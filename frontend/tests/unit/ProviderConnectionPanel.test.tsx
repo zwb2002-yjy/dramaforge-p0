@@ -185,13 +185,15 @@ describe("Provider connection contract revisions", () => {
       (await screen.findByTestId("provider-diagnostics-disclosure")).querySelector("summary")!,
     );
     expect(await screen.findByText("keyframe · 历史合同")).toBeInTheDocument();
-    expect(screen.getByText("keyframe · v2")).toBeInTheDocument();
+    expect(screen.getByText("keyframe · Agnes Image Flash · v2")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("项目 Provider 绑定"), {
       target: { value: "project-1" },
     });
 
     const historicalRow = screen.getByText("keyframe · 历史合同").closest(".provider-binding");
-    const activeRow = screen.getByText("keyframe · v2").closest(".provider-binding");
+    const activeRow = screen
+      .getByText("keyframe · Agnes Image Flash · v2")
+      .closest(".provider-binding");
     expect(historicalRow).not.toBeNull();
     expect(activeRow).not.toBeNull();
     expect(

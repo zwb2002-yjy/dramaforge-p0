@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
+from pathlib import Path
 from uuid import uuid4
 
 import httpx
 import pytest
 from app.config import Settings
+from app.providers.capabilities import Capability
 from app.providers.catalog_seed_data import SEED_MANIFESTS
 from app.providers.intents import (
     ArtifactReferenceIntent,
@@ -16,14 +19,29 @@ from app.providers.intents import (
     VideoGenerationIntentV1,
     VideoOutputIntent,
 )
-from app.providers.manifest import ModelCapabilityManifest
+from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
 from app.providers.minimax import MiniMaxImageCompiler, MiniMaxRuntime, MiniMaxVideoCompiler
 from app.providers.runtime import CompiledVideoRequest, ProviderResumeToken, ResolvedReference
 
 
-def _manifest(model_id: str) -> ModelCapabilityManifest:
+def _manifest(model_id: str, revision: str | None = None) -> ModelCapabilityManifest:
+    revision = revision or ("v2" if model_id == "MiniMax-H3" else "v1")
+    if model_id == "MiniMax-H3" and revision == "v1":
+        path = (
+            Path(__file__).resolve().parents[2]
+            / "alembic/versions/20260813_0021_minimax_catalog_entries.py"
+        )
+        spec = importlib.util.spec_from_file_location("frozen_minimax_catalog", str(path))
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return ModelCapabilityManifest.model_validate(module._MINIMAX_MANIFESTS[1])
     return ModelCapabilityManifest.model_validate(
-        next(item for item in SEED_MANIFESTS if item["model_id"] == model_id)
+        next(
+            item
+            for item in SEED_MANIFESTS
+            if item["model_id"] == model_id and item["model_revision"] == revision
+        )
     )
 
 
@@ -33,6 +51,19 @@ def _settings() -> Settings:
         minimax_api_key="test-minimax-key",
         minimax_base_url="https://api.minimaxi.com",
     )
+
+
+def test_h3_catalog_projects_distinct_text_and_first_frame_input_rules() -> None:
+    model = to_v3_model_manifest(_manifest("MiniMax-H3"), transport_profile_id="test")
+    text = model.capability_specs[Capability.VIDEO_TEXT_TO_VIDEO]
+    frame = model.capability_specs[Capability.VIDEO_IMAGE_TO_VIDEO]
+    assert text.input_slots == {}
+    assert text.common_options["resolution"].enum == ["2K"]
+    assert text.common_options["aspect_ratio"].enum == ["9:16", "16:9"]
+    assert text.common_options["aspect_ratio"].type == "string"
+    assert frame.input_slots["first_frame"].required is True
+    assert frame.input_slots["first_frame"].minimum == 1
+    assert frame.common_options["resolution"].enum == ["768P"]
 
 
 @pytest.mark.asyncio
@@ -92,8 +123,10 @@ def test_video_compiler_rejects_unsupported_outputs_and_roles() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("aspect_ratio", ["9:16", "16:9"])
+@pytest.mark.parametrize("revision", ["v1", "v2"])
 async def test_video_compiler_inherits_supported_project_ratio_from_first_frame(
     aspect_ratio: str,
+    revision: str,
 ) -> None:
     artifact_id = uuid4()
     intent = VideoGenerationIntentV1(
@@ -109,7 +142,7 @@ async def test_video_compiler_inherits_supported_project_ratio_from_first_frame(
     )
     compiled = await MiniMaxVideoCompiler().compile(
         intent,
-        _manifest("MiniMax-H3"),
+        _manifest("MiniMax-H3", revision),
         [
             ResolvedReference(
                 role="first_frame",
@@ -163,6 +196,57 @@ def test_video_compiler_rejects_missing_first_frame() -> None:
     )
     with pytest.raises(ValueError, match="exactly one first_frame"):
         MiniMaxVideoCompiler().validate(intent, _manifest("MiniMax-H3"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("aspect_ratio", ["9:16", "16:9"])
+async def test_h3_official_text_video_compiles_text_only_v2_request(aspect_ratio: str) -> None:
+    intent = VideoGenerationIntentV1(
+        prompt="Quiet ocean waves at dusk",
+        mode_id="text_to_video",
+        output=VideoOutputIntent(aspect_ratio=aspect_ratio, duration_seconds=5),  # type: ignore[arg-type]
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    compiled = await MiniMaxVideoCompiler().compile(
+        intent,
+        _manifest("MiniMax-H3", "v2"),
+        [],
+        invoke_model_value="MiniMax-H3",
+    )
+    assert compiled.wire_request == {
+        "model": "MiniMax-H3",
+        "content": [{"type": "text", "text": "Quiet ocean waves at dusk"}],
+        "resolution": "2K",
+        "duration": 5,
+        "ratio": aspect_ratio,
+        "aigc_watermark": False,
+    }
+    assert compiled.reference_artifact_ids == []
+    assert compiled.safe_request_summary["effective_common_options"]["generate_audio"] is True
+
+
+def test_h3_text_video_rejects_first_frame_and_adaptive_ratio() -> None:
+    manifest = _manifest("MiniMax-H3", "v2")
+    intent = VideoGenerationIntentV1(
+        prompt="Ocean waves",
+        mode_id="text_to_video",
+        output=VideoOutputIntent(aspect_ratio="adaptive"),
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    with pytest.raises(ValueError, match="requires 2K"):
+        MiniMaxVideoCompiler().validate(intent, manifest)
+    with pytest.raises(ValueError, match="no artifact references"):
+        MiniMaxVideoCompiler().validate(
+            intent.model_copy(
+                update={
+                    "output": VideoOutputIntent(aspect_ratio="16:9"),
+                    "references": [
+                        ArtifactReferenceIntent(artifact_id=uuid4(), role="first_frame")
+                    ],
+                }
+            ),
+            manifest,
+        )
 
 
 @pytest.mark.asyncio

@@ -157,6 +157,24 @@ def _build_video_body(
     return body, [reference]
 
 
+def _build_text_video_body(
+    model: str,
+    *,
+    prompt: str,
+    ratio: str,
+) -> dict[str, object]:
+    if ratio not in {"9:16", "16:9"}:
+        raise ValueError("MiniMax text-to-video requires a concrete supported ratio")
+    return {
+        "model": model,
+        "content": [{"type": "text", "text": _require_prompt(prompt)}],
+        "resolution": "2K",
+        "duration": 5,
+        "ratio": ratio,
+        "aigc_watermark": False,
+    }
+
+
 async def _post_json(
     host: str,
     path: str,
@@ -491,17 +509,48 @@ class MiniMaxImageCompiler:
 class MiniMaxVideoCompiler:
     def validate(self, intent: Any, model: Any) -> None:
         operation = model.operations.get("video.generate")
+        if intent.mode_id == "text_to_video":
+            if operation is None or "video.t2v" not in set(operation.capabilities):
+                raise ValueError("model does not support video.t2v")
+            if model.model_id != "MiniMax-H3" or model.model_revision != "v2":
+                raise ValueError("MiniMax text-to-video requires its explicit H3 contract")
+            if intent.references:
+                raise ValueError("MiniMax text-to-video accepts no artifact references")
+            modes = operation.output_constraints.get("modes")
+            if not isinstance(modes, dict) or modes.get("text_to_video") != {
+                "resolution": "2K",
+                "duration_seconds": 5,
+                "aspect_ratio": {"allowed": ["9:16", "16:9"]},
+                "native_audio": True,
+            }:
+                raise ValueError("MiniMax H3 text-to-video output contract is unsupported")
+            output = intent.output
+            if (
+                output.duration_seconds not in {None, 5}
+                or output.resolution not in {None, "2K"}
+                or output.aspect_ratio not in {"9:16", "16:9"}
+                or output.generate_audio is False
+                or output.seed is not None
+            ):
+                raise ValueError(
+                    "MiniMax H3 text-to-video requires 2K, 5 seconds, and native audio"
+                )
+            return
         if operation is None or "video.i2v.first_frame" not in set(operation.capabilities):
             raise ValueError("model does not support video.i2v.first_frame")
         frames = [ref for ref in intent.references if ref.role == "first_frame"]
         constraint = operation.reference_constraints.get("first_frame")
-        if constraint is None or len(frames) != 1 or constraint.min != 1 or constraint.max != 1:
+        if constraint is None or len(frames) != 1 or constraint.max != 1:
             raise ValueError("MiniMax video generation requires exactly one first_frame")
         if any(ref.role != "first_frame" for ref in intent.references):
             raise ValueError("MiniMax video catalog revision supports no other reference roles")
-        constraints = operation.output_constraints
+        modes = operation.output_constraints.get("modes")
+        constraints = (
+            modes.get("first_frame") if isinstance(modes, dict) else operation.output_constraints
+        )
         if (
-            constraints.get("duration_seconds") != 5
+            not isinstance(constraints, dict)
+            or constraints.get("duration_seconds") != 5
             or constraints.get("resolution") != "768P"
             or constraints.get("aspect_ratio") != "adaptive"
             or constraints.get("native_audio") is not False
@@ -524,6 +573,40 @@ class MiniMaxVideoCompiler:
         self, intent: Any, model: Any, references: list[Any], *, invoke_model_value: str
     ) -> Any:
         self.validate(intent, model)
+        if intent.mode_id == "text_to_video":
+            if references:
+                raise ValueError("MiniMax text-to-video cannot resolve artifact references")
+            body = _build_text_video_body(
+                invoke_model_value,
+                prompt=intent.prompt,
+                ratio=intent.output.aspect_ratio,
+            )
+            from app.providers.runtime import CompiledVideoRequest
+
+            summary = _summary(
+                operation="video.t2v",
+                model=invoke_model_value,
+                artifact_ids=[],
+                fingerprints=[],
+                schema_version=model.manifest_version,
+            )
+            summary["effective_common_options"] = {
+                "aspect_ratio": intent.output.aspect_ratio,
+                "duration_seconds": 5,
+                "resolution": "2K",
+                "generate_audio": True,
+            }
+            return CompiledVideoRequest(
+                provider_type="minimax",
+                protocol_profile=MINIMAX_CN_PROFILE,
+                model_id=invoke_model_value,
+                operation="video.generate",
+                wire_request=cast(dict[str, JsonValue], body),
+                request_schema_version=model.manifest_version,
+                safe_request_summary=cast(dict[str, JsonValue], summary),
+                reference_artifact_ids=[],
+                reference_fingerprints=[],
+            )
         ref = next((item for item in references if item.role == "first_frame"), None)
         if ref is None or ref.content_url is None:
             raise ValueError("MiniMax first_frame must be an HTTPS URL")

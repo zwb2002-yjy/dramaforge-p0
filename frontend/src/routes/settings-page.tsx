@@ -421,13 +421,6 @@ export function ModelConnectionSettingsPage() {
           <Button onClick={() => void projects.refetch()}>重新读取作品列表</Button>
         </p>
       )}
-      {projects.isSuccess && selectedProject && (
-        <ProjectModelSourceSummary
-          key={selectedProject.id}
-          projectId={selectedProject.id}
-          projectName={selectedProject.name}
-        />
-      )}
       <section
         role="tabpanel"
         id="settings-panel-defaults"
@@ -476,6 +469,13 @@ export function ModelConnectionSettingsPage() {
           >
             配置项目模型
           </Link>
+        )}
+        {projects.isSuccess && selectedProject && (
+          <ProjectModelSourceSummary
+            key={selectedProject.id}
+            projectId={selectedProject.id}
+            projectName={selectedProject.name}
+          />
         )}
       </section>
       <section

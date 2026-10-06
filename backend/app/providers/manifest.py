@@ -9,6 +9,7 @@ change adds a new revision row instead of mutating an existing one.
 
 from __future__ import annotations
 
+import math
 from datetime import date
 from typing import Any, Literal
 
@@ -62,6 +63,38 @@ class ExclusiveGroup(BaseModel):
     members: list[list[str]]
 
 
+class ReferenceDurationLimit(BaseModel):
+    minimum_seconds: float = Field(gt=0)
+    maximum_seconds: float = Field(gt=0)
+    total_maximum_seconds: float = Field(gt=0)
+
+
+class ReferenceMediaLimits(BaseModel):
+    maximum_files: int = Field(gt=0)
+    durations: dict[str, ReferenceDurationLimit] = Field(default_factory=dict)
+
+    def validate_metadata(self, references: list[tuple[str, float | None]]) -> None:
+        if len(references) > self.maximum_files:
+            raise ValueError(f"reference count exceeds {self.maximum_files} files in total")
+        totals: dict[str, float] = {}
+        for role, duration in references:
+            limit = self.durations.get(role)
+            if limit is None:
+                continue
+            if duration is None or not math.isfinite(duration):
+                raise ValueError(f"{role} requires verified media duration")
+            if not limit.minimum_seconds <= duration <= limit.maximum_seconds:
+                raise ValueError(
+                    f"{role} duration must be {limit.minimum_seconds:g}-"
+                    f"{limit.maximum_seconds:g} seconds"
+                )
+            totals[role] = totals.get(role, 0) + duration
+            if totals[role] > limit.total_maximum_seconds:
+                raise ValueError(
+                    f"{role} total duration exceeds {limit.total_maximum_seconds:g} seconds"
+                )
+
+
 class OperationManifest(BaseModel):
     """Capability contract for one operation (image.generate / video.generate)."""
 
@@ -70,6 +103,7 @@ class OperationManifest(BaseModel):
     output_constraints: dict[str, JsonValue] = Field(default_factory=dict)
     reference_constraints: dict[str, ReferenceConstraint] = Field(default_factory=dict)
     exclusive_groups: list[ExclusiveGroup] = Field(default_factory=list)
+    reference_media_limits: ReferenceMediaLimits | None = None
 
     @model_validator(mode="after")
     def canonicalize_reference_constraints(self) -> OperationManifest:
@@ -164,15 +198,18 @@ class ParameterSpec(BaseModel):
     maximum: float | None = None
     min_items: int | None = None
     max_items: int | None = None
-    ui_component: Literal[
-        "switch",
-        "select",
-        "number",
-        "slider",
-        "input",
-        "textarea",
-        "multi_select",
-    ] | None = None
+    ui_component: (
+        Literal[
+            "switch",
+            "select",
+            "number",
+            "slider",
+            "input",
+            "textarea",
+            "multi_select",
+        ]
+        | None
+    ) = None
     deprecated: bool = False
     sensitive: bool = False
 
@@ -225,6 +262,7 @@ class CapabilitySpec(BaseModel):
     modes: dict[str, InputModeSpec] = Field(default_factory=dict)
     default_mode: str | None = None
     transport_profile_id: str
+    reference_media_limits: ReferenceMediaLimits | None = None
 
     @model_validator(mode="after")
     def canonicalize_input_slots(self) -> CapabilitySpec:
@@ -342,7 +380,7 @@ def _output_constraint_to_parameter(name: str, value: JsonValue) -> ParameterSpe
         allowed = value.get("allowed")
         if isinstance(allowed, list) and allowed:
             return ParameterSpec(
-                type="integer",
+                type=_PY_TYPE_TO_PARAMETER_TYPE.get(type(allowed[0]), "string"),
                 enum=[item for item in allowed if item is not None],
             )
         return None
@@ -368,6 +406,8 @@ def _v3_capabilities_for(operation: str, declared: set[str]) -> list[Capability]
             capabilities.append(Capability.VIDEO_TEXT_TO_VIDEO)
         if "video.i2v" in declared or "video.i2v.first_frame" in declared:
             capabilities.append(Capability.VIDEO_IMAGE_TO_VIDEO)
+        if "video.i2v.last_frame" in declared:
+            capabilities.append(Capability.VIDEO_LAST_FRAME_TO_VIDEO)
         if "video.keyframes" in declared or (
             "video.i2v.first_frame" in declared and "video.i2v.last_frame" in declared
         ):
@@ -399,6 +439,8 @@ def _mode_id_for_roles(roles: list[str], index: int) -> str:
     role_set = frozenset(roles)
     if role_set == {"first_frame"}:
         return "first_frame"
+    if role_set == {"last_frame"}:
+        return "last_frame"
     if role_set == {"first_frame", "last_frame"}:
         return "first_last_frame"
     if role_set & {"reference_image", "reference_video", "reference_audio"}:
@@ -410,6 +452,7 @@ def _mode_title(mode_id: str) -> str:
     return {
         "text_to_video": "Text to video",
         "first_frame": "First frame",
+        "last_frame": "Last frame",
         "first_last_frame": "First + last frame",
         "omni_reference": "Omni reference",
     }.get(mode_id, mode_id)
@@ -452,19 +495,50 @@ def _capability_spec_for(
     option_schema: ModelOptionSchema,
 ) -> CapabilitySpec:
     """Build one V3 CapabilitySpec from an A+B operation manifest."""
+    output_constraints = op_manifest.output_constraints or {}
+    mode_constraints = output_constraints.get("modes")
+    mode_name = {
+        Capability.VIDEO_TEXT_TO_VIDEO: "text_to_video",
+        Capability.VIDEO_IMAGE_TO_VIDEO: "first_frame",
+        Capability.VIDEO_LAST_FRAME_TO_VIDEO: "last_frame",
+        Capability.VIDEO_FIRST_LAST_FRAME: "first_last_frame",
+    }.get(capability)
+    if isinstance(mode_constraints, dict) and mode_name is not None:
+        selected = mode_constraints.get(mode_name)
+        if isinstance(selected, dict):
+            output_constraints = selected
+    mode_roles = {
+        "text_to_video": set(),
+        "first_frame": {"first_frame"},
+        "last_frame": {"last_frame"},
+        "first_last_frame": {"first_frame", "last_frame"},
+    }
     input_slots: dict[str, InputSlotSpec] = {}
     for role, constraint in (op_manifest.reference_constraints or {}).items():
+        if (
+            isinstance(mode_constraints, dict)
+            and mode_name in mode_roles
+            and role not in mode_roles[mode_name]
+        ):
+            continue
         canonical_role = canonical_reference_role(role) or role
         input_slots[canonical_role] = InputSlotSpec(
-            required=constraint.min > 0,
-            minimum=constraint.min,
+            required=constraint.min > 0
+            or (isinstance(mode_constraints, dict) and mode_name in {
+                "first_frame", "last_frame", "first_last_frame"
+            }),
+            minimum=1
+            if isinstance(mode_constraints, dict) and mode_name in {
+                "first_frame", "last_frame", "first_last_frame"
+            }
+            else constraint.min,
             maximum=constraint.max if constraint.max > 0 else None,
             media_types=[_ROLE_MEDIA_TYPES[canonical_role]]
             if canonical_role in _ROLE_MEDIA_TYPES
             else [],
         )
     common_options: dict[str, ParameterSpec] = {}
-    for name, value in (op_manifest.output_constraints or {}).items():
+    for name, value in output_constraints.items():
         parameter = _output_constraint_to_parameter(name, value)
         if parameter is not None:
             common_options[name] = parameter
@@ -491,6 +565,7 @@ def _capability_spec_for(
         modes=modes,
         default_mode=None,
         transport_profile_id="",
+        reference_media_limits=op_manifest.reference_media_limits,
     )
 
 

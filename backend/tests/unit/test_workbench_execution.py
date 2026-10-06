@@ -802,6 +802,144 @@ async def test_video_plan_fails_closed_without_formal_keyframe(session: AsyncSes
 
 
 @pytest.mark.asyncio
+async def test_text_video_plan_needs_no_formal_keyframe(session: AsyncSession) -> None:
+    from app.assets.models import Shot
+
+    project, binding, user = await _seed(session)
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert entry is not None
+    contract = dict(
+        next(item for item in SEED_MANIFESTS if item["model_id"] == "@contract/sglang-h3-t2v-v1")
+    )
+    contract["provider_type"] = "agnes"
+    contract["protocol_profile"] = "agnes_cn_v1"
+    contract["model_id"] = "agnes-video-v2.0"
+    entry.capability_manifest_json = contract
+    entry.contract_manifest_hash = hash_manifest(contract)
+    binding.capability_manifest_hash = entry.contract_manifest_hash
+    scene = await _seed_scene(session, project)
+    shot = Shot(
+        project_id=project.id,
+        scene_id=scene.id,
+        shot_number=3,
+        version=1,
+        visual_description="A text-only video shot",
+        video_prompt="character walks into frame",
+    )
+    session.add(shot)
+    await session.flush()
+    plan = await WorkbenchExecutionService(session, user_id=user.id).build_plan(
+        project=project,
+        execution_input=_input(
+            shot_id=shot.id,
+            requested_binding_id=binding.id,
+            mode_id="text_to_video",
+        ),
+    )
+    assert plan.capability == Capability.VIDEO_TEXT_TO_VIDEO
+    assert plan.planned_references == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["last_frame", "first_last_frame"])
+async def test_fl2va_plan_keeps_tail_and_formal_first_roles_distinct(
+    session: AsyncSession, mode: str,
+) -> None:
+    from app.production.reference_intents import ShotReferenceIntent
+
+    project, binding, user = await _seed(session)
+    shot, artifact = await _seed_video_shot(session, project=project, user=user)
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert entry is not None
+    contract = dict(next(
+        item for item in SEED_MANIFESTS if item["model_id"] == "@contract/sglang-h3-fl2va-v1"
+    ))
+    contract.update(provider_type="agnes", protocol_profile="agnes_cn_v1",
+                    model_id="agnes-video-v2.0")
+    entry.capability_manifest_json = contract
+    entry.contract_manifest_hash = hash_manifest(contract)
+    binding.capability_manifest_hash = entry.contract_manifest_hash
+    await session.flush()
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(
+        project=project,
+        execution_input=_input(
+            shot_id=shot.id, requested_binding_id=binding.id, mode_id=mode,
+            references=[ShotReferenceIntent(purpose="last_frame", artifact_id=artifact.id)],
+        ),
+    )
+    roles = [reference.role for reference in plan.planned_references]
+    assert roles == (["last_frame"] if mode == "last_frame" else ["first_frame", "last_frame"])
+    assert plan.capability == (
+        Capability.VIDEO_LAST_FRAME_TO_VIDEO if mode == "last_frame"
+        else Capability.VIDEO_FIRST_LAST_FRAME
+    )
+
+
+@pytest.mark.asyncio
+async def test_ref2va_plan_validates_saved_media_without_formal_keyframe(
+    session: AsyncSession,
+) -> None:
+    from decimal import Decimal
+
+    from app.assets.models import Shot
+    from app.execution.models import Artifact
+    from app.production.reference_intents import ShotReferenceIntent
+
+    project, binding, user = await _seed(session)
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert entry is not None
+    contract = dict(next(
+        item for item in SEED_MANIFESTS
+        if item["model_id"] == "@contract/sglang-h3-ref2va-v1" and item["model_revision"] == "v2"
+    ))
+    contract.update(provider_type="agnes", protocol_profile="agnes_cn_v1",
+                    model_id="agnes-video-v2.0")
+    entry.capability_manifest_json = contract
+    entry.contract_manifest_hash = hash_manifest(contract)
+    binding.capability_manifest_hash = entry.contract_manifest_hash
+    scene = await _seed_scene(session, project)
+    shot = Shot(project_id=project.id, scene_id=scene.id, shot_number=3, version=1,
+                visual_description="Reference shot", video_prompt="character walks into frame")
+    artifact = Artifact(
+        project_id=project.id, artifact_type="video", storage_state="available",
+        object_key=f"obj/{uuid4().hex}", content_hash="f" * 64,
+        mime_type="video/mp4", byte_size=1, duration_seconds=Decimal("5"),
+    )
+    session.add_all([shot, artifact])
+    await session.flush()
+    execution_input = _input(
+        shot_id=shot.id, requested_binding_id=binding.id, mode_id="omni_reference",
+        references=[ShotReferenceIntent(purpose="action", artifact_id=artifact.id)],
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(project=project, execution_input=execution_input)
+    assert plan.capability == Capability.VIDEO_REFERENCE_TO_VIDEO
+    assert [ref.role for ref in plan.planned_references] == ["reference_video"]
+    from app.providers.execution_preflight import resolve_execution_model_preflight
+
+    # Preflight uses the same exact binding, not a static name for its remote ID.
+    from app.providers.models import ProjectProviderBinding
+
+    session.add(ProjectProviderBinding(
+        project_id=project.id, workspace_id=project.workspace_id,
+        purpose="video", model_binding_id=binding.id, updated_by=user.id,
+    ))
+    await session.flush()
+    preflight = await resolve_execution_model_preflight(
+        session, project=project, video_mode="omni_reference",
+    )
+    video = next(stage for stage in preflight.stages if stage.stage == "video")
+    assert video.ready is True
+    assert video.contract_display_name == entry.display_name
+    assert video.model_revision == entry.model_revision
+    artifact.duration_seconds = Decimal("16")
+    await session.flush()
+    with pytest.raises(WorkbenchExecutionError, match="duration must"):
+        await service.build_plan(project=project, execution_input=execution_input)
+
+
+@pytest.mark.asyncio
 async def test_video_plan_injects_formal_keyframe_reference(session: AsyncSession) -> None:
     project, binding, user = await _seed(session)
     shot, artifact = await _seed_video_shot(session, project=project, user=user)

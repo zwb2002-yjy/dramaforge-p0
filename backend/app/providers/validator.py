@@ -16,6 +16,7 @@ from app.providers.contracts.image import ImageGenerateRequest
 from app.providers.contracts.video import (
     FirstLastFrameVideoRequest,
     ImageToVideoRequest,
+    LastFrameVideoRequest,
     ReferenceToVideoRequest,
 )
 from app.providers.errors import (
@@ -50,6 +51,8 @@ def _role_counts(request: Any) -> dict[str, int]:
     counts: dict[str, int] = {}
     if isinstance(request, ImageToVideoRequest):
         counts["first_frame"] = 1
+    elif isinstance(request, LastFrameVideoRequest):
+        counts["last_frame"] = 1
     elif isinstance(request, FirstLastFrameVideoRequest):
         counts["first_frame"] = 1
         counts["last_frame"] = 1

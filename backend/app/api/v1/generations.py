@@ -62,6 +62,7 @@ _CAPABILITY_DISPLAY_NAMES: dict[Capability, str] = {
     Capability.IMAGE_EDIT: "图片编辑",
     Capability.VIDEO_TEXT_TO_VIDEO: "文生视频",
     Capability.VIDEO_IMAGE_TO_VIDEO: "图生视频",
+    Capability.VIDEO_LAST_FRAME_TO_VIDEO: "尾帧视频",
     Capability.VIDEO_FIRST_LAST_FRAME: "首尾帧视频",
     Capability.VIDEO_REFERENCE_TO_VIDEO: "多参考视频",
     Capability.AUDIO_TTS: "语音合成",

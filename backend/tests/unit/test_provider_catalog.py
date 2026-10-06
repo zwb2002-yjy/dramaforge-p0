@@ -21,10 +21,11 @@ from pathlib import Path
 
 import pytest
 from app.providers import registry as registry_module
+from app.providers.capabilities import Capability
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.catalog_service import ModelCatalogService
-from app.providers.manifest import ModelCapabilityManifest
+from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
 from app.shared.base import Base
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -53,12 +54,84 @@ def _load_frozen() -> object:
 
 
 def test_all_seed_manifests_parse() -> None:
-    assert len(SEED_MANIFESTS) == 10
+    assert len(SEED_MANIFESTS) == 14
     for manifest in SEED_MANIFESTS:
         parsed = ModelCapabilityManifest.model_validate(manifest)
-        expected_revision = "v2" if parsed.model_id == "agnes-image-2.1-flash" else "v1"
+        expected_revision = (
+            "v2" if parsed.model_id in {"agnes-image-2.1-flash", "MiniMax-H3"}
+            or parsed.manifest_version == "2026-09-30-ref2va-v2" else "v1"
+        )
         assert parsed.model_revision == expected_revision
         assert parsed.catalog_source in {"official_static", "protocol_contract"}
+
+
+def test_sglang_t2v_migration_matches_catalog_contract() -> None:
+    path = BACKEND / "alembic" / "versions" / "20260929_0078_sglang_h3_t2v_contract.py"
+    spec = importlib.util.spec_from_file_location("sglang_h3_t2v_contract", str(path))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    seeded = next(
+        item for item in SEED_MANIFESTS if item["model_id"] == "@contract/sglang-h3-t2v-v1"
+    )
+    assert seeded == module._MANIFEST
+
+
+def test_sglang_ref2va_migration_matches_catalog_contract() -> None:
+    path = BACKEND / "alembic" / "versions" / "20260930_0080_sglang_h3_ref2va_contract.py"
+    spec = importlib.util.spec_from_file_location("sglang_h3_ref2va_contract", str(path))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    seeded = next(
+        item for item in SEED_MANIFESTS if item["model_id"] == "@contract/sglang-h3-ref2va-v1"
+    )
+    assert seeded == module._MANIFEST
+
+
+def test_sglang_fl2va_and_ref2va_v2_migration_matches_catalog_contracts() -> None:
+    path = BACKEND / "alembic" / "versions" / "20260930_0082_sglang_h3_fl2va_and_ref2va_v2.py"
+    spec = importlib.util.spec_from_file_location("sglang_h3_expanded_contracts", str(path))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    by_identity = {(m["model_id"], m["model_revision"]): m for m in SEED_MANIFESTS}
+    for manifest in module._MANIFESTS:
+        assert manifest == by_identity[(manifest["model_id"], manifest["model_revision"])]
+
+
+def test_sglang_fl2va_exposes_only_each_modes_frame_slots() -> None:
+    seeded = next(
+        item for item in SEED_MANIFESTS
+        if item["model_id"] == "@contract/sglang-h3-fl2va-v1"
+    )
+    manifest = to_v3_model_manifest(
+        ModelCapabilityManifest.model_validate(seeded), transport_profile_id="test"
+    )
+    expected = {
+        Capability.VIDEO_TEXT_TO_VIDEO: set(),
+        Capability.VIDEO_IMAGE_TO_VIDEO: {"first_frame"},
+        Capability.VIDEO_LAST_FRAME_TO_VIDEO: {"last_frame"},
+        Capability.VIDEO_FIRST_LAST_FRAME: {"first_frame", "last_frame"},
+    }
+    for capability, slots in expected.items():
+        spec = manifest.capability_specs[capability]
+        assert set(spec.input_slots) == slots
+        assert all(slot.required for slot in spec.input_slots.values())
+
+
+def test_minimax_t2v_migration_matches_catalog_contract() -> None:
+    path = BACKEND / "alembic" / "versions" / "20260929_0079_minimax_h3_t2v_contract.py"
+    spec = importlib.util.spec_from_file_location("minimax_h3_t2v_contract", str(path))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    seeded = next(
+        item
+        for item in SEED_MANIFESTS
+        if item["model_id"] == "MiniMax-H3" and item["model_revision"] == "v2"
+    )
+    assert seeded == module._MANIFEST
 
 
 def test_contract_hash_is_deterministic_and_order_insensitive() -> None:
@@ -96,12 +169,12 @@ def test_seed_manifests_match_registry_plugins() -> None:
 def test_contract_fixtures_match_current_seed_hash() -> None:
     fixture_files = sorted(CONTRACTS_DIR.glob("*.json"))
     assert len(fixture_files) == 9
-    manifest_by_id = {m["model_id"]: m for m in SEED_MANIFESTS}
+    manifest_by_id = {(m["model_id"], m["model_revision"]): m for m in SEED_MANIFESTS}
     for fixture_path in fixture_files:
         fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-        model_id = fixture["manifest"]["model_id"]
-        assert model_id in manifest_by_id
-        assert fixture["manifest_hash"] == hash_manifest(manifest_by_id[model_id])
+        identity = (fixture["manifest"]["model_id"], fixture["manifest"]["model_revision"])
+        assert identity in manifest_by_id
+        assert fixture["manifest_hash"] == hash_manifest(manifest_by_id[identity])
         assert fixture["manifest_hash"] == hash_manifest(fixture["manifest"])
         assert fixture["contract"]["wire_template"]["method"] in {"POST", "GET"}
 
@@ -114,9 +187,7 @@ def test_frozen_migration_snapshot_matches_current_seed_hash() -> None:
     for frozen_manifest in frozen_manifests:
         frozen_hash = frozen.hash_seed(frozen_manifest)
         assert frozen_hash == hash_manifest(frozen_manifest)
-        current = by_identity.get(
-            (frozen_manifest["model_id"], frozen_manifest["model_revision"])
-        )
+        current = by_identity.get((frozen_manifest["model_id"], frozen_manifest["model_revision"]))
         if current is not None:
             assert hash_manifest(current) == frozen_hash
     current_image = next(
@@ -142,10 +213,8 @@ def test_frozen_snapshot_is_self_contained() -> None:
 async def test_catalog_service_is_read_only_and_resolves_active_entries(
     session: AsyncSession,
 ) -> None:
-    # In-memory seed of the two agnes entries so the read-only service has data.
+    # Seed both current and historical contracts to exercise revision selection.
     for manifest in SEED_MANIFESTS:
-        if manifest["provider_type"] != "agnes":
-            continue
         documented_at = manifest.get("documented_at")
         entry = ModelCatalogEntry(
             provider_type=manifest["provider_type"],
@@ -178,6 +247,13 @@ async def test_catalog_service_is_read_only_and_resolves_active_entries(
     assert active.contract_manifest_hash == hash_manifest(
         [m for m in SEED_MANIFESTS if m["model_id"] == "agnes-video-v2.0"][0]
     )
+    ref2va = await service.active_entry_for(
+        provider_type="openai_compatible_media",
+        protocol_profile="openai_media_v1",
+        model_id="@contract/sglang-h3-ref2va-v1",
+    )
+    assert ref2va is not None
+    assert ref2va.model_revision == "v2"
 
     missing = await service.active_entry_for(
         provider_type="agnes",

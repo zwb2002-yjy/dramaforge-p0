@@ -106,7 +106,16 @@ export function AddArtifactToAssetDialog({
       // browser must not invent one; choosing "current formal" stays a separate
       // action the user can take later from the asset panel.
       return createShotReference(projectId, shotId, {
-        purpose: referenceRole,
+        purpose:
+          kind === "video"
+            ? "action"
+            : kind === "audio"
+              ? "audio_rhythm"
+              : kind === "scene"
+                ? "scene_layout"
+                : kind === "character"
+                  ? "identity"
+                  : "generic_reference",
         asset_id: asset.id,
         artifact_id: artifactId,
         resolution_mode: "direct_artifact",

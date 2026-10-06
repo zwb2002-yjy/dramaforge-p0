@@ -248,6 +248,74 @@ async def test_batched_dependencies_keep_fail_closed_worker_semantics(
     assert missing.error_code == "UPSTREAM_RUN_MISSING"
 
 
+@pytest.mark.parametrize(
+    ("mode", "capability"),
+    [
+        ("text_to_video", "video.text_to_video"),
+        ("last_frame", "video.last_frame_to_video"),
+        ("omni_reference", "video.reference_to_video"),
+    ],
+)
+async def test_independent_video_skips_only_the_frozen_keyframe_dependency(env, mode, capability):
+    _, session, user, project, shot = env
+    source = await add_run(env, "completed")
+    node = GraphNode(
+        graph_version_id=source.graph_version_id,
+        node_key="video",
+        node_type="video",
+        display_name="Video",
+        cacheable=True,
+    )
+    session.add(node)
+    await session.flush()
+    session.add(
+        GraphEdge(
+            graph_version_id=source.graph_version_id,
+            upstream_node_id=source.graph_node_id,
+            downstream_node_id=node.id,
+            output_port="result",
+            input_port="image",
+            position=0,
+            required=True,
+        )
+    )
+    target = NodeRun(
+        project_id=project.id,
+        graph_version_id=source.graph_version_id,
+        graph_node_id=node.id,
+        attempt_no=1,
+        idempotency_key=uuid4().hex,
+        input_hash=uuid4().hex * 2,
+        input_snapshot={
+            "shot_id": str(uuid4()),
+            "mode_id": mode,
+            "workbench_plan": {
+                "mode_id": mode,
+                "capability": capability,
+            },
+        },
+        status="queued",
+        created_by=user.id,
+    )
+    session.add(target)
+    await session.flush()
+    decision = (await evaluate_required_dependencies_many(session, runs=[target]))[target.id]
+    assert decision.action == "ready"
+    assert decision.dependencies == ()
+    target.input_snapshot = {**target.input_snapshot, "mode_id": "first_frame"}
+    await session.flush()
+    blocked = (await evaluate_required_dependencies_many(session, runs=[target]))[target.id]
+    assert blocked.error_code == "UPSTREAM_RUN_MISSING"
+    target.input_snapshot = {
+        **target.input_snapshot,
+        "mode_id": "unknown",
+        "workbench_plan": {"mode_id": "unknown"},
+    }
+    await session.flush()
+    invalid = (await evaluate_required_dependencies_many(session, runs=[target]))[target.id]
+    assert invalid.error_code == "UPSTREAM_RUN_MISSING"
+
+
 async def _required_target(env, source):
     _, session, user, project, shot = env
     node = GraphNode(

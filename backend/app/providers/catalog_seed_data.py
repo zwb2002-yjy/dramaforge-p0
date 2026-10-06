@@ -55,6 +55,7 @@ def _operation(
     output_constraints: dict[str, Any] | None = None,
     reference_constraints: dict[str, dict[str, int]] | None = None,
     exclusive_groups: list[dict[str, Any]] | None = None,
+    reference_media_limits: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     op: dict[str, Any] = {
         "operation": kind,
@@ -66,6 +67,8 @@ def _operation(
         },
         "exclusive_groups": exclusive_groups or [],
     }
+    if reference_media_limits is not None:
+        op["reference_media_limits"] = reference_media_limits
     return op
 
 
@@ -289,29 +292,39 @@ SEED_MANIFESTS: list[dict[str, Any]] = [
             )
         },
     ),
-    # MiniMax-H3 Video V2. First-launch scope is one first frame only. H3's
-    # documented last-frame and multimodal-reference modes are deliberately not
-    # declared until they receive their own product/quality contract.
+    # MiniMax-H3 Video V2. The v2 catalog revision adds text-only generation
+    # alongside first-frame I2V. Last-frame and multimodal-reference modes
+    # remain outside the executable contract.
     _manifest(
         provider_type="minimax",
         protocol_profile="minimax_cn_v1",
         model_id="MiniMax-H3",
-        model_revision="v1",
+        model_revision="v2",
         media_kind="video",
         display_name="MiniMax H3",
-        manifest_version=MINIMAX_MANIFEST_VERSION,
-        documented_at=MINIMAX_DOCUMENTED_AT,
+        manifest_version="2026-09-29",
+        documented_at="2026-09-29",
         operations={
             "video.generate": _operation(
                 "video.generate",
-                capabilities=["video.i2v.first_frame"],
+                capabilities=["video.i2v.first_frame", "video.t2v"],
                 output_constraints={
-                    "resolution": "768P",
-                    "duration_seconds": 5,
-                    "aspect_ratio": "adaptive",
-                    "native_audio": False,
+                    "modes": {
+                        "first_frame": {
+                            "resolution": "768P",
+                            "duration_seconds": 5,
+                            "aspect_ratio": "adaptive",
+                            "native_audio": False,
+                        },
+                        "text_to_video": {
+                            "resolution": "2K",
+                            "duration_seconds": 5,
+                            "aspect_ratio": {"allowed": ["9:16", "16:9"]},
+                            "native_audio": True,
+                        },
+                    },
                 },
-                reference_constraints={"first_frame": {"min": 1, "max": 1}},
+                reference_constraints={"first_frame": {"min": 0, "max": 1}},
             )
         },
     ),
@@ -358,6 +371,139 @@ SEED_MANIFESTS: list[dict[str, Any]] = [
                     "native_audio": False,
                 },
                 reference_constraints={"first_frame": {"min": 1, "max": 1}},
+            )
+        },
+    ),
+    _manifest(
+        provider_type="openai_compatible_media",
+        protocol_profile="openai_media_v1",
+        model_id="@contract/sglang-h3-t2v-v1",
+        model_revision="v1",
+        media_kind="video",
+        display_name="SGLang H3 文生视频 (T2VA)",
+        catalog_source="protocol_contract",
+        manifest_version="2026-09-29",
+        documented_at="2026-09-29",
+        operations={
+            "video.generate": _operation(
+                "video.generate",
+                capabilities=["video.t2v"],
+                output_constraints={"duration_seconds": 5, "native_audio": False},
+                reference_constraints={},
+            )
+        },
+    ),
+    _manifest(
+        provider_type="openai_compatible_media",
+        protocol_profile="openai_media_v1",
+        model_id="@contract/sglang-h3-ref2va-v1",
+        model_revision="v1",
+        media_kind="video",
+        display_name="SGLang H3 参考素材生视频 (Ref2VA)",
+        catalog_source="protocol_contract",
+        manifest_version="2026-09-30",
+        documented_at="2026-09-30",
+        operations={
+            "video.generate": _operation(
+                "video.generate",
+                capabilities=[
+                    "video.reference.image",
+                    "video.reference.video",
+                    "video.reference.audio",
+                ],
+                output_constraints={
+                    "duration_seconds": 5,
+                    "aspect_ratio": {"allowed": ["9:16", "16:9"]},
+                    "native_audio": True,
+                },
+                reference_constraints={
+                    "reference_image": {"min": 0, "max": 1},
+                    "reference_video": {"min": 0, "max": 1},
+                    "reference_audio": {"min": 0, "max": 1},
+                },
+                exclusive_groups=[{
+                    "name": "ref2va",
+                    "members": [["reference_image", "reference_video", "reference_audio"]],
+                }],
+            )
+        },
+    ),
+    _manifest(
+        provider_type="openai_compatible_media",
+        protocol_profile="openai_media_v1",
+        model_id="@contract/sglang-h3-fl2va-v1",
+        model_revision="v1",
+        media_kind="video",
+        display_name="SGLang H3 文生/首尾帧 (FL2VA)",
+        catalog_source="protocol_contract",
+        manifest_version="2026-09-30-fl2va",
+        documented_at="2026-09-30",
+        operations={
+            "video.generate": _operation(
+                "video.generate",
+                capabilities=[
+                    "video.t2v", "video.i2v.first_frame", "video.i2v.last_frame",
+                ],
+                output_constraints={
+                    "modes": {
+                        mode: {
+                            "duration_seconds": 5,
+                            "aspect_ratio": {"allowed": ["9:16", "16:9"]},
+                            "native_audio": True,
+                        }
+                        for mode in (
+                            "text_to_video", "first_frame", "last_frame", "first_last_frame"
+                        )
+                    }
+                },
+                reference_constraints={
+                    "first_frame": {"min": 0, "max": 1},
+                    "last_frame": {"min": 0, "max": 1},
+                },
+            )
+        },
+    ),
+    _manifest(
+        provider_type="openai_compatible_media",
+        protocol_profile="openai_media_v1",
+        model_id="@contract/sglang-h3-ref2va-v1",
+        model_revision="v2",
+        media_kind="video",
+        display_name="SGLang H3 多素材参考 (Ref2VA)",
+        catalog_source="protocol_contract",
+        manifest_version="2026-09-30-ref2va-v2",
+        documented_at="2026-09-30",
+        operations={
+            "video.generate": _operation(
+                "video.generate",
+                capabilities=[
+                    "video.reference.image", "video.reference.video", "video.reference.audio",
+                ],
+                output_constraints={
+                    "duration_seconds": 5,
+                    "aspect_ratio": {"allowed": ["9:16", "16:9"]},
+                    "native_audio": True,
+                },
+                reference_constraints={
+                    "reference_image": {"min": 0, "max": 9},
+                    "reference_video": {"min": 0, "max": 3},
+                    "reference_audio": {"min": 0, "max": 3},
+                },
+                exclusive_groups=[{
+                    "name": "ref2va",
+                    "members": [["reference_image", "reference_video", "reference_audio"]],
+                }],
+                reference_media_limits={
+                    "maximum_files": 12,
+                    "durations": {
+                        role: {
+                            "minimum_seconds": 2,
+                            "maximum_seconds": 15,
+                            "total_maximum_seconds": 15,
+                        }
+                        for role in ("reference_video", "reference_audio")
+                    },
+                },
             )
         },
     ),

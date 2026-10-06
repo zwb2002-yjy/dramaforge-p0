@@ -164,13 +164,14 @@ class ProviderCapabilityEvidence(Base):
 class ProviderModelBinding(Base):
     __tablename__ = "provider_model_bindings"
     __table_args__ = (
-        # One binding per exact discovered model identity and purpose. Multiple
-        # remote models may reuse the same capability-plugin contract.
+        # One binding per discovered model, purpose and immutable capability
+        # contract. A corrected contract creates a new binding identity.
         UniqueConstraint(
             "connection_id",
             "media_type",
             "model_id",
             "purpose",
+            "catalog_entry_id",
             name="uq_provider_model_binding_revision",
         ),
     )

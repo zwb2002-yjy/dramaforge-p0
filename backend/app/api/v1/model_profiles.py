@@ -10,6 +10,7 @@ providers layer free of HTTP imports (boundary test §68).
 
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
@@ -407,6 +408,9 @@ async def get_execution_model_preflight(
     project_id: UUID,
     user: CurrentUser,
     session: SessionDep,
+    video_mode: Literal[
+        "first_frame", "last_frame", "first_last_frame", "text_to_video", "omni_reference"
+    ] = "first_frame",
 ) -> ExecutionModelPreflightRead:
     """Resolve the exact provider bindings production will freeze.
 
@@ -418,4 +422,4 @@ async def get_execution_model_preflight(
     """
 
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    return await resolve_execution_model_preflight(session, project=project)
+    return await resolve_execution_model_preflight(session, project=project, video_mode=video_mode)

@@ -10,7 +10,7 @@ DramaForge 是面向专业个人创作者的 AI 短剧 / 漫剧导演工作台�
 （**摘要**；canonical 定义见 [CREATION_FLOW.md](CREATION_FLOW.md)）：
 
 ```text
-故事 / 剧本 → 资产 → Scene / Shot → 关键帧 → 视频生成
+故事 / 剧本 → 资产 → Scene / Shot → 视频生成（文生视频、正式关键帧或参考素材）
 → Review / Repair → Editing → Final Film（MP4 + SRT）
 ```
 

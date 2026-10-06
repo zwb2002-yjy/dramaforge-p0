@@ -60,6 +60,24 @@ def _evaluate_loaded_dependencies(
         )
     dependencies: list[UpstreamDependency] = []
     for edge, upstream_node in edge_rows:
+        snapshot = run.input_snapshot or {}
+        frozen_plan = snapshot.get("workbench_plan")
+        independent_video_modes = {
+            "text_to_video": "video.text_to_video",
+            "last_frame": "video.last_frame_to_video",
+            "omni_reference": "video.reference_to_video",
+        }
+        if (
+            node.node_key == "video"
+            and upstream_node.node_key == "keyframe"
+            and isinstance(frozen_plan, dict)
+            and snapshot.get("mode_id") == frozen_plan.get("mode_id")
+            and str(frozen_plan.get("mode_id")) in independent_video_modes
+            and frozen_plan.get("capability") == independent_video_modes.get(
+                str(frozen_plan.get("mode_id"))
+            )
+        ):
+            continue
         source = latest_by_node_id.get(edge.upstream_node_id)
         dependencies.append(
             UpstreamDependency(

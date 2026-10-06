@@ -174,8 +174,32 @@ describe("AddArtifactToAssetDialog", () => {
     expect(binding?.body).toMatchObject({
       asset_id: ASSET.id,
       artifact_id: ARTIFACT_ID,
+      purpose: "identity",
       resolution_mode: "direct_artifact",
     });
+  });
+
+  it.each([
+    ["video", "action"],
+    ["audio", "audio_rhythm"],
+  ])("binds a %s asset with a supported shot purpose", async (kind, purpose) => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      calls.push({
+        url,
+        body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {},
+      });
+      if (url.endsWith("/assets/from-artifact")) return json({ ...ASSET, kind }, 201);
+      return json({ id: "binding-1" }, 201);
+    });
+    renderDialog({ artifactType: kind, defaultKind: kind });
+    fireEvent.click(screen.getByTestId("add-asset-confirm"));
+    await screen.findByTestId("add-asset-result");
+    fireEvent.click(screen.getByTestId("add-asset-bind-shot"));
+    await waitFor(() => expect(screen.getByTestId("add-asset-bind-shot")).toBeDisabled());
+    expect(calls.find((call) => call.url.includes("/references"))?.body.purpose).toBe(purpose);
   });
 
   it("keeps the dialog open and explains a server rejection", async () => {

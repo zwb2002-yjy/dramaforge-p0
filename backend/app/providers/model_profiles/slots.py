@@ -89,6 +89,7 @@ MODEL_SLOT_DEFINITIONS: dict[ModelSlot, ModelSlotDefinition] = {
         required_capabilities=[
             Capability.VIDEO_TEXT_TO_VIDEO,
             Capability.VIDEO_IMAGE_TO_VIDEO,
+            Capability.VIDEO_LAST_FRAME_TO_VIDEO,
             Capability.VIDEO_FIRST_LAST_FRAME,
             Capability.VIDEO_REFERENCE_TO_VIDEO,
         ],

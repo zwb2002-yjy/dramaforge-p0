@@ -161,6 +161,26 @@ export function ShotProductionActions({
 }: ShotProductionActionsProps) {
   const queryClient = useQueryClient();
   const delegationDecisionIds = useRef(new Map<string, string>());
+  const [videoMode, setVideoMode] = useState<
+    "first_frame" | "last_frame" | "first_last_frame" | "text_to_video" | "omni_reference"
+  >("first_frame");
+  const lastFrameCount = references.filter(
+    (reference) => reference.purpose === "last_frame",
+  ).length;
+  const referenceVideoCount = references.filter((reference) =>
+    [
+      "identity",
+      "clothing",
+      "pose",
+      "style",
+      "scene_layout",
+      "scene_lighting",
+      "generic_reference",
+      "action",
+      "camera_language",
+      "audio_rhythm",
+    ].includes(reference.purpose),
+  ).length;
   // Deployment-level engine facts. A failed read must not hide the manual path:
   // manual generation never depends on the Director runtime.
   const capabilities = useQuery({
@@ -179,8 +199,11 @@ export function ShotProductionActions({
     retry: false,
   });
   const modelPreflight = useQuery({
-    queryKey: queryKeys.model.executionPreflight(projectId),
-    queryFn: () => getExecutionModelPreflight(projectId),
+    queryKey:
+      videoMode === "first_frame"
+        ? queryKeys.model.executionPreflight(projectId)
+        : [...queryKeys.model.executionPreflight(projectId), videoMode],
+    queryFn: () => getExecutionModelPreflight(projectId, videoMode),
     enabled: Boolean(projectId),
     retry: false,
   });
@@ -254,11 +277,22 @@ export function ShotProductionActions({
       // Creative semantics are reconstructed from saved server facts. The
       // browser sends no draft/canonical duplicate.
       semantic_intent: {},
-      mode_id: STAGE_MODE[stage],
+      mode_id: stage === "video" ? videoMode : STAGE_MODE[stage],
       requested_model_id: null,
       requested_binding_id: null,
       accept_approximations: false,
-      references: references.map((reference) => ({ ...reference })),
+      references: (stage !== "video"
+        ? references
+        : videoMode === "text_to_video"
+          ? []
+          : videoMode === "last_frame" || videoMode === "first_last_frame"
+            ? references.filter((reference) => reference.purpose === "last_frame")
+            : videoMode === "omni_reference"
+              ? references.filter(
+                  (reference) => !["first_frame", "last_frame"].includes(reference.purpose),
+                )
+              : references
+      ).map((reference) => ({ ...reference })),
       expected_shot_version: shot.version,
     };
   }
@@ -536,6 +570,57 @@ export function ShotProductionActions({
         <dd>{shot.formal_video_artifact_id ? "已选择" : "未选择"}</dd>
       </dl>
 
+      <fieldset className="qc-video-mode" aria-label="视频输入类型">
+        <legend>视频输入</legend>
+        <div className="qc-video-mode-options">
+          <button
+            type="button"
+            aria-pressed={videoMode === "first_frame"}
+            className={videoMode === "first_frame" ? "active" : ""}
+            onClick={() => setVideoMode("first_frame")}
+            disabled={Boolean(videoStatus) || videoOutcomeUnknown || produce.isPending}
+          >
+            首帧生视频
+          </button>
+          <button
+            type="button"
+            aria-pressed={videoMode === "text_to_video"}
+            className={videoMode === "text_to_video" ? "active" : ""}
+            onClick={() => setVideoMode("text_to_video")}
+            disabled={Boolean(videoStatus) || videoOutcomeUnknown || produce.isPending}
+          >
+            文生视频
+          </button>
+          <button
+            type="button"
+            aria-pressed={videoMode === "last_frame"}
+            className={videoMode === "last_frame" ? "active" : ""}
+            onClick={() => setVideoMode("last_frame")}
+            disabled={Boolean(videoStatus) || videoOutcomeUnknown || produce.isPending}
+          >
+            尾帧生视频
+          </button>
+          <button
+            type="button"
+            aria-pressed={videoMode === "first_last_frame"}
+            className={videoMode === "first_last_frame" ? "active" : ""}
+            onClick={() => setVideoMode("first_last_frame")}
+            disabled={Boolean(videoStatus) || videoOutcomeUnknown || produce.isPending}
+          >
+            首尾帧生视频
+          </button>
+          <button
+            type="button"
+            aria-pressed={videoMode === "omni_reference"}
+            className={videoMode === "omni_reference" ? "active" : ""}
+            onClick={() => setVideoMode("omni_reference")}
+            disabled={Boolean(videoStatus) || videoOutcomeUnknown || produce.isPending}
+          >
+            参考素材生视频
+          </button>
+        </div>
+      </fieldset>
+
       <section
         className="qc-shot-production-plan"
         data-testid="shot-production-preflight"
@@ -551,20 +636,29 @@ export function ShotProductionActions({
             {(
               [
                 ["关键帧", keyframePreflight],
-                ["视频", videoPreflight],
+                [
+                  {
+                    first_frame: "首帧生视频",
+                    last_frame: "尾帧生视频",
+                    first_last_frame: "首尾帧生视频",
+                    text_to_video: "文生视频",
+                    omni_reference: "参考素材生视频",
+                  }[videoMode],
+                  videoPreflight,
+                ],
               ] as const
             ).map(([label, item]) => (
               <div key={label} data-testid={`production-preflight-${item?.stage ?? label}`}>
                 <dt>{label}</dt>
-                <dd>
+                <dd title={item?.resolved_model_id ?? undefined}>
                   {item?.ready && item.resolved_model_id ? (
                     <>
-                      {
+                      {item.contract_display_name ??
                         executionModelLabel(
                           item.resolved_model_id,
                           Array.isArray(models.data) ? models.data : undefined,
-                        ).label
-                      }
+                        ).label}
+                      {item.model_revision ? ` · ${item.model_revision}` : ""}
                       {` · ${executionModelSourceLabel(item.source)}`}
                     </>
                   ) : (
@@ -607,9 +701,13 @@ export function ShotProductionActions({
             Boolean(pendingApproximation) ||
             Boolean(videoStatus) ||
             videoOutcomeUnknown ||
-            !referencesReady ||
+            (videoMode !== "text_to_video" && !referencesReady) ||
             dirty ||
-            !shot.formal_keyframe_artifact_id ||
+            (videoMode === "first_frame" && !shot.formal_keyframe_artifact_id) ||
+            (videoMode === "first_last_frame" && !shot.formal_keyframe_artifact_id) ||
+            ((videoMode === "last_frame" || videoMode === "first_last_frame") &&
+              lastFrameCount !== 1) ||
+            (videoMode === "omni_reference" && referenceVideoCount === 0) ||
             preflightBlocks("video")
           }
         >
@@ -651,6 +749,7 @@ export function ShotProductionActions({
             Boolean(videoStatus) ||
             videoOutcomeUnknown ||
             directorDelegateBlocked ||
+            videoMode !== "first_frame" ||
             !referencesReady ||
             dirty ||
             !shot.formal_keyframe_artifact_id ||
@@ -672,11 +771,19 @@ export function ShotProductionActions({
       )}
 
       <p className="qc-shot-production-hint">
-        {shot.formal_keyframe_artifact_id
-          ? "视频只使用后端确认的正式关键帧，不会自动改用其他图片。"
-          : "生成视频已暂停：请先审查候选并设置正式关键帧。"}
+        {videoMode === "text_to_video"
+          ? "文生视频仅使用已保存的镜头提示词；先在模型连接中绑定支持 T2V 的视频模型。"
+          : videoMode === "last_frame"
+            ? `尾帧生视频使用已保存的尾帧素材绑定（当前 ${lastFrameCount} 条）；模型连接须绑定 FL2VA 合同。`
+            : videoMode === "first_last_frame"
+              ? `首尾帧生视频使用正式关键帧和一条已保存的尾帧素材（当前 ${lastFrameCount} 条）；模型连接须绑定 FL2VA 合同。`
+              : videoMode === "omni_reference"
+                ? `参考素材生视频使用已保存的镜头提示词与资产引用（当前 ${referenceVideoCount} 条）；模型连接须绑定支持 Ref2VA 的视频合同。`
+                : shot.formal_keyframe_artifact_id
+                  ? "视频只使用后端确认的正式关键帧，不会自动改用其他图片。"
+                  : "生成视频已暂停：请先审查候选并设置正式关键帧。"}
       </p>
-      {!referencesReady && (
+      {!referencesReady && videoMode !== "text_to_video" && (
         <p className="qc-shot-production-hint" role="status">
           正在解析当前镜头的资产引用；解析完成前不会提交生产请求。
         </p>

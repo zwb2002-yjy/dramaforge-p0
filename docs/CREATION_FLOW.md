@@ -23,6 +23,15 @@ or change the Project, Scene/Shot, Candidate/Formal, Production Runtime,
 Artifact lineage, or EditingAdapter semantics. Director autonomy never bypasses
 the explicit Apply / Save / Formal / Export gates.
 
+镜头视频在同一 WorkbenchExecutionPlan 与 ProductionGraph 主链内有明确输入模式：
+`first_frame` 使用已审查并显式设为正式的关键帧；`last_frame` 使用一条已保存
+的尾帧素材绑定；`first_last_frame` 使用正式关键帧和一条已保存尾帧；
+`text_to_video` 使用已保存的镜头视频提示词和声明 `video.t2v` 的模型合同，
+不要求或暗中补入图片；`omni_reference` 使用已保存的图/视频/音频素材引用，
+不把参考图自动当成首帧。
+模式、能力、模型绑定和引用在预览时冻结。模式切换不自动替换模型；不兼容时预检和
+计划失败。所有模式的候选视频都须经过 Review 与显式 Formal 选择。
+
 ## Frontend routes
 
 - `/` — Project Lobby and `POST /projects`;
@@ -97,7 +106,7 @@ evaluator is unavailable.
 | 查看前后镜头 | 相邻 Shot 的具体候选/正式版本及已有采样帧 | 只读；缺帧使用占位与待检查说明，不后台付费生成 |
 | 修改镜头内容或模型参数 | 当前镜头草稿、已保存版本、模型/连接/引用身份 | 未保存草稿不直接生产；保存后旧执行预览失效；已有 Artifact 不改变 |
 | 查看本次发送内容 | 冻结计划与同源编译结果的安全投影 | 确定性预览不提交 Provider；LLM 优化是单独显式动作；无 secret/签名凭据/媒体二进制 |
-| 生成关键帧或视频 | 相应 Shot / ExperimentBranch 的既有命令入口 | 费用范围明确；沿用幂等/未知提交规则；主链视频仍消费显式正式关键帧 |
+| 生成关键帧或视频 | 相应 Shot / ExperimentBranch 的既有命令入口 | 费用范围明确；沿用幂等/未知提交规则；首帧模式消费正式关键帧，文生与参考素材模式按所选合同执行 |
 | 审核并采用 | 指定 Artifact 的人工判断与正式指针 | 审核与 Formal 的语义仍可辨认；成功前不显示采用成功；换候选不能沿用其它 Artifact 的判断 |
 | 按问题修改 | ReviewAnnotation、Repair 意图、每步计划与候选 | 明确哪些镜头/阶段受影响；不支持局部像素修复时明示整镜重生成；每步预览、执行、审核和采用 |
 | 查看剪辑效果 | 当前 EditSession 草稿的有序片段、裁切、现有音轨和字幕 | 预览不是 Save / Export；不把候选预览混入正式导出来源 |

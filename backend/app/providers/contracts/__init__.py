@@ -15,6 +15,7 @@ from app.providers.contracts.text import TextGenerateRequest, TTSRequest
 from app.providers.contracts.video import (
     FirstLastFrameVideoRequest,
     ImageToVideoRequest,
+    LastFrameVideoRequest,
     ReferenceToVideoRequest,
     TextToVideoRequest,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "ImageEditRequest",
     "ImageGenerateRequest",
     "ImageToVideoRequest",
+    "LastFrameVideoRequest",
     "ProviderCancelResult",
     "ProviderCostResult",
     "ProviderCreateResult",

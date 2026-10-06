@@ -156,6 +156,22 @@ async def prepare_media_submission(
             ) from exc
     first_frame: Artifact | None = None
     frame_bytes: bytes | None = None
+    text_video = node_type == "video" and (
+        (workbench_plan is not None and workbench_plan.mode_id == "text_to_video")
+        or (frozen_identity is not None and frozen_identity.mode_id == "text_to_video")
+    )
+    reference_video = node_type == "video" and (
+        (workbench_plan is not None and workbench_plan.mode_id == "omni_reference")
+        or (frozen_identity is not None and frozen_identity.mode_id == "omni_reference")
+    )
+    last_frame_video = node_type == "video" and (
+        (workbench_plan is not None and workbench_plan.mode_id == "last_frame")
+        or (frozen_identity is not None and frozen_identity.mode_id == "last_frame")
+    )
+    first_last_video = node_type == "video" and (
+        (workbench_plan is not None and workbench_plan.mode_id == "first_last_frame")
+        or (frozen_identity is not None and frozen_identity.mode_id == "first_last_frame")
+    )
     image_intent: ImageGenerationIntent | None = None
     video_intent: VideoGenerationIntentV1 | None = None
     if node_type == "keyframe":
@@ -213,15 +229,17 @@ async def prepare_media_submission(
             ),
         )
     else:
-        first_frame = await approved_first_frame_for_video(session, video_run=run)
-        try:
-            frame_bytes = await obj_store.get_bytes(object_key=first_frame.object_key)
-        except Exception:
-            frame_bytes = None
-        if not frame_bytes:
-            raise ValidationAppError(
-                "UPSTREAM_ARTIFACT_MISSING: approved first-frame bytes unavailable for video I2V"
-            )
+        if not (text_video or reference_video or last_frame_video):
+            first_frame = await approved_first_frame_for_video(session, video_run=run)
+            try:
+                frame_bytes = await obj_store.get_bytes(object_key=first_frame.object_key)
+            except Exception:
+                frame_bytes = None
+            if not frame_bytes:
+                raise ValidationAppError(
+                    "UPSTREAM_ARTIFACT_MISSING: approved first-frame bytes "
+                    "unavailable for video I2V"
+                )
         raw_duration = snap.get("duration_seconds")
         try:
             duration_seconds = round(float(str(raw_duration)))
@@ -256,7 +274,9 @@ async def prepare_media_submission(
             ),
             None,
         )
-        if planned_first_frame is not None and planned_first_frame.artifact_id != first_frame.id:
+        if planned_first_frame is not None and (
+            first_frame is None or planned_first_frame.artifact_id != first_frame.id
+        ):
             raise ValidationAppError(
                 "frozen Workbench first_frame does not match the formal keyframe",
                 details={"code": "FORMAL_KEYFRAME_SNAPSHOT_MISMATCH"},
@@ -278,7 +298,8 @@ async def prepare_media_submission(
             )
             for reference in planned_video_references
         ]
-        if not intent_references:
+        if not intent_references and not (text_video or reference_video or last_frame_video):
+            assert first_frame is not None
             intent_references = [
                 ArtifactReferenceIntent(
                     artifact_id=first_frame.id,
@@ -286,12 +307,22 @@ async def prepare_media_submission(
                     required=True,
                 )
             ]
+        video_mode_id = "first_frame"
+        if text_video:
+            video_mode_id = "text_to_video"
+        elif reference_video:
+            video_mode_id = "omni_reference"
+        elif last_frame_video:
+            video_mode_id = "last_frame"
+        elif first_last_video:
+            video_mode_id = "first_last_frame"
         video_intent = VideoGenerationIntentV1(
             prompt=prompt,
+            mode_id=video_mode_id,
             output=VideoOutputIntent(
                 aspect_ratio=video_ratio,
                 duration_seconds=duration_seconds,
-                generate_audio=False,
+                generate_audio=None,
             ),
             references=intent_references,
             selection=ModelSelectionIntent(
@@ -763,26 +794,36 @@ async def prepare_media_submission(
             invoke_model_value=invoke_model_value,
         )
     else:
-        assert first_frame is not None and frame_bytes is not None
         assert video_intent is not None
         video_compiler = resolved.video_compiler
         if video_compiler is None:
             raise ValidationAppError("unified plugin has no video compiler")
+        if text_video and workbench_planned_references:
+            raise ValidationAppError("text_to_video cannot carry artifact references")
+        if reference_video and not workbench_planned_references:
+            raise ValidationAppError("Ref2VA requires frozen artifact references")
+        if last_frame_video and not workbench_planned_references:
+            raise ValidationAppError("last-frame video requires a frozen last frame")
         if workbench_planned_references:
             video_references = [
                 await _load_workbench_reference(
                     reference,
                     existing_artifact=first_frame
-                    if reference.artifact_id == first_frame.id
+                    if first_frame is not None and reference.artifact_id == first_frame.id
                     else None,
-                    existing_bytes=frame_bytes if reference.artifact_id == first_frame.id else None,
+                    existing_bytes=frame_bytes
+                    if first_frame is not None and reference.artifact_id == first_frame.id
+                    else None,
                 )
                 for reference in workbench_planned_references
                 if reference.delivery != "unsupported"
             ]
+        elif text_video:
+            video_references = []
         else:
             # Historical unified runs without a P4 plan retain the formal
             # first-frame path exactly as before.
+            assert first_frame is not None and frame_bytes is not None
             video_references = [
                 await _unified_resolved_reference(
                     session,
