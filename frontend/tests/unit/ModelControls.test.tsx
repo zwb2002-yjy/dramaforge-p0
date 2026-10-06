@@ -17,6 +17,8 @@ function parameter(
 function mockSpec(overrides: Partial<CapabilitySpecRead> = {}): CapabilitySpecRead {
   return {
     capability: "video.image_to_video",
+    minimum_total_references: 0,
+    auto_match_contract: false,
     input_slots: {},
     common_options: {
       duration_seconds: parameter({

@@ -431,7 +431,12 @@ export function getEffectiveBindings(projectId: string): Promise<EffectiveBindin
 /** Exact production resolver result; read-only and never contacts a Provider. */
 export function getExecutionModelPreflight(
   projectId: string,
-  videoMode: "first_frame" | "last_frame" | "first_last_frame" | "text_to_video" | "omni_reference" = "first_frame",
+  videoMode:
+    | "first_frame"
+    | "last_frame"
+    | "first_last_frame"
+    | "text_to_video"
+    | "omni_reference" = "first_frame",
 ): Promise<ExecutionModelPreflightRead> {
   return apiGet(`/api/v1/projects/${projectId}/execution-models/preflight?video_mode=${videoMode}`);
 }

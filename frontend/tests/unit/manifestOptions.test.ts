@@ -20,6 +20,8 @@ function parameter(
 
 const DURATION_RESOLUTION_SPEC: CapabilitySpecRead = {
   capability: "video.image_to_video",
+  minimum_total_references: 0,
+  auto_match_contract: false,
   input_slots: {},
   common_options: {
     duration_seconds: parameter({

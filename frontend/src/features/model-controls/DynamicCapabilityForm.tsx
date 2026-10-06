@@ -12,6 +12,8 @@ import { allowedValuesFor, uiComponentFor, type OptionValue } from "../../lib/ma
 
 const EMPTY_SPEC: CapabilitySpecRead = {
   capability: "image.generate",
+  minimum_total_references: 0,
+  auto_match_contract: false,
   transport_profile_id: "",
 };
 

@@ -404,11 +404,11 @@ async def test_declared_reference_mode_is_enforced_before_compilation() -> None:
     operation.reference_constraints["last_frame"] = operation.reference_constraints["first_frame"]
     intent = VideoGenerationIntentV1(
         prompt="test",
-        mode_id="mode_1",
+        mode_id="last_frame",
         selection=ModelSelectionIntent(mode="explicit_binding"),
         references=[ArtifactReferenceIntent(artifact_id=UUID(int=1), role="first_frame")],
     )
-    # mode_1 is generated for the last-frame member, so first_frame must be refused.
+    # The semantic last-frame mode must refuse a first-frame reference.
     result = await preview_compile(
         manifest=manifest,
         invoke_model_value=manifest.model_id,

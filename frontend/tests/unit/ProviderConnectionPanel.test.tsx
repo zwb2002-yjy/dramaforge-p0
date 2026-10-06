@@ -96,9 +96,39 @@ describe("Provider connection contract revisions", () => {
             media_type: "image",
             model_revision: "v2",
             lifecycle: "active",
+            implementation_status: "contract_tested",
             catalog_source: "official_static",
             capabilities: ["image.t2i", "image.i2i"],
             option_schema: {},
+            capability_summary: {
+              media_kind: "image",
+              accepts_text_only: true,
+              product_text_only: true,
+              accepts: { reference_image: true },
+              product_open: { reference_image: true },
+              limits: { reference_image: 1 },
+            },
+          },
+          {
+            catalog_entry_id: "catalog-preview",
+            capability_manifest_hash: "hash-preview",
+            model_id: "agnes-image-2.5-flash",
+            display_name: "Agnes Image 2.5 Flash",
+            media_type: "image",
+            model_revision: "documented-1",
+            lifecycle: "preview",
+            implementation_status: "documented",
+            catalog_source: "official_static",
+            capabilities: ["image.t2i", "image.i2i"],
+            option_schema: {},
+            capability_summary: {
+              media_kind: "image",
+              accepts_text_only: true,
+              product_text_only: false,
+              accepts: { reference_image: true },
+              product_open: { reference_image: false },
+              limits: { reference_image: 8 },
+            },
           },
         ],
       },
@@ -184,16 +214,20 @@ describe("Provider connection contract revisions", () => {
     fireEvent.click(
       (await screen.findByTestId("provider-diagnostics-disclosure")).querySelector("summary")!,
     );
-    expect(await screen.findByText("keyframe · 历史合同")).toBeInTheDocument();
-    expect(screen.getByText("keyframe · Agnes Image Flash · v2")).toBeInTheDocument();
+    expect(await screen.findByText("历史合同")).toBeInTheDocument();
+    expect(screen.getByText("Agnes Image Flash")).toBeInTheDocument();
+    expect(screen.getByTestId("catalog-only-models")).toHaveTextContent("Agnes Image 2.5 Flash");
+    fireEvent.click(screen.getByRole("button", { name: "添加模型" }));
+    expect(screen.getByLabelText("关键帧模型")).not.toHaveTextContent("Agnes Image 2.5 Flash");
+    expect(screen.getByTestId("binding-capabilities-keyframe")).toHaveTextContent(
+      "供应商声明：纯文本、参考图片；当前工作台：纯文本、参考图片",
+    );
     fireEvent.change(screen.getByLabelText("项目 Provider 绑定"), {
       target: { value: "project-1" },
     });
 
-    const historicalRow = screen.getByText("keyframe · 历史合同").closest(".provider-binding");
-    const activeRow = screen
-      .getByText("keyframe · Agnes Image Flash · v2")
-      .closest(".provider-binding");
+    const historicalRow = screen.getByText("历史合同").closest(".provider-binding");
+    const activeRow = screen.getByTestId("provider-model-binding-v2");
     expect(historicalRow).not.toBeNull();
     expect(activeRow).not.toBeNull();
     expect(
@@ -236,7 +270,7 @@ describe("Provider connection contract revisions", () => {
     );
 
     const toggle = await screen.findByTestId("provider-connection-toggle");
-    expect(toggle).toHaveTextContent("停用连接");
+    expect(toggle).toHaveAccessibleName("停用连接");
     fireEvent.click(toggle);
     await vi.waitFor(() =>
       expect(updateProviderConnection).toHaveBeenCalledWith("workspace-1", "connection-1", {

@@ -1,0 +1,50 @@
+{
+  "manifest": {
+    "catalog_source": "protocol_contract",
+    "display_name": "SGLang H3 文生视频 (T2VA)",
+    "documented_at": "2026-09-29",
+    "lifecycle": "active",
+    "manifest_version": "2026-09-29",
+    "media_kind": "video",
+    "model_id": "@contract/sglang-h3-t2v-v1",
+    "model_revision": "v1",
+    "operations": {
+      "video.generate": {
+        "capabilities": [
+          "video.t2v"
+        ],
+        "exclusive_groups": [],
+        "operation": "video.generate",
+        "output_constraints": {
+          "duration_seconds": 5,
+          "native_audio": false
+        },
+        "reference_constraints": {}
+      }
+    },
+    "option_schema": {
+      "namespace": "",
+      "options": {}
+    },
+    "protocol_profile": "openai_media_v1",
+    "provider_type": "openai_compatible_media"
+  },
+  "manifest_hash": "201d3a5637437efa9e7d461d16d79ecac562047fb3d122a82b92dc6ba674fe42",
+  "contract": {
+    "documentation_source": {
+      "notes": "Frozen local compiler contract; no provider request or account verification.",
+      "verified_at": "2026-10-07"
+    },
+    "wire_template": {
+      "method": "POST",
+      "path": "/v1/videos",
+      "request_body": {
+        "model": "<discovered-model>",
+        "prompt": "<prompt>",
+        "seconds": 5,
+        "size": "720x1280",
+        "extra_body": "{\"task\": \"t2va\", \"conditions\": []}"
+      }
+    }
+  }
+}

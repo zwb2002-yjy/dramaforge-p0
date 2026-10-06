@@ -1,0 +1,140 @@
+"""Load versioned media model manifests from the packaged catalog directory.
+
+The files are the catalog source.  Validation never rewrites their payloads:
+the frozen manifest hash is calculated over exactly the JSON object that was
+shipped, independent of whitespace and key order.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, cast
+
+from app.providers.manifest import (
+    ModelCapabilityManifest,
+    has_reproducible_contract_evidence,
+    is_legacy_tested_manifest,
+)
+
+CatalogIdentity = tuple[str, str, str, str]
+
+
+def hash_manifest(manifest_dict: dict[str, Any]) -> str:
+    """Stable sha256 over the canonical JSON of a manifest dict."""
+    raw = json.dumps(manifest_dict, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
+@dataclass(frozen=True)
+class LoadedCatalogManifest:
+    """Immutable catalog entry; callers get a fresh dict through ``as_dict``."""
+
+    identity: CatalogIdentity
+    manifest_hash: str
+    publication_lifecycle: str
+    source_path: Path
+    _canonical_json: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return cast(dict[str, Any], json.loads(self._canonical_json))
+
+
+class ModelCatalogLoader:
+    def __init__(self, root: Path | None = None) -> None:
+        self._root = root or Path(__file__).with_name("model_catalog")
+
+    def load(self) -> tuple[LoadedCatalogManifest, ...]:
+        if not self._root.is_dir():
+            raise ValueError(f"model catalog directory is missing: {self._root}")
+        # The old seed order is observable to legacy callers that select the
+        # first image/video manifest. File prefixes preserve it without a
+        # Python model list; filename remains outside model identity and hash.
+        paths = sorted(
+            self._root.rglob("*.json"),
+            key=lambda path: (path.name, str(path.relative_to(self._root))),
+        )
+        if not paths:
+            raise ValueError(f"model catalog is empty: {self._root}")
+
+        seen: set[CatalogIdentity] = set()
+        active_models: set[tuple[str, str, str]] = set()
+        loaded: list[LoadedCatalogManifest] = []
+        for path in paths:
+            try:
+                raw = json.loads(
+                    path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys
+                )
+            except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+                raise ValueError(f"invalid model catalog file {path}: {exc}") from exc
+            if not isinstance(raw, dict):
+                raise ValueError(f"model catalog file must contain an object: {path}")
+            if "implementation_status" not in raw and not is_legacy_tested_manifest(raw):
+                raise ValueError(f"model manifest must declare implementation status: {path}")
+            if raw.get("implementation_status") == "contract_tested" and not (
+                has_reproducible_contract_evidence(raw)
+            ):
+                raise ValueError(f"contract-tested manifest lacks reproducible evidence: {path}")
+            try:
+                manifest = ModelCapabilityManifest.model_validate(raw)
+            except ValueError as exc:
+                raise ValueError(f"invalid model manifest {path}: {exc}") from exc
+            relative_parts = path.relative_to(self._root).parts
+            provider_dir = relative_parts[0]
+            if manifest.provider_type != provider_dir:
+                raise ValueError(
+                    f"catalog provider directory does not match manifest: {path}"
+                )
+            if not manifest.protocol_profile.strip():
+                raise ValueError(f"catalog protocol profile is empty: {path}")
+            if len(relative_parts) == 3:
+                publication_lifecycle = relative_parts[1]
+                if publication_lifecycle not in {"preview", "legacy", "deprecated", "retired"}:
+                    raise ValueError(f"unknown catalog publication directory: {path}")
+                if publication_lifecycle == "preview" and (
+                    manifest.lifecycle != "preview"
+                    or "implementation_status" not in raw
+                ):
+                    raise ValueError(
+                        f"preview manifest must declare preview and implementation status: {path}"
+                    )
+            elif len(relative_parts) == 2:
+                publication_lifecycle = manifest.lifecycle
+            else:
+                raise ValueError(f"invalid model catalog path: {path}")
+            identity = (
+                manifest.provider_type,
+                manifest.protocol_profile,
+                manifest.model_id,
+                manifest.model_revision,
+            )
+            if identity in seen:
+                raise ValueError(f"duplicate model catalog identity {identity}: {path}")
+            seen.add(identity)
+            if publication_lifecycle == "active":
+                model_key = identity[:3]
+                if model_key in active_models:
+                    raise ValueError(f"multiple active revisions for model {model_key}")
+                active_models.add(model_key)
+            canonical = json.dumps(raw, sort_keys=True, separators=(",", ":"), default=str)
+            loaded.append(
+                LoadedCatalogManifest(
+                    identity=identity,
+                    manifest_hash=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+                    publication_lifecycle=publication_lifecycle,
+                    source_path=path,
+                    _canonical_json=canonical,
+                )
+            )
+        return tuple(loaded)

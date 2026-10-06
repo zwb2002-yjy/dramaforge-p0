@@ -3344,6 +3344,17 @@ export interface components {
             input_slots?: {
                 [key: string]: components["schemas"]["InputSlotSpec"];
             };
+            /**
+             * Minimum Total References
+             * @default 0
+             */
+            minimum_total_references: number;
+            /** Maximum Total References */
+            maximum_total_references?: number | null;
+            /** Max Total Duration Seconds */
+            max_total_duration_seconds?: {
+                [key: string]: number;
+            };
             /** Common Options */
             common_options?: {
                 [key: string]: components["schemas"]["ParameterSpec"];
@@ -3359,6 +3370,11 @@ export interface components {
             };
             /** Default Mode */
             default_mode?: string | null;
+            /**
+             * Auto Match Contract
+             * @default false
+             */
+            auto_match_contract: boolean;
             /** Transport Profile Id */
             transport_profile_id: string;
             reference_media_limits?: components["schemas"]["ReferenceMediaLimits"] | null;
@@ -3522,20 +3538,6 @@ export interface components {
             code: string;
             /** Message */
             message: string;
-        };
-        /**
-         * ConstraintSpec
-         * @description Cross-field constraint set for one capability (spec §17/§18).
-         */
-        ConstraintSpec: {
-            /** Mutually Exclusive */
-            mutually_exclusive?: string[][];
-            /** Requires */
-            requires?: {
-                [key: string]: string[];
-            };
-            /** Conditional */
-            conditional?: components["schemas"]["ConditionalConstraint"][];
         };
         /**
          * ConstraintSpec
@@ -5012,6 +5014,10 @@ export interface components {
             compiled_options?: {
                 [key: string]: components["schemas"]["JsonValue"];
             }[];
+            /** Operation Ids */
+            operation_ids?: string[];
+            /** Compiled Request Hashes */
+            compiled_request_hashes?: string[];
             /** Operation Statuses */
             operation_statuses?: string[];
             /** Reference Plan */
@@ -5047,6 +5053,17 @@ export interface components {
             input_slots?: {
                 [key: string]: components["schemas"]["InputSlotSpec"];
             };
+            /**
+             * Minimum Total References
+             * @default 0
+             */
+            minimum_total_references: number;
+            /** Maximum Total References */
+            maximum_total_references?: number | null;
+            /** Max Total Duration Seconds */
+            max_total_duration_seconds?: {
+                [key: string]: number;
+            };
             /** Common Options */
             common_options?: {
                 [key: string]: components["schemas"]["ParameterSpec"];
@@ -5077,6 +5094,20 @@ export interface components {
             maximum?: number | null;
             /** Media Types */
             media_types?: string[];
+            /** Max Bytes */
+            max_bytes?: number | null;
+            /** Min Duration Seconds */
+            min_duration_seconds?: number | null;
+            /** Max Duration Seconds */
+            max_duration_seconds?: number | null;
+            /** Min Width */
+            min_width?: number | null;
+            /** Max Width */
+            max_width?: number | null;
+            /** Min Height */
+            min_height?: number | null;
+            /** Max Height */
+            max_height?: number | null;
             /** Description */
             description?: string | null;
         };
@@ -5277,6 +5308,27 @@ export interface components {
             lifecycle_warnings?: components["schemas"]["LifecycleWarning"][];
             /** Limitations */
             limitations?: string[];
+        };
+        /** ModelCapabilitySummary */
+        ModelCapabilitySummary: {
+            /** Media Kind */
+            media_kind: string;
+            /** Accepts Text Only */
+            accepts_text_only: boolean;
+            /** Product Text Only */
+            product_text_only: boolean;
+            /** Accepts */
+            accepts?: {
+                [key: string]: boolean;
+            };
+            /** Product Open */
+            product_open?: {
+                [key: string]: boolean;
+            };
+            /** Limits */
+            limits?: {
+                [key: string]: number;
+            };
         };
         /** ModelQueryRead */
         ModelQueryRead: {
@@ -6311,6 +6363,8 @@ export interface components {
             model_revision: string;
             /** Lifecycle */
             lifecycle: string;
+            /** Implementation Status */
+            implementation_status: string;
             /** Catalog Source */
             catalog_source: string;
             /** Capabilities */
@@ -6319,6 +6373,7 @@ export interface components {
             option_schema: {
                 [key: string]: unknown;
             };
+            capability_summary: components["schemas"]["ModelCapabilitySummary"];
         };
         /** ProviderPluginRead */
         ProviderPluginRead: {

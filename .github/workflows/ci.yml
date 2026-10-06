@@ -201,6 +201,7 @@ jobs:
               set -eu
               python3 scripts/check_canonical_surface.py
               python3 scripts/arch_import_scan.py --check
+              PYTHONPATH=/workspace/backend uv run --directory backend python /workspace/scripts/generate_model_support_docs.py --check
               uv run --directory backend ruff check app tests alembic/versions
               uv run --directory backend mypy app
               uv run --directory backend pytest tests/unit -q

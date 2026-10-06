@@ -1,9 +1,9 @@
 # DATA_MODEL — 数据模型权威
 
 Status: current
-Date: 2026-09-22
-Alembic head: 20260922_0077
-Revisions: 77
+Date: 2026-10-07
+Alembic head: 20261007_0083
+Revisions: 87
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Canonical relational graph
@@ -51,6 +51,13 @@ projects → event_log / outbox_events / outbox_dead_letters
 | Security | encrypted_provider_credentials, key_rotation_audits | app/security/models.py |
 | Provider identity | provider_connections, provider_connection_revisions, provider_capability_evidence, provider_model_bindings, project_provider_bindings, provider_quality_evidence, artifact_reference_tokens | app/providers/models.py |
 | Provider catalog/profile | provider_model_catalog_entries, production_model_profiles | app/providers/catalog_models.py, app/providers/model_profiles/orm.py |
+| Model cutover expand (not runtime authority yet) | model_capability_revisions, model_publication_states/events, connection_discovered_models, connection_model_capability_revisions, provider_availability_evidence, provider_model_availability | app/providers/model_system_models.py |
+| Protocol / handler cutover storage (not runtime authority yet) | protocol_contract_revisions, runtime_handler_revisions | app/providers/model_system_models.py |
+
+模型能力 revision、Connection 发现事实与能力 revision、发布事件和逐模型可用性证据
+在数据库中禁止 UPDATE/DELETE。来源核查或合同实现进展需要新增 revision；新的探测
+结果需要新增 Evidence，并更新单独的 Availability 投影。Migration A 回填的 Global
+revision 尚无来源快照，且只标记为 `manifest_mapped`，不能原地提升为已验证事实。
 
 A second, private schema `director_runtime_checkpoints` (LangGraph checkpoint
 tables `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`,
@@ -112,6 +119,9 @@ Migration 20260902_0051 removes:
 | 20260921_0075 | Bind `provider_capability_evidence` to immutable `provider_connection_revisions` identity. |
 | 20260921_0076 | Seed protocol-level OpenAI-compatible image/video capability contracts (contracts, not concrete supplier models). |
 | 20260922_0077 | `human_review_decisions.decision` adds `demo_confirmed`; it records walkthrough confirmation but does not admit Formal media. |
+| 20260929_0074–0077 | Model-system branch: Global/Connection targets and availability; immutable product-policy, model-history, protocol and handler revisions. These storage and preflight additions do not complete runtime cutover. |
+| 20260929_0078–20260930_0082 | Local-media branch: SGLang H3 contracts, MiniMax H3 v2 text/video contract, and separate bindings per contract revision. |
+| 20261007_0083 | Merge the model-system and local-media migration histories into one head without rewriting either branch. |
 
 No canonical Project, Shot, Artifact, ProviderOperation, or EditSession is
 deleted by these revisions. Revision 0070 backfills legacy Asset lifecycle and
@@ -119,7 +129,7 @@ tag data before enforcing the canonical constraints.
 
 ## Schema invariants
 
-- Alembic has one head: 20260922_0077 (verify with `alembic heads` on the candidate).
+- Alembic has one head: 20261007_0083 (verify with `alembic heads` on the candidate).
 - Metadata registration is centralized in app/shared/model_registry.py.
 - ProviderOperation is NodeRun-owned only.
 - Identity reference resolution is explicit and version-pinned.

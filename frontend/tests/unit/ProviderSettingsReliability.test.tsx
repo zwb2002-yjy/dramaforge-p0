@@ -28,9 +28,18 @@ const model: api.ProviderPluginRead["models"][number] = {
   media_type: "image",
   model_revision: "v2",
   lifecycle: "active",
+  implementation_status: "contract_tested",
   catalog_source: "official_static",
   capabilities: ["image.generate"],
   option_schema: {},
+  capability_summary: {
+    media_kind: "image",
+    accepts_text_only: true,
+    product_text_only: true,
+    accepts: { reference_image: true },
+    product_open: { reference_image: true },
+    limits: { reference_image: 1 },
+  },
 };
 const plugin: api.ProviderPluginRead = {
   provider_type: "fixture",
@@ -105,6 +114,10 @@ function mount() {
   );
   return client;
 }
+async function addModel() {
+  fireEvent.click(await screen.findByRole("button", { name: "添加模型" }));
+  await screen.findByLabelText("关键帧模型");
+}
 async function diagnostics() {
   await screen.findByTestId("provider-connection-toggle");
   fireEvent.click(screen.getByTestId("provider-diagnostics-disclosure").querySelector("summary")!);
@@ -138,7 +151,7 @@ describe("Provider settings honest state and isolated drafts", () => {
     expect(screen.getByLabelText("供应商服务地址")).toHaveValue("");
     expect(screen.getByRole("button", { name: "保存连接地址" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "运行探测" })).toBeDisabled();
-    expect(screen.getByText(/不会自动替换成旧地址/)).toBeInTheDocument();
+    expect(screen.getByText(/未自动替换为旧地址/)).toBeInTheDocument();
     expect(api.updateProviderConnection).not.toHaveBeenCalled();
     expect(api.runProviderProbe).not.toHaveBeenCalled();
   });
@@ -242,6 +255,7 @@ describe("Provider settings honest state and isolated drafts", () => {
     expect(screen.getByText(/模型绑定读取失败/)).toBeInTheDocument();
     expect(screen.queryByText("暂无能力证据。")).not.toBeInTheDocument();
     expect(screen.queryByText(/^尚无模型绑定/)).not.toBeInTheDocument();
+    await addModel();
     expect(screen.getByRole("button", { name: "添加关键帧模型绑定" })).toBeDisabled();
   });
 
@@ -292,6 +306,7 @@ describe("Provider settings honest state and isolated drafts", () => {
     ]);
     const client = mount();
     await diagnostics();
+    await addModel();
     await waitFor(() => expect(screen.getByLabelText("关键帧模型")).toBeEnabled());
     fireEvent.change(screen.getByLabelText("关键帧模型"), { target: { value: model.model_id } });
     expect(screen.getByRole("button", { name: "添加关键帧模型绑定" })).toBeEnabled();
@@ -301,7 +316,7 @@ describe("Provider settings honest state and isolated drafts", () => {
       ]),
     );
     await waitFor(() =>
-      expect(screen.getByTestId("provider-connection-status")).toHaveTextContent("当前认证被拒绝"),
+      expect(screen.getByTestId("provider-connection-status")).toHaveTextContent("认证失败"),
     );
     expect(screen.getByRole("button", { name: "添加关键帧模型绑定" })).toBeDisabled();
     expect(api.runProviderProbe).not.toHaveBeenCalled();
@@ -310,14 +325,15 @@ describe("Provider settings honest state and isolated drafts", () => {
   it("does not let a late historical auth failure override the backend's current verified revision", async () => {
     const client = mount();
     await diagnostics();
+    await addModel();
     await waitFor(() => expect(screen.getByLabelText("关键帧模型")).toBeEnabled());
     fireEvent.change(screen.getByLabelText("关键帧模型"), { target: { value: model.model_id } });
     expect(screen.getByRole("button", { name: "添加关键帧模型绑定" })).toBeEnabled();
     act(() => client.setQueryData(queryKeys.provider.probes("workspace", connection.id), [probe]));
     // The failure remains visible evidence, but carries no current-revision authority.
     expect(await screen.findByText(/错误代码：PROVIDER_AUTH_FAILED/)).toBeInTheDocument();
-    expect(screen.getByTestId("provider-connection-status")).toHaveTextContent("曾通过认证");
-    expect(screen.getByTestId("provider-connection-status")).not.toHaveTextContent("认证被拒绝");
+    expect(screen.getByTestId("provider-connection-status")).toHaveTextContent("目录已验证");
+    expect(screen.getByTestId("provider-connection-status")).not.toHaveTextContent("认证失败");
     expect(screen.getByRole("button", { name: "添加关键帧模型绑定" })).toBeEnabled();
     expect(api.runProviderProbe).not.toHaveBeenCalled();
   });
@@ -340,6 +356,7 @@ describe("Provider settings honest state and isolated drafts", () => {
     });
     mount();
     await diagnostics();
+    await addModel();
     await waitFor(() => expect(screen.getByLabelText("关键帧模型")).toBeEnabled());
     fireEvent.change(screen.getByLabelText("关键帧模型"), {
       target: { value: secondModel.model_id },
@@ -385,19 +402,15 @@ describe("Provider settings honest state and isolated drafts", () => {
     mount();
     await diagnostics();
 
+    await addModel();
     await waitFor(() => expect(screen.getByLabelText("关键帧模型")).toBeEnabled());
     const imagePicker = screen.getByLabelText("关键帧模型");
-    expect(
-      within(imagePicker).getByRole("option", { name: /remote-supported/ }),
-    ).toBeInTheDocument();
+    expect(within(imagePicker).getByRole("option", { name: /Exact Image/ })).toBeInTheDocument();
     expect(within(imagePicker).getByRole("option", { name: /remote-unknown/ })).toBeInTheDocument();
     expect(
       within(imagePicker).queryByRole("option", { name: /catalog-only/ }),
     ).not.toBeInTheDocument();
-    expect(screen.getByTestId("provider-discovered-models")).toHaveTextContent("remote-unknown");
-    expect(screen.getByTestId("provider-discovered-models")).toHaveTextContent(
-      "待指定能力合同并绑定",
-    );
+    expect(screen.getByTestId("provider-discovered-models")).toHaveTextContent("2 个模型");
     fireEvent.change(screen.getByLabelText("关键帧模型"), {
       target: { value: "remote-unknown" },
     });

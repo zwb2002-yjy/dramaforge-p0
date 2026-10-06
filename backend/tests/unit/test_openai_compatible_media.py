@@ -7,7 +7,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from app.config import Settings
-from app.providers.catalog_seed_data import SEED_MANIFESTS
+from app.providers.catalog_loader import ModelCatalogLoader
 from app.providers.intents import (
     ArtifactReferenceIntent,
     ImageGenerationIntent,
@@ -42,8 +42,8 @@ def _settings() -> Settings:
 
 def _manifest(model_id: str, revision: str = "v1") -> ModelCapabilityManifest:
     raw = next(
-        item for item in SEED_MANIFESTS
-        if item["model_id"] == model_id and item["model_revision"] == revision
+        item.as_dict() for item in ModelCatalogLoader().load()
+        if item.identity[2:] == (model_id, revision)
     )
     return ModelCapabilityManifest.model_validate(raw)
 

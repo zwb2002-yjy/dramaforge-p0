@@ -246,7 +246,7 @@ def _register_model(
     key = (manifest.provider_type, manifest.protocol_profile, manifest.media_kind)
     transport_profile_id = _TRANSPORT_BY_KEY.get(key)
     if transport_profile_id is None:
-        return
+        raise ValueError(f"model catalog has no registered transport profile for {key}")
     transport_profile = transport_registry.get(transport_profile_id)
     v3_manifest = to_v3_model_manifest(manifest, transport_profile_id=transport_profile.id)
     # Phase 3 replaces the placeholder with a real bridge; both share the same

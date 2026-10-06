@@ -1,0 +1,32 @@
+{
+  "manifest_version": "2026-08-10",
+  "provider_type": "volcengine",
+  "protocol_profile": "ark_cn_v1",
+  "model_id": "doubao-seedance-1-0-pro-250528",
+  "model_revision": "v1",
+  "media_kind": "video",
+  "display_name": "Seedance 1.0 Pro",
+  "lifecycle": "active",
+  "catalog_source": "official_static",
+  "documented_at": "2026-08-10",
+  "operations": {
+    "video.generate": {
+      "operation": "video.generate",
+      "capabilities": [
+        "video.i2v.first_frame"
+      ],
+      "output_constraints": {},
+      "reference_constraints": {
+        "first_frame": {
+          "min": 1,
+          "max": 1
+        }
+      },
+      "exclusive_groups": []
+    }
+  },
+  "option_schema": {
+    "namespace": "",
+    "options": {}
+  }
+}

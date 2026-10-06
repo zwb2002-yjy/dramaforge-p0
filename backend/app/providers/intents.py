@@ -79,9 +79,26 @@ class ImageGenerationIntent(BaseModel):
     aspect_ratio: Literal["9:16", "16:9", "1:1"] | None = None
     seed: int | None = None
     reference_artifact_id: UUID | None = None
+    # Ordered protocol input for new multi-reference contracts. The existing
+    # Workbench keeps using the single-reference field until its product policy
+    # explicitly opens multiple images.
+    reference_artifact_ids: list[UUID] = Field(default_factory=list)
     reference_fingerprint: str | None = None
     reference_mime: str | None = None
     requirements: VideoRequirements = Field(default_factory=VideoRequirements)
     preferences: VideoPreferences = Field(default_factory=VideoPreferences)
     mode_id: str | None = None
     selection: ModelSelectionIntent
+
+    def selected_reference_ids(self) -> list[UUID]:
+        if self.reference_artifact_id is not None and self.reference_artifact_ids:
+            raise ValueError("image intent cannot mix single and multiple reference fields")
+        if self.reference_artifact_ids:
+            selected = list(self.reference_artifact_ids)
+        elif self.reference_artifact_id is not None:
+            selected = [self.reference_artifact_id]
+        else:
+            selected = []
+        if len(selected) != len(set(selected)):
+            raise ValueError("image intent repeats a reference artifact")
+        return selected

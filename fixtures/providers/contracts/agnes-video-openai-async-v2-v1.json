@@ -1,0 +1,60 @@
+{
+  "manifest": {
+    "catalog_source": "protocol_contract",
+    "display_name": "Agnes Video 2.5 协议插件",
+    "documented_at": "2026-09-21",
+    "lifecycle": "active",
+    "manifest_version": "2026-09-21",
+    "media_kind": "video",
+    "model_id": "@contract/agnes-video-openai-async-v2",
+    "model_revision": "v1",
+    "operations": {
+      "video.generate": {
+        "capabilities": [
+          "video.i2v.first_frame"
+        ],
+        "exclusive_groups": [],
+        "operation": "video.generate",
+        "output_constraints": {
+          "aspect_ratio": "9:16",
+          "duration_seconds": 5,
+          "native_audio": false,
+          "protocol_generation": "2.5",
+          "resolution": "720P"
+        },
+        "reference_constraints": {
+          "first_frame": {
+            "max": 1,
+            "min": 1
+          }
+        }
+      }
+    },
+    "option_schema": {
+      "namespace": "",
+      "options": {}
+    },
+    "protocol_profile": "agnes_cn_v1",
+    "provider_type": "agnes"
+  },
+  "manifest_hash": "3f8859a828862343732897101beac3cd7e125779deb6801ef514541c3e82bf5f",
+  "contract": {
+    "documentation_source": {
+      "notes": "Frozen local compiler contract; no provider request or account verification.",
+      "verified_at": "2026-10-07"
+    },
+    "wire_template": {
+      "method": "POST",
+      "path": "/v1/videos",
+      "request_body": {
+        "model": "<discovered-model>",
+        "prompt": "<prompt>",
+        "seconds": 5,
+        "size": "720x1280",
+        "aspect_ratio": "9:16",
+        "input_image_b64": "Zml4dHVyZQ==",
+        "input_image_mime": "image/png"
+      }
+    }
+  }
+}

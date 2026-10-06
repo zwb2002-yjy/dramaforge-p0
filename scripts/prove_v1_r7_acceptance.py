@@ -9,6 +9,7 @@ persisted responses, and media receipts are read by their original command key.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -39,18 +40,27 @@ def repository_migration_head() -> str:
     to exactly one head, so the head is derived from the repository instead of
     being pinned to a revision that a later migration silently invalidates.
     """
-    revision = re.compile(r"^revision(?::[^=]+)?\s*=\s*[\"']([^\"']+)[\"']", re.MULTILINE)
-    down = re.compile(r"^down_revision(?::[^=]+)?\s*=\s*[\"']([^\"']+)[\"']", re.MULTILINE)
     revisions: set[str] = set()
     parents: set[str] = set()
     for path in sorted(ALEMBIC_VERSIONS.glob("*.py")):
-        text = path.read_text(encoding="utf-8")
-        found = revision.search(text)
-        if found:
-            revisions.add(found.group(1))
-        parent = down.search(text)
-        if parent:
-            parents.add(parent.group(1))
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if isinstance(node, ast.AnnAssign):
+                targets, value = [node.target], node.value
+            elif isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            else:
+                continue
+            for target in targets:
+                if not isinstance(target, ast.Name) or target.id not in {"revision", "down_revision"}:
+                    continue
+                identity = ast.literal_eval(value)
+                if target.id == "revision":
+                    revisions.add(identity)
+                elif isinstance(identity, str):
+                    parents.add(identity)
+                elif identity is not None:
+                    parents.update(identity)
     heads = sorted(revisions - parents)
     if len(heads) != 1:
         raise RuntimeError(

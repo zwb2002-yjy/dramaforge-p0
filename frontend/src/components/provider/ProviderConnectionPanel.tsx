@@ -39,6 +39,27 @@ const CAPABILITY_LABELS: Record<string, string> = {
   video_poll_download: "视频轮询 / 下载",
 };
 
+const REFERENCE_LABELS: Record<string, string> = {
+  first_frame: "首帧",
+  last_frame: "尾帧",
+  reference_image: "参考图片",
+  reference_video: "参考视频",
+  reference_audio: "参考音频",
+};
+
+function modelCapabilityText(model: ProviderPluginRead["models"][number]): string {
+  const summary = model.capability_summary;
+  const providerInputs = Object.entries(summary.accepts ?? {})
+    .filter(([, accepted]) => accepted)
+    .map(([role]) => REFERENCE_LABELS[role] ?? role);
+  const productInputs = Object.entries(summary.product_open ?? {})
+    .filter(([, open]) => open)
+    .map(([role]) => REFERENCE_LABELS[role] ?? role);
+  if (summary.accepts_text_only) providerInputs.unshift("纯文本");
+  if (summary.product_text_only) productInputs.unshift("纯文本");
+  return `供应商声明：${providerInputs.join("、") || "无"}；当前工作台：${productInputs.join("、") || "未开放"}`;
+}
+
 export function ProviderConnectionPanel(props: ProviderConnectionPanelProps) {
   const selectionKey = `dramaforge.providerConnection.${props.workspaceId ?? "none"}`;
   const [selectedPluginKey, setSelectedPluginKey] = useState<string | null>(() => {
@@ -277,55 +298,59 @@ function ProviderConnectionEditor({
       setError("操作结果未确认，草稿已保留。请先重新读取状态，核对是否已保存；不要盲目重复提交。"),
   });
 
-  const probeMutation = useMutation<Awaited<ReturnType<typeof runProviderProbe>>, unknown, boolean>({
-    mutationFn: async (catalogOnly) => {
-      if (!workspaceId || !connection) throw new Error("请先创建当前供应商连接");
-      const requestedCapability = catalogOnly ? "auth_models" : capability;
-      const blocked = catalogOnly ? catalogBlockedReason : probeBlockedReason;
-      if (blocked) throw new Error(blocked);
-      const probeBinding =
-        requestedCapability === "auth_models"
-          ? null
-          : bindings.data?.find((binding) => binding.id === probeBindingId);
-      return runProviderProbe(workspaceId, connection.id, {
-        capability: requestedCapability,
-        ...(probeBinding ? { model_binding_id: probeBinding.id } : {}),
-        paid_request_confirmed: false,
-        ...(!catalogOnly && referenceArtifactId.trim()
-          ? { reference_artifact_id: referenceArtifactId.trim() }
-          : {}),
-        ...(!catalogOnly && remoteTaskId.trim() ? { remote_task_id: remoteTaskId.trim() } : {}),
-        ...(requestedCapability === "video_poll_download"
-          ? { remote_query_kind: remoteQueryKind }
-          : {}),
-      });
-    },
-    onMutate: resetFeedback,
-    retry: false,
-    onSuccess: async (result) => {
-      if (result.status === "passed")
-        setMessage(
-          `${CAPABILITY_LABELS[result.capability] ?? "能力"}检查通过，仅代表该次检查；不代表全部模型可用或质量合格。`,
-        );
-      else
+  const probeMutation = useMutation<Awaited<ReturnType<typeof runProviderProbe>>, unknown, boolean>(
+    {
+      mutationFn: async (catalogOnly) => {
+        if (!workspaceId || !connection) throw new Error("请先创建当前供应商连接");
+        const requestedCapability = catalogOnly ? "auth_models" : capability;
+        const blocked = catalogOnly ? catalogBlockedReason : probeBlockedReason;
+        if (blocked) throw new Error(blocked);
+        const probeBinding =
+          requestedCapability === "auth_models"
+            ? null
+            : bindings.data?.find((binding) => binding.id === probeBindingId);
+        return runProviderProbe(workspaceId, connection.id, {
+          capability: requestedCapability,
+          ...(probeBinding ? { model_binding_id: probeBinding.id } : {}),
+          paid_request_confirmed: false,
+          ...(!catalogOnly && referenceArtifactId.trim()
+            ? { reference_artifact_id: referenceArtifactId.trim() }
+            : {}),
+          ...(!catalogOnly && remoteTaskId.trim() ? { remote_task_id: remoteTaskId.trim() } : {}),
+          ...(requestedCapability === "video_poll_download"
+            ? { remote_query_kind: remoteQueryKind }
+            : {}),
+        });
+      },
+      onMutate: resetFeedback,
+      retry: false,
+      onSuccess: async (result) => {
+        if (result.status === "passed")
+          setMessage(
+            `${CAPABILITY_LABELS[result.capability] ?? "能力"}检查通过，仅代表该次检查；不代表全部模型可用或质量合格。`,
+          );
+        else
+          setError(
+            result.status === "failed"
+              ? "本次检查失败，请核对账号权限、已保存地址与模型目录。不会自动重试或更换模型。"
+              : "本次检查尚未确认成功，请先核对结果；不会自动重试。",
+          );
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.provider.connections(workspaceId),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.provider.probes(workspaceId, connection?.id),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: queryKeys.provider.bindings(workspaceId, connection?.id),
+        });
+      },
+      onError: () =>
         setError(
-          result.status === "failed"
-            ? "本次检查失败，请核对账号权限、已保存地址与模型目录。不会自动重试或更换模型。"
-            : "本次检查尚未确认成功，请先核对结果；不会自动重试。",
-        );
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.provider.connections(workspaceId),
-      });
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.provider.probes(workspaceId, connection?.id),
-      });
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.provider.bindings(workspaceId, connection?.id),
-      });
+          "操作结果未确认，草稿已保留。请先重新读取状态，核对是否已保存；不要盲目重复提交。",
+        ),
     },
-    onError: () =>
-      setError("操作结果未确认，草稿已保留。请先重新读取状态，核对是否已保存；不要盲目重复提交。"),
-  });
+  );
 
   const bindingMutation = useMutation({
     retry: false,
@@ -431,6 +456,11 @@ function ProviderConnectionEditor({
 
   const pluginCapabilities = selectedPlugin?.capabilities ?? ["auth_models"];
   const pluginModels = selectedPlugin?.models ?? [];
+  const activeModels = useMemo(
+    () => (selectedPlugin?.models ?? []).filter((model) => model.lifecycle === "active"),
+    [selectedPlugin?.models],
+  );
+  const catalogOnlyModels = pluginModels.filter((model) => model.lifecycle !== "active");
   const discoveredModelIds = useMemo(() => {
     if (connection?.verification_status !== "verified" || !probes.isSuccess) return null;
     const latestSuccessfulCatalog = probes.data.find(
@@ -445,14 +475,14 @@ function ProviderConnectionEditor({
   const latestModels = useMemo(() => {
     const revisions = new Intl.Collator(undefined, { numeric: true });
     const current = new Map<string, ProviderPluginRead["models"][number]>();
-    for (const model of pluginModels) {
+    for (const model of activeModels) {
       const previous = current.get(model.model_id);
       if (!previous || revisions.compare(model.model_revision, previous.model_revision) > 0) {
         current.set(model.model_id, model);
       }
     }
     return [...current.values()];
-  }, [pluginModels]);
+  }, [activeModels]);
   const imageContracts = latestModels.filter((model) => model.media_type === "image");
   const videoContracts = latestModels.filter((model) => model.media_type === "video");
   const selectableModelIds = discoveredModelIds
@@ -461,12 +491,12 @@ function ProviderConnectionEditor({
   const activeModelsByContract = useMemo(
     () =>
       new Map(
-        (selectedPlugin?.models ?? []).map((model) => [
+        activeModels.map((model) => [
           `${model.catalog_entry_id}:${model.capability_manifest_hash}`,
           model,
         ]),
       ),
-    [selectedPlugin?.models],
+    [activeModels],
   );
   const activeModelFor = (binding: ProviderModelBindingRead) =>
     activeModelsByContract.get(`${binding.catalog_entry_id}:${binding.capability_manifest_hash}`) ??
@@ -608,6 +638,11 @@ function ProviderConnectionEditor({
           </Button>
         }
       >
+        {activeModel && (
+          <p className="muted" data-testid={`binding-capabilities-${binding.purpose}`}>
+            {modelCapabilityText(activeModel)}
+          </p>
+        )}
         {!binding.quality_gated && binding.account_verified && (
           <div className="quality-evidence-form">
             <Input
@@ -931,6 +966,16 @@ function ProviderConnectionEditor({
         {bindings.isSuccess && !allBindings.length && <p className="muted">{copy.emptyModels}</p>}
       </section>
 
+      {catalogOnlyModels.length > 0 && (
+        <Disclosure title="目录中暂不可新建绑定的模型" testId="catalog-only-models">
+          {catalogOnlyModels.map((model) => (
+            <p className="muted" key={model.catalog_entry_id}>
+              {model.display_name} · {model.lifecycle} · {model.implementation_status} ·{" "}
+              {modelCapabilityText(model)}
+            </p>
+          ))}
+        </Disclosure>
+      )}
       <Disclosure title={copy.project} testId="provider-project-disclosure">
         <Field>
           项目

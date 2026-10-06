@@ -1,0 +1,53 @@
+{
+  "manifest_version": "2026-09-29",
+  "provider_type": "minimax",
+  "protocol_profile": "minimax_cn_v1",
+  "model_id": "MiniMax-H3",
+  "model_revision": "v2",
+  "media_kind": "video",
+  "display_name": "MiniMax H3",
+  "lifecycle": "active",
+  "catalog_source": "official_static",
+  "documented_at": "2026-09-29",
+  "operations": {
+    "video.generate": {
+      "operation": "video.generate",
+      "capabilities": [
+        "video.i2v.first_frame",
+        "video.t2v"
+      ],
+      "output_constraints": {
+        "modes": {
+          "first_frame": {
+            "resolution": "768P",
+            "duration_seconds": 5,
+            "aspect_ratio": "adaptive",
+            "native_audio": false
+          },
+          "text_to_video": {
+            "resolution": "2K",
+            "duration_seconds": 5,
+            "aspect_ratio": {
+              "allowed": [
+                "9:16",
+                "16:9"
+              ]
+            },
+            "native_audio": true
+          }
+        }
+      },
+      "reference_constraints": {
+        "first_frame": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      "exclusive_groups": []
+    }
+  },
+  "option_schema": {
+    "namespace": "",
+    "options": {}
+  }
+}

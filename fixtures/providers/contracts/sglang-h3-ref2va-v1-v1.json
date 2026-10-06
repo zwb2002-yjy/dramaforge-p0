@@ -1,0 +1,97 @@
+{
+  "manifest": {
+    "catalog_source": "protocol_contract",
+    "display_name": "SGLang H3 参考素材生视频 (Ref2VA)",
+    "documented_at": "2026-09-30",
+    "lifecycle": "active",
+    "manifest_version": "2026-09-30",
+    "media_kind": "video",
+    "model_id": "@contract/sglang-h3-ref2va-v1",
+    "model_revision": "v1",
+    "operations": {
+      "video.generate": {
+        "capabilities": [
+          "video.reference.image",
+          "video.reference.video",
+          "video.reference.audio"
+        ],
+        "exclusive_groups": [
+          {
+            "members": [
+              [
+                "reference_image",
+                "reference_video",
+                "reference_audio"
+              ]
+            ],
+            "name": "ref2va"
+          }
+        ],
+        "operation": "video.generate",
+        "output_constraints": {
+          "aspect_ratio": {
+            "allowed": [
+              "9:16",
+              "16:9"
+            ]
+          },
+          "duration_seconds": 5,
+          "native_audio": true
+        },
+        "reference_constraints": {
+          "reference_audio": {
+            "max": 1,
+            "min": 0
+          },
+          "reference_image": {
+            "max": 1,
+            "min": 0
+          },
+          "reference_video": {
+            "max": 1,
+            "min": 0
+          }
+        }
+      }
+    },
+    "option_schema": {
+      "namespace": "",
+      "options": {}
+    },
+    "protocol_profile": "openai_media_v1",
+    "provider_type": "openai_compatible_media"
+  },
+  "manifest_hash": "873949ced0e4cec967a288d55cfc75ce37fcd30f2f75843d8dc84c911de05037",
+  "contract": {
+    "documentation_source": {
+      "notes": "Frozen local compiler contract; no provider request or account verification.",
+      "verified_at": "2026-10-07"
+    },
+    "wire_template": {
+      "method": "POST",
+      "path": "/v1/videos",
+      "request_body": {
+        "model": "<discovered-model>",
+        "prompt": "<prompt>",
+        "seconds": 5,
+        "task": "ref2va",
+        "conditions": [
+          {
+            "type": "image",
+            "uri": "data:image/png;base64,Zml4dHVyZQ==",
+            "role": "reference"
+          }
+        ],
+        "target": {
+          "short_edge": 768,
+          "aspect_ratio": "9:16",
+          "duration_seconds": 5.0
+        },
+        "num_outputs_per_prompt": 1,
+        "num_inference_steps": 50,
+        "flow_shift": 12.0,
+        "audio_flow_shift": 3.0
+      }
+    }
+  }
+}

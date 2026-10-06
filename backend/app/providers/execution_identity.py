@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Final, Self
+from typing import Any, Final, Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -25,6 +25,12 @@ _SECRET_KEY_FRAGMENTS: Final[tuple[str, ...]] = (
     "bearer",
     "download_url",
     "grant",
+    "remote_task_id",
+    "remotetaskid",
+    "provider_operation_id",
+    "provideroperationid",
+    "resume_token",
+    "resumetoken",
 )
 
 
@@ -34,8 +40,7 @@ def _validate_safe_evidence(value: JsonValue, *, path: str = "evidence") -> None
             normalized = str(key).casefold().replace("-", "_")
             if any(fragment in normalized for fragment in _SECRET_KEY_FRAGMENTS):
                 raise ValueError(
-                    "execution identity contains forbidden evidence key: "
-                    f"{path}.{key}"
+                    f"execution identity contains forbidden evidence key: {path}.{key}"
                 )
             _validate_safe_evidence(child, path=f"{path}.{key}")
     elif isinstance(value, list):
@@ -115,12 +120,152 @@ class ExecutionIdentitySnapshot(BaseModel):
                 self.connection_revision_id,
             )
         elif self.provider_connection_revision_id != self.connection_revision_id:
-            raise ValueError(
-                "connection revision identity has conflicting field values"
-            )
+            raise ValueError("connection revision identity has conflicting field values")
         _validate_safe_evidence(self.effective_options, path="effective_options")
         _validate_safe_evidence(self.translation_report, path="translation_report")
         return self
+
+
+class GlobalModelTargetIdentity(BaseModel):
+    """One immutable Global capability revision, independent of its invoke ID."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["global_model"] = "global_model"
+    model_capability_revision_id: UUID
+    canonical_model_id: str = Field(min_length=1, max_length=160)
+    model_revision: str = Field(min_length=1, max_length=120)
+    manifest_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ConnectionModelTargetIdentity(BaseModel):
+    """A connection-scoped capability; it has no Global catalog identity."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["connection_model"] = "connection_model"
+    connection_discovered_model_id: UUID
+    connection_model_capability_revision_id: UUID
+    connection_capability_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    remote_model_id: str = Field(min_length=1, max_length=240)
+
+
+class PolicyRevisionIdentity(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    product_policy_revision_id: UUID
+    product_policy_id: UUID
+    policy_revision: int = Field(gt=0)
+    policy_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ProtocolRevisionIdentity(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    protocol_contract_revision_id: UUID
+    protocol_contract_id: UUID
+    protocol_revision: int = Field(gt=0)
+    protocol_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class HandlerRevisionIdentity(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    runtime_handler_revision_id: UUID
+    runtime_handler_id: UUID
+    handler_revision: int = Field(gt=0)
+    implementation_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class FrozenResolvedGenerationPlan(BaseModel):
+    """JSON-safe snapshot of the technical match returned by the resolver."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider_type: str = Field(min_length=1)
+    protocol_profile: str = Field(min_length=1)
+    model_id: str = Field(min_length=1)
+    model_revision: str = Field(min_length=1)
+    operation: str = Field(min_length=1)
+    matched_contract: str = Field(min_length=1)
+    reference_ids: tuple[UUID, ...]
+    reference_roles: tuple[str, ...]
+    effective_options: dict[str, JsonValue]
+
+
+class CutoverExecutionIdentitySnapshot(BaseModel):
+    """V7 frozen Create/recovery identity; not yet used by the current Worker.
+
+    The distinct target variants prevent a Dynamic model from acquiring a
+    fictitious Global catalog identity. Runtime cutover must wire this exact
+    snapshot to Dispatch, Create and recovery together.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    binding_id: UUID
+    target: GlobalModelTargetIdentity | ConnectionModelTargetIdentity = Field(discriminator="kind")
+    invoke_model_value: str = Field(min_length=1, max_length=240)
+    policy: PolicyRevisionIdentity
+    protocol: ProtocolRevisionIdentity
+    handler: HandlerRevisionIdentity
+    connection_id: UUID
+    connection_revision_id: UUID
+    credential_revision_id: UUID
+    operation: str = Field(min_length=1, max_length=120)
+    matched_input_contract: str = Field(min_length=1, max_length=120)
+    resolved_plan: FrozenResolvedGenerationPlan
+    resolved_references: list[ExecutionIdentityReference] = Field(default_factory=list)
+    requested_options: dict[str, JsonValue] = Field(default_factory=dict)
+    effective_options: dict[str, JsonValue] = Field(default_factory=dict)
+    transformations: list[dict[str, JsonValue]] = Field(default_factory=list)
+    request_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def validate_cutover_identity(self) -> CutoverExecutionIdentitySnapshot:
+        if (
+            isinstance(self.target, ConnectionModelTargetIdentity)
+            and self.target.remote_model_id != self.invoke_model_value
+        ):
+            raise ValueError("Dynamic target and invoke model identities differ")
+        if isinstance(self.target, ConnectionModelTargetIdentity):
+            if self.resolved_plan.model_id != self.target.remote_model_id:
+                raise ValueError("Dynamic resolved plan names another model")
+        elif (
+            self.resolved_plan.model_id != self.target.canonical_model_id
+            or self.resolved_plan.model_revision != self.target.model_revision
+        ):
+            raise ValueError("Global resolved plan names another model revision")
+        _validate_safe_evidence(self.requested_options, path="requested_options")
+        _validate_safe_evidence(self.effective_options, path="effective_options")
+        if (
+            self.resolved_plan.operation != self.operation
+            or self.resolved_plan.matched_contract != self.matched_input_contract
+            or self.resolved_plan.effective_options != self.effective_options
+            or list(self.resolved_plan.reference_ids)
+            != [reference.artifact_id for reference in self.resolved_references]
+            or list(self.resolved_plan.reference_roles)
+            != [reference.role for reference in self.resolved_references]
+        ):
+            raise ValueError("resolved generation plan differs from frozen request")
+        _validate_safe_evidence(
+            self.resolved_plan.effective_options, path="resolved_plan.effective_options"
+        )
+        for index, transformation in enumerate(self.transformations):
+            _validate_safe_evidence(transformation, path=f"transformations[{index}]")
+        return self
+
+    def model_copy(
+        self,
+        *,
+        update: Mapping[str, Any] | None = None,
+        deep: bool = False,
+    ) -> Self:
+        if update is None:
+            return super().model_copy(deep=deep)
+        data = self.model_dump(mode="python")
+        data.update(update)
+        return type(self).model_validate(data)
 
 
 @dataclass(frozen=True)

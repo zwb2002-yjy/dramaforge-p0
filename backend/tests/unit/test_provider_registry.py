@@ -38,7 +38,15 @@ _FAKE_IMAGE_MANIFEST = {
     "display_name": "Fake Image",
     "lifecycle": "active",
     "catalog_source": "official_static",
+    "implementation_status": "contract_tested",
     "documented_at": "2026-08-10",
+    "evidence": {
+        "synthetic_contract": {
+            "source_type": "contract_fixture",
+            "source_url": "https://example.invalid/synthetic-contract-fixture",
+            "checked_at": "2026-08-10",
+        }
+    },
     "operations": {
         "image.generate": {
             "operation": "image.generate",
@@ -279,6 +287,36 @@ async def test_plugin_extension_needs_no_service_branch(
             purpose="keyframe",
             enabled=True,
         )
+
+    documented = {**_FAKE_IMAGE_MANIFEST, "model_id": "fake-documented-model"}
+    documented["implementation_status"] = "documented"
+    session.add(
+        ModelCatalogEntry(
+            provider_type=FAKE_PROVIDER,
+            protocol_profile=FAKE_PROFILE,
+            model_id="fake-documented-model",
+            model_revision="v1",
+            display_name="Documented only",
+            media_kind="image",
+            lifecycle="active",
+            catalog_source="official_static",
+            capability_manifest_json=documented,
+            option_schema_json={},
+            contract_manifest_hash=hash_manifest(documented),
+        )
+    )
+    await session.flush()
+    with pytest.raises(ValidationAppError) as blocked:
+        await service.create_model_binding(
+            workspace_id=workspace.id,
+            connection_id=connection.id,
+            actor=user,
+            media_type="image",
+            model_id="fake-documented-model",
+            purpose="keyframe",
+            enabled=True,
+        )
+    assert blocked.value.details["code"] == "MODEL_CONTRACT_NOT_TESTED"
 
     # Account pricing and a boolean consent are not a per-call budget/Owner
     # authorization contract. Even an extension plugin must fail closed.

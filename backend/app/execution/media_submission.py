@@ -52,6 +52,7 @@ from app.providers.runtime import (
 )
 from app.providers.selection import ModelSelectionService, SelectionPlan
 from app.providers.translation import RequestTransformation
+from app.providers.workbench_contract import select_workbench_contract
 from app.shared.db import set_node_run_rls_context
 from app.shared.errors import (
     ValidationAppError,
@@ -787,12 +788,40 @@ async def prepare_media_submission(
             )
             for reference in refs
         ]
-        compiled = await image_compiler.compile(
-            image_intent,
-            manifest,
-            refs,
-            invoke_model_value=invoke_model_value,
-        )
+        image_operation = manifest.operations.get("image.generate")
+        if image_operation is not None and image_operation.input_contracts:
+            try:
+                selected_contract = select_workbench_contract(
+                    operation=image_operation,
+                    media_kind="image",
+                    references=[(ref.role, ref.mime_type) for ref in refs],
+                )
+            except ValueError as exc:
+                raise ValidationAppError(
+                    str(exc), details={"code": "MODEL_INPUT_COMBINATION_UNSUPPORTED"}
+                ) from exc
+            if (
+                workbench_plan is not None
+                and workbench_plan.mode_id != selected_contract.contract_id
+            ):
+                raise ValidationAppError(
+                    "frozen Workbench input contract does not match resolved references",
+                    details={"code": "EXECUTION_PLAN_INVALID"},
+                )
+            compiled = await cast(Any, image_compiler).compile(
+                image_intent,
+                manifest,
+                refs,
+                invoke_model_value=invoke_model_value,
+                policy=selected_contract.policy,
+            )
+        else:
+            compiled = await image_compiler.compile(
+                image_intent,
+                manifest,
+                refs,
+                invoke_model_value=invoke_model_value,
+            )
     else:
         assert video_intent is not None
         video_compiler = resolved.video_compiler
@@ -846,12 +875,45 @@ async def prepare_media_submission(
             )
             for reference in video_references
         ]
-        compiled = await video_compiler.compile(
-            video_intent,
-            manifest,
-            video_references,
-            invoke_model_value=invoke_model_value,
-        )
+        video_operation = manifest.operations.get("video.generate")
+        if video_operation is not None and video_operation.input_contracts:
+            try:
+                selected_contract = select_workbench_contract(
+                    operation=video_operation,
+                    media_kind="video",
+                    references=[(ref.role, ref.mime_type) for ref in video_references],
+                )
+            except ValueError as exc:
+                raise ValidationAppError(
+                    str(exc), details={"code": "MODEL_INPUT_COMBINATION_UNSUPPORTED"}
+                ) from exc
+            if (
+                workbench_plan is not None
+                and workbench_plan.mode_id != selected_contract.contract_id
+            ):
+                raise ValidationAppError(
+                    "frozen Workbench input contract does not match resolved references",
+                    details={"code": "EXECUTION_PLAN_INVALID"},
+                )
+            # The existing product does not request native audio output. Its
+            # frozen false default is not a Provider option on all new models.
+            video_intent = video_intent.model_copy(
+                update={"output": video_intent.output.model_copy(update={"generate_audio": None})}
+            )
+            compiled = await cast(Any, video_compiler).compile(
+                video_intent,
+                manifest,
+                video_references,
+                invoke_model_value=invoke_model_value,
+                policy=selected_contract.policy,
+            )
+        else:
+            compiled = await video_compiler.compile(
+                video_intent,
+                manifest,
+                video_references,
+                invoke_model_value=invoke_model_value,
+            )
 
     if workbench_planned_references:
         expected_reference_ids = [

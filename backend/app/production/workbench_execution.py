@@ -41,6 +41,7 @@ from app.production.execution_plan import (
 from app.production.formal_selection import require_formal_keyframe
 from app.production.models import GraphVersion, ProductionGraph, ShotReferenceBinding
 from app.production.reference_intents import (
+    PURPOSE_TO_ROLE,
     ShotReferenceIntent,
     compile_references,
 )
@@ -51,6 +52,7 @@ from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.model_resolution import ExecutionModelResolver
 from app.providers.models import ProviderConnection, ProviderConnectionRevision
+from app.providers.workbench_contract import select_workbench_contract
 from app.shared.enums import GraphStatus
 from app.shared.errors import ConflictError, ValidationAppError
 
@@ -895,7 +897,11 @@ class WorkbenchExecutionService:
         return suggestions
 
     async def saved_shot_references(
-        self, *, project: Project, shot_id: UUID, stage: PlanStage,
+        self,
+        *,
+        project: Project,
+        shot_id: UUID,
+        stage: PlanStage,
     ) -> list[ShotReferenceIntent]:
         """Resolve the saved, non-experiment references for a repair preview.
 
@@ -903,33 +909,47 @@ class WorkbenchExecutionService:
         Unresolved bindings fail closed instead of silently disappearing from
         the repaired shot. The resulting plan freezes each concrete artifact.
         """
-        bindings = (await self._session.scalars(
-            select(ShotReferenceBinding).where(
-                ShotReferenceBinding.project_id == project.id,
-                ShotReferenceBinding.shot_id == shot_id,
-                ShotReferenceBinding.shot_experiment_id.is_(None),
-                ShotReferenceBinding.stage.in_(("both", "image" if stage == "image_keyframe"
-                                               else "video")),
-            ).order_by(ShotReferenceBinding.sort_order, ShotReferenceBinding.id)
-            .execution_options(populate_existing=True)
-        )).all()
+        bindings = (
+            await self._session.scalars(
+                select(ShotReferenceBinding)
+                .where(
+                    ShotReferenceBinding.project_id == project.id,
+                    ShotReferenceBinding.shot_id == shot_id,
+                    ShotReferenceBinding.shot_experiment_id.is_(None),
+                    ShotReferenceBinding.stage.in_(
+                        ("both", "image" if stage == "image_keyframe" else "video")
+                    ),
+                )
+                .order_by(ShotReferenceBinding.sort_order, ShotReferenceBinding.id)
+                .execution_options(populate_existing=True)
+            )
+        ).all()
         references: list[ShotReferenceIntent] = []
         for binding in bindings:
             version_id = binding.asset_version_id
             if binding.resolution_mode == "current_formal":
-                asset = await self._session.scalar(select(Asset).where(
-                    Asset.id == binding.asset_id, Asset.project_id == project.id,
-                ).execution_options(populate_existing=True))
+                asset = await self._session.scalar(
+                    select(Asset)
+                    .where(
+                        Asset.id == binding.asset_id,
+                        Asset.project_id == project.id,
+                    )
+                    .execution_options(populate_existing=True)
+                )
                 version_id = asset.current_version_id if asset else None
             if binding.resolution_mode == "direct_artifact":
                 artifact_ids = [binding.artifact_id] if binding.artifact_id else []
             elif version_id is not None:
-                artifact_ids = list(await self._session.scalars(
-                    select(AssetVersionReference.artifact_id).where(
-                        AssetVersionReference.project_id == project.id,
-                        AssetVersionReference.asset_version_id == version_id,
-                    ).order_by(AssetVersionReference.sort_order, AssetVersionReference.id)
-                ))
+                artifact_ids = list(
+                    await self._session.scalars(
+                        select(AssetVersionReference.artifact_id)
+                        .where(
+                            AssetVersionReference.project_id == project.id,
+                            AssetVersionReference.asset_version_id == version_id,
+                        )
+                        .order_by(AssetVersionReference.sort_order, AssetVersionReference.id)
+                    )
+                )
             else:
                 artifact_ids = []
             if not artifact_ids:
@@ -939,18 +959,25 @@ class WorkbenchExecutionService:
                 )
             for artifact_id in artifact_ids:
                 artifact = await self._session.get(Artifact, artifact_id, populate_existing=True)
-                if (artifact is None or artifact.project_id != project.id
-                        or artifact.deleted_at is not None
-                        or artifact.storage_state not in {"available", "stored"}):
+                if (
+                    artifact is None
+                    or artifact.project_id != project.id
+                    or artifact.deleted_at is not None
+                    or artifact.storage_state not in {"available", "stored"}
+                ):
                     raise WorkbenchExecutionError(
                         "saved reference media is unavailable",
                         details={"code": "REFERENCE_NOT_RESOLVED", "binding_id": str(binding.id)},
                     )
-                references.append(ShotReferenceIntent(
-                    binding_id=binding.id, purpose=binding.purpose,
-                    asset_version_id=version_id, artifact_id=artifact_id,
-                    resolution_mode=binding.resolution_mode,
-                ))
+                references.append(
+                    ShotReferenceIntent(
+                        binding_id=binding.id,
+                        purpose=binding.purpose,
+                        asset_version_id=version_id,
+                        artifact_id=artifact_id,
+                        resolution_mode=binding.resolution_mode,
+                    )
+                )
         return references
 
     async def build_plan(
@@ -995,9 +1022,17 @@ class WorkbenchExecutionService:
         elif reference_video:
             capability = Capability.VIDEO_REFERENCE_TO_VIDEO
             if not references or not any(
-                reference.purpose in {
-                    "identity", "clothing", "pose", "style", "scene_layout",
-                    "scene_lighting", "generic_reference", "action", "camera_language",
+                reference.purpose
+                in {
+                    "identity",
+                    "clothing",
+                    "pose",
+                    "style",
+                    "scene_layout",
+                    "scene_lighting",
+                    "generic_reference",
+                    "action",
+                    "camera_language",
                     "audio_rhythm",
                 }
                 for reference in references
@@ -1060,23 +1095,30 @@ class WorkbenchExecutionService:
         capability_manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
         operation = capability_manifest.operations.get("video.generate")
         if execution_input.stage == "video" and operation and operation.reference_media_limits:
-            from app.production.reference_intents import PURPOSE_TO_ROLE
-
-            media = (await self._session.scalars(select(Artifact).where(
-                Artifact.id.in_([ref.artifact_id for ref in references]),
-                Artifact.project_id == project.id,
-            ))).all()
+            media = (
+                await self._session.scalars(
+                    select(Artifact).where(
+                        Artifact.id.in_([ref.artifact_id for ref in references]),
+                        Artifact.project_id == project.id,
+                    )
+                )
+            ).all()
             durations = {
                 artifact.id: float(artifact.duration_seconds)
-                if artifact.duration_seconds is not None else None
+                if artifact.duration_seconds is not None
+                else None
                 for artifact in media
             }
             try:
-                operation.reference_media_limits.validate_metadata([
-                    (PURPOSE_TO_ROLE.get(ref.purpose, ""),
-                     durations.get(ref.artifact_id) if ref.artifact_id is not None else None)
-                    for ref in references
-                ])
+                operation.reference_media_limits.validate_metadata(
+                    [
+                        (
+                            PURPOSE_TO_ROLE.get(ref.purpose, ""),
+                            durations.get(ref.artifact_id) if ref.artifact_id is not None else None,
+                        )
+                        for ref in references
+                    ]
+                )
             except ValueError as exc:
                 raise WorkbenchExecutionError(str(exc)) from exc
         v3_manifest = to_v3_model_manifest(
@@ -1105,10 +1147,13 @@ class WorkbenchExecutionService:
                 )
             except ValidationAppError as exc:
                 raise WorkbenchExecutionError(str(exc)) from exc
-            if not any(
-                ref.purpose == "first_frame" and ref.artifact_id == formal.id
-                for ref in references
-            ):
+            requested_frames = [ref for ref in references if ref.purpose == "first_frame"]
+            if any(ref.artifact_id != formal.id for ref in requested_frames):
+                raise WorkbenchExecutionError(
+                    "submitted first frame differs from the Formal keyframe",
+                    details={"code": "FORMAL_KEYFRAME_SNAPSHOT_MISMATCH"},
+                )
+            if not requested_frames:
                 references.insert(
                     0,
                     ShotReferenceIntent(
@@ -1118,11 +1163,32 @@ class WorkbenchExecutionService:
                     ),
                 )
 
+        effective_mode_id = execution_input.mode_id
+        operation_key: Literal["image.generate", "video.generate"] = (
+            "video.generate" if execution_input.stage == "video" else "image.generate"
+        )
+        operation_manifest = capability_manifest.operations.get(operation_key)
+        if operation_manifest is not None and operation_manifest.input_contracts:
+            try:
+                selected_contract = select_workbench_contract(
+                    operation=operation_manifest,
+                    media_kind="video" if execution_input.stage == "video" else "image",
+                    references=[
+                        (PURPOSE_TO_ROLE.get(ref.purpose, ""), ref.mime_type) for ref in references
+                    ],
+                )
+            except ValueError as exc:
+                raise WorkbenchExecutionError(
+                    str(exc), details={"code": "MODEL_INPUT_COMBINATION_UNSUPPORTED"}
+                ) from exc
+            effective_mode_id = selected_contract.contract_id
+            resolution = resolution.model_copy(update={"mode_id": effective_mode_id})
+
         compiled = compile_references(
             manifest=v3_manifest,
             capability=capability,
             references=references,
-            mode_id=execution_input.mode_id,
+            mode_id=effective_mode_id,
             accept_approximations=execution_input.accept_approximations,
         )
         pending_suggestions = await self._pending_creative_suggestions(
@@ -1137,7 +1203,7 @@ class WorkbenchExecutionService:
             stage=execution_input.stage,
             prompt=prompt,
             semantic_intent=semantic_intent,
-            mode_id=execution_input.mode_id,
+            mode_id=effective_mode_id,
             resolved_model=resolution,
             capability=capability,
             planned_references=compiled.planned_references,

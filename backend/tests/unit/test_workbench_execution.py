@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import AsyncGenerator
+from copy import deepcopy
 from datetime import date
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ import pytest
 from app.access.models import Project, User, Workspace
 from app.assets.models import Episode, Scene
 from app.execution.models import NodeRun, ProviderOperation
+from app.production.reference_intents import ShotReferenceIntent
 from app.production.workbench_execution import (
     WorkbenchExecutionError,
     WorkbenchExecutionInput,
@@ -951,6 +953,66 @@ async def test_video_plan_injects_formal_keyframe_reference(session: AsyncSessio
     first_frame = [r for r in plan.planned_references if r.purpose == "first_frame"]
     assert len(first_frame) == 1
     assert first_frame[0].artifact_id == artifact.id
+
+
+@pytest.mark.asyncio
+async def test_new_contract_auto_matches_formal_and_rejects_reference_conflict(
+    session: AsyncSession,
+) -> None:
+    from app.execution.models import Artifact
+
+    project, binding, user = await _seed(session)
+    shot, formal = await _seed_video_shot(session, project=project, user=user)
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert entry is not None
+    manifest = deepcopy(entry.capability_manifest_json)
+    manifest["operations"]["video.generate"]["input_contracts"] = {
+        "formal_frame": {
+            "input_slots": {"first_frame": {"minimum": 1, "maximum": 1}},
+            "minimum_total_references": 1,
+        },
+        "reference_video": {
+            "input_slots": {"reference_video": {"maximum": 3}},
+            "minimum_total_references": 1,
+        },
+    }
+    entry.capability_manifest_json = manifest
+    entry.contract_manifest_hash = hash_manifest(manifest)
+    binding.capability_manifest_hash = entry.contract_manifest_hash
+    await session.flush()
+
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(
+        project=project,
+        execution_input=_input(shot_id=shot.id, requested_binding_id=binding.id),
+    )
+    assert plan.mode_id == "formal_frame"
+    assert plan.resolved_model.mode_id == "formal_frame"
+    assert [ref.artifact_id for ref in plan.planned_references] == [formal.id]
+
+    reference_video = Artifact(
+        project_id=project.id,
+        artifact_type="video",
+        storage_state="available",
+        object_key=f"obj/{uuid4().hex}",
+        content_hash="c" * 64,
+        mime_type="video/mp4",
+        byte_size=10,
+    )
+    session.add(reference_video)
+    await session.flush()
+    with pytest.raises(WorkbenchExecutionError, match="Formal 首帧") as error:
+        await service.build_plan(
+            project=project,
+            execution_input=_input(
+                shot_id=shot.id,
+                requested_binding_id=binding.id,
+                references=[
+                    ShotReferenceIntent(purpose="action", artifact_id=reference_video.id)
+                ],
+            ),
+        )
+    assert error.value.details["code"] == "MODEL_INPUT_COMBINATION_UNSUPPORTED"
 
 
 @pytest.mark.asyncio
