@@ -4,12 +4,14 @@ Status: proposed-plan，未启动实现。主入口为 [CURRENT](../CURRENT.md)�
 架构映射权威仍是 [ARCHITECTURE_MAPPING](../ARCHITECTURE_MAPPING.md)。
 本计划落实 [现状审计](DIRECTOR_AGENT_CURRENT_STATE.md)、[目标架构](DIRECTOR_AGENT_TARGET_ARCHITECTURE.md)
 和 [Model Capability / Prompt Compiler](MODEL_CAPABILITY_PROMPT_COMPILER.md)。
-本轮交付审查、设计与方案；后续阶段须按新任务范围执行，不因读到本计划自动获准重构或付费。
+Agent Loop / ToolRegistry 实施仍未启动。模型只读查询、编译预览、生成快照及 ImageEdit/参数负测
+已作为现有基础实现；P2b 应复用这些 service 并补 Agent 工具接线，不重建同名能力。
+后续阶段须按新任务范围执行，不因读到本计划自动获准重构或付费。
 
 ## 1. 不变条件与依赖
 
 ```text
-P0 Reality + docs（本轮）
+P0 Reality + docs（现有基础）
  → P1 Boundary contracts（不接生产）
  → P2a Read-only Agent loop + durable audit + API
  → P2b Capability query / semantic dry-run（先补相关协议负测）
@@ -26,19 +28,19 @@ P0 Reality + docs（本轮）
 - 每个阶段使用feature flag或独立入口渐进启用；已有执行身份仍由原引擎恢复，不能通过切flag给旧Turn换引擎。
 - “单元测试证明loop机制”与“真实模型自主选择工具已验收”分开报告；后者不能由scripted fake取代。
 
-## 2. P0 — 当前事实、缺口与文档归位
+## 2. P0 — 当前事实、缺口与文档基础
 
 | 项 | 内容 |
 |---|---|
-| 目标 | 证据化当前文本/Workflow/Production链、状态权威、七模型能力与编译位置；确定后续设计 |
+| 目标 | 证据化当前文本/Workflow/Production链、状态权威、文件目录中的模型/协议合同及编译位置；确定后续设计 |
 | 现状依据 | TextModelPort已存在；LangGraph固定图；domain_tools.propose读已有提案；tools请求尚无结构化响应闭环 |
 | 涉及文件 | docs/CURRENT.md、DIRECTOR_RUNTIME.md、MODEL_PROVIDER.md、ARCHITECTURE_MAPPING.md |
-| 新增文件 | docs/architecture/ 下四份本次文档 |
+| 参考文件 | docs/architecture/ 下已存在的四份详细参考 |
 | 修改文件 | 入口增加详细参考链接；修正“有界Agent loop已实现”的文字，补workflow/native能力区别 |
 | 禁止触碰边界 | 不改业务代码/依赖/API/迁移/运行配置/模型绑定；不启动服务或Provider |
 | 数据迁移 | 无 |
 | 测试 | 文档相对链接/必备章节/模型覆盖、git diff --check、现有目录合规静态检查（环境可用时） |
-| 验收 | 四文档可从唯一入口找到；所有现状有源码；目标显式未实现；Evidence Missing清晰；没有把历史fixture当本轮Probe |
+| 验收 | 四份参考可从唯一入口找到；所有现状有源码；目标显式未实现；Evidence Missing清晰；没有把历史fixture当本轮Probe |
 | 回滚方式 | 只撤本次文档改动，保留别人的工作；不回滚数据库 |
 | 风险 | 文档与源码漂移；用固定模型合同代替账号证据。维护时同步权威链接与差异章节 |
 
@@ -105,13 +107,13 @@ mock/recorded响应证明程序语义，**不证明真实LLM自主决策质量**
 | 项 | 内容 |
 |---|---|
 | 目标 | Agent可解释当前模型/参考/原生参数与prompt-only限制；先semantic_plan，再provider_contract级dry-run |
-| 现状依据 | 七seed + V3转换 + validators + ProviderAdapterBridge + wire compiler已存在；build_plan非完整wire编译；image.edit bridge类型缺口已确认 |
+| 现状依据 | 文件目录 + V3 转换 + validators + ProviderAdapterBridge + wire compiler 已存在；ModelInspectionService/compile_preview 已实现；ImageEdit 类型与引用映射已修复，Agent 工具接线仍缺失 |
 | 涉及文件 | providers/manifest.py、intent_bridge.py、validator.py、adapters_v2.py、各provider compiler；production/workbench_execution.py、reference_intents.py、execution/media_submission.py |
-| 新增文件 | director/agent/tools/model.py；有明确消费者时新增providers/compile_preview.py及安全DTO；unit/test_director_model_tools.py、test_compile_preview.py |
-| 修改文件 | 仅提取真实重复的纯compile seam；补IMAGE_EDIT独立type映射/slot验证；已声明字段要么进入wire/translation要么前置明确拒绝；不扩大模型公开能力 |
+| 新增文件 | Director Agent 模型工具包装与对应测试；复用已存在的 providers/compile_preview.py、production/model_inspection.py、api/v1/model_inspection.py 及其 DTO |
+| 修改文件 | 仅提取真实重复的纯compile seam；保留已实现的 IMAGE_EDIT 独立类型/slot 验证；已声明字段要么进入wire/translation要么前置明确拒绝；不扩大模型公开能力 |
 | 禁止触碰边界 | 不在dry-run调用prepare_media_submission/create_and_dispatch；不建立ProviderOperation、reference token或公网URL下载；不迁型号/复活退役表面 |
 | 数据迁移 | 默认无；如能力元数据需版本更新，新增revision而非覆盖历史manifest/fixture；先明确兼容 |
-| 测试 | 所有7项catalog覆盖；DTO→intent→wire映射；native_options负测；多图/尾帧/音频/ratio/duration/seed；有序参考；preview无网络无DB写；摘要脱敏 |
+| 测试 | 当前文件目录中实际公开的模型及协议合同覆盖，包含 active/preview/legacy 的明确边界；DTO→intent→wire映射；native_options负测；多图/尾帧/音频/ratio/duration/seed；有序参考；preview无网络无DB写；摘要脱敏 |
 | 验收 | 查询区分repository/official/account三层；compile_level准确；semantic通过但wire不支持时绝不标executable；同输入同语义hash |
 | 回滚方式 | 关闭新tools/preview façade；保留旧compiler行为；新版本manifest仅用于新绑定，既有快照不变 |
 | 风险 | 编译预览误触真实提交；model-specific控制差异；用fixture生成的表掩盖ImageEdit和MiniMax ratio不一致 |

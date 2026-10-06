@@ -1,6 +1,6 @@
 # CREATION_FLOW — 唯一创作主链权威
 
-Status: current / Updated: 2026-09-22（发布与运行身份另见 V1_STATUS.md）
+Status: current / Updated: 2026-10-07（发布与运行身份另见 V1_STATUS.md）
 （入口见 [CURRENT.md](CURRENT.md)）
 
 本文件是**产品路径的唯一 canonical 定义**。CURRENT / CANONICAL_ARCHITECTURE /
@@ -48,7 +48,7 @@ the explicit Apply / Save / Formal / Export gates.
 - `/settings` with `/account`, `/workspaces`, `/models`, `/defaults` and
   `/projects/$projectId` — account, workspace, model connection, default
   preference and project settings;
-- `/design-preview` — neutral design-system showcase.
+- `/design-preview` — development-only design-system showcase; absent from production builds.
 
 Quick routes and Quick mock product routes are deleted. Server state lives in
 TanStack Query; Zustand only holds layout/selection UI state.

@@ -53,11 +53,19 @@ projects → event_log / outbox_events / outbox_dead_letters
 | Provider catalog/profile | provider_model_catalog_entries, production_model_profiles | app/providers/catalog_models.py, app/providers/model_profiles/orm.py |
 | Model cutover expand (not runtime authority yet) | model_capability_revisions, model_publication_states/events, connection_discovered_models, connection_model_capability_revisions, provider_availability_evidence, provider_model_availability | app/providers/model_system_models.py |
 | Protocol / handler cutover storage (not runtime authority yet) | protocol_contract_revisions, runtime_handler_revisions | app/providers/model_system_models.py |
+| Production policy cutover storage (not runtime authority yet) | product_policy_revisions, product_policy_states, product_policy_events | app/production/policy_models.py |
 
 模型能力 revision、Connection 发现事实与能力 revision、发布事件和逐模型可用性证据
 在数据库中禁止 UPDATE/DELETE。来源核查或合同实现进展需要新增 revision；新的探测
 结果需要新增 Evidence，并更新单独的 Availability 投影。Migration A 回填的 Global
 revision 尚无来源快照，且只标记为 `manifest_mapped`，不能原地提升为已验证事实。
+
+当前迁移图在 `20260919_0073` 后包含两条已保留的历史分支：模型系统 expand 的
+`20260929_0074–0077`，以及发现/协议接入与本地 H3 的 `20260921_0074–20260930_0082`。
+`20261007_0083` 是无数据改写的 merge revision，将两条历史汇成单一 head；相同数字
+后缀不代表相同 revision，不重编号或覆盖已经应用的迁移。迁移时必须覆盖两条父链。
+`product_policy_revisions` / `product_policy_events` 为不可变历史，撤销写入独立
+`product_policy_states`。这些存储结构不表示新的 Cutover 身份已接入生产提交或恢复。
 
 A second, private schema `director_runtime_checkpoints` (LangGraph checkpoint
 tables `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`,

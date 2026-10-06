@@ -56,14 +56,15 @@ MiniMax 官方 [`GET /v1/models`](https://platform.minimax.io/docs/api-reference
 要求 Access Key 鉴权，现有 `/models` TODO 不产生 `visible`。这两种未证实情形为
 `not_supported`，仍阻止新的 Provider Create。
 新目录 Revision 必须显式声明实施状态；声称 `contract_tested` 时还须附可复现的
-合同/质量证据。仅七个现存 active Manifest 的原始精确哈希保留旧版省略字段时的
-`contract_tested` 兼容；改动这些文件或新增型号不能继承该状态。创建 Binding
+合同/质量证据。旧版省略实施状态的兼容仅限 `manifest.py` 中列明的冻结精确哈希，
+覆盖原有官方 revision、已持久化的协议合同及 MiniMax H3 v2；它不随 active 模型数量
+推断。改动这些文件或新增型号不能继承 `contract_tested`。创建 Binding
 时再次核对目录哈希、实施状态和证据。
 
 ## Model Capability / Prompt Compiler 详细指南
 
 [逐模型能力与编译指南](architecture/MODEL_CAPABILITY_PROMPT_COMPILER.md) 维护当前
-7 个媒体 catalog 模型、LiteLLM 逻辑文本与本地 TTS 的源码合同、参考槽位、参数/Prompt
+文件目录中的官方模型、协议合同、候选与历史 revision，以及逻辑文本和语音实现的源码合同、参考槽位、参数/Prompt
 编译链及 Agent 查询设计。它不替代 Manifest，也不证明当前账号已通过 Probe。
 供应商页面声明、项目开放子集、账户执行证据必须分别标注；官方退役公告与固定 catalog
 的差异需显式呈现，不能自动换模型、扩能力或覆盖冻结执行身份。
@@ -379,11 +380,16 @@ BF16 或量化权重只要由同一 SGLang H3 协议提供相同分区能力，�
   插件若将它们标为付费也会阻止。该查询不创建新生成任务，成功不自动认证模型绑定。
   这是缺少授权合同期间的 fail-closed，不是已实现预算审批或 Owner 授权。
 
-## 冻结的接入合同（真实账号）
+## 冻结接入合同与账号证据
+
+以下参数来自冻结源码合同，不代表当前账号已通过验证。活动、候选和历史 revision 的
+完整列表与参数见 [生成矩阵](generated/MODEL_SUPPORT.md)；逐账号证据仍按具体连接、
+凭证修订、远端模型和操作判断。MiniMax H3 v1 留在 `legacy/`；active v2 另有显式
+文生视频与首帧模式，不能用 v1 的参数说明替代 v2。
 
 | 供应商   | 插件 / Profile          | 默认视频模型                 | 调用方式                                           | 当前产品范围                                                          |
 | -------- | ----------------------- | ---------------------------- | -------------------------------------------------- | --------------------------------------------------------------------- |
-| MiniMax  | `minimax/minimax_cn_v1` | `MiniMax-H3`                 | `POST /v2/video_generation`，异步查询并下载        | 一个公网 HTTPS 首帧，768P，5 秒，比例继承首帧，不声明原生音频         |
+| MiniMax | `minimax/minimax_cn_v1` | `MiniMax-H3` v2 | `POST /v2/video_generation`，异步查询并下载 | 首帧模式：768P、5 秒、adaptive；文生视频：2K、5 秒、9:16/16:9、原生音频。两者按冻结模式校验 |
 | 火山方舟 | `volcengine/ark_cn_v1`  | `doubao-seedance-2-0-260128` | `POST /contents/generations/tasks`，按任务 ID 查询 | 一个公网 HTTPS 首帧；音频、时长、多参考和可信素材能力尚未进入产品合同 |
 
 Seedance 1.0 Pro 旧目录项保留以避免既有绑定失效；新连接优先 Seedance 2.0。
@@ -415,7 +421,7 @@ Seedance 1.0 Pro 旧目录项保留以避免既有绑定失效；新连接优先
 
 ## 模型接入与请求透明度开发目标
 
-**状态：MP-01 至 MP-12 均为待实施、未验收的目标合同。** 前文描述现有实现及限制；
+**状态：MP-01 至 MP-12 的完整目标合同尚未验收，部分基础已实现。** 前文描述现有实现及限制；
 本节规定改造后必须达到的行为，不能因文档合入就标为已实现或对外支持。整体开发顺序
 与跨域验收入口见 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md)。界面布局及
 交互由 [FRONTEND_WORKBENCH.md](FRONTEND_WORKBENCH.md) 负责，队列和资源调度由

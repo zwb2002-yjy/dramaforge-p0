@@ -1,7 +1,7 @@
 # DOMAIN_VOCABULARY — 术语唯一解
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Date: 2026-09-22 / Alembic head: 20260922_0077
+Updated: 2026-10-07；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 
 本文件是 DramaForge 的**唯一词典**。任何模块、PR、Review、文档只能使用这里的词。
 
@@ -117,6 +117,7 @@ explicit user value > accepted proposal > project override > pack default
 | **Artifact** | 不可变产物及其血缘 | `execution/models.py::Artifact`、`execution/artifact_lineage.py` |
 | **Outbox** | 事务性事件外发与死信 | `events/`、`workers/dispatcher.py` |
 | **WorkbenchExecutionPlan** | 冻结的执行计划：模型身份、引用编译、阶段与节点契约在提交前被显式冻结 | `production/execution_plan.py::WorkbenchExecutionPlan` |
+| **VoiceExecutionSpec** | 冻结的配音引擎、音色、语速与实现版本；与媒体/文本模型槽分开，失败不自动换引擎 | `assets/voice.py`、`providers/voice_config.py`、`providers/voice_runtime.py` |
 | **ShotHumanLock** | Shot 级人工锁，防并发执行冲突 | `execution/shot_locks.py` |
 | **Production Planner** | Production Runtime 内部逻辑角色：由 CreativeIntent + 现有 Artifact + Formal 状态 + ModelCapability + 修改范围推导**最小** ProductionGraph。它不负责创意 `[部分落地：`production/execution_plan.py` 冻结阶段契约；完整最小重算规划器尚未独立成形]` | `production/execution_plan.py`、`production/workbench_execution.py` |
 
@@ -133,6 +134,15 @@ explicit user value > accepted proposal > project override > pack default
 | **ProviderConnection** | 用户 BYOK 连接及其修订 | `providers/models.py::ProviderConnection`、`connection_service.py` |
 | **EffectiveProviderRequest** | CreativeIntent + ModelCapability 编译后的最终 Provider 请求 | `providers/` compiler/runtime（`unified-v1`） |
 | **ArtifactReferenceToken** | 提供给 Provider 的临时引用令牌（不泄露凭据） | `providers/models.py::ArtifactReferenceToken`、`reference_delivery.py` |
+| **InputContractSpec** | 一个模型 operation 的输入槽、基数、素材元数据与参数约束；实际素材须唯一匹配合同 | `providers/manifest.py`、`capability_resolver.py` |
+| **ProductCapabilityPolicy** | 当前编译调用显式传入的产品开放子集；不能由供应商声明或 LLM 自行放宽 | `providers/capability_resolver.py` |
+| **ModelCapabilityRevision** | 新模型系统的不可变 Global 能力事实；生命周期另存，尚未替代当前运行时目录准入 | `providers/model_system_models.py` |
+| **ConnectionModelCapabilityRevision** | 当前连接发现模型的不可变动态能力 revision；不能与同名 Global 模型混用身份 | `providers/model_system_models.py` |
+| **ProviderAvailabilityEvidence / ProviderModelAvailability** | 前者是具体模型、连接/凭证 revision 的不可变证据；后者是独立当前投影；不等于静态支持或质量认证 | `providers/model_system_models.py`、`availability_projection.py` |
+| **ProtocolContractRevision / RuntimeHandlerRevision** | 不可变协议与精确实现修订；历史恢复不得自动换为当前实现 | `providers/model_system_models.py`、`handler_registry.py` |
+| **ProductPolicyRevision** | Production 拥有的不可变策略存储，撤销由独立 State/Event 表记录；当前还未作为运行时切换的唯一策略源 | `production/policy_models.py`、`policy_revisions.py` |
+| **ResolvedGenerationPlan** | 技术能力匹配的只读结果；不等于生产命令、用户授权或 WorkbenchExecutionPlan | `providers/capability_resolver.py` |
+| **CutoverExecutionIdentitySnapshot** | 新模型系统分别冻结 Global/Dynamic、Policy、Protocol、Handler 和连接身份的快照；构造与预检已存在，尚未接入 Dispatch/Create/Recovery | `providers/execution_identity.py`、`production/cutover_identity.py` |
 
 ---
 

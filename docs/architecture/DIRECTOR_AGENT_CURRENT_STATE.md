@@ -5,6 +5,11 @@ Status: current-reference。本文是 [DIRECTOR_RUNTIME](../DIRECTOR_RUNTIME.md)
 的详细源码视图，不建立第二套领域权威。目标接口见 [目标架构](DIRECTOR_AGENT_TARGET_ARCHITECTURE.md)，
 未实现工作见 [实施计划](DIRECTOR_AGENT_IMPLEMENTATION_PLAN.md)。这不是发布验收记录。
 
+源码同步日期：2026-10-07。模型目录与协议合同已改为文件加载，模型系统 expand 的
+Policy/Protocol/Handler 存储及只读预检已存在；新 Cutover 链尚未接入生产执行。
+这些变化不等于本文讨论的 Agent Loop / ToolRegistry 已实现，能力细节见
+[模型指南](MODEL_CAPABILITY_PROMPT_COMPILER.md) 与 [模型权威](../MODEL_PROVIDER.md)。
+
 ## 1. 明确结论
 
 **当前 Director 是结构化 LLM 建议/提案服务，加上可持久恢复的确定性编排；尚不是 LLM 自主选择领域工具的通用 Agent Loop。**

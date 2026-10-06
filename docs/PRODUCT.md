@@ -40,7 +40,8 @@ DramaForge 是面向**专业个人创作者**的开源 AI 影视制作工作台�
    显式绑定，不做名称猜测）。
 4. 在 Scene / Shot 工作台设计镜头；导演（AUTO / ASSIST）以提案方式建议，
    MANUAL 完全手动。
-5. 确认 WorkbenchExecutionPlan 后执行：关键帧 → 视频 → 语音 → 审核等。
+5. 确认 WorkbenchExecutionPlan 后执行所选镜头输入模式：文生视频、正式关键帧、尾帧、
+   首尾帧或已保存参考素材；具体模式仍须模型合同支持，随后进入配音与审核等步骤。
 6. Review / Repair：标注证据、决策、局部修复。
 7. Editing：EditSession 时间线、剪辑建议、导出 Final Film（MP4 + SRT）。
 

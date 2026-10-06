@@ -3,7 +3,8 @@
 Status: current-reference；只读查询/编译预览/生成快照已实现，Agent ToolRegistry 集成尚未实现。模型执行权威仍是
 [MODEL_PROVIDER](../MODEL_PROVIDER.md) 与源码 Manifest/Compiler/Runtime；本文是维护指南，
 不是第二份可写配置、付费验收流水或账号认证。Agent 目标见 [目标架构](DIRECTOR_AGENT_TARGET_ARCHITECTURE.md)。
-官方资料核查日期 **2026-09-24**；后续修改 catalog/compiler 必须同步更新本指南，但文档不驱动运行时。
+源码同步日期 **2026-10-07**。下文官方页面说明保留 **2026-09-24** 的来源快照日期，
+不是本次重新探测供应商或账号的结果。当前目录状态与参数矩阵从源码生成，文档不驱动运行时。
 
 ## 1. 三层证据必须分离
 
@@ -11,16 +12,18 @@ Status: current-reference；只读查询/编译预览/生成快照已实现，Ag
 2. **Official claim**：供应商页面声明什么，以及生命周期公告；不是 DramaForge 已开放的能力。
 3. **Account evidence**：当前 connection/credential revision、精确 invoke model、操作模式的真实 Probe/质量证据。
 
-最初调研只读代码与公开文档；实现与测试只使用隔离数据及 mock Provider。
-**没有调用真实生成模型/付费 Probe，没有认证当前账号**；查询账号字段时只返回“本查询未验证”，不将历史标记提升为本轮证明。
-fixture 中历史 verified_at/说明仅是仓库的既有记录，不能提升为本轮账号验证。
+只读查询、编译预览和隔离 mock 回归不调用真实生成模型或付费 Probe，也不认证当前账号。
+查询账号字段只返回“本查询未验证”；fixture 中历史 verified_at/说明不能提升为当前账号证据。
 `catalog_source=official_static` 是代码字段，不自动证明来源页面仍有效，也不表示模型今天可用。
 
 ## 2. 模型范围与身份
 
-当前固定媒体 catalog **7 项**，唯一 seed 在
-[catalog_seed_data.py::SEED_MANIFESTS](../../backend/app/providers/catalog_seed_data.py)，
-逐项 [contract fixtures](../../fixtures/providers/contracts/)。
+媒体目录唯一数据源为版本化 [model_catalog/](../../backend/app/providers/model_catalog/)，由
+[ModelCatalogLoader](../../backend/app/providers/catalog_loader.py) 校验 schema、精确身份和证据。
+[catalog_seed_data.py::SEED_MANIFESTS](../../backend/app/providers/catalog_seed_data.py) 只是 active
+目录的兼容投影；preview 与历史 revision 由 Loader 读取。完整列表与限制见
+[生成支持矩阵](../generated/MODEL_SUPPORT.md)，冻结请求见 [contract fixtures](../../fixtures/providers/contracts/)。
+同一模型的新能力必须新增 revision，不能改写已有 Manifest/hash。
 消费侧 registry ID 是 `provider_type/model_id`；wire 的 model 使用冻结的 `invoke_model_value`，不是 UI display_name。
 Manifest 有两种表示：catalog `ModelCapabilityManifest` → [to_v3_model_manifest](../../backend/app/providers/manifest.py) → `ModelManifest`。
 前者以 operation/细能力描述，后者以 capability/mode/slot 描述；不是可独立编辑的两份模型事实。
@@ -28,8 +31,9 @@ Manifest 有两种表示：catalog `ModelCapabilityManifest` → [to_v3_model_ma
 ### 2.1 当前媒体开放子集
 
 下表 **N = 当前 native/wire 参数；P = 只能通过已编译 prompt 表达；— = 未开放/不可推定**。
-所有视频行均只声明一个首帧，不开放尾帧、多图/音视频参考和原生 camera 参数。
-所有 seed 的 option_schema.options 当前为空；不能由 LLM 传任意 provider kwargs。
+下面保留既有官方合同的编译要点，后续合同与候选参数以生成矩阵为准。
+模式与槽位来自 Manifest 的 reference constraints、input_contracts、output_options 及 option schema；
+不能由 LLM 传任意 provider kwargs，也不能从供应商更宽声明推断当前工作台已开放。
 
 | registry ID / revision | operation 与模式 | 参考槽位、数目、传输 | 输出与参数实际合同 | Compiler |
 |---|---|---|---|---|
@@ -39,25 +43,41 @@ Manifest 有两种表示：catalog `ModelCapabilityManifest` → [to_v3_model_ma
 | `volcengine/doubao-seedance-1-0-pro-250528` / v1 | video.generate；first-frame I2V | first_frame 必须1；HTTPS → content[].image_url，role=first_frame | 当前 wire 仅 model/content；duration/ratio/audio 显式拒绝；其它输出不保证；camera=P | ArkVideoCompiler |
 | `volcengine/doubao-seedance-2-0-260128` / v1 | 同上，仅复用 first-frame 子集 | 同上；无多参考、尾帧、音频合同 | 同上；模型名称2.0不代表完整2.0能力已接通 | ArkVideoCompiler |
 | `minimax/image-01` / v1 | image.generate；I2I only（不是无图T2I） | reference_image 必须1；HTTPS → subject_reference[{type:character,image_file}] | N:aspect_ratio=1:1、n=1、response_format=url、prompt_optimizer=false、aigc_watermark=false；catalog size=1024x1024不是wire size字段 | MiniMaxImageCompiler |
-| `minimax/MiniMax-H3` / v1 | video.generate；first-frame I2V | first_frame 必须1；HTTPS → content[] | N:resolution=768P、duration=5、ratio=adaptive；语义输入要求9:16/16:9首帧继承，generate_audio仅None/false，seed拒绝；camera=P | MiniMaxVideoCompiler |
+| `minimax/MiniMax-H3` / v1（legacy） | video.generate；first-frame I2V | first_frame 必须1；HTTPS → content[] | N:resolution=768P、duration=5、ratio=adaptive；语义输入要求9:16/16:9首帧继承，generate_audio仅None/false，seed拒绝；camera=P | MiniMaxVideoCompiler |
+
+活动 `MiniMax-H3` v2 在同一编译器中保留首帧模式，并新增显式文生视频：
+无参考、2K、5 秒、9:16/16:9、原生音频。旧 v1 仍以原身份和首帧请求恢复。
+
+协议目录另包含 OpenAI-compatible image/video、Agnes OpenAI async video，以及 SGLang H3
+T2VA / Ref2VA / FL2VA 合同；`@contract/...` 是调用方案，不是具体供应商模型。
+用户发现的 remote model ID、方案 revision 和连接身份共同组成 Binding，不把合同 ID
+发送为远端模型名。Ref2VA v1 保留为 legacy，active v2 支持的数量/时长按冻结合同校验。
+
+preview 的 Agnes 2.5、Ark 与 MiniMax 候选已可供只读目录和合同编译测试核对，不能新建
+active Binding。声明 `input_contracts` 的 Compiler 要求显式 ProductCapabilityPolicy；
+该 Workbench 子集的视频目前仅开放 Formal 首帧。它与上述既有冻结的多模式合同分开判断。
 
 实现：[Agnes](../../backend/app/providers/agnes.py)、[Ark](../../backend/app/providers/volcengine.py)、
 [MiniMax](../../backend/app/providers/minimax.py)、[bootstrap](../../backend/app/providers/bootstrap.py)、
 [reference delivery](../../backend/app/providers/reference_delivery.py)。
 尺寸是请求合同/文档声称，不是每次产物已实测的保证；实际下载后的元数据须另验。
 
-### 2.2 文本与本地 TTS
+### 2.2 文本与语音实现
 
 | 对象 | 当前代码事实 | 不得推断 |
 |---|---|---|
 | `litellm/text-llm` | bootstrap bridge；gateway_model 默认 legacy-text，可由配置替换 | 不等于具体 OpenAI/Claude/Gemini/DeepSeek 版本 |
 | `litellm/script-quality`、`litellm/script-fast` | 默认配置注册的逻辑别名；上游 model/base/key 属 LiteLLM 部署配置 | 别名不代表确定的上下文长度、tool calling 或价格 |
 | `litellm/<discovered alias>` | `LiteLLMModelCatalogSyncService` 可从 gateway发现别名，注册 text.generate | discovery 不是结构化输出/工具闭环认证 |
-| `local_tts` / `espeak-ng` | LocalEspeakAdapter，经 voice_runtime 接入；本地 subprocess 输出 RIFF/WAV，使用配置 voice/engine | 不属于7项媒体 seed；不是云语音模型、语音克隆或多模态参考能力 |
+| Edge TTS / `edge-voice-v1` | 默认配置；联网神经配音，冻结音色/语速/引擎版本 | 是非官方联网服务，配置读取不证明可用性；失败不自动退回 eSpeak |
+| `local_tts` / `local-voice-v2` | 显式 eSpeak 旧版机械音；本地 subprocess 输出 RIFF/WAV | 不属于图/视频目录，不是语音克隆或自动回退 |
+| PCM silence / `silent-voice-v1` | 明确无对白时生成静音 | 不属于文本模型绑定 |
 
 代码：[text manifest](../../backend/app/providers/bootstrap.py)、
 [logical catalog](../../backend/app/providers/litellm_gateway/model_catalog.py)、
 [gateway配置](../../infra/litellm/config.yaml)、[LocalEspeakAdapter](../../backend/app/providers/local_tts.py)。
+语音身份见 [voice_config](../../backend/app/providers/voice_config.py)、
+[voice_runtime](../../backend/app/providers/voice_runtime.py) 与 [voice_path](../../backend/app/execution/voice_path.py)。
 文本已支持 messages/system/max_tokens/temperature/response_format，并能转发 tools；
 但消息合同无 tool role/call_id，response 未规范化 tool_calls，故**当前 Agent tool calling = 不完整**。
 JSON schema 请求 + 最多一次 repair 是已实现的结构化文本行为，不证明每个上游原生 strict schema 可用。
@@ -71,7 +91,8 @@ JSON schema 请求 + 最多一次 repair 是已实现的结构化文本行为，
   第十批列出 `doubao-seedance-1-0-pro-250528` 与 `doubao-seedream-4-0-250828`，该批常规 EOS 为
   **2026-11-24 14:00（UTC+8）**；另列的10月22日例外仅针对该公告指定的 lite/mini文本型号，不适用这两项。
   官方存在自动替换/关停政策，执行身份不能只相信接入点名称；迁移仍需独立确认和新合同。
-- 当前未修改 seed、fixture、binding、credential 或已有 NodeRun 身份。Owner 可据此决定迁移任务与逐操作正预算；历史授权不延续。
+- 上述公告是带日期的来源记录，不等于当前账号探测；目录 lifecycle 与供应商状态须分别核对。
+  后续迁移需要独立任务、来源复核及逐操作正预算，历史授权不延续。
 
 ## 3. 官方资料与逐模型差异
 
@@ -115,7 +136,7 @@ JSON schema 请求 + 最多一次 repair 是已实现的结构化文本行为，
     → 从权威创作事实合成 prompt
     → hydrate/校验 reference 的 project、Artifact、AssetVersion、MIME、指纹
     → ExecutionModelResolver，冻结 binding/catalog/connection/credential revisions
-    → 当前Formal首帧（video，不用“最近图片”回退）
+    → 按冻结视频模式核对 Formal 首帧、尾帧或已保存参考；文生不暗中补图
     → compile_references：exact / approximate / unsupported、slots、基数、mode
     → WorkbenchExecutionPlan + plan_fingerprint（无凭据、无网络提交）
  → 用户审批/计划哈希与版本再校验
@@ -159,13 +180,13 @@ CapabilityRouter → validator（manifest/mode/slots/options）
 | 生产通用语义Prompt | workbench_execution._compose_effective_prompt | 显式说明P级控制，不宣称native参数 |
 | 角色一致性辅助措辞 | execution/product_path.identity_priority_keyframe_prompt 与参考/审核链 | 不能单靠文本保证身份；以真实reference与review证据为准 |
 | 模型wire规则 | Agnes/Ark/MiniMax compiler + builders | 此处拥有参数名/固定值，不在Agent prompt硬编码 |
-| TTS文本 | LocalEspeakAdapter 输入prompt→命令行text | 与图视频Prompt分开；无云模型能力推断 |
+| TTS文本 | voice_config 冻结身份；voice_runtime 选择 Edge/eSpeak/静音实现 | 与媒体目录和 audio.tts 模型槽分开；失败不换引擎 |
 
 ## 5. native / prompt-only / unsupported 的准确语义
 
 - **native**：Manifest声明 + 参数编译实际写wire + 返回translation evidence。名称出现在DTO或builder不构成公开支持。
-- **prompt-only**：镜头运动、景别、风格、连续性可进入已保存的语义提示词；没有这7项模型的统一 native camera knob，也没有精确遵循保证。
-- **unsupported**：尾帧/多参考/原生音频未声明，即便供应商网页支持也不能夹进extra_body绕过。参考超过上限必须错误，不截取第一张后假装成功。
+- **prompt-only**：镜头运动、景别、风格、连续性可进入已保存的语义提示词；没有跨模型统一的 native camera knob，也没有精确遵循保证。
+- **unsupported**：所选精确 revision 未声明的尾帧/多参考/原生音频，即便供应商网页支持也不能夹进extra_body绕过。参考超过上限必须错误，不截取第一张后假装成功。
 - **approximate**：参考用途到通用槽位是约定映射，或ratio继承等；必须给reason并需要显式accept_approximations，不由Agent替用户接受。
 
 所有参考保持有序 `list[ResolvedReference]`，记录 role + artifact_id + fingerprint + index。
@@ -178,12 +199,14 @@ CapabilityRouter → validator（manifest/mode/slots/options）
 2. **静默参数变更已封堵**：Agnes 图像拒绝 seed，Agnes 视频拒绝未传输的resolution/seed；
    Ark视频拒绝duration/ratio/audio/resolution/seed；Ark图像拒绝未声明seed、非冻结size及非1:1 ratio；
    MiniMax图像拒绝非1:1 ratio及seed。旧builder与冻结合同保留，未开放额外能力。
-3. **文本 Agent 循环仍未实现**：本任务仅返回 capability facts，不扩展 LLM tool-response/history，
+3. **文本 Agent 循环仍未实现**：只读服务返回 capability facts，不扩展 LLM tool-response/history，
    不宣称模型自主调用工具已接通。工具支持在查询中明确unknown，不从OpenAI兼容性推断。
-4. **DTO表达范围保持不变**：ImageGenerateRequest无ratio、Video common无audio；本轮不扩大通用参数面。
-5. **MiniMax H3仍有语义→wire转换**：输入9:16/16:9，wire ratio=adaptive；原生音频未开放。
+4. **通用 DTO 与模型合同分层**：公共请求字段以共享合同为准；模型特定的输出选项来自
+   Manifest，不因目录声明而自动扩张所有调用方的参数面。
+5. **MiniMax H3按模式转换**：冻结首帧模式输入9:16/16:9，wire ratio=adaptive；
+   active v2 的文生模式则显式传比例并使用原生音频，不能套用首帧模式的限制。
    预览只证明compiler接受；不证明实际素材、传输可达性或输出静音。
-6. **现有生产链与供应商子集冲突会提前暴露**：canonical视频当前固定5秒/project ratio，Ark子集拒绝这些参数；
+6. **生产链与供应商子集冲突会提前暴露**：既有默认视频请求与冻结 Ark 子集的参数不兼容时必须阻断；
    square-only图像模型与竖屏项目不匹配会blocked，不能删除校验“跑通”。
 7. **模型生命周期为警告而非自动迁移**：只读来源注释不改变seed lifecycle、binding或旧NodeRun。
 8. **参考传输明确分层**：每个compiler声明reference_transport，dry-run按它构造占位引用。
@@ -203,8 +226,8 @@ HTTP：[model_inspection.py](../../backend/app/api/v1/model_inspection.py)，正
 
 ### get_model_capabilities
 
-- [capability_inspection](../../backend/app/providers/capability_inspection.py) 从既有manifest投影，覆盖7项seed、
-  当前注册/配置的LiteLLM别名、local_tts/espeak-ng；unknown ID不回退。
+- [capability_inspection](../../backend/app/providers/capability_inspection.py) 从可解析的精确 manifest 投影；官方目录、协议 Binding、
+  逻辑文本与语音身份的查询范围以应用 resolver 为准，不能把所有 preview 候选当作可执行注册项。unknown ID 不回退。
 - 输出model_id、revision、manifest version/hash、原始capability/mode/slot/option结构，
   controls的native/prompt_only/unsupported/unknown分类、limitations、account_status=not_checked。
 - [capability_sources](../../backend/app/providers/capability_sources.py) 只存官方来源与退役通知，不是第二个可写capability catalog。

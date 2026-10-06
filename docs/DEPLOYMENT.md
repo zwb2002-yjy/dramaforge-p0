@@ -112,8 +112,13 @@ checked from service status and worker logs: `worker-default` consumes
 `dispatcher` and by the Director worker's startup recovery.
 Provider reconciliation runs in an independent dispatcher loop, not a heavy-queue cron job;
 media execution still uses the existing queue. Apply migrations through the
-candidate head (currently `20260922_0077`; confirm with `alembic heads`) before
+candidate head (see [DATA_MODEL.md](DATA_MODEL.md); confirm with `alembic heads`) before
 updating the dispatcher and media workers. This rollout is not implied by a source-only push.
+
+The current source includes a merge revision joining model-system expand and local-media
+history. Upgrade through both parents to the single candidate head; do not rewrite applied
+revisions or stamp a running database past unapplied migrations. Expand storage alone does
+not enable Runtime Cutover; its remaining gates are documented in [MODEL_PROVIDER.md](MODEL_PROVIDER.md).
 
 PostgreSQL, Redis, MinIO and the LiteLLM database use `restart: unless-stopped` plus bounded
 startup health periods. The API, dispatcher and every Worker wait for PostgreSQL health and

@@ -30,7 +30,10 @@ Workbench execution-plan preview → executions dispatch → Outbox → Arq Work
   `first_frame` / `first_last_frame` 视频必须有显式 formal keyframe。
   冻结的 `text_to_video`、`last_frame` 与 `omni_reference` 模式不消费正式首帧，
   Worker 只在模式与冻结能力同时匹配时免除 keyframe 上游依赖。
-- voice → 显式 `local-voice-v1` runtime → Artifact。
+- voice → 冻结 `VoiceExecutionSpec` → 对应语音实现 → Artifact。
+  当前默认配置为 Edge TTS 神经配音，身份为 `edge-voice-v1`；显式 eSpeak 旧版身份为
+  `local-voice-v2`，无对白的 PCM 静音身份为 `silent-voice-v1`。音色、语速、引擎版本在
+  计划中冻结，失败不自动换引擎；配置读取不构成联网服务验证。
 - review / subtitle / composite → 零成本本地节点 → Artifact。
 
 执行模块位于 `backend/app/execution/`，按实际副作用与恢复职责分工：
@@ -44,9 +47,10 @@ Workbench execution-plan preview → executions dispatch → Outbox → Arq Work
 | `artifact_inputs.py` | 同项目不可变 Artifact 绑定、哈希校验与 Review 输入血缘 |
 | `local_nodes.py` | 零成本 Review / subtitle / composite 完成路径 |
 | `run_state.py` | 共享执行结果与持久终态；保留 commit 后重新设置 RLS 的语义 |
-| `voice_path.py` | 本地语音执行 |
+| `voice_path.py` | 冻结配音身份校验、显式语音实现执行及 Artifact 持久化 |
 
-这些模块没有 Director workflow、budget、batch 或历史路径分支。
+这些模块不恢复已退役的 controlled Director workflow、budget、batch 或历史生产路径。
+仍在使用的 workflow 模板依赖及边界债务以 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) 为准。
 准备阶段与网络阶段的拆分不改变事务边界：提交标记必须在 paid call 前持久化，
 resume 不重编译或重复提交，取消和下载失败仍按原有恢复语义处理。
 Provider 特定的 reference URL/bytes 决策在 provider delivery 层内部。

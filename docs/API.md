@@ -2,8 +2,8 @@
 
 Status: current
 Source: backend/app/api/v1 and generated OpenAPI
-Date: 2026-09-22
-Migration head: 20260922_0077
+Updated: 2026-10-07
+Migration authority: [DATA_MODEL.md](DATA_MODEL.md)
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Contract rules
@@ -37,7 +37,7 @@ Migration head: 20260922_0077
 | Review | review.py | evidence annotations and annotation decisions, plus the human review decision (`review-summary`, `review-decisions`) that admits an exact Artifact |
 | Batch production / todo | batch_production.py | read-only per-Shot plan preview, explicit bounded Owner dispatch through the canonical command path, and server-fact-driven production todo / consistency risk projection |
 | Production monitor | production.py | Artifact bytes/frames and project snapshot; queue dispatch belongs to Workers, not a second user command |
-| Providers | provider_connections.py, provider_references.py, generations.py, model_profiles.py, model_candidates.py | read-only model catalog/capabilities/manifest, connection/credential revisions, capability probe, reference delivery, model profiles (binding validation is an invariant of the save path, not a separate endpoint) and read-only candidates; media generation has no second write surface |
+| Providers | provider_connections.py, provider_references.py, generations.py, model_profiles.py, model_candidates.py, model_inspection.py | read-only model catalog/capabilities/manifest, connection/credential revisions, capability probe, reference delivery, model profiles (binding validation is an invariant of the save path, not a separate endpoint) and read-only candidates; media generation has no second write surface |
 | Experiments | experiments.py | isolated Shot experiment branches; adoption is the ExperimentBranch decision, never a second adopt endpoint |
 | Editing | editing.py, opencut.py, final_film.py | EditSession timeline, suggestion, export, OpenCut manifest, Final Film bound to a timeline version |
 | Creative capabilities | creative_capabilities.py, workflow_planning.py | provider-neutral intent/capability planning and the read-only workflow-state aggregation; workflow/participation freeze is a domain action for Director/Workbench, not an HTTP surface |
@@ -93,7 +93,7 @@ Review/Repair, Artifact delivery, and EditSession export.
 
 ## Admission gates on the write surface
 
-Three write paths refuse to continue until a stored fact says they may. Each is
+The write paths below refuse to continue until a stored fact says they may. Each is
 validated server-side; a disabled button is never the only guard.
 
 | Write path | Requirement | Refusal |

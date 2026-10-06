@@ -12,6 +12,10 @@ DramaForge 是面向专业个人创作者的开源 AI 影视制作工作台。�
 
 ## 快速开始
 
+当前开发源码统一在 `dev`，稳定发布与运行实例的状态见
+[V1_STATUS.md](docs/V1_STATUS.md)。版本化 Release 完成前，源码试用走下文的 Docker
+构建入口；下面的 online/offline 安装步骤用于同一已发布版本的完整制品。
+
 宿主机只需要 Docker Compose v2，不需要 Python、Node.js 或编译器。
 
 ```powershell

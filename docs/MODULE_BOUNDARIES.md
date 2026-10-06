@@ -1,7 +1,7 @@
 # MODULE_BOUNDARIES — 模块边界与依赖方向
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Date: 2026-09-22 / Alembic head: 20260922_0077
+Updated: 2026-10-07；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 
 本文件只回答一件事：**哪一层可以依赖哪一层。**
 

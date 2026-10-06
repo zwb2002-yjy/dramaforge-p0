@@ -107,13 +107,14 @@ Director 当前为结构化文本任务加确定性持久编排，尚无完整�
 | [当前实现](architecture/DIRECTOR_AGENT_CURRENT_STATE.md) | 调用链、逐图节点行为、状态权威与保留/重构映射 |
 | [目标设计](architecture/DIRECTOR_AGENT_TARGET_ARCHITECTURE.md) | 自有 Agent Loop + 现有 TextModelPort + ToolRegistry；LangGraph 留作 durable workflow，Production 不重写 |
 | [实施计划](architecture/DIRECTOR_AGENT_IMPLEMENTATION_PLAN.md) | P1 合同 → 只读 loop → Proposal → Workflow → Memory/Skill → 可选 MCP，逐项验收与回滚 |
-| [模型/编译指南](architecture/MODEL_CAPABILITY_PROMPT_COMPILER.md) | 7 个媒体模型、逻辑文本与本地 TTS；区分源码支持、官方声明和账号证据 |
+| [模型/编译指南](architecture/MODEL_CAPABILITY_PROMPT_COMPILER.md) | 文件目录、官方模型与协议合同、逻辑文本和语音；区分源码支持、官方声明和账号证据 |
 
 Agent runtime/ToolRegistry/会话迁移仍为未实现目标；模型能力查询、compiler dry-run及生成快照
-已提供共享只读service/API（详见模型指南），并补ImageEdit/严格参数校验。没有替换模型、
-删除表或修改生产写入口。后续完成实施后继续收敛本表，过时计划仅留Git历史。
+已提供共享只读 service/API（详见模型指南），并补 ImageEdit/严格参数校验。只读查询
+不替换执行模型、删除表或触发生产写入；目录 revision 的演进另按 MODEL_PROVIDER 管理。
+后续完成实施后继续收敛本表，过时计划仅留 Git 历史。
 
-## 6. 可重复核查与门禁
+## 可重复核查与门禁
 
 先构建当前源码的 quality image，再运行已有信息性扫描：
 

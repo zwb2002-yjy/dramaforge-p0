@@ -1,7 +1,7 @@
 # CANONICAL_ARCHITECTURE — DramaForge 架构宪法
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Date: 2026-09-22 / Alembic head: 20260922_0077
+Updated: 2026-10-07；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 
 本文件定义 DramaForge **以后所有模块必须服从的架构世界观**。它是"宪法"，只回答
 "这个系统到底是什么、一个新模块应该归属哪里"。

@@ -27,7 +27,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_doc
 该门构建 backend 质量容器（Python 3.14.x / Debian Bookworm）与 frontend 质量容器
 （Node 24 LTS + Chromium），执行：
 
-- 目录合规、canonical-surface 与增量架构依赖门（`arch_import_scan.py --check`）、ruff、mypy；
+- 目录合规、canonical-surface、Provider 权威、增量架构依赖门（`arch_import_scan.py --check`）、
+  模型支持文档生成一致性（`generate_model_support_docs.py --check`）、ruff、mypy；
 - backend 单测；
 - PostgreSQL `alembic upgrade head` / `alembic check` 与集成测试；
 - OpenAPI 导出与 generated client 检查；
@@ -36,7 +37,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_doc
 
 本地完整质量门与 GitHub Full Gate 共用 `docker-compose.quality.yml`，不维护第二套
 测试实现。当前 dev 处于快速开发模式，PR CI 只监听 `main`（见 RELEASE.md）；
-以下分层规则在恢复 dev PR CI 后生效：
+所有指向 `main` 的 PR（包括 docs-only）及手动 dispatch 仍执行完整质量和安全门。
+以下 Fast Gate / docs-only 分层规则只在恢复 dev PR CI 后生效：
 
 - 所有 PR：`policy` + secret scan；
 - docs-only：不构建 backend/frontend 质量镜像，不启动 PostgreSQL、Redis、
@@ -129,6 +131,10 @@ FFmpeg 解码成功不证明叙事成立，人工喜欢画面不放行重复扣�
 - 用 `docker compose ps` / `docker compose logs` 检查内部服务；
 - 质量镜像构建失败时先修复 Docker Hub / Debian / npm 网络访问；
   不得用宿主机安装的依赖替代并把门报绿。
+
+文档整理只运行链接/锚点、目录、生成文档一致性与差异检查，不因此启动完整服务。
+若网络故障期间在已有质量容器内安装当前锁文件并运行回归，必须明确记录源码、依赖、
+执行范围与未完成的新镜像构建；这种分项结果不等同于 exact candidate 的正式完整门。
 
 ## 备份与恢复
 
