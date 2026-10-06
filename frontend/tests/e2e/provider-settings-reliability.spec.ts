@@ -135,6 +135,7 @@ test("supplier configuration stays read-only, distinguishes partial/failed evide
   const { writes } = await setupProviders(page);
   const origin = `/projects/${PROJECT_ID}/scenes/${SCENE_ID}?shotId=${SHOT_ID}`;
   await page.goto(`/settings/models?returnTo=${encodeURIComponent(origin)}`);
+  await page.getByRole("tab", { name: "项目模型", exact: true }).click();
   const summary = page.getByTestId("project-model-source-summary");
   await expect(summary).toBeVisible();
   await expect(summary.getByTestId("model-source-visual.keyframe")).toContainText(
@@ -144,6 +145,8 @@ test("supplier configuration stays read-only, distinguishes partial/failed evide
     "工作空间默认方案",
   );
   await expect(summary.getByTestId("model-source-video.shot")).toContainText("未确认");
+  await page.getByRole("tab", { name: "连接", exact: true }).click();
+  await page.getByTestId("provider-project-disclosure").locator("summary").click();
   await page.getByTestId("provider-diagnostics-disclosure").locator("summary").click();
   await expect(page.getByRole("combobox", { name: "项目 Provider 绑定" })).toHaveValue(PROJECT_ID);
   await expect(page.getByText(/能力证据读取失败/)).toBeVisible();
@@ -211,6 +214,7 @@ test("selecting a catalog model is only a draft and persists the exact identity 
     `/settings/models?returnTo=${encodeURIComponent(`/projects/${PROJECT_ID}/production`)}`,
   );
   await page.getByTestId("provider-diagnostics-disclosure").locator("summary").click();
+  await page.getByRole("button", { name: "添加模型", exact: true }).click();
   await page.getByLabel("关键帧模型", { exact: true }).selectOption(model.model_id);
   expect(saved).toEqual([]);
   expect(writes).toEqual([]);
