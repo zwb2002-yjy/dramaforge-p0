@@ -35,7 +35,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_doc
 - LiteLLM 集成（固定官方 Proxy 镜像 + 确定性 mock 模型，无外部 Provider 调用）。
 
 本地完整质量门与 GitHub Full Gate 共用 `docker-compose.quality.yml`，不维护第二套
-测试实现。GitHub PR CI 按变更风险分层：
+测试实现。当前 dev 处于快速开发模式，PR CI 只监听 `main`（见 RELEASE.md）；
+以下分层规则在恢复 dev PR CI 后生效：
 
 - 所有 PR：`policy` + secret scan；
 - docs-only：不构建 backend/frontend 质量镜像，不启动 PostgreSQL、Redis、

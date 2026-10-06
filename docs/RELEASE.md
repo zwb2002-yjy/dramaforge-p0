@@ -6,21 +6,23 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 
 - `main` 是受保护的稳定发布分支，禁止直接 push（本地 pre-push hook 与
   GitHub ruleset 双重拦截）。
-- `dev` 是常规集成分支。日常修改通过短生命周期
-  `agent/<task-id> -> dev` PR 集成；普通 PR 使用按变更风险分层的 CI，
-  merge 到 `dev` 后不再原样重复同一套全量质量门。
+- `dev` 是常规集成分支，当前处于快速开发模式：不运行 PR CI，不启用 ruleset，
+  允许直接 push 或直接合并分支；完整质量与安全验证集中在 `dev -> main`。
+  恢复 dev 门禁时，在 `ci.yml` 的 `pull_request.branches` 加回 `dev`
+  （`backend-fast` / `frontend-fast` 分层作业仍保留），并重新启用 `dev` ruleset。
 - 发布的唯一正常方向：`dev -> main` PR。该 PR 必须执行完整质量与安全
   required checks；合并后本地 `main` fast-forward，并在历史分叉时把
   `main` 合回 `dev`。
-- 短生命周期 `agent/<task-id>` 分支 + `.worktrees/<task-id>` 用于并行隔离
-  工作：从 `dev` 出发、PR 目标 `dev`。生产 hotfix 可从 `main` 出发、
+- 短生命周期分支 + `.worktrees/<task-id>` 可用于并行隔离
+  工作：从 `dev` 出发、合回 `dev`。生产 hotfix 可从 `main` 出发、
   目标 `main`，事后同步回 `dev`。
 - Dependabot 常规版本更新当前暂停（各 ecosystem 的
   `open-pull-requests-limit: 0`）；安全告警保留人工分诊，自动安全修复关闭。
   恢复常规更新时只允许直接依赖、忽略 major 更新、使用
   `dependabot/* -> dev` PR，并在对应依赖审计与受影响质量门通过后由 Owner
   决定是否集成；不直接作为稳定版本更新合入 `main`。
-- 只有 `@zwb2002-yjy` 批准 / 合并 PR；Agent 不自批、不自合、不记录 MERGED。
+- 合入 `dev` 由 Owner 授权的开发任务直接执行；`dev -> main` 只有
+  `@zwb2002-yjy` 批准 / 合并，Agent 不自批、不自合该 PR。
 
 ### 合并提交说明检查
 
@@ -44,8 +46,7 @@ Squash 必须显式传入审阅过的标题和正文，不使用自动拼接的�
    - `frontend-dependencies`
    - `filesystem-scan`
 
-`dev` ruleset 当前保留删除与 non-fast-forward 保护，不配置 required status
-checks；`agent/* -> dev` 仍通过 CI workflow 做按风险分层验证。
+`dev` ruleset（删除与 non-fast-forward 保护）当前为 disabled，PR CI 不监听 `dev`。
 
 PR CI 的分层规则见 [DEVELOPMENT.md](DEVELOPMENT.md)。`dev -> main` 不走
 Fast Gate：上述六个 required checks 全部执行，其中 `container-gates`

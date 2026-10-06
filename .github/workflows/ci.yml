@@ -3,7 +3,6 @@ name: CI
 on:
   pull_request:
     branches:
-      - dev
       - main
   workflow_dispatch:
 
@@ -46,15 +45,6 @@ jobs:
               dev|agent/hotfix-*) ;;
               *)
                 echo "Stable releases must target main from dev; only agent/hotfix-* branches are allowed for urgent fixes."
-                exit 1
-                ;;
-            esac
-          fi
-          if [ "$BASE_REF" = "dev" ]; then
-            case "$HEAD_REF" in
-              agent/*|codex/*|dependabot/*) ;;
-              *)
-                echo "Only short-lived agent/<task-id>, codex/<task-id> or dependabot/* branches may target dev through a pull request."
                 exit 1
                 ;;
             esac

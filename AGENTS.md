@@ -40,9 +40,10 @@
 
 ## Git and Ownership
 
-- Routine integration happens on `dev`; `main` only advances through a
-  protected `dev -> main` PR. Only `@zwb2002-yjy` approves and merges; agents
-  never approve, merge, or record `MERGED`.
+- Routine integration happens on `dev`, currently in fast-development mode:
+  no dev PR CI and no dev ruleset, so Owner-authorized tasks may push or merge
+  into `dev` directly. `main` only advances through a protected `dev -> main`
+  PR; only `@zwb2002-yjy` approves and merges it, agents never do.
 - No force push, history rewrite, `reset --hard`, or `clean -fd`. Cleanup is
   limited to the current task's resources.
 - When a merge is explicitly authorized, inspect the final commit title, body,

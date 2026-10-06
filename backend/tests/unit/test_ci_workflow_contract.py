@@ -61,17 +61,25 @@ def test_policy_checks_run_inside_a_python_container() -> None:
     assert "scripts/repo_guardrails.py policy" in policy_job
 
 
-def test_branch_flow_admits_dependency_integration_but_protects_main() -> None:
+def test_pr_ci_only_listens_on_main_while_dev_is_in_fast_development() -> None:
+    import yaml
+
+    parsed = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
+    triggers = parsed[True]
+    assert triggers["pull_request"]["branches"] == ["main"]
+    assert "workflow_dispatch" in triggers
+
+
+def test_branch_flow_leaves_dev_open_but_protects_main() -> None:
     step = _step(
         _WORKFLOW.read_text(encoding="utf-8"), "Enforce integration branch flow"
     )
     for base, head, allowed in [
-        ("dev", "dependabot/npm_and_yarn/frontend/prettier-3.9.6", True),
-        ("dev", "agent/runtime-policy", True),
         ("dev", "codex/workbench-optimization", True),
+        ("dev", "unreviewed-feature", True),
         ("main", "codex/workbench-optimization", False),
-        ("dev", "unreviewed-feature", False),
         ("main", "dependabot/npm_and_yarn/frontend/prettier-3.9.6", False),
+        ("main", "agent/hotfix-provider", True),
         ("main", "dev", True),
     ]:
         result = subprocess.run(

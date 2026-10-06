@@ -9,7 +9,7 @@
 - [ ] `policy`
 - [ ] `container-gates` (backend + PostgreSQL + OpenAPI + frontend + E2E + LiteLLM)
 - [ ] No generated formal evidence was committed from a dirty worktree.
-- [ ] This is either the release PR `dev -> main`, an isolation PR `agent/<task-id> -> dev`, or an urgent `agent/hotfix-* -> main` PR that will be synchronized back to `dev`.
+- [ ] This is either the release PR `dev -> main`, an optional isolation PR into `dev` (no CI while dev is in fast-development mode), or an urgent `agent/hotfix-* -> main` PR that will be synchronized back to `dev`.
 
 ## Approval
 
