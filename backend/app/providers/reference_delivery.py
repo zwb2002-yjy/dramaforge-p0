@@ -260,6 +260,10 @@ async def resolve_reference_for_runtime(
         content_bytes=content_bytes,
         mime_type=mime_type,
         fingerprint=fingerprint,
+        duration_seconds=(
+            float(artifact.duration_seconds)
+            if artifact is not None and artifact.duration_seconds is not None else None
+        ),
     )
 
 

@@ -25,7 +25,9 @@ Workbench execution-plan preview → executions dispatch → Outbox → Arq Work
 ```
 
 - keyframe / video → 统一 `unified-v1` ProviderRuntime/compiler → Artifact；
-  video 必须有显式 formal keyframe。
+  `first_frame` / `first_last_frame` 视频必须有显式 formal keyframe。
+  冻结的 `text_to_video`、`last_frame` 与 `omni_reference` 模式不消费正式首帧，
+  Worker 只在模式与冻结能力同时匹配时免除 keyframe 上游依赖。
 - voice → 显式 `local-voice-v1` runtime → Artifact。
 - review / subtitle / composite → 零成本本地节点 → Artifact。
 

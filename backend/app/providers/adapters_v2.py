@@ -36,6 +36,7 @@ from app.providers.contracts.image import ImageEditRequest, ImageGenerateRequest
 from app.providers.contracts.video import (
     FirstLastFrameVideoRequest,
     ImageToVideoRequest,
+    LastFrameVideoRequest,
     ReferenceToVideoRequest,
 )
 from app.providers.errors import ProviderStateMappingError, ResumeTokenUnavailableError
@@ -199,6 +200,7 @@ def _resolved_reference(role: str, artifact: ResolvedArtifact) -> ResolvedRefere
         content_bytes=artifact.content_bytes,
         mime_type=artifact.mime_type,
         fingerprint=artifact.sha256,
+        duration_seconds=artifact.duration_seconds,
     )
 
 
@@ -226,6 +228,10 @@ def _request_reference_roles(request: Any) -> list[tuple[str, ResolvedArtifact]]
     elif isinstance(request, ImageToVideoRequest):
         roles.append(
             (ReferenceRole.FIRST_FRAME.value, slot(request.image.artifact_id, "image/*"))
+        )
+    elif isinstance(request, LastFrameVideoRequest):
+        roles.append(
+            (ReferenceRole.LAST_FRAME.value, slot(request.last_frame.artifact_id, "image/*"))
         )
     elif isinstance(request, FirstLastFrameVideoRequest):
         roles.append(

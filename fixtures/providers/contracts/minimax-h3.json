@@ -1,9 +1,9 @@
 {
   "contract": {
     "documentation_source": {
-      "notes": "Official MiniMax H3 Video V2 API. First-launch subset is one HTTPS first frame with fixed 768P, five seconds, adaptive ratio, and no native audio.",
-      "url": "https://platform.minimaxi.com/docs/api-reference/video-generation-v2-create.md",
-      "verified_at": "2026-08-13"
+      "notes": "Official MiniMax H3 Video V2 API. First-frame mode uses 768P and adaptive ratio; text-only mode uses 2K and a concrete ratio. Both are five seconds in this product contract.",
+      "url": "https://github.com/MiniMax-AI/cli/blob/main/src/video/v2.ts",
+      "verified_at": "2026-09-29"
     },
     "wire_template": {
       "host": "https://api.minimaxi.com",
@@ -25,6 +25,14 @@
         "ratio": "adaptive",
         "resolution": "768P"
       },
+      "text_to_video_request_body": {
+        "aigc_watermark": false,
+        "content": [{"text": "<prompt>", "type": "text"}],
+        "duration": 5,
+        "model": "MiniMax-H3",
+        "ratio": "16:9",
+        "resolution": "2K"
+      },
       "status_machine": ["queued", "running", "succeeded"],
       "success_response": {"task_id": "task-..."}
     }
@@ -32,29 +40,39 @@
   "manifest": {
     "catalog_source": "official_static",
     "display_name": "MiniMax H3",
-    "documented_at": "2026-08-13",
+    "documented_at": "2026-09-29",
     "lifecycle": "active",
-    "manifest_version": "2026-08-13",
+    "manifest_version": "2026-09-29",
     "media_kind": "video",
     "model_id": "MiniMax-H3",
-    "model_revision": "v1",
+    "model_revision": "v2",
     "operations": {
       "video.generate": {
-        "capabilities": ["video.i2v.first_frame"],
+        "capabilities": ["video.i2v.first_frame", "video.t2v"],
         "exclusive_groups": [],
         "operation": "video.generate",
         "output_constraints": {
-          "aspect_ratio": "adaptive",
-          "duration_seconds": 5,
-          "native_audio": false,
-          "resolution": "768P"
+          "modes": {
+            "first_frame": {
+              "aspect_ratio": "adaptive",
+              "duration_seconds": 5,
+              "native_audio": false,
+              "resolution": "768P"
+            },
+            "text_to_video": {
+              "aspect_ratio": {"allowed": ["9:16", "16:9"]},
+              "duration_seconds": 5,
+              "native_audio": true,
+              "resolution": "2K"
+            }
+          }
         },
-        "reference_constraints": {"first_frame": {"max": 1, "min": 1}}
+        "reference_constraints": {"first_frame": {"max": 1, "min": 0}}
       }
     },
     "option_schema": {"namespace": "", "options": {}},
     "protocol_profile": "minimax_cn_v1",
     "provider_type": "minimax"
   },
-  "manifest_hash": "04dd2d914a517a45bbc14a6a5ab91c525185a76b9145d8a2b5f040f6a8e00ba8"
+  "manifest_hash": "c895be383ff6293d5edb2baaee2acc2907b8bebeca91491fbc2bf1a6ae5ccdf3"
 }

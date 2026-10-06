@@ -42,7 +42,10 @@ describe("executionPlanLabels", () => {
       label: "Agnes Image Flash",
       raw: "agnes/agnes-image-2.1-flash",
     });
-    expect(executionModelLabel("agnes/not-in-catalog", catalog).label).toBe("已解析执行模型");
+    expect(executionModelLabel("agnes/not-in-catalog", catalog).label).toBe("not-in-catalog");
+    expect(
+      executionModelLabel("openai_compatible_media//models/MiniMax-H3-runtime", catalog).label,
+    ).toBe("/models/MiniMax-H3-runtime");
     expect(executionModelLabel("", catalog).label).toBe("尚未解析执行模型");
   });
 });

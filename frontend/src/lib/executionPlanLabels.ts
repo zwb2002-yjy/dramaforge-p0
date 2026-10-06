@@ -63,9 +63,8 @@ export function capabilityGapReason(reason: string | null | undefined): {
 /**
  * Model display name for a stored `provider/model` id.
  *
- * `docs/FRONTEND_WORKBENCH.md` requires display names to come from the backend
- * catalogue, so an unresolved id must not be printed as-is: the caller renders
- * `label` and keeps the id in diagnostics.
+ * Catalogue names take priority. A discovered workspace model may not have a
+ * static catalogue display name; show its exact remote ID instead of hiding it.
  */
 export function executionModelLabel(
   resolvedModelId: string | null | undefined,
@@ -74,5 +73,5 @@ export function executionModelLabel(
   const raw = (resolvedModelId ?? "").trim();
   if (!raw || raw === "未解析") return { label: "尚未解析执行模型", raw };
   const match = catalog?.find((model) => model.id === raw);
-  return { label: match?.display_name ?? "已解析执行模型", raw };
+  return { label: match?.display_name ?? raw.slice(raw.indexOf("/") + 1), raw };
 }

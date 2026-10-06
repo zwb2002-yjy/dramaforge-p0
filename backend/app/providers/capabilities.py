@@ -26,6 +26,7 @@ class Capability(StrEnum):
 
     VIDEO_TEXT_TO_VIDEO = "video.text_to_video"
     VIDEO_IMAGE_TO_VIDEO = "video.image_to_video"
+    VIDEO_LAST_FRAME_TO_VIDEO = "video.last_frame_to_video"
     VIDEO_FIRST_LAST_FRAME = "video.first_last_frame"
     VIDEO_REFERENCE_TO_VIDEO = "video.reference_to_video"
 
@@ -44,6 +45,7 @@ CAPABILITY_FINE_GRAINED: dict[Capability, tuple[tuple[str, ...], ...]] = {
     Capability.IMAGE_EDIT: (("image.i2i",),),
     Capability.VIDEO_TEXT_TO_VIDEO: (("video.t2v",),),
     Capability.VIDEO_IMAGE_TO_VIDEO: (("video.i2v",), ("video.i2v.first_frame",)),
+    Capability.VIDEO_LAST_FRAME_TO_VIDEO: (("video.i2v.last_frame",),),
     Capability.VIDEO_FIRST_LAST_FRAME: (
         ("video.keyframes",),
         ("video.i2v.first_frame", "video.i2v.last_frame"),

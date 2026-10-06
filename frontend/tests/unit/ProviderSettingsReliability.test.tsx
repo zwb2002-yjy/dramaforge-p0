@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderConnectionPanel } from "../../src/components/provider/ProviderConnectionPanel";
 import * as api from "../../src/lib/api";
@@ -111,6 +111,7 @@ async function diagnostics() {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  window.localStorage.removeItem("dramaforge.providerConnection.workspace");
   vi.mocked(api.listProviderPlugins).mockResolvedValue([plugin, otherPlugin]);
   vi.mocked(api.listProviderConnections).mockResolvedValue([connection]);
   vi.mocked(api.listProviderModelBindings).mockResolvedValue([]);
@@ -119,6 +120,17 @@ beforeEach(() => {
 });
 
 describe("Provider settings honest state and isolated drafts", () => {
+  it("restores the selected provider for this workspace without carrying drafts", async () => {
+    mount();
+    await screen.findByLabelText("Fixture Provider API Key");
+    fireEvent.change(screen.getByLabelText("供应商"), { target: { value: "other/fixture-v1" } });
+    expect(await screen.findByLabelText("Other Provider API Key")).toBeInTheDocument();
+    cleanup();
+    mount();
+    expect(await screen.findByLabelText("Other Provider API Key")).toHaveValue("");
+    expect(screen.getByLabelText("供应商")).toHaveValue("other/fixture-v1");
+  });
+
   it("keeps an intentionally blank address and never probes the old address behind a dirty draft", async () => {
     mount();
     await diagnostics();
@@ -383,7 +395,9 @@ describe("Provider settings honest state and isolated drafts", () => {
       within(imagePicker).queryByRole("option", { name: /catalog-only/ }),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("provider-discovered-models")).toHaveTextContent("remote-unknown");
-    expect(screen.getByTestId("provider-discovered-models")).toHaveTextContent("尚未匹配能力插件");
+    expect(screen.getByTestId("provider-discovered-models")).toHaveTextContent(
+      "待指定能力合同并绑定",
+    );
     fireEvent.change(screen.getByLabelText("关键帧模型"), {
       target: { value: "remote-unknown" },
     });

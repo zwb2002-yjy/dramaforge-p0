@@ -861,6 +861,42 @@
   gap: var(--df-space-2);
 }
 
+.qc-video-mode {
+  border: 0;
+  margin: var(--df-space-3) 0;
+  padding: 0;
+}
+
+.qc-video-mode legend {
+  color: var(--df-text-muted);
+  font-size: var(--df-text-xs);
+  margin-bottom: var(--df-space-2);
+}
+
+.qc-video-mode-options {
+  display: flex;
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--df-border);
+  border-radius: 6px;
+}
+
+.qc-video-mode-options button {
+  min-width: 88px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--df-text-muted);
+}
+
+.qc-video-mode-options button.active {
+  background: var(--df-surface-raised);
+  color: var(--df-text-primary);
+}
+
 .qc-scene-card header {
   justify-content: space-between;
 }

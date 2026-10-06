@@ -67,9 +67,74 @@ Protocol/DTO，以及无调用方的 `providers/openai.py`、`providers/fake.py`
   `/images/edits`，视频使用异步 `/videos` + `/videos/{id}` 轮询。设置页让用户先选
   账号发现的模型，再显式选择图像或视频能力合同；合同描述请求形状与参考槽位，
   远端模型 ID 由 Compiler 写入最终 wire request。
+- SGLang H3 的 `@contract/sglang-h3-t2v-v1` 是独立的 `video.t2v` 合同：零图片
+  输入，`t2va` 任务，经 `/v1/videos` multipart 提交、按任务 ID 轮询并读取
+  `/content`。这不是 MiniMax 云 API `minimax_cn_v1` 的首帧合同。工作空间保存
+  局域网服务 URL；从 `/v1/models` 发现的精确模型 ID 由用户绑定，代码不保存
+  任何特定 IP 或该实例模型 ID。目录/认证通过仅证明当次可读，不证明生成、画质
+  或费用；真实生成仍须逐次正数预算和 Owner 授权。
+  完成后的局域网 `/content` 只由已冻结连接的 Runtime 读取并交给媒体字节校验；
+  通用产物 URL 下载器继续仅接受公网 HTTPS，不开放任意私网抓取。
+- `@contract/sglang-h3-ref2va-v1` 单独描述加载了 Ref2VA 分区的 H3 服务，
+  初始 `v1` 声明参考图、参考视频、参考音频槽位（各最多一份、至少有一份），固定 5 秒。
+  Compiler 将保存的 Artifact 字节按用户顺序编码为 `conditions` 的 `image` / `video` /
+  `audio` data URI，使用 `task=ref2va` 的 JSON 请求；不自动拿正式关键帧替代参考素材。
+  `/v1/models` 的模型 ID 与 `/model_info` 的粗粒度 `TI2V` 均不足以判断实际分区，
+  必须依据当前实例生成结果选合同。旧 T2V 绑定与运行身份不改写；同一个发现模型可按
+  不同合同创建独立绑定，再显式切换项目绑定。该协议形状依据
+  [SGLang H3 cookbook](https://github.com/sgl-project/sglang/blob/main/docs/cookbook/diffusion/MiniMax/MiniMax-H3.mdx)。
+- 本地 H3 的 `@contract/sglang-h3-fl2va-v1` 是另一份协议合同，不共享 Ref2VA
+  的输入语义。它覆盖零图 `task=t2va`、正式首帧、已保存尾帧、正式首帧+已保存尾帧；
+  后三者用 `task=fl2va`，按顺序传 `role=keyframe`、`frame_index=0/-1` 的
+  图片 data URI。固定 5 秒、768 短边、原生音频、`9:16`/`16:9`，经 JSON
+  `/v1/videos` 提交并按同一连接轮询/下载。能力、请求体、绑定的精确目录 ID 和
+  连接修订均进入冻结执行身份；绝不按模型名称猜分区或把 Ref2VA 参考图当首帧。
+- Ref2VA 的不可变 `v2` 目录修订沿用相同合同 ID，扩展到最多 9 图、3 视频、
+  3 音频且总数不超过 12；至少一份参考素材。输入按已保存顺序编码，图片只是
+  语义参考，不是画面端点。旧 `v1` 每类最多一份的合同与已有绑定保持原样。
+  视频/音频每段 2–15 秒，每类总时长不超过 15 秒。计划预检读取 Artifact 的
+  已验证时长，未知时长、单段或累计超限在排队前拒绝；Compiler 在提交前复核。
+  媒体类型、单项数量、混合总数、总字节数亦在提交前检查。
+  官网完整 H3 系统还包含 Context-IR 和 2K 再生成；本地上述两合同只覆盖
+  H3-Base 的 768 短边视频生成，不把这些托管能力混同为已本地部署。
+  依据 [官方模型卡](https://huggingface.co/MiniMaxAI/MiniMax-H3) 与
+  [SGLang 调用示例](https://github.com/sgl-project/sglang/blob/main/docs/cookbook/diffusion/MiniMax/MiniMax-H3.mdx)。
+- MiniMax 官方托管 H3 的 `minimax_cn_v1` 目录修订 `MiniMax-H3/v2` 同时声明
+  `video.i2v.first_frame` 与 `video.t2v`，每种能力投影独立的输入槽和输出规则。
+  首帧模式仍需正式关键帧、`768P` / `adaptive`；纯文本模式没有参考槽，
+  `POST /v2/video_generation` 的 `content` 仅包含 `text`，固定 5 秒、`2K`、
+  明确 `9:16` 或 `16:9` 比例。官方 H3 在该模式生成原生音频，产品不提供
+  关闭音频的虚假开关。`v1` 历史目录项保留原语义，不改变已有冻结执行。
+  该合同依据 [MiniMax 官方 H3 说明](https://www.minimax.cn/news/minimax-h3-open-source)
+  和 [官方 CLI 的 V2 请求校验](https://github.com/MiniMax-AI/cli/blob/main/src/video/v2.ts)，
+  以 `fixtures/providers/contracts/minimax-h3.json` 锁定 wire 样例和清单哈希。
 - 不符合该协议的原生端点仍按**协议**增加一个 Adapter（例如 `agnes_cn_v1`、
   `ark_cn_v1`），而不是为每个新模型复制一套适配代码。未声明的协议或能力继续
   fail-closed，不能仅凭 `/v1/models` 的返回值执行。
+
+### 本地 H3 分区接入矩阵
+
+| 权重分区 | 产品输入模式 | 保存的输入 | 调用规则 |
+| --- | --- | --- | --- |
+| FL2VA | `text_to_video` | 无媒体 | `task=t2va`，`conditions=[]` |
+| FL2VA | `first_frame` | 正式关键帧 | `task=fl2va`，`keyframe`，`frame_index=0` |
+| FL2VA | `last_frame` | 一张尾帧绑定 | `task=fl2va`，`keyframe`，`frame_index=-1` |
+| FL2VA | `first_last_frame` | 正式关键帧 + 一张尾帧绑定 | `task=fl2va`，顺序为首帧、尾帧 |
+| Ref2VA `v2` | `omni_reference` | 1–12 份参考，最多 9 图 / 3 视频 / 3 音频 | `task=ref2va`，`role=reference`，保持保存的引用顺序 |
+
+以上接入统一采用 SGLang `/v1/videos` JSON 创建、任务轮询、`/content` 下载，
+产品输出固定为 5 秒、768 短边、`9:16`/`16:9`、原生音频。官方权重本身支持
+4–15 秒及更多比例；该产品合同只承诺表中的输出范围。
+
+配置流程：模型连接选择 OpenAI 兼容媒体协议，保存服务 URL 与凭证并显式读取
+模型目录；将远端精确模型 ID 绑定到相应 FL2VA 或 Ref2VA `v2` 合同；在默认模型
+或项目模型中明确选该绑定；镜头页面选择对应输入模式。项目覆盖优先于工作空间
+默认，设置页当前展示的连接不改变生产模型。调用冻结 URL、凭证修订、合同修订、
+远端模型 ID、模式与输入身份；切换设置不改写已排队或完成的任务。
+
+BF16 或量化权重只要由同一 SGLang H3 协议提供相同分区能力，可使用相同合同；
+服务实际支持的任务仍需部署配置和执行证据确认。vLLM、diffusers、ComfyUI 或其他
+任意权重不会因名称含 H3 自动获得兼容性；它们须暴露相同协议或另有协议适配。
 
 ## 文本凭证边界
 

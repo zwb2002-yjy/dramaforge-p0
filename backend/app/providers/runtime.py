@@ -38,6 +38,8 @@ from app.shared.errors import NotFoundError, ValidationAppError
 if TYPE_CHECKING:
     from app.providers.model_resolution import ExecutionModelResolution
 
+PROVIDER_CONTENT_URI = "provider-content"
+
 
 class ProviderResumeToken(BaseModel):
     """Sanitized resume context. Never carries secrets, raw media, short-lived
@@ -157,6 +159,7 @@ class ResolvedReference:
     content_url: str | None = None
     mime_type: str = "image/png"
     fingerprint: str | None = None
+    duration_seconds: float | None = None
 
 
 class VideoCompiler(Protocol):

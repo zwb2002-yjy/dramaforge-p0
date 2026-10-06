@@ -16,6 +16,7 @@ from app.providers.contracts.image import ImageEditRequest, ImageGenerateRequest
 from app.providers.contracts.video import (
     FirstLastFrameVideoRequest,
     ImageToVideoRequest,
+    LastFrameVideoRequest,
     ReferenceToVideoRequest,
     TextToVideoRequest,
 )
@@ -89,6 +90,14 @@ def video_request_to_intent(
             mode_id=request.mode_id,
             selection=selection,
         )
+    if isinstance(request, LastFrameVideoRequest):
+        return VideoGenerationIntentV1(
+            prompt=request.prompt,
+            output=_video_output(request),
+            references=[_ref(request.last_frame, ReferenceRole.LAST_FRAME)],
+            mode_id=request.mode_id or "last_frame",
+            selection=selection,
+        )
     if isinstance(request, FirstLastFrameVideoRequest):
         return VideoGenerationIntentV1(
             prompt=request.prompt,
@@ -150,6 +159,7 @@ def request_to_intent(capability: Capability, request: object) -> object:
     if capability in {
         Capability.VIDEO_TEXT_TO_VIDEO,
         Capability.VIDEO_IMAGE_TO_VIDEO,
+        Capability.VIDEO_LAST_FRAME_TO_VIDEO,
         Capability.VIDEO_FIRST_LAST_FRAME,
         Capability.VIDEO_REFERENCE_TO_VIDEO,
     }:

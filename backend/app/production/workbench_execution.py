@@ -976,6 +976,33 @@ class WorkbenchExecutionService:
             references=list(execution_input.references),
         )
         slot, capability, purpose, _node_key = _STAGE_CONTRACT[execution_input.stage]
+        text_video = execution_input.stage == "video" and execution_input.mode_id == "text_to_video"
+        last_frame_video = (
+            execution_input.stage == "video" and execution_input.mode_id == "last_frame"
+        )
+        first_last_video = (
+            execution_input.stage == "video" and execution_input.mode_id == "first_last_frame"
+        )
+        reference_video = (
+            execution_input.stage == "video" and execution_input.mode_id == "omni_reference"
+        )
+        if text_video:
+            capability = Capability.VIDEO_TEXT_TO_VIDEO
+        elif last_frame_video:
+            capability = Capability.VIDEO_LAST_FRAME_TO_VIDEO
+        elif first_last_video:
+            capability = Capability.VIDEO_FIRST_LAST_FRAME
+        elif reference_video:
+            capability = Capability.VIDEO_REFERENCE_TO_VIDEO
+            if not references or not any(
+                reference.purpose in {
+                    "identity", "clothing", "pose", "style", "scene_layout",
+                    "scene_lighting", "generic_reference", "action", "camera_language",
+                    "audio_rhythm",
+                }
+                for reference in references
+            ):
+                raise WorkbenchExecutionError("reference video requires a saved media reference")
         resolution = await ExecutionModelResolver(self._session).resolve(
             project=project,
             slot=slot,
@@ -1031,12 +1058,40 @@ class WorkbenchExecutionService:
         if entry is None:
             raise WorkbenchExecutionError("resolved catalog entry not found")
         capability_manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
+        operation = capability_manifest.operations.get("video.generate")
+        if execution_input.stage == "video" and operation and operation.reference_media_limits:
+            from app.production.reference_intents import PURPOSE_TO_ROLE
+
+            media = (await self._session.scalars(select(Artifact).where(
+                Artifact.id.in_([ref.artifact_id for ref in references]),
+                Artifact.project_id == project.id,
+            ))).all()
+            durations = {
+                artifact.id: float(artifact.duration_seconds)
+                if artifact.duration_seconds is not None else None
+                for artifact in media
+            }
+            try:
+                operation.reference_media_limits.validate_metadata([
+                    (PURPOSE_TO_ROLE.get(ref.purpose, ""),
+                     durations.get(ref.artifact_id) if ref.artifact_id is not None else None)
+                    for ref in references
+                ])
+            except ValueError as exc:
+                raise WorkbenchExecutionError(str(exc)) from exc
         v3_manifest = to_v3_model_manifest(
             capability_manifest,
             transport_profile_id="workbench",
         )
 
-        if execution_input.stage == "video":
+        if execution_input.stage == "video" and (last_frame_video or first_last_video):
+            last_frames = [ref for ref in references if ref.purpose == "last_frame"]
+            if len(last_frames) != 1:
+                raise WorkbenchExecutionError("last-frame mode requires one saved last frame")
+
+        if execution_input.stage == "video" and not (
+            text_video or reference_video or last_frame_video
+        ):
             # Video execution requires the shot formal keyframe; the latest
             # image must never be used as a fallback (03 §38/§39).
             shot = await self._session.get(Shot, execution_input.shot_id)
@@ -1050,7 +1105,10 @@ class WorkbenchExecutionService:
                 )
             except ValidationAppError as exc:
                 raise WorkbenchExecutionError(str(exc)) from exc
-            if not any(ref.artifact_id == formal.id for ref in references):
+            if not any(
+                ref.purpose == "first_frame" and ref.artifact_id == formal.id
+                for ref in references
+            ):
                 references.insert(
                     0,
                     ShotReferenceIntent(

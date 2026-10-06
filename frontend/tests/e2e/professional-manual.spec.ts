@@ -8,6 +8,70 @@ import {
   installProfessionalMock,
 } from "./professional-mocks";
 
+for (const viewport of [
+  { width: 1440, height: 900 },
+  { width: 390, height: 844 },
+]) {
+  test(`H3 input modes preserve production gates at ${viewport.width}px`, async ({ page }) => {
+    const state = await installProfessionalMock(page);
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.setViewportSize(viewport);
+    await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
+    await page.getByTestId("context-dock-generate").click();
+    const modes = page.getByRole("group", { name: "视频输入类型" });
+    const labels = ["首帧生视频", "文生视频", "尾帧生视频", "首尾帧生视频", "参考素材生视频"];
+    const boxes = [];
+    for (const label of labels) {
+      const button = modes.getByRole("button", { name: label, exact: true });
+      await expect(button).toBeVisible();
+      const box = await button.boundingBox();
+      expect(box).not.toBeNull();
+      if (box) boxes.push(box);
+      expect(await button.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+        true,
+      );
+    }
+    for (let index = 0; index < boxes.length; index++) {
+      for (const other of boxes.slice(index + 1)) {
+        const box = boxes[index];
+        expect(
+          box.x + box.width <= other.x ||
+            other.x + other.width <= box.x ||
+            box.y + box.height <= other.y ||
+            other.y + other.height <= box.y,
+        ).toBe(true);
+      }
+    }
+    await modes.getByRole("button", { name: "尾帧生视频", exact: true }).click();
+    await expect(page.getByTestId("generate-video")).toBeDisabled();
+    await modes.getByRole("button", { name: "首尾帧生视频", exact: true }).click();
+    await expect(page.getByTestId("generate-video")).toBeDisabled();
+    await modes.getByRole("button", { name: "参考素材生视频", exact: true }).click();
+    await expect(page.getByTestId("generate-video")).toBeDisabled();
+    await modes.getByRole("button", { name: "文生视频", exact: true }).click();
+    await expect(page.getByTestId("generate-video")).toBeEnabled();
+    await page.getByTestId("generate-video").click();
+    await expect
+      .poll(() =>
+        state.editing.requests.some(
+          (request) => request.method === "POST" && request.path.endsWith("/executions"),
+        ),
+      )
+      .toBe(true);
+    const execution = state.editing.requests.find(
+      (request) => request.method === "POST" && request.path.endsWith("/executions"),
+    );
+    expect(execution?.body).toMatchObject({
+      stage: "video",
+      mode_id: "text_to_video",
+      references: [],
+    });
+    expect(errors).toEqual([]);
+    await page.screenshot({ path: test.info().outputPath(`h3-modes-${viewport.width}.png`) });
+  });
+}
+
 test("AUTO delegates one frozen Shot plan to the Director runtime", async ({ page }) => {
   const state = await installProfessionalMock(page);
   state.directorAutonomy = "AUTO";

@@ -3259,7 +3259,7 @@ export interface components {
          * @description Stable business capabilities the product layer can request.
          * @enum {string}
          */
-        Capability: "text.generate" | "image.generate" | "image.edit" | "video.text_to_video" | "video.image_to_video" | "video.first_last_frame" | "video.reference_to_video" | "audio.tts";
+        Capability: "text.generate" | "image.generate" | "image.edit" | "video.text_to_video" | "video.image_to_video" | "video.last_frame_to_video" | "video.first_last_frame" | "video.reference_to_video" | "audio.tts";
         /**
          * CapabilityAssessmentSummary
          * @description Assessed multi-subject capability of the keyframe model for a shot.
@@ -3361,6 +3361,7 @@ export interface components {
             default_mode?: string | null;
             /** Transport Profile Id */
             transport_profile_id: string;
+            reference_media_limits?: components["schemas"]["ReferenceMediaLimits"] | null;
         };
         /** CompilePreview */
         CompilePreview: {
@@ -4438,6 +4439,10 @@ export interface components {
             provider_model_binding_id: string | null;
             /** Reason */
             reason: string | null;
+            /** Contract Display Name */
+            contract_display_name?: string | null;
+            /** Model Revision */
+            model_revision?: string | null;
         };
         /**
          * ExecutionModelResolution
@@ -6445,6 +6450,24 @@ export interface components {
              * @description Server time of the accepted replay
              */
             replayed_at: string;
+        };
+        /** ReferenceDurationLimit */
+        ReferenceDurationLimit: {
+            /** Minimum Seconds */
+            minimum_seconds: number;
+            /** Maximum Seconds */
+            maximum_seconds: number;
+            /** Total Maximum Seconds */
+            total_maximum_seconds: number;
+        };
+        /** ReferenceMediaLimits */
+        ReferenceMediaLimits: {
+            /** Maximum Files */
+            maximum_files: number;
+            /** Durations */
+            durations?: {
+                [key: string]: components["schemas"]["ReferenceDurationLimit"];
+            };
         };
         /** RegisterRequest */
         RegisterRequest: {
@@ -13956,6 +13979,7 @@ export interface operations {
     get_execution_model_preflight_api_v1_projects__project_id__execution_models_preflight_get: {
         parameters: {
             query?: {
+                video_mode?: "first_frame" | "last_frame" | "first_last_frame" | "text_to_video" | "omni_reference";
                 workspace_id?: string | null;
             };
             header?: {

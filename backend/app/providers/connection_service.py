@@ -1125,6 +1125,7 @@ class ProviderConnectionService:
                 ProviderModelBinding.media_type == media_type,
                 ProviderModelBinding.model_id == model_id,
                 ProviderModelBinding.purpose == purpose,
+                ProviderModelBinding.catalog_entry_id == entry.id,
             )
         )
         if duplicate is not None:

@@ -120,6 +120,8 @@ function renderActions(
   references: ShotExecutionReference[] = [],
   trace: unknown[] = [],
   onDirectorDelegated?: () => void,
+  referencesReady = true,
+  formalKeyframeId: string | null = null,
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
@@ -156,8 +158,9 @@ function renderActions(
     <QueryClientProvider client={queryClient}>
       <ShotProductionActions
         projectId={SHOT.project_id}
-        shot={SHOT}
+        shot={{ ...SHOT, formal_keyframe_artifact_id: formalKeyframeId }}
         references={references}
+        referencesReady={referencesReady}
         trace={trace}
         onDirectorDelegated={onDirectorDelegated}
       />
@@ -169,6 +172,141 @@ describe("ShotProductionActions", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     window.localStorage.clear();
+  });
+
+  it("allows text-only video without a formal keyframe when T2V preflight is ready", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/execution-models/preflight?video_mode=text_to_video")) {
+        return json({
+          project_id: SHOT.project_id,
+          ready: true,
+          stages: [
+            { stage: "image_keyframe", ready: true },
+            {
+              stage: "video",
+              ready: true,
+              resolved_model_id: "openai_compatible_media//models/MiniMax-H3-runtime",
+              source: "project_profile",
+            },
+          ],
+        });
+      }
+      return json({});
+    });
+    renderActions([], [], undefined, false);
+    expect(screen.getByTestId("generate-video")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "文生视频" }));
+    await waitFor(() => expect(screen.getByTestId("generate-video")).toBeEnabled());
+    expect(screen.getByTestId("delegate-video-to-director")).toBeDisabled();
+  });
+
+  it("offers Ref2VA without a formal keyframe and freezes selected references", async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      calls.push({ url, body });
+      if (url.includes("/execution-models/preflight?video_mode=omni_reference")) {
+        return json({
+          project_id: SHOT.project_id,
+          ready: true,
+          stages: [
+            { stage: "image_keyframe", ready: true },
+            {
+              stage: "video",
+              ready: true,
+              resolved_model_id: "openai_compatible_media/H3",
+              contract_display_name: "SGLang H3 多素材参考 (Ref2VA)",
+              model_revision: "v2",
+            },
+          ],
+        });
+      }
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) return json(planResponse());
+      if (url.endsWith("/executions")) {
+        return json({
+          node_run_id: "33333333-3333-4333-8333-333333333333",
+          status: "queued",
+          plan_fingerprint: "a".repeat(64),
+        });
+      }
+      return json({});
+    });
+    const reference: ShotExecutionReference = {
+      binding_id: "binding-1",
+      purpose: "action",
+      asset_version_id: "version-1",
+      artifact_id: "artifact-1",
+      resolution_mode: "current_formal",
+      mime_type: "video/mp4",
+      fingerprint: "hash-1",
+    };
+    renderActions([reference]);
+    fireEvent.click(screen.getByRole("button", { name: "参考素材生视频" }));
+    await waitFor(() => expect(screen.getByTestId("generate-video")).toBeEnabled());
+    expect(screen.getByTestId("production-preflight-video")).toHaveTextContent(
+      "SGLang H3 多素材参考 (Ref2VA) · v2",
+    );
+    expect(screen.getByTestId("delegate-video-to-director")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("generate-video"));
+    await waitFor(() =>
+      expect(calls.some((call) => call.url.endsWith("/execution-plan"))).toBe(true),
+    );
+    const plan = calls.find((call) => call.url.endsWith("/execution-plan"));
+    expect(plan?.body.mode_id).toBe("omni_reference");
+    expect(plan?.body.references).toEqual([reference]);
+  });
+
+  it.each([
+    ["尾帧生视频", "last_frame", null],
+    ["首尾帧生视频", "first_last_frame", "formal-frame"],
+  ])("freezes the saved last frame for %s", async (label, mode, formalFrame) => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      calls.push({ url, body });
+      if (url.includes(`/execution-models/preflight?video_mode=${mode}`)) {
+        return json({
+          project_id: SHOT.project_id,
+          ready: true,
+          stages: [
+            { stage: "image_keyframe", ready: true },
+            { stage: "video", ready: true, resolved_model_id: "openai_compatible_media/H3" },
+          ],
+        });
+      }
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) return json(planResponse());
+      return json({});
+    });
+    const lastFrame: ShotExecutionReference = {
+      binding_id: "binding-last",
+      purpose: "last_frame",
+      asset_version_id: "version-last",
+      artifact_id: "artifact-last",
+      resolution_mode: "current_formal",
+      mime_type: "image/png",
+      fingerprint: "hash-last",
+    };
+    const unrelated: ShotExecutionReference = {
+      ...lastFrame,
+      binding_id: "binding-style",
+      purpose: "style",
+      artifact_id: "artifact-style",
+    };
+    renderActions([unrelated, lastFrame], [], undefined, true, formalFrame);
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    await waitFor(() => expect(screen.getByTestId("generate-video")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("generate-video"));
+    await waitFor(() =>
+      expect(calls.some((call) => call.url.endsWith("/execution-plan"))).toBe(true),
+    );
+    const plan = calls.find((call) => call.url.endsWith("/execution-plan"));
+    expect(plan?.body.mode_id).toBe(mode);
+    expect(plan?.body.references).toEqual([lastFrame]);
   });
 
   it("delegates one exact frozen plan to the Director runtime", async () => {

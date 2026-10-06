@@ -288,6 +288,33 @@ def test_execution_preflight_requires_immutable_connection_revision(
     }
 
 
+def test_text_video_preflight_rejects_an_i2v_only_binding(api: tuple[TestClient, Any]) -> None:
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _create_project(client, workspace_id)
+
+    async def _seed_i2v() -> None:
+        from app.access.models import Project, User
+        from model_infra_fixture import seed_model_infra
+        from sqlalchemy import select
+
+        async with factory() as session:
+            user = (await session.execute(select(User).limit(1))).scalar_one()
+            project = await session.get(Project, UUID(project_id))
+            assert project is not None
+            await seed_model_infra(session, project=project, user=user)
+            await session.commit()
+
+    _run_create(_seed_i2v())
+    response = client.get(
+        f"/api/v1/projects/{project_id}/execution-models/preflight?video_mode=text_to_video"
+    )
+    assert response.status_code == 200
+    video = next(stage for stage in response.json()["stages"] if stage["stage"] == "video")
+    assert video["ready"] is False
+    assert video["reason"] == "MODEL_CAPABILITY_UNSUPPORTED"
+
+
 def test_batch_preview_and_todo_fail_closed_before_dispatch(
     api: tuple[TestClient, Any],
 ) -> None:

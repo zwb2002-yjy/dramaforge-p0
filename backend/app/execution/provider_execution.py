@@ -27,6 +27,7 @@ from app.execution.run_state import (
     ExecuteNodeResult,
     _commit_terminal_failure,
 )
+from app.providers.runtime import PROVIDER_CONTENT_URI
 from app.shared.db import set_node_run_rls_context
 from app.shared.errors import (
     ProviderTaskCancelledError,
@@ -591,7 +592,12 @@ async def _execute_unified_media_node_run(
 
     op.status = "succeeded"
     op.completed_at = datetime.now(UTC)
-    uri = poll.artifact_uri
+    uri: object = poll.artifact_uri
+    if uri == PROVIDER_CONTENT_URI:
+        fetch_artifact = getattr(runtime, "fetch_artifact", None)
+        if not callable(fetch_artifact):
+            raise ValidationAppError("PROVIDER_MEDIA_MISSING: runtime cannot fetch content")
+        uri = await fetch_artifact(resume)
     data = await _resolve_media_bytes(
         kind=node_type,
         remote=remote,
