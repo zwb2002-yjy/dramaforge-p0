@@ -103,7 +103,7 @@ function SceneWorkflowGroup({ scene }: { scene: SceneWorkflowViewRead }) {
         {status.formal_shots}/{status.total_shots}
       </p>
       <ul className="workflow-shot-list">
-        {scene.shots.map((shot) => (
+        {(scene.shots ?? []).map((shot) => (
           <ShotWorkflowRow key={shot.shot_id} shot={shot} />
         ))}
       </ul>
@@ -126,7 +126,7 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
   const overview = useQuery({
     queryKey: queryKeys.production.workflowOverview(projectId),
     queryFn: () => fetchWorkflowOverview(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
   });
   const data = overview.data as WorkflowOverviewRead | undefined;
   const episodes = data?.episodes ?? [];

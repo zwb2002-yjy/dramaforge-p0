@@ -111,8 +111,15 @@ checked from service status and worker logs: `worker-default` consumes
 `dramaforge:heavy`. Recoverable work is republished by the resident
 `dispatcher` and by the Director worker's startup recovery.
 Provider reconciliation runs in an independent dispatcher loop, not a heavy-queue cron job;
-media execution still uses the existing queue. Apply migration `20260919_0073` before
+media execution still uses the existing queue. Apply migrations through the
+candidate head (currently `20260922_0077`; confirm with `alembic heads`) before
 updating the dispatcher and media workers. This rollout is not implied by a source-only push.
+
+PostgreSQL, Redis, MinIO and the LiteLLM database use `restart: unless-stopped` plus bounded
+startup health periods. The API, dispatcher and every Worker wait for PostgreSQL health and
+the completed database bootstrap, then also restart unless explicitly stopped. The frontend
+waits for API health. This ordering prevents a surviving gateway from presenting an API that
+started before its DNS/database dependencies recovered after a Docker restart.
 
 Director health uses `python -m app.workers.healthcheck` rather than importing
 all WorkerSettings/jobs for the Arq CLI. It checks the configured queue's nonempty

@@ -15,6 +15,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -23,6 +25,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 5s
+    restart: unless-stopped
 
   minio:
     # MinIO publishes only to quay.io; the Docker Hub `minio/minio` repository was
@@ -39,6 +43,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
+    restart: unless-stopped
 
   # LiteLLM Proxy (fix spec §4.1/§6/§11). Official BerriAI image, pinned. The
   # Proxy is DramaForge's unified LLM scheduler: it owns Router load-balancing /
@@ -58,6 +64,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
+    restart: unless-stopped
 
   litellm:
     image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.96.0}
@@ -170,6 +178,8 @@ services:
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
       minio:
@@ -288,6 +298,8 @@ services:
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     security_opt:
@@ -350,6 +362,8 @@ services:
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     security_opt:
@@ -390,6 +404,8 @@ services:
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     security_opt:
@@ -453,6 +469,8 @@ services:
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     security_opt:

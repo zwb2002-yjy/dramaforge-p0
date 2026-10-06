@@ -22,6 +22,10 @@ from app.api.deps import (
     SessionDep,
     require_selected_workspace,
 )
+from app.providers.execution_preflight import (
+    ExecutionModelPreflightRead,
+    resolve_execution_model_preflight,
+)
 from app.providers.model_profiles.models import (
     ModelSlotBinding,
     SimpleModeSelection,
@@ -207,9 +211,7 @@ async def update_workspace_profile(
     service = ProductionModelProfileService(session)
     profile = await service.get(profile_id=profile_id)
     _assert_workspace_profile(profile, workspace_id)
-    bindings = (
-        _to_domain_bindings(body.bindings) if body.bindings is not None else None
-    )
+    bindings = _to_domain_bindings(body.bindings) if body.bindings is not None else None
     profile = await service.update(
         profile_id=profile_id,
         actor_id=user.id,
@@ -287,9 +289,7 @@ async def get_project_profile(
     user: CurrentUser,
     session: SessionDep,
 ) -> ProfileRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     service = ProductionModelProfileService(session)
     profile = await service.get_project_profile(project_id=project.id)
     if profile is None:
@@ -311,17 +311,13 @@ async def put_project_profile(
     session: SessionDep,
     _: CsrfDep,
 ) -> ProfileRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     service = ProductionModelProfileService(session)
     profile = await service.get_project_profile(project_id=project.id)
     if profile is None:
         # Snapshot the workspace default into a project profile on first write
         # (spec §54 Snapshot semantics — the project stops live-inheriting).
-        workspace_default = await service.get_workspace_default(
-            workspace_id=project.workspace_id
-        )
+        workspace_default = await service.get_workspace_default(workspace_id=project.workspace_id)
         profile = await service.create(
             workspace_id=project.workspace_id,
             actor_id=user.id,
@@ -330,9 +326,7 @@ async def put_project_profile(
             project_id=project.id,
             copy_from=workspace_default.id if workspace_default is not None else None,
         )
-    bindings = (
-        _to_domain_bindings(body.bindings) if body.bindings is not None else None
-    )
+    bindings = _to_domain_bindings(body.bindings) if body.bindings is not None else None
     profile = await service.update(
         profile_id=profile.id,
         actor_id=user.id,
@@ -357,9 +351,7 @@ async def get_effective_bindings(
 ) -> list[EffectiveBindingRead]:
     """Preview the effective slot→model map for a project (spec §37). This is
     resolution preview only — it never calls a Provider."""
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     service = ProductionModelProfileService(session)
     profile = await service.get_effective_for_project(project=project)
     if profile is None:
@@ -378,9 +370,9 @@ async def get_effective_bindings(
             planned_capability_for_slot,
         )
 
-        preview_capability = planned_capability_for_slot(slot) or slot_definition(
-            slot
-        ).required_capabilities[0]
+        preview_capability = (
+            planned_capability_for_slot(slot) or slot_definition(slot).required_capabilities[0]
+        )
         try:
             resolved = await resolver.resolve(
                 workspace_id=project.workspace_id,
@@ -404,3 +396,26 @@ async def get_effective_bindings(
             )
         )
     return result
+
+
+@router.get(
+    "/projects/{project_id}/execution-models/preflight",
+    response_model=ExecutionModelPreflightRead,
+    dependencies=[Depends(require_selected_workspace)],
+)
+async def get_execution_model_preflight(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> ExecutionModelPreflightRead:
+    """Resolve the exact provider bindings production will freeze.
+
+    The profile preview above answers which logical model a profile names.  A
+    production run additionally needs an enabled, credentialed workspace
+    ``ProviderModelBinding`` for the relevant purpose.  Returning that second
+    answer explicitly prevents a UI from saying "use default" while the first
+    paid action will fail with ``MODEL_BINDING_MISSING``.
+    """
+
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return await resolve_execution_model_preflight(session, project=project)

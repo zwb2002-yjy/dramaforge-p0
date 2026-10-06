@@ -44,7 +44,7 @@ async function openPortraitReview(page: Page) {
       }),
   );
   await page.goto(`/projects/${PROJECT_ID}/review`);
-  await expect(page.getByRole("heading", { name: "镜头审片与批注" })).toBeInViewport();
+  await expect(page.getByRole("heading", { name: "审片确认" })).toBeInViewport();
   await expect
     .poll(() =>
       page
@@ -86,7 +86,7 @@ async function scrollReview(page: Page) {
   const viewport = page.viewportSize()!;
   await page.mouse.move(viewport.width - 80, viewport.height / 2);
   await page.mouse.wheel(0, 1100);
-  await expect(page.getByRole("heading", { name: "镜头审片与批注" })).not.toBeInViewport();
+  await expect(page.getByRole("heading", { name: "审片确认" })).not.toBeInViewport();
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
 }
 
@@ -140,7 +140,7 @@ for (const viewport of [
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
     await creation.click();
     await expect(page).toHaveURL(`/projects/${PROJECT_ID}/review`);
-    await expect(page.getByRole("heading", { name: "镜头审片与批注" })).toBeInViewport();
+    await expect(page.getByRole("heading", { name: "审片确认" })).toBeInViewport();
     expect(writes).toEqual([]);
     expect(errors).toEqual([]);
   });

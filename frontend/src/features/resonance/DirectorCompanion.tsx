@@ -41,7 +41,7 @@ export function DirectorCompanion({
   const turns = useQuery({
     queryKey: queryKeys.director.turns(projectId, "shot", shotId ?? "none"),
     queryFn: () => listDirectorTurns(projectId, "shot", shotId!),
-    enabled: Boolean(shotId) && projectId !== "demo",
+    enabled: Boolean(projectId) && Boolean(shotId),
     retry: false,
     refetchInterval: (query) =>
       Array.isArray(query.state.data) && query.state.data.some((turn) => ACTIVE.has(turn.status))

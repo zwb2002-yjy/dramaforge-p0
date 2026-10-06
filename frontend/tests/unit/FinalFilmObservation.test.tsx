@@ -142,6 +142,40 @@ it("refuses an incomplete preparation receipt without rendering or retrying", as
   expect(calls.some((url) => url.endsWith("/render"))).toBe(false);
 });
 
+it("stops on an ambiguous tail submission without rendering or retrying", async () => {
+  const calls: string[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.endsWith("/final-films")) return json([]);
+    if (url.endsWith("/auth/csrf")) return json({ csrf_token: "test" });
+    if (url.endsWith("/prepare")) {
+      return json({ preparation_fingerprint: "a".repeat(64), node_run_ids: ["r1"] });
+    }
+    if (url.includes("/node-runs/status?")) {
+      return json([
+        {
+          id: "r1",
+          status: "failed",
+          result_artifact_id: null,
+          error_code: "PROVIDER_SUBMISSION_UNKNOWN",
+        },
+      ]);
+    }
+    throw new Error("Unexpected request: " + url);
+  });
+
+  const { result } = mount();
+  await act(async () => {
+    await result.current.exportFilm();
+  });
+
+  expect(result.current.error).toContain("提交结果未知");
+  expect(result.current.error).toContain("不要盲目重试");
+  expect(calls.filter((url) => url.includes("/node-runs/status?"))).toHaveLength(1);
+  expect(calls.some((url) => url.endsWith("/render"))).toBe(false);
+});
+
 it("keeps real UUID export keys within the server limit and distinguishes saved and prepared versions", async () => {
   const projectId = "9a0b1dc8-f938-4699-b567-231339655d22";
   const sessionId = "23512641-a87d-49c3-bd51-22921980a4e7";

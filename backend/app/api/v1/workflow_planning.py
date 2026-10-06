@@ -12,18 +12,26 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from app.access.models import Project
 from app.access.projects import ProjectService
 from app.api.deps import CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import Episode, Scene, Shot
-from app.director.workflows.workflow_read_models import build_shot_workflow_state
+from app.director.workflows.workflow_read_models import (
+    ShotWorkflowState,
+    build_shot_workflow_state,
+)
 from app.shared.errors import NotFoundError
 
 router = APIRouter(
     tags=["workflow-planning"], dependencies=[Depends(require_selected_workspace)]
 )
+
+
+class ShotWorkflowStateResponse(BaseModel):
+    workflow_state: ShotWorkflowState
 
 
 async def _shot_with_episode(
@@ -44,13 +52,16 @@ async def _shot_with_episode(
     return shot, episode.id
 
 
-@router.get("/projects/{project_id}/shots/{shot_id}/workflow-state")
+@router.get(
+    "/projects/{project_id}/shots/{shot_id}/workflow-state",
+    response_model=ShotWorkflowStateResponse,
+)
 async def get_shot_workflow_state(
     project_id: UUID,
     shot_id: UUID,
     user: CurrentUser,
     session: SessionDep,
-) -> dict[str, object]:
+) -> ShotWorkflowStateResponse:
     """Wire-visible workflow state for one shot (read-only aggregation).
 
     Resolves the workspace keyframe manifest so ``capability_assessment`` is a
@@ -82,4 +93,4 @@ async def get_shot_workflow_state(
         episode_id=episode_id,
         assessment_manifest=assessment_manifest,
     )
-    return {"workflow_state": state.model_dump(mode="json")}
+    return ShotWorkflowStateResponse(workflow_state=state)

@@ -59,10 +59,11 @@ test("create=false is normalized without logging out; only explicit logout chang
   await expect(page.getByRole("region", { name: "新建项目" })).not.toBeVisible();
   expect(writes).toEqual([]);
   await page.goto("/settings/defaults");
-  await expect(page).toHaveURL(/\/?create=true$/);
-  await expect(page.getByRole("region", { name: "新建项目" })).toBeVisible();
-  await page.getByRole("button", { name: "取消", exact: true }).click();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL("/settings/defaults");
+  await expect(page.getByRole("tab", { name: "默认模型" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
   expect(writes).toEqual([]);
   await page.goto("/settings/account");
   await expect(page.getByText("owner@example.com")).toBeVisible();
@@ -101,11 +102,15 @@ test("director policy follows creation, not project model settings", async ({ pa
       body: { expected_version: 1, director_autonomy: "MANUAL" },
     },
   ]);
-  await page.getByRole("link", { name: "分镜制作", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "创作流程" })
+    .getByRole("link", { name: "03 分镜制作", exact: true })
+    .click();
   await expect(policy).toHaveValue("MANUAL");
   await page.goto(`/settings/projects/${PROJECT_ID}`);
   await expect(page.getByTestId("project-settings-page")).toBeVisible();
   await expect(page.getByRole("combobox", { name: "导演参与度" })).toHaveCount(0);
+  await page.getByRole("link", { name: "设置", exact: true }).click();
   await expect(page.getByRole("navigation", { name: "设置导航" }).getByRole("link")).toHaveCount(2);
   expect(errors).toEqual([]);
 });
@@ -120,7 +125,7 @@ test("workspace management belongs to Projects and no longer contains model conf
     "aria-current",
     "page",
   );
-  await page.getByTestId("workspace-management-disclosure").locator(":scope > summary").click();
+  await expect(page.getByRole("heading", { name: "工作空间", level: 1 })).toBeVisible();
   await expect(page.getByRole("region", { name: "工作空间管理" })).toBeVisible();
   await expect(page.getByTestId("workspace-model-profile-settings")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "创建空间", exact: true })).toBeVisible();

@@ -16,7 +16,7 @@ export function EditingSessionPicker({
   const sessions = useQuery({
     queryKey: queryKeys.editing.sessions(projectId),
     queryFn: () => fetchEditSessions(projectId),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
     retry: false,
   });
   return (

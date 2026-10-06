@@ -8,6 +8,7 @@ import { defineConfig } from "vite";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const apiTarget = process.env.DRAMAFORGE_API_URL ?? "http://127.0.0.1:8080";
+const usePolling = process.env.DRAMAFORGE_VITE_POLLING === "true";
 
 export default defineConfig({
   cacheDir: "./tmp/vite-cache",
@@ -26,6 +27,11 @@ export default defineConfig({
   server: {
     port: 5173,
     watch: {
+      // Docker Desktop does not always propagate Windows bind-mount rename
+      // events into the Linux container. The live preview opts into polling;
+      // ordinary host development keeps native events and their lower cost.
+      usePolling,
+      interval: usePolling ? 250 : undefined,
       // Editors that write atomically create `.<name>.<pid>.<id>.tmpdir/`
       // next to the target file and rename it into place. Watching that
       // transient directory throws EBUSY on Windows and kills the dev server,

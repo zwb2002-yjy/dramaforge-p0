@@ -1,38 +1,43 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { CapabilitySpecRead, ModelRead } from "../../src/lib/api";
+import type { CapabilitySpecRead, ParameterSpecRead } from "../../src/lib/api";
 import {
   AdvancedModelOptions,
   DynamicCapabilityForm,
-  ModelPicker,
   ReferencePurposeEditor,
 } from "../../src/features/model-controls";
+
+function parameter(
+  value: Omit<ParameterSpecRead, "required" | "deprecated" | "sensitive">,
+): ParameterSpecRead {
+  return { required: false, deprecated: false, sensitive: false, ...value };
+}
 
 function mockSpec(overrides: Partial<CapabilitySpecRead> = {}): CapabilitySpecRead {
   return {
     capability: "video.image_to_video",
     input_slots: {},
     common_options: {
-      duration_seconds: {
+      duration_seconds: parameter({
         type: "integer",
         title: "时长(秒)",
         ui_component: "slider",
         minimum: 5,
         maximum: 10,
         default: 10,
-      },
-      resolution: {
+      }),
+      resolution: parameter({
         type: "string",
         title: "分辨率",
         ui_component: "select",
         enum: ["720p", "1080p"],
         default: "1080p",
-      },
-      enhanced: { type: "boolean", title: "增强", ui_component: "switch" },
+      }),
+      enhanced: parameter({ type: "boolean", title: "增强", ui_component: "switch" }),
     },
     native_options: {
-      seed: { type: "integer", title: "种子", ui_component: "number" },
+      seed: parameter({ type: "integer", title: "种子", ui_component: "number" }),
     },
     constraints: {
       mutually_exclusive: [["enhanced", "resolution"]],
@@ -98,31 +103,12 @@ describe("AdvancedModelOptions", () => {
   it("renders native options inside a collapsible section", () => {
     render(
       <AdvancedModelOptions
-        options={{ seed: { type: "integer", title: "种子", ui_component: "number" } }}
+        options={{ seed: parameter({ type: "integer", title: "种子", ui_component: "number" }) }}
         values={{ seed: 7 }}
         onChange={() => undefined}
       />,
     );
     expect(screen.getByTestId("advanced-model-options")).toBeTruthy();
-  });
-});
-
-describe("ModelPicker", () => {
-  it("renders models by display name and capability, not provider names", () => {
-    const models: ModelRead[] = [
-      {
-        id: "agnes/agnes-video-v2.0",
-        provider_id: "agnes",
-        display_name: "Agnes Video 2.0",
-        enabled: true,
-        configured: true,
-        available: true,
-        capabilities: ["video.image_to_video"],
-      },
-    ];
-    render(<ModelPicker models={models} value={null} onChange={() => undefined} />);
-    expect(screen.getByText("Agnes Video 2.0")).toBeTruthy();
-    expect(screen.getByText(/video\.image_to_video/)).toBeTruthy();
   });
 });
 

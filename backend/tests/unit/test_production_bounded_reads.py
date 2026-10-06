@@ -66,10 +66,18 @@ async def test_status_lookup_is_bounded_exact_ordered_and_fails_closed(env):
     _, session, _, project, _ = env
     first = await add_run(env)
     second = await add_run(env, "completed", 2)
+    first.error_code = "PROVIDER_SUBMISSION_UNKNOWN"
+    await session.flush()
     service = ProductionReadService(session)
     result = await service.statuses(project_id=project.id, run_ids=[second.id, first.id])
     assert [row.id for row in result] == [second.id, first.id]
-    assert set(result[0].model_dump()) == {"id", "status", "result_artifact_id"}
+    assert set(result[0].model_dump()) == {
+        "id",
+        "status",
+        "result_artifact_id",
+        "error_code",
+    }
+    assert result[1].error_code == "PROVIDER_SUBMISSION_UNKNOWN"
     for project_id, ids, error in [
         (project.id, [first.id, uuid4()], NotFoundError),
         (uuid4(), [first.id], NotFoundError),

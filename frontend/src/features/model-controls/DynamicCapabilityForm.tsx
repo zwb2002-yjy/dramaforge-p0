@@ -11,11 +11,7 @@ import type { CapabilitySpecRead, ParameterSpecRead } from "../../lib/api";
 import { allowedValuesFor, uiComponentFor, type OptionValue } from "../../lib/manifestOptions";
 
 const EMPTY_SPEC: CapabilitySpecRead = {
-  capability: "",
-  input_slots: {},
-  common_options: {},
-  native_options: {},
-  constraints: { mutually_exclusive: [], requires: {}, conditional: [] },
+  capability: "image.generate",
   transport_profile_id: "",
 };
 
@@ -36,7 +32,7 @@ function isDisabledByExclusiveGroup(
   keyName: string,
   values: Record<string, OptionValue>,
 ): boolean {
-  for (const group of spec.constraints.mutually_exclusive) {
+  for (const group of spec.constraints?.mutually_exclusive ?? []) {
     if (!group.includes(keyName)) continue;
     const occupied = group.find((member) => member !== keyName && values[member] !== undefined);
     if (occupied !== undefined) return true;
@@ -176,11 +172,12 @@ export function DynamicCapabilityForm({
   onChange,
   optionKeys,
 }: DynamicCapabilityFormProps) {
-  const keys = optionKeys ?? Object.keys(spec.common_options);
+  const commonOptions = spec.common_options ?? {};
+  const keys = optionKeys ?? Object.keys(commonOptions);
   return (
     <div className="space-y-3" data-testid="dynamic-capability-form">
       {keys.map((key) => {
-        const parameter = spec.common_options[key];
+        const parameter = commonOptions[key];
         if (!parameter) return null;
         return (
           <OptionField

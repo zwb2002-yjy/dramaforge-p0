@@ -1,0 +1,66 @@
+{
+  "contract": {
+    "documentation_source": {
+      "notes": "Protocol contract for OpenAI-compatible image generation/edit endpoints.",
+      "verified_at": "2026-09-21"
+    },
+    "wire_template": {
+      "host": "https://api.openai.com/v1",
+      "method": "POST",
+      "path": "/images/generations",
+      "request_body": {
+        "model": "<discovered-model>",
+        "prompt": "<prompt>",
+        "size": "1024x1024",
+        "response_format": "url"
+      },
+      "status_machine": [
+        "synchronous"
+      ],
+      "success_response": {
+        "data": [
+          {
+            "url": "https://short-lived.example/image.png"
+          }
+        ]
+      }
+    }
+  },
+  "manifest": {
+    "manifest_version": "2026-09-21",
+    "provider_type": "openai_compatible_media",
+    "protocol_profile": "openai_media_v1",
+    "model_id": "@contract/openai-image-v1",
+    "model_revision": "v1",
+    "media_kind": "image",
+    "display_name": "OpenAI 兼容图像协议",
+    "lifecycle": "active",
+    "catalog_source": "protocol_contract",
+    "documented_at": "2026-09-21",
+    "operations": {
+      "image.generate": {
+        "operation": "image.generate",
+        "capabilities": [
+          "image.t2i",
+          "image.i2i"
+        ],
+        "output_constraints": {
+          "response_format": "url",
+          "size": "1024x1024"
+        },
+        "reference_constraints": {
+          "reference_image": {
+            "min": 0,
+            "max": 1
+          }
+        },
+        "exclusive_groups": []
+      }
+    },
+    "option_schema": {
+      "namespace": "",
+      "options": {}
+    }
+  },
+  "manifest_hash": "1cc79d5e922e07cb77b612d171c9b065ece7ac6d4ad64d8f8a94bf6b9dc7d183"
+}

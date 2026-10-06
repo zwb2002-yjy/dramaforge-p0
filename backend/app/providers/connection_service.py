@@ -499,9 +499,9 @@ class ProviderConnectionService:
             or entry.lifecycle != "active"
             or entry.provider_type != connection.provider_type
             or entry.protocol_profile != connection.protocol_profile
-            or entry.model_id != binding.model_id
             or entry.media_kind != binding.media_type
             or binding.capability_manifest_hash != entry.contract_manifest_hash
+            or binding.invoke_model_value != binding.model_id
         ):
             raise ValidationAppError(
                 "model binding does not reference the active catalog contract",
@@ -613,7 +613,11 @@ class ProviderConnectionService:
                 details={"code": "PROBE_RATE_LIMITED"},
             )
         cfg = await self._probe_settings(connection, binding, revision=probe_revision)
-        client = plugin.build_client(cfg, host=probe_revision.base_url)
+        client = (
+            plugin.build_client(cfg, host=probe_revision.base_url)
+            if capability != "auth_models"
+            else None
+        )
         reference_artifact: Artifact | None = None
         reference_bytes: bytes | None = None
         reference_mime = "image/png"
@@ -693,12 +697,19 @@ class ProviderConnectionService:
                         else None
                     )
                     if isinstance(raw_models, list):
+                        # Provider responses are untrusted and can be very large.
+                        # Keep deterministic ids that fit the binding identity.
+                        candidates = sorted(
+                            {
+                                str(item.get("id") or item.get("model") or "").strip()
+                                for item in raw_models
+                                if isinstance(item, dict)
+                            }
+                            - {""}
+                        )[:500]
                         listed_model_ids = {
-                            str(item.get("id") or item.get("model") or "").strip()
-                            for item in raw_models
-                            if isinstance(item, dict)
+                            model_id for model_id in candidates if len(model_id) <= 160
                         }
-                        listed_model_ids.discard("")
                     if not listed_model_ids:
                         status = "failed"
                         error_code = "PROVIDER_MODELS_RESPONSE_INVALID"
@@ -711,6 +722,7 @@ class ProviderConnectionService:
             except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
                 error_code = "PROVIDER_UNAVAILABLE"
         elif capability == "image_t2i":
+            assert client is not None
             evidence_model_id = (
                 binding.invoke_model_value
                 if binding is not None
@@ -725,6 +737,7 @@ class ProviderConnectionService:
             http_status = int(result["http_status"]) if result.get("http_status") else None
             error_code = str(result.get("error_code") or "") or None
         elif capability == "image_i2i":
+            assert client is not None
             evidence_model_id = (
                 binding.invoke_model_value
                 if binding is not None
@@ -766,6 +779,7 @@ class ProviderConnectionService:
                     http_status = int(result["http_status"]) if result.get("http_status") else None
                     error_code = str(result.get("error_code") or "") or None
         elif capability == "video_i2v":
+            assert client is not None
             evidence_model_id = (
                 binding.invoke_model_value
                 if binding is not None
@@ -796,6 +810,7 @@ class ProviderConnectionService:
                 http_status = int(result["http_status"]) if result.get("http_status") else None
                 error_code = str(result.get("error_code") or "") or None
         else:
+            assert client is not None
             evidence_model_id = (
                 binding.invoke_model_value
                 if binding is not None
@@ -830,6 +845,8 @@ class ProviderConnectionService:
             currency=probe_currency,
             cost_status="not_reported",
             error_code=error_code,
+            discovered_model_ids=sorted(listed_model_ids),
+            connection_revision_id=probe_revision.id,
             model_binding_id=binding.id if binding is not None else None,
             capability_manifest_hash=(
                 binding.capability_manifest_hash if binding is not None else None
@@ -1046,6 +1063,7 @@ class ProviderConnectionService:
         model_id: str,
         purpose: str,
         enabled: bool,
+        capability_contract_id: UUID | None = None,
     ) -> ProviderModelBinding:
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
@@ -1053,20 +1071,48 @@ class ProviderConnectionService:
         plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
         if (media_type, purpose) not in {("image", "keyframe"), ("video", "video")}:
             raise ValidationAppError("unsupported model binding purpose")
-        # The binding must reference an active catalog entry of the same
-        # provider/profile/media; the single-model contract map is gone.
-        entry = await ModelCatalogService(self._session).active_entry_for(
-            provider_type=plugin.provider_type,
-            protocol_profile=plugin.protocol_profile,
-            model_id=model_id,
+        # The entry is a capability-plugin contract. The discovered remote
+        # model identity is stored separately and may reuse that contract.
+        entry = (
+            await self._session.get(ModelCatalogEntry, capability_contract_id)
+            if capability_contract_id is not None
+            else await ModelCatalogService(self._session).active_entry_for(
+                provider_type=plugin.provider_type,
+                protocol_profile=plugin.protocol_profile,
+                model_id=model_id,
+            )
         )
         if entry is None:
             raise ValidationAppError(
                 "model binding has no active catalog entry",
                 details={"code": "MODEL_NOT_IN_CATALOG"},
             )
-        if entry.media_kind != media_type:
+        if (
+            entry.lifecycle != "active"
+            or entry.provider_type != plugin.provider_type
+            or entry.protocol_profile != plugin.protocol_profile
+            or entry.media_kind != media_type
+        ):
             raise ValidationAppError("model binding media type mismatch")
+        discovered = False
+        if capability_contract_id is not None and entry.model_id != model_id:
+            revision = await self.current_connection_revision(connection=connection)
+            evidence = await self._session.scalar(
+                select(ProviderCapabilityEvidence)
+                .where(
+                    ProviderCapabilityEvidence.connection_id == connection.id,
+                    ProviderCapabilityEvidence.capability == "auth_models",
+                    ProviderCapabilityEvidence.status == "passed",
+                    ProviderCapabilityEvidence.connection_revision_id == revision.id,
+                )
+                .order_by(ProviderCapabilityEvidence.tested_at.desc())
+            )
+            discovered = bool(evidence and model_id in (evidence.discovered_model_ids or []))
+            if not discovered:
+                raise ValidationAppError(
+                    "model was not returned by the current connection discovery",
+                    details={"code": "MODEL_NOT_DISCOVERED"},
+                )
         operation_kind = "image.generate" if media_type == "image" else "video.generate"
         operations = entry.capability_manifest_json.get("operations") or {}
         if operation_kind not in operations:
@@ -1077,7 +1123,7 @@ class ProviderConnectionService:
             select(ProviderModelBinding.id).where(
                 ProviderModelBinding.connection_id == connection.id,
                 ProviderModelBinding.media_type == media_type,
-                ProviderModelBinding.catalog_entry_id == entry.id,
+                ProviderModelBinding.model_id == model_id,
                 ProviderModelBinding.purpose == purpose,
             )
         )
@@ -1097,7 +1143,7 @@ class ProviderConnectionService:
             contract_tested=True,
             # A new binding has no evidence of its own; only a binding-scoped
             # probe of this exact model advances account_verified.
-            account_verified=False,
+            account_verified=discovered,
             quality_gated=False,
             catalog_entry_id=entry.id,
             capability_manifest_hash=entry.contract_manifest_hash,

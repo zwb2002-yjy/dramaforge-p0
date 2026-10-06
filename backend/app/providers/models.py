@@ -146,6 +146,13 @@ class ProviderCapabilityEvidence(Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     cost_status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_reported")
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Exact model ids returned by a successful read-only account catalog probe.
+    # Keeping this on immutable evidence lets the settings UI show what the
+    # current endpoint/account actually exposed after a refresh.
+    discovered_model_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    connection_revision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("provider_connection_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
     tested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -157,12 +164,12 @@ class ProviderCapabilityEvidence(Base):
 class ProviderModelBinding(Base):
     __tablename__ = "provider_model_bindings"
     __table_args__ = (
-        # One binding per (connection, media, catalog revision, purpose): the
-        # same model may have multiple revisions coexist as distinct bindings.
+        # One binding per exact discovered model identity and purpose. Multiple
+        # remote models may reuse the same capability-plugin contract.
         UniqueConstraint(
             "connection_id",
             "media_type",
-            "catalog_entry_id",
+            "model_id",
             "purpose",
             name="uq_provider_model_binding_revision",
         ),

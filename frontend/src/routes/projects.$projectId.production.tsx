@@ -14,10 +14,22 @@ import { projectRoute } from "./projects.$projectId";
 export const projectProductionRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: "/production",
+  validateSearch: (search: Record<string, unknown>) => ({
+    view: search.view === "experiments" ? ("experiments" as const) : undefined,
+    shotId: typeof search.shotId === "string" ? search.shotId : undefined,
+  }),
   component: ProductionRoutePage,
 });
 
 function ProductionRoutePage() {
   const { projectId } = projectProductionRoute.useParams();
-  return <LazyProductionPage projectId={projectId} />;
+  const { view, shotId } = projectProductionRoute.useSearch();
+  return (
+    <LazyProductionPage
+      key={`${projectId}:${view}:${shotId}`}
+      projectId={projectId}
+      initialView={view}
+      initialShotId={shotId}
+    />
+  );
 }

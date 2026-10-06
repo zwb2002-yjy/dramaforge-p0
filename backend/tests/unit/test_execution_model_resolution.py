@@ -151,6 +151,27 @@ async def test_explicit_binding_freezes_concrete_identity(session: AsyncSession)
 
 
 @pytest.mark.asyncio
+async def test_protocol_contract_preserves_discovered_model_id_with_slash(
+    session: AsyncSession,
+) -> None:
+    project, binding, _user = await _seed(session)
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert entry is not None
+    entry.model_id = "@contract/video-v1"
+    entry.catalog_source = "protocol_contract"
+    binding.model_id = "vendor/video-model"
+    binding.remote_resource_id = "vendor/video-model"
+    binding.invoke_model_value = "vendor/video-model"
+    await session.flush()
+
+    result = await _resolve(session, project, requested_binding_id=binding.id)
+
+    assert result.status == "RESOLVED"
+    assert result.resolved_model_id == "agnes/vendor/video-model"
+    assert result.invoke_model_value == "vendor/video-model"
+
+
+@pytest.mark.asyncio
 async def test_project_slot_beats_workspace_slot(session: AsyncSession) -> None:
     project, binding, user = await _seed(session)
     session.add_all(

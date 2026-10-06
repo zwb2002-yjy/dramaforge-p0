@@ -1,0 +1,70 @@
+{
+  "contract": {
+    "documentation_source": {
+      "notes": "Protocol contract for OpenAI-compatible asynchronous video creation and polling.",
+      "verified_at": "2026-09-21"
+    },
+    "wire_template": {
+      "host": "https://api.openai.com/v1",
+      "method": "POST",
+      "path": "/videos",
+      "poll": {
+        "video_id": "GET /videos/{id}"
+      },
+      "request_body": {
+        "model": "<discovered-model>",
+        "prompt": "<prompt>",
+        "seconds": 5,
+        "size": "720x1280",
+        "input_reference": "<multipart-first-frame>"
+      },
+      "status_machine": [
+        "queued",
+        "running",
+        "succeeded"
+      ],
+      "success_response": {
+        "id": "video-...",
+        "status": "queued"
+      }
+    }
+  },
+  "manifest": {
+    "manifest_version": "2026-09-21",
+    "provider_type": "openai_compatible_media",
+    "protocol_profile": "openai_media_v1",
+    "model_id": "@contract/openai-video-v1",
+    "model_revision": "v1",
+    "media_kind": "video",
+    "display_name": "OpenAI 兼容异步视频协议",
+    "lifecycle": "active",
+    "catalog_source": "protocol_contract",
+    "documented_at": "2026-09-21",
+    "operations": {
+      "video.generate": {
+        "operation": "video.generate",
+        "capabilities": [
+          "video.i2v.first_frame"
+        ],
+        "output_constraints": {
+          "duration_seconds": 5,
+          "resolution": "720x1280",
+          "aspect_ratio": "9:16",
+          "native_audio": false
+        },
+        "reference_constraints": {
+          "first_frame": {
+            "min": 1,
+            "max": 1
+          }
+        },
+        "exclusive_groups": []
+      }
+    },
+    "option_schema": {
+      "namespace": "",
+      "options": {}
+    }
+  },
+  "manifest_hash": "15e0a0f7c4e74463adb3b6524fc2437240111aa2c48a1f7b1fd74d91eceacd89"
+}

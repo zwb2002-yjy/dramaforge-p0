@@ -140,10 +140,24 @@ class ProductionModelProfileService:
         registry: ModelRegistry | None = None,
     ) -> None:
         self._session = session
+        self._workspace_dynamic = registry is None
+        self._loaded_workspace_id: UUID | None = None
         if registry is None:
             self._registry = default_model_registry()
         else:
             self._registry = registry
+
+    async def _ensure_workspace_registry(self, workspace_id: UUID) -> None:
+        if not self._workspace_dynamic or self._loaded_workspace_id == workspace_id:
+            return
+        from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
+
+        self._registry = await workspace_model_registry(
+            self._session,
+            workspace_id=workspace_id,
+            base_registry=default_model_registry(),
+        )
+        self._loaded_workspace_id = workspace_id
 
     # ------------------------------------------------------------------
     # Queries
@@ -248,6 +262,7 @@ class ProductionModelProfileService:
         """Create a profile. ``copy_from`` snapshots another profile's bindings
         into this one (spec §54 Snapshot — creating a project copies the
         workspace default rather than live-inheriting)."""
+        await self._ensure_workspace_registry(workspace_id)
         if copy_from is not None:
             source = await self.get(profile_id=copy_from)
             if source.workspace_id != workspace_id:
@@ -292,6 +307,7 @@ class ProductionModelProfileService:
         expected_version: int | None = None,
     ) -> ProductionModelProfile:
         profile = await self._get_for_update(profile_id=profile_id)
+        await self._ensure_workspace_registry(profile.workspace_id)
         if expected_version is not None and profile.version != expected_version:
             raise profile_version_conflict(expected_version, profile.version)
         if name is not None:
@@ -325,6 +341,7 @@ class ProductionModelProfileService:
         """Simple-mode batch patch (spec §30/§77/§78): LLM / Image / Video map to
         slot groups. ``bindings`` stays the single source of truth."""
         profile = await self._get_for_update(profile_id=profile_id)
+        await self._ensure_workspace_registry(profile.workspace_id)
         if expected_version is not None and profile.version != expected_version:
             raise profile_version_conflict(expected_version, profile.version)
         bindings = parse_bindings(profile.bindings)
@@ -498,6 +515,7 @@ class ProductionModelProfileService:
         workspace_id: UUID,
         bindings: dict[ModelSlot, ModelSlotBinding],
     ) -> dict[str, BindingRead]:
+        await self._ensure_workspace_registry(workspace_id)
         from app.providers.models import ProviderConnection
 
         rows = list(
@@ -527,7 +545,9 @@ class ProductionModelProfileService:
             provider_id = model.manifest.provider_id if model is not None else ""
             display_name = model.manifest.display_name if model is not None else binding.model_id
             is_configured = (
-                litellm_configured if provider_id == "litellm" else provider_id in configured
+                ("litellm" in configured or litellm_configured)
+                if provider_id == "litellm"
+                else provider_id in configured
             )
             result[str(slot)] = BindingRead(
                 slot=str(slot),
@@ -567,6 +587,7 @@ class ProductionModelProfileService:
         into an immutable snapshot (spec §21/§92). The snapshot uses the *current*
         bindings at graph start; a running graph keeps them even if the profile
         changes."""
+        await self._ensure_workspace_registry(project.workspace_id)
         profile = await self.get_effective_for_project(project=project)
         if profile is None:
             return ModelProfileSnapshot(

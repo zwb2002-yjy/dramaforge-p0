@@ -9,7 +9,10 @@ import {
   Users,
 } from "lucide-react";
 
-export type ContextTool = "character" | "camera" | "motion" | "look" | "generate" | "director";
+import { Tab, Tabs } from "../../components/ui";
+
+export type ContextTool =
+  "prompts" | "character" | "camera" | "motion" | "look" | "generate" | "director";
 
 type ContextDockProps = {
   activeTool: ContextTool | null;
@@ -27,6 +30,7 @@ const TOOLS: Array<{
   label: string;
   testId: string;
 }> = [
+  { id: "prompts", label: "提示词", testId: "context-dock-prompts" },
   { id: "character", label: "角色", testId: "context-dock-character" },
   { id: "camera", label: "机位", testId: "context-dock-camera" },
   { id: "motion", label: "运动", testId: "context-dock-motion" },
@@ -36,6 +40,7 @@ const TOOLS: Array<{
 ];
 
 const TOOL_ICONS = {
+  prompts: Info,
   character: Users,
   camera: Camera,
   motion: MoveUpRight,
@@ -64,24 +69,27 @@ export function ContextDock({
 }: ContextDockProps) {
   return (
     <nav className="qc-context-dock" data-testid="context-dock" aria-label="当前镜头操作">
-      {TOOLS.map((tool) => {
-        const active = activeTool === tool.id;
-        const Icon = TOOL_ICONS[tool.id];
-        return (
-          <button
-            key={tool.id}
-            type="button"
-            className={active ? "active" : undefined}
-            data-testid={tool.testId}
-            aria-pressed={active}
-            disabled={!hasShot}
-            onClick={() => onSelectTool(tool.id)}
-          >
-            <Icon size={17} aria-hidden="true" />
-            {tool.label}
-          </button>
-        );
-      })}
+      <Tabs label="镜头操作工具" className="qc-context-dock-tabs">
+        {TOOLS.map((tool, index) => {
+          const active = activeTool === tool.id;
+          const Icon = TOOL_ICONS[tool.id];
+          return (
+            <Tab
+              key={tool.id}
+              id={`context-tool-${tool.id}`}
+              active={active}
+              tabIndex={active || (activeTool === null && index === 0) ? 0 : -1}
+              data-testid={tool.testId}
+              aria-controls="shot-context-sheet"
+              disabled={!hasShot}
+              onClick={() => onSelectTool(tool.id)}
+            >
+              <Icon size={17} aria-hidden="true" />
+              {tool.label}
+            </Tab>
+          );
+        })}
+      </Tabs>
       <span className="qc-context-dock-divider" aria-hidden="true" />
       <button
         type="button"

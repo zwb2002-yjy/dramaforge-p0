@@ -304,7 +304,7 @@ describe("EditingWorkspace", () => {
     expect(clip).not.toHaveTextContent(SCENE_ID);
     expect(clip).not.toHaveTextContent(SHOT_ID);
     expect(clip).not.toHaveTextContent("artifact-formal");
-    expect(screen.getByText("只读预览已完成的镜头，继续剪辑或新建会话。")).toBeInTheDocument();
+    expect(screen.getByText("选择已有剪辑，或用正式镜头创建时间线。")).toBeInTheDocument();
     expect(calls).toEqual([{ method: "GET", url: "/api/v1/projects/project-1/opencut-manifest" }]);
     expect(screen.getByTestId("editing-read-only")).toHaveTextContent("只读");
     expect(screen.getByTestId("create-edit-session")).toBeEnabled();

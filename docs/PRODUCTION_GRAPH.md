@@ -1,7 +1,7 @@
 # PRODUCTION_GRAPH — Graph / Node / NodeRun 定义权威
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Date: 2026-09-15 / Base: dev 5ea45d6 / Alembic head: 20260910_0066
+Date: 2026-09-22 / Alembic head: 20260922_0077
 
 本文件只回答一件事：**ProductionGraph 怎么组织执行计划。**
 
@@ -133,7 +133,7 @@ Graph 的 `definition` 是一个 JSON 文档（`GraphVersion.definition`），�
 不是并行执行引擎：真实的 Shot 生产固定使用 `shot-p0-v1`。
 
 因此这是**发现性问题（模板目录分散在三个模块）**，不是**概念性问题（两套 Graph）**。
-详见 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) 问题 5。
+详见 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) §4 问题 5。
 
 ---
 

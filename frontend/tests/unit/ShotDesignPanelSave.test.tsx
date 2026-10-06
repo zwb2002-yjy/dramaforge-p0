@@ -37,14 +37,14 @@ function json(body: unknown, status = 200) {
   );
 }
 
-function renderPanel() {
+function renderPanel(focus: "all" | "prompts" = "all") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   const onSaved = vi.fn();
   render(
     <QueryClientProvider client={queryClient}>
-      <ShotDesignPanel projectId={PROJECT_ID} shot={SHOT} onSaved={onSaved} />
+      <ShotDesignPanel projectId={PROJECT_ID} shot={SHOT} focus={focus} onSaved={onSaved} />
     </QueryClientProvider>,
   );
   return { onSaved };
@@ -288,4 +288,13 @@ describe("ShotDesignPanel canvas write gate", () => {
     expect((screen.getByLabelText("画面描述") as HTMLTextAreaElement).value).toBe("A turns away");
     expect(screen.getByTestId("shot-design-dirty")).toBeInTheDocument();
   });
+});
+
+it("opens both editable prompts in the dedicated prompts focus", () => {
+  renderPanel("prompts");
+  expect(screen.getByLabelText("图片提示词")).toHaveValue("server image prompt");
+  expect(screen.getByLabelText("视频提示词")).toHaveValue("server video prompt");
+  fireEvent.change(screen.getByLabelText("视频提示词"), { target: { value: "updated motion" } });
+  expect(screen.getByTestId("shot-design-dirty")).toBeInTheDocument();
+  expect(screen.getByTestId("save-shot-design")).toBeEnabled();
 });

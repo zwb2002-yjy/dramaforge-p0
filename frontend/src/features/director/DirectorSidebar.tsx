@@ -35,6 +35,7 @@ type DirectorSidebarProps = {
   open?: boolean;
   requestedTool?: ContextTool | null;
   onClose?: () => void;
+  onOpenDetails?: () => void;
   /** Shared draft state lives in SceneWorkspace so a sheet close keeps it. */
   designDirty?: boolean;
   onDesignDirtyChange?: (dirty: boolean) => void;
@@ -53,6 +54,7 @@ const TABS: Array<{ id: DirectorTab; label: string; testId: string }> = [
 ];
 
 const TOOL_TAB: Record<ContextTool, DirectorTab> = {
+  prompts: "shot",
   character: "shot",
   camera: "shot",
   motion: "shot",
@@ -62,6 +64,7 @@ const TOOL_TAB: Record<ContextTool, DirectorTab> = {
 };
 
 const TOOL_FOCUS: Record<ContextTool, ShotDesignFocus> = {
+  prompts: "prompts",
   character: "character",
   camera: "camera",
   motion: "motion",
@@ -91,6 +94,7 @@ export function DirectorSidebar({
   open = true,
   requestedTool = null,
   onClose,
+  onOpenDetails,
   designDirty,
   onDesignDirtyChange,
   designDraft,
@@ -144,8 +148,6 @@ export function DirectorSidebar({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
-
-  if (!open) return null;
 
   const clearSuggestionDraft = () => {
     if (onApplySuggestionDraft) {
@@ -247,6 +249,7 @@ export function DirectorSidebar({
           dirty={dirty}
           trace={trace}
           onExecuted={onWorkspaceRefresh}
+          onOpenDetails={onOpenDetails}
           onDirectorDelegated={() => {
             setActiveTab("shot");
             setTabOverride(true);
@@ -260,13 +263,14 @@ export function DirectorSidebar({
 
   return (
     <aside
+      id="shot-context-sheet"
+      role="tabpanel"
+      aria-labelledby={requestedTool ? `context-tool-${requestedTool}` : undefined}
+      hidden={!open}
       className="qc-director-sidebar qc-director-context-sheet"
       data-testid="director-sidebar"
       data-operation-panel="director-operation-panel"
       data-shot-id={shot?.id ?? undefined}
-      role="dialog"
-      aria-modal="false"
-      aria-label="镜头操作面板"
     >
       <header className="qc-director-sidebar-header">
         <div>
@@ -306,16 +310,31 @@ export function DirectorSidebar({
           ))}
         </div>
         <div
-          id={`director-panel-${activeTab}`}
+          id="director-panel-shot"
           role="tabpanel"
-          aria-labelledby={`director-tab-${activeTab}`}
+          aria-labelledby="director-tab-shot"
           className="qc-director-tab-panel"
+          hidden={activeTab !== "shot"}
         >
-          {activeTab === "shot"
-            ? renderShotTab()
-            : activeTab === "references"
-              ? renderReferencesTab()
-              : renderProductionTab()}
+          {activeTab === "shot" ? renderShotTab() : null}
+        </div>
+        <div
+          id="director-panel-references"
+          role="tabpanel"
+          aria-labelledby="director-tab-references"
+          className="qc-director-tab-panel"
+          hidden={activeTab !== "references"}
+        >
+          {activeTab === "references" ? renderReferencesTab() : null}
+        </div>
+        <div
+          id="director-panel-production"
+          role="tabpanel"
+          aria-labelledby="director-tab-production"
+          className="qc-director-tab-panel"
+          hidden={activeTab !== "production"}
+        >
+          {renderProductionTab()}
         </div>
       </div>
     </aside>

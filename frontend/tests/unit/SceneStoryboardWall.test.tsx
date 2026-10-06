@@ -68,6 +68,21 @@ function mockBackend() {
         },
       ]);
     }
+    if (url.endsWith("/workspace") && method === "GET") {
+      const count = url.includes("scene-1") ? 2 : 1;
+      return json({
+        shots: Array.from({ length: count }, (_, index) => ({
+          id: "shot-" + index,
+          shot_number: index + 1,
+          shot_type: "wide",
+          visual_description: "Test shot",
+          dialogue: "",
+          duration_seconds: "3",
+          formal_keyframe_artifact_id: url.includes("scene-1") && index === 0 ? "frame-1" : null,
+          formal_video_artifact_id: null,
+        })),
+      });
+    }
     if (url.includes("/copy") && method === "POST") {
       return json({ id: "scene-3" }, 201);
     }

@@ -27,3 +27,63 @@
   color: var(--df-verdigris);
   border-color: var(--df-verdigris);
 }
+
+.editing-cut-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--df-space-5);
+  align-items: start;
+}
+.editing-cut-controls {
+  min-width: 0;
+}
+.editing-cut-controls .df-disclosure {
+  margin-block: var(--df-space-2);
+}
+.editing-cut-controls .editing-session-editor {
+  margin-top: var(--df-space-3);
+  padding: var(--df-space-4);
+}
+.editing-session-editor > ol {
+  padding: 0;
+  list-style: none;
+}
+.editing-cut-controls .editing-session-editor > ol > li {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: var(--df-space-3);
+  gap: var(--df-space-3);
+}
+.editing-cut-controls .editing-session-editor > ol > li > div:first-child {
+  grid-column: 1 / -1;
+}
+.editing-cut-controls .editing-session-editor input {
+  width: 100%;
+}
+.editing-cut-controls .editing-session-editor textarea {
+  width: 100%;
+  min-height: var(--df-control-height);
+}
+.editing-cut-controls .editing-session-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--df-z-sticky);
+  padding: var(--df-space-3);
+  background: var(--df-surface-1);
+  border-top: 1px solid var(--df-border);
+  gap: var(--df-space-2);
+}
+@media (min-width: 1440px) {
+  .editing-cut-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  }
+  .editing-cut-layout .editing-source-preview {
+    position: sticky;
+    top: var(--df-space-4);
+    margin-top: 0;
+  }
+}
+@media (max-width: 640px) {
+  .editing-cut-controls .editing-session-editor > ol > li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

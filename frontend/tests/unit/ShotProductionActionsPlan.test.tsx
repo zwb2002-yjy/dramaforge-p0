@@ -82,6 +82,31 @@ function mockApi() {
       ]);
     }
     if (url.includes("/director/capabilities")) return json({ runtime_turns_available: true });
+    if (url.includes("/execution-models/preflight")) {
+      return json({
+        project_id: PROJECT_ID,
+        stages: [
+          {
+            stage: "image_keyframe",
+            ready: true,
+            source: "project_binding",
+            requested_model_id: "agnes/agnes-image-2.1-flash",
+            resolved_model_id: "agnes/agnes-image-2.1-flash",
+            binding_id: "binding-image",
+            reason: null,
+          },
+          {
+            stage: "video",
+            ready: true,
+            source: "project_binding",
+            requested_model_id: "agnes/agnes-video-v2.0",
+            resolved_model_id: "agnes/agnes-video-v2.0",
+            binding_id: "binding-video",
+            reason: null,
+          },
+        ],
+      });
+    }
     if (url.includes("/execution-plan") && init?.method === "POST") return json(PREVIEW);
     return json({});
   });
@@ -111,7 +136,9 @@ describe("ShotProductionActions plan preview vocabulary", () => {
     mockApi();
     renderActions();
 
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    const generate = screen.getByRole("button", { name: "生成关键帧" });
+    await waitFor(() => expect(generate).toBeEnabled());
+    fireEvent.click(generate);
 
     // The plan contains an unsupported reference, so the adaptation is reported
     // as unsupported rather than approximate.

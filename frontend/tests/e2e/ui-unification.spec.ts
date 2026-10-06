@@ -79,8 +79,8 @@ test("real creation, model and script forms use one control recipe across lazy r
   await expect(address).toHaveClass(/df-input/);
   expect(await controlStyle(address)).toEqual(expected);
   await page.goto(`/projects/${PROJECT_ID}/script`);
-  await expect(page.getByLabel("剧本文件名")).toHaveClass(/df-input/);
-  expect(await controlStyle(page.getByLabel("剧本文件名"))).toEqual(expected);
+  await expect(page.getByLabel("剧本文档名")).toHaveClass(/df-input/);
+  expect(await controlStyle(page.getByLabel("剧本文档名"))).toEqual(expected);
   await expect(page.getByLabel("剧本文本")).toHaveClass(/df-input/);
   await expect(page.getByTestId("story-proposal-generate")).toHaveClass(/df-btn/);
   await page.route(`**/api/v1/projects/${PROJECT_ID}/creative-capabilities/catalog`, (route) =>

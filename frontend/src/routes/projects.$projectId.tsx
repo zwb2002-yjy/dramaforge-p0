@@ -33,7 +33,7 @@ function ProjectLayout() {
         throw error;
       }
     },
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
     retry: false,
   });
 
@@ -69,7 +69,7 @@ function ProjectLayout() {
   return (
     <ProjectWorkspaceShell
       projectId={projectId}
-      projectName={projectRead?.name ?? (projectId === "demo" ? "演示项目" : "短剧项目")}
+      projectName={projectRead?.name ?? "短剧项目"}
       activeView={activeView}
       creationControls={
         projectRead?.creative_profile ? (

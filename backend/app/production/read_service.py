@@ -95,7 +95,12 @@ class ProductionReadService:
         rows = (
             (
                 await self._session.execute(
-                    select(NodeRun.id, NodeRun.status, NodeRun.result_artifact_id).where(
+                    select(
+                        NodeRun.id,
+                        NodeRun.status,
+                        NodeRun.result_artifact_id,
+                        NodeRun.error_code,
+                    ).where(
                         NodeRun.project_id == project_id,
                         NodeRun.id.in_(run_ids),
                     )

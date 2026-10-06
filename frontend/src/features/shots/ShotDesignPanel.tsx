@@ -9,7 +9,7 @@ import { fetchShotWorkbench } from "./api";
 import type { ShotLite, ShotVoiceSettings as ShotVoiceSettingsValue } from "./api";
 import { ShotVoiceSettings } from "./ShotVoiceSettings";
 
-export type ShotDesignFocus = "character" | "camera" | "motion" | "look" | "all";
+export type ShotDesignFocus = "prompts" | "character" | "camera" | "motion" | "look" | "all";
 
 type ShotDesignPanelProps = {
   projectId: string;
@@ -133,8 +133,8 @@ export function ShotDesignPanel({
 }: ShotDesignPanelProps) {
   const showCharacter = focus === "all" || focus === "character";
   const showCamera = focus === "all" || focus === "camera";
-  const showMotion = focus === "all" || focus === "motion";
-  const showLook = focus === "all" || focus === "look";
+  const showMotion = focus === "all" || focus === "motion" || focus === "prompts";
+  const showLook = focus === "all" || focus === "look" || focus === "prompts";
   const [visual, setVisual] = useState(shot.visual_description);
   // Canvas facts: stored on the Shot itself and written through the CanvasRevision
   // gate (`PATCH /shots/{id}/canvas`), which is the only endpoint that advances
@@ -327,15 +327,17 @@ export function ShotDesignPanel({
   });
 
   const focusTitle =
-    focus === "character"
-      ? "角色"
-      : focus === "camera"
-        ? "机位"
-        : focus === "motion"
-          ? "运动"
-          : focus === "look"
-            ? "画面"
-            : "镜头设计";
+    focus === "prompts"
+      ? "提示词"
+      : focus === "character"
+        ? "角色"
+        : focus === "camera"
+          ? "机位"
+          : focus === "motion"
+            ? "运动"
+            : focus === "look"
+              ? "画面"
+              : "镜头设计";
 
   return (
     <div

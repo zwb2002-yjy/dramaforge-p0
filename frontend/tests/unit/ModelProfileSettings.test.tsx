@@ -84,7 +84,7 @@ it("hides the non-executing voice slot in both modes and preserves its historica
     expect(putProjectModelProfile).toHaveBeenCalledWith("project-1", {
       bindings: {
         "visual.keyframe": { model_id: "image-a", enabled: true, native_options: {} },
-        "visual.character": { model_id: "image-a" },
+        "visual.character": { model_id: "image-a", enabled: true },
         "audio.tts": historicalVoice,
       },
     }),

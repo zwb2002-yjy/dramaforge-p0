@@ -107,6 +107,7 @@ class DirectorTurnService:
         intent_snapshot: Mapping[str, object] | None = None,
         max_steps: int = DEFAULT_TURN_MAX_STEPS,
         deadline: datetime | None = None,
+        allow_rejected_context_retry: bool = False,
     ) -> tuple[DirectorTurn, bool]:
         key = request_key.strip()
         if not key or len(key) > 200:
@@ -125,7 +126,8 @@ class DirectorTurnService:
                 details={"code": "DIRECTOR_STEP_LIMIT_INVALID"},
             )
         fingerprint = _context_hash(context_snapshot)
-        await self.assert_context_not_rejected(project_id=project.id, context_hash=fingerprint)
+        if not allow_rejected_context_retry:
+            await self.assert_context_not_rejected(project_id=project.id, context_hash=fingerprint)
         existing = await self._by_request_key(project_id=project.id, request_key=key)
         if existing is not None:
             self._require_same_context(existing, fingerprint)

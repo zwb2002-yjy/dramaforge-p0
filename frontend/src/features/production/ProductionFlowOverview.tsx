@@ -26,14 +26,6 @@ const destinations = {
   edit: "/projects/$projectId/edit",
 } as const;
 
-const workspaces = [
-  { label: "故事剧本", outcome: "写故事、确认分场", to: "/projects/$projectId/script" },
-  { label: "角色素材", outcome: "准备一致的参考素材", to: "/projects/$projectId/assets" },
-  { label: "分镜制作", outcome: "制作画面与视频", to: "/projects/$projectId/scenes" },
-  { label: "审片确认", outcome: "检查并采用镜头", to: "/projects/$projectId/review" },
-  { label: "剪辑成片", outcome: "保存时间线、导出作品", to: "/projects/$projectId/edit" },
-] as const;
-
 type ProductionFlowOverviewProps = {
   projectId: string;
   summary?: ProductionSummary;
@@ -49,21 +41,6 @@ export function ProductionFlowOverview({
 }: ProductionFlowOverviewProps) {
   return (
     <section className="production-flow" aria-label="制作流程" data-testid="production-flow">
-      <header>
-        <h2>创作流程</h2>
-        <p>从故事到成片，按需往返。打开工作区不会自动生成或替换正式版本。</p>
-      </header>
-      <nav className="production-flow-workspaces" aria-label="创作流程">
-        {workspaces.map((workspace, index) => (
-          <Link key={workspace.to} to={workspace.to} params={{ projectId }}>
-            <span className="production-journey-index" aria-hidden="true">
-              {String(index + 1).padStart(2, "0")}
-            </span>
-            <strong>{workspace.label}</strong>
-            <small>{workspace.outcome}</small>
-          </Link>
-        ))}
-      </nav>
       <Disclosure title="查看执行环节" description="提示词、画面、视频与合成的真实执行状态">
         <ol className="production-flow-stages">
           {stages.map((step, index) => {
