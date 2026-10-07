@@ -147,7 +147,7 @@ export type ProviderPluginModelRead = components["schemas"]["ProviderPluginModel
 export type ProviderPluginRead = components["schemas"]["ProviderPluginRead"];
 
 export function listProviderPlugins(): Promise<ProviderPluginRead[]> {
-  return apiGet("/api/v1/provider-plugins");
+  return apiGetList<ProviderPluginRead>("/api/v1/provider-plugins");
 }
 
 export type ProviderProbeRead = components["schemas"]["ProbeRead"];
@@ -156,7 +156,9 @@ export type ProviderQualityEvidenceRead = components["schemas"]["QualityEvidence
 export type ProjectProviderBindingRead = components["schemas"]["ProjectBindingRead"];
 
 export function listProviderConnections(workspaceId: string): Promise<ProviderConnectionRead[]> {
-  return apiGet(`/api/v1/workspaces/${workspaceId}/provider-connections`);
+  return apiGetList<ProviderConnectionRead>(
+    `/api/v1/workspaces/${workspaceId}/provider-connections`,
+  );
 }
 
 export async function createProviderConnection(
@@ -214,7 +216,9 @@ export function listProviderProbes(
   workspaceId: string,
   connectionId: string,
 ): Promise<ProviderProbeRead[]> {
-  return apiGet(`/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}/probes`);
+  return apiGetList<ProviderProbeRead>(
+    `/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}/probes`,
+  );
 }
 
 export async function runProviderProbe(
@@ -241,7 +245,7 @@ export function listProviderModelBindings(
   workspaceId: string,
   connectionId: string,
 ): Promise<ProviderModelBindingRead[]> {
-  return apiGet(
+  return apiGetList<ProviderModelBindingRead>(
     `/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}/model-bindings`,
   );
 }

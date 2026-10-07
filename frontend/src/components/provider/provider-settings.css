@@ -3,7 +3,7 @@
 
 .df-model-settings {
   display: grid;
-  gap: var(--df-space-8);
+  gap: var(--df-space-6);
   width: min(100%, var(--df-settings-page-max));
 }
 
@@ -76,6 +76,9 @@
 }
 .df-provider-card-body code,
 .df-model-name code {
+  padding: 0;
+  border: 0;
+  background: none;
   overflow: hidden;
   color: var(--df-text-muted);
   font-family: var(--df-font-mono);
@@ -213,6 +216,9 @@
 }
 .df-model-unsupported li code,
 .df-text-models code {
+  padding: 0;
+  border: 0;
+  background: none;
   font-family: var(--df-font-mono);
   font-size: var(--df-font-size-caption);
 }
