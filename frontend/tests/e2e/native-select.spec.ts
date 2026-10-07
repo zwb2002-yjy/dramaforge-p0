@@ -18,48 +18,20 @@ async function expectReadableOptions(select: Locator) {
   }
 }
 
-test("provider options have their own opaque dark surface, not just a styled closed select", async ({
+test("model setting options have their own opaque dark surface, not just a styled closed select", async ({
   page,
 }) => {
   const state = await installProfessionalMock(page);
-  await page.route("**/api/v1/provider-plugins", (route) =>
-    route.fulfill({
-      json: [
-        {
-          provider_type: "agnes",
-          protocol_profile: "agnes_cn_v1",
-          display_name: "Agnes 中国站",
-          default_base_url: "https://provider.invalid",
-          implemented: true,
-          paid_capabilities: [],
-          capabilities: [],
-          model_list_path: "/models",
-          models: [],
-        },
-        {
-          provider_type: "minimax",
-          protocol_profile: "minimax_v1",
-          display_name: "MiniMax",
-          default_base_url: "https://provider.invalid",
-          implemented: true,
-          paid_capabilities: [],
-          capabilities: [],
-          model_list_path: "/models",
-          models: [],
-        },
-      ],
-    }),
-  );
   await page.goto("/settings/models");
-  const supplier = page.getByRole("combobox", { name: "供应商", exact: true });
-  await expect(supplier).toBeVisible();
-  await expectReadableOptions(supplier);
-  const value = await supplier.inputValue();
-  await supplier.focus();
-  await supplier.press("ArrowDown");
-  await supplier.press("Escape");
-  await supplier.selectOption(value);
-  await expect(supplier).toHaveValue(value);
+  const textModel = page.getByRole("combobox", { name: "文本模型", exact: true });
+  await expect(textModel).toBeVisible();
+  await expectReadableOptions(textModel);
+  const value = await textModel.inputValue();
+  await textModel.focus();
+  await textModel.press("ArrowDown");
+  await textModel.press("Escape");
+  await textModel.selectOption(value);
+  await expect(textModel).toHaveValue(value);
   expect(state.editing.requests.filter((r) => r.method !== "GET")).toEqual([]);
 });
 

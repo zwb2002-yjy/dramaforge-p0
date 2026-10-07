@@ -60,10 +60,7 @@ test("create=false is normalized without logging out; only explicit logout chang
   expect(writes).toEqual([]);
   await page.goto("/settings/defaults");
   await expect(page).toHaveURL("/settings/defaults");
-  await expect(page.getByRole("tab", { name: "默认模型" })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
+  await expect(page.getByRole("heading", { name: "默认模型" })).toBeVisible();
   expect(writes).toEqual([]);
   await page.goto("/settings/account");
   await expect(page.getByText("owner@example.com")).toBeVisible();
@@ -293,7 +290,7 @@ test("return links respect production and model parents instead of relying on br
   for (const [path, label, target] of [
     [`/projects/${PROJECT_ID}/production`, "返回项目大厅", "/"],
     [`/projects/${PROJECT_ID}/review`, "返回作品总览", `/projects/${PROJECT_ID}/production`],
-    [`/settings/projects/${PROJECT_ID}`, "返回模型连接", "/settings/models"],
+    [`/settings/projects/${PROJECT_ID}`, "返回模型设置", "/settings/models"],
   ]) {
     await page.goto(path);
     await page

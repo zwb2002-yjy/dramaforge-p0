@@ -5357,6 +5357,11 @@ export interface components {
             available: boolean;
             /** Capabilities */
             capabilities: string[];
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "workspace" | "installed";
         };
         /**
          * ModelSlot
@@ -6374,6 +6379,11 @@ export interface components {
             display_name: string;
             /** Default Base Url */
             default_base_url: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "media" | "text";
             /** Implemented */
             implemented: boolean;
             /** Paid Capabilities */

@@ -57,6 +57,9 @@ class ProviderPluginRead(BaseModel):
     protocol_profile: str
     display_name: str
     default_base_url: str
+    # ``text`` plugins expose discovered chat models directly; ``media`` plugins
+    # need a catalog contract match and a model binding before execution.
+    kind: Literal["media", "text"]
     implemented: bool
     paid_capabilities: list[str]
     capabilities: list[str]
@@ -104,8 +107,6 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
         )
     result: list[ProviderPluginRead] = []
     for plugin in list_plugins():
-        if plugin.provider_type == "litellm":
-            continue
         models = by_plugin.get((plugin.provider_type, plugin.protocol_profile), [])
         result.append(
             ProviderPluginRead(
@@ -113,6 +114,7 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
                 protocol_profile=plugin.protocol_profile,
                 display_name=plugin.display_name,
                 default_base_url=plugin.default_base_url,
+                kind="text" if plugin.provider_type == "litellm" else "media",
                 implemented=plugin.implemented,
                 paid_capabilities=sorted(plugin.paid_capabilities),
                 capabilities=sorted(

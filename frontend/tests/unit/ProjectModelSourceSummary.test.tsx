@@ -148,11 +148,6 @@ it.each([false, true])(
     expect(screen.queryByTestId("model-source-audio.tts")).not.toBeInTheDocument();
     expect(screen.queryByText("legacy-voice-model")).not.toBeInTheDocument();
     expect(screen.queryByText(/部分环节未返回解析结果/)).not.toBeInTheDocument();
-    expect(screen.getByTestId("voice-runtime-boundary")).toHaveTextContent(
-      "这里的模型方案不控制配音",
-    );
-    expect(screen.getByTestId("voice-runtime-boundary")).toHaveTextContent(
-      "读取配置不等于已联网验证",
-    );
+    expect(screen.getByTestId("voice-runtime-boundary")).toHaveTextContent("不受这里控制");
   },
 );

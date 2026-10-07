@@ -2,15 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams, useRouterState } from "@tanstack/react-router";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
-import { Button, Disclosure, Field, Input, Select, PageHeader, Tabs, Tab } from "../components/ui";
+import { Button, Disclosure, Field, Input, Select, PageHeader } from "../components/ui";
+import { DefaultModelSettings } from "../components/provider/DefaultModelSettings";
 import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
-import {
-  ProjectModelSourceSummary,
-  ProviderConfigurationBoundaries,
-} from "../components/provider/ProjectModelSourceSummary";
-import { ProviderConnectionPanel } from "../components/provider/ProviderConnectionPanel";
-import { WorkspaceModelProfileSettings } from "../components/provider/WorkspaceModelProfileSettings";
-import { TextGatewaySettings } from "../components/provider/TextGatewaySettings";
+import { ProjectModelSourceSummary } from "../components/provider/ProjectModelSourceSummary";
+import { ProviderList } from "../components/provider/ProviderList";
 import { AdvancedRecoveryPanel } from "../features/maintenance/AdvancedRecoveryPanel";
 import {
   ApiError,
@@ -344,149 +340,90 @@ export function WorkspaceSettingsPage({
 }
 
 export function ModelConnectionSettingsPage() {
-  const initialSection = useRouterState({
-    select: (state) => (state.location.pathname.endsWith("/defaults") ? "defaults" : "connection"),
-  });
-  const [section, setSection] = useState(initialSection);
-  const sections = [
-    { id: "connection", label: "连接" },
-    { id: "defaults", label: "默认模型" },
-    { id: "project", label: "项目模型" },
-    { id: "advanced", label: "高级" },
-  ];
   const { workspaces, projects, selectedWorkspaceId, selectWorkspace } = useSettingsWorkspace();
+  const [adding, setAdding] = useState(false);
   const returnTo = useRouterState({
     select: (state) => validateSettingsReturnTo(state.location.search.returnTo),
   });
+  // Coming from a project preselects it, but only if this workspace lists it.
   const originProjectId = returnTo?.match(/^\/projects\/([^/?#]+)/)?.[1];
   const selectionScope = JSON.stringify([selectedWorkspaceId, returnTo]);
-  const [projectSelection, setProjectSelection] = useState<{ scope: string; id: string } | null>(
-    null,
-  );
-  const selectedProjectId =
-    projectSelection?.scope === selectionScope ? projectSelection.id : originProjectId;
-  // Only a project returned for this workspace may become the selected target.
-  const selectedProject = projects.data?.find((project) => project.id === selectedProjectId);
+  const [projectChoice, setProjectChoice] = useState<{ scope: string; id: string } | null>(null);
+  const overrideProjectId =
+    (projects.data ?? []).find(
+      (project) =>
+        project.id ===
+        (projectChoice?.scope === selectionScope ? projectChoice.id : originProjectId),
+    )?.id ?? "";
 
   return (
-    <main className="df-page df-settings-page" data-testid="model-settings-page">
-      <SettingsHeader title="模型连接" />
-      <div className="df-settings-section">
-        {workspaces.isError ? (
-          <p className="flash err" role="alert">
-            无法读取工作空间。<Button onClick={() => void workspaces.refetch()}>重试</Button>
-          </p>
-        ) : workspaces.isPending ? (
-          <p role="status">正在读取工作空间…</p>
-        ) : (
+    <main className="df-page df-settings-page df-model-settings" data-testid="model-settings-page">
+      <SettingsHeader title="模型设置" />
+      {workspaces.isError ? (
+        <p className="flash err" role="alert">
+          无法读取工作空间。<Button onClick={() => void workspaces.refetch()}>重试</Button>
+        </p>
+      ) : workspaces.isPending ? (
+        <p role="status">正在读取工作空间…</p>
+      ) : (workspaces.data ?? []).length > 1 ? (
+        <div className="df-settings-section">
           <WorkspaceSelector
             workspaces={workspaces.data ?? []}
             selectedWorkspaceId={selectedWorkspaceId}
-            onChange={(id) => {
-              selectWorkspace(id);
-              setProjectSelection(null);
-            }}
+            onChange={selectWorkspace}
           />
-        )}
-      </div>
-      <Tabs label="模型设置分区" className="df-section-tabs">
-        {sections.map((item) => (
-          <Tab
-            key={item.id}
-            id={`settings-tab-${item.id}`}
-            aria-controls={`settings-panel-${item.id}`}
-            active={section === item.id}
-            onClick={() => setSection(item.id)}
-          >
-            {item.label}
-          </Tab>
-        ))}
-      </Tabs>
-      <section
-        role="tabpanel"
-        id="settings-panel-connection"
-        aria-labelledby="settings-tab-connection"
-        hidden={section !== "connection"}
-      >
-        <ProviderConnectionPanel
-          key={selectedWorkspaceId ?? "no-workspace"}
-          workspaceId={selectedWorkspaceId}
-          projects={projects.isSuccess ? projects.data : []}
-          initialProjectId={selectedProject?.id}
-        />
-      </section>
-      {projects.isError && (
-        <p role="alert">
-          无法确认当前空间的作品列表。
-          <Button onClick={() => void projects.refetch()}>重新读取作品列表</Button>
-        </p>
+        </div>
+      ) : null}
+      {selectedWorkspaceId ? (
+        <>
+          <ProviderList
+            key={`providers-${selectedWorkspaceId}`}
+            workspaceId={selectedWorkspaceId}
+            adding={adding}
+            onAddingChange={setAdding}
+          />
+          <DefaultModelSettings
+            key={`defaults-${selectedWorkspaceId}`}
+            workspaceId={selectedWorkspaceId}
+            onAddProvider={() => setAdding(true)}
+          />
+          {(projects.data ?? []).length > 0 && (
+            <Disclosure title="按项目覆盖" testId="project-models-disclosure">
+              <div className="df-project-override">
+                <Field>
+                  项目
+                  <Select
+                    aria-label="项目模型覆盖"
+                    value={overrideProjectId}
+                    onChange={(event) =>
+                      setProjectChoice({ scope: selectionScope, id: event.target.value })
+                    }
+                  >
+                    <option value="">选择项目</option>
+                    {(projects.data ?? []).map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                {overrideProjectId && (
+                  <Link
+                    className="df-btn"
+                    to="/settings/projects/$projectId"
+                    params={{ projectId: overrideProjectId }}
+                    search={returnTo ? { returnTo } : {}}
+                  >
+                    设置项目模型
+                  </Link>
+                )}
+              </div>
+            </Disclosure>
+          )}
+        </>
+      ) : (
+        !workspaces.isPending && <p className="muted">请先创建工作空间。</p>
       )}
-      <section
-        role="tabpanel"
-        id="settings-panel-defaults"
-        aria-labelledby="settings-tab-defaults"
-        hidden={section !== "defaults"}
-        data-testid="default-models-disclosure"
-      >
-        <WorkspaceModelProfileSettings
-          key={selectedWorkspaceId ?? "no-workspace"}
-          workspaceId={selectedWorkspaceId}
-        />
-      </section>
-      <section
-        role="tabpanel"
-        id="settings-panel-project"
-        aria-labelledby="settings-tab-project"
-        hidden={section !== "project"}
-        data-testid="project-models-disclosure"
-      >
-        <h2>项目模型覆盖</h2>
-        <p className="muted">仅影响所选项目。</p>
-        <Field>
-          项目
-          <Select
-            aria-label="项目模型覆盖"
-            value={selectedProject?.id ?? ""}
-            onChange={(event) =>
-              setProjectSelection({ scope: selectionScope, id: event.target.value })
-            }
-          >
-            <option value="">选择项目</option>
-            {(projects.data ?? []).map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        {projects.isError && <p role="alert">无法读取项目列表。</p>}
-        {selectedProject && (
-          <Link
-            className="df-btn"
-            to="/settings/projects/$projectId"
-            params={{ projectId: selectedProject.id }}
-            search={returnTo ? { returnTo } : {}}
-          >
-            配置项目模型
-          </Link>
-        )}
-        {projects.isSuccess && selectedProject && (
-          <ProjectModelSourceSummary
-            key={selectedProject.id}
-            projectId={selectedProject.id}
-            projectName={selectedProject.name}
-          />
-        )}
-      </section>
-      <section
-        role="tabpanel"
-        id="settings-panel-advanced"
-        aria-labelledby="settings-tab-advanced"
-        hidden={section !== "advanced"}
-        data-testid="text-service-disclosure"
-      >
-        <TextGatewaySettings workspaceId={selectedWorkspaceId} />
-      </section>
     </main>
   );
 }
@@ -513,9 +450,11 @@ export function ProjectSettingsPage() {
       ) : (
         <>
           <section className="df-settings-section">
-            <ProviderConfigurationBoundaries />
             <ModelProfileSettings projectId={projectId} workspaceId={project.data.workspace_id} />
           </section>
+          <Disclosure title="模型来源详情" testId="project-model-source-disclosure">
+            <ProjectModelSourceSummary projectId={projectId} projectName={project.data.name} />
+          </Disclosure>
         </>
       )}
     </main>

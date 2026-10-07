@@ -139,15 +139,19 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
     save.mutate(bindings);
   };
 
-  const modelsForCapability = (slot: ModelSlotRead) =>
-    (models.data ?? []).filter((m) =>
-      slot.capabilities.some((cap) => m.capabilities.includes(cap)),
+  // Only models behind this workspace's own connections are offered; a saved
+  // value outside that set stays visible so the select never hides the truth.
+  const modelsForCapability = (slot: ModelSlotRead, value: string) =>
+    (models.data ?? []).filter(
+      (m) =>
+        (m.source === "workspace" || m.id === value) &&
+        slot.capabilities.some((cap) => m.capabilities.includes(cap)),
     );
 
   const renderModelSelect = (slotId: string, value: string, onChange: (v: string) => void) => {
     const slot = slotById.get(slotId);
     if (!slot) return null;
-    const candidates = modelsForCapability(slot);
+    const candidates = modelsForCapability(slot, value);
     return (
       <Select
         value={value}
@@ -157,7 +161,8 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
         <option value="">使用默认方案</option>
         {candidates.map((m) => (
           <option key={m.id} value={m.id}>
-            {m.display_name}（{m.provider_id}）{m.configured ? "" : " · 未配置"}
+            {m.display_name}
+            {m.available ? "" : " · 待验证"}
           </option>
         ))}
       </Select>

@@ -589,3 +589,77 @@ async def test_nonpaid_existing_task_poll_remains_explicit_and_binding_scoped(
     assert binding.account_verified is False
     client.create_image.assert_not_called()
     client.create_video.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_binding_created_after_catalog_read_inherits_its_account_visibility(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Binding before or after the catalog read yields the same verification."""
+
+    from datetime import date
+
+    from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
+    from app.providers.catalog_models import ModelCatalogEntry
+
+    actor, workspace, service, connection, _ = await _seed(session)
+    manifests = [
+        item
+        for item in CATALOG_MODELS
+        if item["provider_type"] == "agnes" and not str(item["model_id"]).startswith("@")
+    ][:2]
+    for manifest in manifests:
+        session.add(
+            ModelCatalogEntry(
+                provider_type=manifest["provider_type"],
+                protocol_profile=manifest["protocol_profile"],
+                model_id=manifest["model_id"],
+                model_revision=manifest["model_revision"],
+                display_name=manifest["display_name"],
+                media_kind=manifest["media_kind"],
+                lifecycle="active",
+                catalog_source="official_static",
+                capability_manifest_json=manifest,
+                option_schema_json=manifest.get("option_schema") or {},
+                documented_at=date.fromisoformat(manifest["documented_at"]),
+                contract_manifest_hash=hash_manifest(manifest),
+            )
+        )
+    await session.flush()
+    listed, unlisted = manifests
+
+    async def response() -> httpx.Response:
+        return httpx.Response(200, json={"data": [{"id": listed["model_id"]}]})
+
+    _stub_http(monkeypatch, response)
+    result = await service.probe(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=actor,
+        capability="auth_models",
+    )
+    assert result.status == "passed"
+
+    def purpose(manifest: dict[str, object]) -> str:
+        return "keyframe" if manifest["media_kind"] == "image" else "video"
+
+    visible = await service.create_model_binding(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=actor,
+        media_type=str(listed["media_kind"]),
+        model_id=str(listed["model_id"]),
+        purpose=purpose(listed),
+        enabled=True,
+    )
+    hidden = await service.create_model_binding(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=actor,
+        media_type=str(unlisted["media_kind"]),
+        model_id=str(unlisted["model_id"]),
+        purpose=purpose(unlisted),
+        enabled=True,
+    )
+    assert visible.account_verified is True
+    assert hidden.account_verified is False

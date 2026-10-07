@@ -31,8 +31,22 @@ beforeEach(() => {
     },
   ] as never);
   vi.mocked(listModels).mockResolvedValue([
-    { id: "voice-a", display_name: "声音 A", capabilities: ["audio.tts"], configured: true },
-    { id: "image-a", display_name: "图片 A", capabilities: ["image.generate"], configured: true },
+    {
+      id: "voice-a",
+      display_name: "声音 A",
+      capabilities: ["audio.tts"],
+      configured: true,
+      available: true,
+      source: "workspace",
+    },
+    {
+      id: "image-a",
+      display_name: "图片 A",
+      capabilities: ["image.generate"],
+      configured: true,
+      available: true,
+      source: "workspace",
+    },
   ] as never);
   vi.mocked(getEffectiveBindings).mockResolvedValue([]);
   vi.mocked(getProjectModelProfile).mockResolvedValue({

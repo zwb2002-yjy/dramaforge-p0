@@ -103,6 +103,8 @@ class TestReadSurface:
         assert "volcengine/doubao-seedream-4-0-250828" in ids
         assert "minimax/image-01" in ids
         assert all(item["provider_id"] in {"agnes", "minimax", "volcengine"} for item in models)
+        # Unbound catalog models are installed metadata, never workspace choices.
+        assert all(item["source"] == "installed" for item in models)
 
     def test_litellm_models_use_gateway_configuration(self, api: tuple[TestClient, Any]) -> None:
         client, _ = api
@@ -123,6 +125,20 @@ class TestReadSurface:
         litellm = [item for item in models if item["provider_id"] == "litellm"]
         assert litellm
         assert all(item["configured"] and item["available"] for item in litellm)
+        # Process-level gateway aliases are a bootstrap fallback, not a second
+        # product-level text model identity next to workspace connections.
+        assert all(item["source"] == "installed" for item in litellm)
+
+    def test_provider_plugins_list_text_gateway_as_text_kind(
+        self, api: tuple[TestClient, Any]
+    ) -> None:
+        client, _ = api
+        _register(client)
+        response = client.get("/api/v1/provider-plugins")
+        assert response.status_code == 200, response.text
+        kinds = {item["provider_type"]: item["kind"] for item in response.json()}
+        assert kinds["litellm"] == "text"
+        assert kinds["agnes"] == "media"
 
     def test_get_model_manifest(self, api: tuple[TestClient, Any]) -> None:
         client, _ = api

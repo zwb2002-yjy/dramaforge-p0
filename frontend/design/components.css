@@ -1299,6 +1299,14 @@ body {
   padding: var(--df-space-4) var(--df-space-6);
   border-top: 1px solid var(--df-border-subtle);
 }
+.df-dialog-error {
+  margin: var(--df-space-3) 0 0;
+  padding: var(--df-space-2) var(--df-space-3);
+  border-radius: var(--df-radius-control);
+  background: var(--df-danger-dim);
+  color: var(--df-danger-text);
+  font-size: var(--df-font-size-caption);
+}
 
 /* Quiet status: a dot plus a short word, never a coloured banner. */
 .df-status {

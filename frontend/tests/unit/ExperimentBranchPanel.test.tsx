@@ -19,6 +19,7 @@ const MODELS: ModelRead[] = [
     configured: true,
     available: true,
     capabilities: ["image.generate"],
+    source: "workspace",
   },
   {
     id: "agnes/agnes-video-v2.0",
@@ -28,6 +29,7 @@ const MODELS: ModelRead[] = [
     configured: true,
     available: true,
     capabilities: ["video.generate"],
+    source: "workspace",
   },
 ];
 
@@ -257,6 +259,7 @@ describe("ExperimentBranchPanel", () => {
         configured: true,
         available: true,
         capabilities: ["video.image_to_video"],
+        source: "workspace",
       },
       {
         id: "agnes/video-v3",
@@ -266,6 +269,7 @@ describe("ExperimentBranchPanel", () => {
         configured: true,
         available: true,
         capabilities: ["video.image_to_video"],
+        source: "workspace",
       },
     ];
     const queryClient = new QueryClient({

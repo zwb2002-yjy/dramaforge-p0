@@ -47,6 +47,7 @@ test("real creation, model and script forms use one control recipe across lazy r
           protocol_profile: "fixture-v1",
           display_name: "Fixture Provider",
           default_base_url: "https://fixture.invalid",
+          kind: "media",
           implemented: true,
           paid_capabilities: [],
           capabilities: ["auth_models"],
@@ -75,9 +76,14 @@ test("real creation, model and script forms use one control recipe across lazy r
   expect(await input.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("solid");
 
   await page.goto("/settings/models");
-  const address = page.getByLabel("供应商服务地址");
+  const textModel = page.getByLabel("文本模型", { exact: true });
+  await expect(textModel).toHaveClass(/df-input/);
+  expect(await controlStyle(textModel)).toEqual(expected);
+  await page.getByTestId("add-provider").click();
+  const address = page.getByTestId("add-provider-dialog").getByLabel("服务地址");
   await expect(address).toHaveClass(/df-input/);
   expect(await controlStyle(address)).toEqual(expected);
+  await page.keyboard.press("Escape");
   await page.goto(`/projects/${PROJECT_ID}/script`);
   await expect(page.getByLabel("剧本文档名")).toHaveClass(/df-input/);
   expect(await controlStyle(page.getByLabel("剧本文档名"))).toEqual(expected);

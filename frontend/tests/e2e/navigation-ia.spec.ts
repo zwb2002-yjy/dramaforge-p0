@@ -108,10 +108,10 @@ test("permanent L1 owns Project, Creation and Settings while L2 follows context"
   await expect(page.getByRole("navigation", { name: "一级导航" })).toContainText(
     /项目.*创作.*设置/s,
   );
-  await expect(page.getByRole("navigation", { name: "设置导航" })).toContainText(/模型连接.*账号/s);
-  await page.getByRole("tab", { name: "项目模型", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "设置导航" })).toContainText(/模型设置.*账号/s);
+  await page.getByTestId("project-models-disclosure").locator("summary").click();
   await page.getByRole("combobox", { name: "项目模型覆盖" }).selectOption(PROJECT_ID);
-  await page.getByRole("link", { name: "配置项目模型", exact: true }).click();
+  await page.getByRole("link", { name: "设置项目模型", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/settings/projects/${PROJECT_ID}(?:\\?|$)`));
   await expect(page.getByTestId("project-settings-page")).toBeVisible();
   await expect
@@ -515,7 +515,7 @@ test("new project keeps essentials visible and retains collapsed options without
   expect(state.editing.requests.filter((request) => request.method !== "GET")).toEqual([]);
 });
 
-test("model settings disclose instance configuration without discarding connection drafts", async ({
+test("model settings show providers and default models on one page, keeping add-provider drafts", async ({
   page,
 }) => {
   const state = await installProfessionalMock(page);
@@ -527,10 +527,23 @@ test("model settings disclose instance configuration without discarding connecti
           protocol_profile: "fixture-v1",
           display_name: "Fixture Provider",
           default_base_url: "https://fixture.invalid",
+          kind: "media",
           implemented: true,
           paid_capabilities: [],
           capabilities: ["auth_models"],
           model_list_path: "/models",
+          models: [],
+        },
+        {
+          provider_type: "litellm",
+          protocol_profile: "openai_chat_v1",
+          display_name: "LiteLLM / OpenAI 兼容文本服务",
+          default_base_url: "http://litellm:4000",
+          kind: "text",
+          implemented: true,
+          paid_capabilities: [],
+          capabilities: ["auth_models"],
+          model_list_path: "/v1/models",
           models: [],
         },
       ],
@@ -540,17 +553,23 @@ test("model settings disclose instance configuration without discarding connecti
     route.fulfill({ json: [] }),
   );
   await page.goto("/settings/models");
-  await expect(page.getByRole("tabpanel", { name: "连接", exact: true })).toBeVisible();
-  await expect(page.getByTestId("text-gateway-settings")).not.toBeVisible();
-  await expect(page.getByTestId("workspace-model-profile-settings")).not.toBeVisible();
-  await page.getByLabel("供应商服务地址").fill("https://example.invalid/unsaved");
-  await page.getByRole("tab", { name: "高级", exact: true }).click();
-  await expect(page.getByTestId("text-gateway-settings")).toBeVisible();
-  await expect(page.getByTestId("text-gateway-settings")).toContainText("按工作空间加密保存");
-  await page.getByRole("tab", { name: "连接", exact: true }).click();
-  await expect(page.getByTestId("text-gateway-settings")).not.toBeVisible();
-  await expect(page.getByLabel("设置工作空间")).toHaveValue(WORKSPACE_ID);
-  await expect(page.getByLabel("供应商服务地址")).toHaveValue("https://example.invalid/unsaved");
+  await expect(page.getByRole("tab")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "供应商" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "默认模型" })).toBeVisible();
+  await expect(page.getByLabel("文本模型")).toBeVisible();
+  await expect(page.getByText("还没有连接供应商。")).toBeVisible();
+
+  await page.getByTestId("add-provider").click();
+  const dialog = page.getByTestId("add-provider-dialog");
+  // Text gateways sit in the same vendor list, not behind an advanced tab.
+  await dialog.getByRole("button", { name: /LiteLLM/ }).click();
+  await expect(dialog.getByLabel("服务地址")).toHaveValue("http://litellm:4000");
+  await dialog.getByLabel("服务地址").fill("https://example.invalid/unsaved");
+  await expect(dialog.getByRole("button", { name: "连接并读取模型" })).toBeDisabled();
+  await dialog.getByLabel("API Key").fill("sk-unsaved");
+  await expect(dialog.getByRole("button", { name: "连接并读取模型" })).toBeEnabled();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
   expect(state.editing.requests.filter((request) => request.method !== "GET")).toEqual([]);
 });
 

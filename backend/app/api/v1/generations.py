@@ -9,6 +9,8 @@ URLs, raw payloads or credentials (spec §24/§64).
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
@@ -42,6 +44,11 @@ class ModelRead(BaseModel):
     configured: bool
     available: bool
     capabilities: list[str]
+    # ``workspace``: a model behind one of this workspace's provider connections
+    # (a media binding or a discovered text alias). ``installed``: process-level
+    # catalog or gateway configuration. Normal settings surfaces offer only
+    # workspace models so one model never appears under two identities.
+    source: Literal["workspace", "installed"]
 
 
 class ManifestRead(BaseModel):
@@ -138,6 +145,12 @@ async def list_models(
                 and bool(model.manifest.metadata.get("account_verified"))
             ),
             capabilities=sorted(str(cap) for cap in model.manifest.capability_specs),
+            source=(
+                "workspace"
+                if model.manifest.metadata.get("connection_id")
+                or model.manifest.metadata.get("binding_id")
+                else "installed"
+            ),
         )
         for model in selected
     ]

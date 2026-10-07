@@ -44,6 +44,7 @@ async function setupProviders(page: Page) {
     protocol_profile: "fixture-v1",
     display_name: "Fixture Provider",
     default_base_url: "https://fixture.invalid",
+    kind: "media",
     implemented: true,
     paid_capabilities: ["image_t2i"],
     capabilities: ["auth_models", "image_t2i"],
@@ -129,15 +130,35 @@ async function setupProviders(page: Page) {
   return { writes, model, connection };
 }
 
-test("supplier configuration stays read-only, distinguishes partial/failed evidence, and keeps the exact return context", async ({
+test("supplier settings stay read-only while browsing, show failed evidence, and keep the return context", async ({
   page,
 }) => {
   const { writes } = await setupProviders(page);
   const origin = `/projects/${PROJECT_ID}/scenes/${SCENE_ID}?shotId=${SHOT_ID}`;
   await page.goto(`/settings/models?returnTo=${encodeURIComponent(origin)}`);
-  await page.getByRole("tab", { name: "项目模型", exact: true }).click();
+  const card = page.getByTestId("provider-card-connection-fixture");
+  await expect(card).toContainText("Fixture Provider");
+  await expect(card).toContainText("已连接");
+  await card.getByRole("button", { name: "管理 Fixture Provider" }).click();
+  const dialog = page.getByTestId("provider-manage-dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByTestId("provider-diagnostics-disclosure").locator("summary").click();
+  await expect(dialog.getByText("检查记录读取失败。")).toBeVisible();
+  await expect(dialog.getByText("暂无检查记录。")).toHaveCount(0);
+  await expect(dialog.getByText(/生成类检查暂不提供/)).toBeVisible();
+  await dialog.getByLabel("服务地址").fill("");
+  await expect(dialog.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
+  await dialog.getByRole("button", { name: "放弃修改" }).click();
+  await expect(dialog.getByLabel("服务地址")).toHaveValue("https://saved.invalid");
+  await dialog.getByRole("button", { name: "完成" }).click();
+
+  await page.getByTestId("project-models-disclosure").locator("summary").click();
+  await page.getByLabel("项目模型覆盖").selectOption(PROJECT_ID);
+  await page.getByRole("link", { name: "设置项目模型", exact: true }).click();
+  await expect(page.getByTestId("project-settings-page")).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("returnTo")).toBe(origin);
+  await page.getByTestId("project-model-source-disclosure").locator("summary").click();
   const summary = page.getByTestId("project-model-source-summary");
-  await expect(summary).toBeVisible();
   await expect(summary.getByTestId("model-source-visual.keyframe")).toContainText(
     "fixture/exact-image-v2",
   );
@@ -145,27 +166,11 @@ test("supplier configuration stays read-only, distinguishes partial/failed evide
     "工作空间默认方案",
   );
   await expect(summary.getByTestId("model-source-video.shot")).toContainText("未确认");
-  await page.getByRole("tab", { name: "连接", exact: true }).click();
-  await page.getByTestId("provider-project-disclosure").locator("summary").click();
-  await page.getByTestId("provider-diagnostics-disclosure").locator("summary").click();
-  await expect(page.getByRole("combobox", { name: "项目 Provider 绑定" })).toHaveValue(PROJECT_ID);
-  await expect(page.getByText(/能力证据读取失败/)).toBeVisible();
-  await expect(page.getByText("暂无能力证据。")).toHaveCount(0);
-  await page.getByLabel("探测能力").selectOption("image_t2i");
-  await expect(page.getByRole("button", { name: "付费探测暂不可用" })).toBeDisabled();
-  await page.getByLabel("供应商服务地址").fill("");
-  await expect(page.getByLabel("供应商服务地址")).toHaveValue("");
-  await expect(page.getByRole("button", { name: "保存连接地址" })).toBeDisabled();
-  await page.getByRole("button", { name: "放弃连接草稿" }).click();
-  await page.getByRole("tab", { name: "项目模型", exact: true }).click();
-  await page.getByRole("link", { name: "配置项目模型", exact: true }).click();
-  await expect(page.getByTestId("project-settings-page")).toBeVisible();
-  expect(new URL(page.url()).searchParams.get("returnTo")).toBe(origin);
   // Project model details return to their settings parent, which owns the
   // final return to creation. Preserve the exact origin through both links.
   await page
     .getByRole("navigation", { name: "页面返回" })
-    .getByRole("link", { name: "返回模型连接", exact: true })
+    .getByRole("link", { name: "返回模型设置", exact: true })
     .click();
   await expect(page.getByTestId("model-settings-page")).toBeVisible();
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe(origin);
@@ -178,12 +183,38 @@ test("supplier configuration stays read-only, distinguishes partial/failed evide
   expect(writes).toEqual([]);
 });
 
-test("selecting a catalog model is only a draft and persists the exact identity on explicit Add", async ({
+test("adding models reads the free catalog, then binds only the ticked exact identity", async ({
   page,
 }) => {
   const { writes, model, connection } = await setupProviders(page);
   const saved: Array<Record<string, unknown>> = [];
+  const probes: Array<Record<string, unknown>> = [];
   const bindings: Record<string, unknown>[] = [];
+  await page.route(
+    `**/api/v1/workspaces/${WORKSPACE_ID}/provider-connections/connection-fixture/probes`,
+    async (route) => {
+      if (route.request().method() === "POST") {
+        probes.push(route.request().postDataJSON());
+        await route.fulfill({
+          json: {
+            probe_id: "probe-fixture",
+            capability: "auth_models",
+            status: "passed",
+            evidence_level: "account_verified",
+            http_status: 200,
+            provider_request_id: null,
+            reference_artifact_id: null,
+            model_binding_id: null,
+            remote_query_kind: null,
+            request_fingerprint: "f".repeat(64),
+            tested_at: "2026-10-07T00:00:00Z",
+            error_code: null,
+            discovered_model_ids: [model.model_id, "unknown-remote-model"],
+          },
+        });
+      } else await route.fulfill({ json: [] });
+    },
+  );
   await page.route(
     `**/api/v1/workspaces/${WORKSPACE_ID}/provider-connections/connection-fixture/model-bindings`,
     async (route) => {
@@ -199,7 +230,7 @@ test("selecting a catalog model is only a draft and persists the exact identity 
           enabled: true,
           documented: true,
           contract_tested: true,
-          account_verified: false,
+          account_verified: true,
           quality_gated: false,
           remote_resource_kind: "model",
           remote_resource_id: model.model_id,
@@ -213,15 +244,16 @@ test("selecting a catalog model is only a draft and persists the exact identity 
   await page.goto(
     `/settings/models?returnTo=${encodeURIComponent(`/projects/${PROJECT_ID}/production`)}`,
   );
-  await page.getByTestId("provider-diagnostics-disclosure").locator("summary").click();
-  await page.getByRole("button", { name: "添加模型", exact: true }).click();
-  await page.getByLabel("关键帧模型", { exact: true }).selectOption(model.model_id);
+  await page.getByRole("button", { name: "管理 Fixture Provider" }).click();
+  const dialog = page.getByTestId("provider-manage-dialog");
+  await dialog.getByRole("button", { name: "添加模型", exact: true }).click();
+  const picker = dialog.getByTestId("provider-model-picker");
+  await expect(picker.getByText("已发现 · 暂未支持执行 1")).toBeVisible();
+  await picker.getByRole("checkbox", { name: /Fixture Image/ }).check();
   expect(saved).toEqual([]);
-  expect(writes).toEqual([]);
-  await page.getByRole("button", { name: "添加关键帧模型绑定" }).click();
-  await expect(page.getByTestId("provider-config-message")).toContainText(
-    `模型绑定已创建：${model.model_id}`,
-  );
+  await dialog.getByRole("button", { name: "添加 1 个模型" }).click();
+  await expect(dialog.getByText("已添加 1 个模型。")).toBeVisible();
+  expect(probes).toEqual([{ capability: "auth_models" }]);
   expect(saved).toEqual([
     {
       model_id: model.model_id,
@@ -231,6 +263,6 @@ test("selecting a catalog model is only a draft and persists the exact identity 
       capability_contract_id: model.catalog_entry_id,
     },
   ]);
-  await expect(page.getByRole("button", { name: "绑定所选项目" })).toBeDisabled();
-  expect(writes.filter((path) => path.includes("/probes"))).toEqual([]);
+  await expect(dialog.getByTestId("provider-model-binding-fixture")).toContainText("可用");
+  expect(writes.filter((path) => !/\/(probes|model-bindings)$/.test(path))).toEqual([]);
 });

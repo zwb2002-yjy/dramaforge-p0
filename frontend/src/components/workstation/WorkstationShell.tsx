@@ -207,7 +207,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   // Return links use a stable parent (or the validated settings origin), not
   // browser history, so they also work after a refresh or a direct visit.
   const backTarget = pathname.startsWith("/settings/projects/")
-    ? { to: "/settings/models", search: settingsSearch, label: "返回模型连接" }
+    ? { to: "/settings/models", search: settingsSearch, label: "返回模型设置" }
     : primary === "settings"
       ? {
           to: returnUrl.pathname,
@@ -402,7 +402,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
                 active={
                   pathname === "/settings/models" || pathname.startsWith("/settings/projects/")
                 }
-                label="模型连接"
+                label="模型设置"
                 to="/settings/models"
                 search={settingsSearch}
                 icon={Wrench}

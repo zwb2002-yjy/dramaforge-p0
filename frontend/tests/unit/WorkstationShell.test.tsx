@@ -401,8 +401,7 @@ describe("Workstation shell", () => {
     const { router } = renderApp("/settings/defaults");
     expect(await screen.findByTestId("model-settings-page")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/settings/defaults");
-    expect(screen.getByRole("tab", { name: "默认模型" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByTestId("default-models-disclosure")).not.toHaveAttribute("hidden");
+    expect(await screen.findByRole("heading", { name: "默认模型" })).toBeVisible();
   });
 
   it("renders current Project settings inside Settings L2", async () => {
@@ -510,7 +509,7 @@ it("limits global settings navigation to models and account", async () => {
   renderApp("/settings/models?returnTo=%2Fprojects%2Fproject-1%2Fproduction");
   const navigation = await screen.findByRole("navigation", { name: "设置导航" });
   expect(within(navigation).getAllByRole("link")).toHaveLength(2);
-  expect(navigation).toHaveTextContent("模型连接");
+  expect(navigation).toHaveTextContent("模型设置");
   expect(navigation).toHaveTextContent("账号");
   expect(navigation).not.toHaveTextContent("新项目默认偏好");
   expect(navigation).not.toHaveTextContent("项目设置");

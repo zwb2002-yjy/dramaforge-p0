@@ -71,9 +71,13 @@ async def workspace_model_registry(
             continue
         settings = await runtime_text_gateway_settings(session, connection=connection)
         for alias in evidence.discovered_model_ids or []:
-            manifest = litellm_logical_manifest(alias).model_copy(
+            logical = litellm_logical_manifest(alias)
+            manifest = logical.model_copy(
                 update={
                     "id": f"litellm/{connection.id}/{alias}",
+                    # Several text connections may expose the same alias; the
+                    # connection name keeps their choices distinguishable.
+                    "display_name": f"{logical.display_name} · {connection.display_name}",
                 }
             )
             manifest.metadata.update(

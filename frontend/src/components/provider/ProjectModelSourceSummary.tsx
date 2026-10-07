@@ -12,22 +12,6 @@ import {
   executionModelSourceLabel,
 } from "../../lib/modelResolutionLabels";
 
-/** Configuration channels do not all use the media A+B binding resolver. */
-export function ProviderConfigurationBoundaries() {
-  return (
-    <section aria-label="模型接入边界" className="muted">
-      <p>
-        图片 / 视频使用这里的供应商连接与模型绑定。文本服务由实例级 LiteLLM
-        网关管理，此页面不验证网关连接。
-      </p>
-      <p data-testid="voice-runtime-boundary">
-        配音请到「分镜制作 → 角色 → 对白与配音」设置音色和语速，这里的模型方案不控制配音。
-        读取配置不等于已联网验证；服务失败不会自动换用其他服务。
-      </p>
-    </section>
-  );
-}
-
 /** A read model is a preview, not proof of dispatch or a replacement resolver. */
 export function ProjectModelSourceSummary({
   projectId,
@@ -82,15 +66,11 @@ export function ProjectModelSourceSummary({
           重新读取模型来源
         </Button>
       </div>
-      <p className="muted">
-        这里只读展示已保存配置，不会调用供应商。图片 /
-        视频的项目方案优先于工作空间默认方案；两者未覆盖时才使用显式项目供应商绑定。指定模型不可用时停止，不偷偷换模型。
+      <p className="muted">项目设置优先于默认模型；所选模型不可用时停止生成，不会换用其他模型。</p>
+      <p className="muted" data-testid="voice-runtime-boundary">
+        配音的音色和语速在镜头的「对白」中设置，不受这里控制。
       </p>
-      <ProviderConfigurationBoundaries />
-      <h3>实际生产解析结果</h3>
-      <p className="muted">
-        这是生成按钮真正使用的解析器结果；必须同时存在可执行的工作空间模型绑定，才会显示为就绪。
-      </p>
+      <h3>实际使用</h3>
       {preflight.isPending ? (
         <p role="status">正在运行只读预检…</p>
       ) : preflight.isError ? (

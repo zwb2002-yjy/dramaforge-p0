@@ -1167,25 +1167,28 @@ class ProviderConnectionService:
                 "model binding lacks reproducible contract evidence",
                 details={"code": "MODEL_CONTRACT_EVIDENCE_MISSING"},
             )
-        discovered = False
-        if capability_contract_id is not None and entry.model_id != model_id:
-            revision = await self.current_connection_revision(connection=connection)
-            evidence = await self._session.scalar(
-                select(ProviderCapabilityEvidence)
-                .where(
-                    ProviderCapabilityEvidence.connection_id == connection.id,
-                    ProviderCapabilityEvidence.capability == "auth_models",
-                    ProviderCapabilityEvidence.status == "passed",
-                    ProviderCapabilityEvidence.connection_revision_id == revision.id,
-                )
-                .order_by(ProviderCapabilityEvidence.tested_at.desc())
+        # A model returned by the latest passed catalog read of the current
+        # connection revision is account-visible, exactly as a later catalog
+        # probe would mark it (``_mark_listed_models_verified``). Binding order
+        # therefore never changes the verification result.
+        revision = await self.current_connection_revision(connection=connection)
+        evidence = await self._session.scalar(
+            select(ProviderCapabilityEvidence)
+            .where(
+                ProviderCapabilityEvidence.connection_id == connection.id,
+                ProviderCapabilityEvidence.capability == "auth_models",
+                ProviderCapabilityEvidence.status == "passed",
+                ProviderCapabilityEvidence.connection_revision_id == revision.id,
+                ProviderCapabilityEvidence.credential_revision == connection.credential_revision,
             )
-            discovered = bool(evidence and model_id in (evidence.discovered_model_ids or []))
-            if not discovered:
-                raise ValidationAppError(
-                    "model was not returned by the current connection discovery",
-                    details={"code": "MODEL_NOT_DISCOVERED"},
-                )
+            .order_by(ProviderCapabilityEvidence.tested_at.desc())
+        )
+        discovered = bool(evidence and model_id in (evidence.discovered_model_ids or []))
+        if capability_contract_id is not None and entry.model_id != model_id and not discovered:
+            raise ValidationAppError(
+                "model was not returned by the current connection discovery",
+                details={"code": "MODEL_NOT_DISCOVERED"},
+            )
         operation_kind = "image.generate" if media_type == "image" else "video.generate"
         operations = entry.capability_manifest_json.get("operations") or {}
         if operation_kind not in operations:
@@ -1215,9 +1218,9 @@ class ProviderConnectionService:
             enabled=enabled,
             documented=True,
             contract_tested=True,
-            # A new binding has no evidence of its own; only a binding-scoped
-            # probe of this exact model advances account_verified.
-            account_verified=discovered,
+            # A new binding has no evidence of its own beyond the current
+            # revision's catalog read; a later credential rejection wins.
+            account_verified=discovered and connection.verification_status == "verified",
             quality_gated=False,
             catalog_entry_id=entry.id,
             capability_manifest_hash=entry.contract_manifest_hash,

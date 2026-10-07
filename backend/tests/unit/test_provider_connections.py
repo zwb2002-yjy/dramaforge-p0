@@ -176,6 +176,8 @@ async def test_same_named_text_models_keep_connection_and_credentials_separate(
     assert {model.manifest.metadata["connection_id"] for model in models} == {
         str(connection.id) for connection in connections
     }
+    # The same alias on two connections stays distinguishable in pickers.
+    assert {model.manifest.display_name.rsplit(" · ", 1)[-1] for model in models} == {"a", "b"}
 
 
 @pytest.mark.asyncio

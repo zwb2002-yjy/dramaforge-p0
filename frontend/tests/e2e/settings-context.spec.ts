@@ -56,15 +56,15 @@ test("project model drilldown preserves the exact saved editing session without 
   await page.goto(origin);
   await expect(page.getByTestId("edit-session-editor")).toBeVisible();
   await page.getByRole("link", { name: "设置", exact: true }).click();
-  await page.getByRole("tab", { name: "项目模型", exact: true }).click();
+  await page.getByTestId("project-models-disclosure").locator("summary").click();
   await expect(page.getByRole("combobox", { name: "项目模型覆盖", exact: true })).toHaveValue(
     PROJECT_ID,
   );
-  await page.getByRole("link", { name: "配置项目模型", exact: true }).click();
+  await page.getByRole("link", { name: "设置项目模型", exact: true }).click();
   await expect(page.getByTestId("project-settings-page")).toBeVisible();
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe(origin);
   await page.reload();
-  await page.getByRole("link", { name: "返回模型连接", exact: true }).click();
+  await page.getByRole("link", { name: "返回模型设置", exact: true }).click();
   await page.getByRole("link", { name: "账号", exact: true }).click();
   await page.getByRole("link", { name: "返回创作", exact: true }).click();
   await expect(page).toHaveURL(origin);
@@ -91,14 +91,14 @@ test("an origin project is never selected outside the currently listed workspace
   const { writes } = await setup(page);
   const origin = `/projects/${PROJECT_ID}/production`;
   await page.goto(`/settings/models?returnTo=${encodeURIComponent(origin)}`);
-  await page.getByRole("tab", { name: "项目模型", exact: true }).click();
+  await page.getByTestId("project-models-disclosure").locator("summary").click();
   await expect(page.getByRole("combobox", { name: "项目模型覆盖", exact: true })).toHaveValue(
     PROJECT_ID,
   );
   await page
     .getByRole("combobox", { name: "设置工作空间", exact: true })
     .selectOption("workspace-other");
-  await expect(page.getByRole("combobox", { name: "项目模型覆盖", exact: true })).toHaveValue("");
-  await expect(page.getByRole("link", { name: "配置项目模型", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("combobox", { name: "项目模型覆盖", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "设置项目模型", exact: true })).toHaveCount(0);
   expect(writes).toEqual([]);
 });
