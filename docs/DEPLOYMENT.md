@@ -9,8 +9,9 @@ images are built from current source through `docker-compose.build.yml`; future
 release bundles supply immutable image references. It publishes only the unprivileged Nginx gateway on
 `127.0.0.1:8080`, and contains no source `build` instructions. PostgreSQL,
 Redis, MinIO, LiteLLM, the API, dispatcher and workers remain on the Compose
-network. A user host needs Docker Compose v2; it does not need Python, Node.js,
-or a compiler.
+network. A packaged-release host needs Docker Compose v2; it does not need
+Python, Node.js, or a compiler. The source-development setup below invokes
+`scripts/init_env.py` and therefore needs Python for that step.
 
 This topology is intended to behave the same with Docker Compose v2 on Linux,
 Windows Docker Desktop and macOS Docker Desktop. The authoritative CI quality
