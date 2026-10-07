@@ -23,6 +23,7 @@ from app.providers.contracts import (
     TextToVideoRequest,
     TTSRequest,
 )
+from app.providers.contracts.text import TextMessage
 from app.providers.errors import (
     ProviderErrorCode,
     SubmissionOutcomeUnknownError,
@@ -58,9 +59,7 @@ class TestCapability:
 
     def test_capability_satisfied_or_semantics(self) -> None:
         # coarse capability satisfied by ANY fine-grained member
-        assert capability_satisfied(
-            Capability.VIDEO_IMAGE_TO_VIDEO, {"video.i2v.first_frame"}
-        )
+        assert capability_satisfied(Capability.VIDEO_IMAGE_TO_VIDEO, {"video.i2v.first_frame"})
         assert capability_satisfied(Capability.VIDEO_IMAGE_TO_VIDEO, {"video.i2v"})
         # sibling capability is not satisfied
         assert not capability_satisfied(
@@ -112,7 +111,12 @@ class TestContracts:
         assert req.reference_videos == []
 
     def test_text_and_audio_contracts(self) -> None:
-        assert TextGenerateRequest(prompt="hi").prompt == "hi"
+        assert (
+            TextGenerateRequest(messages=[TextMessage(role="user", content="hi")])
+            .messages[0]
+            .content
+            == "hi"
+        )
         assert TTSRequest(text="hello", voice="zh-CN-Xiaoxiao").voice == "zh-CN-Xiaoxiao"
         edit = ImageEditRequest(prompt="edit", image=ArtifactRef(artifact_id="x"))
         assert edit.image.artifact_id == "x"

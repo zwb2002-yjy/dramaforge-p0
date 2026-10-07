@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
 from copy import deepcopy
-from pathlib import Path
 from uuid import uuid4
 
 import httpx
 import pytest
 from app.config import Settings
-from app.providers.capabilities import Capability
 from app.providers.capability_resolver import ProductCapabilityPolicy
-from app.providers.catalog_loader import ModelCatalogLoader
-from app.providers.catalog_seed_data import SEED_MANIFESTS
+from app.providers.catalog_loader import CATALOG_MODELS, ModelCatalogLoader
 from app.providers.intents import (
     ArtifactReferenceIntent,
     ImageGenerationIntent,
@@ -22,114 +18,20 @@ from app.providers.intents import (
     VideoGenerationIntentV1,
     VideoOutputIntent,
 )
-from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
+from app.providers.manifest import ModelCapabilityManifest
 from app.providers.minimax import MiniMaxImageCompiler, MiniMaxRuntime, MiniMaxVideoCompiler
 from app.providers.runtime import CompiledVideoRequest, ProviderResumeToken, ResolvedReference
 
 
 def _manifest(model_id: str, revision: str | None = None) -> ModelCapabilityManifest:
-    revision = revision or ("v2" if model_id == "MiniMax-H3" else "v1")
-    if model_id == "MiniMax-H3" and revision == "v1":
-        path = (
-            Path(__file__).resolve().parents[2]
-            / "alembic/versions/20260813_0021_minimax_catalog_entries.py"
-        )
-        spec = importlib.util.spec_from_file_location("frozen_minimax_catalog", str(path))
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return ModelCapabilityManifest.model_validate(module._MINIMAX_MANIFESTS[1])
-    return ModelCapabilityManifest.model_validate(
-        next(
-            item
-            for item in SEED_MANIFESTS
-            if item["model_id"] == model_id and item["model_revision"] == revision
-        )
-    )
-
-
-def _preview_manifest(model_id: str) -> ModelCapabilityManifest:
     raw = next(
         item.as_dict()
         for item in ModelCatalogLoader().load()
-        if item.identity[2] == model_id and item.as_dict()["lifecycle"] == "preview"
+        if item.identity[2] == model_id
+        and item.publication_lifecycle == "active"
+        and (revision is None or item.identity[3] == revision)
     )
     return ModelCapabilityManifest.model_validate(raw)
-
-
-def _video_contract_manifest(*, max_variant: bool) -> ModelCapabilityManifest:
-    source = next(item for item in SEED_MANIFESTS if item["model_id"] == "MiniMax-H3")
-    revised = deepcopy(source)
-    revised["model_revision"] = "v2-contract-test"
-    if max_variant:
-        revised["model_id"] = "MiniMax-H3-Max"
-        revised["display_name"] = "MiniMax H3 Max"
-    operation = revised["operations"]["video.generate"]
-    operation["input_contracts"] = {
-        "text": {"input_slots": {}, "maximum_total_references": 0},
-        "frame": {
-            "input_slots": {
-                "first_frame": {"maximum": 1, "media_types": ["image/*"]},
-                "last_frame": {"maximum": 1, "media_types": ["image/*"]},
-            },
-            "minimum_total_references": 1,
-        },
-        "reference": {
-            "input_slots": {
-                "reference_image": {"maximum": 9, "media_types": ["image/*"]},
-                "reference_video": {"maximum": 3, "media_types": ["video/*"]},
-                "reference_audio": {"maximum": 3, "media_types": ["audio/*"]},
-            },
-            "minimum_total_references": 1,
-            "maximum_total_references": 12,
-        },
-    }
-    operation["output_options"] = {
-        "resolution": {
-            "type": "string",
-            "enum": ["480P", "768P"] if max_variant else ["768P", "2K"],
-            "default": "768P",
-        },
-        "duration_seconds": {
-            "type": "integer",
-            "minimum": 5 if max_variant else 4,
-            "maximum": 15,
-            "default": 5,
-        },
-        "aspect_ratio": {
-            "type": "string",
-            "enum": ["adaptive", "9:16", "16:9"],
-            "default": "adaptive",
-        },
-    }
-    if max_variant:
-        operation["output_options"]["prompt_expansion_mode"] = {
-            "type": "string",
-            "enum": ["balanced"],
-            "default": "balanced",
-        }
-    return ModelCapabilityManifest.model_validate(revised)
-
-
-def _settings() -> Settings:
-    return Settings(
-        minimax_enabled=True,
-        minimax_api_key="test-minimax-key",
-        minimax_base_url="https://api.minimaxi.com",
-    )
-
-
-def test_h3_catalog_projects_distinct_text_and_first_frame_input_rules() -> None:
-    model = to_v3_model_manifest(_manifest("MiniMax-H3"), transport_profile_id="test")
-    text = model.capability_specs[Capability.VIDEO_TEXT_TO_VIDEO]
-    frame = model.capability_specs[Capability.VIDEO_IMAGE_TO_VIDEO]
-    assert text.input_slots == {}
-    assert text.common_options["resolution"].enum == ["2K"]
-    assert text.common_options["aspect_ratio"].enum == ["9:16", "16:9"]
-    assert text.common_options["aspect_ratio"].type == "string"
-    assert frame.input_slots["first_frame"].required is True
-    assert frame.input_slots["first_frame"].minimum == 1
-    assert frame.common_options["resolution"].enum == ["768P"]
 
 
 @pytest.mark.asyncio
@@ -137,7 +39,9 @@ async def test_image_compiler_requires_one_https_reference_and_builds_native_bod
     artifact_id = uuid4()
     intent = ImageGenerationIntent(
         prompt="portrait",
-        reference_artifact_id=artifact_id,
+        reference_artifact_ids=[
+            reference_id for reference_id in [(artifact_id)] if reference_id is not None
+        ],
         selection=ModelSelectionIntent(mode="explicit_binding"),
     )
     reference = ResolvedReference(
@@ -165,7 +69,7 @@ async def test_image_compiler_requires_one_https_reference_and_builds_native_bod
 
 @pytest.mark.asyncio
 async def test_same_image_compiler_handles_manifest_driven_t2i_and_i2i() -> None:
-    source = next(item for item in SEED_MANIFESTS if item["model_id"] == "image-01")
+    source = next(item for item in CATALOG_MODELS if item["model_id"] == "image-01")
     revised = deepcopy(source)
     revised["model_revision"] = "v2-test"
     operation = revised["operations"]["image.generate"]
@@ -225,7 +129,9 @@ async def test_same_image_compiler_handles_manifest_driven_t2i_and_i2i() -> None
         ImageGenerationIntent(
             prompt="portrait",
             aspect_ratio="1:1",
-            reference_artifact_id=artifact_id,
+            reference_artifact_ids=[
+                reference_id for reference_id in [(artifact_id)] if reference_id is not None
+            ],
             selection=ModelSelectionIntent(mode="explicit_binding"),
         ),
         manifest,
@@ -296,10 +202,8 @@ def test_video_compiler_rejects_unsupported_outputs_and_roles() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("aspect_ratio", ["9:16", "16:9"])
-@pytest.mark.parametrize("revision", ["v1", "v2"])
 async def test_video_compiler_inherits_supported_project_ratio_from_first_frame(
     aspect_ratio: str,
-    revision: str,
 ) -> None:
     artifact_id = uuid4()
     intent = VideoGenerationIntentV1(
@@ -315,7 +219,7 @@ async def test_video_compiler_inherits_supported_project_ratio_from_first_frame(
     )
     compiled = await MiniMaxVideoCompiler().compile(
         intent,
-        _manifest("MiniMax-H3", revision),
+        _manifest("MiniMax-H3"),
         [
             ResolvedReference(
                 role="first_frame",
@@ -597,7 +501,7 @@ async def test_h3_official_text_video_compiles_text_only_v2_request(aspect_ratio
     )
     compiled = await MiniMaxVideoCompiler().compile(
         intent,
-        _manifest("MiniMax-H3", "v2"),
+        _manifest("MiniMax-H3"),
         [],
         invoke_model_value="MiniMax-H3",
     )
@@ -614,7 +518,7 @@ async def test_h3_official_text_video_compiles_text_only_v2_request(aspect_ratio
 
 
 def test_h3_text_video_rejects_first_frame_and_adaptive_ratio() -> None:
-    manifest = _manifest("MiniMax-H3", "v2")
+    manifest = _manifest("MiniMax-H3")
     intent = VideoGenerationIntentV1(
         prompt="Ocean waves",
         mode_id="text_to_video",
@@ -635,3 +539,74 @@ def test_h3_text_video_rejects_first_frame_and_adaptive_ratio() -> None:
             ),
             manifest,
         )
+
+
+def _preview_manifest(model_id: str) -> ModelCapabilityManifest:
+    raw = next(
+        item.as_dict()
+        for item in ModelCatalogLoader().load()
+        if item.identity[2] == model_id and item.as_dict()["lifecycle"] == "preview"
+    )
+    return ModelCapabilityManifest.model_validate(raw)
+
+
+def _video_contract_manifest(*, max_variant: bool) -> ModelCapabilityManifest:
+    source = next(item for item in CATALOG_MODELS if item["model_id"] == "MiniMax-H3")
+    revised = deepcopy(source)
+    revised["model_revision"] = "v2-contract-test"
+    if max_variant:
+        revised["model_id"] = "MiniMax-H3-Max"
+        revised["display_name"] = "MiniMax H3 Max"
+    operation = revised["operations"]["video.generate"]
+    operation["input_contracts"] = {
+        "text": {"input_slots": {}, "maximum_total_references": 0},
+        "frame": {
+            "input_slots": {
+                "first_frame": {"maximum": 1, "media_types": ["image/*"]},
+                "last_frame": {"maximum": 1, "media_types": ["image/*"]},
+            },
+            "minimum_total_references": 1,
+        },
+        "reference": {
+            "input_slots": {
+                "reference_image": {"maximum": 9, "media_types": ["image/*"]},
+                "reference_video": {"maximum": 3, "media_types": ["video/*"]},
+                "reference_audio": {"maximum": 3, "media_types": ["audio/*"]},
+            },
+            "minimum_total_references": 1,
+            "maximum_total_references": 12,
+        },
+    }
+    operation["output_options"] = {
+        "resolution": {
+            "type": "string",
+            "enum": ["480P", "768P"] if max_variant else ["768P", "2K"],
+            "default": "768P",
+        },
+        "duration_seconds": {
+            "type": "integer",
+            "minimum": 5 if max_variant else 4,
+            "maximum": 15,
+            "default": 5,
+        },
+        "aspect_ratio": {
+            "type": "string",
+            "enum": ["adaptive", "9:16", "16:9"],
+            "default": "adaptive",
+        },
+    }
+    if max_variant:
+        operation["output_options"]["prompt_expansion_mode"] = {
+            "type": "string",
+            "enum": ["balanced"],
+            "default": "balanced",
+        }
+    return ModelCapabilityManifest.model_validate(revised)
+
+
+def _settings() -> Settings:
+    return Settings(
+        minimax_enabled=True,
+        minimax_api_key="test-minimax-key",
+        minimax_base_url="https://api.minimaxi.com",
+    )

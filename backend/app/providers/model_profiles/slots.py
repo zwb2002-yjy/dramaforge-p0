@@ -44,7 +44,6 @@ class ModelSlotDefinition(BaseModel):
 
     slot: ModelSlot
     required_capabilities: list[Capability]
-    fallback_slot: ModelSlot | None = None
     description: str
 
 
@@ -148,8 +147,11 @@ def slot_satisfies(slot: ModelSlot, capability: Capability) -> bool:
 
 def slots_for_capability(capability: Capability) -> list[ModelSlot]:
     """Slots that declare ``capability`` — used to filter the slot picker."""
-    return [slot for slot, definition in MODEL_SLOT_DEFINITIONS.items()
-            if capability in definition.required_capabilities]
+    return [
+        slot
+        for slot, definition in MODEL_SLOT_DEFINITIONS.items()
+        if capability in definition.required_capabilities
+    ]
 
 
 def validate_slot_definitions() -> None:
@@ -165,24 +167,6 @@ def validate_slot_definitions() -> None:
         for capability in definition.required_capabilities:
             if not isinstance(capability, Capability):
                 raise ValueError(f"slot {slot} has non-Capability requirement: {capability!r}")
-    # Acyclic fallback graph: simple DFS cycle detection.
-    visiting: set[ModelSlot] = set()
-    visited: set[ModelSlot] = set()
-
-    def visit(node: ModelSlot) -> None:
-        if node in visited:
-            return
-        if node in visiting:
-            raise ValueError(f"fallback_slot cycle detected at {node}")
-        visiting.add(node)
-        definition = MODEL_SLOT_DEFINITIONS.get(node)
-        if definition is not None and definition.fallback_slot is not None:
-            visit(definition.fallback_slot)
-        visiting.discard(node)
-        visited.add(node)
-
-    for slot in MODEL_SLOT_DEFINITIONS:
-        visit(slot)
 
 
 validate_slot_definitions()

@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 from app.providers.adapters_v2 import BridgeComponents, ProviderAdapterBridge
 from app.providers.capabilities import Capability
-from app.providers.catalog_seed_data import SEED_MANIFESTS
+from app.providers.catalog_loader import CATALOG_MODELS
 from app.providers.contracts.common import ArtifactRef
 from app.providers.contracts.image import ImageEditRequest
 from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
@@ -16,7 +16,7 @@ from app.providers.validator import CapabilityValidator
 
 async def test_image_edit_validates_and_compiles_its_reference() -> None:
     manifest = ModelCapabilityManifest.model_validate(
-        next(row for row in SEED_MANIFESTS if row["model_id"] == "image-01")
+        next(row for row in CATALOG_MODELS if row["model_id"] == "image-01")
     )
     public = to_v3_model_manifest(manifest, transport_profile_id="minimax-image-v1")
     reference_id = UUID("00000000-0000-0000-0000-000000000001")
@@ -36,7 +36,7 @@ async def test_image_edit_validates_and_compiles_its_reference() -> None:
             runtime=None,
         ),
     )
-    result = await bridge.translate_v2(
+    result = await bridge.translate(
         Capability.IMAGE_EDIT,
         request,
         [
@@ -93,7 +93,7 @@ async def test_preview_compiles_without_a_runtime_and_never_exposes_payload() ->
     from app.providers.intents import ImageGenerationIntent, ModelSelectionIntent
 
     manifest = ModelCapabilityManifest.model_validate(
-        next(row for row in SEED_MANIFESTS if row["model_id"] == "image-01")
+        next(row for row in CATALOG_MODELS if row["model_id"] == "image-01")
     )
     ref_id = UUID(int=1)
     preview = await preview_compile(
@@ -101,7 +101,9 @@ async def test_preview_compiles_without_a_runtime_and_never_exposes_payload() ->
         invoke_model_value="image-01",
         intent=ImageGenerationIntent(
             prompt="sensitive private creative material",
-            reference_artifact_id=ref_id,
+            reference_artifact_ids=[
+                reference_id for reference_id in [(ref_id)] if reference_id is not None
+            ],
             selection=ModelSelectionIntent(mode="explicit_binding"),
         ),
         references=[
@@ -128,14 +130,16 @@ async def test_preview_rejects_mismatched_reference_identity() -> None:
     from app.providers.intents import ImageGenerationIntent, ModelSelectionIntent
 
     manifest = ModelCapabilityManifest.model_validate(
-        next(row for row in SEED_MANIFESTS if row["model_id"] == "image-01")
+        next(row for row in CATALOG_MODELS if row["model_id"] == "image-01")
     )
     result = await preview_compile(
         manifest=manifest,
         invoke_model_value="image-01",
         intent=ImageGenerationIntent(
             prompt="test",
-            reference_artifact_id=UUID(int=1),
+            reference_artifact_ids=[
+                reference_id for reference_id in [(UUID(int=1))] if reference_id is not None
+            ],
             selection=ModelSelectionIntent(mode="explicit_binding"),
         ),
         references=[
@@ -162,7 +166,7 @@ def test_ark_video_rejects_untransmitted_output_controls(field: str, value: obje
     from app.providers.volcengine import ArkVideoCompiler
 
     manifest = ModelCapabilityManifest.model_validate(
-        next(row for row in SEED_MANIFESTS if row["model_id"] == "doubao-seedance-2-0-260128")
+        next(row for row in CATALOG_MODELS if row["model_id"] == "doubao-seedance-2-0-260128")
     )
     intent = VideoGenerationIntentV1(
         prompt="camera moves",
@@ -178,13 +182,15 @@ def test_minimax_image_rejects_ratio_that_would_be_silently_replaced() -> None:
     from app.providers.intents import ImageGenerationIntent, ModelSelectionIntent
 
     manifest = ModelCapabilityManifest.model_validate(
-        next(row for row in SEED_MANIFESTS if row["model_id"] == "image-01")
+        next(row for row in CATALOG_MODELS if row["model_id"] == "image-01")
     )
     with pytest.raises(ValueError, match="aspect ratio"):
         MiniMaxImageCompiler().validate(
             ImageGenerationIntent(
                 prompt="portrait",
-                reference_artifact_id=UUID(int=1),
+                reference_artifact_ids=[
+                    reference_id for reference_id in [(UUID(int=1))] if reference_id is not None
+                ],
                 aspect_ratio="9:16",
                 selection=ModelSelectionIntent(mode="explicit_binding"),
             ),
@@ -194,17 +200,13 @@ def test_minimax_image_rejects_ratio_that_would_be_silently_replaced() -> None:
 
 @pytest.mark.parametrize(
     "model_id",
-    [
-        row["model_id"]
-        for row in SEED_MANIFESTS
-        if row.get("catalog_source") != "protocol_contract"
-    ],
+    [row["model_id"] for row in CATALOG_MODELS if row.get("catalog_source") != "protocol_contract"],
 )
 def test_every_seed_model_is_queryable_without_account_verification(model_id: str) -> None:
     from app.providers.capability_inspection import inspect_catalog_model
-    from app.providers.catalog_seed_data import hash_manifest
+    from app.providers.catalog_loader import hash_manifest
 
-    seed = next(row for row in SEED_MANIFESTS if row["model_id"] == model_id)
+    seed = next(row for row in CATALOG_MODELS if row["model_id"] == model_id)
     report = inspect_catalog_model(f"{seed['provider_type']}/{model_id}")
     assert report.manifest_hash == hash_manifest(seed)
     assert report.account_status == "not_checked"
@@ -232,7 +234,7 @@ def test_image_compilers_reject_undeclared_seed(provider: str, model_id: str) ->
     from app.providers.registry import get_plugin
 
     manifest = ModelCapabilityManifest.model_validate(
-        next(row for row in SEED_MANIFESTS if row["model_id"] == model_id)
+        next(row for row in CATALOG_MODELS if row["model_id"] == model_id)
     )
     compiler, _ = get_plugin(provider, manifest.protocol_profile).compiler_factory()
     with pytest.raises(ValueError, match="seed"):
@@ -249,7 +251,7 @@ def test_ark_image_does_not_silently_replace_portrait_with_square() -> None:
     from app.providers.volcengine import ArkImageCompiler
 
     manifest = ModelCapabilityManifest.model_validate(
-        next(row for row in SEED_MANIFESTS if row["model_id"] == "doubao-seedream-4-0-250828")
+        next(row for row in CATALOG_MODELS if row["model_id"] == "doubao-seedream-4-0-250828")
     )
     with pytest.raises(ValueError, match="aspect ratio"):
         ArkImageCompiler().validate(
@@ -264,11 +266,7 @@ def test_ark_image_does_not_silently_replace_portrait_with_square() -> None:
 
 @pytest.mark.parametrize(
     "model_id",
-    [
-        row["model_id"]
-        for row in SEED_MANIFESTS
-        if row.get("catalog_source") != "protocol_contract"
-    ],
+    [row["model_id"] for row in CATALOG_MODELS if row.get("catalog_source") != "protocol_contract"],
 )
 async def test_every_seed_compiler_has_a_side_effect_free_contract_preview(model_id: str) -> None:
     from app.providers.compile_preview import PreviewReference, preview_compile
@@ -281,13 +279,17 @@ async def test_every_seed_compiler_has_a_side_effect_free_contract_preview(model
     )
 
     manifest = ModelCapabilityManifest.model_validate(
-        next(row for row in SEED_MANIFESTS if row["model_id"] == model_id)
+        next(row for row in CATALOG_MODELS if row["model_id"] == model_id)
     )
     selection = ModelSelectionIntent(mode="explicit_binding")
     reference_id = UUID(int=1)
     if manifest.media_kind == "image":
         intent = ImageGenerationIntent(
-            prompt="private", reference_artifact_id=reference_id, selection=selection
+            prompt="private",
+            reference_artifact_ids=[
+                reference_id for reference_id in [(reference_id)] if reference_id is not None
+            ],
+            selection=selection,
         )
         role = "reference_image"
     else:
@@ -328,7 +330,7 @@ def test_agnes_video_rejects_untransmitted_controls(field: str, value: object) -
     )
 
     manifest = ModelCapabilityManifest.model_validate(
-        next(row for row in SEED_MANIFESTS if row["model_id"] == "agnes-video-v2.0")
+        next(row for row in CATALOG_MODELS if row["model_id"] == "agnes-video-v2.0")
     )
     intent = VideoGenerationIntentV1(
         prompt="test",
@@ -358,14 +360,16 @@ async def test_unknown_preview_mode_and_unordered_references_fail_closed() -> No
     from app.providers.intents import ImageGenerationIntent, ModelSelectionIntent
 
     manifest = ModelCapabilityManifest.model_validate(
-        next(row for row in SEED_MANIFESTS if row["model_id"] == "image-01")
+        next(row for row in CATALOG_MODELS if row["model_id"] == "image-01")
     )
     result = await preview_compile(
         manifest=manifest,
         invoke_model_value="image-01",
         intent=ImageGenerationIntent(
             prompt="test",
-            reference_artifact_id=UUID(int=1),
+            reference_artifact_ids=[
+                reference_id for reference_id in [(UUID(int=1))] if reference_id is not None
+            ],
             mode_id="unregistered-mode",
             selection=ModelSelectionIntent(mode="explicit_binding"),
         ),
@@ -392,7 +396,7 @@ async def test_declared_reference_mode_is_enforced_before_compilation() -> None:
     from app.providers.manifest import ExclusiveGroup
 
     manifest = ModelCapabilityManifest.model_validate(
-        next(row for row in SEED_MANIFESTS if row["model_id"] == "doubao-seedance-2-0-260128")
+        next(row for row in CATALOG_MODELS if row["model_id"] == "doubao-seedance-2-0-260128")
     )
     operation = manifest.operations["video.generate"]
     operation.exclusive_groups = [

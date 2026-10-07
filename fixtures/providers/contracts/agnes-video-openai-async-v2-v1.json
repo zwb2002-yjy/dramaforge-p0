@@ -1,43 +1,51 @@
 {
   "manifest": {
-    "catalog_source": "protocol_contract",
-    "display_name": "Agnes Video 2.5 协议插件",
-    "documented_at": "2026-09-21",
-    "lifecycle": "active",
     "manifest_version": "2026-09-21",
-    "media_kind": "video",
+    "provider_type": "agnes",
+    "protocol_profile": "agnes_cn_v1",
     "model_id": "@contract/agnes-video-openai-async-v2",
-    "model_revision": "v1",
+    "model_revision": "v2",
+    "media_kind": "video",
+    "display_name": "Agnes Video 2.5 协议插件",
+    "lifecycle": "active",
+    "catalog_source": "protocol_contract",
+    "documented_at": "2026-09-21",
     "operations": {
       "video.generate": {
+        "operation": "video.generate",
         "capabilities": [
           "video.i2v.first_frame"
         ],
-        "exclusive_groups": [],
-        "operation": "video.generate",
         "output_constraints": {
-          "aspect_ratio": "9:16",
-          "duration_seconds": 5,
-          "native_audio": false,
           "protocol_generation": "2.5",
-          "resolution": "720P"
+          "resolution": "720P",
+          "duration_seconds": 5,
+          "aspect_ratio": "9:16",
+          "native_audio": false
         },
         "reference_constraints": {
           "first_frame": {
-            "max": 1,
-            "min": 1
+            "min": 1,
+            "max": 1
           }
-        }
+        },
+        "exclusive_groups": []
       }
     },
     "option_schema": {
       "namespace": "",
       "options": {}
     },
-    "protocol_profile": "agnes_cn_v1",
-    "provider_type": "agnes"
+    "implementation_status": "contract_tested",
+    "evidence": {
+      "current_contract": {
+        "source_type": "contract_fixture",
+        "source_url": "repository:backend/tests/unit",
+        "checked_at": "2026-10-07"
+      }
+    }
   },
-  "manifest_hash": "3f8859a828862343732897101beac3cd7e125779deb6801ef514541c3e82bf5f",
+  "manifest_hash": "a9bdcc31a87f7daced274a3f8271683029de83d3b9717223f65757feb22fe6c2",
   "contract": {
     "documentation_source": {
       "notes": "Frozen local compiler contract; no provider request or account verification.",

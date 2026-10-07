@@ -285,9 +285,7 @@ class ArkHubClient:
             "size": str(body.get("size", "")),
             "reference_count": len(references),
             "reference_artifact_ids": ([reference_artifact_id] if reference_artifact_id else []),
-            "reference_fingerprints": (
-                [reference_fingerprint] if reference_fingerprint else []
-            ),
+            "reference_fingerprints": ([reference_fingerprint] if reference_fingerprint else []),
             "reference_transport": "signed_url" if references else "none",
             "request_schema_fingerprint": _schema_fingerprint(body),
         }
@@ -578,11 +576,11 @@ class ArkImageCompiler:
             raise ValueError("Ark image size must match the frozen manifest")
         capabilities = set(op.capabilities)
         required = "image.t2i"
-        if intent.reference_artifact_id is not None:
+        if intent.single_reference_id() is not None:
             required = "image.i2i"
         if required not in capabilities:
             raise ValueError(f"model does not support {required}")
-        if intent.reference_artifact_id is not None:
+        if intent.single_reference_id() is not None:
             constraint = op.reference_constraints.get("reference_image")
             if constraint is None or constraint.max < 1:
                 raise ValueError("model does not accept a reference_image")
@@ -601,9 +599,7 @@ class ArkImageCompiler:
             return self._compile_contract(
                 intent, model, references, invoke_model_value=invoke_model_value, policy=policy
             )
-        image_references = [
-            ref for ref in references if ref.role == "reference_image"
-        ]
+        image_references = [ref for ref in references if ref.role == "reference_image"]
         if len(image_references) > 1:
             raise ValueError(
                 "UNSUPPORTED_BY_LEGACY_BRIDGE: image compiler accepts at most one reference_image"
@@ -878,8 +874,7 @@ class ArkVideoCompiler:
             for item in intent.references
         ]
         delivered = [
-            (item.artifact_id, canonical_reference_role(str(item.role)))
-            for item in references
+            (item.artifact_id, canonical_reference_role(str(item.role))) for item in references
         ]
         if selected != delivered:
             raise ValueError("resolved Ark references do not match creative intent")
@@ -1189,9 +1184,7 @@ class ArkRuntime:
         from app.providers.runtime import CancelResult
 
         try:
-            async with httpx.AsyncClient(
-                timeout=30.0, transport=self._transport
-            ) as client:
+            async with httpx.AsyncClient(timeout=30.0, transport=self._transport) as client:
                 await client.delete(
                     f"{self._host}{ARK_VIDEO_CREATE_PATH}/{resume.remote_task_id}",
                     headers=self._headers(),

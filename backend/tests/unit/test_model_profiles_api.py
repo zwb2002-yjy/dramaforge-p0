@@ -115,7 +115,7 @@ def test_workspace_profile_crud_and_simple_mode(api: tuple[TestClient, Any]) -> 
         f"/api/v1/workspaces/{workspace_id}/model-profiles",
         json={
             "name": "默认方案",
-            "bindings": {"visual.keyframe": {"model_id": "agnes/agnes-image-2.1-flash"}},
+            "bindings": {"planning.script": {"model_id": "litellm/script-quality"}},
             "is_default": True,
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -123,14 +123,13 @@ def test_workspace_profile_crud_and_simple_mode(api: tuple[TestClient, Any]) -> 
     assert created.status_code == 201, created.text
     profile = created.json()
     assert profile["version"] == 1
-    assert profile["bindings"]["visual.keyframe"]["model_id"] == "agnes/agnes-image-2.1-flash"
+    assert profile["bindings"]["planning.script"]["model_id"] == "litellm/script-quality"
 
     # simple mode batch patch (LLM / Image / Video → slot groups)
     simple = client.post(
         f"/api/v1/workspaces/{workspace_id}/model-profiles/{profile['id']}/simple-mode",
         json={
-            "llm_model_id": "litellm/text-llm",
-            "image_model_id": "agnes/agnes-image-2.1-flash",
+            "llm_model_id": "litellm/script-quality",
             "expected_version": 1,
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -138,8 +137,8 @@ def test_workspace_profile_crud_and_simple_mode(api: tuple[TestClient, Any]) -> 
     assert simple.status_code == 200, simple.text
     updated = simple.json()
     assert updated["version"] == 2
-    assert updated["bindings"]["planning.brief"]["model_id"] == "litellm/text-llm"
-    assert updated["bindings"]["visual.keyframe"]["model_id"] == "agnes/agnes-image-2.1-flash"
+    assert updated["bindings"]["planning.brief"]["model_id"] == "litellm/script-quality"
+    assert updated["bindings"]["planning.script"]["model_id"] == "litellm/script-quality"
 
     # version conflict
     conflict = client.put(
@@ -197,7 +196,7 @@ def test_effective_bindings_and_generation_slot_resolution(
         f"/api/v1/workspaces/{workspace_id}/model-profiles",
         json={
             "name": "默认方案",
-            "bindings": {"visual.keyframe": {"model_id": "agnes/agnes-image-2.1-flash"}},
+            "bindings": {"planning.script": {"model_id": "litellm/script-quality"}},
             "is_default": True,
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -205,8 +204,8 @@ def test_effective_bindings_and_generation_slot_resolution(
 
     effective = client.get(f"/api/v1/projects/{project_id}/model-bindings/effective")
     assert effective.status_code == 200, effective.text
-    keyframe = next(b for b in effective.json() if b["slot"] == "visual.keyframe")
-    assert keyframe["model_id"] == "agnes/agnes-image-2.1-flash"
+    keyframe = next(b for b in effective.json() if b["slot"] == "planning.script")
+    assert keyframe["model_id"] == "litellm/script-quality"
     assert keyframe["source"] == "workspace_profile"
 
     # A logical profile selection is not yet an executable provider binding.
@@ -218,44 +217,11 @@ def test_effective_bindings_and_generation_slot_resolution(
         stage for stage in preflight.json()["stages"] if stage["stage"] == "image_keyframe"
     )
     assert keyframe_execution["ready"] is False
-    assert keyframe_execution["requested_model_id"] == "agnes/agnes-image-2.1-flash"
+    assert keyframe_execution["requested_model_id"] is None
     assert keyframe_execution["resolved_model_id"] is None
-    assert keyframe_execution["reason"] == "MODEL_BINDING_UNAVAILABLE"
+    assert keyframe_execution["reason"] == "MODEL_BINDING_MISSING"
 
     # Standalone image.generate without model_id resolves the visual.keyframe
-    # slot through the GenerationService domain call (media generation has no
-    # second HTTP writer; the workbench execution path owns that surface).
-    async def _create() -> str:
-        from app.access.models import Project, User
-        from app.providers.bootstrap import default_v3_registry
-        from app.providers.capabilities import Capability
-        from app.providers.generation_service import GenerationService
-        from app.providers.router import CapabilityRouter
-        from sqlalchemy import select
-
-        async with factory() as session:
-            user = (await session.execute(select(User).limit(1))).scalar_one()
-            project = await session.get(Project, UUID(project_id))
-            assert project is not None
-            service = GenerationService(
-                session, CapabilityRouter(registry=default_v3_registry()[0])
-            )
-            run = await service.create_generation(
-                project=project,
-                actor=user,
-                capability=Capability.IMAGE_GENERATE,
-                model_id=None,
-                input_data={"prompt": "雨夜"},
-                options={},
-                native_options={},
-                idempotency_key=None,
-            )
-            snapshot = dict(run.input_snapshot or {})
-            generation = snapshot.get("generation") or {}
-            assert isinstance(generation, dict)
-            return str(generation.get("requested_model") or "")
-
-    assert _run_create(_create()) == "agnes/agnes-image-2.1-flash"
 
 
 def test_execution_preflight_requires_immutable_connection_revision(
@@ -401,7 +367,7 @@ def test_project_profile_snapshot_on_first_write(api: tuple[TestClient, Any]) ->
         f"/api/v1/workspaces/{workspace_id}/model-profiles",
         json={
             "name": "默认方案",
-            "bindings": {"planning.script": {"model_id": "litellm/text-llm"}},
+            "bindings": {"planning.script": {"model_id": "litellm/script-quality"}},
             "is_default": True,
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -415,7 +381,7 @@ def test_project_profile_snapshot_on_first_write(api: tuple[TestClient, Any]) ->
     assert put.status_code == 200, put.text
     profile = put.json()
     assert profile["project_id"] == project_id
-    assert profile["bindings"]["planning.script"]["model_id"] == "litellm/text-llm"
+    assert profile["bindings"]["planning.script"]["model_id"] == "litellm/script-quality"
 
     got = client.get(f"/api/v1/projects/{project_id}/model-profile")
     assert got.status_code == 200, got.text

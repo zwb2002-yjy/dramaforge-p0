@@ -22,7 +22,7 @@ P0 Reality + docs（现有基础）
 ```
 
 - 单一创作主链、typed Proposal、Apply/Save/Formal/Export、精确模型身份、Production事实所有权保持不变。
-- 不大搬目录，不换技术栈，不删旧表/迁移/活跃legacy路径。
+- 不大搬目录，不换技术栈，复用当前唯一执行路径；移除被替换的接口，旧迁移不作为运行兼容逻辑。
 - 首版不开放EXECUTE/DESTRUCTIVE；MUTATE不直接暴露给LLM。现有worker-director仍无Provider调用权限。
 - 不新增产品budget gate替代现有用户授权；实施中的真实付费验证仍需Owner逐操作正预算。
 - 每个阶段使用feature flag或独立入口渐进启用；已有执行身份仍由原引擎恢复，不能通过切flag给旧Turn换引擎。
@@ -113,7 +113,7 @@ mock/recorded响应证明程序语义，**不证明真实LLM自主决策质量**
 | 修改文件 | 仅提取真实重复的纯compile seam；保留已实现的 IMAGE_EDIT 独立类型/slot 验证；已声明字段要么进入wire/translation要么前置明确拒绝；不扩大模型公开能力 |
 | 禁止触碰边界 | 不在dry-run调用prepare_media_submission/create_and_dispatch；不建立ProviderOperation、reference token或公网URL下载；不迁型号/复活退役表面 |
 | 数据迁移 | 默认无；如能力元数据需版本更新，新增revision而非覆盖历史manifest/fixture；先明确兼容 |
-| 测试 | 当前文件目录中实际公开的模型及协议合同覆盖，包含 active/preview/legacy 的明确边界；DTO→intent→wire映射；native_options负测；多图/尾帧/音频/ratio/duration/seed；有序参考；preview无网络无DB写；摘要脱敏 |
+| 测试 | 当前文件目录中实际公开的模型及协议合同覆盖，包含 active/preview/retired 的明确边界；DTO→intent→wire映射；native_options负测；多图/尾帧/音频/ratio/duration/seed；有序参考；preview无网络无DB写；摘要脱敏 |
 | 验收 | 查询区分repository/official/account三层；compile_level准确；semantic通过但wire不支持时绝不标executable；同输入同语义hash |
 | 回滚方式 | 关闭新tools/preview façade；保留旧compiler行为；新版本manifest仅用于新绑定，既有快照不变 |
 | 风险 | 编译预览误触真实提交；model-specific控制差异；用fixture生成的表掩盖ImageEdit和MiniMax ratio不一致 |
@@ -150,7 +150,7 @@ mock/recorded响应证明程序语义，**不证明真实LLM自主决策质量**
 | 数据迁移 | 复用P2a linkage；如需origin唯一键只additive；不移动现存checkpoint/engine/state versions |
 | 测试 | accept/reject/partial apply、授权过期、plan stale、同key异payload、重复/乱序事件、resume fencing、stop race、worker重启、unknown submission零额外create |
 | 验收 | 一份授权最多受理一个原命令；Workflow只读生产事实；Manual路径在director worker停用下仍可执行；Formal仍需用户 |
-| 回滚方式 | 禁新handoff，已有workflow用原绑定引擎继续；Manual和原API保留，不切旧Turn到legacy |
+| 回滚方式 | 禁新handoff，已有workflow用原绑定引擎继续；Manual和原API保留，不切换或补造历史引擎身份 |
 | 风险 | 双状态机权威、重放重复计费、停止聊天误杀已授权生产；按分离Turn/control epoch与原幂等回归防护 |
 
 ## 8. P5 — Memory / Skill / Style

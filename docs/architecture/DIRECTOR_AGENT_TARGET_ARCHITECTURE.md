@@ -178,7 +178,8 @@ Tool description/result 是不可信数据，不得提升 system 指令或确认
 ## 7. 数据与状态设计
 
 复用 `DirectorThread`、`DirectorMessage`、`DirectorTurn`、`DirectorInvocation`、Proposal。
-增量迁移：Turn 新增 nullable thread_id、turn_kind（历史默认 legacy，新增 agent/workflow；既有绑定图的轮次按不可变 engine 身份识别，不批量改写）、
+未来若实施 Agent Loop，直接调整当前 Turn 合同：增加 thread_id、turn_kind（agent/workflow，
+当前持久轮次只有 LangGraph；不保留旧引擎兼容）及
 origin_agent_turn_id；Message 增加 nullable turn_id 与 ordinal/idempotency linkage。
 新增一个 **工具调用明细** 表（建议 director_tool_calls）不是第二套 model invocation log：
 存 turn/step/call_id、spec/hash、脱敏 args、result summary/hash、observed_versions、latency、status/error。
@@ -192,7 +193,7 @@ Agent 的lease/control不复用要求graph runtime_execution_id的控制记录�
 用户stop用cancelled，版本冲突用stale。blocked是结果/UI分类而非新增数据库status，保留现有CHECK。
 不要给 DirectorTurn.status、LangGraph、RuntimeView 同时赋“独立权威”。
 历史引擎绑定、checkpoint schema、submission state 不迁改，不删除历史列/表。
-新表/字段通过 additive migration 与兼容读取启用；旧应用回滚时保留新数据而非 down-migration 抹除。
+未来实现时直接调整当前未发布合同与调用方；只保留一套新执行路径，数据另行保管。
 
 ## 8. Context、Memory、Skills、Style
 

@@ -19,8 +19,8 @@ from app.production.workbench_execution import (
     WorkbenchExecutionService,
 )
 from app.providers.capabilities import Capability
+from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.models import ProviderConnection, ProviderModelBinding
 from app.shared.base import Base
 from app.shared.security import hash_password
@@ -58,7 +58,7 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
     )
     session.add(project)
     await session.flush()
-    manifest = next(item for item in SEED_MANIFESTS if item["model_id"] == "agnes-video-v2.0")
+    manifest = next(item for item in CATALOG_MODELS if item["model_id"] == "agnes-video-v2.0")
     entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
@@ -163,7 +163,7 @@ async def _seed_image_shot(
     from app.assets.models import Shot
     from app.execution.models import Artifact
 
-    manifest = next(item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash")
+    manifest = next(item for item in CATALOG_MODELS if item["model_id"] == "agnes-image-2.1-flash")
     entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
@@ -402,7 +402,7 @@ async def test_reference_identity_is_hydrated_and_frozen_in_node_run_snapshot(
     # The shared seed only needs one additional image binding to exercise the
     # keyframe path; no provider call is made by WorkbenchExecutionService.
     image_manifest = next(
-        item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash"
+        item for item in CATALOG_MODELS if item["model_id"] == "agnes-image-2.1-flash"
     )
     image_entry = ModelCatalogEntry(
         provider_type="agnes",
@@ -811,7 +811,7 @@ async def test_text_video_plan_needs_no_formal_keyframe(session: AsyncSession) -
     entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
     assert entry is not None
     contract = dict(
-        next(item for item in SEED_MANIFESTS if item["model_id"] == "@contract/sglang-h3-t2v-v1")
+        next(item for item in CATALOG_MODELS if item["model_id"] == "@contract/sglang-h3-t2v-v1")
     )
     contract["provider_type"] = "agnes"
     contract["protocol_profile"] = "agnes_cn_v1"
@@ -845,7 +845,8 @@ async def test_text_video_plan_needs_no_formal_keyframe(session: AsyncSession) -
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["last_frame", "first_last_frame"])
 async def test_fl2va_plan_keeps_tail_and_formal_first_roles_distinct(
-    session: AsyncSession, mode: str,
+    session: AsyncSession,
+    mode: str,
 ) -> None:
     from app.production.reference_intents import ShotReferenceIntent
 
@@ -853,11 +854,12 @@ async def test_fl2va_plan_keeps_tail_and_formal_first_roles_distinct(
     shot, artifact = await _seed_video_shot(session, project=project, user=user)
     entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
     assert entry is not None
-    contract = dict(next(
-        item for item in SEED_MANIFESTS if item["model_id"] == "@contract/sglang-h3-fl2va-v1"
-    ))
-    contract.update(provider_type="agnes", protocol_profile="agnes_cn_v1",
-                    model_id="agnes-video-v2.0")
+    contract = dict(
+        next(item for item in CATALOG_MODELS if item["model_id"] == "@contract/sglang-h3-fl2va-v1")
+    )
+    contract.update(
+        provider_type="agnes", protocol_profile="agnes_cn_v1", model_id="agnes-video-v2.0"
+    )
     entry.capability_manifest_json = contract
     entry.contract_manifest_hash = hash_manifest(contract)
     binding.capability_manifest_hash = entry.contract_manifest_hash
@@ -866,14 +868,17 @@ async def test_fl2va_plan_keeps_tail_and_formal_first_roles_distinct(
     plan = await service.build_plan(
         project=project,
         execution_input=_input(
-            shot_id=shot.id, requested_binding_id=binding.id, mode_id=mode,
+            shot_id=shot.id,
+            requested_binding_id=binding.id,
+            mode_id=mode,
             references=[ShotReferenceIntent(purpose="last_frame", artifact_id=artifact.id)],
         ),
     )
     roles = [reference.role for reference in plan.planned_references]
     assert roles == (["last_frame"] if mode == "last_frame" else ["first_frame", "last_frame"])
     assert plan.capability == (
-        Capability.VIDEO_LAST_FRAME_TO_VIDEO if mode == "last_frame"
+        Capability.VIDEO_LAST_FRAME_TO_VIDEO
+        if mode == "last_frame"
         else Capability.VIDEO_FIRST_LAST_FRAME
     )
 
@@ -891,27 +896,44 @@ async def test_ref2va_plan_validates_saved_media_without_formal_keyframe(
     project, binding, user = await _seed(session)
     entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
     assert entry is not None
-    contract = dict(next(
-        item for item in SEED_MANIFESTS
-        if item["model_id"] == "@contract/sglang-h3-ref2va-v1" and item["model_revision"] == "v2"
-    ))
-    contract.update(provider_type="agnes", protocol_profile="agnes_cn_v1",
-                    model_id="agnes-video-v2.0")
+    contract = dict(
+        next(
+            item
+            for item in CATALOG_MODELS
+            if item["model_id"] == "@contract/sglang-h3-ref2va-v1" and item["lifecycle"] == "active"
+        )
+    )
+    contract.update(
+        provider_type="agnes", protocol_profile="agnes_cn_v1", model_id="agnes-video-v2.0"
+    )
     entry.capability_manifest_json = contract
     entry.contract_manifest_hash = hash_manifest(contract)
     binding.capability_manifest_hash = entry.contract_manifest_hash
     scene = await _seed_scene(session, project)
-    shot = Shot(project_id=project.id, scene_id=scene.id, shot_number=3, version=1,
-                visual_description="Reference shot", video_prompt="character walks into frame")
+    shot = Shot(
+        project_id=project.id,
+        scene_id=scene.id,
+        shot_number=3,
+        version=1,
+        visual_description="Reference shot",
+        video_prompt="character walks into frame",
+    )
     artifact = Artifact(
-        project_id=project.id, artifact_type="video", storage_state="available",
-        object_key=f"obj/{uuid4().hex}", content_hash="f" * 64,
-        mime_type="video/mp4", byte_size=1, duration_seconds=Decimal("5"),
+        project_id=project.id,
+        artifact_type="video",
+        storage_state="available",
+        object_key=f"obj/{uuid4().hex}",
+        content_hash="f" * 64,
+        mime_type="video/mp4",
+        byte_size=1,
+        duration_seconds=Decimal("5"),
     )
     session.add_all([shot, artifact])
     await session.flush()
     execution_input = _input(
-        shot_id=shot.id, requested_binding_id=binding.id, mode_id="omni_reference",
+        shot_id=shot.id,
+        requested_binding_id=binding.id,
+        mode_id="omni_reference",
         references=[ShotReferenceIntent(purpose="action", artifact_id=artifact.id)],
     )
     service = WorkbenchExecutionService(session, user_id=user.id)
@@ -923,13 +945,20 @@ async def test_ref2va_plan_validates_saved_media_without_formal_keyframe(
     # Preflight uses the same exact binding, not a static name for its remote ID.
     from app.providers.models import ProjectProviderBinding
 
-    session.add(ProjectProviderBinding(
-        project_id=project.id, workspace_id=project.workspace_id,
-        purpose="video", model_binding_id=binding.id, updated_by=user.id,
-    ))
+    session.add(
+        ProjectProviderBinding(
+            project_id=project.id,
+            workspace_id=project.workspace_id,
+            purpose="video",
+            model_binding_id=binding.id,
+            updated_by=user.id,
+        )
+    )
     await session.flush()
     preflight = await resolve_execution_model_preflight(
-        session, project=project, video_mode="omni_reference",
+        session,
+        project=project,
+        video_mode="omni_reference",
     )
     video = next(stage for stage in preflight.stages if stage.stage == "video")
     assert video.ready is True
@@ -1007,9 +1036,7 @@ async def test_new_contract_auto_matches_formal_and_rejects_reference_conflict(
             execution_input=_input(
                 shot_id=shot.id,
                 requested_binding_id=binding.id,
-                references=[
-                    ShotReferenceIntent(purpose="action", artifact_id=reference_video.id)
-                ],
+                references=[ShotReferenceIntent(purpose="action", artifact_id=reference_video.id)],
             ),
         )
     assert error.value.details["code"] == "MODEL_INPUT_COMBINATION_UNSUPPORTED"

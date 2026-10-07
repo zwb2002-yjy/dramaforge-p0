@@ -38,8 +38,8 @@ from app.execution.models import (
 )
 from app.production.service import GraphService
 from app.providers import registry as registry_module
+from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.catalog_seed_data import hash_manifest
 from app.providers.models import (
     ProviderConnection,
     ProviderModelBinding,

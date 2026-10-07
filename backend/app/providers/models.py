@@ -19,20 +19,12 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.providers import model_system_models as _model_system_models  # noqa: F401
+from app.providers import availability_models as _availability_models  # noqa: F401
 from app.shared.base import Base
 
 
 class ProviderConnection(Base):
     __tablename__ = "provider_connections"
-    __table_args__ = (
-        UniqueConstraint(
-            "workspace_id",
-            "provider_type",
-            "protocol_profile",
-            name="uq_provider_connection_profile",
-        ),
-    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     workspace_id: Mapped[UUID] = mapped_column(
@@ -91,9 +83,7 @@ class ProviderConnectionRevision(Base):
         ),
         nullable=False,
     )
-    revision_no: Mapped[int] = mapped_column(
-        nullable=False, default=1, server_default="1"
-    )
+    revision_no: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
     provider_type: Mapped[str] = mapped_column(String(40), nullable=False)
     protocol_profile: Mapped[str] = mapped_column(String(80), nullable=False)
     base_url: Mapped[str] = mapped_column(String(240), nullable=False)
@@ -175,19 +165,6 @@ class ProviderModelBinding(Base):
             "catalog_entry_id",
             name="uq_provider_model_binding_revision",
         ),
-        CheckConstraint(
-            "(binding_target_kind IS NULL AND canonical_model_id IS NULL "
-            "AND model_capability_revision_id IS NULL "
-            "AND connection_discovered_model_id IS NULL "
-            "AND connection_model_capability_revision_id IS NULL) OR "
-            "(binding_target_kind = 'global_model' AND model_capability_revision_id IS NOT NULL "
-            "AND canonical_model_id IS NOT NULL AND connection_discovered_model_id IS NULL "
-            "AND connection_model_capability_revision_id IS NULL) OR "
-            "(binding_target_kind = 'connection_model' AND model_capability_revision_id IS NULL "
-            "AND canonical_model_id IS NULL AND connection_discovered_model_id IS NOT NULL "
-            "AND connection_model_capability_revision_id IS NOT NULL)",
-            name="ck_provider_model_binding_target",
-        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -216,17 +193,6 @@ class ProviderModelBinding(Base):
         nullable=True,
     )
     capability_manifest_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    binding_target_kind: Mapped[str | None] = mapped_column(String(24), nullable=True)
-    canonical_model_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
-    model_capability_revision_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("model_capability_revisions.id", ondelete="RESTRICT"), nullable=True
-    )
-    connection_discovered_model_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("connection_discovered_models.id", ondelete="RESTRICT"), nullable=True
-    )
-    connection_model_capability_revision_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("connection_model_capability_revisions.id", ondelete="RESTRICT"), nullable=True
-    )
     remote_resource_kind: Mapped[str | None] = mapped_column(
         String(20), nullable=True, default="model"
     )

@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.providers.model_system_models import (
+from app.providers.availability_models import (
     ProviderAvailabilityEvidence,
     ProviderModelAvailability,
 )
@@ -52,9 +52,7 @@ class ModelAvailabilityObservation:
             raise ValueError("failed checks cannot claim a model-list result")
 
 
-def effective_availability(
-    previous: str | None, observation: AvailabilityStatus
-) -> str:
+def effective_availability(previous: str | None, observation: AvailabilityStatus) -> str:
     """Only a positive check creates visible; transient failure preserves state."""
     if observation == "temporary_error":
         return previous or "not_checked"

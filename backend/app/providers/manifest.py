@@ -9,8 +9,6 @@ change adds a new revision row instead of mutating an existing one.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from datetime import date
 from typing import Any, Literal
@@ -30,42 +28,6 @@ CatalogSource = Literal[
     "protocol_contract",
 ]
 OperationKind = Literal["image.generate", "video.generate"]
-
-# Pre-cutover tested revisions had no explicit implementation_status: the seven
-# original official revisions plus the protocol contracts and MiniMax-H3 v2 that
-# migrations 0076 and 0078-0082 persisted. Their exact payloads remain frozen; a
-# new or edited manifest cannot acquire contract_tested by omitting the field.
-LEGACY_TESTED_MANIFEST_HASHES = frozenset(
-    {
-        "eb8bd2da7a29f3cb8cd061fb994db2b69c9bfb16265ad2c26a521463b9ca4a2c",
-        "432f444ac4000852dde0bcc97eba8d00b1ca83a724f887b441f4bbc7c7387025",
-        "8cec18e61bf09ca76399f6d49db38ca45a5b712c230973d16688b4ccbf19f77c",
-        "2fdf987947919fd4d797b9c0a2cbbae165571d91054c1c1e87bd87b77dde6add",
-        "9fe8be474428218ff47221413062b26d4d23e2541000611600112f09d1fcbae5",
-        "30793572ba52b743ab05b3d6237354110a4c51e1b9adb29f5a2b8b51e9e01e3e",
-        "04dd2d914a517a45bbc14a6a5ab91c525185a76b9145d8a2b5f040f6a8e00ba8",
-        # MiniMax-H3 v2 (0079)
-        "c895be383ff6293d5edb2baaee2acc2907b8bebeca91491fbc2bf1a6ae5ccdf3",
-        # @contract/openai-image-v1, @contract/openai-video-v1 (0076)
-        "1cc79d5e922e07cb77b612d171c9b065ece7ac6d4ad64d8f8a94bf6b9dc7d183",
-        "15e0a0f7c4e74463adb3b6524fc2437240111aa2c48a1f7b1fd74d91eceacd89",
-        # @contract/agnes-video-openai-async-v2 (protocol fixture contract)
-        "3f8859a828862343732897101beac3cd7e125779deb6801ef514541c3e82bf5f",
-        # SGLang H3 t2v v1, ref2va v1, fl2va v1, ref2va v2 (0078, 0080, 0082)
-        "201d3a5637437efa9e7d461d16d79ecac562047fb3d122a82b92dc6ba674fe42",
-        "873949ced0e4cec967a288d55cfc75ce37fcd30f2f75843d8dc84c911de05037",
-        "4b86b0115ede1f388769bb683cce2d99951e46c5ef48d1891ba91b7b7b3a560c",
-        "1a984cde392cf2f005f71889891de82239ed2b117fe1cbd37c7e15df8d4cbde3",
-    }
-)
-
-
-def is_legacy_tested_manifest(raw: dict[str, Any]) -> bool:
-    if "implementation_status" in raw:
-        return False
-    encoded = json.dumps(raw, sort_keys=True, separators=(",", ":"), default=str)
-    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-    return digest in LEGACY_TESTED_MANIFEST_HASHES
 
 
 def has_reproducible_contract_evidence(raw: dict[str, Any]) -> bool:
@@ -212,9 +174,7 @@ class ModelCapabilityManifest(BaseModel):
     display_name: str
     lifecycle: Lifecycle = "active"
     catalog_source: CatalogSource = "official_static"
-    implementation_status: Literal["discovered", "documented", "contract_tested"] = (
-        "discovered"
-    )
+    implementation_status: Literal["discovered", "documented", "contract_tested"] = "discovered"
     documented_at: date
     operations: dict[OperationKind, OperationManifest]
     # Official abilities outside the current generate operation vocabulary are
@@ -227,14 +187,13 @@ class ModelCapabilityManifest(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def preserve_exact_legacy_status(cls, value: Any) -> Any:
-        if isinstance(value, dict):
-            if is_legacy_tested_manifest(value):
-                return {**value, "implementation_status": "contract_tested"}
-            if value.get("implementation_status") == "contract_tested" and not (
-                has_reproducible_contract_evidence(value)
-            ):
-                raise ValueError("contract-tested manifest lacks reproducible evidence")
+    def require_contract_evidence(cls, value: Any) -> Any:
+        if (
+            isinstance(value, dict)
+            and value.get("implementation_status") == "contract_tested"
+            and not has_reproducible_contract_evidence(value)
+        ):
+            raise ValueError("contract-tested manifest lacks reproducible evidence")
         return value
 
 
@@ -413,11 +372,11 @@ class CapabilitySpec(BaseModel):
         return self
 
     def mode_spec(self, mode_id: str | None = None) -> InputModeSpec:
-        """Return the selected mode, or the additive legacy contract."""
+        """Return a declared mode or the single default contract."""
         if not self.modes:
             return InputModeSpec(
-                id=mode_id or "legacy",
-                title="Legacy capability contract",
+                id=mode_id or "default",
+                title="Default capability contract",
                 input_slots=self.input_slots,
                 common_options=self.common_options,
                 native_options=self.native_options,
@@ -687,13 +646,13 @@ def _capability_spec_for(
         canonical_role = canonical_reference_role(role) or role
         input_slots[canonical_role] = InputSlotSpec(
             required=constraint.min > 0
-            or (isinstance(mode_constraints, dict) and mode_name in {
-                "first_frame", "last_frame", "first_last_frame"
-            }),
+            or (
+                isinstance(mode_constraints, dict)
+                and mode_name in {"first_frame", "last_frame", "first_last_frame"}
+            ),
             minimum=1
-            if isinstance(mode_constraints, dict) and mode_name in {
-                "first_frame", "last_frame", "first_last_frame"
-            }
+            if isinstance(mode_constraints, dict)
+            and mode_name in {"first_frame", "last_frame", "first_last_frame"}
             else constraint.min,
             maximum=constraint.max if constraint.max > 0 else None,
             media_types=[_ROLE_MEDIA_TYPES[canonical_role]]

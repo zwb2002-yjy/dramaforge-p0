@@ -3,7 +3,7 @@
   "provider_type": "openai_compatible_media",
   "protocol_profile": "openai_media_v1",
   "model_id": "@contract/sglang-h3-ref2va-v1",
-  "model_revision": "v2",
+  "model_revision": "v3",
   "media_kind": "video",
   "display_name": "SGLang H3 多素材参考 (Ref2VA)",
   "lifecycle": "active",
@@ -73,5 +73,13 @@
   "option_schema": {
     "namespace": "",
     "options": {}
+  },
+  "implementation_status": "contract_tested",
+  "evidence": {
+    "current_contract": {
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit",
+      "checked_at": "2026-10-07"
+    }
   }
 }

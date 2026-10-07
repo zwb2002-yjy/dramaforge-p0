@@ -34,14 +34,13 @@ from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun
-from app.production.archive_models import ProductionExperiment, ShotExperiment
-from app.production.models import ShotReferenceBinding
+from app.production.models import ExperimentBranch, ShotReferenceBinding
 from app.production.workbench_execution import (
     WorkbenchExecutionInput,
     WorkbenchExecutionService,
 )
+from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.models import (
@@ -87,8 +86,7 @@ P10_05_TABLES = [
     "asset_tag_links",  # tag
     "shot_reference_bindings",
     "asset_version_references",  # binding
-    "production_experiments",
-    "shot_experiments",  # experiment
+    "experiment_branches",  # experiment
     "review_annotations",  # annotation
     "director_threads",
     "director_messages",  # director assistant
@@ -234,21 +232,13 @@ async def _seed_user_workspace_projects(session: AsyncSession, suffix: str) -> d
             proposal_id=proposal.id, project_id=project_b.id, command="shot.update_design"
         )
     )
-    experiment = ProductionExperiment(
-        project_id=project_b.id,
-        name="B exp",
-        idempotency_key=f"exp-{suffix}",
-        status="draft",
-        created_by=user.id,
-    )
-    session.add(experiment)
-    await session.flush()
     session.add(
-        ShotExperiment(
-            production_experiment_id=experiment.id,
+        ExperimentBranch(
             project_id=project_b.id,
-            shot_id=shot.id,
-            prompts={},
+            source_shot_id=shot.id,
+            name="B exp",
+            idempotency_key=f"exp-{suffix}",
+            status="draft",
             created_by=user.id,
         )
     )
@@ -465,12 +455,8 @@ async def test_phase10_rls_cross_project_negative_pg(pg_session: AsyncSession) -
             select(DirectorProposalItem.id).where(DirectorProposalItem.project_id == project_b.id),
         ),
         (
-            "production_experiments",
-            select(ProductionExperiment.id).where(ProductionExperiment.project_id == project_b.id),
-        ),
-        (
-            "shot_experiments",
-            select(ShotExperiment.id).where(ShotExperiment.project_id == project_b.id),
+            "experiment_branches",
+            select(ExperimentBranch.id).where(ExperimentBranch.project_id == project_b.id),
         ),
         (
             "shot_reference_bindings",
@@ -553,7 +539,7 @@ async def _seed_professional_resolution(session: AsyncSession, suffix: str) -> d
     shot.formal_keyframe_artifact_id = keyframe.id
     await session.flush()
 
-    manifest = next(item for item in SEED_MANIFESTS if item["model_id"] == "agnes-video-v2.0")
+    manifest = next(item for item in CATALOG_MODELS if item["model_id"] == "agnes-video-v2.0")
     model_id = f"p10-res-{suffix}"
     entry = ModelCatalogEntry(
         provider_type="agnes",

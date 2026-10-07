@@ -4,8 +4,9 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 
 ## Supported deployment shape
 
-The default `docker-compose.yml` is the release topology. It uses versioned
-release images, publishes only the unprivileged Nginx gateway on
+The default `docker-compose.yml` is the current `dramaforge-dev` topology. Local
+images are built from current source through `docker-compose.build.yml`; future
+release bundles supply immutable image references. It publishes only the unprivileged Nginx gateway on
 `127.0.0.1:8080`, and contains no source `build` instructions. PostgreSQL,
 Redis, MinIO, LiteLLM, the API, dispatcher and workers remain on the Compose
 network. A user host needs Docker Compose v2; it does not need Python, Node.js,
@@ -17,7 +18,19 @@ gate builds and tests the same containers used for the release path; a release
 claim still requires the release candidate's Docker smoke test and evidence on
 each claimed host.
 
-## First start
+## Current development start
+
+Generate a unique local environment, set the exact source commit, and build the current images:
+
+```text
+python scripts/init_env.py
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+The project is unreleased. Retain old instance volumes separately; current startup does not
+reuse another worktree, old image tags or queued provider tasks.
+
+## Future packaged release start
 
 Download and extract the complete online bundle from one GitHub Release. On
 Windows PowerShell run:
@@ -115,10 +128,9 @@ media execution still uses the existing queue. Apply migrations through the
 candidate head (see [DATA_MODEL.md](DATA_MODEL.md); confirm with `alembic heads`) before
 updating the dispatcher and media workers. This rollout is not implied by a source-only push.
 
-The current source includes a merge revision joining model-system expand and local-media
-history. Upgrade through both parents to the single candidate head; do not rewrite applied
-revisions or stamp a running database past unapplied migrations. Expand storage alone does
-not enable Runtime Cutover; its remaining gates are documented in [MODEL_PROVIDER.md](MODEL_PROVIDER.md).
+The current unreleased schema has a one-way cleanup head (see [DATA_MODEL.md](DATA_MODEL.md)).
+Use a fresh development database and retain old environment volumes separately. Do not translate
+old queued requests, relabel old image identities, or stamp past unapplied migrations.
 
 PostgreSQL, Redis, MinIO and the LiteLLM database use `restart: unless-stopped` plus bounded
 startup health periods. The API, dispatcher and every Worker wait for PostgreSQL health and
@@ -144,14 +156,10 @@ entrypoint is `scripts/p0_backup_restore.py` (see
 
 ## Director runtime engine
 
-`DIRECTOR_RUNTIME_ENGINE` selects the engine for **newly started** Director
-turns and defaults to `legacy`. It is passed to both the API (which starts
-turns) and `worker-director` (which executes them); the `langgraph` value also
-requires `DIRECTOR_CHECKPOINT_DATABASE_URL`, which both processes receive,
-plus the private `director_runtime_checkpoints` schema created by
-migration `20260910_0066` (role `dramaforge_director_checkpoint`, provisioned by
-`database-bootstrap`). Selecting one engine never runs the other, and the manual
-production path must still complete with the director worker stopped.
+`DIRECTOR_RUNTIME_ENGINE` only accepts `langgraph`. Both API and worker-director receive
+`DIRECTOR_CHECKPOINT_DATABASE_URL`; the dedicated checkpoint password is required and
+`database-bootstrap` provisions the private schema role. Worker startup verifies the store.
+Manual production remains available independently of the Director worker.
 
 ## AIOS/AISphere handoff boundary
 

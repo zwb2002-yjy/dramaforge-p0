@@ -1,15 +1,10 @@
 # ARCHITECTURE_MAPPING — 当前代码到架构的映射
 
-模型系统单向重构当前处于 Migration A expand 阶段：新能力 revision、同一
-`ProviderModelBinding` 的 target 字段和逐模型 Availability Evidence 已落库，
-Production 层已增加不可变 ProductPolicyRevision 与独立撤销 State/Event 存储，
-模型能力 revision、发现事实、发布事件和可用性证据已由数据库触发器保护为不可变；
-ProtocolContractRevision 与 RuntimeHandlerRevision 已有独立、不可变存储，
-Provider 层有按精确 revision 与实现摘要查找的 Handler Registry，
-但尚未由 Dispatch 选取或冻结。现有 runtime 仍在旧准入链上。Cutover 前还必须完成
-Binding 分类、Provider 可用性复验、Policy/Protocol/Handler/ExecutionIdentity
-运行时冻结及 Recovery exact gate；
-现阶段不得将新结构称为已投入生产的唯一模型执行系统。
+未发布阶段已经按现有功能收敛为单一路径：Director 仅使用 LangGraph；媒体在用户
+确认计划后冻结模型、连接和凭证修订，Worker 不再现场重新选模型。未接入的模型
+Cutover / Policy / Handler 第二套表与服务、独立 Generation writer 和旧实验 ORM 已退役。
+当前模型来源、输入合同及可用性证据见 [MODEL_PROVIDER.md](MODEL_PROVIDER.md)，
+唯一迁移头和不可逆清理边界见 [DATA_MODEL.md](DATA_MODEL.md)。
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
 
@@ -34,11 +29,10 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 | api/v1、workers | HTTP/Arq/dispatcher 入站与命令转发 | KEEP；不能在这里复制业务与 Provider 执行规则 |
 | access、assets | 工作空间、Project、Story/Scene/Shot、资产与版本 | KEEP；域模型不是临时 UI 状态 |
 | director/assistant_*、proposal_*、story_* | 上下文、提案、显式部分接受 | KEEP；不自动创建媒体或 Formal |
-| director/runtime、turn_*、invocation*、inbox*、wakeup* | 有界导演编排、引擎身份、恢复与信号 | KEEP；legacy/langgraph 是仍有调用的执行身份，不因命名而删 |
+| director/runtime、turn_*、invocation*、inbox*、wakeup* | 有界导演编排、引擎身份、恢复与信号 | KEEP；仅 LangGraph 是可执行身份；业务观察记录不构成第二种引擎 |
 | director/creative_capabilities、workflows | 创作意图、模板、能力规划及镜头执行模板 | KEEP；逻辑职责与物理路径的整理另见待决问题 |
 | production/application、execution_plan、workbench_execution | 类型化业务命令、授权、冻结计划、生产受理 | KEEP；用户生成/修复不能改走底层队列 helper |
 | production/models、service、formal_selection、experiment_service、repair_service | Graph、当前 ExperimentBranch、显式 Formal、分步修复 | KEEP；当前实验创建已统一，不复活旧轨 |
-| production/archive_models | 旧实验的历史存储映射 | ARCHIVE；只允许元数据注册，禁止运行时业务导入 |
 | execution、runtime | NodeRun 执行、ProviderOperation/Artifact 血缘、调度与恢复 | KEEP；删除 HTTP helper 不删除内部 Worker 能力 |
 | providers | Catalog/Manifest、编译、供应商 Runtime、连接/凭证版本、逻辑模型选择 | KEEP；不将名称含 bridge/legacy 的活跃实现当成死代码 |
 | consistency、delivery、editing | 审核证据、人工决定、导出、EditSession | KEEP；视频证据需补桌面消费设计，不因缺入口删除 |
@@ -55,11 +49,11 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 | TEXT_LLM_* 旧直连配置 | 由当前文本 HTTP adapter 和 ProviderConnection / 显式部署来源取代 | 清理旧 knobs/helper/Compose 透传；保留实际网关配置、逻辑模型绑定与安全隔离；来源缺口见 MODEL_PROVIDER |
 | dispatch/enqueue HTTP | 生成/修复/恢复已有业务命令，用户不应操作队列 | 退役 HTTP；保留 scheduler/Worker 与 qualified maintenance recovery |
 | video-frames | 人工审片需要时间采样与参考对照 | KEEP + DESIGN；完整候选/修复证据消费方案见 API.md |
-| ProductionExperiment/ShotExperiment | 当前实验已由 ExperimentBranch 拥有 | 隔离至 archive_models；保留表、迁移、RLS 与历史数据，不回接 UI |
+| ProductionExperiment/ShotExperiment | 当前实验已由 ExperimentBranch 拥有 | 只保留 ExperimentBranch；旧 ORM 和空的废弃表清退，非空旧表阻止清理 |
 | ExecuteKeyframeResult、_input_hash、shared/ids.py | 无独立用户能力；前者有 ExecuteNodeResult，后者只是未使用包装 | 删除别名/死函数，不改变当前执行 DTO 与 ID 策略 |
 | checkpoint、Outbox、credential revision、reference token | 属恢复、隔离、投递和审计事实 | 保留，不按空表或缺前端按钮清空 |
 
-视频设计尚未实现、历史表尚未物理删除，不能把本表解释成发布完成记录。
+视频设计尚未实现、存量数据需要单独保管，不能把本表解释成发布完成记录。
 
 ## 4. 尚未解决的结构问题
 
@@ -91,7 +85,7 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
    依赖，不能因为 shared 理想上是叶子层，就删除这些有消费者的基础设施。
 10. **golden_project 是证明/测试种子**：迁出前要核对证明脚本，不因位置看起来旧就
     删除测试资产。
-11. **历史 shot_experiment_id 字段**：与冻结计划序列化仍需做兼容审计，再设计前向迁移。
+11. **实验分支身份**：当前 DTO/ORM/计划统一为 `experiment_branch_id`，不保留旧字段别名。
 
 收敛优先级（Owner 已定）：问题 2 → 问题 3（text_transport 端口化）→ 问题 9（shared
 组合根分类）→ 问题 6（domain→creative 初始化依赖）→ 再逐步清剩余

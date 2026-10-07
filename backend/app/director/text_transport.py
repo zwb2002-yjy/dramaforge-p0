@@ -164,9 +164,11 @@ def _reported_cost(attempts: list[dict[str, object]]) -> tuple[Decimal | None, s
 
 def _evidence_reported_cost(turn: DirectorTurn) -> str | None:
     raw_attempts = (turn.response_summary or {}).get("attempts")
-    attempts = [dict(item) for item in raw_attempts if isinstance(item, dict)] if isinstance(
-        raw_attempts, list
-    ) else []
+    attempts = (
+        [dict(item) for item in raw_attempts if isinstance(item, dict)]
+        if isinstance(raw_attempts, list)
+        else []
+    )
     amount, status = _reported_cost(attempts)
     if status == "reported" and amount is not None:
         return str(amount)
@@ -265,6 +267,11 @@ class DirectorTextRuntimeAdapter:
                 runtime_text_model = CapabilityTextModel(runtime_registry)
             registered = runtime_registry.get(resolved.model_id)
             binding_ref = _model_binding_ref(slot=slot, resolved=resolved)
+            if registered.adapter is None:
+                raise ValidationAppError(
+                    "Selected text model is a read-only contract",
+                    details={"code": "DIRECTOR_TEXT_MODEL_UNAVAILABLE"},
+                )
             backend = registered.manifest.metadata.get("backend")
             model_resolution: dict[str, object] = {
                 "slot": str(slot),
@@ -330,22 +337,27 @@ class DirectorTextRuntimeAdapter:
         primary_request = TextGenerateRequest(
             messages=[
                 TextMessage(
-                    role="user",
-                    content=canonical_json(
-                        {
-                            "task": task_name,
-                            "context": context_snapshot,
-                            "required_output_schema": schema,
-                        }
+                    role="system",
+                    content=(
+                        f"{system_instruction}\nReturn exactly one JSON object matching the "
+                        "supplied schema. Never include SQL, code, credentials, URLs, "
+                        "provider/runtime fields, media execution commands, or prose outside "
+                        "the JSON object."
                     ),
-                )
+                ),
+                *[
+                    TextMessage(
+                        role="user",
+                        content=canonical_json(
+                            {
+                                "task": task_name,
+                                "context": context_snapshot,
+                                "required_output_schema": schema,
+                            }
+                        ),
+                    )
+                ],
             ],
-            system=(
-                f"{system_instruction}\n"
-                "Return exactly one JSON object matching the supplied schema. "
-                "Never include SQL, code, credentials, URLs, provider/runtime fields, "
-                "media execution commands, or prose outside the JSON object."
-            ),
             temperature=0.2,
             max_tokens=4096,
             response_format=_response_format(output_type, task_name),
@@ -361,7 +373,8 @@ class DirectorTextRuntimeAdapter:
                 turn=turn,
                 model_id=resolved.model_id,
                 text_model=runtime_text_model,
-                purpose="primary", output_type=output_type,
+                purpose="primary",
+                output_type=output_type,
             )
             first_text = self._record_attempt(attempts, result=first, purpose="primary")
             self._require_success(first, turn=turn, attempts=attempts)
@@ -372,22 +385,28 @@ class DirectorTextRuntimeAdapter:
                 repair_request = TextGenerateRequest(
                     messages=[
                         TextMessage(
-                            role="user",
-                            content=canonical_json(
-                                {
-                                    "task": task_name,
-                                    "original_context": context_snapshot,
-                                    "invalid_output": first_text[:20000],
-                                    "validation_error": str(first_error)[:4000],
-                                    "required_output_schema": schema,
-                                }
+                            role="system",
+                            content=(
+                                "Repair the invalid model output once. Return exactly one JSON "
+                                "object matching the supplied schema, with no prose and no "
+                                "execution fields."
                             ),
-                        )
+                        ),
+                        *[
+                            TextMessage(
+                                role="user",
+                                content=canonical_json(
+                                    {
+                                        "task": task_name,
+                                        "original_context": context_snapshot,
+                                        "invalid_output": first_text[:20000],
+                                        "validation_error": str(first_error)[:4000],
+                                        "required_output_schema": schema,
+                                    }
+                                ),
+                            )
+                        ],
                     ],
-                    system=(
-                        "Repair the invalid model output once. Return exactly one JSON object "
-                        "matching the supplied schema, with no prose and no execution fields."
-                    ),
                     temperature=0,
                     max_tokens=4096,
                     response_format=_response_format(output_type, f"{task_name}_repair"),
@@ -400,7 +419,8 @@ class DirectorTextRuntimeAdapter:
                     turn=turn,
                     model_id=resolved.model_id,
                     text_model=runtime_text_model,
-                    purpose="schema_repair", output_type=output_type,
+                    purpose="schema_repair",
+                    output_type=output_type,
                 )
                 repaired_text = self._record_attempt(
                     attempts, result=repaired, purpose="schema_repair"
@@ -530,6 +550,15 @@ class DirectorTextRuntimeAdapter:
                     "status": terminal_status,
                 },
             ) from None
+        from app.director.runtime.control import DirectorRuntimeControlService
+        from app.director.runtime.langgraph_adapter import ENGINE_VERSION, STATE_SCHEMA_VERSION
+
+        await DirectorRuntimeControlService(self._session).bind(
+            project_id=turn.project_id,
+            turn_id=turn.id,
+            engine_version=ENGINE_VERSION,
+            state_schema_version=STATE_SCHEMA_VERSION,
+        )
         await self._commit_and_restore_scope(turn)
         return StructuredDirectorTextResult(
             value=value,
@@ -548,7 +577,8 @@ class DirectorTextRuntimeAdapter:
         if not allow_rejected_context_retry:
             try:
                 await self._turns.assert_context_not_rejected(
-                    project_id=turn.project_id, context_hash=turn.context_hash,
+                    project_id=turn.project_id,
+                    context_hash=turn.context_hash,
                 )
             except ConflictError:
                 await self.mark_stale(turn, reason="The user rejected this suggestion context.")
@@ -612,8 +642,11 @@ class DirectorTextRuntimeAdapter:
     ) -> ProviderCreateResult:
         journal = InvocationService(self._session)
         invocation = await journal.prepare(
-            project_id=project.id, turn_id=turn.id,
-            invocation_key=f"text:{purpose}:1", step_key=f"text:{purpose}", attempt=1,
+            project_id=project.id,
+            turn_id=turn.id,
+            invocation_key=f"text:{purpose}:1",
+            step_key=f"text:{purpose}",
+            attempt=1,
             model_resolution=dict(turn.model_resolution),
             request_snapshot=request.model_dump(mode="json"),
             output_schema=output_type.model_json_schema(mode="validation"),
@@ -632,21 +665,29 @@ class DirectorTextRuntimeAdapter:
                     str(saved.reported_cost) if saved.reported_cost is not None else None
                 )
                 await self._commit_and_restore_scope(turn)
-                return ProviderCreateResult(status=GenerationStatus.SUCCEEDED,
-                                            provider_metadata=metadata)
+                return ProviderCreateResult(
+                    status=GenerationStatus.SUCCEEDED, provider_metadata=metadata
+                )
             await self._commit_and_restore_scope(turn)
             return ProviderCreateResult(
-                status=(GenerationStatus.FAILED if saved.status == "failed"
-                        else GenerationStatus.SUBMIT_UNKNOWN),
+                status=(
+                    GenerationStatus.FAILED
+                    if saved.status == "failed"
+                    else GenerationStatus.SUBMIT_UNKNOWN
+                ),
                 provider_metadata={"error_code": saved.error_code},
             )
         try:
             result = await text_model.generate(
-                request=request, model_id=model_id,
+                request=request,
+                model_id=model_id,
                 context=ExecutionContext(
-                    trace_id=str(turn.id), operation_id=f"director-invocation:{invocation_id}",
-                    project_id=str(project.id), workspace_id=str(project.workspace_id),
-                    user_id=str(actor.id), idempotency_key=f"director-invocation:{invocation_id}",
+                    trace_id=str(turn.id),
+                    operation_id=f"director-invocation:{invocation_id}",
+                    project_id=str(project.id),
+                    workspace_id=str(project.workspace_id),
+                    user_id=str(actor.id),
+                    idempotency_key=f"director-invocation:{invocation_id}",
                 ),
             )
         except ValidationAppError as exc:
@@ -679,7 +720,8 @@ class DirectorTextRuntimeAdapter:
             await journal.mark_unknown(project_id=project.id, invocation_id=invocation_id)
         elif result.status != GenerationStatus.SUCCEEDED:
             await journal.record_failure(
-                project_id=project.id, invocation_id=invocation_id,
+                project_id=project.id,
+                invocation_id=invocation_id,
                 error_code=str(result.provider_metadata.get("error_code") or "MODEL_CALL_FAILED"),
             )
         else:
@@ -687,13 +729,17 @@ class DirectorTextRuntimeAdapter:
                 value = _parse_output(text, output_type)
             except (json.JSONDecodeError, ValidationError, TypeError, ValueError):
                 await journal.record_failure(
-                    project_id=project.id, invocation_id=invocation_id,
+                    project_id=project.id,
+                    invocation_id=invocation_id,
                     error_code="INVALID_DIRECTOR_TEXT_OUTPUT",
                 )
             else:
                 await journal.complete(
-                    project_id=project.id, invocation_id=invocation_id, output=value,
-                    token_usage=_aggregate_usage(evidence), reported_cost=cost,
+                    project_id=project.id,
+                    invocation_id=invocation_id,
+                    output=value,
+                    token_usage=_aggregate_usage(evidence),
+                    reported_cost=cost,
                 )
         invocation = await journal.get(project_id=project.id, invocation_id=invocation_id)
         invocation.token_usage = _aggregate_usage(evidence)

@@ -1,3 +1,5 @@
+name: dramaforge-dev
+
 x-dramaforge-release:
   version: ${DRAMAFORGE_VERSION:-0.1.0}
 
@@ -83,10 +85,6 @@ services:
       LITELLM_SCRIPT_FAST_API_BASE: ${LITELLM_SCRIPT_FAST_API_BASE:-}
       LITELLM_SCRIPT_FAST_API_KEY: ${LITELLM_SCRIPT_FAST_API_KEY:-}
       LITELLM_SCRIPT_FAST_MOCK_RESPONSE: ${LITELLM_SCRIPT_FAST_MOCK_RESPONSE:-}
-      LITELLM_LEGACY_TEXT_MODEL: ${LITELLM_LEGACY_TEXT_MODEL:-openai/legacy-text-deployment}
-      LITELLM_LEGACY_TEXT_API_BASE: ${LITELLM_LEGACY_TEXT_API_BASE:-}
-      LITELLM_LEGACY_TEXT_API_KEY: ${LITELLM_LEGACY_TEXT_API_KEY:-}
-      LITELLM_LEGACY_TEXT_MOCK_RESPONSE: ${LITELLM_LEGACY_TEXT_MOCK_RESPONSE:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
@@ -105,7 +103,7 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
@@ -125,14 +123,14 @@ services:
       - ALL
 
   api:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
-      DIRECTOR_RUNTIME_ENGINE: ${DIRECTOR_RUNTIME_ENGINE:-legacy}
-      DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:-disabled}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DIRECTOR_RUNTIME_ENGINE: langgraph
+      DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -197,7 +195,7 @@ services:
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
 
   frontend:
-    image: ${DRAMAFORGE_FRONTEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-frontend:v0.1.0}
+    image: ${DRAMAFORGE_FRONTEND_IMAGE:-dramaforge-frontend:dev}
     ports:
       - "${DRAMAFORGE_BIND_ADDRESS:-127.0.0.1}:${DRAMAFORGE_PORT:-8080}:8080"
     depends_on:
@@ -230,7 +228,7 @@ services:
       POSTGRES_APP_USER: ${POSTGRES_APP_USER:-dramaforge_app}
       POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}
       DIRECTOR_CHECKPOINT_USER: ${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}
-      DIRECTOR_CHECKPOINT_PASSWORD: ${DIRECTOR_CHECKPOINT_PASSWORD:-}
+      DIRECTOR_CHECKPOINT_PASSWORD: ${DIRECTOR_CHECKPOINT_PASSWORD:?Run python scripts/init_env.py first}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -249,7 +247,7 @@ services:
 
   maintenance:
     profiles: ["maintenance"]
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     working_dir: /workspace
     volumes:
       - ./:/workspace:ro
@@ -278,7 +276,7 @@ services:
     entrypoint: ["python", "/workspace/scripts/p0_backup_restore.py"]
 
   dispatcher:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
@@ -315,7 +313,7 @@ services:
     command: ["python", "-m", "app.workers.dispatcher"]
 
   worker-default:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
@@ -384,14 +382,14 @@ services:
     restart: unless-stopped
 
   worker-director:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
-      DIRECTOR_RUNTIME_ENGINE: ${DIRECTOR_RUNTIME_ENGINE:-legacy}
-      DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:-disabled}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DIRECTOR_RUNTIME_ENGINE: langgraph
+      DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       DIRECTOR_QUEUE_NAME: ${DIRECTOR_QUEUE_NAME:-dramaforge:director}
       SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
@@ -421,7 +419,7 @@ services:
     restart: unless-stopped
 
   worker-heavy:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}

@@ -25,8 +25,8 @@ from app.providers.capability_inspection import (
     inspect_catalog_model,
     inspect_manifest,
 )
+from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.catalog_seed_data import hash_manifest
 from app.providers.compile_preview import CompilePreview, PreviewReference, preview_compile
 from app.providers.intents import (
     ArtifactReferenceIntent,
@@ -95,7 +95,7 @@ class GenerationSnapshotRead(BaseModel):
 def _compiled_options(summary: dict[str, object]) -> dict[str, JsonValue]:
     import re
 
-    effective = summary.get("effective_request")
+    effective = summary.get("effective_request_redacted")
     options = effective.get("common_options") if isinstance(effective, dict) else None
     if not isinstance(options, dict):
         return {}
@@ -281,7 +281,7 @@ class ModelInspectionService:
                         "aspect_ratio": project.aspect_ratio,
                         "selection": selection,
                         "mode_id": plan.mode_id,
-                        "reference_artifact_id": ref.artifact_id if ref else None,
+                        "reference_artifact_ids": [r.artifact_id for r in refs],
                         "reference_fingerprint": ref.fingerprint if ref else None,
                         "reference_mime": ref.mime_type if ref else None,
                     }

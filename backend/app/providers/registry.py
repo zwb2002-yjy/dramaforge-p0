@@ -41,9 +41,6 @@ class ProviderPlugin:
     # Settings field prefix (``<prefix>_enabled/api_key/base_url/...``); defaults
     # to provider_type.
     settings_prefix: str | None = None
-    # (media_type, purpose) -> model id that this profile is allowed to bind.
-    # DEPRECATED in favor of catalog_manifests; retained for legacy validation.
-    model_contracts: dict[tuple[str, str], str] = field(default_factory=dict)
     # capability -> purpose advanced by account verification (image_i2i->keyframe).
     capability_purposes: dict[str, str] = field(default_factory=dict)
     # Capabilities that spend real budget and require an explicit authorization.
@@ -129,6 +126,7 @@ def _openai_compatible_media_client(settings: Settings, host: str | None) -> Any
 
     return OpenAICompatibleMediaClient(settings, host=host)
 
+
 def _minimax_hub_client(settings: Settings, host: str | None) -> Any:
     from app.providers.minimax import MiniMaxHubClient
 
@@ -142,7 +140,7 @@ def _register_defaults() -> None:
         _agnes_compiler_factory,
         _agnes_runtime_factory,
     )
-    from app.providers.catalog_seed_data import seed_manifests_for
+    from app.providers.catalog_loader import active_manifests_for
     from app.providers.openai_compatible_media import (
         OPENAI_MEDIA_DEFAULT_HOST,
         OPENAI_MEDIA_PROFILE,
@@ -159,10 +157,6 @@ def _register_defaults() -> None:
             implemented=True,
             settings_prefix="agnes",
             credential_provider_key="agnes",
-            model_contracts={
-                ("image", "keyframe"): "agnes-image-2.1-flash",
-                ("video", "video"): "agnes-video-v2.0",
-            },
             capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
             paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
             model_list_path="/v1/models",
@@ -170,7 +164,7 @@ def _register_defaults() -> None:
             # catalog endpoint. Only an exact returned ID proves visibility.
             availability_list_scope="positive_only",
             client_factory=_agnes_hub_client,
-            catalog_manifests=tuple(seed_manifests_for(provider_type="agnes")),
+            catalog_manifests=tuple(active_manifests_for(provider_type="agnes")),
             runtime_factory=_agnes_runtime_factory,
             compiler_factory=_agnes_compiler_factory,
         )
@@ -184,18 +178,12 @@ def _register_defaults() -> None:
             implemented=True,
             settings_prefix="openai_compatible_media",
             credential_provider_key="openai_compatible_media",
-            model_contracts={
-                ("image", "keyframe"): "@contract/openai-image-v1",
-                ("video", "video"): "@contract/openai-video-v1",
-            },
             capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
             paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
             image_i2i_probe_transport="bytes",
             model_list_path="/models",
             client_factory=_openai_compatible_media_client,
-            catalog_manifests=tuple(
-                seed_manifests_for(provider_type="openai_compatible_media")
-            ),
+            catalog_manifests=tuple(active_manifests_for(provider_type="openai_compatible_media")),
             runtime_factory=_openai_compatible_media_runtime_factory,
             compiler_factory=_openai_compatible_media_compiler_factory,
         )
@@ -231,17 +219,13 @@ def _register_defaults() -> None:
             implemented=True,
             settings_prefix="minimax",
             credential_provider_key="minimax",
-            model_contracts={
-                ("image", "keyframe"): "image-01",
-                ("video", "video"): "MiniMax-H3",
-            },
             capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
             paid_capabilities=frozenset({"image_i2i", "video_i2v"}),
             image_i2i_probe_transport="public_url",
             model_list_path="/v1/models",
             availability_list_scope="positive_only",
             client_factory=_minimax_hub_client,
-            catalog_manifests=tuple(seed_manifests_for(provider_type="minimax")),
+            catalog_manifests=tuple(active_manifests_for(provider_type="minimax")),
             runtime_factory=_minimax_runtime_factory,
             compiler_factory=_minimax_compiler_factory,
         )
@@ -263,17 +247,13 @@ def _register_defaults() -> None:
             implemented=True,
             settings_prefix="volcengine",
             credential_provider_key="volcengine",
-            model_contracts={
-                ("image", "keyframe"): "doubao-seedream-4-0-250828",
-                ("video", "video"): "doubao-seedance-2-0-260128",
-            },
             capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
             paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
             # TODO(phase-d): confirm whether the Ark data plane exposes a model
             # list endpoint; the auth_models probe may need a different check.
             model_list_path="/models",
             client_factory=_ark_hub_client,
-            catalog_manifests=tuple(seed_manifests_for(provider_type="volcengine")),
+            catalog_manifests=tuple(active_manifests_for(provider_type="volcengine")),
             runtime_factory=_ark_runtime_factory,
             compiler_factory=_ark_compiler_factory,
         )
@@ -285,7 +265,7 @@ _register_defaults()
 
 def _validate_catalog_registration() -> None:
     """Every file-backed manifest must belong to a registered protocol plugin."""
-    from app.providers.catalog_seed_data import SEED_MANIFESTS
+    from app.providers.catalog_loader import CATALOG_MODELS
 
     declared = {
         (
@@ -294,7 +274,7 @@ def _validate_catalog_registration() -> None:
             item["model_id"],
             item["model_revision"],
         )
-        for item in SEED_MANIFESTS
+        for item in CATALOG_MODELS
     }
     registered = {
         (
@@ -336,7 +316,7 @@ class UnknownModelError(LookupError):
 @dataclass(frozen=True)
 class RegisteredModel:
     manifest: ModelManifest
-    adapter: ModelAdapter
+    adapter: ModelAdapter | None
 
 
 class ModelRegistry:
@@ -346,7 +326,7 @@ class ModelRegistry:
     def __init__(self) -> None:
         self._models: dict[str, RegisteredModel] = {}
 
-    def register(self, manifest: ModelManifest, adapter: ModelAdapter) -> None:
+    def register(self, manifest: ModelManifest, adapter: ModelAdapter | None = None) -> None:
         if manifest.id in self._models:
             raise DuplicateModelError(manifest.id)
         self._models[manifest.id] = RegisteredModel(manifest=manifest, adapter=adapter)

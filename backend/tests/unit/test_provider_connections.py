@@ -38,7 +38,7 @@ def _register_and_select_workspace(client: TestClient) -> str:
     return workspace_id
 
 
-def test_connection_api_is_fixed_write_only_and_duplicate_is_conflict(
+def test_same_protocol_connections_are_independent_and_credentials_are_write_only(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -88,8 +88,12 @@ def test_connection_api_is_fixed_write_only_and_duplicate_is_conflict(
         },
         headers={CSRF_HEADER: _csrf(client)},
     )
-    assert duplicate.status_code == 409
-    assert duplicate.json()["code"] == "CONFLICT"
+    assert duplicate.status_code == 201
+    assert duplicate.json()["id"] != body["id"]
+    assert "credential_id" not in duplicate.json()
+    listed = client.get(f"/api/v1/workspaces/{workspace_id}/provider-connections")
+    assert len(listed.json()) == 2
+    assert "second-secret" not in listed.text
 
 
 @pytest.fixture
@@ -118,14 +122,71 @@ async def _seed_owner(session: AsyncSession) -> tuple[User, Workspace]:
 
 
 @pytest.mark.asyncio
+async def test_same_named_text_models_keep_connection_and_credentials_separate(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
+    from app.providers.registry import ModelRegistry
+
+    key = Fernet.generate_key().decode("ascii")
+    monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
+    monkeypatch.setenv("BYOK_KEYRING", f"v1:{key}")
+    clear_settings_cache()
+    user, workspace = await _seed_owner(session)
+    service = ProviderConnectionService(session)
+    connections = []
+    for label in ("a", "b"):
+        connection = await service.create_connection(
+            workspace_id=workspace.id,
+            actor=user,
+            display_name=label,
+            api_key=f"secret-{label}",
+            enabled=True,
+            provider_type="litellm",
+            protocol_profile="openai_chat_v1",
+            base_url=f"https://{label}.example.test/v1",
+        )
+        revision = await service.current_connection_revision(connection=connection)
+        session.add(
+            ProviderCapabilityEvidence(
+                workspace_id=workspace.id,
+                connection_id=connection.id,
+                capability="auth_models",
+                status="passed",
+                evidence_level="account_verified",
+                request_fingerprint="a" * 64,
+                credential_revision=connection.credential_revision,
+                created_by=user.id,
+                connection_revision_id=revision.id,
+                discovered_model_ids=["same-model"],
+            )
+        )
+        connections.append(connection)
+    await session.flush()
+    registry = await workspace_model_registry(
+        session,
+        workspace_id=workspace.id,
+        base_registry=ModelRegistry(),
+    )
+    models = [registry.get(f"litellm/{connection.id}/same-model") for connection in connections]
+    assert models[0].manifest.id != models[1].manifest.id
+    assert connections[0].credential_id != connections[1].credential_id
+    assert all(model.manifest.model_name == "same-model" for model in models)
+    assert {model.manifest.metadata["connection_id"] for model in models} == {
+        str(connection.id) for connection in connections
+    }
+
+
+@pytest.mark.asyncio
 async def test_credential_rotation_clears_flags_but_preserves_historical_evidence(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from datetime import date
 
+    from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 
     keyring_key = Fernet.generate_key().decode("ascii")
     monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
@@ -140,9 +201,7 @@ async def test_credential_rotation_clears_flags_but_preserves_historical_evidenc
         api_key="first-secret",
         enabled=True,
     )
-    manifest = next(
-        m for m in SEED_MANIFESTS if m["model_id"] == "agnes-image-2.1-flash"
-    )
+    manifest = next(m for m in CATALOG_MODELS if m["model_id"] == "agnes-image-2.1-flash")
     session.add(
         ModelCatalogEntry(
             provider_type=manifest["provider_type"],
@@ -232,8 +291,8 @@ async def test_owner_can_freeze_account_pricing_on_exact_binding(
     from datetime import date
     from decimal import Decimal
 
+    from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 
     keyring_key = Fernet.generate_key().decode("ascii")
     monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
@@ -248,9 +307,7 @@ async def test_owner_can_freeze_account_pricing_on_exact_binding(
         api_key="secret",
         enabled=True,
     )
-    manifest = next(
-        item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash"
-    )
+    manifest = next(item for item in CATALOG_MODELS if item["model_id"] == "agnes-image-2.1-flash")
     session.add(
         ModelCatalogEntry(
             provider_type=manifest["provider_type"],
@@ -302,8 +359,8 @@ async def test_deprecated_catalog_binding_cannot_be_bound_to_a_new_project(
     from datetime import date
 
     from app.access.models import Project
+    from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 
     keyring_key = Fernet.generate_key().decode("ascii")
     monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
@@ -319,7 +376,7 @@ async def test_deprecated_catalog_binding_cannot_be_bound_to_a_new_project(
         enabled=True,
     )
     active_manifest = next(
-        item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash"
+        item for item in CATALOG_MODELS if item["model_id"] == "agnes-image-2.1-flash"
     )
     legacy_manifest = {
         **active_manifest,

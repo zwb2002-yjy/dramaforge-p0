@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.providers.bootstrap import build_v3_registry, litellm_text_manifest
+from app.providers.bootstrap import build_v3_registry
 from app.providers.capabilities import Capability
 from app.providers.capability_sources import (
     LifecycleWarning,
@@ -12,7 +12,7 @@ from app.providers.capability_sources import (
     lifecycle_warnings,
     official_sources,
 )
-from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
+from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
 from app.providers.manifest import (
     CapabilitySpec,
@@ -124,10 +124,7 @@ def inspect_catalog_model(
 ) -> ModelCapabilityReport:
     """Inspect a selected model; unknown IDs never fall back to another model."""
     catalog_row = next(
-        (
-            row for row in SEED_MANIFESTS
-            if f"{row['provider_type']}/{row['model_id']}" == model_id
-        ),
+        (row for row in CATALOG_MODELS if f"{row['provider_type']}/{row['model_id']}" == model_id),
         None,
     )
     catalog = ModelCapabilityManifest.model_validate(catalog_row) if catalog_row else None
@@ -152,8 +149,6 @@ def inspect_catalog_model(
                 "Voice and engine are deployment configuration, not request options.",
             ],
         )
-    if model_id == "litellm/text-llm":
-        return inspect_manifest(litellm_text_manifest())
     if registry is None:
         registry, _ = build_v3_registry()
         from app.config import get_settings

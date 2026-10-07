@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 from app.providers.capabilities import Capability
-from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
+from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.contracts.common import ArtifactRef
 from app.providers.contracts.video import (
     ImageToVideoRequest,
@@ -21,7 +21,7 @@ from app.providers.validator import CapabilityValidator
 
 
 def test_new_manifest_expresses_disjoint_video_input_families() -> None:
-    original = next(item for item in SEED_MANIFESTS if item["model_id"] == "MiniMax-H3")
+    original = next(item for item in CATALOG_MODELS if item["model_id"] == "MiniMax-H3")
     frozen_hash = hash_manifest(original)
     revised = deepcopy(original)
     revised["model_revision"] = "contract-schema-test"

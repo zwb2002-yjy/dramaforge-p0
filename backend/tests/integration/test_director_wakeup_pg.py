@@ -28,18 +28,32 @@ from tests.unit.test_workbench_execution import _input, _seed, _seed_video_shot
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("delivery", [
-    "direct", "dead_letter", "process_kill", pytest.param("arq", marks=pytest.mark.skipif(
-        not os.environ.get("TEST_DIRECTOR_REDIS_URL"), reason="isolated Redis required",
-    )),
-    "late_completed", "late_cached", "late_cancelled", "late_completed_after_cancel",
-])
+@pytest.mark.parametrize(
+    "delivery",
+    [
+        "direct",
+        "dead_letter",
+        "process_kill",
+        pytest.param(
+            "arq",
+            marks=pytest.mark.skipif(
+                not os.environ.get("TEST_DIRECTOR_REDIS_URL"),
+                reason="isolated Redis required",
+            ),
+        ),
+        "late_completed",
+        "late_cached",
+        "late_cancelled",
+        "late_completed_after_cancel",
+    ],
+)
 async def test_director_failure_rolls_back_only_wakeup_and_retries_once(monkeypatch, delivery):
     dbname = f"dramaforge_d2_wakeup_{uuid4().hex[:8]}"
     await _create_database(dbname)
     engine = create_async_engine(_async_url(dbname))
     app_engine = create_async_engine(
-        _async_url(dbname), connect_args={"server_settings": {"role": "dramaforge_app"}},
+        _async_url(dbname),
+        connect_args={"server_settings": {"role": "dramaforge_app"}},
     )
     try:
         _alembic(dbname)
@@ -48,50 +62,76 @@ async def test_director_failure_rolls_back_only_wakeup_and_retries_once(monkeypa
         async with admin() as session:
             project, binding, actor = await _seed(session)
             shot, _artifact = await _seed_video_shot(session, project=project, user=actor)
-            session.add(ProjectCreativeProfile(
-                project_id=project.id, start_type="FREE", director_autonomy="AUTO",
-            ))
+            session.add(
+                ProjectCreativeProfile(
+                    project_id=project.id,
+                    start_type="FREE",
+                    director_autonomy="AUTO",
+                )
+            )
             await session.commit()
-            command = _input(project_id=project.id, shot_id=shot.id,
-                             requested_binding_id=binding.id, expected_shot_version=shot.version)
+            command = _input(
+                project_id=project.id,
+                shot_id=shot.id,
+                requested_binding_id=binding.id,
+                expected_shot_version=shot.version,
+            )
             plan = await WorkbenchExecutionService(session, user_id=actor.id).build_plan(
-                project=project, execution_input=command,
+                project=project,
+                execution_input=command,
             )
             receipt = await ProductionCommands(session).submit_user_execution(
-                actor=actor, project_id=project.id, shot_id=shot.id, command_key="independent",
+                actor=actor,
+                project_id=project.id,
+                shot_id=shot.id,
+                command_key="independent",
                 body=ExecutionBody(
-                    **command.model_dump(exclude={"project_id", "shot_id", "shot_experiment_id"}),
+                    **command.model_dump(exclude={"project_id", "shot_id", "experiment_branch_id"}),
                     plan_fingerprint=plan.plan_fingerprint,
                     accepted_approximations=plan.accepted_approximations,
                 ),
             )
             await session.commit()
-            event = await session.scalar(select(OutboxEvent).where(
-                OutboxEvent.topic == "production.facts.v1",
-            ))
+            event = await session.scalar(
+                select(OutboxEvent).where(
+                    OutboxEvent.topic == "production.facts.v1",
+                )
+            )
             event_id = event.event_id
         if delivery.startswith("late_"):
             terminal_status = delivery.removeprefix("late_")
             async with factory() as session:
-                await set_rls_context(session, user_id=actor.id, workspace_id=project.workspace_id,
-                                      project_id=project.id)
+                await set_rls_context(
+                    session,
+                    user_id=actor.id,
+                    workspace_id=project.workspace_id,
+                    project_id=project.id,
+                )
                 run = await session.get(NodeRun, receipt.node_run_id)
                 if terminal_status != "cancelled":
                     artifact = Artifact(
-                        project_id=project.id, artifact_type="video", storage_state="available",
-                        object_key=f"test/{uuid4().hex}.mp4", content_hash="f" * 64,
-                        mime_type="video/mp4", byte_size=1,
+                        project_id=project.id,
+                        artifact_type="video",
+                        storage_state="available",
+                        object_key=f"test/{uuid4().hex}.mp4",
+                        content_hash="f" * 64,
+                        mime_type="video/mp4",
+                        byte_size=1,
                     )
                     session.add(artifact)
                     await session.flush()
                     run.result_artifact_id = artifact.id
                     if terminal_status == "cached":
                         source = NodeRun(
-                            project_id=project.id, graph_version_id=run.graph_version_id,
-                            graph_node_id=run.graph_node_id, attempt_no=2,
+                            project_id=project.id,
+                            graph_version_id=run.graph_version_id,
+                            graph_node_id=run.graph_node_id,
+                            attempt_no=2,
                             idempotency_key=f"cache-source:{uuid4().hex}",
-                            input_hash=run.input_hash, input_snapshot=run.input_snapshot,
-                            status="completed", result_artifact_id=artifact.id,
+                            input_hash=run.input_hash,
+                            input_snapshot=run.input_snapshot,
+                            status="completed",
+                            result_artifact_id=artifact.id,
                             created_by=actor.id,
                         )
                         session.add(source)
@@ -100,17 +140,28 @@ async def test_director_failure_rolls_back_only_wakeup_and_retries_once(monkeypa
                 run.status = terminal_status
                 await session.commit()
             async with admin() as session:
-                changed = (await session.scalars(select(OutboxEvent).where(
-                    OutboxEvent.payload["notice"]["kind"].as_string() == "execution_changed",
-                ))).one()
+                changed = (
+                    await session.scalars(
+                        select(OutboxEvent).where(
+                            OutboxEvent.payload["notice"]["kind"].as_string()
+                            == "execution_changed",
+                        )
+                    )
+                ).one()
                 changed_id = changed.event_id
             # Deliver the terminal fact before the original acceptance.
             for notice_id in (changed_id, event_id, changed_id, event_id):
                 async with factory() as session:
-                    await set_rls_context(session, user_id=actor.id,
-                                          workspace_id=project.workspace_id, project_id=project.id)
+                    await set_rls_context(
+                        session,
+                        user_id=actor.id,
+                        workspace_id=project.workspace_id,
+                        project_id=project.id,
+                    )
                     received = await receive_production_event(
-                        session, project_id=project.id, event_id=notice_id,
+                        session,
+                        project_id=project.id,
+                        event_id=notice_id,
                     )
                     await session.commit()
                 await process_director_wakeup(factory, inbox_id=received)
@@ -118,19 +169,27 @@ async def test_director_failure_rolls_back_only_wakeup_and_retries_once(monkeypa
                 turn = (await session.scalars(select(DirectorTurn))).one()
                 assert turn.status == "awaiting_user"
                 assert turn.response_summary["coordination"]["current_action"]["action"] == (
-                    "review_execution_failure" if terminal_status == "cancelled"
+                    "review_execution_failure"
+                    if terminal_status == "cancelled"
                     else "confirm_formal_candidate"
                 )
-                assert await session.scalar(select(func.count()).select_from(
-                    ProviderOperation,
-                )) == 0
+                assert (
+                    await session.scalar(
+                        select(func.count()).select_from(
+                            ProviderOperation,
+                        )
+                    )
+                    == 0
+                )
                 assert (await session.get(NodeRun, receipt.node_run_id)).status == terminal_status
             return
         async with factory() as session:
-            await set_rls_context(session, user_id=actor.id, workspace_id=project.workspace_id,
-                                  project_id=project.id)
-            inbox_id = await receive_production_event(session, project_id=project.id,
-                                                       event_id=event_id)
+            await set_rls_context(
+                session, user_id=actor.id, workspace_id=project.workspace_id, project_id=project.id
+            )
+            inbox_id = await receive_production_event(
+                session, project_id=project.id, event_id=event_id
+            )
             await session.commit()
         original = DirectorBusinessCheckpoints.reconcile_business_fact
 
@@ -138,7 +197,9 @@ async def test_director_failure_rolls_back_only_wakeup_and_retries_once(monkeypa
             raise RuntimeError("Injected director failure before wakeup completion")
 
         monkeypatch.setattr(
-            DirectorBusinessCheckpoints, "reconcile_business_fact", fail_after_tracking,
+            DirectorBusinessCheckpoints,
+            "reconcile_business_fact",
+            fail_after_tracking,
         )
         assert not await process_director_wakeup(factory, inbox_id=inbox_id)
         async with admin() as session:
@@ -171,13 +232,19 @@ async def test_director_failure_rolls_back_only_wakeup_and_retries_once(monkeypa
                 pending = await session.get(DirectorWakeup, inbox_id)
                 failed_at = pending.dead_letter_at
                 assert await replay_failed_wakeup(
-                    session, actor=actor, project_id=project.id, inbox_id=inbox_id,
+                    session,
+                    actor=actor,
+                    project_id=project.id,
+                    inbox_id=inbox_id,
                     expected_dead_letter_at=failed_at,
                 )
                 await session.commit()
             async with admin() as session:
                 assert not await replay_failed_wakeup(
-                    session, actor=actor, project_id=project.id, inbox_id=inbox_id,
+                    session,
+                    actor=actor,
+                    project_id=project.id,
+                    inbox_id=inbox_id,
                     expected_dead_letter_at=failed_at,
                 )
                 await session.commit()
@@ -196,7 +263,7 @@ async def test_director_failure_rolls_back_only_wakeup_and_retries_once(monkeypa
             )
             assert sorted(results) == [False, True]
         elif delivery == "process_kill":
-            child_source = '''
+            child_source = """
 import asyncio, os
 from uuid import UUID
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -214,12 +281,18 @@ async def main():
     factory = async_sessionmaker(engine, expire_on_commit=False)
     await process_director_wakeup(factory, inbox_id=UUID(os.environ["TEST_WAKEUP_ID"]))
 asyncio.run(main())
-'''
+"""
             child = await asyncio.create_subprocess_exec(
-                sys.executable, "-c", child_source,
-                env={**os.environ, "DATABASE_URL": _async_url(dbname),
-                     "TEST_WAKEUP_ID": str(inbox_id)},
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                sys.executable,
+                "-c",
+                child_source,
+                env={
+                    **os.environ,
+                    "DATABASE_URL": _async_url(dbname),
+                    "TEST_WAKEUP_ID": str(inbox_id),
+                },
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
             try:
                 ready = await asyncio.wait_for(child.stdout.readline(), 15)
@@ -253,8 +326,13 @@ asyncio.run(main())
                     raise ConnectionError("Intake down; committed wakeup must still run")
 
             worker = Worker(
-                [director.execute_director_wakeup], redis_pool=redis, queue_name=queue,
-                burst=True, handle_signals=False, poll_delay=0.01, keep_result=0,
+                [director.execute_director_wakeup],
+                redis_pool=redis,
+                queue_name=queue,
+                burst=True,
+                handle_signals=False,
+                poll_delay=0.01,
+                keep_result=0,
             )
             try:
                 ctx = {"redis": redis, "director_consumer": UnavailableIntake()}
@@ -280,31 +358,56 @@ asyncio.run(main())
             assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0
         if delivery == "direct":
             async with factory() as session:
-                await set_rls_context(session, user_id=actor.id, workspace_id=project.workspace_id,
-                                      project_id=project.id)
+                await set_rls_context(
+                    session,
+                    user_id=actor.id,
+                    workspace_id=project.workspace_id,
+                    project_id=project.id,
+                )
                 run = await session.get(NodeRun, receipt.node_run_id)
                 run.status = "failed"
                 await session.flush()
                 await session.rollback()
             async with admin() as session:
                 assert (await session.get(NodeRun, receipt.node_run_id)).status == "queued"
-                assert await session.scalar(select(func.count()).select_from(OutboxEvent).where(
-                    OutboxEvent.payload["notice"]["kind"].as_string() == "execution_changed",
-                )) == 0
+                assert (
+                    await session.scalar(
+                        select(func.count())
+                        .select_from(OutboxEvent)
+                        .where(
+                            OutboxEvent.payload["notice"]["kind"].as_string()
+                            == "execution_changed",
+                        )
+                    )
+                    == 0
+                )
             async with factory() as session:
-                await set_rls_context(session, user_id=actor.id, workspace_id=project.workspace_id,
-                                      project_id=project.id)
+                await set_rls_context(
+                    session,
+                    user_id=actor.id,
+                    workspace_id=project.workspace_id,
+                    project_id=project.id,
+                )
                 run = await session.get(NodeRun, receipt.node_run_id)
                 run.status = "failed"
                 await session.commit()
             async with admin() as session:
-                notices = list((await session.scalars(select(OutboxEvent).where(
-                    OutboxEvent.payload["notice"]["kind"].as_string() == "execution_changed",
-                ))).all())
+                notices = list(
+                    (
+                        await session.scalars(
+                            select(OutboxEvent).where(
+                                OutboxEvent.payload["notice"]["kind"].as_string()
+                                == "execution_changed",
+                            )
+                        )
+                    ).all()
+                )
                 assert len(notices) == 1
                 changed_id = notices[0].event_id
                 next_inbox = await receive_production_event(
-                    session, project_id=project.id, event_id=changed_id,
+                    session,
+                    project_id=project.id,
+                    event_id=changed_id,
                 )
                 await session.commit()
             assert await process_director_wakeup(factory, inbox_id=next_inbox)

@@ -13,11 +13,11 @@ from app.access.models import Project, User, Workspace
 from app.config import clear_settings_cache
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.production.service import GraphService
-from app.providers.connection_service import ProviderConnectionService
-from app.providers.model_system_models import (
+from app.providers.availability_models import (
     ProviderAvailabilityEvidence,
     ProviderModelAvailability,
 )
+from app.providers.connection_service import ProviderConnectionService
 from app.providers.models import (
     ProviderCapabilityEvidence,
     ProviderConnection,
@@ -247,7 +247,9 @@ async def test_explicit_auth_rejection_revokes_current_account_flags_without_era
     stored_revision = await session.scalar(select(ProviderConnectionRevision))
     assert stored_revision is not None
     assert (
-        stored_revision.id, stored_revision.credential_revision_id, stored_revision.base_url
+        stored_revision.id,
+        stored_revision.credential_revision_id,
+        stored_revision.base_url,
     ) == original_revision
 
 
@@ -328,10 +330,7 @@ async def test_model_list_scope_never_infers_unproven_media_visibility(
     assert tuple(projected[binding.invoke_model_value or ""] for binding in bindings) == expected
     evidence = list(await session.scalars(select(ProviderAvailabilityEvidence)))
     assert len(evidence) == 2
-    assert all(
-        item.listed_model_ids_json == [bindings[0].invoke_model_value]
-        for item in evidence
-    )
+    assert all(item.listed_model_ids_json == [bindings[0].invoke_model_value] for item in evidence)
 
 
 @pytest.mark.asyncio
@@ -520,9 +519,7 @@ async def test_plugin_declared_paid_read_operations_also_fail_closed(
     from app.providers.registry import get_plugin
 
     actor, workspace, service, connection, _ = await _seed(session)
-    plugin = replace(
-        get_plugin("agnes", "agnes_cn_v1"), paid_capabilities=frozenset({capability})
-    )
+    plugin = replace(get_plugin("agnes", "agnes_cn_v1"), paid_capabilities=frozenset({capability}))
     monkeypatch.setattr("app.providers.connection_service._resolve_plugin", lambda *args: plugin)
     with pytest.raises(ValidationAppError) as caught:
         await service.probe(
@@ -541,13 +538,13 @@ async def test_nonpaid_existing_task_poll_remains_explicit_and_binding_scoped(
 ) -> None:
     from datetime import date
 
+    from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 
     actor, workspace, service, connection, _ = await _seed(session)
     manifest = next(
         item
-        for item in SEED_MANIFESTS
+        for item in CATALOG_MODELS
         if item["provider_type"] == "agnes" and item["media_kind"] == "video"
     )
     session.add(

@@ -3,7 +3,7 @@
   "provider_type": "minimax",
   "protocol_profile": "minimax_cn_v1",
   "model_id": "image-01",
-  "model_revision": "v1",
+  "model_revision": "v3",
   "media_kind": "image",
   "display_name": "MiniMax Image 01",
   "lifecycle": "active",
@@ -33,5 +33,13 @@
   "option_schema": {
     "namespace": "",
     "options": {}
+  },
+  "implementation_status": "contract_tested",
+  "evidence": {
+    "current_contract": {
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit",
+      "checked_at": "2026-10-07"
+    }
   }
 }

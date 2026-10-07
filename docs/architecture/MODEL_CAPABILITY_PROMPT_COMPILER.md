@@ -20,11 +20,12 @@ Status: current-reference；只读查询/编译预览/生成快照已实现，Ag
 
 媒体目录唯一数据源为版本化 [model_catalog/](../../backend/app/providers/model_catalog/)，由
 [ModelCatalogLoader](../../backend/app/providers/catalog_loader.py) 校验 schema、精确身份和证据。
-[catalog_seed_data.py::SEED_MANIFESTS](../../backend/app/providers/catalog_seed_data.py) 只是 active
-目录的兼容投影；preview 与历史 revision 由 Loader 读取。完整列表与限制见
+[catalog_loader.py::CATALOG_MODELS](../../backend/app/providers/catalog_loader.py) 只是 active
+目录的派生视图；preview 由 Loader 读取，旧修订不参与新执行。完整列表与限制见
 [生成支持矩阵](../generated/MODEL_SUPPORT.md)，冻结请求见 [contract fixtures](../../fixtures/providers/contracts/)。
 同一模型的新能力必须新增 revision，不能改写已有 Manifest/hash。
-消费侧 registry ID 是 `provider_type/model_id`；wire 的 model 使用冻结的 `invoke_model_value`，不是 UI display_name。
+静态目录 ID 是 `provider_type/model_id`；可执行媒体选择使用 `binding:<UUID>`，
+连接文本模型使用 `litellm/<connection-UUID>/<remote-id>`；wire 的 model 使用冻结的 `invoke_model_value`，不是 UI display_name。
 Manifest 有两种表示：catalog `ModelCapabilityManifest` → [to_v3_model_manifest](../../backend/app/providers/manifest.py) → `ModelManifest`。
 前者以 operation/细能力描述，后者以 capability/mode/slot 描述；不是可独立编辑的两份模型事实。
 
@@ -37,13 +38,12 @@ Manifest 有两种表示：catalog `ModelCapabilityManifest` → [to_v3_model_ma
 
 | registry ID / revision | operation 与模式 | 参考槽位、数目、传输 | 输出与参数实际合同 | Compiler |
 |---|---|---|---|---|
-| `agnes/agnes-image-2.1-flash` / v2 | image.generate；T2I / 单参考 I2I | reference_image 0..1；有序 list，读取 bytes → Data URI，`extra_body.image[]` | N:size=1K、ratio=9:16；合同尺寸736×1312，URL输出；其它档位未开放 | AgnesImageCompiler |
-| `agnes/agnes-video-v2.0` / v1 | video.generate；first-frame I2V | first_frame 必须1；bytes raw-base64 兼容路径或 public HTTPS，顶层 image | N:121帧、24fps、720×1280、9:16；产品 intent 5秒，不可随意换算帧数；拒绝原生音频；camera=P | AgnesVideoCompiler |
-| `volcengine/doubao-seedream-4-0-250828` / v1 | image.generate；T2I / 单参考 I2I | reference_image 0..1；HTTPS → image[] | N:size=2048x2048、response_format=url、watermark=false；builder 保留历史 seed 形状，但当前 compiler 拒绝未声明 seed；只接受冻结尺寸及空/1:1 ratio | ArkImageCompiler |
-| `volcengine/doubao-seedance-1-0-pro-250528` / v1 | video.generate；first-frame I2V | first_frame 必须1；HTTPS → content[].image_url，role=first_frame | 当前 wire 仅 model/content；duration/ratio/audio 显式拒绝；其它输出不保证；camera=P | ArkVideoCompiler |
-| `volcengine/doubao-seedance-2-0-260128` / v1 | 同上，仅复用 first-frame 子集 | 同上；无多参考、尾帧、音频合同 | 同上；模型名称2.0不代表完整2.0能力已接通 | ArkVideoCompiler |
-| `minimax/image-01` / v1 | image.generate；I2I only（不是无图T2I） | reference_image 必须1；HTTPS → subject_reference[{type:character,image_file}] | N:aspect_ratio=1:1、n=1、response_format=url、prompt_optimizer=false、aigc_watermark=false；catalog size=1024x1024不是wire size字段 | MiniMaxImageCompiler |
-| `minimax/MiniMax-H3` / v1（legacy） | video.generate；first-frame I2V | first_frame 必须1；HTTPS → content[] | N:resolution=768P、duration=5、ratio=adaptive；语义输入要求9:16/16:9首帧继承，generate_audio仅None/false，seed拒绝；camera=P | MiniMaxVideoCompiler |
+| `agnes/agnes-image-2.1-flash` / v3 | image.generate；T2I / 单参考 I2I | reference_image 0..1；有序 list，读取 bytes → Data URI，`extra_body.image[]` | N:size=1K、ratio=9:16；合同尺寸736×1312，URL输出；其它档位未开放 | AgnesImageCompiler |
+| `agnes/agnes-video-v2.0` / v2 | video.generate；first-frame I2V | first_frame 必须1；bytes raw-base64 兼容路径或 public HTTPS，顶层 image | N:121帧、24fps、720×1280、9:16；产品 intent 5秒，不可随意换算帧数；拒绝原生音频；camera=P | AgnesVideoCompiler |
+| `volcengine/doubao-seedream-4-0-250828` / v3 | image.generate；T2I / 单参考 I2I | reference_image 0..1；HTTPS → image[] | N:size=2048x2048、response_format=url、watermark=false；builder 保留历史 seed 形状，但当前 compiler 拒绝未声明 seed；只接受冻结尺寸及空/1:1 ratio | ArkImageCompiler |
+| `volcengine/doubao-seedance-1-0-pro-250528` / v2 | video.generate；first-frame I2V | first_frame 必须1；HTTPS → content[].image_url，role=first_frame | 当前 wire 仅 model/content；duration/ratio/audio 显式拒绝；其它输出不保证；camera=P | ArkVideoCompiler |
+| `volcengine/doubao-seedance-2-0-260128` / v3 | 同上，仅复用 first-frame 子集 | 同上；无多参考、尾帧、音频合同 | 同上；模型名称2.0不代表完整2.0能力已接通 | ArkVideoCompiler |
+| `minimax/image-01` / v3 | image.generate；I2I only（不是无图T2I） | reference_image 必须1；HTTPS → subject_reference[{type:character,image_file}] | N:aspect_ratio=1:1、n=1、response_format=url、prompt_optimizer=false、aigc_watermark=false；catalog size=1024x1024不是wire size字段 | MiniMaxImageCompiler |
 
 活动 `MiniMax-H3` v2 在同一编译器中保留首帧模式，并新增显式文生视频：
 无参考、2K、5 秒、9:16/16:9、原生音频。旧 v1 仍以原身份和首帧请求恢复。
@@ -51,7 +51,7 @@ Manifest 有两种表示：catalog `ModelCapabilityManifest` → [to_v3_model_ma
 协议目录另包含 OpenAI-compatible image/video、Agnes OpenAI async video，以及 SGLang H3
 T2VA / Ref2VA / FL2VA 合同；`@contract/...` 是调用方案，不是具体供应商模型。
 用户发现的 remote model ID、方案 revision 和连接身份共同组成 Binding，不把合同 ID
-发送为远端模型名。Ref2VA v1 保留为 legacy，active v2 支持的数量/时长按冻结合同校验。
+发送为远端模型名。Ref2VA 只公开当前 active 合同，数量/时长按其冻结修订校验。
 
 preview 的 Agnes 2.5、Ark 与 MiniMax 候选已可供只读目录和合同编译测试核对，不能新建
 active Binding。声明 `input_contracts` 的 Compiler 要求显式 ProductCapabilityPolicy；
@@ -66,7 +66,7 @@ active Binding。声明 `input_contracts` 的 Compiler 要求显式 ProductCapab
 
 | 对象 | 当前代码事实 | 不得推断 |
 |---|---|---|
-| `litellm/text-llm` | bootstrap bridge；gateway_model 默认 legacy-text，可由配置替换 | 不等于具体 OpenAI/Claude/Gemini/DeepSeek 版本 |
+| `litellm/script-quality` | 与其它逻辑 alias 使用相同合同；部署默认 script-quality | 不等于具体 OpenAI/Claude/Gemini/DeepSeek 版本 |
 | `litellm/script-quality`、`litellm/script-fast` | 默认配置注册的逻辑别名；上游 model/base/key 属 LiteLLM 部署配置 | 别名不代表确定的上下文长度、tool calling 或价格 |
 | `litellm/<discovered alias>` | `LiteLLMModelCatalogSyncService` 可从 gateway发现别名，注册 text.generate | discovery 不是结构化输出/工具闭环认证 |
 | Edge TTS / `edge-voice-v1` | 默认配置；联网神经配音，冻结音色/语速/引擎版本 | 是非官方联网服务，配置读取不证明可用性；失败不自动退回 eSpeak |
@@ -233,7 +233,7 @@ HTTP：[model_inspection.py](../../backend/app/api/v1/model_inspection.py)，正
 - [capability_sources](../../backend/app/providers/capability_sources.py) 只存官方来源与退役通知，不是第二个可写capability catalog。
 - 当前绑定查询复用ExecutionModelResolver；文本slot复用ModelBindingResolver；返回binding/profile关联及身份hash，
   不返回credential revision明文/secret/native敏感值。敏感ParameterSpec的default/enum/说明被移除。
-- 无显式InputModeSpec的历史合同只接受legacy/explicit_binding查询语义，不把任意mode字符串当已认证模式。
+- 只有单一输入模式的当前合同使用 default/explicit_binding 查询语义，不把任意mode字符串当已认证模式。
 
 ### preview_generation_compile
 

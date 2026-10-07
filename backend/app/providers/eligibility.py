@@ -133,7 +133,7 @@ async def evaluate_candidate(
     if catalog_entry is None:
         _issues_add(issues, "MODEL_NOT_IN_CATALOG")
     else:
-        if catalog_entry.lifecycle not in {"active", "legacy", "deprecated"}:
+        if catalog_entry.lifecycle != "active":
             _issues_add(issues, "MODEL_LIFECYCLE_INACTIVE", catalog_entry.lifecycle)
         if (
             catalog_entry.provider_type != connection.provider_type

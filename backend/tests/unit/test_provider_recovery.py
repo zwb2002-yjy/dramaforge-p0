@@ -51,24 +51,38 @@ async def recovery(monkeypatch):
     monkeypatch.setattr("arq.create_pool", pool)
     async with factory() as session:
         user = User(
-            email=f"recovery-{uuid4()}@example.com", display_name="Owner", password_hash="x",
+            email=f"recovery-{uuid4()}@example.com",
+            display_name="Owner",
+            password_hash="x",
         )
         session.add(user)
         await session.flush()
         workspace = Workspace(owner_user_id=user.id, name="Recovery")
         session.add(workspace)
         await session.flush()
-        project = Project(workspace_id=workspace.id, name="Recovery", stage="draft",
-                          aspect_ratio="16:9", budget_limit=0)
+        project = Project(
+            workspace_id=workspace.id,
+            name="Recovery",
+            stage="draft",
+            aspect_ratio="16:9",
+            budget_limit=0,
+        )
         session.add(project)
         await session.flush()
         node = GraphNode(
-            graph_version_id=uuid4(), node_key="video", node_type="video", display_name="Video",
+            graph_version_id=uuid4(),
+            node_key="video",
+            node_type="video",
+            display_name="Video",
         )
         session.add(node)
         await session.commit()
         env = SimpleNamespace(
-            factory=factory, queue=queue, project=project, user=user, node=node,
+            factory=factory,
+            queue=queue,
+            project=project,
+            user=user,
+            node=node,
         )
     try:
         yield env
@@ -82,19 +96,30 @@ async def seed(env, count=1, *, start=1, age=timedelta(hours=2), remote=True):
     async with env.factory() as session:
         for number in range(start, start + count):
             run = NodeRun(
-                id=UUID(int=number), project_id=env.project.id,
-                graph_version_id=env.node.graph_version_id, graph_node_id=env.node.id,
-                attempt_no=number, idempotency_key=f"recovery:{number}", input_hash="a" * 64,
-                status="running", input_snapshot={"source_commit": "previous-release"},
-                created_by=env.user.id, started_at=now, created_at=now,
+                id=UUID(int=number),
+                project_id=env.project.id,
+                graph_version_id=env.node.graph_version_id,
+                graph_node_id=env.node.id,
+                attempt_no=number,
+                idempotency_key=f"recovery:{number}",
+                input_hash="a" * 64,
+                status="running",
+                input_snapshot={"source_commit": "previous-release"},
+                created_by=env.user.id,
+                started_at=now,
+                created_at=now,
             )
             operation = ProviderOperation(
-                node_run_id=run.id, operation_kind="video", actual_provider="test",
-                actual_model="test-video", request_fingerprint="b" * 64,
+                node_run_id=run.id,
+                operation_kind="video",
+                actual_provider="test",
+                actual_model="test-video",
+                request_fingerprint="b" * 64,
                 execution_path_version="unified-v1",
                 status="submitted" if remote else "submission_started",
                 provider_operation_id=f"remote-{number}" if remote else None,
-                created_at=now, submitted_at=now if remote else None,
+                created_at=now,
+                submitted_at=now if remote else None,
             )
             session.add_all([run, operation])
             ids.append(run.id)
@@ -150,8 +175,10 @@ async def test_active_resume_lease_blocks_another_job_and_recovery(recovery, mon
         with pytest.raises(asyncio.CancelledError):
             await first
 
+
 async def test_rows_becoming_stale_behind_cursor_are_revisited_without_restart(
-    recovery, monkeypatch,
+    recovery,
+    monkeypatch,
 ):
     base = datetime.now(UTC)
 
@@ -187,8 +214,10 @@ async def test_rows_becoming_stale_behind_cursor_are_revisited_without_restart(
     await jobs.recover_interrupted_provider_jobs(dict(ctx))
     assert str(late_id) not in recovery.queue.admitted.values()
 
+
 async def test_overlap_uses_one_outbox_and_job_without_resetting_cancellation(
-    recovery, monkeypatch,
+    recovery,
+    monkeypatch,
 ):
     import asyncio
 
@@ -236,10 +265,12 @@ async def test_overlap_uses_one_outbox_and_job_without_resetting_cancellation(
         assert run.status == "cancel_requested"
         assert run.cancellation_requested_at.replace(tzinfo=UTC) == cancelled_at
         assert run.input_snapshot == {
-            "source_commit": "old", "dispatch_generation": "explicit-existing",
+            "source_commit": "old",
+            "dispatch_generation": "explicit-existing",
         }
         assert (run.error_code, run.error_summary) == (
-            "PROVIDER_TASK_PENDING", "keep this evidence",
+            "PROVIDER_TASK_PENDING",
+            "keep this evidence",
         )
         assert len((await session.scalars(select(OutboxEvent))).all()) == 1
 
@@ -261,7 +292,9 @@ async def test_enqueue_failure_does_not_fail_remote_task_or_starve_siblings(reco
     async with recovery.factory() as session:
         run = await session.get(NodeRun, first)
         assert (run.status, run.error_code, run.input_snapshot) == (
-            "running", None, {"source_commit": "previous-release"},
+            "running",
+            None,
+            {"source_commit": "previous-release"},
         )
         # Commit-before-enqueue survives; no stranded queued transition is needed.
         assert len((await session.scalars(select(OutboxEvent))).all()) == 2
@@ -273,7 +306,8 @@ async def test_enqueue_failure_does_not_fail_remote_task_or_starve_siblings(reco
 
 
 async def test_time_bound_advances_only_past_attempted_row_and_retries_after_wrap(
-    recovery, monkeypatch,
+    recovery,
+    monkeypatch,
 ):
     import asyncio
 
@@ -300,6 +334,7 @@ async def test_time_bound_advances_only_past_attempted_row_and_retries_after_wra
     async with recovery.factory() as session:
         assert len((await session.scalars(select(OutboxEvent))).all()) == 2
 
+
 async def test_remote_identity_resumes_interrupted_download_with_zero_create(recovery, monkeypatch):
     import asyncio
     import hashlib
@@ -313,14 +348,24 @@ async def test_remote_identity_resumes_interrupted_download_with_zero_create(rec
 
     (run_id,) = await seed(recovery)
     identity = ExecutionIdentitySnapshot(
-        resolved_model="test/image", resolution_source="project_snapshot",
-        provider_model_binding_id=uuid4(), catalog_entry_id=uuid4(), model_revision="r1",
-        manifest_hash="c" * 64, invoke_model_value="image", connection_id=uuid4(),
-        connection_revision_id=uuid4(), credential_revision_id=uuid4(),
-        capability="image.generate", mode_id="text-to-image", request_fingerprint="b" * 64,
+        resolved_model="test/image",
+        resolution_source="project_snapshot",
+        provider_model_binding_id=uuid4(),
+        catalog_entry_id=uuid4(),
+        model_revision="r1",
+        manifest_hash="c" * 64,
+        invoke_model_value="image",
+        connection_id=uuid4(),
+        connection_revision_id=uuid4(),
+        credential_revision_id=uuid4(),
+        capability="image.generate",
+        mode_id="text-to-image",
+        request_fingerprint="b" * 64,
     )
     resume = ProviderResumeToken(
-        provider_type="test", protocol_profile="test-v1", remote_task_id="remote-1",
+        provider_type="test",
+        protocol_profile="test-v1",
+        remote_task_id="remote-1",
     )
     async with recovery.factory() as session:
         node = await session.get(GraphNode, recovery.node.id)
@@ -335,9 +380,12 @@ async def test_remote_identity_resumes_interrupted_download_with_zero_create(rec
         operation_id = operation.id
         await session.commit()
     runtime = SimpleNamespace(
-        poll_video=AsyncMock(return_value=PollResult(
-            status="succeeded", artifact_uri="https://unit.invalid/result",
-        )),
+        poll_video=AsyncMock(
+            return_value=PollResult(
+                status="succeeded",
+                artifact_uri="https://unit.invalid/result",
+            )
+        ),
         fetch_cost=AsyncMock(return_value=SimpleNamespace(amount=None, cost_status="not_reported")),
         submit_image=AsyncMock(side_effect=AssertionError("must not create")),
         submit_video=AsyncMock(side_effect=AssertionError("must not create")),
@@ -361,12 +409,14 @@ async def test_remote_identity_resumes_interrupted_download_with_zero_create(rec
         return SimpleNamespace(
             object_key=kwargs["object_key"],
             content_hash=hashlib.sha256(kwargs["data"]).hexdigest(),
-            mime_type=kwargs["mime_type"], byte_size=len(kwargs["data"]),
+            mime_type=kwargs["mime_type"],
+            byte_size=len(kwargs["data"]),
         )
 
     monkeypatch.setattr("app.execution.provider_execution._resolve_media_bytes", download)
     monkeypatch.setattr(
-        "app.execution.product_path.get_object_store", lambda: SimpleNamespace(put_bytes=store),
+        "app.execution.product_path.get_object_store",
+        lambda: SimpleNamespace(put_bytes=store),
     )
     ctx = {}
     await jobs.recover_interrupted_provider_jobs(ctx)
@@ -418,14 +468,17 @@ def test_recovery_bounds_outlive_heavy_attempt_and_arq_result_retention():
     assert heavy.WorkerSettings.on_startup is jobs.recover_interrupted_provider_jobs
     assert not getattr(heavy.WorkerSettings, "cron_jobs", [])
     assert provider_recovery.PROVIDER_RECOVERY_BATCH_SIZE == 50
-    assert 0 < provider_recovery.PROVIDER_RECOVERY_TIMEOUT_SECONDS < (
-        dispatcher.PROVIDER_RECOVERY_POLL_SECONDS
+    assert (
+        0
+        < provider_recovery.PROVIDER_RECOVERY_TIMEOUT_SECONDS
+        < (dispatcher.PROVIDER_RECOVERY_POLL_SECONDS)
     )
     assert dispatcher.PROVIDER_RECOVERY_POLL_SECONDS == 60
 
 
 async def test_dispatcher_recovery_bypasses_fifty_jobs_and_a_busy_single_heavy_slot(
-    recovery, monkeypatch,
+    recovery,
+    monkeypatch,
 ):
     import asyncio
     from unittest.mock import AsyncMock
@@ -495,13 +548,14 @@ async def test_dispatcher_recovery_bypasses_fifty_jobs_and_a_busy_single_heavy_s
 
 
 async def test_poll_timeout_releases_lease_then_cancel_retries_same_remote_id(
-    recovery, monkeypatch,
+    recovery,
+    monkeypatch,
 ):
     from unittest.mock import AsyncMock
 
     from app.execution import provider_execution
+    from app.production.run_control import ProductionRunControl
     from app.providers.execution_identity import ExecutionIdentitySnapshot
-    from app.providers.generation_service import GenerationService
     from app.providers.runtime import (
         CancelResult,
         PollResult,
@@ -513,14 +567,24 @@ async def test_poll_timeout_releases_lease_then_cancel_retries_same_remote_id(
     # A recent created_at must not be mistaken for an active started_at lease.
     (run_id,) = await seed(recovery, age=timedelta(seconds=10))
     identity = ExecutionIdentitySnapshot(
-        resolved_model="test/image", resolution_source="project_snapshot",
-        provider_model_binding_id=uuid4(), catalog_entry_id=uuid4(), model_revision="r1",
-        manifest_hash="c" * 64, invoke_model_value="image", connection_id=uuid4(),
-        connection_revision_id=uuid4(), credential_revision_id=uuid4(),
-        capability="image.generate", mode_id="text-to-image", request_fingerprint="b" * 64,
+        resolved_model="test/image",
+        resolution_source="project_snapshot",
+        provider_model_binding_id=uuid4(),
+        catalog_entry_id=uuid4(),
+        model_revision="r1",
+        manifest_hash="c" * 64,
+        invoke_model_value="image",
+        connection_id=uuid4(),
+        connection_revision_id=uuid4(),
+        credential_revision_id=uuid4(),
+        capability="image.generate",
+        mode_id="text-to-image",
+        request_fingerprint="b" * 64,
     )
     resume = ProviderResumeToken(
-        provider_type="test", protocol_profile="test-v1", remote_task_id="remote-1",
+        provider_type="test",
+        protocol_profile="test-v1",
+        remote_task_id="remote-1",
     )
     async with recovery.factory() as session:
         node = await session.get(GraphNode, recovery.node.id)
@@ -558,9 +622,14 @@ async def test_poll_timeout_releases_lease_then_cancel_retries_same_remote_id(
     prepare = AsyncMock(side_effect=AssertionError("must not compile/resubmit"))
     monkeypatch.setattr(provider_execution, "prepare_media_submission", prepare)
     # Replace only this module's clock access, never asyncio's global event loop.
-    monkeypatch.setattr(provider_execution, "asyncio", SimpleNamespace(
-        get_running_loop=lambda: clock, sleep=AsyncMock(),
-    ))
+    monkeypatch.setattr(
+        provider_execution,
+        "asyncio",
+        SimpleNamespace(
+            get_running_loop=lambda: clock,
+            sleep=AsyncMock(),
+        ),
+    )
     monkeypatch.setattr("app.execution.product_path.get_object_store", lambda: SimpleNamespace())
     with pytest.raises(Retry):
         await jobs.execute_node_run({"job_try": 1}, str(run_id))
@@ -573,8 +642,9 @@ async def test_poll_timeout_releases_lease_then_cancel_retries_same_remote_id(
         assert "120s" in operation.error_summary
         project = await session.get(Project, run.project_id)
         # The real cancellation method runs inside Arq's 5s retry window.
-        await GenerationService(session, SimpleNamespace()).cancel_generation(
-            project=project, operation_id=run_id,
+        await ProductionRunControl(session).request_cancel(
+            project=project,
+            run_id=run_id,
         )
         await session.commit()
         assert run.status == "cancel_requested"
@@ -646,6 +716,5 @@ async def test_dispatcher_retries_recovery_errors_without_blocking_outbox_and_jo
             await resident
     assert recovery_stopped.is_set()
     assert not any(
-        task.get_name() in {"provider-recovery", "outbox-dispatch"}
-        for task in asyncio.all_tasks()
+        task.get_name() in {"provider-recovery", "outbox-dispatch"} for task in asyncio.all_tasks()
     )

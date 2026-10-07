@@ -3,7 +3,7 @@ FROM node:24.21.0-alpine3.24 AS build
 
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY . .
 RUN npm run build
 

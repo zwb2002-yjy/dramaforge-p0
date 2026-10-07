@@ -14,7 +14,6 @@ from app.director.proposal_commands import (
     ProposalCommandRegistry,
 )
 from app.execution.models import NodeRun
-from app.production.archive_models import ProductionExperiment, ShotExperiment
 from app.production.experiment_service import ExperimentCreateBody, create_experiment_branch
 from app.production.models import ExperimentBranch
 from app.shared.base import Base
@@ -98,8 +97,6 @@ async def test_director_creates_only_canonical_draft(session: AsyncSession, comm
     assert branch.selected_model == "agnes/model-b"
     assert branch.status == "draft"
     assert branch.parameters["target_node_key"] == "video"
-    assert (await session.scalars(select(ProductionExperiment))).all() == []
-    assert (await session.scalars(select(ShotExperiment))).all() == []
     assert (await session.scalars(select(NodeRun))).all() == []
     await session.refresh(shot)
     assert shot.version == 1

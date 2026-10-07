@@ -235,9 +235,7 @@ class OpenAICompatibleMediaClient:
                     json=payload,
                 )
             data = {
-                key: str(value)
-                for key, value in payload.items()
-                if key != "reference_artifact_ids"
+                key: str(value) for key, value in payload.items() if key != "reference_artifact_ids"
             }
             return await client.post(
                 f"{self._host}/images/edits",
@@ -328,10 +326,14 @@ class OpenAICompatibleMediaClient:
         data = _json_object(response)
         status = _status(data.get("status"))
         artifact_uri = _first_url(data)
-        if status == "succeeded" and response.status_code < 400 and (
-            self._host.startswith("http://")
-            or artifact_uri is None
-            or not artifact_uri.startswith("https://")
+        if (
+            status == "succeeded"
+            and response.status_code < 400
+            and (
+                self._host.startswith("http://")
+                or artifact_uri is None
+                or not artifact_uri.startswith("https://")
+            )
         ):
             artifact_uri = PROVIDER_CONTENT_URI
         return {
@@ -348,11 +350,11 @@ class OpenAICompatibleImageCompiler:
         operation = model.operations.get("image.generate")
         if operation is None:
             raise ValueError("model does not support image.generate")
-        required = "image.i2i" if intent.reference_artifact_id is not None else "image.t2i"
+        required = "image.i2i" if intent.single_reference_id() is not None else "image.t2i"
         if required not in operation.capabilities:
             raise ValueError(f"model does not support {required}")
         constraint = operation.reference_constraints.get("reference_image")
-        if intent.reference_artifact_id is not None and (constraint is None or constraint.max < 1):
+        if intent.single_reference_id() is not None and (constraint is None or constraint.max < 1):
             raise ValueError("model does not accept a reference_image")
 
     async def compile(
@@ -368,8 +370,8 @@ class OpenAICompatibleImageCompiler:
         if len(resolved) > 1:
             raise ValueError("OpenAI-compatible image compiler accepts one reference_image")
         ref = resolved[0] if resolved else None
-        if intent.reference_artifact_id is not None and (
-            ref is None or ref.artifact_id != intent.reference_artifact_id
+        if intent.single_reference_id() is not None and (
+            ref is None or ref.artifact_id != intent.single_reference_id()
         ):
             raise ValueError("resolved reference_image does not match the image intent")
         body: dict[str, JsonValue] = {
@@ -421,22 +423,27 @@ class OpenAICompatibleVideoCompiler:
             if not any(
                 capability in operation.capabilities
                 for capability in (
-                    "video.reference.image", "video.reference.video", "video.reference.audio"
+                    "video.reference.image",
+                    "video.reference.video",
+                    "video.reference.audio",
                 )
             ):
                 raise ValueError("model does not support reference video generation")
         else:
             required = (
-                ["video.t2v"] if text_only else
-                ["video.i2v.first_frame", "video.i2v.last_frame"]
-                if intent.mode_id == "first_last_frame" else
-                ["video.i2v.last_frame"] if intent.mode_id == "last_frame" else
-                ["video.i2v.first_frame"]
+                ["video.t2v"]
+                if text_only
+                else ["video.i2v.first_frame", "video.i2v.last_frame"]
+                if intent.mode_id == "first_last_frame"
+                else ["video.i2v.last_frame"]
+                if intent.mode_id == "last_frame"
+                else ["video.i2v.first_frame"]
             )
             if not set(required) <= set(operation.capabilities):
                 raise ValueError(f"model does not support {required}")
         if text_only and model.model_id not in {
-            "@contract/sglang-h3-t2v-v1", "@contract/sglang-h3-fl2va-v1"
+            "@contract/sglang-h3-t2v-v1",
+            "@contract/sglang-h3-fl2va-v1",
         }:
             raise ValueError("text_to_video requires the SGLang H3 T2VA contract")
         if reference_mode and model.model_id != "@contract/sglang-h3-ref2va-v1":
@@ -472,9 +479,8 @@ class OpenAICompatibleVideoCompiler:
                 "last_frame": ["last_frame"],
                 "first_last_frame": ["first_frame", "last_frame"],
             }[intent.mode_id]
-            if (
-                [ref.role for ref in intent.references] != expected_roles
-                or len(references) != len(expected_roles)
+            if [ref.role for ref in intent.references] != expected_roles or len(references) != len(
+                expected_roles
             ):
                 raise ValueError("FL2VA references do not match the selected frame mode")
             frame_conditions: list[JsonValue] = []
@@ -488,12 +494,14 @@ class OpenAICompatibleVideoCompiler:
                 if len(ref.content_bytes) > 32 * 1024 * 1024:
                     raise ValueError("FL2VA frame exceeds the media limit")
                 encoded = base64.b64encode(ref.content_bytes).decode("ascii")
-                frame_conditions.append({
-                    "type": "image",
-                    "uri": f"data:{ref.mime_type};base64,{encoded}",
-                    "role": "keyframe",
-                    "frame_index": 0 if role == "first_frame" else -1,
-                })
+                frame_conditions.append(
+                    {
+                        "type": "image",
+                        "uri": f"data:{ref.mime_type};base64,{encoded}",
+                        "role": "keyframe",
+                        "frame_index": 0 if role == "first_frame" else -1,
+                    }
+                )
             duration = intent.output.duration_seconds or 5
             frame_body: dict[str, JsonValue] = {
                 "model": invoke_model_value,
@@ -565,11 +573,13 @@ class OpenAICompatibleVideoCompiler:
                     raise ValueError("Ref2VA reference bytes exceed the media limit")
                 encoded = base64.b64encode(ref.content_bytes).decode("ascii")
                 uri = f"data:{ref.mime_type};base64,{encoded}"
-                conditions.append({
-                    "type": media_type,
-                    "uri": uri,
-                    "role": "reference",
-                })
+                conditions.append(
+                    {
+                        "type": media_type,
+                        "uri": uri,
+                        "role": "reference",
+                    }
+                )
             if len(conditions) > 12:
                 raise ValueError("Ref2VA accepts at most 12 references in total")
             duration = intent.output.duration_seconds or 5
@@ -836,11 +846,14 @@ class OpenAICompatibleMediaRuntime:
         """Fetch only this connection's completed video, never an arbitrary result URL."""
         self._configured()
         url = f"{self._client._host}/videos/{quote(resume.remote_task_id, safe='')}/content"
-        async with httpx.AsyncClient(
-            timeout=self._settings.openai_compatible_media_timeout_seconds,
-            transport=self._client._transport,
-            follow_redirects=False,
-        ) as client, client.stream("GET", url, headers=self._client._headers()) as response:
+        async with (
+            httpx.AsyncClient(
+                timeout=self._settings.openai_compatible_media_timeout_seconds,
+                transport=self._client._transport,
+                follow_redirects=False,
+            ) as client,
+            client.stream("GET", url, headers=self._client._headers()) as response,
+        ):
             if response.is_redirect:
                 raise ValueError("provider content redirects are not allowed")
             response.raise_for_status()

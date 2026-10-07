@@ -3,63 +3,28 @@
 Status: current（入口见 [CURRENT.md](CURRENT.md)）；
 Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/0005-provider-plugin-driven-configuration.md)。
 
-## 模型系统 Cutover 的当前阶段
+## 当前唯一模型执行系统
 
-离线目标资格判定 `evaluate_cutover_binding_target` 已能分别检查 Global 与 Dynamic
-Binding 的当前 Connection/Availability、能力和 Lifecycle/Protocol 事实；它只返回
-阻塞原因与 warning；`visible` 还须由同一 Revision、Credential 与具体模型的正向证据行支持。
-只读 Binding 分类报告已复用此判定，并输出 warning。调用者必须提供最高版本的 Connection Revision，并在实际 Create
-边界重新核对。此判定尚未接入 Dispatch，也未组合 ProductPolicy、技术匹配或精确 Handler，
-不能单独授权 Provider Create。
+项目尚未发布。模型执行统一为文件 Catalog/Manifest、具体 ProviderModelBinding、
+Connection/Credential revision、严格 Compiler 和 ExecutionIdentitySnapshot。
+未接入生产的 Global/Dynamic 第二套能力表、Policy/Protocol/Handler 表与 Cutover 预检
+服务已退役；不保留旧系统回滚路径或自动转换旧运行计划。
 
-Migration A 已扩展版本化 Global 模型、Connection 动态模型和精确修订的 Availability
-证据/投影，并在原有 `ProviderModelBinding` 上增加 target identity。能由现有官方目录行
-精确映射的绑定保留原 ID 与项目引用；未映射绑定保持 unresolved。历史
-`account_verified=true` 只作旧系统提示，不能回填 `visible`。用户显式执行不付费
-`auth_models` 后，模型列表按当前连接、凭证修订和精确 remote model ID 写入新证据；
-短时错误不撤销同修订的正向投影，明确负向结果仍阻止将来的新 Create。
-当前生产 Create 仍使用既有准入路径；Global/Dynamic target、Policy、Protocol/Handler、
-ExecutionIdentity 和 Recovery 的新执行链尚未切换。旧目录和旧列暂留作回滚兼容，
-不能把 Migration A 误报为 Runtime Cutover 完成。
-旧目录的 mutable lifecycle 也未直接升级成新发布状态；未完成官方来源复核时为
-`unknown`，不得据此开放新绑定。
+- 新媒体 Create 只接受当前 active、合同可复现且通过账号验证的具体 Binding。
+- Media Profile 可以引用 `binding:<UUID>`，同名模型不再按更新时间或供应商名字选第一条。
+- 文本统一为 `litellm/<logical-alias>`；连接发现的模型使用
+  `litellm/<connection-UUID>/<remote-model-id>`，不同地址与凭证不会互相覆盖。
+- 单一文本请求是非空 messages 列表；图片素材是有序 reference_artifact_ids 列表。
+  旧 prompt/system 简写、单 reference_artifact_id 和 translate_v2 不再是执行接口。
+- 媒体通过工作台预览和显式确认，工作台冻结 WorkbenchExecutionPlan，实验图在排队前冻结相同 ExecutionModelResolution；Worker 缺少计划
+  与已冻结执行身份时拒绝执行，不能转去重新选模型或单独生成。
+- ProductCapabilityPolicy 是编译时的显式产品开放子集，不引入另一套策略存储。
+- ProviderAvailabilityEvidence 为模型、连接和凭证修订的追加证据，Availability 是其
+  当前投影；静态合同、目录列表、账号执行验证和人工质量认证必须分别表述。
 
-当前可用 `scripts/report_model_binding_cutover.py --all-workspaces --owner-id <UUID>`
-在该 Owner 的全部工作空间生成只读 Binding 分类报告；`--strict` 在存在 enabled
-阻塞绑定时返回退出码 2。也可用 `--workspace-id <UUID>` 单独盘点。每个 Owner
-及其工作空间均须覆盖，
-`enabled_unresolved_count` 或 `enabled_blocked_count` 非零都不能当作 Cutover 通过。
-该报告不运行 Provider 验证，也不解密或输出凭证。
-正式全库盘点使用 `--all-owners --strict`，要求 PostgreSQL superuser 或具备
-`BYPASSRLS` 且有只读表权限的维护账号；普通应用账号会明确失败。它在单个只读
-一致性快照内枚举所有 Owner 工作空间，再逐工作空间分类，输出 `coverage=all_owners`
-及汇总阻塞数。零工作空间、任一 enabled Binding 未解析或阻塞都会使严格模式失败。
-这只是分类与 Availability 当前投影的只读门禁，不替代现场重新验证和 Recovery Gate。
-
-`scripts/report_model_recovery_inventory.py --workspace-id <UUID> --owner-id <UUID>`
-按同一 Owner 上下文只读盘点可恢复/需人工核对的 ProviderOperation，输出候选
-Provider/Protocol/执行路径与冻结身份缺口，不输出远端任务 ID、ResumeToken 或请求内容。
-这是 Early Inventory；`exact_gate_ready=false` 固定表示历史 Handler 和 Protocol 的
-精确映射尚未完成，不能拿它当 Runtime Cutover 的 Recovery Gate。
-`execution/recovery_preflight.py` 已提供单条操作的只读精确检查：三份冻结身份必须一致，
-历史 Connection/Credential、Policy、Protocol、模型能力和已部署 Handler 修订必须匹配。
-Dynamic 能力哈希会从不可变内容重算，ResumeToken 按运行时合同解析并与远端任务身份核对。
-它不检查当前 Lifecycle、Availability 或 Policy 撤销状态；尚未接入全 Owner 严格盘点
-及 Worker 恢复路径，因此目前仍不能作为 Cutover Gate。
-
-目录检查的模型级证据按已证明的列表范围解释：Agnes 当前只使用精确 ID 的正向证据，
-尚未证明列表覆盖全部媒体模型，缺失视为 `not_supported`；
-MiniMax 官方 [`GET /v1/models`](https://platform.minimax.io/docs/api-reference/models/openai/list-models)
-明确属于 OpenAI 兼容模型列表，因此精确 ID 出现可作正向证据，缺失不能断言媒体模型
-不可用；火山方舟目前没有已证实可用 BYOK Bearer Key 调用的完整媒体模型目录，
-其管理面 [`ListModelActivations`](https://docs.volcengine.com/docs/ark/list-model-activations-api?lang=en)
-要求 Access Key 鉴权，现有 `/models` TODO 不产生 `visible`。这两种未证实情形为
-`not_supported`，仍阻止新的 Provider Create。
-新目录 Revision 必须显式声明实施状态；声称 `contract_tested` 时还须附可复现的
-合同/质量证据。旧版省略实施状态的兼容仅限 `manifest.py` 中列明的冻结精确哈希，
-覆盖原有官方 revision、已持久化的协议合同及 MiniMax H3 v2；它不随 active 模型数量
-推断。改动这些文件或新增型号不能继承 `contract_tested`。创建 Binding
-时再次核对目录哈希、实施状态和证据。
+当前修订必须显式声明 implementation_status；contract_tested 还需可复现合同证据。
+不再按旧 hash 白名单补足状态。preview 只可用于离线检查，不能注册为可执行绑定。
+当前离线测试不证明任何实际账号或作品质量。
 
 ## Model Capability / Prompt Compiler 详细指南
 
@@ -86,46 +51,15 @@ api/v1/model_inspection.py 提供。预览复用原compiler，使用占位refere
 | Reference delivery                         | providers/reference_delivery.py, reference_roles.py                             | 严格参考槽位校验、有序多参考传输（不做 `dict[role, artifact]`）、URL/bytes 决策                   |
 | 文本通道                                   | providers/litellm_adapter.py + providers/litellm_gateway + infra/litellm           | OpenAI 兼容 Chat HTTP 客户端，可连接官方 LiteLLM Proxy 或兼容端点；DramaForge 不安装 litellm SDK |
 
-当前媒体模型的 Manifest 数据来自 `backend/app/providers/model_catalog/` 中的版本化
-JSON 文件。`catalog_loader.py` 在启动时做 schema 与身份校验；
-`catalog_seed_data.py` 仅保留旧调用方兼容入口和既有 hash 算法。现有 revision 的
-Manifest 内容和 hash 不变，历史 Alembic 快照仍独立保存。
-
-新模型或新 revision 通过 `scripts/sync_model_catalog.py` 与数据库比较：默认只预览，
-显式 `--apply` 才写入。该维护命令需要有 Catalog 写权限的数据库角色，应用运行角色
-仍只读。相同 identity 的 hash 不同会失败，必须新增 revision；重复运行保持幂等。
-文件移入供应商目录下的 `legacy/`、`deprecated/` 或 `retired/` 可改变发布状态而不
-改写不可变 Manifest。发布新的 active revision 时，旧 active 数据库行降为 legacy，
-历史 Binding 仍指向原行。preview 文件只用于记录候选，不进入当前活动模型列表。
-新 Binding 只可选择 active；已验证、供应商仍可用的既有 Binding 可在 legacy 或
-deprecated 状态继续执行。retired 状态阻止新的 Provider 提交。
-
-Cutover 扩展已增加独立的 `ProtocolContractRevision` 与 `RuntimeHandlerRevision`。
-维护侧通过 `providers/protocol_revisions.py` 发布新 revision，协议 hash 由规范化的
-Transport 合同计算，Handler revision 记录精确实现摘要；旧 revision 保持不变。
-现有 Dispatch / Recovery 尚未冻结或选择这些 revision，不能把存储层视为已完成的
-精确 Handler 恢复能力。
-`ExactHandlerRegistry` 只接受已注册的完整 `runtime_handler_id`、revision、key 与
-实现摘要；Create 与恢复预检还要求注册项声明匹配的协议 Profile 和操作。缺失旧版本
-或不相容时抛错，不从当前版本替代。Registry 尚未接入 Worker 的恢复路径。
-`CutoverExecutionIdentitySnapshot` 已能分别表达 Global 和 Connection 动态目标，并冻结
-Policy、Protocol、Handler、连接及请求身份。Production 的
-`freeze_cutover_execution_identity` 是只读构造器，会核对现有目标资格、Policy 内容哈希、
-协议内容哈希、已注册的精确 Handler 与技术匹配得到的 `ResolvedGenerationPlan`。
-`revalidate_cutover_create` 可在提交标记事务中
-重新核对当前连接/凭证、可用性投影、生命周期和被冻结的修订身份；这两个入口还未
-接入 Dispatch、Create 或 Recovery，
-不能单独作为切换验收。
-维护侧 `providers/model_publication.py` 可在提供来源快照 ID 后发布新的 Global 能力
-revision；它保留 Manifest 原始字段（只拆出生命周期/目录来源），新发布状态始终先是
-`unknown`，不从文件目录或旧账号验证结果自动推断 active/visible。
-独立的生命周期变更需要有来源快照的 revision 和明确原因，并追加 PublicationEvent；
-该变更不修改 Manifest hash，也不能替代账号可用性复验。
+当前媒体模型合同来自 `backend/app/providers/model_catalog/` 的版本化 JSON，
+`catalog_loader.py` 统一加载、校验和计算 hash，active 清单只是派生视图。
+`scripts/sync_model_catalog.py` 默认比较；显式 --apply 才写入。相同 identity 的
+不同内容拒绝同步，变化必须新增 revision；旧 revision 只保留历史事实，不开放新 Create。
+模型级列表证据仍按供应商声明的覆盖范围解释，不由缺少某个名称推断媒体账号不可用。
 
 新 revision 可在同一 Manifest 的 operation 下声明 `input_contracts`、素材元数据界限、
 输出参数和来源证据。`CapabilityResolver` 以实际输入匹配唯一合同，再应用产品开放策略；
-V3 Validator 也从同一 Manifest 自动匹配新合同。旧 revision 未声明合同，继续使用冻结的
-`reference_constraints` 和既有编译路径。Workbench 对新视频合同在预览选定产品开放的
+V3 Validator 也从同一 Manifest 自动匹配新合同。当前明确的协议约束由各 Compiler 消费；不补造不存在的模式或供应商能力。Workbench 对新视频合同在预览选定产品开放的
 首帧合同，并在 Worker 提交前复核；Compiler 再调用 Resolver 验证完整素材与输出参数。
 新增模型仍须完成编译、绑定和账号验证才能真实执行。
 
@@ -384,7 +318,7 @@ BF16 或量化权重只要由同一 SGLang H3 协议提供相同分区能力，�
 
 以下参数来自冻结源码合同，不代表当前账号已通过验证。活动、候选和历史 revision 的
 完整列表与参数见 [生成矩阵](generated/MODEL_SUPPORT.md)；逐账号证据仍按具体连接、
-凭证修订、远端模型和操作判断。MiniMax H3 v1 留在 `legacy/`；active v2 另有显式
+凭证修订、远端模型和操作判断。MiniMax H3 只提供当前 active 修订，其显式
 文生视频与首帧模式，不能用 v1 的参数说明替代 v2。
 
 | 供应商   | 插件 / Profile          | 默认视频模型                 | 调用方式                                           | 当前产品范围                                                          |
@@ -435,7 +369,6 @@ Seedance 1.0 Pro 旧目录项保留以避免既有绑定失效；新连接优先
 
 | 当前实现 | 对目标的缺口 | 代码依据 |
 | --- | --- | --- |
-| 每空间同 provider/profile 只允许一条连接 | 两个兼容地址及同名模型无法按独立连接共存 | `providers/models.py::ProviderConnection`、`connection_service.py::create_connection` |
 | 设置探测直接拼 Base URL 与插件目录路径，文本执行另有规范化函数 | 输入带 `/v1` 的文本地址时，目录路径可能重复版本段 | `connection_service.py::probe`、`litellm_gateway/client.py::normalize_models_url` |
 | 文本发现统一注册 Chat 能力，同名静态 alias 不替换 adapter | 目录分类及空间/部署来源尚不满足 MP-03、MP-09 | `litellm_gateway/workspace_registry.py`、`litellm_gateway/model_catalog.py` |
 | Workbench 预览生成语义计划，Provider Compiler 在 Worker 执行；创意上下文直接追加 JSON | 尚无可确认的最终 payload 预览；模型 prompt 策略和编译证据需要统一 | `production/workbench_execution.py::_compose_effective_prompt / build_plan`、`execution/media_submission.py` |
@@ -471,7 +404,7 @@ flowchart LR
 图中的 Apply / Save 指镜头提示词建议；StoryProposal 的显式 Apply 语义仍按 CREATION_FLOW。
 
 现有扩展入口如下；表内路径均带 `/api/v1` 前缀。新增请求字段、状态投影或凭证作用域
-必须作为这些领域合同的兼容演进落实，并同步 [API.md](API.md) 与生成的前端类型；
+必须作为这些领域合同的当前合同调整落实，并同步 [API.md](API.md) 与生成的前端类型；
 不得把本节的目标字段当作当前 API 已支持。
 
 | 用途 | 当前接口 / 源码 | 改造落点 |
@@ -479,7 +412,7 @@ flowchart LR
 | 安装的协议与目录 | `GET /provider-plugins`；`api/v1/provider_connections.py` | 继续提供只读插件与能力合同；附发现策略、合同来源和版本 |
 | 连接管理 | `GET/POST /workspaces/{workspace_id}/provider-connections`；单项 `GET/PATCH .../{connection_id}`、`PUT .../{connection_id}/credential` | 多连接、统一地址规范化、修订与权限校验 |
 | 发现 / 验证 | `GET/POST .../{connection_id}/probes` | 分离证据类别；付费验证扩展前保持现有拒绝行为 |
-| 模型登记 | `GET/POST .../{connection_id}/model-bindings` | 当前仅 image/video；文本连接身份与手动登记需兼容演进，不创建另一套绑定真相 |
+| 模型登记 | `GET/POST .../{connection_id}/model-bindings` | 当前仅 image/video；文本连接身份与手动登记需当前合同调整，不创建另一套绑定真相 |
 | 默认与覆盖 | `api/v1/model_profiles.py`；`GET /projects/{project_id}/model-bindings/effective`、`GET /projects/{project_id}/execution-models/preflight` | 返回可追溯的连接/模型身份、来源及阻塞原因；不能只返回名称 |
 | 生成预览与提交 | `POST /projects/{project_id}/shots/{shot_id}/execution-plan`、`POST .../executions`、`GET .../executions/receipt`；`api/v1/workbench.py` | 扩展同一计划，冻结已预览编译产物、版本与幂等回执 |
 | 请求编译与执行 | `providers/runtime.py`、`providers/translation.py`、`execution/media_submission.py` | 由同一强类型结果提供预览、执行和审计，保留单次提交与恢复边界 |
@@ -498,7 +431,7 @@ flowchart LR
 验收报告明确标注“离线通过 / 真实验证未运行 / 真实验证通过的确切合同”，不使用笼统
 “全模型支持”。生产正式验收仍遵循仓库现有质量 Gate，不以本节局部用例替代。
 
-### MP-01 多连接身份、同名模型隔离与兼容迁移
+### MP-01 多连接身份、同名模型隔离与身份收敛
 
 **规范**：一个工作空间允许保存多个相同协议的具名连接。连接 UUID 是实例身份，
 `provider_type / protocol_profile` 只描述供应商类别与协议；显示名称、Base URL、模型
@@ -675,7 +608,7 @@ Owner/项目权限，不能为模型管理新建绕过权限的通用调试入�
 Key 已配置”。空间模型与部署 alias 同名不共享 adapter 身份。用户选中的来源不可用
 时返回具体阻塞，禁止取另一个同名 alias、另一个空间、环境默认或排序首项。
 
-**边界**：保留历史回读与已受理任务的冻结身份；兼容逻辑只负责解释旧数据，不能
+**边界**：已受理任务只允许使用其完整冻结身份；不翻译旧 DTO 或替换模型，不能
 自行产生新的默认选择。对无法唯一映射的历史选择显示待重选；不删除历史证据，不
 为了消除混用而破坏部署管理员明确选择的网关。Proxy 上游如果可能改变真实模型，
 也须受无静默回退约束；响应能提供的实际模型/路由信息进入执行证据，不能只记 alias。
@@ -693,7 +626,7 @@ Key 已配置”。空间模型与部署 alias 同名不共享 adapter 身份。
 增加进程内 litellm SDK，也不同时维护 SDK 与 Proxy 两条选择规则。
 
 **边界**：默认 Compose 当前启用 Proxy 和其数据库；目标是将本地 Proxy 作为明确
-可选的部署能力，并保持现有部署的兼容升级方案。直接兼容端点不要求额外启动本地
+可选的部署能力，并按当前未发布合同直接更新部署。直接兼容端点不要求额外启动本地
 Proxy/数据库，Proxy 停止不影响项目浏览、手工编辑与明确使用直连的请求。直连仅
 支持已经声明的 Chat 协议；Responses、原生鉴权、工具调用或媒体 endpoint 不会因
 接入 LiteLLM 自动变成已支持能力。媒体继续按自身 compiler/runtime 与异步合同执行。

@@ -10,8 +10,8 @@ from __future__ import annotations
 from datetime import date
 
 from app.access.models import Project, User
+from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.models import (
     ProviderConnection,
@@ -35,7 +35,7 @@ async def _catalog_entry(
     The migration chain already seeds the official agnes catalog on PostgreSQL,
     so an unconditional insert would violate the catalog's unique key.
     """
-    manifest = next(item for item in SEED_MANIFESTS if item["model_id"] == model_id)
+    manifest = next(item for item in CATALOG_MODELS if item["model_id"] == model_id)
     existing = (
         await session.execute(
             select(ModelCatalogEntry).where(

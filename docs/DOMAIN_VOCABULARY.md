@@ -136,13 +136,10 @@ explicit user value > accepted proposal > project override > pack default
 | **ArtifactReferenceToken** | 提供给 Provider 的临时引用令牌（不泄露凭据） | `providers/models.py::ArtifactReferenceToken`、`reference_delivery.py` |
 | **InputContractSpec** | 一个模型 operation 的输入槽、基数、素材元数据与参数约束；实际素材须唯一匹配合同 | `providers/manifest.py`、`capability_resolver.py` |
 | **ProductCapabilityPolicy** | 当前编译调用显式传入的产品开放子集；不能由供应商声明或 LLM 自行放宽 | `providers/capability_resolver.py` |
-| **ModelCapabilityRevision** | 新模型系统的不可变 Global 能力事实；生命周期另存，尚未替代当前运行时目录准入 | `providers/model_system_models.py` |
-| **ConnectionModelCapabilityRevision** | 当前连接发现模型的不可变动态能力 revision；不能与同名 Global 模型混用身份 | `providers/model_system_models.py` |
-| **ProviderAvailabilityEvidence / ProviderModelAvailability** | 前者是具体模型、连接/凭证 revision 的不可变证据；后者是独立当前投影；不等于静态支持或质量认证 | `providers/model_system_models.py`、`availability_projection.py` |
-| **ProtocolContractRevision / RuntimeHandlerRevision** | 不可变协议与精确实现修订；历史恢复不得自动换为当前实现 | `providers/model_system_models.py`、`handler_registry.py` |
-| **ProductPolicyRevision** | Production 拥有的不可变策略存储，撤销由独立 State/Event 表记录；当前还未作为运行时切换的唯一策略源 | `production/policy_models.py`、`policy_revisions.py` |
+| **ProviderAvailabilityEvidence / ProviderModelAvailability** | 前者是具体模型、连接/凭证 revision 的不可变证据；后者是独立当前投影；不等于静态支持或质量认证 | `providers/availability_models.py`、`availability_projection.py` |
+| **BindingModelId** | `binding:<UUID>`，模型方案精确指向一条连接的媒体 Binding；不是显示名或供应商默认模型 | `providers/model_resolution.py` |
+| **ConnectionTextModelId** | `litellm/<connection-UUID>/<remote-id>`，连接身份与 wire model 分离，不覆盖部署逻辑 alias | `providers/litellm_gateway/workspace_registry.py` |
 | **ResolvedGenerationPlan** | 技术能力匹配的只读结果；不等于生产命令、用户授权或 WorkbenchExecutionPlan | `providers/capability_resolver.py` |
-| **CutoverExecutionIdentitySnapshot** | 新模型系统分别冻结 Global/Dynamic、Policy、Protocol、Handler 和连接身份的快照；构造与预检已存在，尚未接入 Dispatch/Create/Recovery | `providers/execution_identity.py`、`production/cutover_identity.py` |
 
 ---
 

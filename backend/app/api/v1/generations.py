@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import select
 
 from app.api.deps import (
     SelectedWorkspace,
@@ -22,7 +21,6 @@ from app.api.deps import (
 from app.providers.bootstrap import default_v3_registry
 from app.providers.capabilities import Capability
 from app.providers.manifest import CapabilitySpec, ModelManifest
-from app.providers.models import ProviderConnection
 from app.providers.registry import ModelRegistry
 from app.shared.errors import NotFoundError, ValidationAppError
 
@@ -117,25 +115,10 @@ async def list_models(
             ) from exc
     else:
         selected = registry.list_models()
-    configured: set[str] = set()
-    rows = list(
-        (
-            await session.execute(
-                select(ProviderConnection).where(
-                    ProviderConnection.workspace_id == workspace.id,
-                    ProviderConnection.enabled.is_(True),
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    configured = {row.provider_type for row in rows}
     # The LiteLLM gateway is process-level configuration, not a workspace
     # ProviderConnection. Keep this read surface aligned with ModelProfile reads.
     litellm_configured = bool(
-        settings.litellm_gateway_url.strip()
-        and settings.litellm_api_key.strip()
+        settings.litellm_gateway_url.strip() and settings.litellm_api_key.strip()
     )
     return [
         ModelRead(
@@ -144,14 +127,15 @@ async def list_models(
             display_name=model.manifest.display_name,
             enabled=True,
             configured=(
-                ("litellm" in configured or litellm_configured)
+                (bool(model.manifest.metadata.get("connection_id")) or litellm_configured)
                 if model.manifest.provider_id == "litellm"
-                else model.manifest.provider_id in configured
+                else bool(model.manifest.metadata.get("binding_id"))
             ),
             available=(
-                ("litellm" in configured or litellm_configured)
+                (bool(model.manifest.metadata.get("connection_id")) or litellm_configured)
                 if model.manifest.provider_id == "litellm"
-                else model.manifest.provider_id in configured
+                else bool(model.manifest.metadata.get("binding_id"))
+                and bool(model.manifest.metadata.get("account_verified"))
             ),
             capabilities=sorted(str(cap) for cap in model.manifest.capability_specs),
         )
@@ -164,8 +148,19 @@ async def list_models(
     response_model=ManifestRead,
     dependencies=[Depends(require_selected_workspace)],
 )
-async def get_model_manifest(model_id: str) -> ManifestRead:
-    model = _registry().get_or_none(model_id)
+async def get_model_manifest(
+    model_id: str,
+    workspace: SelectedWorkspace,
+    session: SessionDep,
+) -> ManifestRead:
+    from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
+
+    registry = await workspace_model_registry(
+        session,
+        workspace_id=workspace.id,
+        base_registry=_registry(),
+    )
+    model = registry.get_or_none(model_id)
     if model is None:
         raise NotFoundError("model not found")
     manifest: ModelManifest = model.manifest
@@ -177,7 +172,6 @@ async def get_model_manifest(model_id: str) -> ManifestRead:
         execution_mode=str(manifest.execution_mode),
         supports_cancel=manifest.supports_cancel,
         capability_specs={
-            str(capability): spec
-            for capability, spec in manifest.capability_specs.items()
+            str(capability): spec for capability, spec in manifest.capability_specs.items()
         },
     )

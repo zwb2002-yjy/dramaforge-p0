@@ -24,6 +24,7 @@ from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.model_profiles.service import parse_bindings
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.models import ProjectProviderBinding, ProviderConnection, ProviderModelBinding
+from app.shared.errors import ValidationAppError
 
 ResolutionSource = Literal[
     "request_override",
@@ -94,9 +95,7 @@ class ExecutionModelResolver:
                 purpose=purpose,
             )
             requested = (
-                self._model_identity(concrete)
-                if concrete is not None
-                else requested_model_id
+                self._model_identity(concrete) if concrete is not None else requested_model_id
             )
             return self._resolution_for(
                 concrete=concrete,
@@ -129,6 +128,16 @@ class ExecutionModelResolver:
         )
         if project_slot is not None:
             profile, binding = project_slot
+            if not binding.enabled:
+                return ExecutionModelResolution(
+                    requested_model_id=binding.model_id,
+                    source="project_profile",
+                    status="UNAVAILABLE",
+                    reason="MODEL_PROFILE_BINDING_DISABLED",
+                    capability=capability,
+                    mode_id=mode_id,
+                    native_options=binding.native_options,
+                )
             concrete = await self._binding_for_model(
                 workspace_id=project.workspace_id,
                 model_id=binding.model_id,
@@ -149,6 +158,16 @@ class ExecutionModelResolver:
         )
         if workspace_slot is not None:
             profile, binding = workspace_slot
+            if not binding.enabled:
+                return ExecutionModelResolution(
+                    requested_model_id=binding.model_id,
+                    source="workspace_profile",
+                    status="UNAVAILABLE",
+                    reason="MODEL_PROFILE_BINDING_DISABLED",
+                    capability=capability,
+                    mode_id=mode_id,
+                    native_options=binding.native_options,
+                )
             concrete = await self._binding_for_model(
                 workspace_id=project.workspace_id,
                 model_id=binding.model_id,
@@ -225,7 +244,7 @@ class ExecutionModelResolver:
         if profile is None:
             return None
         binding = parse_bindings(profile.bindings).get(slot)
-        if binding is None or not binding.enabled:
+        if binding is None:
             return None
         return profile, binding
 
@@ -242,6 +261,16 @@ class ExecutionModelResolver:
     async def _binding_for_model(
         self, *, workspace_id: UUID, model_id: str, purpose: str
     ) -> _ConcreteBinding | None:
+        if model_id.startswith("binding:"):
+            try:
+                binding_id = UUID(model_id.removeprefix("binding:"))
+            except ValueError as exc:
+                raise ValidationAppError("Model binding identity is invalid") from exc
+            return await self._binding_by_id(
+                workspace_id=workspace_id,
+                binding_id=binding_id,
+                purpose=purpose,
+            )
         provider_type, raw_model_id = self._split_model_id(model_id)
         return await self._query_binding(
             workspace_id=workspace_id,
@@ -281,9 +310,15 @@ class ExecutionModelResolver:
             statement = statement.where(ProviderModelBinding.model_id == model_id)
         if provider_type is not None:
             statement = statement.where(ProviderConnection.provider_type == provider_type)
-        row = (await self._session.execute(statement)).first()
-        if row is None:
+        rows = (await self._session.execute(statement)).all()
+        if not rows:
             return None
+        if len(rows) != 1:
+            raise ValidationAppError(
+                "Model name matches multiple bindings; select an explicit model binding",
+                details={"code": "MODEL_BINDING_AMBIGUOUS"},
+            )
+        row = rows[0]
         binding, connection, catalog_entry = row
         return _ConcreteBinding(
             binding=binding,

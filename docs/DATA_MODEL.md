@@ -2,8 +2,8 @@
 
 Status: current
 Date: 2026-10-07
-Alembic head: 20261007_0083
-Revisions: 87
+Alembic head: 20261007_0084
+Revisions: 88
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Canonical relational graph
@@ -38,7 +38,6 @@ projects → event_log / outbox_events / outbox_dead_letters
 | Identity assets | assets, asset_versions, asset_version_references, asset_tags, asset_tag_links | app/assets/models.py |
 | Shot references | shot_reference_bindings | app/production/models.py |
 | Production graph | production_graphs, graph_versions, experiment_branches, director_board_states | app/production/models.py |
-| Archived experiment storage (not product authority) | production_experiments, shot_experiments | app/production/archive_models.py |
 | Approved commands | production_command_authorizations | app/production/command_models.py |
 | Execution | graph_nodes, graph_edges, node_runs, artifacts, provider_operations, shot_human_locks | app/execution/models.py |
 | Assistant | director_threads, director_messages, director_proposals, director_proposal_items | app/director/assistant_models.py and proposal_models.py |
@@ -51,21 +50,13 @@ projects → event_log / outbox_events / outbox_dead_letters
 | Security | encrypted_provider_credentials, key_rotation_audits | app/security/models.py |
 | Provider identity | provider_connections, provider_connection_revisions, provider_capability_evidence, provider_model_bindings, project_provider_bindings, provider_quality_evidence, artifact_reference_tokens | app/providers/models.py |
 | Provider catalog/profile | provider_model_catalog_entries, production_model_profiles | app/providers/catalog_models.py, app/providers/model_profiles/orm.py |
-| Model cutover expand (not runtime authority yet) | model_capability_revisions, model_publication_states/events, connection_discovered_models, connection_model_capability_revisions, provider_availability_evidence, provider_model_availability | app/providers/model_system_models.py |
-| Protocol / handler cutover storage (not runtime authority yet) | protocol_contract_revisions, runtime_handler_revisions | app/providers/model_system_models.py |
-| Production policy cutover storage (not runtime authority yet) | product_policy_revisions, product_policy_states, product_policy_events | app/production/policy_models.py |
 
-模型能力 revision、Connection 发现事实与能力 revision、发布事件和逐模型可用性证据
-在数据库中禁止 UPDATE/DELETE。来源核查或合同实现进展需要新增 revision；新的探测
-结果需要新增 Evidence，并更新单独的 Availability 投影。Migration A 回填的 Global
-revision 尚无来源快照，且只标记为 `manifest_mapped`，不能原地提升为已验证事实。
-
-当前迁移图在 `20260919_0073` 后包含两条已保留的历史分支：模型系统 expand 的
-`20260929_0074–0077`，以及发现/协议接入与本地 H3 的 `20260921_0074–20260930_0082`。
-`20261007_0083` 是无数据改写的 merge revision，将两条历史汇成单一 head；相同数字
-后缀不代表相同 revision，不重编号或覆盖已经应用的迁移。迁移时必须覆盖两条父链。
-`product_policy_revisions` / `product_policy_events` 为不可变历史，撤销写入独立
-`product_policy_states`。这些存储结构不表示新的 Cutover 身份已接入生产提交或恢复。
+当前仅保留文件目录/具体 Binding 与连接修订、逐模型可用性证据/投影。证据追加且不可改写。
+同 provider/profile 连接可以并存；模型必须选择具体身份。历史两条父链在 0083 汇合，
+当前 0084 进行单向清理：未接入的过渡表与旧实验表退役，引用字段统一为
+`experiment_branch_id`。非空旧实验表阻止清理，必须单独归档，不自动转换成当前事实。
+新增明确合同 revision，不改写旧 Manifest/hash；不提供回旧系统的 downgrade。
+旧实例数据卷单独保管，当前开发环境使用新数据库并应用完整迁移链。
 
 A second, private schema `director_runtime_checkpoints` (LangGraph checkpoint
 tables `checkpoints`, `checkpoint_blobs`, `checkpoint_writes`,
@@ -127,8 +118,9 @@ Migration 20260902_0051 removes:
 | 20260921_0075 | Bind `provider_capability_evidence` to immutable `provider_connection_revisions` identity. |
 | 20260921_0076 | Seed protocol-level OpenAI-compatible image/video capability contracts (contracts, not concrete supplier models). |
 | 20260922_0077 | `human_review_decisions.decision` adds `demo_confirmed`; it records walkthrough confirmation but does not admit Formal media. |
-| 20260929_0074–0077 | Model-system branch: Global/Connection targets and availability; immutable product-policy, model-history, protocol and handler revisions. These storage and preflight additions do not complete runtime cutover. |
+| 20260929_0074–0077 | Model-system branch: Global/Connection targets and availability; immutable product-policy, model-history, protocol and handler revisions. The unused parallel schema is removed by the current cleanup head. |
 | 20260929_0078–20260930_0082 | Local-media branch: SGLang H3 contracts, MiniMax H3 v2 text/video contract, and separate bindings per contract revision. |
+| 20261007_0084 | One-way cleanup of unused cutover/experiment storage and obsolete fields; one model authority, multiple independent connections, explicit new contract revisions. |
 | 20261007_0083 | Merge the model-system and local-media migration histories into one head without rewriting either branch. |
 
 No canonical Project, Shot, Artifact, ProviderOperation, or EditSession is
@@ -154,28 +146,16 @@ tag data before enforcing the canonical constraints.
 
 当前实验唯一事实是 ExperimentBranch，HTTP 与 Director 共享创建服务。
 production_experiments / shot_experiments 的 ORM 已隔离到
-app/production/archive_models.py；迁移与历史 RLS 测试保留，
 以便既有持久数据仍可管理；没有当前运行时读取/写入或独立采用服务。
 不以本次收口为由删除历史表或伪造迁移后的候选结果。Golden fixture 使用当前
 ExperimentBranch，不再为旧轨制造新样本。
 
 ## 数据库清理准入
 
-先判断前端/Worker/运维是否需要该能力，再判断当前表、字段或入口是否是它的唯一
-实现。没有前端页面、表为空、类名含 legacy，都不构成删表依据。
-
-- 当前实验能力由 ExperimentBranch 完整拥有；旧实验表不再回接前端。历史映射
-  只由 model_registry 加载以保证 Alembic/ORM 一致性；运行时业务模块禁止导入。
-- 保留旧表不等于允许旧轨复活。后续物理删除必须独立确认目标实例、备份/留存、
-  旧版本退役与 FK/RLS/历史 JSON 引用处理，再新增前向迁移；不能直接改旧迁移。
-- shot_reference_bindings.shot_experiment_id 等历史字段的去除，还需核对已冻结
-  execution-plan JSON 与指纹兼容；不能用旧字段为前端发明新的实验分支功能。
-- 私有 checkpoint schema、Outbox、死信、审计、凭证版本是基础设施事实，不能
-  因无直接 UI 或当下无行就清空；凭证密文及私密载荷不进入清理报告。
-- 运行实例和源码 revision 必须分别核对。临时发布实例或旧 revision 不是当前
-  工作树的自动迁移目标；本轮不对持久实例执行升级、DROP、TRUNCATE 或 DELETE。
-- schema 比对使用 PostgreSQL 对 CHECK 表达式的解析/反解与完整名称集比较，
-  不过滤“多出来”的真实约束；历史数据保留测试也不算当前产品功能测试。
+当前只有 ExperimentBranch；旧实验 ORM、表和字段别名不属于当前业务。
+清理迁移拒绝非空旧实验表，避免把旧引用误解释为正式引用。旧实例的数据卷和证据
+保留在独立环境；新开发环境初始化当前 schema，不复用旧队列或补造冻结执行身份。
+迁移不可降级。当前业务表、用户门、RLS、Artifact 血缘和显式授权约束仍须完整验证。
 
 ## 创作体验改进：目标数据演进
 

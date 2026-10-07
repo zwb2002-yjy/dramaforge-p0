@@ -1,4 +1,4 @@
-﻿"""Review gate 6: quality evidence must prove the reviewed media was produced by
+"""Review gate 6: quality evidence must prove the reviewed media was produced by
 the exact model binding being gated — not by a sibling binding."""
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ from app.consistency.identity_policy import identity_evidence_policy_snapshot
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
 from app.production import models as _pm  # noqa: F401
 from app.production.service import GraphService
+from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.connection_service import ProviderConnectionService
 from app.providers.models import ProviderConnection, ProviderModelBinding
 from app.shared.base import Base
@@ -167,7 +167,7 @@ async def _seed_binding(
     media_type: str = "image",
     purpose: str = "keyframe",
 ) -> tuple[ProviderConnection, ProviderModelBinding]:
-    manifest = next(m for m in SEED_MANIFESTS if m["model_id"] == model_id)
+    manifest = next(m for m in CATALOG_MODELS if m["model_id"] == model_id)
     entry = await session.scalar(
         select(ModelCatalogEntry).where(
             ModelCatalogEntry.provider_type == "agnes",
@@ -296,9 +296,7 @@ async def test_quality_evidence_rejects_other_model_binding(
         media_type="video",
         purpose="video",
     )
-    _producer, face_run = await _seed_chain(
-        session, workspace, producer_binding=producer_binding
-    )
+    _producer, face_run = await _seed_chain(session, workspace, producer_binding=producer_binding)
     face_art = await session.get(Artifact, face_run.result_artifact_id)
     assert face_art is not None
 

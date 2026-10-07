@@ -463,7 +463,7 @@ class MiniMaxImageCompiler:
         if operation is None:
             raise ValueError("model does not support image.generate")
         if operation.input_contracts:
-            required = "image.i2i" if intent.reference_artifact_id is not None else "image.t2i"
+            required = "image.i2i" if intent.single_reference_id() is not None else "image.t2i"
             if required not in set(operation.capabilities):
                 raise ValueError(f"model does not support {required}")
             return
@@ -471,7 +471,7 @@ class MiniMaxImageCompiler:
             raise ValueError("model does not support image.i2i")
         constraint = operation.reference_constraints.get("reference_image")
         if (
-            intent.reference_artifact_id is None
+            intent.single_reference_id() is None
             or constraint is None
             or constraint.min != 1
             or constraint.max != 1
@@ -549,7 +549,7 @@ class MiniMaxImageCompiler:
         if any(ref.role != "reference_image" for ref in references) or len(references) > 1:
             raise ValueError("MiniMax image protocol accepts one character reference at most")
         ref = references[0] if references else None
-        if (ref.artifact_id if ref is not None else None) != intent.reference_artifact_id:
+        if (ref.artifact_id if ref is not None else None) != intent.single_reference_id():
             raise ValueError("resolved image reference does not match creative intent")
         if ref is not None and ref.content_url is None:
             raise ValueError("MiniMax reference_image must be an HTTPS URL")
@@ -644,8 +644,6 @@ class MiniMaxVideoCompiler:
         if intent.mode_id == "text_to_video":
             if operation is None or "video.t2v" not in set(operation.capabilities):
                 raise ValueError("model does not support video.t2v")
-            if model.model_id != "MiniMax-H3" or model.model_revision != "v2":
-                raise ValueError("MiniMax text-to-video requires its explicit H3 contract")
             if intent.references:
                 raise ValueError("MiniMax text-to-video accepts no artifact references")
             modes = operation.output_constraints.get("modes")

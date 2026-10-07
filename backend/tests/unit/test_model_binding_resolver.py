@@ -184,18 +184,18 @@ async def test_workspace_default_beats_system(session: AsyncSession, world, serv
     assert resolved.profile_id == profile.id
 
 
-async def test_system_default_fallback(session: AsyncSession, world, service) -> None:
+async def test_ambiguous_system_default_is_rejected(session: AsyncSession, world, service) -> None:
     workspace = world["workspace"]
     project = world["project"]
     resolver = ModelBindingResolver(session, registry=service._registry)
-    resolved = await resolver.resolve(
-        workspace_id=workspace.id,
-        project_id=project.id,
-        slot=ModelSlot.PLANNING_SCRIPT,
-        capability=Capability.TEXT_GENERATE,
-    )
-    assert resolved.source == "system_default"
-    assert resolved.model_id in {TEST_TEXT_A, TEST_TEXT_B}
+    with pytest.raises(Exception) as blocked:
+        await resolver.resolve(
+            workspace_id=workspace.id,
+            project_id=project.id,
+            slot=ModelSlot.PLANNING_SCRIPT,
+            capability=Capability.TEXT_GENERATE,
+        )
+    assert blocked.value.details["code"] == MODEL_PROFILE_NO_AVAILABLE_MODEL
 
 
 async def test_missing_all_models_raises_no_available(
@@ -317,7 +317,9 @@ async def test_request_override_with_wrong_capability_raises(
         )
 
 
-async def test_disabled_binding_falls_through(session: AsyncSession, world, service) -> None:
+async def test_disabled_binding_does_not_fall_through(
+    session: AsyncSession, world, service
+) -> None:
     workspace = world["workspace"]
     project = world["project"]
     await _make_workspace_default(
@@ -332,13 +334,14 @@ async def test_disabled_binding_falls_through(session: AsyncSession, world, serv
         },
     )
     resolver = ModelBindingResolver(session, registry=service._registry)
-    resolved = await resolver.resolve(
-        workspace_id=workspace.id,
-        project_id=project.id,
-        slot=ModelSlot.PLANNING_SCRIPT,
-        capability=Capability.TEXT_GENERATE,
-    )
-    assert resolved.source == "system_default"
+    with pytest.raises(Exception) as blocked:
+        await resolver.resolve(
+            workspace_id=workspace.id,
+            project_id=project.id,
+            slot=ModelSlot.PLANNING_SCRIPT,
+            capability=Capability.TEXT_GENERATE,
+        )
+    assert blocked.value.details["code"] == "MODEL_PROFILE_BINDING_DISABLED"
 
 
 async def test_native_options_carried_into_resolved_binding(

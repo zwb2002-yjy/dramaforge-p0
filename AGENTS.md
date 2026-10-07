@@ -16,6 +16,12 @@
 
 ## Task Scope
 
+- This project is unreleased and has no production business to preserve. Maintain
+  one current implementation per capability; remove replaced runtimes, transitional
+  writers, obsolete DTO aliases and speculative parallel schemas. Update all current
+  callers and tests directly. Retain data/evidence separately; do not silently adapt
+  an old execution into the new contract or re-submit a possibly billed operation.
+
 - Complete the requested outcome and relevant fixes; do not expand product
   scope, rewrite intended behavior to make a failing test pass, or create
   unrelated follow-up work.

@@ -25,8 +25,7 @@ Director Runtime 是**独立于生产执行的编排 runtime**：它驱动导演
 
 ## 引擎与检查点
 
-- `DIRECTOR_RUNTIME_ENGINE` 选择**新启动**轮次的引擎，默认 `legacy`；
-  `langgraph` 只在硬门满足时分配给新轮次。选择一个引擎绝不静默运行另一个。
+- `DIRECTOR_RUNTIME_ENGINE` 只接受 `langgraph`；执行、重放和恢复没有第二种引擎。
 - `langgraph` 需要 `DIRECTOR_CHECKPOINT_DATABASE_URL`（API 与 worker-director
   均接收，用于能力报告与实际执行），
   使用私有 `director_runtime_checkpoints` schema（迁移 `20260910_0066`，
@@ -51,7 +50,7 @@ Director Runtime 是**独立于生产执行的编排 runtime**：它驱动导演
 
 ## 当前有界执行与 Agent Loop 目标
 
-当前实现分成两条链，不能将目标 Agent Loop 当成已实现事实：
+当前实现有文本调用和持久编排两种职责，不能将目标 Agent Loop 当成已实现事实：
 
 - 文本任务由 `DirectorTextRuntimeAdapter.generate_structured` 执行固定 schema
   请求，必要时同一模型最多一次 schema 修复；调用身份和结果由 Invocation/Turn 持久化。

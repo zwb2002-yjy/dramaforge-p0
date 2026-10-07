@@ -11,8 +11,7 @@ import httpx
 import pytest
 from app.config import Settings
 from app.providers.capability_resolver import ProductCapabilityPolicy
-from app.providers.catalog_loader import ModelCatalogLoader
-from app.providers.catalog_seed_data import SEED_MANIFESTS
+from app.providers.catalog_loader import CATALOG_MODELS, ModelCatalogLoader
 from app.providers.intents import (
     ArtifactReferenceIntent,
     ImageGenerationIntent,
@@ -27,17 +26,17 @@ from app.providers.volcengine import ArkImageCompiler, ArkRuntime, ArkVideoCompi
 
 
 def _video_manifest() -> ModelCapabilityManifest:
-    raw = next(m for m in SEED_MANIFESTS if m["model_id"] == "doubao-seedance-1-0-pro-250528")
+    raw = next(m for m in CATALOG_MODELS if m["model_id"] == "doubao-seedance-1-0-pro-250528")
     return ModelCapabilityManifest.model_validate(raw)
 
 
 def _image_manifest() -> ModelCapabilityManifest:
-    raw = next(m for m in SEED_MANIFESTS if m["model_id"] == "doubao-seedream-4-0-250828")
+    raw = next(m for m in CATALOG_MODELS if m["model_id"] == "doubao-seedream-4-0-250828")
     return ModelCapabilityManifest.model_validate(raw)
 
 
 def _contract_image_manifest() -> ModelCapabilityManifest:
-    raw = deepcopy(next(m for m in SEED_MANIFESTS if m["model_id"] == "doubao-seedream-4-0-250828"))
+    raw = deepcopy(next(m for m in CATALOG_MODELS if m["model_id"] == "doubao-seedream-4-0-250828"))
     raw["model_revision"] = "multi-image-contract-test"
     operation = raw["operations"]["image.generate"]
     operation["input_contracts"] = {
@@ -65,7 +64,7 @@ def _contract_image_manifest() -> ModelCapabilityManifest:
 
 
 def _contract_video_manifest() -> ModelCapabilityManifest:
-    raw = deepcopy(next(m for m in SEED_MANIFESTS if m["model_id"] == "doubao-seedance-2-0-260128"))
+    raw = deepcopy(next(m for m in CATALOG_MODELS if m["model_id"] == "doubao-seedance-2-0-260128"))
     raw["model_revision"] = "protocol-contract-test"
     operation = raw["operations"]["video.generate"]
     operation["input_contracts"] = {
@@ -306,15 +305,15 @@ async def test_ark_image_contract_rejects_count_and_untranslatable_ratio() -> No
         )
 
 
-def test_multi_image_intent_stays_closed_in_normal_product_selection() -> None:
+def test_multi_image_intent_is_validated_by_the_selected_contract() -> None:
     intent = ImageGenerationIntent(
         prompt="two characters",
         reference_artifact_ids=[uuid4(), uuid4()],
         selection=ModelSelectionIntent(mode="explicit_binding"),
     )
     result = normalize_image(intent)
-    assert not result.ok
-    assert any("not open" in error for error in result.errors)
+    assert result.ok
+    assert "reference_image" in result.reference_roles
 
 
 @pytest.mark.asyncio
@@ -465,7 +464,9 @@ async def test_seedance_25_preview_uses_the_same_ark_video_compiler() -> None:
 async def test_ark_image_compiler_t2i_wire_request() -> None:
     intent = ImageGenerationIntent(
         prompt="portrait",
-        reference_artifact_id=None,
+        reference_artifact_ids=[
+            reference_id for reference_id in [(None)] if reference_id is not None
+        ],
         selection=ModelSelectionIntent(mode="explicit_binding"),
     )
     compiled = await ArkImageCompiler().compile(

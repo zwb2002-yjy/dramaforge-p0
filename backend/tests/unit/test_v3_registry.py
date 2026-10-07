@@ -5,9 +5,8 @@ from __future__ import annotations
 import pytest
 from app.providers.bootstrap import build_v3_registry
 from app.providers.capabilities import Capability
-from app.providers.catalog_seed_data import SEED_MANIFESTS, seed_manifests_for
+from app.providers.catalog_loader import CATALOG_MODELS, active_manifests_for
 from app.providers.contracts.common import ExecutionContext
-from app.providers.errors import ProviderError
 from app.providers.manifest import (
     ModelCapabilityManifest,
     to_v3_model_manifest,
@@ -28,7 +27,7 @@ def agnes_video_manifest() -> ModelCapabilityManifest:
     return ModelCapabilityManifest.model_validate(
         next(
             item
-            for item in seed_manifests_for(provider_type="agnes")
+            for item in active_manifests_for(provider_type="agnes")
             if item["model_id"] == "agnes-video-v2.0"
         )
     )
@@ -58,7 +57,7 @@ class TestManifestConversion:
         manifest = ModelCapabilityManifest.model_validate(
             next(
                 item
-                for item in seed_manifests_for(provider_type="volcengine")
+                for item in active_manifests_for(provider_type="volcengine")
                 if item["model_id"] == "doubao-seedream-4-0-250828"
             )
         )
@@ -71,7 +70,7 @@ class TestManifestConversion:
         manifest = ModelCapabilityManifest.model_validate(
             next(
                 item
-                for item in seed_manifests_for(provider_type="minimax")
+                for item in active_manifests_for(provider_type="minimax")
                 if item["model_id"] == "MiniMax-H3"
             )
         )
@@ -108,7 +107,8 @@ class TestModelRegistry:
         # Every catalog model registers without a hand-maintained ID list.
         ids = {model.manifest.id for model in models}
         assert ids == {
-            f"{item['provider_type']}/{item['model_id']}" for item in SEED_MANIFESTS
+            f"{item['provider_type']}/{item['model_id']}"
+            for item in CATALOG_MODELS
             if item["catalog_source"] != "protocol_contract"
         }
 
@@ -148,16 +148,15 @@ class TestModelRegistry:
         manifest = ModelCapabilityManifest.model_validate(
             next(
                 item
-                for item in seed_manifests_for(provider_type="agnes")
+                for item in active_manifests_for(provider_type="agnes")
                 if item["model_id"] == "agnes-video-v2.0"
             )
         )
         v3 = to_v3_model_manifest(manifest, transport_profile_id="t1")
-        from app.providers.bootstrap import UnavailableAdapter
 
-        registry.register(v3, UnavailableAdapter(v3))
+        registry.register(v3)
         with pytest.raises(DuplicateModelError):
-            registry.register(v3, UnavailableAdapter(v3))
+            registry.register(v3)
 
 
 class TestDefaultRegistryQueryable:
@@ -167,24 +166,20 @@ class TestDefaultRegistryQueryable:
         models = model_registry.find_by_capability(Capability.VIDEO_IMAGE_TO_VIDEO)
         assert models
 
-    async def test_query_only_adapter_fails_with_typed_unsupported_error(self) -> None:
-        model_registry, _ = build_v3_registry()
-        registered = model_registry.get("agnes/agnes-video-v2.0")
+    async def test_readonly_catalog_has_no_executable_adapter(self) -> None:
+        from app.providers.router import CapabilityRouter
+        from app.shared.errors import ValidationAppError
 
-        with pytest.raises(ProviderError) as unsupported:
-            await registered.adapter.create(
-                Capability.VIDEO_IMAGE_TO_VIDEO,
-                object(),
-                ExecutionContext(trace_id="test-query-only"),
+        registry, _ = build_v3_registry()
+        assert registry.get("agnes/agnes-video-v2.0").adapter is None
+        with pytest.raises(ValidationAppError) as blocked:
+            await CapabilityRouter(registry=registry).create(
+                capability=Capability.VIDEO_IMAGE_TO_VIDEO,
+                request=object(),
+                context=ExecutionContext(trace_id="readonly"),
+                model_id="agnes/agnes-video-v2.0",
             )
-
-        assert unsupported.value.code == "unsupported_capability"
-        assert unsupported.value.status_code == 422
-        assert unsupported.value.details == {
-            "adapter": "bootstrap",
-            "model_id": "agnes/agnes-video-v2.0",
-            "operation": "create",
-        }
+        assert blocked.value.details["code"] == "MODEL_PROFILE_MODEL_NOT_CONFIGURED"
 
 
 class TestDefaultRegistryRealAdapters:
@@ -198,7 +193,7 @@ class TestDefaultRegistryRealAdapters:
 
         model_registry, _ = default_v3_registry()
         text_models = [
-            m for m in model_registry.list_models() if m.manifest.id == "litellm/text-llm"
+            m for m in model_registry.list_models() if m.manifest.id == "litellm/script-quality"
         ]
         assert len(text_models) == 1
         assert isinstance(text_models[0].adapter, LiteLLMModelAdapter)

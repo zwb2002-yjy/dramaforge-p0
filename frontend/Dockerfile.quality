@@ -16,7 +16,7 @@ ENV DRAMAFORGE_E2E_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Cache npm dependencies independently from source/docs changes.
 COPY frontend/package.json frontend/package-lock.json /workspace/frontend/
-RUN npm ci --prefix /workspace/frontend
+RUN --mount=type=cache,target=/root/.npm npm ci --prefix /workspace/frontend
 
 COPY . .
 

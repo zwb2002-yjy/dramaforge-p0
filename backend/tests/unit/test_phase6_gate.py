@@ -49,14 +49,22 @@ async def _seed(session: AsyncSession) -> tuple[Project, Shot, User]:
         actor=user,
     )
     old_keyframe = Artifact(
-        project_id=project.id, artifact_type="image", storage_state="stored",
-        object_key=f"obj/{uuid4().hex}", content_hash="a" * 64,
-        mime_type="image/png", byte_size=1,
+        project_id=project.id,
+        artifact_type="image",
+        storage_state="stored",
+        object_key=f"obj/{uuid4().hex}",
+        content_hash="a" * 64,
+        mime_type="image/png",
+        byte_size=1,
     )
     old_video = Artifact(
-        project_id=project.id, artifact_type="video", storage_state="stored",
-        object_key=f"obj/{uuid4().hex}", content_hash="b" * 64,
-        mime_type="video/mp4", byte_size=2,
+        project_id=project.id,
+        artifact_type="video",
+        storage_state="stored",
+        object_key=f"obj/{uuid4().hex}",
+        content_hash="b" * 64,
+        mime_type="video/mp4",
+        byte_size=2,
     )
     session.add_all([old_keyframe, old_video])
     await session.flush()
@@ -89,8 +97,8 @@ async def _seed(session: AsyncSession) -> tuple[Project, Shot, User]:
 
 
 async def _seed_model_infra(session: AsyncSession, *, project: Project, user: User) -> None:
+    from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
     from app.providers.model_profiles.orm import ProductionModelProfile
     from app.providers.models import (
         ProviderConnection,
@@ -98,82 +106,133 @@ async def _seed_model_infra(session: AsyncSession, *, project: Project, user: Us
         ProviderModelBinding,
     )
 
-    video_manifest = next(
-        item for item in SEED_MANIFESTS if item["model_id"] == "agnes-video-v2.0"
-    )
+    video_manifest = next(item for item in CATALOG_MODELS if item["model_id"] == "agnes-video-v2.0")
     image_manifest = next(
-        item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash"
+        item for item in CATALOG_MODELS if item["model_id"] == "agnes-image-2.1-flash"
     )
     entry = ModelCatalogEntry(
-        provider_type="agnes", protocol_profile="agnes_cn_v1",
-        model_id="agnes-video-v2.0", model_revision="v1",
-        display_name="Agnes Video", media_kind="video", lifecycle="active",
-        catalog_source="official_static", capability_manifest_json=video_manifest,
-        option_schema_json={}, documented_at=date.fromisoformat("2026-08-10"),
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="agnes-video-v2.0",
+        model_revision="v1",
+        display_name="Agnes Video",
+        media_kind="video",
+        lifecycle="active",
+        catalog_source="official_static",
+        capability_manifest_json=video_manifest,
+        option_schema_json={},
+        documented_at=date.fromisoformat("2026-08-10"),
         contract_manifest_hash=hash_manifest(video_manifest),
     )
     session.add(entry)
     await session.flush()
     connection = ProviderConnection(
-        workspace_id=project.workspace_id, provider_type="agnes", display_name="Agnes",
-        base_url="https://api.agnes-ai.cn", protocol_profile="agnes_cn_v1",
-        credential_id=uuid4(), credential_revision=1, enabled=True,
-        verification_status="verified", created_by=user.id, updated_by=user.id,
+        workspace_id=project.workspace_id,
+        provider_type="agnes",
+        display_name="Agnes",
+        base_url="https://api.agnes-ai.cn",
+        protocol_profile="agnes_cn_v1",
+        credential_id=uuid4(),
+        credential_revision=1,
+        enabled=True,
+        verification_status="verified",
+        created_by=user.id,
+        updated_by=user.id,
     )
     session.add(connection)
     await session.flush()
     session.add(
         ProviderConnectionRevision(
-            connection_id=connection.id, revision_no=1, provider_type="agnes",
-            protocol_profile="agnes_cn_v1", base_url="https://api.agnes-ai.cn",
+            connection_id=connection.id,
+            revision_no=1,
+            provider_type="agnes",
+            protocol_profile="agnes_cn_v1",
+            base_url="https://api.agnes-ai.cn",
             credential_revision_id=connection.credential_id,
         )
     )
     await session.flush()
     binding = ProviderModelBinding(
-        workspace_id=project.workspace_id, connection_id=connection.id,
-        media_type="video", model_id="agnes-video-v2.0", purpose="video",
-        enabled=True, documented=True, contract_tested=True, account_verified=True,
-        quality_gated=True, catalog_entry_id=entry.id,
+        workspace_id=project.workspace_id,
+        connection_id=connection.id,
+        media_type="video",
+        model_id="agnes-video-v2.0",
+        purpose="video",
+        enabled=True,
+        documented=True,
+        contract_tested=True,
+        account_verified=True,
+        quality_gated=True,
+        catalog_entry_id=entry.id,
         capability_manifest_hash=entry.contract_manifest_hash,
-        remote_resource_kind="model", remote_resource_id="agnes-video-v2.0",
-        invoke_model_value="agnes-video-v2.0", created_by=user.id, updated_by=user.id,
+        remote_resource_kind="model",
+        remote_resource_id="agnes-video-v2.0",
+        invoke_model_value="agnes-video-v2.0",
+        created_by=user.id,
+        updated_by=user.id,
     )
     session.add(binding)
     await session.flush()
     image_entry = ModelCatalogEntry(
-        provider_type="agnes", protocol_profile="agnes_cn_v1",
-        model_id="agnes-image-2.1-flash", model_revision="v1",
-        display_name="Agnes Image", media_kind="image", lifecycle="active",
-        catalog_source="official_static", capability_manifest_json=image_manifest,
-        option_schema_json={}, documented_at=date.fromisoformat("2026-08-10"),
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="agnes-image-2.1-flash",
+        model_revision="v1",
+        display_name="Agnes Image",
+        media_kind="image",
+        lifecycle="active",
+        catalog_source="official_static",
+        capability_manifest_json=image_manifest,
+        option_schema_json={},
+        documented_at=date.fromisoformat("2026-08-10"),
         contract_manifest_hash=hash_manifest(image_manifest),
     )
     session.add(image_entry)
     await session.flush()
     image_binding = ProviderModelBinding(
-        workspace_id=project.workspace_id, connection_id=connection.id,
-        media_type="image", model_id="agnes-image-2.1-flash", purpose="keyframe",
-        enabled=True, documented=True, contract_tested=True, account_verified=True,
-        quality_gated=True, catalog_entry_id=image_entry.id,
+        workspace_id=project.workspace_id,
+        connection_id=connection.id,
+        media_type="image",
+        model_id="agnes-image-2.1-flash",
+        purpose="keyframe",
+        enabled=True,
+        documented=True,
+        contract_tested=True,
+        account_verified=True,
+        quality_gated=True,
+        catalog_entry_id=image_entry.id,
         capability_manifest_hash=image_entry.contract_manifest_hash,
-        remote_resource_kind="model", remote_resource_id="agnes-image-2.1-flash",
-        invoke_model_value="agnes-image-2.1-flash", created_by=user.id, updated_by=user.id,
+        remote_resource_kind="model",
+        remote_resource_id="agnes-image-2.1-flash",
+        invoke_model_value="agnes-image-2.1-flash",
+        created_by=user.id,
+        updated_by=user.id,
     )
     session.add(image_binding)
     await session.flush()
     session.add(
         ProductionModelProfile(
-            workspace_id=project.workspace_id, project_id=project.id, name="default",
-            version=1, is_default=True,
+            workspace_id=project.workspace_id,
+            project_id=project.id,
+            name="default",
+            version=1,
+            is_default=True,
             bindings={
-                "video.shot": {"slot": "video.shot", "model_id": "agnes-video-v2.0",
-                               "native_options": {}, "enabled": True},
-                "visual.keyframe": {"slot": "visual.keyframe",
-                                    "model_id": "agnes-image-2.1-flash",
-                                    "native_options": {}, "enabled": True},
+                "video.shot": {
+                    "slot": "video.shot",
+                    "model_id": "agnes-video-v2.0",
+                    "native_options": {},
+                    "enabled": True,
+                },
+                "visual.keyframe": {
+                    "slot": "visual.keyframe",
+                    "model_id": "agnes-image-2.1-flash",
+                    "native_options": {},
+                    "enabled": True,
+                },
             },
-            created_by=user.id, updated_by=user.id,
+            created_by=user.id,
+            updated_by=user.id,
         )
     )
     await session.flush()
@@ -189,8 +248,13 @@ async def test_phase6_gate_drift_repair_keeps_old_formal_in_history(session: Asy
     # 1) mark 2.3-3.1s drift
     session.add(
         ReviewAnnotation(
-            project_id=project.id, shot_id=shot.id, created_by=user.id,
-            time_start=2.3, time_end=3.1, note="人物漂移", severity="warning",
+            project_id=project.id,
+            shot_id=shot.id,
+            created_by=user.id,
+            time_start=2.3,
+            time_end=3.1,
+            note="人物漂移",
+            severity="warning",
             status="open",
         )
     )
@@ -204,7 +268,9 @@ async def test_phase6_gate_drift_repair_keeps_old_formal_in_history(session: Asy
 
     # 3) regenerate keyframe candidate (new keyframe NodeRun queued)
     keyframe_run = await repair.execute_repair(
-        project=project, user=user, shot_id=shot.id,
+        project=project,
+        user=user,
+        shot_id=shot.id,
         repair_option="regenerate_keyframe_then_video",
         idempotency_key="gate6-kf",
     )
@@ -213,17 +279,28 @@ async def test_phase6_gate_drift_repair_keeps_old_formal_in_history(session: Asy
 
     # 4) the exact generated candidate is reviewed and explicitly selected Formal.
     new_keyframe, _decision = await approve_and_adopt(
-        session, project=project, shot=shot, user=user, run=keyframe_run,
+        session,
+        project=project,
+        shot=shot,
+        user=user,
+        run=keyframe_run,
     )
-    repair_id = UUID(keyframe_run.input_snapshot["workbench_plan"]
-                     ["semantic_intent"]["repair_request_id"])
+    repair_id = UUID(
+        keyframe_run.input_snapshot["workbench_plan"]["semantic_intent"]["repair_request_id"]
+    )
     # 5) continue the same repair, not a second workflow bypassing its review gate.
     preview = await repair.build_step_plan(
-        project=project, user=user, shot_id=shot.id, repair_id=repair_id,
+        project=project,
+        user=user,
+        shot_id=shot.id,
+        repair_id=repair_id,
     )
     assert preview.step_ordinal == 3
     _, _, video_run = await repair.execute_step(
-        project=project, user=user, shot_id=shot.id, repair_id=repair_id,
+        project=project,
+        user=user,
+        shot_id=shot.id,
+        repair_id=repair_id,
         expected_step_ordinal=preview.step_ordinal,
         expected_plan_fingerprint=preview.plan.plan_fingerprint,
         idempotency_key="gate6-video",

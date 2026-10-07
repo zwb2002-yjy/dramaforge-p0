@@ -8,8 +8,8 @@ from uuid import uuid4
 
 import pytest
 from app.access.models import Project, User, Workspace
+from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.intents import (
     ArtifactReferenceIntent,
     ModelSelectionIntent,
@@ -63,7 +63,7 @@ async def _seed(
     session.add(project)
     await session.flush()
 
-    manifest = next(m for m in SEED_MANIFESTS if m["model_id"] == "agnes-video-v2.0")
+    manifest = next(m for m in CATALOG_MODELS if m["model_id"] == "agnes-video-v2.0")
     entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
@@ -143,9 +143,7 @@ async def test_explicit_project_binding_resolves_plan(session: AsyncSession) -> 
         )
     )
     await session.flush()
-    plan = await ModelSelectionService(session).select_video(
-        project=project, intent=_intent()
-    )
+    plan = await ModelSelectionService(session).select_video(project=project, intent=_intent())
     assert plan.model_binding_id == binding.id
     assert plan.invoke_model_value == "agnes-video-v2.0"
     assert plan.protocol_profile == "agnes_cn_v1"
@@ -181,15 +179,13 @@ async def test_profile_binding_drives_media_selection_without_project_binding(
         bindings={
             ModelSlot.VIDEO_SHOT: ModelSlotBinding(
                 slot=ModelSlot.VIDEO_SHOT,
-                model_id="agnes/agnes-video-v2.0",
+                model_id=f"binding:{binding.id}",
             )
         },
         is_default=True,
     )
     await session.flush()
-    plan = await ModelSelectionService(session).select_video(
-        project=project, intent=_intent()
-    )
+    plan = await ModelSelectionService(session).select_video(project=project, intent=_intent())
     assert plan.model_binding_id == binding.id
     assert plan.invoke_model_value == "agnes-video-v2.0"
     assert plan.protocol_profile == "agnes_cn_v1"
@@ -201,25 +197,25 @@ async def test_profile_binding_without_concrete_binding_fails_closed(
 ) -> None:
     """Profile X is authoritative: legacy project binding Y must not run."""
     project, binding = await _seed(session)
-    from app.providers.model_profiles.models import ModelSlotBinding
-    from app.providers.model_profiles.service import ProductionModelProfileService
-    from app.providers.model_profiles.slots import ModelSlot
+    from app.providers.model_profiles.orm import ProductionModelProfile
     from app.providers.models import ProjectProviderBinding
 
-    service = ProductionModelProfileService(session)
-    await service.create(
-        workspace_id=project.workspace_id,
-        actor_id=binding.created_by,
-        name="默认方案",
-        bindings={
-            ModelSlot.VIDEO_SHOT: ModelSlotBinding(
-                slot=ModelSlot.VIDEO_SHOT,
-                # A registered model with no credentialed binding in this
-                # workspace (only agnes is connected) → fall back.
-                model_id="volcengine/doubao-seedance-1-0-pro-250528",
-            )
-        },
-        is_default=True,
+    session.add(
+        ProductionModelProfile(
+            workspace_id=project.workspace_id,
+            name="Unavailable saved binding",
+            is_default=True,
+            bindings={
+                "video.shot": {
+                    "slot": "video.shot",
+                    "model_id": f"binding:{uuid4()}",
+                    "enabled": True,
+                    "native_options": {},
+                }
+            },
+            created_by=binding.created_by,
+            updated_by=binding.created_by,
+        )
     )
     session.add(
         ProjectProviderBinding(

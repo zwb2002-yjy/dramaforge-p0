@@ -1,4 +1,4 @@
-﻿"""Provider Connection, capability evidence, and binding use cases."""
+"""Provider Connection, capability evidence, and binding use cases."""
 
 from __future__ import annotations
 
@@ -29,7 +29,6 @@ from app.providers.catalog_service import ModelCatalogService
 from app.providers.manifest import (
     ModelCapabilityManifest,
     has_reproducible_contract_evidence,
-    is_legacy_tested_manifest,
 )
 from app.providers.models import (
     ProjectProviderBinding,
@@ -101,18 +100,6 @@ class ProviderConnectionService:
         secret = api_key.strip()
         if not secret:
             raise ValidationAppError("api_key must not be empty")
-        existing = await self._session.scalar(
-            select(ProviderConnection.id).where(
-                ProviderConnection.workspace_id == workspace_id,
-                ProviderConnection.provider_type == provider_type,
-                ProviderConnection.protocol_profile == protocol_profile,
-            )
-        )
-        if existing is not None:
-            raise ConflictError(
-                f"{plugin.display_name} connection already exists for this Workspace",
-                details={"code": "PROVIDER_CONNECTION_EXISTS"},
-            )
         host = (base_url or plugin.default_base_url).strip().rstrip("/")
         if not host:
             raise ValidationAppError("base_url must not be empty")
@@ -313,19 +300,6 @@ class ProviderConnectionService:
                 raise ValidationAppError("protocol_profile must not be empty")
             if profile != connection.protocol_profile:
                 plugin = _resolve_plugin(connection.provider_type, profile)
-                duplicate = await self._session.scalar(
-                    select(ProviderConnection.id).where(
-                        ProviderConnection.workspace_id == workspace_id,
-                        ProviderConnection.provider_type == connection.provider_type,
-                        ProviderConnection.protocol_profile == profile,
-                        ProviderConnection.id != connection.id,
-                    )
-                )
-                if duplicate is not None:
-                    raise ConflictError(
-                        "provider connection already exists for this Workspace",
-                        details={"code": "PROVIDER_CONNECTION_EXISTS"},
-                    )
                 credential = await self._session.scalar(
                     select(EncryptedProviderCredential).where(
                         EncryptedProviderCredential.id == connection.credential_id,
@@ -424,9 +398,7 @@ class ProviderConnectionService:
         # must not mix the old credential with a concurrently rotated endpoint.
         provider_type = revision.provider_type if revision else connection.provider_type
         profile = revision.protocol_profile if revision else connection.protocol_profile
-        credential_id = (
-            revision.credential_revision_id if revision else connection.credential_id
-        )
+        credential_id = revision.credential_revision_id if revision else connection.credential_id
         base_url = revision.base_url if revision else connection.base_url
         enabled = connection.enabled
         plugin = _resolve_plugin(provider_type, profile)
@@ -639,10 +611,7 @@ class ProviderConnectionService:
                 artifact_id=reference_artifact_id,
             )
             reference_mime = reference_artifact.mime_type
-            if (
-                capability == "image_i2i"
-                and plugin.image_i2i_probe_transport == "public_url"
-            ):
+            if capability == "image_i2i" and plugin.image_i2i_probe_transport == "public_url":
                 grant = await issue_artifact_reference(
                     self._session,
                     artifact=reference_artifact,
@@ -807,9 +776,7 @@ class ProviderConnectionService:
                     image_mime=reference_mime,
                     reference_artifact_ids=[str(reference_artifact_id)],
                     reference_fingerprints=(
-                        [reference_artifact.content_hash]
-                        if reference_artifact is not None
-                        else []
+                        [reference_artifact.content_hash] if reference_artifact is not None else []
                     ),
                 )
                 result_status = str(result.get("status") or "failed")
@@ -967,9 +934,10 @@ class ProviderConnectionService:
         alone would allow an old request to revoke a newly verified credential.
         """
         passed = evidence.status in {"passed", "succeeded"}
-        credential_rejected = (
-            evidence.capability == "auth_models" and evidence.http_status in {401, 403}
-        )
+        credential_rejected = evidence.capability == "auth_models" and evidence.http_status in {
+            401,
+            403,
+        }
         if not passed and not credential_rejected:
             # Timeouts, network/5xx failures and malformed catalogs are not proof
             # that the stored credential has been rejected.
@@ -1196,10 +1164,7 @@ class ProviderConnectionService:
                 "model binding requires a contract-tested manifest",
                 details={"code": "MODEL_CONTRACT_NOT_TESTED"},
             )
-        if not (
-            is_legacy_tested_manifest(entry.capability_manifest_json)
-            or has_reproducible_contract_evidence(entry.capability_manifest_json)
-        ):
+        if not has_reproducible_contract_evidence(entry.capability_manifest_json):
             raise ValidationAppError(
                 "model binding lacks reproducible contract evidence",
                 details={"code": "MODEL_CONTRACT_EVIDENCE_MISSING"},
@@ -1560,9 +1525,7 @@ class ProviderConnectionService:
         )
         if model is None:
             raise NotFoundError("model binding not found")
-        model_connection = await self._session.get(
-            ProviderConnection, model.connection_id
-        )
+        model_connection = await self._session.get(ProviderConnection, model.connection_id)
         if model_connection is None:
             raise ValidationAppError(
                 "model binding does not reference the active catalog contract",
@@ -1577,13 +1540,10 @@ class ProviderConnectionService:
         # enter the project, then require accepted evidence before formal
         # Workbench execution.
         if not (
-            model.enabled
-            and model.documented
-            and model.contract_tested
-            and model.account_verified
+            model.enabled and model.documented and model.contract_tested and model.account_verified
         ):
             raise ValidationAppError(
-            "model binding is not eligible for Workbench execution",
+                "model binding is not eligible for Workbench execution",
                 details={"code": "MODEL_BINDING_NOT_VERIFIED"},
             )
         binding = await self._session.scalar(

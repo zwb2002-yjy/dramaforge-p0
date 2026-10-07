@@ -126,6 +126,7 @@ async def _freeze_execution_model_resolution(
     *,
     project: Project,
     node_key: str,
+    requested_binding_id: UUID | None = None,
 ) -> dict[str, object]:
     """Freeze the concrete ProviderModelBinding for unified media nodes at dispatch.
 
@@ -163,6 +164,7 @@ async def _freeze_execution_model_resolution(
             capability=capability,
             purpose=purpose,
             mode_id="explicit_binding",
+            requested_binding_id=requested_binding_id,
         )
     except Exception as exc:  # noqa: BLE001 - audit path, never block dispatch
         return {
@@ -174,6 +176,21 @@ async def _freeze_execution_model_resolution(
             "model_binding_id": None,
             "model_resolution_unavailable_reason": (resolution.reason or resolution.status),
         }
+    from app.providers.connection_service import ProviderConnectionService
+    from app.providers.models import ProviderConnection
+
+    connection = await session.get(ProviderConnection, resolution.provider_connection_id)
+    if connection is None:
+        raise ValidationAppError("Selected provider connection is unavailable")
+    revision = await ProviderConnectionService(session).current_connection_revision(
+        connection=connection,
+    )
+    resolution = resolution.model_copy(
+        update={
+            "provider_connection_revision_id": revision.id,
+            "credential_revision_id": revision.credential_revision_id,
+        }
+    )
     return {
         "model_binding_id": str(resolution.provider_model_binding_id),
         "execution_model_resolution": resolution.model_dump(mode="json"),
@@ -409,6 +426,7 @@ async def queue_branch_nodes(
                 session,
                 project=project,
                 node_key=key,
+                requested_binding_id=(model_binding_id if key == model_binding_node_key else None),
             )
         if key == "voice":
             execution_freeze["voice_execution"] = freeze_voice_execution(

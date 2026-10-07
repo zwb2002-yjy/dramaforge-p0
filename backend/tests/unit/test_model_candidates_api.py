@@ -11,8 +11,8 @@ from uuid import UUID, uuid4
 import pytest
 from app.config import clear_settings_cache, get_settings
 from app.main import create_app
+from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.models import ProviderModelBinding
 from app.shared.base import Base
 from app.shared.db import get_session
@@ -61,7 +61,7 @@ def _csrf(client: TestClient) -> str:
 
 
 def _seed_catalog(factory: Any, model_id: str = "agnes-video-v2.0") -> None:
-    manifest = next(m for m in SEED_MANIFESTS if m["model_id"] == model_id)
+    manifest = next(m for m in CATALOG_MODELS if m["model_id"] == model_id)
 
     async def _insert() -> None:
         async with factory() as session:
@@ -292,7 +292,5 @@ def test_model_candidates_api_requires_project_ownership(api: tuple[TestClient, 
     other_workspace_id = str(client.get("/api/v1/workspaces").json()[0]["id"])
     client.headers["X-Workspace-Id"] = other_workspace_id
     # A project id from another workspace must 404 under this workspace header.
-    response = client.get(
-        f"/api/v1/projects/{uuid4()}/model-candidates?operation=image.generate"
-    )
+    response = client.get(f"/api/v1/projects/{uuid4()}/model-candidates?operation=image.generate")
     assert response.status_code in {400, 404}

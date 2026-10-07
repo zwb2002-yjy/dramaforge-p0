@@ -102,7 +102,7 @@ async def test_actual_snapshot_reports_plan_compilation_and_observed_artifact(
             request_fingerprint="a" * 64,
             status="succeeded",
             request_summary={
-                "effective_request": {
+                "effective_request_redacted": {
                     "common_options": {"size": "1K", "aspect_ratio": "9:16"},
                     "prompt": "SECRET",
                     "url": "https://secret.invalid/?token=secret",
@@ -154,6 +154,7 @@ async def test_query_and_preview_reject_cross_project_or_stale_inputs(
     with pytest.raises(ValidationAppError, match="approximations"):
         await service.preview_generation_compile(project_id=project.id, request=request)
 
+
 async def test_query_current_media_binding_and_text_slot_are_distinct(
     session: AsyncSession,
 ) -> None:
@@ -161,10 +162,15 @@ async def test_query_current_media_binding_and_text_slot_are_distinct(
     from app.providers.models import ProjectProviderBinding
 
     project, binding, actor = await _seed(session)
-    session.add(ProjectProviderBinding(
-        project_id=project.id, workspace_id=project.workspace_id, purpose="video",
-        model_binding_id=binding.id, updated_by=actor.id,
-    ))
+    session.add(
+        ProjectProviderBinding(
+            project_id=project.id,
+            workspace_id=project.workspace_id,
+            purpose="video",
+            model_binding_id=binding.id,
+            updated_by=actor.id,
+        )
+    )
     await session.commit()
     service = ModelInspectionService(session, actor=actor)
     report = await service.get_model_capabilities(project_id=project.id, stage="video")
@@ -172,7 +178,8 @@ async def test_query_current_media_binding_and_text_slot_are_distinct(
     assert report.binding_id == binding.id
     assert report.report.model_id == "agnes/agnes-video-v2.0"
     text = await service.get_model_capabilities(
-        project_id=project.id, slot=ModelSlot.PLANNING_SCRIPT,
+        project_id=project.id,
+        slot=ModelSlot.PLANNING_SCRIPT,
     )
     assert text.selection == "text_slot"
     assert text.report.model_id.startswith("litellm/")

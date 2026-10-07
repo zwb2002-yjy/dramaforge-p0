@@ -3,7 +3,7 @@
   "provider_type": "agnes",
   "protocol_profile": "agnes_cn_v1",
   "model_id": "agnes-image-2.1-flash",
-  "model_revision": "v2",
+  "model_revision": "v3",
   "media_kind": "image",
   "display_name": "Agnes Image Flash",
   "lifecycle": "active",
@@ -35,5 +35,13 @@
   "option_schema": {
     "namespace": "",
     "options": {}
+  },
+  "implementation_status": "contract_tested",
+  "evidence": {
+    "current_contract": {
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit",
+      "checked_at": "2026-10-07"
+    }
   }
 }

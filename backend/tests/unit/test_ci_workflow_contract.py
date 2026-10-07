@@ -8,9 +8,7 @@ import subprocess
 from pathlib import Path
 
 _WORKFLOW = Path(__file__).resolve().parents[3] / ".github" / "workflows" / "ci.yml"
-_SECURITY_WORKFLOW = (
-    Path(__file__).resolve().parents[3] / ".github" / "workflows" / "security.yml"
-)
+_SECURITY_WORKFLOW = Path(__file__).resolve().parents[3] / ".github" / "workflows" / "security.yml"
 
 
 def _job(workflow: str, name: str) -> str:
@@ -24,9 +22,7 @@ def _step(workflow: str, name: str) -> dict[str, str]:
     import yaml
 
     parsed = yaml.safe_load(workflow)
-    return next(
-        step for step in parsed["jobs"]["policy"]["steps"] if step.get("name") == name
-    )
+    return next(step for step in parsed["jobs"]["policy"]["steps"] if step.get("name") == name)
 
 
 def test_container_gate_owns_all_project_toolchains_and_quality_commands() -> None:
@@ -71,9 +67,7 @@ def test_pr_ci_only_listens_on_main_while_dev_is_in_fast_development() -> None:
 
 
 def test_branch_flow_leaves_dev_open_but_protects_main() -> None:
-    step = _step(
-        _WORKFLOW.read_text(encoding="utf-8"), "Enforce integration branch flow"
-    )
+    step = _step(_WORKFLOW.read_text(encoding="utf-8"), "Enforce integration branch flow")
     for base, head, allowed in [
         ("dev", "codex/workbench-optimization", True),
         ("dev", "unreviewed-feature", True),
@@ -106,18 +100,18 @@ def test_quality_images_own_browser_and_canonical_surface_gates() -> None:
 
 
 def test_quality_images_cache_dependencies_before_copying_source() -> None:
-    backend = (
-        Path(__file__).resolve().parents[3] / "backend" / "Dockerfile.quality"
-    ).read_text(encoding="utf-8")
-    frontend = (
-        Path(__file__).resolve().parents[3] / "frontend" / "Dockerfile.quality"
-    ).read_text(encoding="utf-8")
+    backend = (Path(__file__).resolve().parents[3] / "backend" / "Dockerfile.quality").read_text(
+        encoding="utf-8"
+    )
+    frontend = (Path(__file__).resolve().parents[3] / "frontend" / "Dockerfile.quality").read_text(
+        encoding="utf-8"
+    )
 
     backend_dependencies = "COPY backend/pyproject.toml backend/uv.lock backend/README.md"
     assert backend.index(backend_dependencies) < backend.index("COPY . .")
     assert backend.index("COPY . .") < backend.rindex("RUN uv sync")
     assert frontend.index("COPY frontend/package.json") < frontend.index("COPY . .")
-    assert frontend.index("RUN npm ci") < frontend.index("COPY . .")
+    assert frontend.index("npm ci --prefix") < frontend.index("COPY . .")
 
 
 def test_main_pr_preserves_every_required_check_context() -> None:
@@ -176,9 +170,7 @@ def test_changed_path_classifier_routes_fast_and_full_gates(tmp_path: Path) -> N
         repo.mkdir()
         subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
         subprocess.run(["git", "config", "user.name", "CI Test"], cwd=repo, check=True)
-        subprocess.run(
-            ["git", "config", "user.email", "ci@example.invalid"], cwd=repo, check=True
-        )
+        subprocess.run(["git", "config", "user.email", "ci@example.invalid"], cwd=repo, check=True)
         (repo / ".baseline").write_text("baseline\n", encoding="utf-8")
         subprocess.run(["git", "add", "."], cwd=repo, check=True)
         subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repo, check=True)
@@ -213,8 +205,7 @@ def test_changed_path_classifier_routes_fast_and_full_gates(tmp_path: Path) -> N
         )
         assert result.returncode == 0, result.stdout + result.stderr
         actual = dict(
-            line.split("=", 1)
-            for line in output.read_text(encoding="utf-8").splitlines()
+            line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines()
         )
         for name, value in expected.items():
             assert actual[name] == value, case_name

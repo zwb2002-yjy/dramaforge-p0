@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from app.providers.capability_summary import summarize_model_capability
-from app.providers.catalog_seed_data import SEED_MANIFESTS
+from app.providers.catalog_loader import CATALOG_MODELS
 from app.providers.manifest import ModelCapabilityManifest
 
 
@@ -21,7 +21,7 @@ def _mark_tested(source: dict[str, object]) -> None:
 
 
 def test_frozen_h3_reports_only_its_declared_first_frame() -> None:
-    source = next(item for item in SEED_MANIFESTS if item["model_id"] == "MiniMax-H3")
+    source = next(item for item in CATALOG_MODELS if item["model_id"] == "MiniMax-H3")
     summary = summarize_model_capability(ModelCapabilityManifest.model_validate(source))
     assert summary.accepts["first_frame"] is True
     assert summary.accepts["reference_video"] is False
@@ -30,7 +30,7 @@ def test_frozen_h3_reports_only_its_declared_first_frame() -> None:
 
 
 def test_new_h3_reference_capability_stays_closed_in_formal_mainchain() -> None:
-    source = next(item for item in SEED_MANIFESTS if item["model_id"] == "MiniMax-H3")
+    source = next(item for item in CATALOG_MODELS if item["model_id"] == "MiniMax-H3")
     revised = deepcopy(source)
     _mark_tested(revised)
     operation = revised["operations"]["video.generate"]
@@ -57,7 +57,7 @@ def test_new_h3_reference_capability_stays_closed_in_formal_mainchain() -> None:
 
 
 def test_image_text_and_reference_contracts_are_separate() -> None:
-    source = next(item for item in SEED_MANIFESTS if item["model_id"] == "image-01")
+    source = next(item for item in CATALOG_MODELS if item["model_id"] == "image-01")
     revised = deepcopy(source)
     _mark_tested(revised)
     operation = revised["operations"]["image.generate"]

@@ -61,10 +61,7 @@ def _admin_dsn(dbname: str) -> str:
 
 
 def _checkpoint_dsn(dbname: str) -> str:
-    return (
-        f"postgresql://{CHECKPOINT_ROLE}:{CHECKPOINT_PASSWORD}"
-        f"@{_host()}:{_port()}/{dbname}"
-    )
+    return f"postgresql://{CHECKPOINT_ROLE}:{CHECKPOINT_PASSWORD}@{_host()}:{_port()}/{dbname}"
 
 
 @pytest.mark.asyncio
@@ -76,7 +73,8 @@ async def test_stop_before_first_checkpoint_settles_start_and_stop_wakeups(
     admin_dsn = _admin_dsn(dbname)
     admin_engine = create_async_engine(_async_url(dbname))
     app_engine = create_async_engine(
-        _async_url(dbname), connect_args={"server_settings": {"role": "dramaforge_app"}},
+        _async_url(dbname),
+        connect_args={"server_settings": {"role": "dramaforge_app"}},
     )
     try:
         _alembic(dbname)
@@ -123,19 +121,22 @@ async def test_stop_before_first_checkpoint_settles_start_and_stop_wakeups(
             )
             session.add(proposal)
             await session.flush()
-            session.add(DirectorProposalItem(
-                proposal_id=proposal.id,
-                project_id=project.id,
-                command="story.set_script_document",
-                payload={
-                    "filename": "stopped-before-start.md",
-                    "content_hash": "e" * 64,
-                    "raw_text": "This command must never be applied.",
-                    "format": "md",
-                },
-            ))
+            session.add(
+                DirectorProposalItem(
+                    proposal_id=proposal.id,
+                    project_id=project.id,
+                    command="story.set_script_document",
+                    payload={
+                        "filename": "stopped-before-start.md",
+                        "content_hash": "e" * 64,
+                        "raw_text": "This command must never be applied.",
+                        "format": "md",
+                    },
+                )
+            )
             turn, start_wakeup = await DirectorRuntimeStartService(
-                session, settings=settings,
+                session,
+                settings=settings,
             ).accept(
                 project=project,
                 actor=actor,
@@ -181,16 +182,23 @@ async def test_stop_before_first_checkpoint_settles_start_and_stop_wakeups(
                 project_id=project.id,
             )
             stored = await DirectorTurnService(session).get(
-                project_id=project.id, turn_id=turn.id,
+                project_id=project.id,
+                turn_id=turn.id,
             )
             assert stored.status == "cancelled"
             assert stored.wait_reason == "user_stopped"
             assert stored.runtime_revision is None
             control = await session.get(DirectorRuntimeControl, turn.runtime_execution_id)
             assert control is not None and control.status == "stopped"
-            wakeups = list((await session.scalars(select(DirectorRuntimeWakeup).where(
-                DirectorRuntimeWakeup.runtime_execution_id == turn.runtime_execution_id,
-            ))).all())
+            wakeups = list(
+                (
+                    await session.scalars(
+                        select(DirectorRuntimeWakeup).where(
+                            DirectorRuntimeWakeup.runtime_execution_id == turn.runtime_execution_id,
+                        )
+                    )
+                ).all()
+            )
             assert len(wakeups) == 2
             assert all(row.completed_at is not None for row in wakeups)
             assert all(row.last_error is None for row in wakeups)
@@ -200,11 +208,10 @@ async def test_stop_before_first_checkpoint_settles_start_and_stop_wakeups(
         await admin_engine.dispose()
         try:
             async with await psycopg.AsyncConnection.connect(
-                admin_dsn, autocommit=True,
+                admin_dsn,
+                autocommit=True,
             ) as admin:
-                await admin.execute(
-                    f"ALTER ROLE {CHECKPOINT_ROLE} NOLOGIN PASSWORD NULL"
-                )
+                await admin.execute(f"ALTER ROLE {CHECKPOINT_ROLE} NOLOGIN PASSWORD NULL")
         finally:
             await _drop_database(dbname)
 
@@ -218,7 +225,8 @@ async def test_new_runtime_turn_completes_from_persisted_proposal_decision_event
     admin_dsn = _admin_dsn(dbname)
     admin_engine = create_async_engine(_async_url(dbname))
     app_engine = create_async_engine(
-        _async_url(dbname), connect_args={"server_settings": {"role": "dramaforge_app"}},
+        _async_url(dbname),
+        connect_args={"server_settings": {"role": "dramaforge_app"}},
     )
     try:
         _alembic(dbname)
@@ -273,7 +281,8 @@ async def test_new_runtime_turn_completes_from_persisted_proposal_decision_event
             )
             session.add(item)
             turn, start_wakeup = await DirectorRuntimeStartService(
-                session, settings=settings,
+                session,
+                settings=settings,
             ).accept(
                 project=project,
                 actor=actor,
@@ -335,23 +344,35 @@ async def test_new_runtime_turn_completes_from_persisted_proposal_decision_event
                 project_id=project.id,
             )
             waiting = await DirectorTurnService(session).get(
-                project_id=project.id, turn_id=turn.id,
+                project_id=project.id,
+                turn_id=turn.id,
             )
             assert waiting.status == "awaiting_user"
             assert waiting.wait_reason == "proposal_decision"
             result = await ProposalService(session, actor=actor).partial_apply(
                 project=project,
                 proposal_id=proposal.id,
-                apply_input=PartialApplyInput(decisions=[
-                    ProposalDecision(item_id=item.id, decision="accepted"),
-                ]),
+                apply_input=PartialApplyInput(
+                    decisions=[
+                        ProposalDecision(item_id=item.id, decision="accepted"),
+                    ]
+                ),
             )
             assert result.accepted == [item.id]
-            events = list((await session.scalars(select(EventLog).where(
-                EventLog.project_id == project.id,
-            ).order_by(EventLog.occurred_at.desc(), EventLog.id.desc()))).all())
+            events = list(
+                (
+                    await session.scalars(
+                        select(EventLog)
+                        .where(
+                            EventLog.project_id == project.id,
+                        )
+                        .order_by(EventLog.occurred_at.desc(), EventLog.id.desc())
+                    )
+                ).all()
+            )
             decision_event = next(
-                event for event in events
+                event
+                for event in events
                 if (event.payload or {}).get("notice", {}).get("kind") == "proposal_decided"
             )
             inbox_id = await receive_production_event(
@@ -360,10 +381,12 @@ async def test_new_runtime_turn_completes_from_persisted_proposal_decision_event
                 event_id=decision_event.event_id,
             )
             assert await apply_director_wakeup(session, inbox_id=inbox_id)
-            runtime_wakeup = await session.scalar(select(DirectorRuntimeWakeup).where(
-                DirectorRuntimeWakeup.runtime_execution_id == turn.runtime_execution_id,
-                DirectorRuntimeWakeup.kind == "resume",
-            ))
+            runtime_wakeup = await session.scalar(
+                select(DirectorRuntimeWakeup).where(
+                    DirectorRuntimeWakeup.runtime_execution_id == turn.runtime_execution_id,
+                    DirectorRuntimeWakeup.kind == "resume",
+                )
+            )
             assert runtime_wakeup is not None
             runtime_wakeup_id = runtime_wakeup.id
             await session.commit()
@@ -377,7 +400,8 @@ async def test_new_runtime_turn_completes_from_persisted_proposal_decision_event
                 project_id=project.id,
             )
             completed = await DirectorTurnService(session).get(
-                project_id=project.id, turn_id=turn.id,
+                project_id=project.id,
+                turn_id=turn.id,
             )
             assert completed.status == "completed"
             assert completed.wait_reason == "proposal_applied"
@@ -412,7 +436,8 @@ async def test_new_runtime_turn_completes_from_persisted_proposal_decision_event
             session.add(detached)
             await session.flush()
             detached_start = await DirectorRuntimeStartService(
-                session, settings=settings,
+                session,
+                settings=settings,
             ).accept_existing_detached_turn(
                 project=project,
                 actor=actor,
@@ -432,7 +457,8 @@ async def test_new_runtime_turn_completes_from_persisted_proposal_decision_event
                 project_id=project.id,
             )
             waiting_detached = await DirectorTurnService(session).get(
-                project_id=project.id, turn_id=detached.id,
+                project_id=project.id,
+                turn_id=detached.id,
             )
             assert waiting_detached.runtime_revision is not None
             assert waiting_detached.runtime_execution_id is not None
@@ -473,7 +499,8 @@ async def test_new_runtime_turn_completes_from_persisted_proposal_decision_event
                 project_id=project.id,
             )
             completed_detached = await DirectorTurnService(session).get(
-                project_id=project.id, turn_id=detached.id,
+                project_id=project.id,
+                turn_id=detached.id,
             )
             assert completed_detached.status == "completed"
             assert completed_detached.wait_reason == "proposal_rejected"
@@ -483,11 +510,10 @@ async def test_new_runtime_turn_completes_from_persisted_proposal_decision_event
         await admin_engine.dispose()
         try:
             async with await psycopg.AsyncConnection.connect(
-                admin_dsn, autocommit=True,
+                admin_dsn,
+                autocommit=True,
             ) as admin:
-                await admin.execute(
-                    f"ALTER ROLE {CHECKPOINT_ROLE} NOLOGIN PASSWORD NULL"
-                )
+                await admin.execute(f"ALTER ROLE {CHECKPOINT_ROLE} NOLOGIN PASSWORD NULL")
         finally:
             await _drop_database(dbname)
 
@@ -501,7 +527,8 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
     admin_dsn = _admin_dsn(dbname)
     admin_engine = create_async_engine(_async_url(dbname))
     app_engine = create_async_engine(
-        _async_url(dbname), connect_args={"server_settings": {"role": "dramaforge_app"}},
+        _async_url(dbname),
+        connect_args={"server_settings": {"role": "dramaforge_app"}},
     )
     try:
         _alembic(dbname)
@@ -514,13 +541,17 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
         async with admin_factory() as session:
             project, binding, actor = await _seed(session)
             shot, _keyframe = await _seed_video_shot(
-                session, project=project, user=actor,
+                session,
+                project=project,
+                user=actor,
             )
-            session.add(ProjectCreativeProfile(
-                project_id=project.id,
-                start_type="FREE",
-                director_autonomy="AUTO",
-            ))
+            session.add(
+                ProjectCreativeProfile(
+                    project_id=project.id,
+                    start_type="FREE",
+                    director_autonomy="AUTO",
+                )
+            )
             await session.commit()
         settings = Settings(
             director_runtime_engine="langgraph",
@@ -540,11 +571,12 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
                 expected_shot_version=shot.version,
             )
             plan = await WorkbenchExecutionService(
-                session, user_id=actor.id,
+                session,
+                user_id=actor.id,
             ).build_plan(project=project, execution_input=execution_input)
             body = ExecutionBody(
                 **execution_input.model_dump(
-                    exclude={"project_id", "shot_id", "shot_experiment_id"},
+                    exclude={"project_id", "shot_id", "experiment_branch_id"},
                 ),
                 plan_fingerprint=plan.plan_fingerprint,
                 accepted_approximations=plan.accepted_approximations,
@@ -590,13 +622,16 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
                 project_id=project.id,
             )
             turn = await DirectorTurnService(session).get(
-                project_id=project.id, turn_id=accepted.id,
+                project_id=project.id,
+                turn_id=accepted.id,
             )
             assert turn.runtime_execution_id is not None
-            start_wakeup = await session.scalar(select(DirectorRuntimeWakeup).where(
-                DirectorRuntimeWakeup.runtime_execution_id == turn.runtime_execution_id,
-                DirectorRuntimeWakeup.kind == "start",
-            ))
+            start_wakeup = await session.scalar(
+                select(DirectorRuntimeWakeup).where(
+                    DirectorRuntimeWakeup.runtime_execution_id == turn.runtime_execution_id,
+                    DirectorRuntimeWakeup.kind == "start",
+                )
+            )
             assert start_wakeup is not None
             authorization_id = await session.scalar(
                 select(ProductionCommandAuthorization.id).where(
@@ -620,7 +655,8 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
                 project_id=project.id,
             )
             submitted = await DirectorTurnService(session).get(
-                project_id=project.id, turn_id=turn.id,
+                project_id=project.id,
+                turn_id=turn.id,
             )
             grant = await session.get(ProductionCommandAuthorization, authorization_id)
             runs = list((await session.scalars(select(NodeRun))).all())
@@ -706,12 +742,17 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
                 project_id=project.id,
             )
             assert await apply_director_wakeup(session, inbox_id=formal_inbox_id)
-            assert await session.scalar(
-                select(func.count()).select_from(DirectorRuntimeWakeup).where(
-                    DirectorRuntimeWakeup.runtime_execution_id == turn.runtime_execution_id,
-                    DirectorRuntimeWakeup.kind == "resume",
+            assert (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(DirectorRuntimeWakeup)
+                    .where(
+                        DirectorRuntimeWakeup.runtime_execution_id == turn.runtime_execution_id,
+                        DirectorRuntimeWakeup.kind == "resume",
+                    )
                 )
-            ) == 0
+                == 0
+            )
             await session.commit()
 
         async with factory() as session:
@@ -737,8 +778,7 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
             assert await apply_director_wakeup(session, inbox_id=inbox_id)
             terminal_wakeup = await session.scalar(
                 select(DirectorRuntimeWakeup).where(
-                    DirectorRuntimeWakeup.runtime_execution_id
-                    == turn.runtime_execution_id,
+                    DirectorRuntimeWakeup.runtime_execution_id == turn.runtime_execution_id,
                     DirectorRuntimeWakeup.kind == "resume",
                 )
             )
@@ -746,7 +786,8 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
             await session.commit()
 
         assert await director.execute_director_runtime_wakeup(
-            {}, str(terminal_wakeup.id),
+            {},
+            str(terminal_wakeup.id),
         )
         async with factory() as session:
             await set_rls_context(
@@ -756,7 +797,8 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
                 project_id=project.id,
             )
             waiting_confirmation = await DirectorTurnService(session).get(
-                project_id=project.id, turn_id=turn.id,
+                project_id=project.id,
+                turn_id=turn.id,
             )
             assert waiting_confirmation.status == "awaiting_user"
             assert waiting_confirmation.wait_reason == "confirm_candidate"
@@ -808,7 +850,8 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
                 project_id=project.id,
             )
             completed = await DirectorTurnService(session).get(
-                project_id=project.id, turn_id=turn.id,
+                project_id=project.id,
+                turn_id=turn.id,
             )
             assert completed.status == "completed"
             assert completed.wait_reason == "candidate_confirmed"
@@ -825,9 +868,11 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
             assert keys == ["keyframe", "video", "video_drift_review"]
 
         async with admin_factory() as session:
-            profile = await session.scalar(select(ProjectCreativeProfile).where(
-                ProjectCreativeProfile.project_id == project.id,
-            ))
+            profile = await session.scalar(
+                select(ProjectCreativeProfile).where(
+                    ProjectCreativeProfile.project_id == project.id,
+                )
+            )
             assert profile is not None
             profile.director_autonomy = "ASSIST"
             profile.version += 1
@@ -862,20 +907,26 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
                 workspace_id=project.workspace_id,
                 project_id=project.id,
             )
-            assert await session.scalar(select(func.count()).select_from(
-                ProductionCommandAuthorization,
-            ).where(
-                ProductionCommandAuthorization.command_key == f"approved:{denied_decision}",
-            )) == 0
+            assert (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(
+                        ProductionCommandAuthorization,
+                    )
+                    .where(
+                        ProductionCommandAuthorization.command_key == f"approved:{denied_decision}",
+                    )
+                )
+                == 0
+            )
     finally:
         await app_engine.dispose()
         await admin_engine.dispose()
         try:
             async with await psycopg.AsyncConnection.connect(
-                admin_dsn, autocommit=True,
+                admin_dsn,
+                autocommit=True,
             ) as admin:
-                await admin.execute(
-                    f"ALTER ROLE {CHECKPOINT_ROLE} NOLOGIN PASSWORD NULL"
-                )
+                await admin.execute(f"ALTER ROLE {CHECKPOINT_ROLE} NOLOGIN PASSWORD NULL")
         finally:
             await _drop_database(dbname)

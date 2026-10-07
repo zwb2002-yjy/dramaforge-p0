@@ -40,10 +40,13 @@ def _settings() -> Settings:
     )
 
 
-def _manifest(model_id: str, revision: str = "v1") -> ModelCapabilityManifest:
+def _manifest(model_id: str, revision: str | None = None) -> ModelCapabilityManifest:
     raw = next(
-        item.as_dict() for item in ModelCatalogLoader().load()
-        if item.identity[2:] == (model_id, revision)
+        item.as_dict()
+        for item in ModelCatalogLoader().load()
+        if item.identity[2] == model_id
+        and item.publication_lifecycle == "active"
+        and (revision is None or item.identity[3] == revision)
     )
     return ModelCapabilityManifest.model_validate(raw)
 
@@ -64,7 +67,11 @@ async def test_protocol_client_uses_openai_compatible_image_and_video_shapes() -
         if request.method == "GET" and request.url.path == "/v1/videos/vid-1":
             return httpx.Response(
                 200,
-                json={"id": "vid-1", "status": "completed", "output_url": "https://cdn.example/video.mp4"},
+                json={
+                    "id": "vid-1",
+                    "status": "completed",
+                    "output_url": "https://cdn.example/video.mp4",
+                },
             )
         raise AssertionError(f"unexpected request: {request.method} {request.url}")
 
@@ -116,7 +123,9 @@ async def test_compilers_bind_discovered_model_id_not_protocol_contract_id() -> 
     selection = ModelSelectionIntent(mode="explicit_binding", model_binding_id=uuid4())
     image_intent = ImageGenerationIntent(
         prompt="portrait",
-        reference_artifact_id=artifact_id,
+        reference_artifact_ids=[
+            reference_id for reference_id in [(artifact_id)] if reference_id is not None
+        ],
         reference_mime="image/png",
         selection=selection,
     )
@@ -202,13 +211,17 @@ async def test_h3_fl2va_modes_compile_json_keyframes(
     )
     refs = [
         ResolvedReference(
-            role=role, artifact_id=artifact_id, content_bytes=b"image",
+            role=role,
+            artifact_id=artifact_id,
+            content_bytes=b"image",
             mime_type="image/png",
         )
         for artifact_id, role in zip(ids, roles, strict=True)
     ]
     request = await OpenAICompatibleVideoCompiler().compile(
-        intent, _manifest("@contract/sglang-h3-fl2va-v1"), refs,
+        intent,
+        _manifest("@contract/sglang-h3-fl2va-v1"),
+        refs,
         invoke_model_value="discovered-h3",
     )
     assert request.wire_request["task"] == task
@@ -232,17 +245,23 @@ async def test_h3_fl2va_modes_compile_json_keyframes(
 async def test_h3_fl2va_rejects_wrong_frame_mode_and_identity() -> None:
     artifact_id = uuid4()
     intent = VideoGenerationIntentV1(
-        prompt="Morning river", mode_id="last_frame",
+        prompt="Morning river",
+        mode_id="last_frame",
         references=[ArtifactReferenceIntent(artifact_id=artifact_id, role="first_frame")],
         selection=ModelSelectionIntent(mode="explicit_binding", model_binding_id=uuid4()),
     )
     with pytest.raises(ValueError, match="frame mode"):
         await OpenAICompatibleVideoCompiler().compile(
-            intent, _manifest("@contract/sglang-h3-fl2va-v1"),
-            [ResolvedReference(
-                role="first_frame", artifact_id=artifact_id,
-                content_bytes=b"image", mime_type="image/png",
-            )],
+            intent,
+            _manifest("@contract/sglang-h3-fl2va-v1"),
+            [
+                ResolvedReference(
+                    role="first_frame",
+                    artifact_id=artifact_id,
+                    content_bytes=b"image",
+                    mime_type="image/png",
+                )
+            ],
             invoke_model_value="discovered-h3",
         )
 
@@ -251,19 +270,25 @@ async def test_h3_fl2va_rejects_wrong_frame_mode_and_identity() -> None:
 async def test_h3_ref2va_v2_accepts_multiple_images_and_rejects_over_limit() -> None:
     ids = [uuid4() for _ in range(10)]
     intent = VideoGenerationIntentV1(
-        prompt="Use each picture as reference", mode_id="omni_reference",
+        prompt="Use each picture as reference",
+        mode_id="omni_reference",
         references=[
             ArtifactReferenceIntent(artifact_id=artifact_id, role="reference_image")
             for artifact_id in ids
         ],
         selection=ModelSelectionIntent(mode="explicit_binding", model_binding_id=uuid4()),
     )
-    refs = [ResolvedReference(
-        role="reference_image", artifact_id=artifact_id,
-        content_bytes=b"image", mime_type="image/png",
-    ) for artifact_id in ids]
+    refs = [
+        ResolvedReference(
+            role="reference_image",
+            artifact_id=artifact_id,
+            content_bytes=b"image",
+            mime_type="image/png",
+        )
+        for artifact_id in ids
+    ]
     compiler = OpenAICompatibleVideoCompiler()
-    manifest = _manifest("@contract/sglang-h3-ref2va-v1", "v2")
+    manifest = _manifest("@contract/sglang-h3-ref2va-v1")
     nine = intent.model_copy(update={"references": intent.references[:9]})
     compiled = await compiler.compile(nine, manifest, refs[:9], invoke_model_value="discovered-h3")
     assert len(compiled.wire_request["conditions"]) == 9
@@ -285,17 +310,22 @@ async def test_h3_ref2va_v2_accepts_multiple_images_and_rejects_over_limit() -> 
     ],
 )
 async def test_ref2va_v2_checks_media_duration_and_cardinality(
-    role: str, durations: list[float | None], error: str | None,
+    role: str,
+    durations: list[float | None],
+    error: str | None,
 ) -> None:
     ids = [uuid4() for _ in durations]
     intent = VideoGenerationIntentV1(
-        prompt="Follow the reference", mode_id="omni_reference",
+        prompt="Follow the reference",
+        mode_id="omni_reference",
         references=[ArtifactReferenceIntent(artifact_id=aid, role=role) for aid in ids],
         selection=ModelSelectionIntent(mode="explicit_binding", model_binding_id=uuid4()),
     )
     refs = [
         ResolvedReference(
-            artifact_id=aid, role=role, content_bytes=b"media",
+            artifact_id=aid,
+            role=role,
+            content_bytes=b"media",
             mime_type="video/mp4" if role == "reference_video" else "audio/wav",
             duration_seconds=duration,
         )
@@ -305,12 +335,16 @@ async def test_ref2va_v2_checks_media_duration_and_cardinality(
     if error:
         with pytest.raises(ValueError, match=error):
             await compiler.compile(
-                intent, _manifest("@contract/sglang-h3-ref2va-v1", "v2"), refs,
+                intent,
+                _manifest("@contract/sglang-h3-ref2va-v1"),
+                refs,
                 invoke_model_value="discovered-h3",
             )
     else:
         compiled = await compiler.compile(
-            intent, _manifest("@contract/sglang-h3-ref2va-v1", "v2"), refs,
+            intent,
+            _manifest("@contract/sglang-h3-ref2va-v1"),
+            refs,
             invoke_model_value="discovered-h3",
         )
         assert len(compiled.wire_request["conditions"]) == len(durations)
@@ -321,28 +355,40 @@ async def test_ref2va_v2_checks_mixed_file_limit() -> None:
     roles = ["reference_image"] * 9 + ["reference_video"] * 3 + ["reference_audio"]
     refs = [
         ResolvedReference(
-            artifact_id=uuid4(), role=role, content_bytes=b"media", duration_seconds=2,
-            mime_type={"reference_image": "image/png", "reference_video": "video/mp4",
-                       "reference_audio": "audio/wav"}[role],
+            artifact_id=uuid4(),
+            role=role,
+            content_bytes=b"media",
+            duration_seconds=2,
+            mime_type={
+                "reference_image": "image/png",
+                "reference_video": "video/mp4",
+                "reference_audio": "audio/wav",
+            }[role],
         )
         for role in roles
     ]
     intent = VideoGenerationIntentV1(
-        prompt="Use the mixed references", mode_id="omni_reference",
-        references=[ArtifactReferenceIntent(artifact_id=ref.artifact_id, role=ref.role)
-                    for ref in refs],
+        prompt="Use the mixed references",
+        mode_id="omni_reference",
+        references=[
+            ArtifactReferenceIntent(artifact_id=ref.artifact_id, role=ref.role) for ref in refs
+        ],
         selection=ModelSelectionIntent(mode="explicit_binding", model_binding_id=uuid4()),
     )
     compiler = OpenAICompatibleVideoCompiler()
     twelve = intent.model_copy(update={"references": intent.references[:12]})
     compiled = await compiler.compile(
-        twelve, _manifest("@contract/sglang-h3-ref2va-v1", "v2"), refs[:12],
+        twelve,
+        _manifest("@contract/sglang-h3-ref2va-v1"),
+        refs[:12],
         invoke_model_value="discovered-h3",
     )
     assert len(compiled.wire_request["conditions"]) == 12
     with pytest.raises(ValueError, match="12 files in total"):
         await compiler.compile(
-            intent, _manifest("@contract/sglang-h3-ref2va-v1", "v2"), refs,
+            intent,
+            _manifest("@contract/sglang-h3-ref2va-v1"),
+            refs,
             invoke_model_value="discovered-h3",
         )
 
@@ -367,6 +413,7 @@ async def test_h3_ref2va_compiles_ordered_media_conditions_and_json_submission()
             artifact_id=artifact_id,
             content_bytes=f"bytes-{index}".encode(),
             mime_type=mime,
+            duration_seconds=5.0 if role != "reference_image" else None,
             fingerprint=f"hash-{index}",
         )
         for index, (artifact_id, role, mime) in enumerate(zip(ids, roles, mimes, strict=True))
@@ -379,11 +426,14 @@ async def test_h3_ref2va_compiles_ordered_media_conditions_and_json_submission()
     )
     assert compiled.wire_request["task"] == "ref2va"
     assert [condition["type"] for condition in compiled.wire_request["conditions"]] == [
-        "image", "video", "audio"
+        "image",
+        "video",
+        "audio",
     ]
-    assert all(condition["uri"].startswith(f"data:{mime};base64,") for condition, mime in zip(
-        compiled.wire_request["conditions"], mimes, strict=True
-    ))
+    assert all(
+        condition["uri"].startswith(f"data:{mime};base64,")
+        for condition, mime in zip(compiled.wire_request["conditions"], mimes, strict=True)
+    )
     assert compiled.reference_artifact_ids == ids
     assert "conditions" not in compiled.safe_request_summary
 
@@ -421,12 +471,15 @@ async def test_h3_ref2va_accepts_single_image_or_audio_reference(
     compiled = await OpenAICompatibleVideoCompiler().compile(
         intent,
         _manifest("@contract/sglang-h3-ref2va-v1"),
-        [ResolvedReference(
-            role=role,
-            artifact_id=artifact_id,
-            content_bytes=b"reference",
-            mime_type=mime,
-        )],
+        [
+            ResolvedReference(
+                role=role,
+                artifact_id=artifact_id,
+                content_bytes=b"reference",
+                mime_type=mime,
+                duration_seconds=5.0 if role != "reference_image" else None,
+            )
+        ],
         invoke_model_value="/models/MiniMax-H3-runtime",
     )
     assert compiled.wire_request["conditions"][0]["type"] == media_type
@@ -442,9 +495,7 @@ def test_h3_ref2va_refuses_a_false_native_audio_setting() -> None:
         selection=ModelSelectionIntent(mode="explicit_binding", model_binding_id=uuid4()),
     )
     with pytest.raises(ValueError, match="cannot be disabled"):
-        OpenAICompatibleVideoCompiler().validate(
-            intent, _manifest("@contract/sglang-h3-ref2va-v1")
-        )
+        OpenAICompatibleVideoCompiler().validate(intent, _manifest("@contract/sglang-h3-ref2va-v1"))
 
 
 @pytest.mark.asyncio
@@ -506,7 +557,9 @@ async def test_runtime_sends_compiled_model_without_substituting_settings_defaul
     request = await compiler.compile(
         ImageGenerationIntent(
             prompt="portrait",
-            reference_artifact_id=artifact_id,
+            reference_artifact_ids=[
+                reference_id for reference_id in [(artifact_id)] if reference_id is not None
+            ],
             reference_mime="image/png",
             selection=ModelSelectionIntent(mode="explicit_binding", model_binding_id=uuid4()),
         ),

@@ -21,9 +21,7 @@ from app.director.workflows.workflow_read_models import (
     build_project_workflow_overview,
 )
 
-router = APIRouter(
-    tags=["workflow-planning"], dependencies=[Depends(require_selected_workspace)]
-)
+router = APIRouter(tags=["workflow-planning"], dependencies=[Depends(require_selected_workspace)])
 
 
 class WorkflowOverviewResponse(BaseModel):
@@ -40,18 +38,22 @@ async def get_workflow_overview(
     session: SessionDep,
 ) -> WorkflowOverviewResponse:
     """Episode → Scene → Shot workflow state + scene production statuses."""
+    from app.production.model_contract import resolve_project_keyframe_manifest
     from app.providers.manifest import ModelManifest
-    from app.providers.workspace_router import resolve_workspace_bridge
 
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     rows = (
-        await session.execute(
-            select(Episode, Scene)
-            .join(Scene, Scene.episode_id == Episode.id)
-            .where(Episode.project_id == project_id)
-            .order_by(Episode.episode_number, Scene.scene_number)
+        (
+            await session.execute(
+                select(Episode, Scene)
+                .join(Scene, Scene.episode_id == Episode.id)
+                .where(Episode.project_id == project_id)
+                .order_by(Episode.episode_number, Scene.scene_number)
+            )
         )
-    ).tuples().all()
+        .tuples()
+        .all()
+    )
     shots = (
         (
             await session.execute(
@@ -70,15 +72,13 @@ async def get_workflow_overview(
     try:
         project = await session.get(Project, project_id)
         if project is not None:
-            bridge = await resolve_workspace_bridge(
+            manifest = await resolve_project_keyframe_manifest(
                 session,
-                workspace_id=project.workspace_id,
-                provider_type="agnes",
-                media_kind="image",
+                project=project,
             )
-            if isinstance(bridge.manifest, ModelManifest):
+            if isinstance(manifest, ModelManifest):
                 scene_ids = {scene.id for _, scene in rows}
-                manifests_by_scene = {sid: bridge.manifest for sid in scene_ids}
+                manifests_by_scene = {sid: manifest for sid in scene_ids}
     except Exception:  # noqa: BLE001 - a read model must never fail a page
         manifests_by_scene = {}
     overview = build_project_workflow_overview(

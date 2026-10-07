@@ -10,7 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from app.providers.catalog_seed_data import hash_manifest
+from app.providers.catalog_loader import hash_manifest
 from app.providers.intents import ImageGenerationIntent, VideoGenerationIntentV1
 from app.providers.manifest import ModelCapabilityManifest
 from app.providers.normalizer import normalize_image, normalize_video
@@ -64,11 +64,7 @@ def _reference_errors(
     references: list[PreviewReference],
 ) -> list[str]:
     expected = (
-        (
-            [("reference_image", intent.reference_artifact_id)]
-            if intent.reference_artifact_id
-            else []
-        )
+        [("reference_image", reference_id) for reference_id in intent.selected_reference_ids()]
         if isinstance(intent, ImageGenerationIntent)
         else [(r.role, r.artifact_id) for r in intent.references]
     )
@@ -206,7 +202,7 @@ async def preview_compile(
                 spec.mode_spec(intent.mode_id)
             except ValueError:
                 errors.append("MODE_UNSUPPORTED")
-        elif intent.mode_id not in {None, "legacy", "explicit_binding"}:
+        elif intent.mode_id not in {None, "default", "explicit_binding"}:
             errors.append("MODE_UNSUPPORTED")
     if not invoke_model_value.strip():
         errors.append("MODEL_IDENTITY_MISSING")

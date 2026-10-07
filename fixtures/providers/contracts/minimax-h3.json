@@ -9,13 +9,20 @@
       "host": "https://api.minimaxi.com",
       "method": "POST",
       "path": "/v2/video_generation",
-      "poll": {"task_id": "GET /v2/query/video_generation/{id}"},
+      "poll": {
+        "task_id": "GET /v2/query/video_generation/{id}"
+      },
       "request_body": {
         "aigc_watermark": false,
         "content": [
-          {"text": "<prompt>", "type": "text"},
           {
-            "image_url": {"url": "https://dramaforge.example/api/v1/provider-references/<token>"},
+            "text": "<prompt>",
+            "type": "text"
+          },
+          {
+            "image_url": {
+              "url": "https://dramaforge.example/api/v1/provider-references/<token>"
+            },
             "role": "first_frame",
             "type": "image_url"
           }
@@ -27,52 +34,87 @@
       },
       "text_to_video_request_body": {
         "aigc_watermark": false,
-        "content": [{"text": "<prompt>", "type": "text"}],
+        "content": [
+          {
+            "text": "<prompt>",
+            "type": "text"
+          }
+        ],
         "duration": 5,
         "model": "MiniMax-H3",
         "ratio": "16:9",
         "resolution": "2K"
       },
-      "status_machine": ["queued", "running", "succeeded"],
-      "success_response": {"task_id": "task-..."}
+      "status_machine": [
+        "queued",
+        "running",
+        "succeeded"
+      ],
+      "success_response": {
+        "task_id": "task-..."
+      }
     }
   },
   "manifest": {
-    "catalog_source": "official_static",
-    "display_name": "MiniMax H3",
-    "documented_at": "2026-09-29",
-    "lifecycle": "active",
     "manifest_version": "2026-09-29",
-    "media_kind": "video",
+    "provider_type": "minimax",
+    "protocol_profile": "minimax_cn_v1",
     "model_id": "MiniMax-H3",
-    "model_revision": "v2",
+    "model_revision": "v4",
+    "media_kind": "video",
+    "display_name": "MiniMax H3",
+    "lifecycle": "active",
+    "catalog_source": "official_static",
+    "documented_at": "2026-09-29",
     "operations": {
       "video.generate": {
-        "capabilities": ["video.i2v.first_frame", "video.t2v"],
-        "exclusive_groups": [],
         "operation": "video.generate",
+        "capabilities": [
+          "video.i2v.first_frame",
+          "video.t2v"
+        ],
         "output_constraints": {
           "modes": {
             "first_frame": {
-              "aspect_ratio": "adaptive",
+              "resolution": "768P",
               "duration_seconds": 5,
-              "native_audio": false,
-              "resolution": "768P"
+              "aspect_ratio": "adaptive",
+              "native_audio": false
             },
             "text_to_video": {
-              "aspect_ratio": {"allowed": ["9:16", "16:9"]},
+              "resolution": "2K",
               "duration_seconds": 5,
-              "native_audio": true,
-              "resolution": "2K"
+              "aspect_ratio": {
+                "allowed": [
+                  "9:16",
+                  "16:9"
+                ]
+              },
+              "native_audio": true
             }
           }
         },
-        "reference_constraints": {"first_frame": {"max": 1, "min": 0}}
+        "reference_constraints": {
+          "first_frame": {
+            "min": 0,
+            "max": 1
+          }
+        },
+        "exclusive_groups": []
       }
     },
-    "option_schema": {"namespace": "", "options": {}},
-    "protocol_profile": "minimax_cn_v1",
-    "provider_type": "minimax"
+    "option_schema": {
+      "namespace": "",
+      "options": {}
+    },
+    "implementation_status": "contract_tested",
+    "evidence": {
+      "current_contract": {
+        "source_type": "contract_fixture",
+        "source_url": "repository:backend/tests/unit",
+        "checked_at": "2026-10-07"
+      }
+    }
   },
-  "manifest_hash": "c895be383ff6293d5edb2baaee2acc2907b8bebeca91491fbc2bf1a6ae5ccdf3"
+  "manifest_hash": "d396524de99e0d65868f8291caaf1acf14c7f5383e15e77a277cf37b7bb4c3a6"
 }

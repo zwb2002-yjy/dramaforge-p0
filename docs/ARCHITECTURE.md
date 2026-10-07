@@ -41,7 +41,6 @@ Updated: 2026-10-07；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 | References | backend/app/contracts/shot_reference.py, production/reference_intents.py and api/v1/references.py | shared intent, explicit binding, compilation, model capability gaps | name/prompt fallback |
 | Workbench | backend/app/workbench and backend/app/production/workbench_execution.py | workspace state, frozen execution plan and NodeRun creation | direct Provider HTTP, budget gate |
 | Production graph | backend/app/production | graph versions, branches, formal selection, repair plans, Final Film and timeline rendering | HTTP/API concerns, silent rerun |
-| Archived storage | backend/app/production/archive_models.py | historical experiment mappings registered for migration parity only | frontend contracts, runtime reads/writes or adoption |
 | Runtime | backend/app/execution (module responsibilities in PRODUCTION_RUNTIME.md) | Worker execution, lineage, artifact persistence, shot locks | HTTP/API concerns, old branches |
 | Director Assistant | backend/app/director/assistant_models.py, suggestion.py, proposal_* | suggestions, threads, typed proposal/apply boundary | media, budgets, workflow ownership |
 | Director runtime | backend/app/director/runtime and backend/app/workers/director.py | turn/invocation identity, engine routing, checkpoints, wakeups, resume fencing | Canonical media writes or bypassing Apply/Save/Formal gates |

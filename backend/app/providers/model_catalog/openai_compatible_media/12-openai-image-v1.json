@@ -3,7 +3,7 @@
   "provider_type": "openai_compatible_media",
   "protocol_profile": "openai_media_v1",
   "model_id": "@contract/openai-image-v1",
-  "model_revision": "v1",
+  "model_revision": "v2",
   "media_kind": "image",
   "display_name": "OpenAI 兼容图像协议",
   "lifecycle": "active",
@@ -32,5 +32,13 @@
   "option_schema": {
     "namespace": "",
     "options": {}
+  },
+  "implementation_status": "contract_tested",
+  "evidence": {
+    "current_contract": {
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit",
+      "checked_at": "2026-10-07"
+    }
   }
 }

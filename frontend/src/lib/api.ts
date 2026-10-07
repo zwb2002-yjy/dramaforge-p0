@@ -151,10 +151,7 @@ export function listProviderPlugins(): Promise<ProviderPluginRead[]> {
 }
 
 export type ProviderProbeRead = components["schemas"]["ProbeRead"];
-export type ProviderModelBindingRead = components["schemas"]["ModelBindingRead"] & {
-  /** @deprecated historical fixture compatibility; pricing is owned by Provider. */
-  pricing_snapshot?: Record<string, unknown>;
-};
+export type ProviderModelBindingRead = components["schemas"]["ModelBindingRead"];
 export type ProviderQualityEvidenceRead = components["schemas"]["QualityEvidenceRead"];
 export type ProjectProviderBindingRead = components["schemas"]["ProjectBindingRead"];
 

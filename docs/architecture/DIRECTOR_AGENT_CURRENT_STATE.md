@@ -5,8 +5,8 @@ Status: current-reference。本文是 [DIRECTOR_RUNTIME](../DIRECTOR_RUNTIME.md)
 的详细源码视图，不建立第二套领域权威。目标接口见 [目标架构](DIRECTOR_AGENT_TARGET_ARCHITECTURE.md)，
 未实现工作见 [实施计划](DIRECTOR_AGENT_IMPLEMENTATION_PLAN.md)。这不是发布验收记录。
 
-源码同步日期：2026-10-07。模型目录与协议合同已改为文件加载，模型系统 expand 的
-Policy/Protocol/Handler 存储及只读预检已存在；新 Cutover 链尚未接入生产执行。
+源码同步日期：2026-10-07。模型目录与协议合同已改为文件加载，媒体统一使用具体 Binding、冻结 WorkbenchExecutionPlan 与 ExecutionIdentity；
+未接入执行的第二套 Cutover / Policy / Handler 存储和预检已删除。
 这些变化不等于本文讨论的 Agent Loop / ToolRegistry 已实现，能力细节见
 [模型指南](MODEL_CAPABILITY_PROMPT_COMPILER.md) 与 [模型权威](../MODEL_PROVIDER.md)。
 
@@ -79,7 +79,7 @@ system 明确禁止 SQL、凭据、Provider/runtime 字段和媒体执行命令�
 [executor](../../backend/app/director/runtime/executor.py)、
 [worker](../../backend/app/workers/director.py)、
 [projector](../../backend/app/director/runtime/projector.py)。
-`legacy` 是仍然有效的现存执行身份；环境设置只决定新轮次，不允许恢复时静默换引擎。
+只有 LangGraph 是可执行身份；缺失或不支持的身份拒绝执行，不迁移到另一种引擎。
 
 ### 2.3 图节点逐项审计
 
@@ -140,7 +140,7 @@ unknown submission 不等于可安全 retry。Director 不拥有上述生产状�
 |---|---|---|
 | `DirectorThread` / `DirectorMessage` | 会话事实 | project/scope 唯一 thread；不是模型 turn 调度器。当前 Turn 无 thread_id 外键，不能宣称已串起完整 Agent transcript |
 | `DirectorTurn` identity、request_key、context_hash、input_versions | 业务轮次与冻结输入权威 | 保留现有 CAS、deadline、输出恢复；不用新的 AgentSession 重建 |
-| 未绑定图的 Turn.status/revision | 既有文本/legacy 状态机事实 | 不可用 langgraph 投影假设覆盖 |
+| 未绑定图的 Turn.status/revision | 业务观察与文本结果的状态事实 | 不可用 langgraph 投影假设覆盖 |
 | 绑定图的 Turn.status/wait_reason/step_count | Runtime 的持久外部投影 | `DirectorRuntimeProjector` 校验 engine/state version、runtime_revision、终态；投影不是另一份可自行推进的 workflow |
 | `DirectorTurn.revision` vs `runtime_revision` | 分别为 Turn CAS 与引擎投影水位 | 不能当同一版本比较或合并；图推进一次与 Turn 写一次不是必然一对一 |
 | `RuntimeView` | 传输投影 DTO | 不是独立数据库状态机 |

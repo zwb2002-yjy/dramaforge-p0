@@ -22,8 +22,12 @@ def test_build_request_summary_has_four_canonical_keys() -> None:
             {"role": "first_frame", "artifact_id": str(uuid4()), "status": "exact"}
         ],
     )
-    canonical = ("translation_report", "effective_request_redacted",
-                "reference_delivery", "semantic_fingerprint")
+    canonical = (
+        "translation_report",
+        "effective_request_redacted",
+        "reference_delivery",
+        "semantic_fingerprint",
+    )
     assert set(canonical).issubset(summary)
     assert summary["effective_request_redacted"] == {"prompt": "..."}
     assert len(summary["semantic_fingerprint"]) == 64
@@ -36,28 +40,13 @@ def test_build_request_summary_rejects_secrets() -> None:
         build_request_summary(effective_request_redacted={"Authorization": "Bearer x"})
 
 
-def test_normalize_request_summary_folds_legacy_keys() -> None:
-    artifact_id = str(uuid4())
-    summary = normalize_request_summary(
-        {
-            "kind": "keyframe",
-            "effective_request": {"prompt": "p"},
-            "reference_artifact_ids": [artifact_id],
-        }
-    )
-    assert "effective_request_redacted" in summary
-    # legacy key is preserved for backward compatibility
-    assert summary["effective_request"] == {"prompt": "p"}
-    assert summary["effective_request_redacted"] == {"prompt": "p"}
-    assert summary["reference_delivery"] == [
-        {"role": "reference", "artifact_id": artifact_id, "status": "delivered"}
-    ]
-    assert "semantic_fingerprint" in summary
-    assert len(summary["semantic_fingerprint"]) == 64
+def test_normalize_request_summary_rejects_retired_keys() -> None:
+    with pytest.raises(RequestSummaryError, match="retired"):
+        normalize_request_summary({"effective_request": {"prompt": "p"}})
 
 
 def test_normalize_request_summary_is_idempotent() -> None:
-    first = normalize_request_summary({"effective_request": {"prompt": "p"}})
+    first = normalize_request_summary({"effective_request_redacted": {"prompt": "p"}})
     second = normalize_request_summary(first)
     assert first["semantic_fingerprint"] == second["semantic_fingerprint"]
 

@@ -143,9 +143,7 @@ async def test_new_input_contract_supplies_reference_role_eligibility() -> None:
                 "capabilities": ["video.i2v.first_frame"],
                 "reference_constraints": {},
                 "input_contracts": {
-                    "formal": {
-                        "input_slots": {"first_frame": {"minimum": 1, "maximum": 1}}
-                    }
+                    "formal": {"input_slots": {"first_frame": {"minimum": 1, "maximum": 1}}}
                 },
             }
         }
@@ -241,8 +239,7 @@ async def test_required_capability_missing_is_ineligible() -> None:
     )
     assert evaluation.eligible is False
     assert any(
-        issue.code == "CAPABILITY_REQUIRED_MISSING"
-        and issue.detail == "video.i2v.last_frame"
+        issue.code == "CAPABILITY_REQUIRED_MISSING" and issue.detail == "video.i2v.last_frame"
         for issue in evaluation.issues
     )
 
@@ -260,8 +257,7 @@ async def test_reference_role_above_constraint_is_ineligible() -> None:
     )
     assert evaluation.eligible is False
     assert any(
-        issue.code == "CAPABILITY_REQUIRED_MISSING"
-        and "last_frame" in issue.detail
+        issue.code == "CAPABILITY_REQUIRED_MISSING" and "last_frame" in issue.detail
         for issue in evaluation.issues
     )
 
@@ -352,7 +348,8 @@ async def test_lifecycle_and_catalog_mismatch_are_ineligible() -> None:
         catalog_entry=entry,
         operation=VIDEO_GENERATE,
     )
-    assert still_supported.eligible is True
+    assert still_supported.eligible is False
+    assert any(issue.code == "MODEL_LIFECYCLE_INACTIVE" for issue in still_supported.issues)
 
     ark_entry = ModelCatalogEntry(
         id=uuid4(),

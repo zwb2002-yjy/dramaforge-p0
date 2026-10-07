@@ -3138,8 +3138,8 @@ export interface components {
              * @default both
              */
             stage: string;
-            /** Shot Experiment Id */
-            shot_experiment_id?: string | null;
+            /** Experiment Branch Id */
+            experiment_branch_id?: string | null;
             /** Asset Id */
             asset_id?: string | null;
             /** Asset Version Id */
@@ -3188,8 +3188,8 @@ export interface components {
             expected_version: number;
             /** Stage */
             stage?: string | null;
-            /** Shot Experiment Id */
-            shot_experiment_id?: string | null;
+            /** Experiment Branch Id */
+            experiment_branch_id?: string | null;
             /** Asset Id */
             asset_id?: string | null;
             /** Asset Version Id */
@@ -8000,8 +8000,8 @@ export interface components {
              * Format: uuid
              */
             shot_id: string;
-            /** Shot Experiment Id */
-            shot_experiment_id?: string | null;
+            /** Experiment Branch Id */
+            experiment_branch_id?: string | null;
             /**
              * Stage
              * @enum {string}
@@ -8167,8 +8167,8 @@ export interface components {
              * Format: uuid
              */
             shot_id: string;
-            /** Shot Experiment Id */
-            shot_experiment_id: string | null;
+            /** Experiment Branch Id */
+            experiment_branch_id: string | null;
             /** Stage */
             stage: string;
             /** Asset Id */

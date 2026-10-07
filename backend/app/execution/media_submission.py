@@ -22,7 +22,6 @@ from app.execution.run_state import (
 )
 from app.production.execution_plan import WorkbenchExecutionPlan
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.connection_service import ProviderConnectionService
 from app.providers.execution_identity import (
     ExecutionIdentityReference,
     ExecutionIdentitySnapshot,
@@ -50,7 +49,7 @@ from app.providers.runtime import (
     ProviderRuntimeResolver,
     ResolvedReference,
 )
-from app.providers.selection import ModelSelectionService, SelectionPlan
+from app.providers.selection import SelectionPlan
 from app.providers.translation import RequestTransformation
 from app.providers.workbench_contract import select_workbench_contract
 from app.shared.db import set_node_run_rls_context
@@ -135,6 +134,15 @@ async def prepare_media_submission(
     The same frozen identity is revalidated on a rejected-operation retry. The
     transaction commit deliberately precedes the caller's paid network boundary.
     """
+    if (
+        frozen_identity is None
+        and workbench_plan is None
+        and not isinstance(snap.get("execution_model_resolution"), dict)
+    ):
+        raise ValidationAppError(
+            "Media execution requires a frozen execution plan",
+            details={"code": "EXECUTION_PLAN_REQUIRED"},
+        )
     workbench_planned_references = (
         list(workbench_plan.planned_references) if workbench_plan is not None else []
     )
@@ -211,7 +219,9 @@ async def prepare_media_submission(
             size=None,
             aspect_ratio=image_ratio,
             seed=None,
-            reference_artifact_id=reference_uuid,
+            reference_artifact_ids=[
+                reference_id for reference_id in [(reference_uuid)] if reference_id is not None
+            ],
             reference_fingerprint=(
                 workbench_image_reference.fingerprint
                 if workbench_image_reference is not None
@@ -332,7 +342,6 @@ async def prepare_media_submission(
             ),
         )
 
-    service = ModelSelectionService(session)
     raw_frozen_selection = (
         op.selection_plan
         if op is not None and isinstance(op.selection_plan, dict)
@@ -555,71 +564,74 @@ async def prepare_media_submission(
                 mode="json"
             )
         else:
-            if node_type == "keyframe":
-                assert image_intent is not None
-                plan = await service.select_image(
-                    project=project,
-                    intent=image_intent,
-                )
-            else:
-                assert video_intent is not None
-                plan = await service.select_video(
-                    project=project,
-                    intent=video_intent,
-                )
-            if frozen_binding_id is not None and plan.model_binding_id != frozen_binding_id:
+            # Experiment graphs defer upstream artifacts, but freeze the same
+            # model/connection/credential identity at acceptance. Never select
+            # a model or current connection revision in the worker.
+            frozen_resolution = ExecutionModelResolution.model_validate(
+                snap.get("execution_model_resolution")
+            )
+            if frozen_resolution.status != "RESOLVED":
+                raise ValidationAppError("Frozen model resolution is unavailable")
+            if frozen_resolution.provider_model_binding_id != frozen_binding_id:
+                raise ValidationAppError("Frozen model binding identity differs")
+            connection = await session.get(
+                ProviderConnection,
+                frozen_resolution.provider_connection_id,
+            )
+            binding = await session.get(
+                ProviderModelBinding,
+                frozen_resolution.provider_model_binding_id,
+            )
+            entry = await session.get(ModelCatalogEntry, frozen_resolution.catalog_entry_id)
+            if connection is None or binding is None or entry is None:
+                raise ValidationAppError("Frozen model identity is unavailable")
+            from app.providers.eligibility import evaluate_candidate
+
+            evaluation = await evaluate_candidate(
+                session,
+                binding=binding,
+                connection=connection,
+                catalog_entry=entry,
+                operation="image.generate" if node_type == "keyframe" else "video.generate",
+            )
+            if not evaluation.eligible:
                 raise ValidationAppError(
-                    "unified selection changed the frozen model binding",
-                    details={"code": "MODEL_BINDING_SNAPSHOT_MISMATCH"},
+                    "Frozen model is no longer eligible",
+                    details={"issues": [issue.code for issue in evaluation.issues]},
                 )
+            resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_resolution(
+                resolution=frozen_resolution,
+                workspace_id=project.workspace_id,
+            )
+            connection_revision = await session.get(
+                ProviderConnectionRevision,
+                frozen_resolution.provider_connection_revision_id,
+            )
+            if connection_revision is None:
+                raise ValidationAppError("Frozen connection revision is unavailable")
+            plan = SelectionPlan(
+                intent_hash=run.input_hash,
+                purpose="keyframe" if node_type == "keyframe" else "video",
+                mode="explicit_binding",
+                mode_id=frozen_resolution.mode_id or "explicit_binding",
+                model_binding_id=binding.id,
+                connection_id=connection.id,
+                provider_type=connection.provider_type,
+                protocol_profile=connection.protocol_profile,
+                catalog_entry_id=entry.id,
+                model_id=frozen_resolution.resolved_model_id,
+                invoke_model_value=frozen_resolution.invoke_model_value,
+                execution_model_resolution=frozen_resolution,
+                manifest_hash=frozen_resolution.manifest_hash,
+            )
             selection_snapshot = json.loads(json.dumps(asdict(plan), default=str))
-            selection_snapshot["execution_model_resolution"] = (
-                plan.execution_model_resolution.model_dump(mode="json")
+            selection_snapshot["execution_model_resolution"] = frozen_resolution.model_dump(
+                mode="json"
             )
             invoke_model_value = plan.invoke_model_value
             provider_type = plan.provider_type
             protocol_profile = plan.protocol_profile
-            if invoke_model_value is None or provider_type is None or protocol_profile is None:
-                raise ValidationAppError("unified selection has no model/provider identity")
-            connection = await session.get(ProviderConnection, plan.connection_id)
-            binding = await session.get(ProviderModelBinding, plan.model_binding_id)
-            entry = await session.get(ModelCatalogEntry, plan.catalog_entry_id)
-            if connection is None or binding is None or entry is None:
-                raise ValidationAppError(
-                    "unified selection references missing connection/binding/catalog",
-                    details={"code": "MODEL_BINDING_MISSING"},
-                )
             pricing_currency = _binding_pricing_currency(binding, required=False)
-            connection_revision = await ProviderConnectionService(
-                session
-            ).current_connection_revision(connection=connection)
-            if connection_revision is None:
-                raise ValidationAppError(
-                    "unified selection has no provider connection revision",
-                    details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
-                )
-            resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_resolution(
-                resolution=plan.execution_model_resolution,
-                workspace_id=project.workspace_id,
-                connection_revision_id=connection_revision.id,
-                credential_revision_id=connection_revision.credential_revision_id,
-            )
-            if (
-                resolved.binding is None
-                or resolved.catalog_entry is None
-                or resolved.invoke_model_value is None
-            ):
-                raise ValidationAppError(
-                    "binding-based runtime resolution returned incomplete identity",
-                    details={"code": "MODEL_RUNTIME_IDENTITY_INVALID"},
-                )
-            connection = resolved.connection
-            binding = resolved.binding
-            entry = resolved.catalog_entry
-            invoke_model_value = resolved.invoke_model_value
-            provider_type = connection.provider_type
-            protocol_profile = connection.protocol_profile
-            runtime = resolved.runtime
 
     if frozen_identity is None:
         snap = {
@@ -1091,7 +1103,7 @@ async def prepare_media_submission(
                         else {}
                     ),
                     "compiled_request": compiled.safe_request_summary,
-                    "effective_request": effective_request,
+                    "effective_request_redacted": effective_request,
                     "translation_report": translation_report,
                     "reference_artifact_ids": [
                         str(value) for value in compiled.reference_artifact_ids

@@ -61,9 +61,9 @@ class Settings(BaseSettings):
         default=False,
         description="Enable TLS for PostgreSQL connections; local Compose defaults to false",
     )
-    director_runtime_engine: Literal["legacy", "langgraph"] = Field(
-        default="legacy",
-        description="Engine assigned only to newly started Director turns",
+    director_runtime_engine: Literal["langgraph"] = Field(
+        default="langgraph",
+        description="The single durable Director execution engine",
     )
     director_checkpoint_database_url: str = Field(
         default="",
@@ -176,12 +176,12 @@ class Settings(BaseSettings):
         ),
     )
     litellm_api_key: str = Field(default="", description="LiteLLM Gateway API key")
-    # Logical alias the ``litellm/text-llm`` bootstrap bridge sends to the
+    # Logical alias the ``litellm/script-quality`` bootstrap bridge sends to the
     # gateway (fix spec §32/§33). DramaForge
     # requests the logical group, the LiteLLM Router picks the deployment.
     litellm_text_gateway_model: str = Field(
-        default="legacy-text",
-        description="Logical gateway model alias used by the litellm/text-llm bridge",
+        default="script-quality",
+        description="Logical gateway model alias used by the litellm/script-quality bridge",
     )
     # Static logical aliases registered as ``litellm/<alias>`` text models
     # (fix spec §34/§41/§104). Profile slots (planning.brief/script/storyboard)

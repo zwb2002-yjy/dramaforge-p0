@@ -189,7 +189,7 @@ async def test_protocol_contract_keeps_discovered_model_as_runtime_identity(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("lifecycle", ["legacy", "deprecated"])
-async def test_verified_existing_binding_can_use_old_catalog_revision(
+async def test_old_catalog_revision_cannot_create(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
     lifecycle: str,
@@ -204,11 +204,12 @@ async def test_verified_existing_binding_can_use_old_catalog_revision(
         "app.providers.registry.get_plugin",
         lambda provider_type, protocol_profile: _plugin(runtime_calls),
     )
-    resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_model_binding(
-        model_binding_id=binding_a.id
-    )
-    assert resolved.binding is not None and resolved.binding.id == binding_a.id
-    assert len(runtime_calls) == 1
+    with pytest.raises(ValidationAppError) as blocked:
+        await ProviderRuntimeResolver(session).resolve_runtime_for_model_binding(
+            model_binding_id=binding_a.id,
+        )
+    assert "CATALOG_LIFECYCLE_UNACCEPTABLE" in blocked.value.details["reasons"]
+    assert runtime_calls == []
 
 
 @pytest.mark.asyncio

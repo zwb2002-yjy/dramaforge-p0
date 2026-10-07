@@ -91,9 +91,7 @@ class ExperimentBranch(Base):
     comparison: Mapped[dict[str, object]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=dict
     )
-    adopted_shot_ids: Mapped[list[str]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=list
-    )
+    adopted_shot_ids: Mapped[list[str]] = mapped_column(JSON_DOCUMENT, nullable=False, default=list)
     parameters: Mapped[dict[str, object]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=dict
     )
@@ -121,15 +119,11 @@ class DirectorBoardState(Base):
         ForeignKey("shots.id", ondelete="CASCADE"), nullable=False
     )
     mode: Mapped[str] = mapped_column(String(16), nullable=False, default="2d")
-    camera: Mapped[dict[str, object]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=dict
-    )
+    camera: Mapped[dict[str, object]] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
     characters: Mapped[list[dict[str, object]]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=list
     )
-    scene: Mapped[dict[str, object]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=dict
-    )
+    scene: Mapped[dict[str, object]] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     updated_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
@@ -187,7 +181,6 @@ def assert_graph_version_mutable(version: GraphVersion) -> None:
 
 # Backward-compatible alias used by older imports during transition.
 Graph = ProductionGraph
-
 
 
 SHOT_REFERENCE_PURPOSES = (
@@ -257,7 +250,7 @@ class ShotReferenceBinding(Base):
     shot_id: Mapped[UUID] = mapped_column(
         ForeignKey("shots.id", ondelete="RESTRICT"), nullable=False
     )
-    shot_experiment_id: Mapped[UUID | None] = mapped_column(
+    experiment_branch_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("experiment_branches.id", ondelete="SET NULL"), nullable=True
     )
     stage: Mapped[str] = mapped_column(String(16), nullable=False, default="both")
@@ -321,9 +314,7 @@ class RepairRequest(Base):
     option: Mapped[str] = mapped_column(String(40), nullable=False)
     plan_schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     plan_hash: Mapped[str] = mapped_column(HASH_64, nullable=False)
-    annotation_ids: Mapped[list[str]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=list
-    )
+    annotation_ids: Mapped[list[str]] = mapped_column(JSON_DOCUMENT, nullable=False, default=list)
     annotation_summary: Mapped[dict[str, object]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=dict
     )
@@ -369,9 +360,7 @@ class RepairStep(Base):
     confirmed_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    confirmed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     adopted_artifact_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True
     )
@@ -400,7 +389,3 @@ Index(
     RepairStep.__table__.c.ordinal,
 )
 Index("ix_shot_reference_bindings_shot", ShotReferenceBinding.__table__.c.shot_id)
-
-# Register Production-owned policy history through the existing Production ORM
-# entrypoint, keeping shared.model_registry's domain dependency stable.
-from app.production import policy_models as policy_models  # noqa: E402

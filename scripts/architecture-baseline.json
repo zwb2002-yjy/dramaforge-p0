@@ -273,21 +273,6 @@
       "reason": "Existing Provider execution facts/business coupling; ARCHITECTURE_MAPPING §4."
     },
     {
-      "from": "app.providers.generation_service",
-      "to": "app.execution.models",
-      "reason": "Existing Provider execution facts/business coupling; ARCHITECTURE_MAPPING §4."
-    },
-    {
-      "from": "app.providers.generation_service",
-      "to": "app.production.service",
-      "reason": "Existing Provider execution facts/business coupling; ARCHITECTURE_MAPPING §4."
-    },
-    {
-      "from": "app.providers.generation_service",
-      "to": "app.runtime.scheduler",
-      "reason": "Existing Provider execution facts/business coupling; ARCHITECTURE_MAPPING §4."
-    },
-    {
       "from": "app.providers.reference_delivery",
       "to": "app.execution.branches",
       "reason": "Existing Provider execution facts/business coupling; ARCHITECTURE_MAPPING §4."
@@ -350,11 +335,6 @@
     {
       "from": "app.shared.model_registry",
       "to": "app.execution.models",
-      "reason": "Existing RLS scope discovery and model composition roots; ARCHITECTURE_MAPPING §4."
-    },
-    {
-      "from": "app.shared.model_registry",
-      "to": "app.production.archive_models",
       "reason": "Existing RLS scope discovery and model composition roots; ARCHITECTURE_MAPPING §4."
     },
     {

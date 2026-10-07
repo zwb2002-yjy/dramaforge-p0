@@ -152,3 +152,7 @@ docker compose --profile maintenance run --rm maintenance restore-verify \
 - 完整门先从当前后端导出 OpenAPI，再运行 `api:check`，重生成并逐字节比较
   `frontend/src/shared/api/generated.ts`；`api:authority` 同时拒绝 API client 中同名或异名手写的
   API schema。检查不会改写提交中的 generated.ts。
+
+未发布开发实例统一使用 `dramaforge-dev` Compose 项目和当前源码构建镜像；
+镜像、API、Workers 与 `DRAMAFORGE_SOURCE_COMMIT` 必须对应同一提交，不挂载其它 worktree
+充当新实例。旧项目数据卷单独保管，不能自动合并或启动旧任务。

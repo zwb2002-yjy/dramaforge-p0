@@ -265,7 +265,10 @@ test("in-page return remains available with the sidebar closed and on direct lin
   await page.getByTestId("workspace-return").getByRole("link", { name: "返回场景" }).click();
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/scenes`);
   await page.goto(`/settings/account?returnTo=${encodeURIComponent(scenePath)}`);
-  await page.getByRole("link", { name: "设置", exact: true }).click();
+  await expect(page.getByRole("link", { name: "设置", exact: true })).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
   const returnToCreation = page
     .getByTestId("workspace-return")
     .getByRole("link", { name: "返回创作" });
@@ -273,7 +276,10 @@ test("in-page return remains available with the sidebar closed and on direct lin
   await returnToCreation.click();
   await expect(page).toHaveURL(scenePath);
   await page.goto("/settings/account");
-  await page.getByRole("link", { name: "设置", exact: true }).click();
+  await expect(page.getByRole("link", { name: "设置", exact: true })).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
   await page.getByTestId("workspace-return").getByRole("link", { name: "返回项目大厅" }).click();
   await expect(page).toHaveURL("/");
   expect(writes).toEqual([]);

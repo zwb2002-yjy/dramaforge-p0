@@ -71,8 +71,6 @@ def test_agnes_plugin_is_implemented() -> None:
     plugin = get_plugin("agnes", "agnes_cn_v1")
     assert plugin.implemented is True
     assert plugin.default_base_url == "https://api.agnes-ai.cn"
-    assert plugin.model_contracts[("image", "keyframe")] == "agnes-image-2.1-flash"
-    assert plugin.model_contracts[("video", "video")] == "agnes-video-v2.0"
     assert plugin.capability_purposes == {"image_i2i": "keyframe", "video_i2v": "video"}
 
 
@@ -82,8 +80,6 @@ def test_ark_plugin_is_implemented() -> None:
     plugin = get_plugin("volcengine", "ark_cn_v1")
     assert plugin.implemented is True
     assert plugin.default_base_url == "https://ark.cn-beijing.volces.com/api/v3"
-    assert plugin.model_contracts[("image", "keyframe")] == "doubao-seedream-4-0-250828"
-    assert plugin.model_contracts[("video", "video")] == "doubao-seedance-2-0-260128"
     # The implemented plugin must build a real Ark protocol client.
     client = plugin.build_client(Settings())
     assert isinstance(client, ArkHubClient)
@@ -97,8 +93,6 @@ def test_minimax_plugin_is_implemented() -> None:
     plugin = get_plugin("minimax", "minimax_cn_v1")
     assert plugin.implemented is True
     assert plugin.default_base_url == "https://api.minimaxi.com"
-    assert plugin.model_contracts[("image", "keyframe")] == "image-01"
-    assert plugin.model_contracts[("video", "video")] == "MiniMax-H3"
     assert plugin.capability_purposes == {"image_i2i": "keyframe", "video_i2v": "video"}
     assert plugin.image_i2i_probe_transport == "public_url"
     assert isinstance(plugin.build_client(Settings()), MiniMaxHubClient)
@@ -172,10 +166,6 @@ def _fake_plugin() -> ProviderPlugin:
         implemented=True,
         settings_prefix="agnes",
         credential_provider_key="agnes",
-        model_contracts={
-            ("image", "keyframe"): "fake-img-model",
-            ("video", "video"): "fake-vid-model",
-        },
         capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
         paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
         model_list_path="/v1/models",
@@ -227,8 +217,8 @@ async def test_plugin_extension_needs_no_service_branch(
     _byok_env(monkeypatch)
     from datetime import date
 
+    from app.providers.catalog_loader import hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import hash_manifest
 
     user, workspace = await _seed_owner(session)
     service = ProviderConnectionService(session)
@@ -350,8 +340,8 @@ async def test_auth_models_verifies_only_bindings_listed_by_provider(
 ) -> None:
     from datetime import date
 
+    from app.providers.catalog_loader import hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import hash_manifest
 
     _byok_env(monkeypatch)
     user, workspace = await _seed_owner(session)
@@ -460,8 +450,8 @@ async def test_binding_scoped_evidence_projection_only_advances_exact_binding(
     """A scoped evidence projection must never certify a sibling model."""
     from datetime import date
 
+    from app.providers.catalog_loader import hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import hash_manifest
 
     _byok_env(monkeypatch)
     user, workspace = await _seed_owner(session)

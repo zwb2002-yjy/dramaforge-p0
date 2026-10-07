@@ -12,8 +12,7 @@ from app.providers.capability_resolver import (
     ProductCapabilityPolicy,
     ReferenceMetadata,
 )
-from app.providers.catalog_loader import ModelCatalogLoader
-from app.providers.catalog_seed_data import SEED_MANIFESTS
+from app.providers.catalog_loader import CATALOG_MODELS, ModelCatalogLoader
 from app.providers.intents import (
     ArtifactReferenceIntent,
     ModelSelectionIntent,
@@ -24,7 +23,7 @@ from app.providers.manifest import ModelCapabilityManifest
 
 
 def _manifest() -> ModelCapabilityManifest:
-    source = next(item for item in SEED_MANIFESTS if item["model_id"] == "MiniMax-H3")
+    source = next(item for item in CATALOG_MODELS if item["model_id"] == "MiniMax-H3")
     data = deepcopy(source)
     data["model_revision"] = "contract-test"
     operation = data["operations"]["video.generate"]
@@ -88,32 +87,42 @@ def _resolve(
     *,
     allowed: frozenset[str] = frozenset({"text", "frames", "references"}),
 ) -> str:
-    return CapabilityResolver().resolve(
-        manifest=manifest,
-        intent=intent,
-        reference_metadata=metadata,
-        policy=ProductCapabilityPolicy(allowed_contracts=allowed),
-    ).matched_contract
+    return (
+        CapabilityResolver()
+        .resolve(
+            manifest=manifest,
+            intent=intent,
+            reference_metadata=metadata,
+            policy=ProductCapabilityPolicy(allowed_contracts=allowed),
+        )
+        .matched_contract
+    )
 
 
 def test_resolver_matches_exactly_one_contract_from_inputs() -> None:
     manifest = _manifest()
     assert _resolve(manifest, _intent(), []) == "text"
     frame = uuid4()
-    assert _resolve(
-        manifest,
-        _intent([(frame, "first_frame")]),
-        [ReferenceMetadata(artifact_id=frame, mime_type="image/png")],
-    ) == "frames"
+    assert (
+        _resolve(
+            manifest,
+            _intent([(frame, "first_frame")]),
+            [ReferenceMetadata(artifact_id=frame, mime_type="image/png")],
+        )
+        == "frames"
+    )
     image, video = uuid4(), uuid4()
-    assert _resolve(
-        manifest,
-        _intent([(image, "reference_image"), (video, "reference_video")]),
-        [
-            ReferenceMetadata(artifact_id=image, mime_type="image/png"),
-            ReferenceMetadata(artifact_id=video, mime_type="video/mp4", duration_seconds=8),
-        ],
-    ) == "references"
+    assert (
+        _resolve(
+            manifest,
+            _intent([(image, "reference_image"), (video, "reference_video")]),
+            [
+                ReferenceMetadata(artifact_id=image, mime_type="image/png"),
+                ReferenceMetadata(artifact_id=video, mime_type="video/mp4", duration_seconds=8),
+            ],
+        )
+        == "references"
+    )
 
 
 def test_resolver_rejects_frame_reference_conflict_and_count_overflow() -> None:
@@ -125,9 +134,7 @@ def test_resolver_rejects_frame_reference_conflict_and_count_overflow() -> None:
             _intent([(first, "first_frame"), (reference, "reference_video")]),
             [
                 ReferenceMetadata(artifact_id=first, mime_type="image/png"),
-                ReferenceMetadata(
-                    artifact_id=reference, mime_type="video/mp4", duration_seconds=5
-                ),
+                ReferenceMetadata(artifact_id=reference, mime_type="video/mp4", duration_seconds=5),
             ],
         )
     assert conflict.value.code == "MODEL_INPUT_COMBINATION_UNSUPPORTED"
@@ -150,15 +157,18 @@ def test_seedance_25_preview_contract_records_official_reference_limits() -> Non
     assert manifest.lifecycle == "preview"
     video_a, video_b = uuid4(), uuid4()
     roles = [(video_a, "reference_video"), (video_b, "reference_video")]
-    assert _resolve(
-        manifest,
-        _intent(roles),
-        [
-            ReferenceMetadata(artifact_id=video_a, mime_type="video/mp4", duration_seconds=15),
-            ReferenceMetadata(artifact_id=video_b, mime_type="video/mp4", duration_seconds=15),
-        ],
-        allowed=frozenset({"reference"}),
-    ) == "reference"
+    assert (
+        _resolve(
+            manifest,
+            _intent(roles),
+            [
+                ReferenceMetadata(artifact_id=video_a, mime_type="video/mp4", duration_seconds=15),
+                ReferenceMetadata(artifact_id=video_b, mime_type="video/mp4", duration_seconds=15),
+            ],
+            allowed=frozenset({"reference"}),
+        )
+        == "reference"
+    )
     with pytest.raises(CapabilityResolutionError, match="no input contract"):
         _resolve(
             manifest,
@@ -186,11 +196,14 @@ def test_resolver_checks_metadata_and_conditional_options() -> None:
             _intent([(video, "reference_video")], duration=10, resolution="2K"),
             [ReferenceMetadata(artifact_id=video, mime_type="video/mp4", duration_seconds=8)],
         )
-    assert _resolve(
-        manifest,
-        _intent([(video, "reference_video")], duration=10, resolution="768P"),
-        [ReferenceMetadata(artifact_id=video, mime_type="video/mp4", duration_seconds=8)],
-    ) == "references"
+    assert (
+        _resolve(
+            manifest,
+            _intent([(video, "reference_video")], duration=10, resolution="768P"),
+            [ReferenceMetadata(artifact_id=video, mime_type="video/mp4", duration_seconds=8)],
+        )
+        == "references"
+    )
 
 
 def test_resolver_rejects_ambiguous_manifest_and_closed_product_policy() -> None:

@@ -91,19 +91,17 @@ def normalize_image(
         intent.selected_reference_ids()
     except ValueError as exc:
         errors.append(str(exc))
-    if intent.reference_artifact_ids:
-        errors.append("multi-reference image input is not open in the current product path")
     if intent.selection.mode != "explicit_binding":
         errors.append(f"selection mode not open in stage A+B: {intent.selection.mode}")
     if intent.purpose != "keyframe":
         errors.append(f"image purpose not open in stage A+B: {intent.purpose}")
     capabilities: set[str] = set(intent.requirements.required_capabilities)
-    if intent.reference_artifact_id is not None:
+    if intent.reference_artifact_ids:
         capabilities.add("image.i2i")
     return NormalizationResult(
         required_capabilities=frozenset(capabilities),
         reference_roles=frozenset({"reference_image"})
-        if intent.reference_artifact_id is not None
+        if intent.reference_artifact_ids
         else frozenset(),
         preferred_capabilities=frozenset(intent.preferences.preferred_capabilities),
         errors=errors,

@@ -5,16 +5,14 @@ behind the V3 :class:`ModelAdapter` surface. ``translate()`` is pure and
 unit-testable without a provider; ``create()``/``poll()``/``cancel()``/
 ``fetch_cost()`` delegate to the wrapped runtime when it is wired.
 
-LEGACY_COMPAT: the A+B intents and CompiledRequest objects are only touched
-inside this bridge. Business code above the CapabilityRouter never sees them.
-Remove this bridge (and the direct HubClient dict adapters) when the unified
-CapabilityRouter path fully owns submission (Phase 11/12).
+The catalog uses this adapter for pure contract inspection. Production media
+submissions use the DB-bound frozen runtime; catalog adapters have no runtime.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -88,7 +86,6 @@ def submission_status_to_v3(status: str) -> GenerationStatus:
 
 
 ArtifactResolver = Callable[[list[tuple[str, ResolvedArtifact]]], list[ResolvedReference]]
-ReferenceInput = Mapping[str, ResolvedArtifact] | Sequence[ResolvedReference]
 
 _COMPILER_AUDIT_OPTION_FIELDS = frozenset(
     {"aspect_ratio", "duration_seconds", "resolution", "generate_audio", "seed", "size"}
@@ -142,9 +139,7 @@ def _compiler_translation_evidence(
             return isinstance(value, bool)
         if field == "seed":
             return (
-                not isinstance(value, bool)
-                and isinstance(value, int)
-                and -(2**63) <= value < 2**63
+                not isinstance(value, bool) and isinstance(value, int) and -(2**63) <= value < 2**63
             )
         return False
 
@@ -226,9 +221,7 @@ def _request_reference_roles(request: Any) -> list[tuple[str, ResolvedArtifact]]
             (ReferenceRole.REFERENCE_IMAGE.value, slot(request.image.artifact_id, "image/*"))
         )
     elif isinstance(request, ImageToVideoRequest):
-        roles.append(
-            (ReferenceRole.FIRST_FRAME.value, slot(request.image.artifact_id, "image/*"))
-        )
+        roles.append((ReferenceRole.FIRST_FRAME.value, slot(request.image.artifact_id, "image/*")))
     elif isinstance(request, LastFrameVideoRequest):
         roles.append(
             (ReferenceRole.LAST_FRAME.value, slot(request.last_frame.artifact_id, "image/*"))
@@ -378,43 +371,16 @@ class ProviderAdapterBridge:
         )
         return compiled, translation
 
-    @staticmethod
-    def _coerce_reference_input(resolved_artifacts: ReferenceInput) -> list[ResolvedReference]:
-        """Convert the mapping surface without reintroducing role dedupe.
-
-        A mapping is retained only for old callers and therefore cannot recover
-        duplicates that were already collapsed by that caller. New callers use
-        ``translate_v2`` and pass the ordered ``ResolvedReference`` list directly.
-        """
-        if isinstance(resolved_artifacts, Mapping):
-            return [
-                _resolved_reference(role, artifact)
-                for role, artifact in resolved_artifacts.items()
-            ]
-        return list(resolved_artifacts)
-
     async def translate(
-        self,
-        capability: Capability,
-        request: Any,
-        resolved_artifacts: ReferenceInput,
-    ) -> TranslationResult:
-        """Compatibility surface for old mapping callers and ordered V2 input."""
-        _, translation = await self._compile(
-            capability,
-            request,
-            self._coerce_reference_input(resolved_artifacts),
-        )
-        return translation
-
-    async def translate_v2(
         self,
         capability: Capability,
         request: Any,
         resolved_references: list[ResolvedReference],
     ) -> TranslationResult:
-        """Translate an ordered reference list without a role-keyed intermediary."""
-        _, translation = await self._compile(capability, request, list(resolved_references))
+        """Compile one ordered reference contract without a role-keyed intermediary."""
+        if not isinstance(resolved_references, list):
+            raise TypeError("resolved references must be an ordered list")
+        _, translation = await self._compile(capability, request, resolved_references)
         return translation
 
     async def create(
@@ -425,8 +391,7 @@ class ProviderAdapterBridge:
     ) -> ProviderCreateResult:
         if self._components.runtime is None:
             raise RuntimeError(
-                "bridge has no runtime; use the DB-bound submission path "
-                "(Phase 5/6)"
+                "bridge has no runtime; use the DB-bound submission path (Phase 5/6)"
             )
         requested_references = _request_reference_roles(request)
         if requested_references and self._resolver is not None:
@@ -435,8 +400,7 @@ class ProviderAdapterBridge:
             resolved_references = list(self._resolver(requested_references))
         else:
             resolved_references = [
-                _resolved_reference(role, artifact)
-                for role, artifact in requested_references
+                _resolved_reference(role, artifact) for role, artifact in requested_references
             ]
         compiled, _translation = await self._compile(
             capability,

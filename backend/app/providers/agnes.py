@@ -709,11 +709,11 @@ class AgnesImageCompiler:
             )
         capabilities = set(op.capabilities)
         required = "image.t2i"
-        if intent.reference_artifact_id is not None:
+        if intent.single_reference_id() is not None:
             required = "image.i2i"
         if required not in capabilities:
             raise ValueError(f"model does not support {required}")
-        if intent.reference_artifact_id is not None:
+        if intent.single_reference_id() is not None:
             constraint = op.reference_constraints.get("reference_image")
             if constraint is None or constraint.max < 1:
                 raise ValueError("model does not accept a reference_image")
@@ -757,15 +757,13 @@ class AgnesImageCompiler:
                 invoke_model_value=invoke_model_value,
                 policy=policy,
             )
-        image_references = [
-            ref for ref in references if ref.role == "reference_image"
-        ]
+        image_references = [ref for ref in references if ref.role == "reference_image"]
         if len(image_references) > 1:
             raise ValueError(
                 "UNSUPPORTED_BY_LEGACY_BRIDGE: image compiler accepts at most one reference_image"
             )
         ref_image = image_references[0] if image_references else None
-        expected_reference_id = intent.reference_artifact_id
+        expected_reference_id = intent.single_reference_id()
         if expected_reference_id is None and ref_image is not None:
             raise ValueError("image compiler received an unexpected reference_image")
         if expected_reference_id is not None:
@@ -786,9 +784,7 @@ class AgnesImageCompiler:
         size = intent.size or (
             manifest_size if isinstance(manifest_size, str) else _AGNES_IMAGE_SIZE
         )
-        ratio = intent.aspect_ratio or (
-            manifest_ratio if isinstance(manifest_ratio, str) else None
-        )
+        ratio = intent.aspect_ratio or (manifest_ratio if isinstance(manifest_ratio, str) else None)
         body, operation, fingerprints = _build_image_body(
             invoke_model_value,
             prompt=intent.prompt,
@@ -820,14 +816,18 @@ class AgnesImageCompiler:
             "aspect_ratio": ratio if isinstance(ratio, str) else "9:16",
             "size": size,
         }
-        summary["translation_transformations"] = [
-            {
-                "field": "size",
-                "from_value": None,
-                "to_value": size,
-                "reason": "frozen_manifest_native_size_tier",
-            }
-        ] if intent.size is None else []
+        summary["translation_transformations"] = (
+            [
+                {
+                    "field": "size",
+                    "from_value": None,
+                    "to_value": size,
+                    "reason": "frozen_manifest_native_size_tier",
+                }
+            ]
+            if intent.size is None
+            else []
+        )
         return CompiledImageRequest(
             provider_type="agnes",
             protocol_profile=AGNES_CN_PROFILE,
@@ -1083,8 +1083,7 @@ class AgnesVideoCompiler:
             for item in intent.references
         ]
         delivered = [
-            (item.artifact_id, canonical_reference_role(str(item.role)))
-            for item in references
+            (item.artifact_id, canonical_reference_role(str(item.role))) for item in references
         ]
         if selected != delivered:
             raise ValueError("resolved Agnes video references do not match creative intent")

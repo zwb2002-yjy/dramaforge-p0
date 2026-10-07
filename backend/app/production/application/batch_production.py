@@ -605,7 +605,7 @@ async def dispatch_batch_production(
             shot_id=shot_id,
             body=ExecutionBody(
                 **execution_input.model_dump(
-                    exclude={"project_id", "shot_id", "shot_experiment_id"}
+                    exclude={"project_id", "shot_id", "experiment_branch_id"}
                 ),
                 plan_fingerprint=plan.plan_fingerprint,
                 accepted_approximations=plan.accepted_approximations,

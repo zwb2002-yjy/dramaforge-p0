@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -17,8 +16,8 @@ from app.access.models import Project
 from app.assets.models import Episode, Scene, Shot
 from app.execution.experiment_nodes import queue_branch_nodes
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
+from app.production.run_control import ProductionRunControl
 from app.providers import registry as registry_module
-from app.providers.generation_service import GenerationService
 from app.providers.registry import ProviderPlugin, register_plugin
 from app.providers.runtime import CancelResult, PollResult, ProviderResumeToken, SubmissionResult
 from app.runtime.scheduler import NodeRunScheduler, WorkerRuntime
@@ -185,10 +184,10 @@ async def test_cancel_restart_never_recreates_remote_task(
         await session.commit()
         if outcome == "queued_cancel":
             run = await session.get(NodeRun, run_ids[1])
-            service = GenerationService(session, SimpleNamespace())
-            await service.cancel_generation(project=project, operation_id=run.id)
+            service = ProductionRunControl(session)
+            await service.request_cancel(project=project, run_id=run.id)
             await session.commit()
-            await service.cancel_generation(project=project, operation_id=run.id)
+            await service.request_cancel(project=project, run_id=run.id)
             # A second request still owns its FOR UPDATE lock until it finishes.
             locked_delivery = await jobs.execute_node_run({}, str(run.id))
             assert locked_delivery["status"] == "already_claimed"
@@ -304,9 +303,7 @@ async def test_cancel_restart_never_recreates_remote_task(
             assert calls == {"create": 1, "poll": 0, "cancel": 0}
             return
         assert op.provider_operation_id == remote_id
-        await GenerationService(session, SimpleNamespace()).cancel_generation(
-            project=project, operation_id=run.id
-        )
+        await ProductionRunControl(session).request_cancel(project=project, run_id=run.id)
         await session.commit()
         # Changing the mutable binding cannot change a recovery's frozen identity.
         binding.enabled = False
@@ -327,9 +324,9 @@ async def test_cancel_restart_never_recreates_remote_task(
         await session.refresh(run)
         assert run.status == "cancel_requested" and run.cancellation_requested_at is not None
         assert run.input_snapshot == snapshot_before
-        await GenerationService(session, SimpleNamespace()).cancel_generation(
+        await ProductionRunControl(session).request_cancel(
             project=project,
-            operation_id=run.id,
+            run_id=run.id,
         )
         assert run.status == "cancel_requested"
         await session.commit()

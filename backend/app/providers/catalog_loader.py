@@ -16,7 +16,6 @@ from typing import Any, cast
 from app.providers.manifest import (
     ModelCapabilityManifest,
     has_reproducible_contract_evidence,
-    is_legacy_tested_manifest,
 )
 
 CatalogIdentity = tuple[str, str, str, str]
@@ -80,7 +79,7 @@ class ModelCatalogLoader:
                 raise ValueError(f"invalid model catalog file {path}: {exc}") from exc
             if not isinstance(raw, dict):
                 raise ValueError(f"model catalog file must contain an object: {path}")
-            if "implementation_status" not in raw and not is_legacy_tested_manifest(raw):
+            if "implementation_status" not in raw:
                 raise ValueError(f"model manifest must declare implementation status: {path}")
             if raw.get("implementation_status") == "contract_tested" and not (
                 has_reproducible_contract_evidence(raw)
@@ -93,9 +92,7 @@ class ModelCatalogLoader:
             relative_parts = path.relative_to(self._root).parts
             provider_dir = relative_parts[0]
             if manifest.provider_type != provider_dir:
-                raise ValueError(
-                    f"catalog provider directory does not match manifest: {path}"
-                )
+                raise ValueError(f"catalog provider directory does not match manifest: {path}")
             if not manifest.protocol_profile.strip():
                 raise ValueError(f"catalog protocol profile is empty: {path}")
             if len(relative_parts) == 3:
@@ -103,8 +100,7 @@ class ModelCatalogLoader:
                 if publication_lifecycle not in {"preview", "legacy", "deprecated", "retired"}:
                     raise ValueError(f"unknown catalog publication directory: {path}")
                 if publication_lifecycle == "preview" and (
-                    manifest.lifecycle != "preview"
-                    or "implementation_status" not in raw
+                    manifest.lifecycle != "preview" or "implementation_status" not in raw
                 ):
                     raise ValueError(
                         f"preview manifest must declare preview and implementation status: {path}"
@@ -138,3 +134,12 @@ class ModelCatalogLoader:
                 )
             )
         return tuple(loaded)
+
+
+CATALOG_MODELS: list[dict[str, Any]] = [
+    item.as_dict() for item in ModelCatalogLoader().load() if item.publication_lifecycle == "active"
+]
+
+
+def active_manifests_for(*, provider_type: str) -> list[dict[str, Any]]:
+    return [manifest for manifest in CATALOG_MODELS if manifest["provider_type"] == provider_type]

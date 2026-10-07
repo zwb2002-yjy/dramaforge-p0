@@ -3,7 +3,7 @@
   "provider_type": "volcengine",
   "protocol_profile": "ark_cn_v1",
   "model_id": "doubao-seedance-2-0-260128",
-  "model_revision": "v1",
+  "model_revision": "v3",
   "media_kind": "video",
   "display_name": "Seedance 2.0",
   "lifecycle": "active",
@@ -28,5 +28,13 @@
   "option_schema": {
     "namespace": "",
     "options": {}
+  },
+  "implementation_status": "contract_tested",
+  "evidence": {
+    "current_contract": {
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit",
+      "checked_at": "2026-10-07"
+    }
   }
 }

@@ -72,3 +72,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\.agent-control\control.ps1
 DramaForge 以 [Apache License 2.0](LICENSE) 开源，提交前请阅读[贡献指南](CONTRIBUTING.md)、
 [安全策略](SECURITY.md)、[社区行为准则](CODE_OF_CONDUCT.md) 与[第三方声明](THIRD_PARTY_NOTICES.md)。
 仓库提供 AIOS/AISphere 的 Compose 交接描述，但尚未在真实 AIOS 环境验证。
+
+未发布开发实例统一使用 `dramaforge-dev` Compose 项目和当前源码构建镜像；
+镜像、API、Workers 与 `DRAMAFORGE_SOURCE_COMMIT` 必须对应同一提交，不挂载其它 worktree
+充当新实例。旧项目数据卷单独保管，不能自动合并或启动旧任务。

@@ -3,7 +3,7 @@
   "provider_type": "agnes",
   "protocol_profile": "agnes_cn_v1",
   "model_id": "@contract/agnes-video-openai-async-v2",
-  "model_revision": "v1",
+  "model_revision": "v2",
   "media_kind": "video",
   "display_name": "Agnes Video 2.5 协议插件",
   "lifecycle": "active",
@@ -34,5 +34,13 @@
   "option_schema": {
     "namespace": "",
     "options": {}
+  },
+  "implementation_status": "contract_tested",
+  "evidence": {
+    "current_contract": {
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit",
+      "checked_at": "2026-10-07"
+    }
   }
 }

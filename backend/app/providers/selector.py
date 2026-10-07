@@ -16,15 +16,6 @@ from app.providers.errors import UnsupportedCapabilityError
 from app.providers.registry import ModelRegistry, RegisteredModel, UnknownModelError
 
 
-def _first_candidate_preferring_bridge(
-    candidates: list[RegisteredModel],
-) -> RegisteredModel:
-    for model in candidates:
-        if model.manifest.metadata.get("bootstrap_bridge"):
-            return model
-    return candidates[0]
-
-
 class DefaultModelSelector:
     def select(
         self,
@@ -32,7 +23,6 @@ class DefaultModelSelector:
         capability: Capability,
         requested_model: str | None,
         registry: ModelRegistry,
-        policy: object | None = None,
     ) -> RegisteredModel:
         if requested_model is not None:
             model = registry.get_or_none(requested_model)
@@ -44,9 +34,14 @@ class DefaultModelSelector:
         candidates = registry.find_by_capability(capability)
         if not candidates:
             raise UnsupportedCapabilityError(capability)
-        # Deterministic system default: stable sort order first match. When a
-        # bootstrap bridge is registered (e.g. the ``litellm/text-llm`` legacy
-        # bridge alongside logical aliases), prefer it so the last-resort text
-        # default keeps pointing at the bridge, not a logical alias that may be
-        # unconfigured on the gateway (fix spec §34/§103).
-        return _first_candidate_preferring_bridge(candidates)
+        if capability == Capability.TEXT_GENERATE:
+            from app.config import get_settings
+
+            configured = f"litellm/{get_settings().litellm_text_gateway_model}"
+            model = registry.get_or_none(configured)
+            if model is None:
+                raise UnknownModelError(configured)
+            return model
+        if len(candidates) != 1:
+            raise UnknownModelError("explicit model selection is required")
+        return candidates[0]

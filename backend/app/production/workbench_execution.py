@@ -382,7 +382,7 @@ class WorkbenchExecutionInput(BaseModel):
 
     project_id: UUID
     shot_id: UUID
-    shot_experiment_id: UUID | None = None
+    experiment_branch_id: UUID | None = None
     stage: PlanStage
     prompt: str = Field(min_length=1)
     semantic_intent: dict[str, JsonValue] = Field(default_factory=dict)
@@ -915,7 +915,7 @@ class WorkbenchExecutionService:
                 .where(
                     ShotReferenceBinding.project_id == project.id,
                     ShotReferenceBinding.shot_id == shot_id,
-                    ShotReferenceBinding.shot_experiment_id.is_(None),
+                    ShotReferenceBinding.experiment_branch_id.is_(None),
                     ShotReferenceBinding.stage.in_(
                         ("both", "image" if stage == "image_keyframe" else "video")
                     ),
@@ -1199,7 +1199,7 @@ class WorkbenchExecutionService:
         plan = WorkbenchExecutionPlan(
             project_id=project.id,
             shot_id=execution_input.shot_id,
-            shot_experiment_id=execution_input.shot_experiment_id,
+            experiment_branch_id=execution_input.experiment_branch_id,
             stage=execution_input.stage,
             prompt=prompt,
             semantic_intent=semantic_intent,

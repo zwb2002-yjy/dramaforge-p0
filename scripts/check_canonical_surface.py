@@ -16,6 +16,10 @@ SCAN_ROOTS = (
 
 # Keep the spellings split so this checker cannot report its own policy table.
 FORBIDDEN_TEXT = (
+    "LEGACY_" + "COMPAT",
+    "litellm/text-" + "llm",
+    "shot_" + "experiment_id",
+    "translate_" + "v2",
     "/projects/" + "$projectId/quick",
     "p0_" + "10_shots",
     "exactly " + "10",
@@ -50,6 +54,14 @@ FORBIDDEN_TEXT = (
     "/projects/" + "{project_id}/node-runs/{node_run_id}/enqueue",
 )
 FORBIDDEN_FILES = (
+    ROOT / "backend" / "app" / "production" / "archive_models.py",
+    ROOT / "backend" / "app" / "providers" / "generation_service.py",
+    ROOT / "backend" / "app" / "providers" / "model_system_models.py",
+    ROOT / "backend" / "app" / "providers" / "binding_cutover.py",
+    ROOT / "backend" / "app" / "production" / "cutover_identity.py",
+    ROOT / "backend" / "app" / "production" / "policy_models.py",
+    ROOT / "backend" / "app" / "providers" / "catalog_seed_data.py",
+    ROOT / "backend" / "app" / "providers" / "workspace_router.py",
     ROOT / "backend" / "app" / "creation",
     ROOT / "backend" / "app" / "shared" / "ids.py",
     ROOT / "backend" / "app" / "providers" / "connection.py",
@@ -105,27 +117,6 @@ def main() -> int:
         if path.resolve() == Path(__file__).resolve():
             continue
         source = path.read_text(encoding="utf-8", errors="replace")
-        if (
-            path.is_relative_to(ROOT / "backend" / "app")
-            and path
-            not in {
-                ROOT / "backend" / "app" / "production" / "archive_models.py",
-                ROOT / "backend" / "app" / "shared" / "model_registry.py",
-            }
-            and "archive_models" in source
-        ):
-            failures.append(
-                f"{path.relative_to(ROOT)} imports archival storage into runtime"
-            )
-        # Old ORM definitions remain for data retention, never runtime consumers.
-        if path.is_relative_to(ROOT / "backend" / "app") and path != (
-            ROOT / "backend" / "app" / "production" / "archive_models.py"
-        ):
-            for legacy_model in ("Production" + "Experiment", "Shot" + "Experiment"):
-                if legacy_model in source:
-                    failures.append(
-                        f"{path.relative_to(ROOT)} consumes archival model {legacy_model}"
-                    )
         for token in FORBIDDEN_TEXT:
             if token in source:
                 failures.append(

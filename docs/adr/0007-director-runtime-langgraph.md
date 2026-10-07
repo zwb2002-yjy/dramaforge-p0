@@ -1,6 +1,6 @@
 # ADR 0007：导演持久编排采用 Python LangGraph
 
-**状态：Accepted；已实现可选引擎接线，默认仍为 legacy**
+**状态：Accepted；唯一持久编排引擎，仅使用 LangGraph**
 **日期：2026-09-10**
 **当前实现权威：[DIRECTOR_RUNTIME.md](../DIRECTOR_RUNTIME.md)**
 
@@ -31,7 +31,7 @@ Pi agent-core 保留为首要备选，Claude Agent SDK 保留给明确采用 Cla
 
 LangGraph adapter 已接入独立 Director Worker/队列、Turn 引擎身份、持久 signal claim、
 控制 epoch 和私有 PostgreSQL checkpoint schema。新轮次由 `DIRECTOR_RUNTIME_ENGINE`
-显式选择，默认仍为 `legacy`；启用 `langgraph` 还需专用 checkpoint 数据库配置与角色。
+显式选择，只使用 `langgraph`；启用 `langgraph` 还需专用 checkpoint 数据库配置与角色。
 旧轮次固定原引擎，不同时运行两套推进器。
 
 当前图执行固定的 propose / 等待决定 / 提交 / 等待生产 / 确认候选流程；propose port

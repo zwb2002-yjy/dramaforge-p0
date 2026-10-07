@@ -92,7 +92,9 @@ def validate_compiled_submission(
     the body. Errors intentionally omit payloads and credential values.
     """
     if (request.provider_type, request.protocol_profile, request.operation) != (
-        provider_type, protocol_profile, operation
+        provider_type,
+        protocol_profile,
+        operation,
     ):
         raise ValueError("compiled request does not match runtime provider/profile/operation")
     if not request.model_id.strip() or request.wire_request.get("model") != request.model_id:
@@ -136,9 +138,9 @@ class CostResult(BaseModel):
     amount: float | None = None
     currency: str = "USD"
     units: float = 1.0
-    cost_status: Literal[
-        "reported", "estimated_only", "not_reported", "reconciled"
-    ] = "not_reported"
+    cost_status: Literal["reported", "estimated_only", "not_reported", "reconciled"] = (
+        "not_reported"
+    )
 
     @model_validator(mode="after")
     def infer_reported_amount(self) -> CostResult:
@@ -261,9 +263,7 @@ class ProviderRuntimeResolver:
             binding=binding,
             catalog_entry=entry,
             model_id=(
-                f"{connection.provider_type}/{binding.model_id}"
-                if binding is not None
-                else None
+                f"{connection.provider_type}/{binding.model_id}" if binding is not None else None
             ),
             invoke_model_value=binding.invoke_model_value if binding is not None else None,
             manifest_hash=entry.contract_manifest_hash if entry is not None else None,
@@ -315,7 +315,7 @@ class ProviderRuntimeResolver:
             reasons.append("CATALOG_PROTOCOL_MISMATCH")
         if entry.media_kind != binding.media_type:
             reasons.append("CATALOG_MEDIA_MISMATCH")
-        if entry.lifecycle not in {"active", "legacy", "deprecated"}:
+        if entry.lifecycle != "active":
             reasons.append("CATALOG_LIFECYCLE_UNACCEPTABLE")
         if binding.capability_manifest_hash != entry.contract_manifest_hash:
             reasons.append("MANIFEST_HASH_MISMATCH")
@@ -402,9 +402,7 @@ class ProviderRuntimeResolver:
             credential_revision_id=credential_id,
             capability=resolution.capability.value,
             mode_id=resolution.mode_id or "resolved",
-            effective_options=cast(
-                dict[str, JsonValue], resolution.native_options
-            ),
+            effective_options=cast(dict[str, JsonValue], resolution.native_options),
             request_fingerprint="0" * 64,
         )
         return await self.resolve_runtime_for_identity(
@@ -487,10 +485,7 @@ class ProviderRuntimeResolver:
             or binding.invoke_model_value != identity.invoke_model_value
             or entry.provider_type != revision.provider_type
             or entry.protocol_profile != revision.protocol_profile
-            or (
-                entry.catalog_source != "protocol_contract"
-                and entry.model_id != binding.model_id
-            )
+            or (entry.catalog_source != "protocol_contract" and entry.model_id != binding.model_id)
             or (
                 entry.catalog_source == "protocol_contract"
                 and binding.invoke_model_value != binding.model_id

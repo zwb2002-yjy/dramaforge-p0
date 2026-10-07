@@ -151,7 +151,6 @@ describe("Provider connection contract revisions", () => {
         remote_resource_kind: "model",
         remote_resource_id: "agnes-image-2.1-flash",
         invoke_model_value: "agnes-image-2.1-flash",
-        pricing_snapshot: {},
       },
       {
         id: "binding-v2",
@@ -169,7 +168,6 @@ describe("Provider connection contract revisions", () => {
         remote_resource_kind: "model",
         remote_resource_id: "agnes-image-2.1-flash",
         invoke_model_value: "agnes-image-2.1-flash",
-        pricing_snapshot: {},
       },
     ]);
 

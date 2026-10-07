@@ -115,7 +115,10 @@ async def test_repair_plan_region_suggests_rerun_video(session: AsyncSession) ->
             project_id=project.id,
             shot_id=shot.id,
             created_by=user.id,
-            x=0.2, y=0.3, width=0.4, height=0.2,
+            x=0.2,
+            y=0.3,
+            width=0.4,
+            height=0.2,
             note="色偏",
             severity="warning",
             status="open",
@@ -128,15 +131,13 @@ async def test_repair_plan_region_suggests_rerun_video(session: AsyncSession) ->
     assert "formal_keyframe" in plan.retained_assets
 
 
-
-
 async def _seed_model_infra(session: AsyncSession, *, project: Project, user: User) -> None:
     """Seed catalog entry + connection + revision + binding + profile so the
     workbench resolver returns RESOLVED for video.shot / visual.keyframe."""
     from datetime import date
 
+    from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
     from app.providers.model_profiles.orm import ProductionModelProfile
     from app.providers.models import (
         ProviderConnection,
@@ -144,7 +145,7 @@ async def _seed_model_infra(session: AsyncSession, *, project: Project, user: Us
         ProviderModelBinding,
     )
 
-    manifest = next(item for item in SEED_MANIFESTS if item["model_id"] == "agnes-video-v2.0")
+    manifest = next(item for item in CATALOG_MODELS if item["model_id"] == "agnes-video-v2.0")
     entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
@@ -208,7 +209,7 @@ async def _seed_model_infra(session: AsyncSession, *, project: Project, user: Us
     session.add(binding)
     await session.flush()
     image_manifest = next(
-        item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash"
+        item for item in CATALOG_MODELS if item["model_id"] == "agnes-image-2.1-flash"
     )
     image_entry = ModelCatalogEntry(
         provider_type="agnes",

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from app.providers.bootstrap import UnavailableAdapter
 from app.providers.capabilities import Capability
 from app.providers.manifest import (
     CapabilitySpec,
@@ -20,9 +19,7 @@ TEST_VIDEO_FULL = "test/video-full"
 TEST_VIDEO_T2V = "test/video-t2v"
 
 
-def _manifest(
-    model_id: str, capabilities: list[Capability]
-) -> ModelManifest:
+def _manifest(model_id: str, capabilities: list[Capability]) -> ModelManifest:
     native_options: dict[str, ParameterSpec] = {}
     if Capability.TEXT_GENERATE in capabilities:
         native_options["temperature"] = ParameterSpec(type="number")
@@ -73,5 +70,5 @@ def build_test_registry() -> ModelRegistry:
         (TEST_VIDEO_T2V, [Capability.VIDEO_TEXT_TO_VIDEO]),
     ):
         manifest = _manifest(model_id, capabilities)
-        registry.register(manifest, UnavailableAdapter(manifest))
+        registry.register(manifest)
     return registry

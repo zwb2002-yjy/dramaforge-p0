@@ -29,6 +29,7 @@ from app.providers.model_profiles.service import parse_bindings
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.registry import ModelRegistry, RegisteredModel
 from app.providers.selector import DefaultModelSelector
+from app.shared.errors import ValidationAppError
 
 
 class ModelBindingResolver:
@@ -167,7 +168,7 @@ class ModelBindingResolver:
         profile: ProductionModelProfile, slot: ModelSlot
     ) -> ModelSlotBinding | None:
         binding = parse_bindings(profile.bindings).get(slot)
-        if binding is None or not binding.enabled:
+        if binding is None:
             return None
         return binding
 
@@ -179,9 +180,17 @@ class ModelBindingResolver:
         capability: Capability,
         profile: ProductionModelProfile,
     ) -> ResolvedModelBinding:
+        if not binding.enabled:
+            raise ValidationAppError(
+                "Model profile slot is disabled",
+                details={"code": "MODEL_PROFILE_BINDING_DISABLED", "slot": str(slot)},
+            )
         model = self._require_model(binding.model_id)
         self._require_capability(
-            model, binding.model_id, slot, capability,
+            model,
+            binding.model_id,
+            slot,
+            capability,
             fail_on_mismatch=True,
         )
         return ResolvedModelBinding(
@@ -233,6 +242,4 @@ class ModelBindingResolver:
         if capability in model.manifest.capability_specs:
             return
         if fail_on_mismatch:
-            raise profile_capability_mismatch(
-                str(slot), model_id, capability=str(capability)
-            )
+            raise profile_capability_mismatch(str(slot), model_id, capability=str(capability))

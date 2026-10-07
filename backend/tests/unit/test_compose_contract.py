@@ -73,10 +73,8 @@ def test_compose_defines_required_boot0_services() -> None:
         not ports for name, ports in externally_published.items() if name != "frontend"
     )
     assert services["frontend"]["depends_on"]["api"]["condition"] == "service_healthy"
-    assert services["frontend"]["image"] == (
-        "${DRAMAFORGE_FRONTEND_IMAGE:-ghcr.io/zwb2002-yjy/"
-        "dramaforge-frontend:v0.1.0}"
-    )
+    assert data["name"] == "dramaforge-dev"
+    assert services["frontend"]["image"] == "${DRAMAFORGE_FRONTEND_IMAGE:-dramaforge-frontend:dev}"
     assert services["frontend"]["read_only"] is True
     assert services["frontend"]["cap_drop"] == ["ALL"]
     for name in ("api", "dispatcher", "worker-default", "worker-heavy", "worker-director"):
@@ -87,10 +85,7 @@ def test_compose_defines_required_boot0_services() -> None:
         assert services[name]["security_opt"] == ["no-new-privileges:true"]
         assert services[name]["cap_drop"] == ["ALL"]
         assert "healthcheck" in services[name]
-        assert services[name]["image"] == (
-            "${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/"
-            "dramaforge-backend:v0.1.0}"
-        )
+        assert services[name]["image"] == "${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}"
     # Every service that imports app.config in production must receive the
     # generated secrets that settings validation checks. worker-director builds
     # full Settings at import (RedisSettings.from_dsn(get_settings())), so a

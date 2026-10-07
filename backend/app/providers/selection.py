@@ -122,7 +122,7 @@ def _video_mode_id(intent: VideoGenerationIntentV1) -> str:
 def _image_mode_id(intent: ImageGenerationIntent) -> str:
     if intent.mode_id:
         return intent.mode_id
-    return "reference_image" if intent.reference_artifact_id is not None else "text_to_image"
+    return "reference_image" if intent.reference_artifact_ids else "text_to_image"
 
 
 class ModelSelectionService:
@@ -245,9 +245,11 @@ class ModelSelectionService:
                     "issues": [issue.code for issue in remaining_issues],
                 },
             )
-        manifest = ModelCapabilityManifest.model_validate(
-            entry.capability_manifest_json
-        ) if entry is not None else None
+        manifest = (
+            ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
+            if entry is not None
+            else None
+        )
         supported = set(evaluation.supported_capabilities)
         return SelectionPlan(
             intent_hash=intent_hash,

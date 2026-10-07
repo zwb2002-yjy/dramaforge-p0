@@ -32,24 +32,16 @@ def _pg_port() -> str:
 
 
 def _pg_admin_url() -> str:
-    default = (
-        f"postgresql://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/postgres"
-    )
+    default = f"postgresql://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/postgres"
     return os.environ.get("TEST_PG_ADMIN_URL", default)
 
 
 def _db_sync_url(dbname: str) -> str:
-    return (
-        f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}"
-        f"@{_pg_host()}:{_pg_port()}/{dbname}"
-    )
+    return f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/{dbname}"
 
 
 def _db_async_url(dbname: str) -> str:
-    return (
-        f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}"
-        f"@{_pg_host()}:{_pg_port()}/{dbname}"
-    )
+    return f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/{dbname}"
 
 
 def _pg_available_sync() -> bool:
@@ -85,9 +77,7 @@ def _alembic(dbname: str, *args: str) -> None:
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("TEST_PG_ENABLED") != "1" or not _pg_available_sync(),
-    reason=(
-        "set TEST_PG_ENABLED=1 with an explicitly configured isolated PostgreSQL target"
-    ),
+    reason=("set TEST_PG_ENABLED=1 with an explicitly configured isolated PostgreSQL target"),
 )
 
 
@@ -127,7 +117,7 @@ def _seed_workspace_default(dbname: str) -> dict:
                 "INSERT INTO production_model_profiles "
                 "(id, workspace_id, name, version, is_default, bindings, created_by, updated_by) "
                 "VALUES (gen_random_uuid(), :w, '默认方案', 1, true, "
-                ' \'{"planning.script": {"model_id": "litellm/text-llm"}}\'::json, :u, :u) '
+                ' \'{"planning.script": {"model_id": "litellm/script-quality"}}\'::json, :u, :u) '
                 "RETURNING id"
             ),
             {"w": workspace_id, "u": user_id},

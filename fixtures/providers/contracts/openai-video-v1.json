@@ -34,7 +34,7 @@
     "provider_type": "openai_compatible_media",
     "protocol_profile": "openai_media_v1",
     "model_id": "@contract/openai-video-v1",
-    "model_revision": "v1",
+    "model_revision": "v2",
     "media_kind": "video",
     "display_name": "OpenAI 兼容异步视频协议",
     "lifecycle": "active",
@@ -64,7 +64,15 @@
     "option_schema": {
       "namespace": "",
       "options": {}
+    },
+    "implementation_status": "contract_tested",
+    "evidence": {
+      "current_contract": {
+        "source_type": "contract_fixture",
+        "source_url": "repository:backend/tests/unit",
+        "checked_at": "2026-10-07"
+      }
     }
   },
-  "manifest_hash": "15e0a0f7c4e74463adb3b6524fc2437240111aa2c48a1f7b1fd74d91eceacd89"
+  "manifest_hash": "406bb69bc6751d14477450ab558986ddbb6c0f7857364a463fcc9930e7f74bda"
 }
