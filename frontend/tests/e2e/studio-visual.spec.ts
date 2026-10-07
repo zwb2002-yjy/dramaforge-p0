@@ -34,6 +34,8 @@ for (const path of routes) {
     }
     await page.emulateMedia({ reducedMotion: "reduce" });
     const nav = page.locator(".df-primary-sidebar a").first();
+    // :focus-visible follows input modality; use keyboard input before focusing.
+    await page.keyboard.press("Tab");
     await nav.focus();
     await expect(nav).toBeFocused();
     await expect(nav).toHaveCSS("outline-style", "solid");
