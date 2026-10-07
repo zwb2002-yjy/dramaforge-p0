@@ -1,0 +1,105 @@
+/* Lobby quick start: three quiet numbered steps, one highlighted at a time. */
+.df-quick-start {
+  margin-bottom: var(--df-space-8);
+}
+.df-quick-start ol {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--df-surface-tier-raised-border);
+  border-radius: var(--df-radius-container-lg);
+  background: var(--df-surface-tier-raised-bg);
+  overflow: hidden;
+}
+.df-quick-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-content: space-between;
+  gap: var(--df-space-3) var(--df-space-3);
+  min-height: var(--df-quick-step-min);
+  padding: var(--df-space-5);
+}
+.df-quick-step + .df-quick-step {
+  border-left: 1px solid var(--df-border-subtle);
+}
+.df-quick-step.current {
+  background: var(--df-verdigris-tint);
+}
+.df-quick-step-mark {
+  display: inline-grid;
+  place-items: center;
+  width: var(--df-space-6);
+  height: var(--df-space-6);
+  border: 1px solid var(--df-border-strong);
+  border-radius: var(--df-radius-chip);
+  color: var(--df-text-secondary);
+  font-size: var(--df-font-size-meta);
+  font-variant-numeric: tabular-nums;
+}
+.df-quick-step.current .df-quick-step-mark {
+  border-color: var(--df-verdigris);
+  color: var(--df-verdigris);
+}
+.df-quick-step.done .df-quick-step-mark {
+  border-color: transparent;
+  background: var(--df-success-dim);
+  color: var(--df-success-text);
+}
+.df-quick-step-body {
+  display: grid;
+  gap: var(--df-space-1);
+  min-width: 0;
+}
+.df-quick-step-body strong {
+  color: var(--df-text-primary);
+  font-size: var(--df-font-size-body-lg);
+  font-weight: var(--df-weight-semibold);
+}
+.df-quick-step.pending .df-quick-step-body strong {
+  color: var(--df-text-secondary);
+}
+.df-quick-step-status {
+  overflow: hidden;
+  color: var(--df-text-muted);
+  font-size: var(--df-font-size-caption);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.df-quick-step-action {
+  grid-column: 2;
+}
+.df-quick-step-action .df-btn {
+  gap: var(--df-space-2);
+  text-decoration: none;
+}
+
+@media (max-width: 899px) {
+  .df-quick-start ol {
+    grid-template-columns: 1fr;
+  }
+  .df-quick-step + .df-quick-step {
+    border-top: 1px solid var(--df-border-subtle);
+    border-left: 0;
+  }
+  .df-quick-step {
+    min-height: 0;
+  }
+}
+
+/* Project cards carry two explicit entries instead of one card-sized button. */
+.df-project-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--df-space-2);
+  margin-top: var(--df-space-3);
+}
+.df-project-card-actions .df-btn {
+  min-height: var(--df-chip-height);
+  height: var(--df-chip-height);
+  padding-inline: var(--df-space-3);
+  font-size: var(--df-font-size-caption);
+  text-decoration: none;
+}

@@ -119,7 +119,7 @@ for (const viewport of [
     await recordLayout(page, testInfo);
     await expectPrimaryVisible(page);
     const secondary = page.getByRole("complementary", { name: "二级导航" });
-    for (const name of ["作品总览", "故事剧本", "角色素材", "分镜制作", "审片确认", "剪辑成片"]) {
+    for (const name of ["作品总览", "故事剧本", "角色素材", "分镜与生成", "审片确认", "剪辑成片"]) {
       await expect(secondary.getByRole("link", { name, exact: true })).toBeInViewport({ ratio: 1 });
     }
     await expect.poll(async () => (await secondary.boundingBox())?.y).toBe(0);

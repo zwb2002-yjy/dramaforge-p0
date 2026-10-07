@@ -140,6 +140,8 @@ export async function exerciseContextualDirector(
   const writes = () =>
     state.editing.requests.filter(({ method, path, body }) => {
       if (method === "GET" || path.endsWith("/auth/csrf")) return false;
+      // Resolving the selected shot's saved references is a read-only POST.
+      if (path.endsWith("/references/resolve")) return false;
       if (path === `/api/v1/projects/${PROJECT_ID}/workspace-state`) {
         // Navigation may persist last-view preferences, never creative facts.
         expect(method).toBe("PATCH");
@@ -206,8 +208,9 @@ export async function exerciseContextualDirector(
   });
   assertServerUnchanged();
 
-  await page.getByTestId("save-shot-design").click();
-  await expect(page.getByText("已保存设计（版本已递增）", { exact: true })).toBeVisible();
+  // Applying a suggestion leaves an unsaved design, so saving is the primary step.
+  await page.getByTestId("shot-primary-save").click();
+  await expect(page.getByTestId("shot-design-message")).toHaveText("已保存。");
   await expect(page.getByTestId("shot-design-dirty")).toHaveCount(0);
   expect(writes()).toHaveLength(3);
   expect(writes()[2]).toEqual({
@@ -233,6 +236,7 @@ export async function exerciseContextualDirector(
   await expect(page.getByLabel("视频提示词", { exact: true })).toHaveValue(
     suggestion.suggested_video_prompt,
   );
-  await expect(page.getByTestId("save-shot-design")).toBeDisabled();
+  await expect(page.getByTestId("shot-design-saved-state")).toBeVisible();
+  await expect(page.getByTestId("shot-primary-save")).toHaveCount(0);
   expect(writes()).toHaveLength(3);
 }

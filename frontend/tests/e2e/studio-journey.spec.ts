@@ -1,35 +1,37 @@
 import { expect, test } from "@playwright/test";
 import { installProfessionalMock, PROJECT_ID } from "./professional-mocks";
 
-test("the overview explains the creative journey before exposing engine details", async ({
+test("the overview keeps engine details behind one disclosure and one project nav", async ({
   page,
 }) => {
   await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByRole("heading", { name: "作品总览", exact: true })).toBeVisible();
-  const journey = page.getByRole("navigation", { name: "创作流程", exact: true });
-  await expect(journey.getByRole("link")).toHaveCount(5);
-  await expect(journey).toContainText("故事剧本");
-  await expect(journey).toContainText("剪辑成片");
+  // Only one project navigation exists; there is no second in-page step map.
+  await expect(page.getByRole("navigation", { name: "创作流程" })).toHaveCount(0);
+  const nav = page.getByRole("navigation", { name: "创作导航", exact: true });
+  await expect(nav).toContainText("故事剧本");
+  await expect(nav).toContainText("剪辑成片");
   await expect(page.getByTestId("production-stage-prompt")).not.toBeVisible();
   await page.locator("summary").filter({ hasText: "查看执行环节" }).click();
   await expect(page.getByTestId("production-stage-prompt")).toBeVisible();
 });
 
-test("every creative workspace explains its outcome and next destination without generating", async ({
-  page,
-}) => {
+test("every creative workspace offers one next step without generating", async ({ page }) => {
   const state = await installProfessionalMock(page);
-  for (const view of ["script", "assets", "scenes", "review", "edit"]) {
+  const expected: Record<string, [string, RegExp]> = {
+    script: ["准备角色素材", /\/assets$/],
+    assets: ["进入分镜与生成", /\/scenes$/],
+    scenes: ["进入审片确认", /\/review$/],
+    review: ["进入剪辑成片", /\/edit$/],
+    edit: ["返回作品总览", /\/production$/],
+  };
+  for (const [view, [label, target]] of Object.entries(expected)) {
     await page.goto(`/projects/${PROJECT_ID}/${view}`);
-    const guide = page.getByTestId("project-stage-guide");
-    await expect(guide).toBeVisible();
-    await expect(guide.getByRole("navigation", { name: "创作流程" }).getByRole("link")).toHaveCount(
-      5,
-    );
-    await expect(guide.getByText(/本步产物/)).not.toBeVisible();
-    await guide.getByText("操作指引", { exact: true }).click();
-    await expect(guide.getByText(/本步产物/)).toBeVisible();
+    const next = page.getByTestId("project-stage-guide");
+    await expect(next).toHaveCount(1);
+    await expect(next).toContainText(label);
+    await expect(next).toHaveAttribute("href", target);
   }
   expect(state.editing.requests.filter((request) => request.method === "POST")).toEqual([]);
 });

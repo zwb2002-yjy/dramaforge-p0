@@ -72,7 +72,7 @@ test("permanent L1 owns Project, Creation and Settings while L2 follows context"
   const creationNavigation = page.getByRole("navigation", { name: "创作导航" });
   await expect(creationNavigation.getByRole("link")).toHaveCount(6);
   await expect(creationNavigation).toContainText(
-    /作品总览.*故事剧本.*角色素材.*分镜制作.*审片确认.*剪辑成片/s,
+    /作品总览.*故事剧本.*角色素材.*分镜与生成.*审片确认.*剪辑成片/s,
   );
   await expect(creationNavigation).toContainText("审片确认");
   await expect(creationNavigation).not.toContainText("专业");

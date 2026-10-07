@@ -8,8 +8,8 @@
 .df-batch-button svg {
   color: var(--df-text-muted);
 }
-.df-batch-button.primary svg {
-  color: inherit;
+.df-batch-button[data-state="ready"] svg {
+  color: var(--df-verdigris);
 }
 .df-batch-button[data-state="running"] svg {
   color: var(--df-verdigris);

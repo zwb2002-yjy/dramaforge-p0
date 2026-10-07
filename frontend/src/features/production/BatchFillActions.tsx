@@ -271,7 +271,6 @@ function BatchFillButton({
   };
 
   let label: string;
-  let tone: "default" | "primary" = "default";
   if (preview.ready_count > 0) {
     label = `${copy.fill} · ${preview.ready_count}`;
   } else if (active > 0) {
@@ -281,12 +280,10 @@ function BatchFillButton({
   } else {
     label = `${copy.fill} · 0`;
   }
-  if (preview.ready_count > 0 && stage === "image_keyframe") tone = "primary";
 
   return (
     <>
       <Button
-        tone={tone}
         className="df-batch-button"
         disabled={complete}
         aria-haspopup="dialog"

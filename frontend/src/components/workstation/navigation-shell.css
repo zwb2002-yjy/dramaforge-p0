@@ -652,7 +652,7 @@
 .df-project-card strong {
   font-size: var(--df-text-md);
   height: auto;
-  min-height: 3em;
+  min-height: 0;
 }
 .df-project-card-meta {
   color: var(--df-text-muted);

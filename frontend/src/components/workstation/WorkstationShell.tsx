@@ -369,7 +369,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
               />
               <ContextLink
                 active={creationView === "scenes"}
-                label="分镜制作"
+                label="分镜与生成"
                 step="03"
                 to={`/projects/${projectId}/scenes`}
                 icon={Film}

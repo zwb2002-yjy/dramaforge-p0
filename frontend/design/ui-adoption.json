@@ -18,7 +18,8 @@
     "src/features/review/ReviewWorkspace.tsx",
     "src/features/shots/ShotInspector.tsx",
     "src/features/shots/ShotDesignPanel.tsx",
-    "src/features/shots/ShotProductionActions.tsx"
+    "src/features/shots/ShotProductionActions.tsx",
+    "src/features/project/QuickStartSteps.tsx"
   ],
   "pageHeaders": [
     "src/routes/index.tsx",

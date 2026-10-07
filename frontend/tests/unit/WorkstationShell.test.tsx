@@ -389,11 +389,14 @@ describe("Workstation shell", () => {
     mockAuthenticatedHome();
     const { router } = renderApp("/projects/project-1");
 
-    await screen.findByRole("link", { name: "分镜制作" });
+    await screen.findByRole("link", { name: "分镜与生成" });
     await vi.waitFor(() =>
       expect(router.state.location.pathname).toBe("/projects/project-1/scenes"),
     );
-    expect(screen.getByRole("link", { name: "分镜制作" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "分镜与生成" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("opens the default-model settings section at its stable route", async () => {

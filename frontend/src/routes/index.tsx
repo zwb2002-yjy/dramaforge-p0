@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createRoute, useNavigate, redirect } from "@tanstack/react-router";
-import { ArrowUpRight, Clapperboard, Plus, Search } from "lucide-react";
+import { Clapperboard, Plus, Search } from "lucide-react";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -19,6 +19,7 @@ import { queryKeys } from "../lib/queryKeys";
 import { getRememberedProjectId } from "../lib/navigationPreferences";
 import { Button, Field, Input, Select, PageHeader } from "../components/ui";
 import { CreateProjectForm } from "../features/project/CreateProjectForm";
+import { QuickStartSteps } from "../features/project/QuickStartSteps";
 import { LazyWorkspaceSettingsPage } from "./pages";
 import { rootRoute } from "./__root";
 
@@ -326,27 +327,13 @@ function HomePage() {
               </Suspense>
             </section>
           )}
-          {!createOpen && recentProject && search.panel !== "workspace" && (
-            <section className="df-lobby-section" id="recent-projects">
-              <header>
-                <h2>继续创作</h2>
-              </header>
-              <article className="df-continue-card">
-                <span className="df-project-cover" aria-hidden="true">
-                  <Clapperboard size={24} />
-                </span>
-                <div>
-                  <strong>{recentProject.name}</strong>
-                  <p>
-                    画幅
-                    {recentProject.aspect_ratio}
-                  </p>
-                </div>
-                <Button tone="primary" type="button" onClick={() => openProject(recentProject.id)}>
-                  继续创作
-                </Button>
-              </article>
-            </section>
+          {!createOpen && !search.panel && projects.isSuccess && (
+            <QuickStartSteps
+              recentProject={recentProject ?? projects.data[0] ?? null}
+              hasProjects={projects.data.length > 0}
+              onCreateProject={() => setCreateOpen(true)}
+              onOpenProject={openProject}
+            />
           )}
 
           {search.panel === "recent" && !recentProject && (
@@ -418,11 +405,7 @@ function HomePage() {
               <div className="df-project-grid" role="list" aria-label="项目列表">
                 {displayedProjects.map((project) => (
                   <div role="listitem" key={project.id}>
-                    <Button
-                      className="df-project-card"
-                      type="button"
-                      onClick={() => openProject(project.id)}
-                    >
+                    <article className="df-project-card" aria-label={project.name}>
                       <span className="df-project-cover" aria-hidden="true">
                         <Clapperboard size={24} />
                       </span>
@@ -432,11 +415,24 @@ function HomePage() {
                           {project.aspect_ratio === "16:9" ? "横屏" : "竖屏"} ·{" "}
                           {project.aspect_ratio}
                         </span>
-                        <span className="df-project-card-enter">
-                          打开作品 <ArrowUpRight size={16} aria-hidden="true" />
+                        <span className="df-project-card-actions">
+                          <Button
+                            type="button"
+                            onClick={() => openProject(project.id)}
+                            aria-label={`打开 ${project.name}`}
+                          >
+                            打开
+                          </Button>
+                          <Link
+                            className="df-btn ghost"
+                            to="/projects/$projectId/scenes"
+                            params={{ projectId: project.id }}
+                          >
+                            分镜与生成
+                          </Link>
                         </span>
                       </span>
-                    </Button>
+                    </article>
                   </div>
                 ))}
               </div>

@@ -12,7 +12,9 @@ async function setup(page: Page) {
     if (
       path.startsWith("/api/") &&
       !["GET", "HEAD", "OPTIONS"].includes(request.method()) &&
-      !path.endsWith("/workspace-state")
+      !path.endsWith("/workspace-state") &&
+      // Resolving a shot's saved references is a read-only POST.
+      !path.endsWith("/references/resolve")
     )
       writes.push({ path, body: request.postDataJSON() });
   });
@@ -99,9 +101,11 @@ test("director policy follows creation, not project model settings", async ({ pa
       body: { expected_version: 1, director_autonomy: "MANUAL" },
     },
   ]);
+  // At this width the project navigation is a drawer opened from 「创作」.
+  await page.getByRole("link", { name: "创作", exact: true }).click();
   await page
-    .getByRole("navigation", { name: "创作流程" })
-    .getByRole("link", { name: "03 分镜制作", exact: true })
+    .getByRole("navigation", { name: "创作导航" })
+    .getByRole("link", { name: "分镜与生成" })
     .click();
   await expect(policy).toHaveValue("MANUAL");
   await page.goto(`/settings/projects/${PROJECT_ID}`);

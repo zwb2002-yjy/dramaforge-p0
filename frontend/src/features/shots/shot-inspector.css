@@ -292,6 +292,7 @@
 }
 .df-candidate-actions .df-btn {
   flex: 1;
+  min-height: var(--df-chip-height);
   height: var(--df-chip-height);
   padding-inline: var(--df-space-2);
   font-size: var(--df-font-size-caption);

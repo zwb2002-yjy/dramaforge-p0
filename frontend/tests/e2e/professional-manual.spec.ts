@@ -258,7 +258,7 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("分镜制作");
+  await expect(page.locator(".qc-project-mode")).toHaveText("分镜与生成");
   await expect(page.getByTestId("scene-stage")).toBeVisible();
   await expect(page.getByTestId("cinematic-canvas")).toBeVisible();
   await expect(page.getByTestId("shot-strip")).toBeVisible();

@@ -50,7 +50,9 @@ for (const width of [1920, 1440, 1024, 768]) {
     page.on("request", (r) => {
       if (
         ["POST", "PATCH", "PUT", "DELETE"].includes(r.method()) &&
-        !new URL(r.url()).pathname.endsWith("/workspace-state")
+        !new URL(r.url()).pathname.endsWith("/workspace-state") &&
+        // Resolving a shot's saved references is a read-only POST.
+        !new URL(r.url()).pathname.endsWith("/references/resolve")
       )
         writes.push(r.url());
     });
@@ -65,10 +67,8 @@ for (const width of [1920, 1440, 1024, 768]) {
         const content = await page.locator(".df-shell-content").boundingBox();
         expect(content!.width).toBeGreaterThan(width >= 1100 ? width * 0.7 : width * 0.85);
         if (url.includes("/projects/")) {
-          const steps = page.getByRole("navigation", { name: "创作流程" });
-          await expect(steps.getByRole("link")).toHaveCount(5);
-          if (!url.endsWith("production"))
-            await expect(steps.locator('[aria-current="page"]')).toHaveCount(1);
+          // One project navigation only; the in-page step map is gone.
+          await expect(page.getByRole("navigation", { name: "创作流程" })).toHaveCount(0);
         }
       });
     }
@@ -106,9 +106,10 @@ test("navigation folds on resize and does not obscure the creation workflow", as
   await expect(page.getByRole("navigation", { name: "创作导航" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator(".df-context-sidebar")).not.toBeVisible();
+  await page.getByRole("link", { name: "创作", exact: true }).click();
   await page
-    .getByRole("navigation", { name: "创作流程" })
-    .getByRole("link", { name: "02 角色素材" })
+    .getByRole("navigation", { name: "创作导航" })
+    .getByRole("link", { name: "角色素材" })
     .click();
   await expect(page).toHaveURL(/\/assets$/);
 });
