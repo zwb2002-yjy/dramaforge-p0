@@ -38,9 +38,6 @@
     box-shadow: 0 0 0 8px var(--df-brass-tint);
   }
 }
-.qc-scene-workspace .qc-scene-stage {
-  grid-template-rows: auto auto auto auto;
-}
 .qc-scene-workspace .rs-stage .qc-cinematic-canvas {
   background: transparent;
   border: 0;
@@ -344,22 +341,6 @@
   text-align: center;
   color: #c8c6c2;
 }
-.qc-scene-workspace .qc-context-dock {
-  justify-content: center;
-  border: 0;
-  background: transparent;
-  flex-wrap: wrap;
-  padding-block: 14px;
-  gap: 6px;
-}
-.qc-scene-workspace .qc-context-dock button {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border-radius: 24px;
-}
 .qc-scene-workspace .qc-scene-context > .director-stage-kicker {
   display: none;
 }
@@ -369,10 +350,6 @@
 }
 .qc-scene-workspace .qc-scene-context > p {
   max-width: 70ch;
-}
-.qc-scene-workspace .qc-director-context-sheet {
-  border-radius: 24px;
-  box-shadow: 0 20px 70px rgb(0 0 0 / 35%);
 }
 .qc-scene-workspace .qc-shot-strip-panel {
   border-radius: 20px;
@@ -407,16 +384,6 @@
   .rs-world-toolbar {
     padding-inline: 12px;
   }
-  .qc-scene-workspace .qc-context-dock button {
-    font-size: 12px;
-  }
-}
-@media (min-width: 1101px) {
-  .qc-scene-workspace .qc-director-context-sheet,
-  .qc-scene-workspace .qc-shot-details-sheet {
-    grid-row: 1 / 2;
-    grid-column: 1 / 2;
-  }
 }
 .rs-memory-detail {
   margin-block: 12px;
@@ -426,12 +393,6 @@
   min-height: 44px;
   padding-block: 12px;
   cursor: pointer;
-}
-.rs-design-detail summary {
-  min-height: 44px;
-  padding: 14px 0;
-  cursor: pointer;
-  color: var(--df-text-secondary);
 }
 .rs-memory-strip {
   display: flex;

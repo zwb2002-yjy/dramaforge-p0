@@ -4,7 +4,7 @@
 .df-model-settings {
   display: grid;
   gap: var(--df-space-8);
-  width: min(100%, 880px);
+  width: min(100%, var(--df-settings-page-max));
 }
 
 .df-settings-block {
@@ -41,7 +41,7 @@
   grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: var(--df-space-4);
-  min-height: 4rem;
+  min-height: var(--df-list-row-min);
   padding: var(--df-space-3) var(--df-space-4);
   border: 1px solid var(--df-surface-tier-raised-border);
   border-radius: var(--df-radius-container);
@@ -106,9 +106,9 @@
 /* ---- Add provider ---- */
 .df-add-provider {
   display: grid;
-  grid-template-columns: minmax(12rem, 15rem) minmax(0, 1fr);
+  grid-template-columns: minmax(var(--df-vendor-rail-min), var(--df-vendor-rail-max)) minmax(0, 1fr);
   gap: var(--df-space-6);
-  min-height: 20rem;
+  min-height: var(--df-dialog-body-min);
 }
 .df-vendor-rail {
   display: grid;
@@ -194,7 +194,7 @@
   border-bottom: 0;
 }
 .df-model-picker li > .df-input {
-  flex: 0 0 14rem;
+  flex: 0 0 var(--df-mapping-select-w);
 }
 .df-field.df-model-check {
   flex: 1;
@@ -204,7 +204,7 @@
 .df-model-name {
   display: grid;
   flex: 1;
-  gap: 2px;
+  gap: var(--df-space-1);
   min-width: 0;
 }
 .df-model-name strong {

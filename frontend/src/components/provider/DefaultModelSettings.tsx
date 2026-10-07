@@ -149,6 +149,7 @@ export function DefaultModelSettings({
     (models.data ?? []).filter(
       (model) => model.source === "workspace" && model.capabilities.includes(capability),
     );
+  const anyChoices = GROUPS.some((group) => options(group.capability).length > 0);
   const dirty = Object.values(draft).some((value) => value !== null && value !== "");
   const readsReady =
     profiles.isSuccess && models.isSuccess && (!defaultSummary || profile.isSuccess);
@@ -214,20 +215,25 @@ export function DefaultModelSettings({
                     ))}
                   </Select>
                 </Field>
-                {readsReady && !choices.length && (
+                {readsReady && anyChoices && !choices.length && (
                   <p className="df-default-model-empty">
                     <span className="df-status warn">还没有可用的{group.label}</span>
-                    {onAddProvider && (
-                      <Button tone="ghost" onClick={onAddProvider}>
-                        <Plus size={14} aria-hidden="true" />
-                        添加供应商
-                      </Button>
-                    )}
                   </p>
                 )}
               </div>
             );
           })}
+          {readsReady && !anyChoices && (
+            <p className="df-default-model-empty">
+              <span className="df-status warn">还没有可选的模型</span>
+              {onAddProvider && (
+                <Button tone="ghost" onClick={onAddProvider}>
+                  <Plus size={14} aria-hidden="true" />
+                  添加供应商
+                </Button>
+              )}
+            </p>
+          )}
           <div className="df-default-models-actions">
             {dirty && (
               <Button tone="ghost" disabled={save.isPending} onClick={() => setDraft(EMPTY_DRAFT)}>

@@ -136,7 +136,8 @@ describe("ShotProductionActions plan preview vocabulary", () => {
     mockApi();
     renderActions();
 
-    const generate = screen.getByRole("button", { name: "生成关键帧" });
+    // The shot already has a formal frame, so regenerating it is a secondary action.
+    const generate = await screen.findByRole("button", { name: "重新生成画面" });
     await waitFor(() => expect(generate).toBeEnabled());
     fireEvent.click(generate);
 
@@ -151,7 +152,7 @@ describe("ShotProductionActions plan preview vocabulary", () => {
       "执行模型：Agnes Image Flash",
     );
     expect(screen.getByTestId("shot-execution-plan-references")).toHaveTextContent(
-      "引用：完全支持 1 · 近似支持 1 · 不支持 1",
+      "引用：完全支持 1 · 近似 1 · 不支持 1",
     );
     expect(preview).toHaveTextContent("无法执行：该模型没有声明对应的输入位");
 

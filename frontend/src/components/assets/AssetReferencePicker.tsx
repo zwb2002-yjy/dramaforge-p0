@@ -1,7 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { Button, Select } from "../ui";
 import { fetchProjectAssets } from "../../lib/api";
+import "./asset-reference-picker.css";
 import { queryKeys } from "../../lib/queryKeys";
 import {
   createShotReference,
@@ -113,6 +116,7 @@ export function AssetReferencePicker({
   const [editPurpose, setEditPurpose] = useState<string>(purpose);
   const [editMode, setEditMode] = useState<"current_formal" | "pinned_version">("current_formal");
   const [editError, setEditError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const assets = useQuery({
     queryKey: queryKeys.asset.picker(projectId),
@@ -161,6 +165,8 @@ export function AssetReferencePicker({
         label: selectedAssetId ? labelFor(selectedAssetId) : "",
       }),
     onSuccess: async () => {
+      setAdding(false);
+      setSelectedAssetId("");
       // Do not leave the old concrete artifacts attached while the binding
       // list is being refreshed.  The next resolution response repopulates
       // the context from the server truth.
@@ -278,204 +284,202 @@ export function AssetReferencePicker({
     return asset.status === "recycled" ? `@${asset.name}（已回收）` : `@${asset.name}`;
   }
 
-  const bindingLabels = rows.map((binding) => binding.label);
-
   return (
-    <div className="qc-reference-picker" data-testid="asset-reference-picker" data-shot-id={shotId}>
-      <header>
-        <strong>镜头资产引用</strong>
-        <span>保存业务目的，不保存 provider role；@文本仅供人类阅读。</span>
-      </header>
+    <div className="df-refs" data-testid="asset-reference-picker" data-shot-id={shotId}>
+      <ul className="df-ref-chips" data-testid="binding-list" aria-label="角色与参考">
+        {rows.map((binding) => {
+          const invalid = resolution.isSuccess && !resolvedBindingIds.has(binding.id);
+          const name = binding.label?.replace(/^@/, "") || "未命名";
+          return (
+            <li key={binding.id} className={invalid ? "invalid" : undefined}>
+              <button
+                type="button"
+                className="df-ref-chip"
+                aria-label={`编辑引用 ${binding.label || binding.id}`}
+                aria-expanded={editingId === binding.id}
+                onClick={() =>
+                  editingId === binding.id ? setEditingId(null) : startEditing(binding)
+                }
+                title={`${purposeLabel(binding.purpose)} · ${resolutionModeLabel(binding.resolution_mode)}`}
+              >
+                <span className="df-ref-avatar" aria-hidden="true">
+                  {name.slice(0, 1)}
+                </span>
+                <span>{binding.label || "未命名"}</span>
+                <small>{purposeLabel(binding.purpose)}</small>
+              </button>
+              {invalid && (
+                <span
+                  className="df-status err"
+                  data-testid={`reference-binding-invalid-${binding.id}`}
+                >
+                  已失效：解析不到素材
+                </span>
+              )}
+            </li>
+          );
+        })}
+        <li>
+          <button
+            type="button"
+            className="df-ref-add"
+            aria-expanded={adding}
+            onClick={() => setAdding((value) => !value)}
+          >
+            <Plus size={14} aria-hidden="true" />
+            {rows.length ? "添加" : "添加角色或参考"}
+          </button>
+        </li>
+      </ul>
 
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (selectedAssetId) create.mutate();
-        }}
-      >
-        <select
-          aria-label="选择资产"
-          value={selectedAssetId}
-          onChange={(event) => setSelectedAssetId(event.target.value)}
+      {adding && (
+        <form
+          className="df-ref-editor"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (selectedAssetId) create.mutate();
+          }}
         >
-          <option value="">选择资产…</option>
-          {assetOptions.map((asset) => (
-            <option key={asset.id} value={asset.id}>
-              {asset.name}（{assetKindLabel(asset.kind)}）
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="引用目的"
-          value={selectedPurpose}
-          onChange={(event) => setSelectedPurpose(event.target.value)}
-        >
-          {PURPOSES.map((item) => (
-            <option key={item} value={item}>
-              {purposeLabel(item)}
-            </option>
-          ))}
-        </select>
-        <button type="submit" disabled={!selectedAssetId || create.isPending}>
-          添加引用
-        </button>
-        <button
-          type="button"
-          onClick={() => void resolution.refetch()}
-          disabled={resolution.isFetching}
-        >
-          解析引用
-        </button>
-      </form>
+          <Select
+            aria-label="选择资产"
+            value={selectedAssetId}
+            onChange={(event) => setSelectedAssetId(event.target.value)}
+          >
+            <option value="">选择素材…</option>
+            {assetOptions.map((asset) => (
+              <option key={asset.id} value={asset.id}>
+                {asset.name}（{assetKindLabel(asset.kind)}）
+              </option>
+            ))}
+          </Select>
+          <Select
+            aria-label="引用目的"
+            value={selectedPurpose}
+            onChange={(event) => setSelectedPurpose(event.target.value)}
+          >
+            {PURPOSES.map((item) => (
+              <option key={item} value={item}>
+                {purposeLabel(item)}
+              </option>
+            ))}
+          </Select>
+          <Button type="submit" disabled={!selectedAssetId || create.isPending}>
+            添加引用
+          </Button>
+          {!assetOptions.length && assets.isSuccess && (
+            <p className="df-ref-note">素材库还没有可用素材，先在「角色素材」中添加。</p>
+          )}
+        </form>
+      )}
+
+      {rows.map((binding) =>
+        editingId === binding.id ? (
+          <div
+            key={binding.id}
+            className="df-ref-editor"
+            data-testid={`binding-editor-${binding.id}`}
+          >
+            <Select
+              aria-label={`参考素材 ${binding.id}`}
+              value={editAssetId}
+              onChange={(event) => setEditAssetId(event.target.value)}
+            >
+              <option value="">选择素材…</option>
+              {assetOptions.map((asset) => (
+                <option key={asset.id} value={asset.id}>
+                  {asset.name}（{assetKindLabel(asset.kind)}）
+                </option>
+              ))}
+            </Select>
+            <Select
+              aria-label={`参考用途 ${binding.id}`}
+              value={editPurpose}
+              onChange={(event) => setEditPurpose(event.target.value)}
+            >
+              {PURPOSES.map((item) => (
+                <option key={item} value={item}>
+                  {purposeLabel(item)}
+                </option>
+              ))}
+            </Select>
+            <Select
+              aria-label={`参考方式 ${binding.id}`}
+              value={editMode}
+              onChange={(event) =>
+                setEditMode(
+                  event.target.value === "pinned_version" ? "pinned_version" : "current_formal",
+                )
+              }
+            >
+              <option value="current_formal">跟随正式版本</option>
+              <option value="pinned_version">固定到当前版本</option>
+            </Select>
+            <div className="df-ref-editor-actions">
+              <Button
+                tone="ghost"
+                className="danger"
+                aria-label={`删除引用 ${binding.label || binding.id}`}
+                onClick={() => {
+                  setEditingId(null);
+                  remove.mutate(binding.id);
+                }}
+                disabled={remove.isPending}
+              >
+                删除
+              </Button>
+              <Button
+                tone="ghost"
+                aria-label={`取消编辑 ${binding.id}`}
+                onClick={() => {
+                  setEditingId(null);
+                  setEditError(null);
+                }}
+              >
+                取消
+              </Button>
+              <Button
+                aria-label={`保存引用 ${binding.id}`}
+                onClick={() => update.mutate(binding)}
+                disabled={update.isPending}
+              >
+                保存
+              </Button>
+            </div>
+          </div>
+        ) : null,
+      )}
 
       {editError && (
-        <p className="flash err" role="alert">
+        <p className="df-ref-note err" role="alert">
           引用修改失败：{editError}
         </p>
       )}
-
-      <ul className="qc-binding-list" data-testid="binding-list">
-        {rows.map((binding) => (
-          <li key={binding.id}>
-            {editingId === binding.id ? (
-              <div className="qc-binding-editor" data-testid={`binding-editor-${binding.id}`}>
-                <select
-                  aria-label={`参考素材 ${binding.id}`}
-                  value={editAssetId}
-                  onChange={(event) => setEditAssetId(event.target.value)}
-                >
-                  <option value="">选择资产…</option>
-                  {assetOptions.map((asset) => (
-                    <option key={asset.id} value={asset.id}>
-                      {asset.name}（{assetKindLabel(asset.kind)}）
-                    </option>
-                  ))}
-                </select>
-                <select
-                  aria-label={`参考用途 ${binding.id}`}
-                  value={editPurpose}
-                  onChange={(event) => setEditPurpose(event.target.value)}
-                >
-                  {PURPOSES.map((item) => (
-                    <option key={item} value={item}>
-                      {purposeLabel(item)}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  aria-label={`参考方式 ${binding.id}`}
-                  value={editMode}
-                  onChange={(event) =>
-                    setEditMode(
-                      event.target.value === "pinned_version" ? "pinned_version" : "current_formal",
-                    )
-                  }
-                >
-                  <option value="current_formal">跟随正式版本</option>
-                  <option value="pinned_version">固定到当前版本</option>
-                </select>
-                <button
-                  type="button"
-                  aria-label={`保存引用 ${binding.id}`}
-                  onClick={() => update.mutate(binding)}
-                  disabled={update.isPending}
-                >
-                  保存引用
-                </button>
-                <button
-                  type="button"
-                  aria-label={`取消编辑 ${binding.id}`}
-                  onClick={() => {
-                    setEditingId(null);
-                    setEditError(null);
-                  }}
-                >
-                  取消
-                </button>
-              </div>
-            ) : (
-              <>
-                <span>
-                  {binding.label || "（无标签）"} · {purposeLabel(binding.purpose)} ·{" "}
-                  {resolutionModeLabel(binding.resolution_mode)}
-                </span>
-                {resolution.isSuccess && !resolvedBindingIds.has(binding.id) && (
-                  <strong
-                    className="status-bad"
-                    data-testid={`reference-binding-invalid-${binding.id}`}
-                  >
-                    已失效：解析不到素材
-                  </strong>
-                )}
-                {binding.asset_id && (
-                  <details className="editing-diagnostics">
-                    <summary>开发 / 诊断详情（只读）</summary>
-                    <code>{binding.asset_id}</code>
-                  </details>
-                )}
-                <button
-                  type="button"
-                  aria-label={`编辑引用 ${binding.label || binding.id}`}
-                  onClick={() => startEditing(binding)}
-                >
-                  修改引用
-                </button>
-                <button
-                  type="button"
-                  aria-label={`删除引用 ${binding.label || binding.id}`}
-                  onClick={() => remove.mutate(binding.id)}
-                  disabled={remove.isPending}
-                >
-                  删除引用
-                </button>
-              </>
-            )}
-          </li>
-        ))}
-      </ul>
-
       {invalidBindings.length > 0 && (
-        <p className="muted" data-testid="reference-binding-invalid-hint">
-          已失效的引用不会进入生成。请更换参考素材，或重新选定版本。
+        <p className="df-ref-note" data-testid="reference-binding-invalid-hint">
+          已失效的引用不会进入生成，请更换素材或重新选定版本。
         </p>
       )}
-
-      {resolution.isSuccess && (
-        <div className="qc-resolved-references" data-testid="resolved-references">
-          <h4>本次生成将使用的参考素材</h4>
-          <ul>
-            {resolved.map((item, index) => (
-              <li key={`${item.artifact_id}-${index}`}>
-                <span>
-                  {purposeLabel(item.purpose)} ·{" "}
-                  {item.source === "pinned_version" ? "固定版本" : "跟随正式版本"}
-                </span>
-                {item.role ? <small className="muted">{roleLabel(item.role)}</small> : null}
-                <details className="editing-diagnostics">
-                  <summary>开发 / 诊断详情（只读）</summary>
-                  <code>{item.artifact_id}</code>
-                </details>
-              </li>
-            ))}
-          </ul>
-          {resolved.length === 0 && (
-            <p className="muted">
-              {rows.length > 0
-                ? "已绑定的参考当前解析不到内容：素材换版后没有可用素材，或素材已被回收。请更换参考素材。"
-                : "尚未绑定参考素材。"}
-            </p>
-          )}
-        </div>
+      {resolution.isSuccess && rows.length > 0 && (
+        <p className="df-ref-note" data-testid="resolved-references">
+          {resolved.length
+            ? `本次生成将使用的参考素材：${resolved
+                .map(
+                  (item) =>
+                    `${purposeLabel(item.purpose)}${item.role ? `（${roleLabel(item.role)}）` : ""}`,
+                )
+                .join("、")}`
+            : "已绑定的参考当前解析不到内容：素材换版后没有可用素材，或素材已被回收。"}
+        </p>
       )}
-
       {resolution.isError && (
-        <p className="qc-reference-picker-error" role="alert">
+        <p className="df-ref-note err" role="alert">
           引用解析失败：
           {resolution.error instanceof Error ? resolution.error.message : String(resolution.error)}
+          <Button tone="ghost" onClick={() => void resolution.refetch()}>
+            重试
+          </Button>
         </p>
       )}
-
-      {bindingLabels.length === 0 && <p className="muted">尚未绑定资产引用。</p>}
     </div>
   );
 }

@@ -186,7 +186,6 @@ test("a flow handoff generates one mock candidate only after explicit submission
     .getByRole("link", { name: "查看失败镜头" })
     .click();
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
-  await page.getByTestId("context-dock-generate").click();
   const executions = () =>
     state.editing.requests.filter(
       (request) =>
@@ -194,7 +193,7 @@ test("a flow handoff generates one mock candidate only after explicit submission
         request.path === `/api/v1/projects/${PROJECT_ID}/shots/${SHOT_ID}/executions`,
     );
   expect(executions()).toHaveLength(0);
-  await page.getByRole("button", { name: "生成关键帧", exact: true }).click();
+  await page.getByRole("button", { name: "生成画面", exact: true }).click();
   await expect.poll(() => executions().length).toBe(1);
   await expect.poll(() => state.candidates.length).toBe(1);
   expect(executions()[0].body).toMatchObject({

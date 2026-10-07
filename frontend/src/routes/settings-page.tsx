@@ -364,7 +364,7 @@ export function ModelConnectionSettingsPage() {
           无法读取工作空间。<Button onClick={() => void workspaces.refetch()}>重试</Button>
         </p>
       ) : workspaces.isPending ? (
-        <p role="status">正在读取工作空间…</p>
+        !selectedWorkspaceId && <p role="status">正在读取工作空间…</p>
       ) : (workspaces.data ?? []).length > 1 ? (
         <div className="df-settings-section">
           <WorkspaceSelector

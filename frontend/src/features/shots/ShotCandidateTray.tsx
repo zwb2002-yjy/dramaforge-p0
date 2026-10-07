@@ -1,11 +1,13 @@
 import { reviewTargetHref } from "../review/reviewTarget";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, ChevronUp, Layers } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { artifactContentUrl } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { AddArtifactToAssetDialog } from "../assets/AddArtifactToAssetDialog";
+import "./shot-inspector.css";
 import {
   setShotFormalKeyframe,
   setShotFormalVideo,
@@ -31,9 +33,8 @@ type ShotCandidateTrayProps = {
   /** Clear the canvas preview and refetch the SceneWorkspace after success. */
   onConfirmed?: (result: FormalKeyframeRead | FormalVideoRead) => void | Promise<void>;
   /**
-   * V2 Canvas-first (UI-1): the tray is a conditional review surface.
-   * Collapsed (default) it renders a single "备选画面 · N" line; it expands
-   * after Generate, in review, or when the user opens it from the dock.
+   * State-driven review surface: absent until candidates exist, a single
+   * "候选 · N" bar when collapsed, expanded after Generate or in review.
    */
   expanded?: boolean;
   onToggleExpanded?: () => void;
@@ -94,9 +95,8 @@ export function ShotCandidateTray({
       setFeedback({
         kind: "success",
         message:
-          ("formal_keyframe_artifact_id" in result ? "已设为正式关键帧" : "已设为正式视频") +
-          `：镜头 ${shot?.id ?? "未知"}，素材 ${candidate.artifactId}。` +
-          (candidate.stage === "image_keyframe" ? "下一步可生成视频。" : "下一步可进入剪辑。"),
+          ("formal_keyframe_artifact_id" in result ? "已设为正式画面" : "已设为正式视频") +
+          (candidate.stage === "image_keyframe" ? "，下一步生成视频。" : "，可以进入剪辑。"),
       });
       // Keep the existing cache aliases coherent.  No browser-side Shot or
       // formal id is manufactured; the follow-up workspace read is the truth.
@@ -122,80 +122,95 @@ export function ShotCandidateTray({
       setFeedback({
         kind: "error",
         message: /has not been approved by a human review decision/.test(errorMessage(error))
-          ? "请先点击此候选的‘审查此候选’，记录人工通过，再返回设为正式版本。"
+          ? "请先审查此候选并通过，再设为正式。"
           : errorMessage(error),
       });
     },
   });
 
-  if (!shot) {
-    return (
-      <section className="qc-shot-candidate-tray" data-testid="shot-candidate-tray">
-        <p className="muted">选择一个镜头比较候选结果。</p>
-      </section>
-    );
-  }
+  if (!shot) return null;
+  // State-driven: the tray only exists once there is something to review, or
+  // right after a generation request while the result is on its way.
+  if (!parsedCandidates.length && !expanded) return null;
 
   const activeArtifactId = confirm.isPending ? confirm.variables?.artifactId : null;
+  if (!expanded) {
+    return (
+      <button
+        type="button"
+        className="df-candidates-bar"
+        data-testid="shot-candidate-tray"
+        data-expanded="false"
+        aria-expanded="false"
+        onClick={onToggleExpanded}
+      >
+        <Layers size={16} aria-hidden="true" />
+        <span>候选</span>
+        <span className="df-num">{parsedCandidates.length}</span>
+        <ChevronUp size={16} aria-hidden="true" />
+      </button>
+    );
+  }
   return (
     <section
-      className="qc-shot-candidate-tray"
+      className="df-candidates"
       data-testid="shot-candidate-tray"
       data-shot-id={shot.id}
-      data-expanded={expanded ? "true" : "false"}
+      data-expanded="true"
       aria-label="候选结果"
-      hidden={!expanded}
     >
-      <header className="qc-shot-candidate-tray-header">
-        <div>
-          <span className="director-stage-kicker">候选比较</span>
-          <strong>候选结果 · #{shot.shot_number}</strong>
-        </div>
-        <span className="qc-shot-candidate-count">
-          {parsedCandidates.length ? `${parsedCandidates.length} 个可确认候选` : "暂无可确认候选"}
-        </span>
+      <header className="df-candidates-header">
+        <strong>
+          候选 <span className="df-num muted">{parsedCandidates.length}</span>
+        </strong>
+        <span className="muted">预览 → 审查通过 → 设为正式</span>
+        <a
+          className="df-candidates-link"
+          href={`/projects/${projectId}/production?view=experiments&shotId=${shot.id}`}
+        >
+          多版本尝试
+        </a>
         {onToggleExpanded && (
           <button
             type="button"
-            className="qc-shot-candidate-collapse"
+            className="df-candidates-collapse"
             data-testid="shot-candidate-collapse"
             aria-expanded="true"
+            aria-label="收起候选"
             onClick={onToggleExpanded}
           >
-            收起
+            <ChevronDown size={16} aria-hidden="true" />
           </button>
         )}
       </header>
 
-      <a href={`/projects/${projectId}/production?view=experiments&shotId=${shot.id}`}>
-        创建多个候选版本 →
-      </a>
-      {parsedCandidates.length > 0 && (
-        <p className="muted">
-          使用顺序：预览候选 → 审查并通过 → 设为正式。只有正式视频可以用于成片。
-        </p>
-      )}
       {parsedCandidates.length === 0 ? (
-        <p className="muted" data-testid="shot-candidate-empty">
-          生产链完成后，候选媒体会出现在这里；实验分支不会混入正式候选。
+        <p className="df-candidates-empty" data-testid="shot-candidate-empty">
+          生成完成后，候选会出现在这里。
         </p>
       ) : (
-        <div className="qc-shot-candidate-list" data-testid="shot-candidate-list">
+        <div className="df-candidates-list" data-testid="shot-candidate-list">
           {parsedCandidates.map((candidate) => {
             const label = shotCandidateStageLabel(candidate.stage);
             const selected =
               selectedCandidate !== null &&
               shotCandidateKey(selectedCandidate) === shotCandidateKey(candidate);
+            const review = candidate.reviewAllowed
+              ? { tone: "ok", text: "审查已通过" }
+              : candidate.reviewDecision === "rejected"
+                ? { tone: "err", text: "已拒绝" }
+                : { tone: "warn", text: candidate.reviewNodeRunId ? "待人工判断" : "待审查" };
             return (
               <article
                 key={shotCandidateKey(candidate)}
-                className={`qc-shot-candidate-card${selected ? " selected" : ""}`}
+                className={`df-candidate${selected ? " selected" : ""}`}
                 data-testid={`shot-candidate-${candidate.artifactId}`}
                 data-selected={selected ? "true" : "false"}
+                title={`${nodeRunStatusLabel(candidate.status)} · ${candidate.artifactId}`}
               >
                 <button
                   type="button"
-                  className="qc-shot-candidate-preview"
+                  className="df-candidate-preview"
                   data-testid={`shot-candidate-select-${candidate.artifactId}`}
                   aria-label={`预览${label}候选 ${candidate.artifactId}`}
                   aria-pressed={selected}
@@ -214,62 +229,57 @@ export function ShotCandidateTray({
                       alt={`${label}候选 ${candidate.artifactId}`}
                     />
                   )}
-                  <span className="qc-shot-candidate-badge">{selected ? "正在预览" : label}</span>
+                  <span className="df-candidate-badge">{selected ? "预览中" : label}</span>
                 </button>
-                <a
-                  href={reviewTargetHref(projectId, {
-                    shotId: shot.id,
-                    artifactId: candidate.artifactId,
-                    stage:
-                      candidate.stage === "image_keyframe" ? "formal_keyframe" : "formal_video",
-                    reviewKind: candidate.stage === "image_keyframe" ? "identity" : "video_drift",
-                  })}
+                <span
+                  className={`df-status ${review.tone}`}
+                  data-testid={`shot-candidate-review-${candidate.artifactId}`}
                 >
-                  审查此候选
-                </a>
-                <div className="qc-shot-candidate-meta">
-                  <span>{nodeRunStatusLabel(candidate.status)}</span>
-                  <span data-testid={`shot-candidate-review-${candidate.artifactId}`}>
-                    {candidate.reviewAllowed
-                      ? "人工审查已通过，可设为正式"
-                      : candidate.reviewDecision === "rejected"
-                        ? "人工审查已拒绝"
-                        : candidate.reviewNodeRunId
-                          ? "已有检查证据，等待人工判断"
-                          : "等待生成检查证据"}
+                  {review.text}
+                </span>
+                {candidate.duplicateContent && (
+                  <span
+                    className="df-status err"
+                    data-testid={`shot-candidate-duplicate-${candidate.artifactId}`}
+                  >
+                    与另一候选完全相同
                   </span>
-                  {candidate.duplicateContent && (
-                    <span
-                      className="status-bad"
-                      data-testid={`shot-candidate-duplicate-${candidate.artifactId}`}
+                )}
+                <div className="df-candidate-actions">
+                  {candidate.reviewAllowed ? (
+                    <button
+                      type="button"
+                      className="df-btn primary"
+                      data-testid={`shot-candidate-confirm-${candidate.artifactId}`}
+                      onClick={() => confirm.mutate(candidate)}
+                      disabled={confirm.isPending}
                     >
-                      与同阶段另一候选内容完全相同；请改用独立提示词重新生成
-                    </span>
+                      {activeArtifactId === candidate.artifactId ? "确认中…" : "设为正式"}
+                    </button>
+                  ) : (
+                    <a
+                      className="df-btn"
+                      href={reviewTargetHref(projectId, {
+                        shotId: shot.id,
+                        artifactId: candidate.artifactId,
+                        stage:
+                          candidate.stage === "image_keyframe" ? "formal_keyframe" : "formal_video",
+                        reviewKind:
+                          candidate.stage === "image_keyframe" ? "identity" : "video_drift",
+                      })}
+                    >
+                      审查
+                    </a>
                   )}
-                  {candidate.nodeRunId && <small>Run {candidate.nodeRunId.slice(0, 8)}</small>}
-                  <code>{candidate.artifactId}</code>
+                  <button
+                    type="button"
+                    className="df-btn ghost"
+                    data-testid={`shot-candidate-add-asset-${candidate.artifactId}`}
+                    onClick={() => setAssetCandidate(candidate)}
+                  >
+                    加入资产
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="qc-shot-candidate-confirm"
-                  data-testid={`shot-candidate-confirm-${candidate.artifactId}`}
-                  onClick={() => confirm.mutate(candidate)}
-                  disabled={confirm.isPending || !candidate.reviewAllowed}
-                >
-                  {activeArtifactId === candidate.artifactId
-                    ? "确认中…"
-                    : candidate.reviewAllowed
-                      ? `设为正式${label}`
-                      : "审查通过后可设为正式"}
-                </button>
-                <button
-                  type="button"
-                  className="qc-shot-candidate-confirm secondary"
-                  data-testid={`shot-candidate-add-asset-${candidate.artifactId}`}
-                  onClick={() => setAssetCandidate(candidate)}
-                >
-                  加入资产
-                </button>
               </article>
             );
           })}
@@ -294,12 +304,12 @@ export function ShotCandidateTray({
       )}
 
       {feedback?.kind === "success" && (
-        <p className="qc-shot-candidate-success" data-testid="shot-candidate-success" role="status">
+        <p className="df-candidates-note ok" data-testid="shot-candidate-success" role="status">
           {feedback.message}
         </p>
       )}
       {feedback?.kind === "error" && (
-        <p className="qc-shot-candidate-error" data-testid="shot-candidate-error" role="alert">
+        <p className="df-candidates-note err" data-testid="shot-candidate-error" role="alert">
           确认失败：{feedback.message}
         </p>
       )}

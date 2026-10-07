@@ -195,8 +195,9 @@ describe("ShotProductionActions", () => {
       return json({});
     });
     renderActions([], [], undefined, false);
-    expect(screen.getByTestId("generate-video")).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "文生视频" }));
+    // Without a formal frame the default next step is the frame itself.
+    expect(screen.queryByTestId("generate-video")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("视频方式"), { target: { value: "text_to_video" } });
     await waitFor(() => expect(screen.getByTestId("generate-video")).toBeEnabled());
     expect(screen.getByTestId("delegate-video-to-director")).toBeDisabled();
   });
@@ -244,7 +245,7 @@ describe("ShotProductionActions", () => {
       fingerprint: "hash-1",
     };
     renderActions([reference]);
-    fireEvent.click(screen.getByRole("button", { name: "参考素材生视频" }));
+    fireEvent.change(screen.getByLabelText("视频方式"), { target: { value: "omni_reference" } });
     await waitFor(() => expect(screen.getByTestId("generate-video")).toBeEnabled());
     expect(screen.getByTestId("production-preflight-video")).toHaveTextContent(
       "SGLang H3 多素材参考 (Ref2VA) · v2",
@@ -298,7 +299,8 @@ describe("ShotProductionActions", () => {
       artifact_id: "artifact-style",
     };
     renderActions([unrelated, lastFrame], [], undefined, true, formalFrame);
-    fireEvent.click(screen.getByRole("button", { name: label }));
+    expect(label).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("视频方式"), { target: { value: mode } });
     await waitFor(() => expect(screen.getByTestId("generate-video")).toBeEnabled());
     fireEvent.click(screen.getByTestId("generate-video"));
     await waitFor(() =>
@@ -347,7 +349,7 @@ describe("ShotProductionActions", () => {
       },
     });
     expect(delegated?.body.authorization_expires_at).toEqual(expect.any(String));
-    expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已授权给导演执行");
+    expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已交给导演执行");
     expect(
       calls.some(
         (call) =>
@@ -383,7 +385,7 @@ describe("ShotProductionActions", () => {
     expect(await screen.findByTestId("shot-production-error")).toHaveTextContent("response lost");
     fireEvent.click(screen.getByTestId("delegate-keyframe-to-director"));
     await waitFor(() =>
-      expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已授权给导演执行"),
+      expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已交给导演执行"),
     );
 
     expect(delegationBodies).toHaveLength(2);
@@ -417,7 +419,7 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
 
     await waitFor(() => expect(screen.getByTestId("shot-production-status")).toBeInTheDocument());
     const plan = calls.find((call) => call.url.endsWith("/execution-plan"));
@@ -454,11 +456,16 @@ describe("ShotProductionActions", () => {
     expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已排队");
   });
 
-  it("disables video before a formal keyframe exists", () => {
+  it("leads with the frame and offers no video action before a formal keyframe exists", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     renderActions();
-    expect(screen.getByRole("button", { name: "生成视频" })).toBeDisabled();
-    expect(screen.getByText("生成视频已暂停：请先审查候选并设置正式关键帧。")).toBeInTheDocument();
+    expect(screen.getByTestId("shot-production-actions")).toHaveAttribute(
+      "data-next-action",
+      "generate_keyframe",
+    );
+    expect(screen.getByTestId("generate-keyframe")).toHaveTextContent("生成画面");
+    expect(screen.queryByRole("button", { name: "生成视频" })).not.toBeInTheDocument();
+    expect(screen.getByText("视频从正式画面开始，不会自动改用其他图片。")).toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalledWith(
       expect.stringContaining("/execution-plan"),
       expect.anything(),
@@ -501,7 +508,7 @@ describe("ShotProductionActions", () => {
       fingerprint: "artifact-fingerprint",
     };
     renderActions([reference]);
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
 
     await waitFor(() => expect(screen.getByTestId("shot-production-status")).toBeInTheDocument());
     const plan = calls.find((call) => call.url.endsWith("/execution-plan"));
@@ -542,7 +549,7 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
 
     const preview = await screen.findByTestId("shot-execution-plan-preview");
     expect(preview).toHaveAttribute("data-delivery", "approximate");
@@ -584,7 +591,7 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
     fireEvent.click(await screen.findByTestId("confirm-shot-execution-approximation"));
 
     expect(await screen.findByTestId("shot-production-error")).toHaveTextContent(
@@ -612,7 +619,7 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
 
     expect(await screen.findByTestId("shot-execution-plan-preview")).toHaveAttribute(
       "data-delivery",
@@ -649,9 +656,9 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
     expect(await screen.findByTestId("shot-production-error")).toHaveTextContent("response lost");
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
     await waitFor(() => expect(screen.getByTestId("shot-production-status")).toBeInTheDocument());
 
     expect(executions).toHaveLength(2);
@@ -683,7 +690,7 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
 
     await waitFor(() =>
       expect(screen.getByTestId("shot-production-status")).toHaveAttribute(
@@ -722,9 +729,9 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
     await waitFor(() => expect(keys).toHaveLength(1));
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
     await waitFor(() => expect(keys).toHaveLength(2));
 
     expect(keys[1]).not.toBe(keys[0]);
@@ -814,7 +821,7 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
 
     await waitFor(() =>
       expect(screen.getByTestId("shot-production-status")).toHaveAttribute(
@@ -842,15 +849,15 @@ describe("ShotProductionActions", () => {
       ],
     );
 
-    expect(screen.getByTestId("generate-keyframe")).toBeDisabled();
-    expect(screen.getByTestId("generate-keyframe")).toHaveTextContent("提交结果待对账");
+    // The primary action reports the unknown state instead of offering a retry.
+    expect(screen.getByTestId("shot-primary-unknown")).toBeDisabled();
+    expect(screen.getByTestId("shot-primary-unknown")).toHaveTextContent("状态待同步");
+    expect(screen.queryByTestId("generate-keyframe")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("secondary-generate-keyframe")).not.toBeInTheDocument();
     expect(screen.getByTestId("delegate-keyframe-to-director")).toBeDisabled();
-    expect(screen.getByTestId("shot-production-outcome-unknown")).toHaveTextContent(
-      "按原操作键对账",
-    );
+    expect(screen.getByTestId("shot-production-outcome-unknown")).toHaveTextContent("以免重复计费");
     // Video remains blocked by the independent formal-keyframe prerequisite.
-    expect(screen.getByTestId("generate-video")).toBeDisabled();
-    expect(screen.queryByTestId("shot-production-running")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("generate-video")).not.toBeInTheDocument();
   });
 
   it("keeps AUTO unavailable with an explanation when the runtime engine is not enabled", async () => {
@@ -877,7 +884,7 @@ describe("ShotProductionActions", () => {
     expect(screen.getByTestId("shot-production-director-blocked")).toHaveTextContent("legacy");
     // Manual generation stays available: MANUAL never depends on the Director.
     expect(screen.getByTestId("generate-keyframe")).toBeEnabled();
-    expect(screen.getByTestId("generate-video")).toBeDisabled();
+    expect(screen.queryByTestId("generate-video")).not.toBeInTheDocument();
   });
 
   it("keeps the AUTO path open when the runtime reports itself available", async () => {
@@ -960,12 +967,10 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
 
     const suggestions = await screen.findByTestId("shot-execution-plan-suggestions");
-    expect(suggestions).toHaveTextContent("建议（尚未生效）");
-    expect(suggestions).toHaveTextContent("不会使用它们");
-    expect(suggestions).toHaveTextContent("不作为");
+    expect(suggestions).toHaveTextContent("本次不会使用");
     expect(screen.getByTestId("plan-suggestion-style:cinematic_realism_v1")).toHaveTextContent(
       "未使用",
     );
@@ -994,7 +999,7 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
 
     await screen.findByTestId("shot-execution-plan-preview");
     expect(screen.queryByTestId("shot-execution-plan-suggestions")).not.toBeInTheDocument();
@@ -1009,10 +1014,11 @@ describe("ShotProductionActions", () => {
       ],
     );
 
-    expect(screen.getByTestId("generate-keyframe")).toBeDisabled();
-    expect(screen.getByTestId("generate-keyframe")).toHaveTextContent("关键帧生成中");
-    expect(screen.getByTestId("generate-video")).toBeDisabled();
-    expect(screen.getByTestId("shot-production-running")).toHaveTextContent("不会重复提交");
+    // The running stage occupies the primary action; nothing can resubmit it.
+    expect(screen.getByTestId("shot-primary-running")).toBeDisabled();
+    expect(screen.getByTestId("shot-primary-running")).toHaveTextContent("画面生成中");
+    expect(screen.queryByTestId("generate-keyframe")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("generate-video")).not.toBeInTheDocument();
   });
 
   it("treats a newer terminal retry as effective over an older active attempt", () => {
@@ -1025,7 +1031,7 @@ describe("ShotProductionActions", () => {
     );
 
     expect(screen.getByTestId("generate-keyframe")).toBeEnabled();
-    expect(screen.getByTestId("generate-keyframe")).toHaveTextContent("生成关键帧");
-    expect(screen.queryByTestId("shot-production-running")).not.toBeInTheDocument();
+    expect(screen.getByTestId("generate-keyframe")).toHaveTextContent("生成画面");
+    expect(screen.queryByTestId("shot-primary-running")).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AssetReferencePicker } from "../../src/components/assets/AssetReferencePicker";
@@ -89,6 +89,7 @@ describe("AssetReferencePicker recycled assets and empty resolution", () => {
     renderPicker();
 
     await waitFor(() => expect(screen.getByTestId("asset-reference-picker")).toBeInTheDocument());
+    fireEvent.click(await screen.findByRole("button", { name: "添加" }));
     const options = await screen.findByLabelText("选择资产");
     const values = Array.from(options.querySelectorAll("option")).map(
       (option) => (option as HTMLOptionElement).value,

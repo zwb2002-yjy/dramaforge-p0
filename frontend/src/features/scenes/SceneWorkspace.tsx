@@ -1,19 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { DirectorSidebar } from "../director/DirectorSidebar";
 import type { ReferenceResolutionState } from "../../components/assets/AssetReferencePicker";
 import { timeOfDayLabel } from "../../lib/sceneLabels";
-import { ContextDock, type ContextTool } from "../shots/ContextDock";
 import { CinematicCanvas } from "../shots/CinematicCanvas";
 import { ShotCandidateTray } from "../shots/ShotCandidateTray";
-import { ShotDetailsPanel } from "../shots/ShotDetailsPanel";
+import { ShotInspector, type InspectorFocus } from "../shots/ShotInspector";
 import { ShotStrip } from "../shots/ShotStrip";
-import {
-  isConfirmableShotCandidate,
-  parseShotCandidates,
-  type ShotCandidate,
-} from "../shots/shotCandidates";
+import { parseShotCandidates, type ShotCandidate } from "../shots/shotCandidates";
 import type { ShotExecutionReference, ShotLite } from "../shots/api";
 import type { ShotDesignDraft } from "../shots/ShotDesignPanel";
 import { hasActiveSceneRuns, SCENE_ACTIVE_REFETCH_MS } from "../production/sceneRunState";
@@ -56,16 +50,29 @@ function draftFromShot(shot: ShotLite): ShotDesignDraft {
   };
 }
 
+function initialFocus(
+  openGenerate: boolean,
+  openPrompts: boolean,
+  openDirector: boolean,
+): { focus: InspectorFocus; revision: number } | null {
+  const focus = openGenerate
+    ? "generate"
+    : openPrompts
+      ? "prompts"
+      : openDirector
+        ? "director"
+        : null;
+  return focus ? { focus, revision: 1 } : null;
+}
+
 /**
- * Canvas-first Scene/Shot Workbench orchestrator (V2 UI-1).
+ * Scene/Shot workbench: central canvas, compact shot strip, state-driven
+ * candidate tray and one right-hand Shot inspector.
  *
- * SceneWorkspaceRead remains the only server snapshot. selectedShotId, local
- * candidate preview, reference resolution drafts, and the new Context Dock /
- * sheet / tray / strip UI state are view state scoped to the current Scene;
- * none create a second media or production fact source. The Canvas keeps
- * dominant visual weight: the operation panel and Details are floating sheets
- * opened on demand, the Candidate Tray is a conditional review surface, and
- * the ShotStrip defaults to compact navigation.
+ * SceneWorkspaceRead remains the only server snapshot. Selection, local
+ * candidate preview, reference resolution drafts and design drafts are view
+ * state scoped to the current Scene; none create a second media or
+ * production fact source.
  */
 export function SceneWorkspace({
   projectId,
@@ -81,13 +88,13 @@ export function SceneWorkspace({
   const [selectedShotId, setSelectedShotId] = useState<string | null>(initialShotId ?? null);
   const [previewCandidate, setPreviewCandidate] = useState<ShotCandidate | null>(null);
   const [referenceDrafts, setReferenceDrafts] = useState<Record<string, ShotReferenceContext>>({});
-  // Context Dock / sheet / tray / strip / details are pure UI state.
-  const [activeTool, setActiveTool] = useState<ContextTool | null>(
-    openGenerate ? "generate" : openPrompts ? "prompts" : openDirector ? "director" : null,
+  // Inspector section requests, tray and strip are pure UI state.
+  const [focusRequest, setFocusRequest] = useState(() =>
+    initialFocus(openGenerate, openPrompts, openDirector),
   );
   const [trayExpanded, setTrayExpanded] = useState(openCandidates);
   const [stripExpanded, setStripExpanded] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const trayAnchor = useRef<HTMLDivElement>(null);
   const [intentSeed, setIntentSeed] = useState<{
     text: string;
     revision: number;
@@ -112,12 +119,9 @@ export function SceneWorkspace({
     setSelectedShotId(initialShotId ?? null);
     setPreviewCandidate(null);
     setReferenceDrafts({});
-    setActiveTool(
-      openGenerate ? "generate" : openPrompts ? "prompts" : openDirector ? "director" : null,
-    );
+    setFocusRequest(initialFocus(openGenerate, openPrompts, openDirector));
     setTrayExpanded(openCandidates);
     setStripExpanded(false);
-    setDetailsOpen(false);
     setIntentSeed(null);
     setDesignDirty(false);
     setDesignDrafts({});
@@ -183,21 +187,14 @@ export function SceneWorkspace({
     [designDirty, selectedShotKey],
   );
 
-  const selectTool = useCallback((tool: ContextTool) => {
-    // Context Sheet and Details are mutually exclusive. Takes stays independent
-    // so Generate can still auto-expand the Candidate Tray.
-    setDetailsOpen(false);
-    setActiveTool((current) => (current === tool ? null : tool));
+  const requestFocus = useCallback((focus: InspectorFocus) => {
+    setFocusRequest((current) => ({ focus, revision: (current?.revision ?? 0) + 1 }));
   }, []);
 
-  const toggleDetails = useCallback(() => {
-    if (detailsOpen) {
-      setDetailsOpen(false);
-      return;
-    }
-    setActiveTool(null);
-    setDetailsOpen(true);
-  }, [detailsOpen]);
+  const reviewCandidates = useCallback(() => {
+    setTrayExpanded(true);
+    trayAnchor.current?.scrollIntoView?.({ block: "nearest" });
+  }, []);
 
   const handleExecuted = useCallback(async () => {
     // Generate fired: surface the Candidate review surface without leaving the
@@ -281,8 +278,11 @@ export function SceneWorkspace({
   };
   const selectedReferences = selectedReferenceContext.references;
   const selectedReferencesReady = selectedReferenceContext.ready;
-  const candidates = selected ? (data?.candidates?.[selected.id] ?? []) : [];
-  const candidateCount = parseShotCandidates(candidates).filter(isConfirmableShotCandidate).length;
+  const candidates = useMemo(
+    () => (selected ? (data?.candidates?.[selected.id] ?? []) : []),
+    [data?.candidates, selected],
+  );
+  const parsedCandidates = useMemo(() => parseShotCandidates(candidates), [candidates]);
   const trace = selected ? (data?.trace?.[selected.id] ?? []) : [];
   const designDraft = selected ? (designDrafts[selected.id] ?? draftFromShot(selected)) : undefined;
 
@@ -338,18 +338,15 @@ export function SceneWorkspace({
         </p>
       )}
 
-      <div className="qc-scene-layout" data-selected-shot-id={selectedShotKey ?? undefined}>
-        <div className="qc-scene-stage" data-testid="scene-stage">
+      <div className="df-scene-layout" data-selected-shot-id={selectedShotKey ?? undefined}>
+        <div className="df-scene-main" data-testid="scene-stage">
           <ResonanceStage
             key={`${projectId}:${sceneId}:${selectedShotKey}`}
             projectId={projectId}
             shots={shots}
             selectedShotId={selectedShotKey}
             subjects={selectedBindingRows}
-            onOpenDirector={() => {
-              setDetailsOpen(false);
-              setActiveTool("director");
-            }}
+            onOpenDirector={() => requestFocus("director")}
             onSelectShot={selectShot}
             onIntent={(text) => {
               setIntentSeed((current) => ({
@@ -357,8 +354,7 @@ export function SceneWorkspace({
                 revision: (current?.revision ?? 0) + 1,
                 shotId: selectedShotKey,
               }));
-              setDetailsOpen(false);
-              setActiveTool("director");
+              requestFocus("director");
             }}
           >
             <CinematicCanvas
@@ -369,29 +365,21 @@ export function SceneWorkspace({
               trace={trace}
             />
           </ResonanceStage>
-          <ContextDock
-            activeTool={activeTool}
-            candidateCount={candidateCount}
-            trayExpanded={trayExpanded}
-            detailsOpen={detailsOpen}
-            hasShot={Boolean(selected)}
-            onSelectTool={selectTool}
-            onToggleTray={() => setTrayExpanded((value) => !value)}
-            onToggleDetails={toggleDetails}
-          />
-          <ShotCandidateTray
-            projectId={projectId}
-            shot={selected}
-            candidates={candidates}
-            selectedCandidate={previewCandidate}
-            expanded={trayExpanded}
-            onToggleExpanded={() => setTrayExpanded((value) => !value)}
-            onPreviewCandidate={setPreviewCandidate}
-            onConfirmed={async () => {
-              setPreviewCandidate(null);
-              await workspace.refetch();
-            }}
-          />
+          <div ref={trayAnchor}>
+            <ShotCandidateTray
+              projectId={projectId}
+              shot={selected}
+              candidates={candidates}
+              selectedCandidate={previewCandidate}
+              expanded={trayExpanded}
+              onToggleExpanded={() => setTrayExpanded((value) => !value)}
+              onPreviewCandidate={setPreviewCandidate}
+              onConfirmed={async () => {
+                setPreviewCandidate(null);
+                await workspace.refetch();
+              }}
+            />
+          </div>
           <ShotStrip
             projectId={projectId}
             shots={shots}
@@ -401,39 +389,28 @@ export function SceneWorkspace({
             onToggleExpanded={() => setStripExpanded((value) => !value)}
             traceByShot={(data?.trace ?? {}) as Record<string, unknown[]>}
           />
-          <DirectorSidebar
-            projectId={projectId}
-            shot={selected}
-            references={selectedReferences}
-            referencesReady={selectedReferencesReady}
-            trace={trace}
-            onReferencesChange={updateSelectedReferences}
-            onResolutionStateChange={updateReferenceResolutionState}
-            onWorkspaceRefresh={handleExecuted}
-            open={activeTool !== null}
-            requestedTool={activeTool}
-            intentSeed={intentSeed?.shotId === selectedShotKey ? intentSeed : null}
-            onClose={() => setActiveTool(null)}
-            onOpenDetails={() => {
-              setActiveTool(null);
-              setDetailsOpen(true);
-            }}
-            designDirty={designDirty}
-            onDesignDirtyChange={updateDesignDirty}
-            designDraft={designDraft}
-            onDesignDraftChange={updateDesignDraft}
-            suggestionDraft={suggestionDraft}
-            onApplySuggestionDraft={setSuggestionDraft}
-            onDesignSaved={handleDesignSaved}
-          />
-          <ShotDetailsPanel
-            open={detailsOpen}
-            projectId={projectId}
-            shot={selected}
-            trace={trace}
-            onClose={() => setDetailsOpen(false)}
-          />
         </div>
+        <ShotInspector
+          projectId={projectId}
+          shot={selected}
+          references={selectedReferences}
+          referencesReady={selectedReferencesReady}
+          trace={trace}
+          candidates={parsedCandidates}
+          onReferencesChange={updateSelectedReferences}
+          onResolutionStateChange={updateReferenceResolutionState}
+          onExecuted={handleExecuted}
+          onReviewCandidates={reviewCandidates}
+          designDirty={designDirty}
+          onDesignDirtyChange={updateDesignDirty}
+          designDraft={designDraft}
+          onDesignDraftChange={updateDesignDraft}
+          suggestionDraft={suggestionDraft}
+          onApplySuggestionDraft={setSuggestionDraft}
+          onDesignSaved={handleDesignSaved}
+          intentSeed={intentSeed?.shotId === selectedShotKey ? intentSeed : null}
+          focusRequest={focusRequest}
+        />
       </div>
       {pendingShotId !== null && (
         <UnsavedChangesDialog
@@ -442,7 +419,7 @@ export function SceneWorkspace({
           discardLabel="放弃并切换"
           onReturnToSave={() => {
             setPendingShotId(null);
-            setActiveTool("director");
+            requestFocus("generate");
           }}
           onDiscard={() => {
             if (selectedShotKey !== null) {

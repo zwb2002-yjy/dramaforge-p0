@@ -87,7 +87,7 @@ function renderTray(onPreviewCandidate = vi.fn()) {
 describe("ShotCandidateTray", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("uses the Context Dock as the only collapsed candidate entry", () => {
+  it("collapses to a single candidate count bar that reopens the tray", () => {
     const onToggleExpanded = vi.fn();
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -104,9 +104,12 @@ describe("ShotCandidateTray", () => {
       </QueryClientProvider>,
     );
 
-    expect(screen.getByTestId("shot-candidate-tray")).toHaveAttribute("hidden");
-    expect(screen.getByTestId("shot-candidate-artifact-keyframe")).toBeInTheDocument();
-    expect(onToggleExpanded).not.toHaveBeenCalled();
+    const bar = screen.getByTestId("shot-candidate-tray");
+    expect(bar).toHaveAttribute("data-expanded", "false");
+    expect(bar).toHaveTextContent("候选2");
+    expect(screen.queryByTestId("shot-candidate-artifact-keyframe")).not.toBeInTheDocument();
+    fireEvent.click(bar);
+    expect(onToggleExpanded).toHaveBeenCalledTimes(1);
   });
 
   it("rejects opaque ExperimentBranch rows and only renders concrete media candidates", () => {

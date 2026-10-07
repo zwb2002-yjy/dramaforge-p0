@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ShotDetailsPanel } from "../../src/features/shots/ShotDetailsPanel";
+import { ShotDetailsBody } from "../../src/features/shots/ShotDetailsPanel";
 import { fetchExecutionTrace } from "../../src/lib/api";
 
 vi.mock("../../src/lib/api", () => ({ fetchExecutionTrace: vi.fn() }));
@@ -37,8 +37,7 @@ describe("Execution trace details", () => {
       <QueryClientProvider
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
-        <ShotDetailsPanel
-          open
+        <ShotDetailsBody
           projectId="project-1"
           shot={{
             id: "shot-1",
@@ -61,7 +60,6 @@ describe("Execution trace details", () => {
             formal_composite_artifact_id: null,
           }}
           trace={[{ node_run_id: "run-1", node_key: "video", status: "completed" }]}
-          onClose={vi.fn()}
         />
       </QueryClientProvider>,
     );

@@ -212,4 +212,17 @@
   --df-dialog-max-height: 86svh;
   --df-backdrop: rgba(5, 6, 8, 0.66);
   --df-status-dot-size: 6px;
+
+  /* ---- Creation surfaces ---- */
+  --df-control-height-lg: 2.75rem; /* the one primary action of a panel */
+  --df-chip-height: 2rem;
+  --df-avatar-sm: 1.5rem;
+  --df-candidate-min: 10rem;
+  --df-stat-min: 7rem;
+  --df-vendor-rail-min: 12rem;
+  --df-vendor-rail-max: 15rem;
+  --df-dialog-body-min: 20rem;
+  --df-list-row-min: 4rem;
+  --df-mapping-select-w: 14rem;
+  --df-settings-page-max: 880px;
 }

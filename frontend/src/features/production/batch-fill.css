@@ -17,7 +17,7 @@
 
 .df-batch-summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(var(--df-stat-min), 1fr));
   gap: var(--df-space-2);
   margin: 0 0 var(--df-space-5);
 }
@@ -106,4 +106,7 @@
 }
 .df-batch-note.err {
   color: var(--df-danger-text);
+}
+.df-batch-button[data-state="error"] {
+  color: var(--df-text-muted);
 }

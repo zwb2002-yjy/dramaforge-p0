@@ -193,28 +193,6 @@
     border-radius: var(--df-radius-control);
     font-size: var(--df-text-sm);
   }
-
-  /* Canvas-first V2 (UI-1): the Scene view is a single-column stage. The
-     operation panel is a floating Context Sheet opened from the Context Dock,
-     not a permanent second column. */
-  .qc-scene-layout {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--df-space-5);
-  }
-
-  .qc-scene-stage {
-    position: relative;
-    grid-template-rows: minmax(420px, 61vh) auto auto auto;
-    gap: var(--df-space-3);
-  }
-
-  .qc-scene-stage .qc-cinematic-canvas {
-    border-color: var(--df-border-strong);
-    border-radius: var(--df-radius-container);
-    background: var(--df-obsidian);
-    box-shadow: inset 0 0 0 1px var(--df-surface-screen);
-  }
-
   .qc-canvas-media {
     gap: var(--df-space-3);
     padding: var(--df-space-5);
@@ -236,54 +214,20 @@
     background: var(--df-surface-1);
   }
 
-  .qc-shot-candidate-tray,
   .qc-shot-strip-panel {
     border-color: var(--df-border-subtle);
     border-radius: var(--df-radius-container);
     background: var(--df-surface-1);
   }
 
-  .qc-shot-candidate-tray {
-    gap: var(--df-space-3);
-    padding: var(--df-space-3) var(--df-space-4);
-  }
-
-  .qc-shot-candidate-tray-header,
   .qc-shot-strip-header {
     min-height: 24px;
   }
 
-  .qc-shot-candidate-tray-header strong,
   .qc-shot-strip-header strong {
     font-size: var(--df-text-sm);
     font-weight: var(--df-weight-semibold);
   }
-
-  .qc-shot-candidate-list {
-    gap: var(--df-space-3);
-  }
-
-  .qc-shot-candidate-card {
-    padding: var(--df-space-2);
-    border-color: var(--df-border-subtle);
-    border-radius: var(--df-radius-container);
-    background: var(--df-surface-0);
-  }
-
-  .qc-shot-candidate-card.selected {
-    border-color: var(--df-brass);
-    box-shadow: inset 0 0 0 1px var(--df-brass-dim);
-  }
-
-  .qc-shot-candidate-preview {
-    border-radius: var(--df-radius-container);
-  }
-
-  .qc-shot-candidate-confirm {
-    min-height: 30px;
-    border-radius: var(--df-radius-container);
-  }
-
   .qc-shot-strip-panel {
     gap: var(--df-space-2);
     padding: var(--df-space-3) var(--df-space-4);
@@ -308,63 +252,6 @@
   .qc-shot-strip-thumb {
     background: var(--df-surface-2);
   }
-
-  .qc-director-sidebar {
-    max-height: calc(100vh - 8.5rem);
-    border-color: var(--df-border);
-    border-radius: var(--df-radius-container);
-    background: var(--df-surface-1);
-  }
-
-  .qc-director-sidebar-header {
-    padding: var(--df-space-4);
-    border-bottom-color: var(--df-border-subtle);
-  }
-
-  .qc-director-sidebar-content {
-    gap: var(--df-space-3);
-    padding: var(--df-space-3);
-  }
-
-  .qc-director-tabs {
-    border-color: var(--df-border);
-    border-radius: var(--df-radius-container);
-    background: var(--df-surface-0);
-  }
-
-  .qc-director-tabs button {
-    min-height: 34px;
-    color: var(--df-text-muted);
-    border-radius: var(--df-radius-control);
-  }
-
-  .qc-director-tabs button.active,
-  .qc-director-tabs button:hover,
-  .qc-director-tabs button:focus-visible {
-    background: var(--df-surface-2);
-    color: var(--df-text-primary);
-  }
-
-  .qc-director-tabs button.active {
-    box-shadow: inset 0 -2px 0 var(--df-brass);
-  }
-
-  .qc-director-tab-panel .qc-shot-design-panel,
-  .qc-director-tab-panel .qc-shot-production-actions,
-  .qc-director-tab-panel .qc-reference-picker,
-  .qc-director-tab-panel .qc-production-trace {
-    padding: var(--df-space-3) var(--df-space-2);
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-  }
-
-  .qc-director-tab-panel .qc-shot-design-panel textarea,
-  .qc-director-tab-panel .qc-reference-picker select,
-  .qc-director-tab-panel .qc-reference-picker input {
-    border-radius: var(--df-radius-control);
-  }
-
   @media (max-width: 1100px) {
     .qc-preview-shell {
       grid-template-columns: 60px minmax(0, 1fr);
@@ -390,24 +277,6 @@
       max-height: none;
       border-top: 1px solid var(--df-border-subtle);
       border-left: 0;
-    }
-
-    .qc-project-shell.scene-view .qc-scene-layout {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .qc-project-shell.scene-view .qc-director-sidebar {
-      max-height: none;
-    }
-
-    /* Canvas-first V2: on narrow screens the Context Sheet and Details sheet
-       stack in flow instead of floating over the Canvas. */
-    .qc-project-shell.scene-view .qc-director-context-sheet,
-    .qc-project-shell.scene-view .qc-shot-details-sheet {
-      position: static;
-      width: auto;
-      max-height: none;
-      box-shadow: none;
     }
   }
 
@@ -436,109 +305,6 @@
     }
   }
 
-  /* ========================================================================
-     Canvas-first V2 (UI-1) — Context Dock, Context Sheet, conditional tray
-     ------------------------------------------------------------------------
-     The default Scene view keeps the Canvas as the dominant visual region.
-     Tools float in on demand from the Context Dock; technical facts sink
-     into the Details sheet. Reuses existing --df-* tokens and the Visual 2.1
-     surface language (small radius, calm borders, restrained brass).
-     ======================================================================== */
-  .qc-context-dock {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--df-space-2);
-    padding: var(--df-space-2) var(--df-space-3);
-    border: 1px solid var(--df-border-subtle);
-    border-radius: var(--df-radius-container);
-    background: var(--df-surface-1);
-  }
-
-  .qc-context-dock-tabs {
-    display: contents;
-  }
-
-  .qc-context-dock button {
-    min-height: 32px;
-    padding: var(--df-space-1) var(--df-space-3);
-    border: 1px solid transparent;
-    border-radius: var(--df-radius-control);
-    background: transparent;
-    color: var(--df-text-secondary);
-    font-size: var(--df-text-sm);
-    font-weight: var(--df-weight-medium);
-  }
-
-  .qc-context-dock button:hover:not(:disabled),
-  .qc-context-dock button:focus-visible {
-    border-color: var(--df-border);
-    background: var(--df-surface-2);
-    color: var(--df-text-primary);
-  }
-
-  .qc-context-dock button.active {
-    border-color: var(--df-brass);
-    background: var(--df-surface-0);
-    color: var(--df-brass);
-  }
-
-  .qc-context-dock button:disabled {
-    opacity: 0.42;
-  }
-
-  .qc-context-dock-divider {
-    width: 1px;
-    align-self: stretch;
-    background: var(--df-border-subtle);
-  }
-
-  .qc-director-context-sheet {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 30;
-    width: clamp(320px, 26vw, 360px);
-    max-height: none;
-    display: flex;
-    flex-direction: column;
-    border: 1px solid var(--df-border);
-    border-radius: var(--df-radius-container);
-    background: var(--df-surface-1);
-    box-shadow: var(--df-surface-tier-overlay-shadow);
-  }
-
-  .qc-director-context-sheet .qc-director-sidebar-content {
-    flex: 1;
-    overflow: auto;
-  }
-
-  .qc-shot-candidate-tray.is-collapsed {
-    display: flex;
-    align-items: center;
-    gap: var(--df-space-3);
-    width: 100%;
-    padding: var(--df-space-2) var(--df-space-4);
-    border: 1px solid var(--df-border-subtle);
-    border-radius: var(--df-radius-container);
-    background: var(--df-surface-1);
-    color: var(--df-text-secondary);
-    font-size: var(--df-text-sm);
-    text-align: left;
-  }
-
-  .qc-shot-candidate-tray.is-collapsed:hover {
-    border-color: var(--df-border-strong);
-    color: var(--df-text-primary);
-  }
-
-  .qc-shot-candidate-tray.is-collapsed strong {
-    color: var(--df-text-primary);
-    font-weight: var(--df-weight-semibold);
-  }
-
-  .qc-shot-candidate-collapse,
   .qc-shot-strip-toggle {
     min-height: 28px;
     margin-left: auto;
@@ -550,7 +316,6 @@
     font-size: var(--df-text-xs);
   }
 
-  .qc-shot-candidate-collapse:hover,
   .qc-shot-strip-toggle:hover {
     border-color: var(--df-border-strong);
     color: var(--df-text-primary);
@@ -565,61 +330,6 @@
     align-items: center;
     gap: var(--df-space-3);
   }
-
-  .qc-shot-details-sheet {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 40;
-    display: flex;
-    flex-direction: column;
-    width: clamp(300px, 24vw, 340px);
-    padding: var(--df-space-4);
-    border: 1px solid var(--df-border);
-    border-radius: var(--df-radius-container);
-    background: var(--df-surface-1);
-    box-shadow: var(--df-surface-tier-overlay-shadow);
-    overflow: auto;
-  }
-
-  .qc-shot-details-sheet > header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--df-space-3);
-    margin-bottom: var(--df-space-4);
-  }
-
-  .qc-shot-details-sheet > header strong {
-    display: block;
-    color: var(--df-text-primary);
-  }
-
-  .qc-shot-details-body dl {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: var(--df-space-1) var(--df-space-3);
-    margin: 0 0 var(--df-space-4);
-    font-size: var(--df-text-sm);
-  }
-
-  .qc-shot-details-body dt {
-    color: var(--df-text-muted);
-  }
-
-  .qc-shot-details-body dd {
-    margin: 0;
-    overflow-wrap: anywhere;
-    color: var(--df-text-secondary);
-  }
-
-  .qc-shot-details-sheet .qc-production-trace {
-    border: 0;
-    padding: 0;
-    background: transparent;
-  }
-
   /* ========================================================================
    Visual 2.1 shared page language
    ------------------------------------------------------------------------
@@ -1143,14 +853,6 @@
     border-top: 1px solid var(--df-border-subtle);
     border-left: 0;
   }
-
-  .qc-project-shell.scene-view .qc-scene-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .qc-project-shell.scene-view .qc-director-sidebar {
-    max-height: none;
-  }
 }
 
 @media (max-width: 620px) {
@@ -1213,29 +915,4 @@
   .qc-project-canvas [data-testid="review-workspace"] {
     grid-template-columns: minmax(0, 1fr);
   }
-}
-
-/* Operation sheets remain a single editing column at every shell breakpoint. */
-.qc-project-shell .qc-director-context-sheet {
-  width: min(var(--df-operation-sheet-width), 100%);
-}
-.qc-project-shell .qc-director-context-sheet .qc-director-sidebar-content {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.qc-project-shell .qc-director-context-sheet .qc-director-tab-panel {
-  flex: 1;
-}
-.qc-director-context-sheet .qc-shot-design-panel textarea {
-  min-height: var(--df-textarea-min-height);
-  resize: vertical;
-}
-
-.experiment-row .qc-shot-candidate-card > img,
-.experiment-row .qc-shot-candidate-card > video {
-  width: 100%;
-  height: var(--df-storyboard-thumb-height);
-  object-fit: contain;
-  background: var(--df-surface-screen);
 }

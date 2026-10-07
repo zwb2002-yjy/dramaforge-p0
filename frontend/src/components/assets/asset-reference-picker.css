@@ -1,0 +1,80 @@
+/* Shot references as compact chips with an inline editor. */
+.df-refs {
+  display: grid;
+  gap: var(--df-space-2);
+}
+.df-ref-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--df-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.df-ref-chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--df-space-2);
+}
+.df-ref-chip,
+.df-ref-add {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--df-space-2);
+  height: var(--df-chip-height);
+  padding: 0 var(--df-space-3) 0 var(--df-space-1);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-chip);
+  background: var(--df-control-background);
+  color: var(--df-text-primary);
+  font-size: var(--df-font-size-caption);
+  cursor: pointer;
+  transition: border-color var(--df-duration-fast) var(--df-ease);
+}
+.df-ref-chip:hover,
+.df-ref-chip[aria-expanded="true"] {
+  border-color: var(--df-border-strong);
+}
+.df-ref-chip small {
+  color: var(--df-text-muted);
+  font-size: var(--df-font-size-meta);
+}
+.df-ref-chips li.invalid .df-ref-chip {
+  border-color: var(--df-danger-border);
+}
+.df-ref-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: var(--df-avatar-sm);
+  height: var(--df-avatar-sm);
+  border-radius: var(--df-radius-chip);
+  background: var(--df-surface-3);
+  color: var(--df-text-secondary);
+  font-size: var(--df-font-size-meta);
+  font-weight: var(--df-weight-semibold);
+}
+.df-ref-add {
+  padding-left: var(--df-space-3);
+  border-style: dashed;
+  color: var(--df-text-secondary);
+}
+.df-ref-editor {
+  display: grid;
+  gap: var(--df-space-2);
+  padding: var(--df-space-3);
+  border-radius: var(--df-radius-control);
+  background: var(--df-control-background);
+}
+.df-ref-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--df-space-1);
+}
+.df-ref-note {
+  margin: 0;
+  color: var(--df-text-muted);
+  font-size: var(--df-font-size-meta);
+}
+.df-ref-note.err {
+  color: var(--df-danger-text);
+}

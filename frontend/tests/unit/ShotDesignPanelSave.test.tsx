@@ -37,14 +37,14 @@ function json(body: unknown, status = 200) {
   );
 }
 
-function renderPanel(focus: "all" | "prompts" = "all") {
+function renderPanel() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   const onSaved = vi.fn();
   render(
     <QueryClientProvider client={queryClient}>
-      <ShotDesignPanel projectId={PROJECT_ID} shot={SHOT} focus={focus} onSaved={onSaved} />
+      <ShotDesignPanel projectId={PROJECT_ID} shot={SHOT} onSaved={onSaved} />
     </QueryClientProvider>,
   );
   return { onSaved };
@@ -61,7 +61,7 @@ describe("ShotDesignPanel save feedback", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(() => json({}));
     renderPanel();
 
-    expect(screen.getByTestId("shot-design-saved-state")).toHaveTextContent("已保存设计 v4");
+    expect(screen.getByTestId("shot-design-saved-state")).toHaveTextContent("已保存 v4");
     expect(screen.queryByTestId("shot-design-dirty")).not.toBeInTheDocument();
   });
 
@@ -106,8 +106,8 @@ describe("ShotDesignPanel save feedback", () => {
     fireEvent.click(screen.getByTestId("save-shot-design"));
 
     const conflict = await screen.findByTestId("shot-design-conflict");
-    expect(conflict).toHaveTextContent("本地草稿基于 v4");
-    expect(conflict).toHaveTextContent("服务器当前为 v6");
+    expect(conflict).toHaveTextContent("本地 v4");
+    expect(conflict).toHaveTextContent("当前 v6");
     expect(conflict).toHaveTextContent("草稿已保留");
     // The draft is untouched while the conflict is unresolved.
     expect((screen.getByLabelText("图片提示词") as HTMLTextAreaElement).value).toBe(
@@ -122,7 +122,7 @@ describe("ShotDesignPanel save feedback", () => {
       ),
     );
     expect(screen.queryByTestId("shot-design-conflict")).not.toBeInTheDocument();
-    expect(screen.getByTestId("shot-design-message")).toHaveTextContent("已载入服务器最新设计");
+    expect(screen.getByTestId("shot-design-message")).toHaveTextContent("已载入最新版本");
     expect(reads.some((url) => url.endsWith(`/shots/${SHOT.id}/workbench`))).toBe(true);
   });
 
@@ -141,7 +141,7 @@ describe("ShotDesignPanel save feedback", () => {
     fireEvent.click(screen.getByTestId("save-shot-design"));
 
     await waitFor(() =>
-      expect(screen.getByTestId("shot-design-message")).toHaveTextContent("已保存设计"),
+      expect(screen.getByTestId("shot-design-message")).toHaveTextContent("已保存。"),
     );
     expect(onSaved).toHaveBeenCalled();
     // Only the parent's server refetch may make the draft clean: the panel must
@@ -222,7 +222,7 @@ describe("ShotDesignPanel canvas write gate", () => {
       duration_seconds: "5",
     });
     await waitFor(() =>
-      expect(screen.getByTestId("shot-design-message")).toHaveTextContent("已保存画布版本"),
+      expect(screen.getByTestId("shot-design-message")).toHaveTextContent("已保存。"),
     );
   });
 
@@ -244,9 +244,7 @@ describe("ShotDesignPanel canvas write gate", () => {
       image_prompt: "local draft prompt",
     });
     await waitFor(() =>
-      expect(screen.getByTestId("shot-design-message")).toHaveTextContent(
-        "已保存画布版本与设计设置",
-      ),
+      expect(screen.getByTestId("shot-design-message")).toHaveTextContent("已保存。"),
     );
   });
 
@@ -284,14 +282,14 @@ describe("ShotDesignPanel canvas write gate", () => {
     fireEvent.click(screen.getByTestId("save-shot-design"));
 
     const conflict = await screen.findByTestId("shot-design-conflict");
-    expect(conflict).toHaveTextContent("本地草稿基于 v4");
+    expect(conflict).toHaveTextContent("本地 v4");
     expect((screen.getByLabelText("画面描述") as HTMLTextAreaElement).value).toBe("A turns away");
     expect(screen.getByTestId("shot-design-dirty")).toBeInTheDocument();
   });
 });
 
-it("opens both editable prompts in the dedicated prompts focus", () => {
-  renderPanel("prompts");
+it("keeps both editable prompts in the prompts section", () => {
+  renderPanel();
   expect(screen.getByLabelText("图片提示词")).toHaveValue("server image prompt");
   expect(screen.getByLabelText("视频提示词")).toHaveValue("server video prompt");
   fireEvent.change(screen.getByLabelText("视频提示词"), { target: { value: "updated motion" } });

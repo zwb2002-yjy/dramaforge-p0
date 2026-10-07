@@ -7,14 +7,24 @@ export function Disclosure({
   description,
   children,
   testId,
+  open,
+  onOpenChange,
 }: {
   title: string;
   description?: string;
   children: ReactNode;
   testId?: string;
+  /** Optional control; omit both to let the element manage itself. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   return (
-    <details className="df-disclosure" data-testid={testId}>
+    <details
+      className="df-disclosure"
+      data-testid={testId}
+      open={open}
+      onToggle={onOpenChange ? (event) => onOpenChange(event.currentTarget.open) : undefined}
+    >
       <summary>
         <span>
           <strong>{title}</strong>

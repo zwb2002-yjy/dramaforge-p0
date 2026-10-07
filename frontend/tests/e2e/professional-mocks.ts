@@ -510,6 +510,41 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         old_version_warnings: [],
       });
     }
+    if (path.endsWith("/batch-production/preview") && method === "GET") {
+      // "补齐" preview: the first shot follows the mock's formal facts; the
+      // second has no saved model choice so it stays blocked.
+      const stage = url.searchParams.get("stage") === "video" ? "video" : "image_keyframe";
+      const first =
+        stage === "image_keyframe"
+          ? state.formalKeyframeArtifactId
+            ? { disposition: "skipped", reason: "ALREADY_FORMAL" }
+            : { disposition: "ready", reason: null }
+          : state.formalVideoArtifactId
+            ? { disposition: "skipped", reason: "ALREADY_FORMAL" }
+            : state.formalKeyframeArtifactId
+              ? { disposition: "ready", reason: null }
+              : { disposition: "skipped", reason: "FORMAL_KEYFRAME_REQUIRED" };
+      const items = [
+        { shot_id: SHOT_ID, scene_id: SCENE_ID, shot_number: 1, ...first },
+        {
+          shot_id: SECOND_SHOT_ID,
+          scene_id: SCENE_ID,
+          shot_number: 2,
+          disposition: "blocked",
+          reason: "MODEL_BINDING_MISSING",
+        },
+      ];
+      return json(route, {
+        project_id: PROJECT_ID,
+        scene_id: url.searchParams.get("scene_id"),
+        stage,
+        fingerprint: (stage === "video" ? "v" : "k").repeat(64),
+        ready_count: items.filter((item) => item.disposition === "ready").length,
+        skipped_count: items.filter((item) => item.disposition === "skipped").length,
+        blocked_count: items.filter((item) => item.disposition === "blocked").length,
+        items,
+      });
+    }
     if (path.endsWith("/workspace") && method === "GET") {
       return json(route, {
         scene: {

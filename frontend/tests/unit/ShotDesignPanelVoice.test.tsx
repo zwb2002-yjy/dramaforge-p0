@@ -107,7 +107,7 @@ function editDialogue(text = "新的镜头旁白") {
   fireEvent.change(screen.getByLabelText("对白／旁白文本"), { target: { value: text } });
 }
 function save() {
-  fireEvent.click(screen.getByRole("button", { name: "保存设计" }));
+  fireEvent.click(screen.getByRole("button", { name: "保存镜头" }));
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -120,8 +120,8 @@ describe("ShotDesignPanel dialogue and voice gates", () => {
     expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("原始对白");
     expect(screen.getByLabelText("配音音色")).toHaveValue("");
     expect(screen.getByLabelText("配音语速")).toHaveValue("0");
-    expect(screen.getByRole("button", { name: "保存设计" })).toBeDisabled();
-    expect(screen.getByText(/保存只更新本镜头设置/)).toHaveTextContent("导出成片 MP4");
+    expect(screen.getByRole("button", { name: "保存镜头" })).toBeDisabled();
+    expect(screen.getByText(/导出成片时按这里的音色和语速生成配音/)).toBeInTheDocument();
     expect(writes()).toEqual([]);
   });
 
@@ -256,38 +256,18 @@ describe("ShotDesignPanel dialogue and voice gates", () => {
     expect(writes()).toEqual([]);
   });
 
-  it.each([-31, 31, 0.5, null, "fast"])(
-    "rejects invalid advanced rate %s before either save gate",
-    async (rate) => {
-      const { writes } = backend();
-      renderPanel();
-      editDialogue();
-      const text = JSON.stringify({ voice: { voice_id: null, rate_percent: rate } });
-      fireEvent.change(screen.getByLabelText("导演状态"), { target: { value: text } });
-      save();
-      await waitFor(() =>
-        expect(screen.getByTestId("shot-design-message")).toHaveTextContent(
-          "配音语速必须是 -30 到 30 之间的整数",
-        ),
-      );
-      expect(screen.getByLabelText("导演状态")).toHaveValue(text);
-      expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("新的镜头旁白");
-      expect(writes()).toEqual([]);
-    },
-  );
-
-  it("does not erase malformed JSON when the structured voice controls cannot read it", async () => {
+  it("keeps an unreadable stored voice untouched instead of rewriting it", async () => {
     const { writes } = backend();
-    renderPanel();
-    fireEvent.change(screen.getByLabelText("导演状态"), { target: { value: '{"voice":' } });
-    expect(screen.getByText(/高级导演参数中的配音设置暂时无效/)).toBeInTheDocument();
+    renderPanel({ ...SHOT, director_state: { voice: { voice_id: null, rate_percent: 99 } } });
+    expect(screen.getByText(/配音设置无效/)).toBeInTheDocument();
     expect(screen.queryByLabelText("配音音色")).not.toBeInTheDocument();
     editDialogue();
     save();
     await waitFor(() =>
-      expect(screen.getByTestId("shot-design-message")).toHaveTextContent("保存失败"),
+      expect(screen.getByTestId("shot-design-message")).toHaveTextContent(
+        "配音语速必须是 -30 到 30 之间的整数",
+      ),
     );
-    expect(screen.getByLabelText("导演状态")).toHaveValue('{"voice":');
     expect(writes()).toEqual([]);
   });
 
@@ -303,7 +283,7 @@ describe("ShotDesignPanel dialogue and voice gates", () => {
     await selectVoice();
     save();
     await screen.findByTestId("shot-design-conflict");
-    fireEvent.click(screen.getByRole("button", { name: "载入服务器最新设计并重新检查" }));
+    fireEvent.click(screen.getByRole("button", { name: "载入最新版本" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("服务器新对白");
     expect(screen.getByLabelText("配音音色")).toHaveValue("voice:voice-a");

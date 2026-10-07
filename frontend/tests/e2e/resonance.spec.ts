@@ -29,7 +29,8 @@ test("spatial focus and group intent preserve the canonical write gates", async 
     state.editing.requests.filter(
       (request) =>
         ["POST", "PATCH", "DELETE"].includes(request.method) &&
-        !request.path.endsWith("/workspace-state"),
+        !request.path.endsWith("/workspace-state") &&
+        !request.path.endsWith("/references/resolve"),
     ),
   ).toEqual([]);
 });
@@ -149,7 +150,7 @@ test("contextual intent reaches the existing director endpoint once and errors s
   });
   expect(state.candidates).toHaveLength(0);
   expect(state.shotVersion).toBe(1);
-  await page.getByTestId("director-sheet-close").click();
+  await page.getByTestId("shot-inspector-director").locator(":scope > summary").click();
   await expect(page.getByTestId("director-companion")).toHaveAttribute("data-state", "failed");
 });
 
@@ -191,24 +192,24 @@ test("keyboard can connect two moments without dragging or writing", async ({ pa
     state.editing.requests.filter(
       (request) =>
         ["POST", "PATCH", "DELETE"].includes(request.method) &&
-        !request.path.endsWith("/workspace-state"),
+        !request.path.endsWith("/workspace-state") &&
+        !request.path.endsWith("/references/resolve"),
     ),
   ).toEqual([]);
 });
 
-test("director reveals the manual editor on demand and preserves its draft", async ({ page }) => {
+test("the AI director sits beside the shot editor and never drops its draft", async ({ page }) => {
   await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
   await page.getByTestId("director-companion").click();
   await expect(page.getByRole("textbox", { name: "导演要求", exact: true })).toBeVisible();
-  await expect(page.getByLabel("图片提示词")).not.toBeVisible();
-  await page.getByText("亲自调整这一刻", { exact: true }).click();
+  const prompts = page.getByTestId("shot-design-prompts");
+  await prompts.locator(":scope > summary").click();
   await page.getByLabel("图片提示词").fill("保留她的沉默");
-  await page.getByTestId("director-sheet-close").click();
+  await page.getByTestId("shot-inspector-director").locator(":scope > summary").click();
   await page.getByTestId("director-companion").click();
-  await expect(page.getByLabel("图片提示词")).toBeVisible();
   await expect(page.getByLabel("图片提示词")).toHaveValue("保留她的沉默");
-  await expect(page.getByRole("button", { name: "保存设计", exact: true })).toBeEnabled();
+  await expect(page.getByTestId("shot-primary-save")).toBeEnabled();
 });
 
 test("changing shots isolates both the intention and Director entry", async ({ page }) => {
@@ -219,15 +220,12 @@ test("changing shots isolates both the intention and Director entry", async ({ p
   await expect(page.getByRole("textbox", { name: "导演要求", exact: true })).toHaveValue(
     "只用于第一个镜头",
   );
-  await page.getByTestId("director-sheet-close").click();
+  await page.getByTestId("shot-inspector-director").locator(":scope > summary").click();
   await page.getByRole("button", { name: "展开镜头关系图" }).click();
   await page.getByRole("button", { name: "聚焦镜头 2", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "此刻的创作意图" })).toHaveValue("");
   await page.getByTestId("director-companion").click();
-  await expect(page.getByTestId("director-sidebar")).toHaveAttribute(
-    "data-shot-id",
-    SECOND_SHOT_ID,
-  );
+  await expect(page.getByTestId("shot-inspector")).toHaveAttribute("data-shot-id", SECOND_SHOT_ID);
   await expect(page.getByRole("textbox", { name: "导演要求", exact: true })).toHaveValue("");
 });
 
@@ -276,39 +274,28 @@ test("collaboration history is disclosed on demand without changing the current 
     state.editing.requests.filter(
       (request) =>
         ["POST", "PATCH", "DELETE"].includes(request.method) &&
-        !request.path.endsWith("/workspace-state"),
+        !request.path.endsWith("/workspace-state") &&
+        !request.path.endsWith("/references/resolve"),
     ),
   ).toEqual([]);
 });
 
-test("floating sheets leave the context controls reachable", async ({ page }) => {
+test("the inspector sits beside the canvas without covering it", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
-  await page.getByTestId("context-dock-generate").click();
-  const geometry = await page.evaluate(() => {
-    return [".qc-scene-stage", ".rs-stage", ".qc-context-dock", ".qc-director-context-sheet"].map(
-      (selector) => {
-        const element = document.querySelector(selector)!;
-        const style = getComputedStyle(element);
-        return {
-          selector,
-          rect: element.getBoundingClientRect().toJSON(),
-          display: style.display,
-          position: style.position,
-          gridRow: style.gridRow,
-          rows: style.gridTemplateRows,
-          bottom: style.bottom,
-        };
-      },
-    );
-  });
-  await test.info().attach("sheet-layout", {
+  await expect(page.getByTestId("shot-inspector")).toBeVisible();
+  const geometry = await page.evaluate(() =>
+    [".rs-stage", "[data-testid='shot-inspector']"].map((selector) =>
+      document.querySelector(selector)!.getBoundingClientRect().toJSON(),
+    ),
+  );
+  await test.info().attach("inspector-layout", {
     body: JSON.stringify(geometry, null, 2),
     contentType: "application/json",
   });
-  expect(geometry[3].rect.bottom).toBeLessThanOrEqual(geometry[1].rect.bottom);
-  await page.getByTestId("context-dock-details").click();
+  expect(geometry[1].left).toBeGreaterThanOrEqual(geometry[0].right);
+  await page.getByTestId("shot-inspector-details").locator(":scope > summary").click();
   await expect(page.getByTestId("shot-details-sheet")).toBeVisible();
 });
 
@@ -340,7 +327,7 @@ test.describe("touch and silent feedback", () => {
     await page.getByRole("button", { name: "共同关注", exact: true }).tap();
     await page.getByRole("button", { name: "共同关注镜头 1", exact: true }).tap();
     await expect(page.locator(".rs-attention")).toHaveText("共同关注 · 镜 1");
-    await page.getByTestId("context-dock-director").tap();
+    await page.getByTestId("director-companion").tap();
     await expect(page.locator(".rs-presence")).toHaveAttribute("data-status", "thinking");
     expect(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(
       true,

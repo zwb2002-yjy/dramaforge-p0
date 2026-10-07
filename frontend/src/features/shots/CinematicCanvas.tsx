@@ -106,7 +106,7 @@ export function CinematicCanvas({
           onClick={() => selectCandidate(candidate)}
         >
           <span className="qc-canvas-state">
-            {candidate.stage === "video" ? "视频候选预览" : "关键帧候选预览"}
+            {candidate.stage === "video" ? "视频候选" : "画面候选"}
           </span>
           {candidate.artifactType === "video" ? (
             <video
@@ -122,7 +122,7 @@ export function CinematicCanvas({
               data-testid={`shot-candidate-preview-${candidate.artifactId}`}
             />
           )}
-          <small>未确认候选</small>
+          <small>未确认</small>
         </div>
       ) : videoId ? (
         <div className="qc-canvas-media" data-testid="shot-formal-output">
@@ -136,7 +136,7 @@ export function CinematicCanvas({
         </div>
       ) : keyframeId ? (
         <div className="qc-canvas-media" data-testid="shot-formal-output">
-          <span className="qc-canvas-state">正式关键帧</span>
+          <span className="qc-canvas-state">正式画面</span>
           <img
             src={artifactContentUrl(projectId, keyframeId)}
             alt={`#${shot.shot_number} 关键帧`}
@@ -167,7 +167,7 @@ export function CinematicCanvas({
       ) : (
         <div className="qc-canvas-empty" data-testid="shot-placeholder">
           <h3>镜头 {shot.shot_number}</h3>
-          <p>{shot.visual_description || "尚未生成关键帧。"}</p>
+          <p>{shot.visual_description || "还没有画面。"}</p>
           {latestTrace && (
             <p
               className="qc-canvas-hint"
@@ -179,7 +179,7 @@ export function CinematicCanvas({
             </p>
           )}
           <p className="qc-canvas-hint" data-testid="no-formal-result">
-            还没有画面，点击下方“生成”开始
+            还没有画面，在右侧点「生成画面」
           </p>
         </div>
       )}

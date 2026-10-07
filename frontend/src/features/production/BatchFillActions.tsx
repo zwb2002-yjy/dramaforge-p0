@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Layers } from "lucide-react";
+import { Layers, RotateCw } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button, Dialog } from "../../components/ui";
@@ -238,14 +238,16 @@ function BatchFillButton({
     );
   }
   if (!preview) {
+    // A failed read never pretends there is nothing to fill; it offers a retry.
     return (
       <Button
         className="df-batch-button"
-        title="读取失败，点击重试"
+        title="暂时无法读取，点击重试"
+        data-state="error"
         onClick={() => void previewQuery.refetch()}
       >
-        <Layers size={16} aria-hidden="true" />
-        {copy.fill} · 重试
+        <RotateCw size={16} aria-hidden="true" />
+        {copy.fill}
       </Button>
     );
   }

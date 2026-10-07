@@ -18,40 +18,32 @@ for (const viewport of [
     page.on("pageerror", (error) => errors.push(error.message));
     await page.setViewportSize(viewport);
     await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
-    await page.getByTestId("context-dock-generate").click();
-    const modes = page.getByRole("group", { name: "视频输入类型" });
-    const labels = ["首帧生视频", "文生视频", "尾帧生视频", "首尾帧生视频", "参考素材生视频"];
-    const boxes = [];
-    for (const label of labels) {
-      const button = modes.getByRole("button", { name: label, exact: true });
-      await expect(button).toBeVisible();
-      const box = await button.boundingBox();
-      expect(box).not.toBeNull();
-      if (box) boxes.push(box);
-      expect(await button.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
-        true,
-      );
+    const inspector = page.getByTestId("shot-inspector");
+    // Without a formal frame the one primary step is the frame itself.
+    await expect(inspector.getByTestId("generate-keyframe")).toBeVisible();
+    await expect(inspector.getByTestId("generate-video")).toHaveCount(0);
+    await inspector.getByTestId("shot-generate-more").locator(":scope > summary").click();
+    const mode = inspector.getByLabel("视频方式");
+    await expect(mode).toBeVisible();
+    await expect(mode.locator("option")).toHaveText([
+      "正式画面作为首帧",
+      "正式画面 + 尾帧",
+      "尾帧生成",
+      "仅用文字",
+      "参考素材生成",
+    ]);
+    for (const value of ["last_frame", "omni_reference"]) {
+      await mode.selectOption(value);
+      await expect(inspector.getByTestId("shot-primary-blocked")).toBeVisible();
+      await expect(inspector.getByTestId("generate-video")).toBeDisabled();
     }
-    for (let index = 0; index < boxes.length; index++) {
-      for (const other of boxes.slice(index + 1)) {
-        const box = boxes[index];
-        expect(
-          box.x + box.width <= other.x ||
-            other.x + other.width <= box.x ||
-            box.y + box.height <= other.y ||
-            other.y + other.height <= box.y,
-        ).toBe(true);
-      }
-    }
-    await modes.getByRole("button", { name: "尾帧生视频", exact: true }).click();
-    await expect(page.getByTestId("generate-video")).toBeDisabled();
-    await modes.getByRole("button", { name: "首尾帧生视频", exact: true }).click();
-    await expect(page.getByTestId("generate-video")).toBeDisabled();
-    await modes.getByRole("button", { name: "参考素材生视频", exact: true }).click();
-    await expect(page.getByTestId("generate-video")).toBeDisabled();
-    await modes.getByRole("button", { name: "文生视频", exact: true }).click();
-    await expect(page.getByTestId("generate-video")).toBeEnabled();
-    await page.getByTestId("generate-video").click();
+    // First + last frame still starts from the formal frame.
+    await mode.selectOption("first_last_frame");
+    await expect(inspector.getByTestId("generate-keyframe")).toBeVisible();
+    await expect(inspector.getByTestId("generate-video")).toHaveCount(0);
+    await mode.selectOption("text_to_video");
+    await expect(inspector.getByTestId("generate-video")).toBeEnabled();
+    await inspector.getByTestId("generate-video").click();
     await expect
       .poll(() =>
         state.editing.requests.some(
@@ -67,6 +59,9 @@ for (const viewport of [
       mode_id: "text_to_video",
       references: [],
     });
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+      .toBe(true);
     expect(errors).toEqual([]);
     await page.screenshot({ path: test.info().outputPath(`h3-modes-${viewport.width}.png`) });
   });
@@ -76,11 +71,12 @@ test("AUTO delegates one frozen Shot plan to the Director runtime", async ({ pag
   const state = await installProfessionalMock(page);
   state.directorAutonomy = "AUTO";
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
-  await page.getByTestId("context-dock-generate").click();
+  const inspector = page.getByTestId("shot-inspector");
+  await inspector.getByTestId("shot-generate-more").locator(":scope > summary").click();
+  await inspector.getByTestId("delegate-keyframe-to-director").click();
 
-  await page.getByTestId("delegate-keyframe-to-director").click();
-
-  await expect(page.getByTestId("director-tab-shot")).toHaveAttribute("aria-selected", "true");
+  // Delegation reveals the local AI director for this shot.
+  await expect(inspector.getByTestId("shot-inspector-director")).toHaveAttribute("open", "");
   const delegation = state.editing.requests.find(
     (request) =>
       request.method === "POST" &&
@@ -115,86 +111,48 @@ test("manual professional production: Scene Workbench design → candidate previ
 
   // Scene Workbench is the authoring surface: read scene, edit shot design,
   // generate the selected Shot, preview a candidate locally, then explicitly
-  // confirm it on the formal line. Canvas-first UI-1 keeps the operation panel
-  // closed until the Context Dock opens it.
+  // confirm it on the formal line. One inspector holds the selected Shot.
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
   await expect(page.getByTestId("shot-strip")).toBeVisible();
-  await expect(page.getByTestId("context-dock")).toBeVisible();
-  await expect(page.getByTestId("context-dock-character")).toBeVisible();
-  await expect(page.getByTestId("context-dock-camera")).toBeVisible();
-  await expect(page.getByTestId("context-dock-motion")).toBeVisible();
-  await expect(page.getByTestId("context-dock-look")).toBeVisible();
-  await expect(page.getByTestId("context-dock-generate")).toBeVisible();
-  await expect(page.getByTestId("context-dock-director")).toBeVisible();
-  await expect(page.getByTestId("director-sidebar")).toBeHidden();
+  const inspector = page.getByTestId("shot-inspector");
+  await expect(inspector).toBeVisible();
+  await expect(page.getByTestId("context-dock")).toHaveCount(0);
+  await expect(inspector.getByRole("tab")).toHaveCount(0);
+  await expect(inspector.getByLabel("画面描述")).toBeVisible();
+  await expect(inspector.getByLabel("镜头类型")).toBeVisible();
   await expect(page.getByTestId("shot-details-sheet")).toHaveCount(0);
-  await expect(page.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "false");
+  await expect(page.getByTestId("shot-candidate-tray")).toHaveCount(0);
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("分镜制作");
-  await expect(
-    page.locator("[data-testid='scene-stage'] > [data-testid='shot-candidate-tray']"),
-  ).toHaveCount(1);
-  await expect(
-    page.locator("[data-testid='scene-stage'] > [data-testid='shot-strip-panel']"),
-  ).toHaveCount(1);
   await expect(page.locator("[data-testid='cinematic-canvas'] textarea")).toHaveCount(0);
+  await expect(inspector.getByLabel("导演状态")).toHaveCount(0);
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
 
-  const desktopLayout = await page.getByTestId("cinematic-canvas").evaluate((element) => {
-    const canvas = getComputedStyle(element);
-    const sceneLayout = getComputedStyle(element.closest(".qc-scene-layout") as Element);
-    return {
-      borderRadius: canvas.borderRadius,
-      columns: sceneLayout.gridTemplateColumns.trim().split(/\s+/).length,
-      noPageOverflow: document.documentElement.scrollWidth <= window.innerWidth,
-    };
-  });
-  expect(desktopLayout.borderRadius).toBe("4px");
-  expect(desktopLayout.columns).toBe(1);
-  expect(desktopLayout.noPageOverflow).toBe(true);
-
-  await page.getByTestId("context-dock-camera").click();
-  await expect(page.getByLabel("导演状态", { exact: true })).not.toBeVisible();
-  await page.locator("summary").filter({ hasText: "高级导演参数（可选）" }).click();
-  await expect(page.getByLabel("导演状态", { exact: true })).toBeVisible();
-  await page.locator("summary").filter({ hasText: "高级导演参数（可选）" }).click();
-  await page.getByTestId("context-dock-motion").click();
-  const operationBox = await page.getByTestId("director-sidebar").boundingBox();
+  // Canvas keeps visual weight next to one inspector column.
   const canvasBox = await page.getByTestId("cinematic-canvas").boundingBox();
-  expect(canvasBox?.width ?? 0).toBeGreaterThan(operationBox?.width ?? 0);
-  expect(operationBox?.width ?? 0).toBeGreaterThanOrEqual(300);
-  // The redesign intentionally widens the single-column prompt editor. Keep
-  // the canvas dominant and bind the upper bound to the canonical 30rem token.
-  const operationMaxWidth = await page.evaluate(() => {
-    const rootStyle = getComputedStyle(document.documentElement);
-    return (
-      Number.parseFloat(rootStyle.getPropertyValue("--df-operation-sheet-width")) *
-      Number.parseFloat(rootStyle.fontSize)
-    );
-  });
-  expect(operationBox?.width ?? 0).toBeLessThanOrEqual(operationMaxWidth);
-  await expect(page.getByTestId("shot-design-panel")).toBeVisible();
-  await page.getByLabel("视频提示词").fill("slow push-in, locked frame");
-  await page.getByRole("button", { name: "保存设计" }).click();
-  await expect(page.getByText("已保存设计（版本已递增）")).toBeVisible();
+  const inspectorBox = await inspector.boundingBox();
+  expect(canvasBox?.width ?? 0).toBeGreaterThan(inspectorBox?.width ?? 0);
+  expect((inspectorBox?.x ?? 0) > (canvasBox?.x ?? 0)).toBe(true);
+
+  await inspector.getByTestId("shot-design-prompts").locator(":scope > summary").click();
+  await inspector.getByLabel("视频提示词").fill("slow push-in, locked frame");
+  await expect(inspector.getByTestId("shot-design-dirty")).toBeVisible();
+  await inspector.getByTestId("shot-primary-save").click();
+  await expect(inspector.getByTestId("shot-design-message")).toHaveText("已保存。");
   const designRequest = state.editing.requests.find(
     (request) => request.path.endsWith("/design") && request.method === "PATCH",
   );
   expect(designRequest?.body).toMatchObject({ expected_version: 1 });
   expect(state.shotVersion).toBe(2);
-  await page.getByTestId("director-sheet-close").click();
-  await page.getByTestId("context-dock-details").click();
+  await inspector.getByTestId("shot-inspector-details").locator(":scope > summary").click();
   await expect(page.getByTestId("shot-details-sheet")).toContainText("v2");
-  await page.getByTestId("shot-details-close").click();
+  await inspector.getByTestId("shot-inspector-details").locator(":scope > summary").click();
 
-  await page.getByTestId("context-dock-generate").click();
-  await expect(page.getByTestId("shot-production-actions")).toBeVisible();
-  await expect(page.getByTestId("director-sidebar")).not.toContainText("NodeRun");
-  await expect(page.getByTestId("shot-production-trace")).toHaveCount(0);
-  await page.getByRole("button", { name: "生成关键帧" }).click();
+  await expect(inspector.getByTestId("shot-production-actions")).toBeVisible();
+  await expect(inspector).not.toContainText("NodeRun");
+  await inspector.getByRole("button", { name: "生成画面" }).click();
   await expect(page.getByTestId("shot-production-status")).toContainText("已排队");
   await expect.poll(() => state.candidates.length).toBe(1);
   await expect(page.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "true");
@@ -218,7 +176,7 @@ test("manual professional production: Scene Workbench design → candidate previ
   );
 
   await page.getByTestId("shot-candidate-confirm-candidate-keyframe-1").click();
-  await expect(page.getByTestId("shot-candidate-success")).toContainText("已设为正式关键帧");
+  await expect(page.getByTestId("shot-candidate-success")).toContainText("已设为正式画面");
   await expect.poll(() => state.formalKeyframeArtifactId).toBe("candidate-keyframe-1");
   // The real backend keeps the successful Artifact in the candidate
   // projection after formal selection. The Scene refetch clears only the
@@ -228,10 +186,10 @@ test("manual professional production: Scene Workbench design → candidate previ
   await expect(page.getByTestId("shot-formal-output")).toBeVisible();
   await expect(page.getByTestId("shot-candidate")).toHaveCount(0);
   expect(state.shotVersion).toBe(3);
-  await page.getByTestId("context-dock-details").click();
+  await inspector.getByTestId("shot-inspector-details").locator(":scope > summary").click();
   await expect(page.getByTestId("shot-details-sheet")).toContainText("v3");
   await expect(page.getByTestId("shot-production-trace")).toBeVisible();
-  await page.getByTestId("shot-details-close").click();
+  await inspector.getByTestId("shot-inspector-details").locator(":scope > summary").click();
 
   // The same Artifact can still be selected for a temporary comparison while
   // formal remains authoritative after the preview is cleared.
@@ -257,13 +215,12 @@ test("manual professional production: Scene Workbench design → candidate previ
   // Clearing the local preview restores the formal keyframe without a write.
   await page.reload();
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
-  await expect(page.getByTestId("director-sidebar")).toBeHidden();
   await expect(page.getByTestId("shot-formal-output")).toBeVisible();
   await expect(page.getByTestId("shot-keyframe")).toBeVisible();
 
   // Video has the same explicit candidate → review → formal gate. It may use
   // only the already confirmed keyframe and must persist the exact candidate.
-  await page.getByTestId("context-dock-generate").click();
+  await expect(page.getByTestId("generate-video")).toBeEnabled();
   await page.getByRole("button", { name: "生成视频", exact: true }).click();
   await expect.poll(() => state.candidates[0]?.artifact_id).toBe("candidate-video-1");
   await expect(page.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "true");
@@ -304,17 +261,11 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
   await expect(page.locator(".qc-project-mode")).toHaveText("分镜制作");
   await expect(page.getByTestId("scene-stage")).toBeVisible();
   await expect(page.getByTestId("cinematic-canvas")).toBeVisible();
-  await expect(page.getByTestId("context-dock")).toBeVisible();
-  await expect(page.getByTestId("context-dock-character")).toBeVisible();
-  await expect(page.getByTestId("context-dock-camera")).toBeVisible();
-  await expect(page.getByTestId("context-dock-motion")).toBeVisible();
-  await expect(page.getByTestId("context-dock-look")).toBeVisible();
-  await expect(page.getByTestId("context-dock-generate")).toBeVisible();
-  await expect(page.getByTestId("context-dock-director")).toBeVisible();
-  await expect(page.getByTestId("shot-candidate-tray")).toBeHidden();
   await expect(page.getByTestId("shot-strip")).toBeVisible();
-  await expect(page.getByTestId("director-sidebar")).toBeHidden();
-  const sceneLayout = await page.locator(".qc-scene-layout").evaluate((element) => {
+  const inspector = page.getByTestId("shot-inspector");
+  await expect(inspector).toBeVisible();
+  // Below the inspector breakpoint the inspector stacks under the canvas.
+  const sceneLayout = await page.locator(".df-scene-layout").evaluate((element) => {
     const style = getComputedStyle(element);
     return {
       columns: style.gridTemplateColumns.trim().split(/\s+/).length,
@@ -323,9 +274,8 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
   });
   expect(sceneLayout.columns).toBe(1);
   expect(sceneLayout.documentFits).toBe(true);
-
-  await page.getByTestId("context-dock-look").click();
-  await expect(page.getByTestId("director-sidebar")).toBeVisible();
+  await inspector.getByTestId("shot-design-prompts").locator(":scope > summary").click();
+  await expect(inspector.getByLabel("图片提示词")).toBeVisible();
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
@@ -352,18 +302,17 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
     .toBe(true);
 });
 
-test("Scene draft survives sheet close and guards route departure", async ({ page }) => {
+test("Scene draft survives collapsing its section and guards route departure", async ({ page }) => {
   const state = await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
 
-  await page.getByTestId("context-dock-look").click();
+  const prompts = page.getByTestId("shot-design-prompts");
+  await prompts.locator(":scope > summary").click();
   await page.getByLabel("图片提示词").fill("unsaved guarded keyframe");
   await expect(page.getByTestId("shot-design-dirty")).toBeVisible();
-  await page.getByTestId("director-sheet-close").click();
-  await expect(page.getByTestId("director-sidebar")).toBeHidden();
-
-  await page.getByTestId("context-dock-look").click();
+  await prompts.locator(":scope > summary").click();
+  await prompts.locator(":scope > summary").click();
   await expect(page.getByLabel("图片提示词")).toHaveValue("unsaved guarded keyframe");
   await page.getByTestId(`shot-strip-card-${SECOND_SHOT_ID}`).click();
   await expect(page.getByTestId("unsaved-changes-guard")).toBeVisible();

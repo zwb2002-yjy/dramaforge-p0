@@ -1,7 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
-import { Disclosure, Field, Textarea } from "../../components/ui";
+import { Button, Disclosure, Field, Input, Select, Textarea } from "../../components/ui";
 import { ApiError, updateShotCanvas } from "../../lib/api";
 import { shotTypeOptionsFor } from "../../lib/shotLabels";
 import { updateShotDesign } from "./api";
@@ -9,7 +9,12 @@ import { fetchShotWorkbench } from "./api";
 import type { ShotLite, ShotVoiceSettings as ShotVoiceSettingsValue } from "./api";
 import { ShotVoiceSettings } from "./ShotVoiceSettings";
 
-export type ShotDesignFocus = "prompts" | "character" | "camera" | "motion" | "look" | "all";
+/** Save control handed to the production block so "保存镜头" can be primary. */
+export type ShotDesignSaveControl = {
+  dirty: boolean;
+  saving: boolean;
+  save: () => void;
+};
 
 type ShotDesignPanelProps = {
   projectId: string;
@@ -25,8 +30,10 @@ type ShotDesignPanelProps = {
    * the existing explicit /design mutation.
    */
   applyDraft?: ShotDesignDraft | null;
-  /** Context Dock tool focus. Hidden fields stay in the draft and still save. */
-  focus?: ShotDesignFocus;
+  /** Character / reference picker, rendered under the dialogue. */
+  references?: ReactNode;
+  /** Generation block, rendered between the shot facts and the prompts. */
+  production?: (control: ShotDesignSaveControl) => ReactNode;
 };
 
 export type ShotDesignDraft = {
@@ -129,12 +136,9 @@ export function ShotDesignPanel({
   draft: controlledDraft,
   onDraftChange,
   applyDraft,
-  focus = "all",
+  references,
+  production,
 }: ShotDesignPanelProps) {
-  const showCharacter = focus === "all" || focus === "character";
-  const showCamera = focus === "all" || focus === "camera";
-  const showMotion = focus === "all" || focus === "motion" || focus === "prompts";
-  const showLook = focus === "all" || focus === "look" || focus === "prompts";
   const [visual, setVisual] = useState(shot.visual_description);
   // Canvas facts: stored on the Shot itself and written through the CanvasRevision
   // gate (`PATCH /shots/{id}/canvas`), which is the only endpoint that advances
@@ -239,7 +243,7 @@ export function ShotDesignPanel({
       director_state: state,
       director_state_text: serializeDirectorState(state),
     });
-    setMessage("建议已应用到草稿；请保存镜头设计后才会成为服务器事实");
+    setMessage("已应用导演建议，保存镜头后生效。");
   }, [applyDraft]); // eslint-disable-line react-hooks/exhaustive-deps -- apply is one-shot
 
   // Keep the sibling production controls informed without persisting a
@@ -286,11 +290,7 @@ export function ShotDesignPanel({
       setConflict(null);
       await onSaved?.();
       setMessage(
-        result.canvasChanged && result.designChanged
-          ? "已保存画布版本与设计设置（版本已递增）"
-          : result.canvasChanged
-            ? "已保存画布版本（版本已递增）"
-            : "已保存设计（版本已递增）",
+        result.canvasChanged || result.designChanged ? "已保存。" : "没有需要保存的修改。",
       );
     },
     onError: (error: unknown, _variables, context) => {
@@ -319,191 +319,158 @@ export function ShotDesignPanel({
     onSuccess: async () => {
       setConflict(null);
       await onSaved?.();
-      setMessage("已载入服务器最新设计；请检查后再保存。");
+      setMessage("已载入最新版本。");
     },
     onError: (error: unknown) => {
       setMessage(`载入服务器设计失败：${errorMessage(error)}`);
     },
   });
 
-  const focusTitle =
-    focus === "prompts"
-      ? "提示词"
-      : focus === "character"
-        ? "角色"
-        : focus === "camera"
-          ? "机位"
-          : focus === "motion"
-            ? "运动"
-            : focus === "look"
-              ? "画面"
-              : "镜头设计";
-
   return (
-    <div
-      className="qc-shot-design-panel"
-      data-testid="shot-design-panel"
-      data-shot-id={shot.id}
-      data-design-focus={focus}
-    >
-      <header>
-        <strong>
-          #{shot.shot_number} {focusTitle}
-        </strong>
-      </header>
-      {showCharacter ? (
-        <label>
-          画面描述
-          <textarea
-            aria-label="画面描述"
-            value={visual}
-            onChange={(event) => setVisual(event.target.value)}
-          />
-        </label>
-      ) : null}
-      {showCharacter ? (
-        <section className="shot-voice-settings" aria-label="对白与配音">
-          <strong>对白与配音</strong>
-          <Field>
-            对白／旁白文本
-            <Textarea
-              aria-label="对白／旁白文本"
-              rows={3}
-              value={dialogue}
-              onChange={(event) => updateDraft({ ...draft, dialogue: event.target.value })}
-              placeholder="填写实际需要朗读的台词或旁白"
-            />
-          </Field>
-          {voiceSettings ? (
-            <ShotVoiceSettings projectId={projectId} value={voiceSettings} onChange={updateVoice} />
-          ) : (
-            <p role="alert">
-              高级导演参数中的配音设置暂时无效；原文已保留，请修正后再调整音色和语速。
-            </p>
-          )}
-          <p className="muted">
-            保存只更新本镜头设置，不会生成或试听。保存后，到剪辑页显式「导出成片 MP4」时生成配音；
-            沿用实例默认的音色会在生成时确定并记录。已有成片不会因修改设置而自动重做。
-          </p>
-        </section>
-      ) : null}
-      {showCamera ? (
-        <div className="qc-shot-design-canvas-fields" data-testid="shot-design-camera-facts">
-          <label>
-            镜头类型
-            <select
-              aria-label="镜头类型"
-              value={shotType}
-              onChange={(event) => setShotType(event.target.value)}
-            >
-              {shotTypeOptionsFor(shotType).map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            机位运动
-            <input
-              aria-label="机位运动"
-              value={cameraMove}
-              onChange={(event) => setCameraMove(event.target.value)}
-              placeholder="例如：缓慢推近"
-            />
-          </label>
-          <label>
-            时长（秒）
-            <input
-              aria-label="时长（秒）"
-              type="number"
-              min="0.1"
-              max="30"
-              step="0.1"
-              value={durationSeconds}
-              onChange={(event) => setDurationSeconds(event.target.value)}
-            />
-          </label>
+    <div className="df-shot-design" data-testid="shot-design-panel" data-shot-id={shot.id}>
+      <Field>
+        画面描述
+        <Textarea
+          aria-label="画面描述"
+          rows={4}
+          value={visual}
+          placeholder="这一镜看到什么：人物、动作、环境、光线"
+          onChange={(event) => setVisual(event.target.value)}
+        />
+      </Field>
+      <Field>
+        对白
+        <Textarea
+          aria-label="对白／旁白文本"
+          rows={2}
+          value={dialogue}
+          onChange={(event) => updateDraft({ ...draft, dialogue: event.target.value })}
+          placeholder="台词或旁白，可留空"
+        />
+      </Field>
+
+      {references && (
+        <div className="df-shot-field">
+          <span className="df-shot-label">角色 / 参考</span>
+          {references}
         </div>
-      ) : null}
-      {showLook ? (
-        <label>
-          图片提示词
-          <textarea
-            aria-label="图片提示词"
-            value={draft.image_prompt}
-            onChange={(event) => updateDraft({ ...draft, image_prompt: event.target.value })}
+      )}
+
+      <div className="df-shot-camera" data-testid="shot-design-camera-facts">
+        <Field>
+          景别
+          <Select
+            aria-label="镜头类型"
+            value={shotType}
+            onChange={(event) => setShotType(event.target.value)}
+          >
+            {shotTypeOptionsFor(shotType).map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field>
+          运镜
+          <Input
+            aria-label="机位运动"
+            value={cameraMove}
+            onChange={(event) => setCameraMove(event.target.value)}
+            placeholder="缓慢推近"
           />
-        </label>
-      ) : null}
-      {showMotion ? (
-        <label>
-          视频提示词
-          <textarea
-            aria-label="视频提示词"
-            value={draft.video_prompt}
-            onChange={(event) => updateDraft({ ...draft, video_prompt: event.target.value })}
+        </Field>
+        <Field>
+          时长
+          <Input
+            aria-label="时长（秒）"
+            type="number"
+            min="0.1"
+            max="30"
+            step="0.1"
+            value={durationSeconds}
+            onChange={(event) => setDurationSeconds(event.target.value)}
           />
-        </label>
-      ) : null}
-      {focus === "all" || focus === "camera" || !voiceSettings ? (
-        <Disclosure title="高级导演参数（可选）" description="普通创作不需要修改这些参数">
-          <label>
-            导演状态（JSON）
-            <textarea
-              aria-label="导演状态"
-              value={directorStateText}
-              onChange={(event) =>
-                updateDraft({ ...draft, director_state_text: event.target.value })
-              }
-              spellCheck={false}
-            />
-          </label>
-        </Disclosure>
-      ) : null}
-      <button
-        type="button"
-        onClick={() => save.mutate()}
-        disabled={save.isPending || !dirty}
-        data-testid="save-shot-design"
-      >
-        保存设计
-      </button>
+        </Field>
+      </div>
+
       {message && (
-        <p className="qc-save-message" data-testid="shot-design-message">
+        <p className="df-shot-hint" data-testid="shot-design-message" role="status">
           {message}
         </p>
       )}
       {conflict && (
-        <div className="flash err" data-testid="shot-design-conflict" role="alert">
+        <div className="df-shot-hint err" data-testid="shot-design-conflict" role="alert">
           <p>
-            服务器已有更新：本地草稿基于 v{conflict.expectedVersion}，服务器当前为 v
-            {conflict.actualVersion}。草稿已保留，不会被自动覆盖。
+            镜头已在别处更新（本地 v{conflict.expectedVersion}，当前 v{conflict.actualVersion}
+            ）。草稿已保留。
           </p>
-          <button
-            type="button"
+          <Button
+            tone="ghost"
             data-testid="shot-design-reload-server"
             disabled={reloadServer.isPending}
             onClick={() => reloadServer.mutate()}
           >
-            载入服务器最新设计并重新检查
-          </button>
+            载入最新版本
+          </Button>
         </div>
       )}
-      {canvasDirty && (
-        <p className="muted" data-testid="shot-design-canvas-note">
-          对白、画面描述、镜头类型、机位运动与时长会作为新的画布版本保存，并成为后续执行的事实源。
-        </p>
-      )}
-      {dirty ? (
-        <p className="canvas-dirty" data-testid="shot-design-dirty" role="status">
-          有未保存的镜头设计
-        </p>
+
+      {production ? (
+        production({ dirty, saving: save.isPending, save: () => save.mutate() })
       ) : (
-        <p className="muted" data-testid="shot-design-saved-state" role="status">
-          已保存设计 v{shot.version}；生成执行使用已保存的服务器事实。
-        </p>
+        // Standalone use (outside the inspector) keeps its own save row.
+        <div className="df-shot-design-save">
+          {dirty ? (
+            <span className="df-status warn" data-testid="shot-design-dirty" role="status">
+              未保存
+            </span>
+          ) : (
+            <span className="df-status ok" data-testid="shot-design-saved-state" role="status">
+              已保存 v{shot.version}
+            </span>
+          )}
+          <Button
+            tone="primary"
+            onClick={() => save.mutate()}
+            disabled={save.isPending || !dirty}
+            data-testid="save-shot-design"
+          >
+            保存镜头
+          </Button>
+        </div>
       )}
+
+      <Disclosure title="提示词" testId="shot-design-prompts">
+        <Field>
+          画面提示词
+          <Textarea
+            aria-label="图片提示词"
+            rows={4}
+            value={draft.image_prompt}
+            placeholder="留空时使用画面描述"
+            onChange={(event) => updateDraft({ ...draft, image_prompt: event.target.value })}
+          />
+        </Field>
+        <Field>
+          视频提示词
+          <Textarea
+            aria-label="视频提示词"
+            rows={4}
+            value={draft.video_prompt}
+            placeholder="动作如何发展；留空时使用画面描述"
+            onChange={(event) => updateDraft({ ...draft, video_prompt: event.target.value })}
+          />
+        </Field>
+      </Disclosure>
+      <Disclosure title="配音" testId="shot-design-voice">
+        {voiceSettings ? (
+          <ShotVoiceSettings projectId={projectId} value={voiceSettings} onChange={updateVoice} />
+        ) : (
+          <p role="alert">配音设置无效，请联系管理员修复后再调整。</p>
+        )}
+        <p className="df-shot-hint">导出成片时按这里的音色和语速生成配音。</p>
+      </Disclosure>
     </div>
   );
 }
