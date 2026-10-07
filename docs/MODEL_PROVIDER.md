@@ -88,6 +88,11 @@ SGLang H3 T2VA / Ref2VA / FL2VA；它们不会因新合同入口的限制而被�
 最终生成前仍以 Resolver、Workbench 与 Worker 的校验为准。
 目录 API 也返回 preview 与历史 revision 供管理界面查看；只有 active、已通过合同测试的
 revision 会报告工作台开放子集，且只有 active revision 可新建 Binding。
+插件以 `kind` 区分 `media`（发现的模型须匹配目录合同并建 Binding）与 `text`（LiteLLM /
+OpenAI 兼容 Chat 连接，发现的别名直接成为 `litellm/{connection_id}/{alias}` 模型）。
+`GET /api/v1/models` 以 `source` 区分 `workspace`（本工作空间连接下的 Binding 或文本
+别名）与 `installed`（进程级目录或网关配置）；设置页的默认模型与项目覆盖只提供
+`workspace` 模型，进程级网关别名保留为内部回退，不与工作空间模型并列。
 官方能力中不属于当前 `image.generate` / `video.generate` 合同的编辑、延长、组图和
 图层操作，记录在 Manifest 的 `documented_features`，不会因此变成可执行 Product 能力。
 模型及 revision 的参数矩阵由
