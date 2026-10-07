@@ -3,19 +3,29 @@ import type { components } from "../../shared/api/generated";
 
 export type BatchProductionStage = components["schemas"]["BatchProductionDispatchBody"]["stage"];
 
-const BATCH_BLOCKER_LABELS: Record<string, string> = {
-  STAGE_ALREADY_ACTIVE: "该环节已有任务在执行",
-  SHOT_PROMPT_REQUIRED: "镜头尚未填写生成提示词",
-  MODEL_BINDING_MISSING: "尚未选择可执行的供应商模型绑定",
-  MODEL_BINDING_UNAVAILABLE: "已选模型绑定当前不可用",
-  NO_FORMAL_KEYFRAME: "请先审查并设置正式关键帧",
-  FORMAL_KEYFRAME_REQUIRED: "请先审查并设置正式关键帧",
-  BATCH_PREFLIGHT_UNAVAILABLE: "预检暂时不可用，请稍后重新读取",
+/** Short, creator-facing reasons; raw codes stay in the API response. */
+const BATCH_REASON_LABELS: Record<string, string> = {
+  ALREADY_FORMAL: "已有正式版本",
+  STAGE_ALREADY_ACTIVE: "正在生成",
+  FORMAL_KEYFRAME_REQUIRED: "缺少正式画面",
+  NO_FORMAL_KEYFRAME: "缺少正式画面",
+  SHOT_PROMPT_REQUIRED: "缺少画面描述",
+  MODEL_BINDING_MISSING: "未选择模型",
+  MODEL_BINDING_UNAVAILABLE: "模型当前不可用",
+  MODEL_UNAVAILABLE: "模型当前不可用",
+  MODEL_CAPABILITY_UNSUPPORTED: "模型不支持此方式",
+  REFERENCE_UNAVAILABLE: "参考素材不可用",
+  BATCH_PREFLIGHT_UNAVAILABLE: "预检暂不可用",
 };
 
-export function batchBlockerLabel(code: string | null | undefined): string {
-  if (!code) return "预检未通过";
-  return BATCH_BLOCKER_LABELS[code] ?? "该镜头尚未满足批量执行条件";
+export function batchReasonLabel(code: string | null | undefined): string {
+  if (!code) return "当前不可生成";
+  return BATCH_REASON_LABELS[code] ?? "当前不可生成";
+}
+
+/** Blocked reasons that the creator fixes in model settings, not on the shot. */
+export function isModelSetupReason(code: string | null | undefined): boolean {
+  return Boolean(code && code.startsWith("MODEL_"));
 }
 
 export type BatchProductionPreviewItem = components["schemas"]["BatchPreviewItemRead"];

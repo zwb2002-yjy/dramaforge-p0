@@ -465,7 +465,7 @@ OpenCut manifest/adapter 交接不等于已内嵌完整 OpenCut 编辑器。
 4. 验证必须同时覆盖 UI-01 至 UI-11 的正向与失败路径。选择与改动相称的类型、
    静态检查、单测及 Playwright 回归；CI 的正式 gate 不得缩减。记录代码与运行版本、
    fixture、断言、未通过/未运行项。mock 通过、真实 Provider 验证、真实成片验收分别
-   报告；未获单次预算授权不发起付费调用。
+   报告；未获 Owner 明确授权不发起付费调用。
 5. 截图只作证据；优先 DOM、可访问性、网络、控制台和布局断言。遵守根 AGENTS.md
    的图片大小、尺寸与证据处理规则，不以截图存在代替可操作验收，不为文档开发目标
    提前填写“已验收”。
@@ -474,4 +474,4 @@ OpenCut manifest/adapter 交接不等于已内嵌完整 OpenCut 编辑器。
 
 Vitest 单测 + Playwright E2E（`playwright.config.ts`、`playwright.r7.config.ts`）；
 命令见 [DEVELOPMENT.md](DEVELOPMENT.md)。验证以 DOM、可访问性、布局与业务断言为主；
-截图作为证据。真实成片验收仅在 Owner 明确预算授权后执行。
+截图作为证据。真实成片验收仅在 Owner 明确授权后执行。

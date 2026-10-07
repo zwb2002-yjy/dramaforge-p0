@@ -308,8 +308,8 @@ async def test_plugin_extension_needs_no_service_branch(
         )
     assert blocked.value.details["code"] == "MODEL_CONTRACT_NOT_TESTED"
 
-    # Account pricing and a boolean consent are not a per-call budget/Owner
-    # authorization contract. Even an extension plugin must fail closed.
+    # Account pricing is not an Owner paid-probe authorization contract. Even
+    # an extension plugin must fail closed.
     for pricing in ({}, {"unit_amount": "0.25", "currency": "USD"}):
         binding.pricing_snapshot_json = pricing
         with pytest.raises(ValidationAppError) as denied:
@@ -319,7 +319,6 @@ async def test_plugin_extension_needs_no_service_branch(
                 actor=user,
                 capability="image_t2i",
                 model_binding_id=binding.id,
-                paid_request_confirmed=True,
             )
         assert denied.value.details["code"] == "PAID_PROBE_AUTHORIZATION_UNAVAILABLE"
     assert (

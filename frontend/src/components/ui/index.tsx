@@ -174,6 +174,7 @@ export function Badge({ tone = "default", className, ...props }: BadgeProps) {
 }
 
 export { Disclosure } from "./Disclosure";
+export { Dialog } from "./Dialog";
 
 /** Shared, calm empty state. Actions stay explicit and owned by the feature. */
 export function EmptyState({

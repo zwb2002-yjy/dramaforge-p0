@@ -5,7 +5,7 @@ import { useState } from "react";
 import { fetchProductionSummary } from "../features/production/api";
 import { ProductionHistoryPanel } from "../features/production/ProductionHistoryPanel";
 import { ProductionMonitor } from "../features/production/ProductionMonitor";
-import { BatchProductionPanel, ProductionTodoQueue } from "../features/production";
+import { BatchFillActions, ProductionTodoQueue } from "../features/production";
 import { ExperimentBranchPanel } from "../features/production/ExperimentBranchPanel";
 import { WorkflowNavigator } from "../features/production/WorkflowNavigator";
 import { CreativeCapabilitiesPanel } from "../features/production/CreativeCapabilitiesPanel";
@@ -96,7 +96,7 @@ export function ProductionPage({
 
   return (
     <div data-testid="production-mode">
-      <PageHeader title="作品总览" />
+      <PageHeader title="作品总览" actions={<BatchFillActions projectId={projectId} />} />
 
       <Tabs label="制作内容">
         {views.map((item) => (
@@ -137,10 +137,6 @@ export function ProductionPage({
           }}
         />
         <ProductionTodoQueue projectId={projectId} />
-        <details className="panel">
-          <summary>批量生成与预算</summary>
-          <BatchProductionPanel projectId={projectId} />
-        </details>
         <ProductionHistoryPanel projectId={projectId} />
       </section>
       <section

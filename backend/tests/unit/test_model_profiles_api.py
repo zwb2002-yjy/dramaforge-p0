@@ -288,8 +288,9 @@ def test_batch_preview_and_todo_fail_closed_before_dispatch(
     workspace_id = _register(client)
     project_id = _create_project(client, workspace_id)
 
-    async def _seed_shot() -> tuple[str, str]:
+    async def _seed_shot() -> tuple[str, str, str]:
         from app.assets.models import Episode, Scene, Shot
+        from app.execution.models import Artifact
 
         async with factory() as session:
             episode = Episode(
@@ -313,23 +314,57 @@ def test_batch_preview_and_todo_fail_closed_before_dispatch(
                 visual_description="Lead enters the room",
                 image_prompt="cinematic entrance",
             )
-            session.add(shot)
+            keyframe = Artifact(
+                project_id=UUID(project_id),
+                artifact_type="image",
+                storage_state="available",
+                object_key=f"test/{project_id}/formal-keyframe.png",
+                content_hash="b" * 64,
+                mime_type="image/png",
+            )
+            session.add_all([shot, keyframe])
+            await session.flush()
+            finished = Shot(
+                project_id=UUID(project_id),
+                scene_id=scene.id,
+                shot_number=2,
+                visual_description="Lead sits down",
+                image_prompt="quiet close-up",
+                formal_keyframe_artifact_id=keyframe.id,
+            )
+            session.add(finished)
             await session.commit()
-            return str(scene.id), str(shot.id)
+            return str(scene.id), str(shot.id), str(finished.id)
 
-    scene_id, shot_id = _run_create(_seed_shot())
+    scene_id, shot_id, finished_id = _run_create(_seed_shot())
     preview = client.get(
         f"/api/v1/projects/{project_id}/batch-production/preview",
         params={"stage": "image_keyframe", "scene_id": scene_id},
     )
     assert preview.status_code == 200, preview.text
-    assert preview.json()["estimated_provider_calls"] == 0
-    assert preview.json()["blocked_count"] == 1
-    assert preview.json()["items"][0]["blocker"] == "MODEL_BINDING_MISSING"
+    body = preview.json()
+    assert (body["ready_count"], body["skipped_count"], body["blocked_count"]) == (0, 1, 1)
+    by_shot = {item["shot_id"]: item for item in body["items"]}
+    assert by_shot[shot_id]["disposition"] == "blocked"
+    assert by_shot[shot_id]["reason"] == "MODEL_BINDING_MISSING"
+    # "补齐" never regenerates a shot that already has the stage's formal output.
+    assert by_shot[finished_id]["disposition"] == "skipped"
+    assert by_shot[finished_id]["reason"] == "ALREADY_FORMAL"
+    assert "max_cost_per_call" not in body and "currency" not in body
+
+    video_preview = client.get(
+        f"/api/v1/projects/{project_id}/batch-production/preview",
+        params={"stage": "video", "scene_id": scene_id},
+    )
+    assert video_preview.status_code == 200, video_preview.text
+    video_items = {item["shot_id"]: item for item in video_preview.json()["items"]}
+    assert video_items[shot_id]["disposition"] == "skipped"
+    assert video_items[shot_id]["reason"] == "FORMAL_KEYFRAME_REQUIRED"
+    assert video_items[finished_id]["disposition"] == "blocked"
 
     todos = client.get(f"/api/v1/projects/{project_id}/production-todos")
     assert todos.status_code == 200, todos.text
-    assert todos.json()["counts"] == {"not_generated": 1}
+    assert todos.json()["counts"]["not_generated"] == 2
     assert todos.json()["items"][0] == {
         "shot_id": shot_id,
         "scene_id": scene_id,
@@ -341,7 +376,7 @@ def test_batch_preview_and_todo_fail_closed_before_dispatch(
     }
 
 
-def test_batch_dispatch_contract_requires_positive_per_operation_budget() -> None:
+def test_batch_dispatch_contract_bounds_operation_count_without_money() -> None:
     from app.api.v1.batch_production import BatchProductionDispatchBody
     from pydantic import ValidationError
 
@@ -349,14 +384,16 @@ def test_batch_dispatch_contract_requires_positive_per_operation_budget() -> Non
         "stage": "image_keyframe",
         "preview_fingerprint": "a" * 64,
         "batch_key": "batch:keyframes",
-        "max_provider_calls": 2,
-        "currency": "CNY",
         "owner_authorized": True,
     }
     with pytest.raises(ValidationError):
-        BatchProductionDispatchBody(**common, max_cost_per_call="0")
-    accepted = BatchProductionDispatchBody(**common, max_cost_per_call="1.25")
-    assert str(accepted.max_cost_per_call) == "1.25"
+        BatchProductionDispatchBody(**common, max_provider_calls=0)
+    with pytest.raises(ValidationError):
+        BatchProductionDispatchBody(**{**common, "owner_authorized": False}, max_provider_calls=2)
+    accepted = BatchProductionDispatchBody(**common, max_provider_calls=2)
+    assert accepted.max_provider_calls == 2
+    assert "max_cost_per_call" not in BatchProductionDispatchBody.model_fields
+    assert "currency" not in BatchProductionDispatchBody.model_fields
 
 
 def test_project_profile_snapshot_on_first_write(api: tuple[TestClient, Any]) -> None:

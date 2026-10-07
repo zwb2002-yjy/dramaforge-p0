@@ -106,9 +106,14 @@ validated server-side; a disabled button is never the only guard.
 `demo_confirmed` is a stored review decision for walkthrough confirmation only. It remains
 blocked by the Formal gate and never aliases `approved`.
 
-`GET …/batch-production/preview` is side-effect free. `POST …/batch-production` requires the
-exact preview fingerprint, a positive call ceiling, `owner_authorized=true`, currency and a
-positive per-operation cost ceiling; each accepted NodeRun stores that concrete authorization.
+`GET …/batch-production/preview` is side-effect free. It classifies every Shot in scope as
+`ready`, `skipped` (`ALREADY_FORMAL`, `STAGE_ALREADY_ACTIVE`, `FORMAL_KEYFRAME_REQUIRED`) or
+`blocked` (preflight / resolver code) and returns `ready_count`, `skipped_count` and
+`blocked_count`. `POST …/batch-production` requires the exact preview fingerprint,
+`max_provider_calls` (1–500, at least the ready count) and `owner_authorized=true`; it dispatches
+only `ready` Shots (409 `BATCH_PREVIEW_STALE`, 422 `BATCH_CALL_LIMIT_EXCEEDED`). Each accepted
+NodeRun stores that concrete authorization (batch key, preview fingerprint, actor, time, call index
+and count). There is no money field: provider pricing is settled by the provider account.
 
 Review steps are human actions: the review page records the decision, and the
 Formal selection stays a separate user action. A machine `needs_human` result is

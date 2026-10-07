@@ -1,9 +1,12 @@
-"""Application service for project/scene batch production.
+"""Application service for project/scene batch production ("补齐").
 
-The preview is read-only. Dispatch requires an exact preview fingerprint, a
-positive provider-call ceiling and an explicit Owner acknowledgement. Every
-shot still enters the canonical Workbench command path; there is no second
-batch runtime or alternate generation truth.
+The preview is read-only and classifies every shot in scope as ``ready``,
+``skipped`` or ``blocked``. Dispatch requires an exact preview fingerprint, a
+positive ceiling on newly created provider operations and an explicit Owner
+acknowledgement. Provider pricing is managed by the provider account;
+DramaForge only bounds how many new operations one confirmation may create.
+Every shot still enters the canonical Workbench command path; there is no
+second batch runtime or alternate generation truth.
 """
 
 from __future__ import annotations
@@ -11,7 +14,6 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
@@ -35,13 +37,18 @@ from app.production.workbench_execution import (
 )
 from app.shared.errors import AppError, ConflictError, ValidationAppError
 
+BatchDisposition = Literal["ready", "skipped", "blocked"]
+
 
 class BatchPreviewItemRead(BaseModel):
     shot_id: UUID
     scene_id: UUID
     shot_number: int
-    ready: bool
-    blocker: str | None = None
+    disposition: BatchDisposition
+    # ``None`` only for ready items. Skipped reasons are fixed codes
+    # (ALREADY_FORMAL, STAGE_ALREADY_ACTIVE, FORMAL_KEYFRAME_REQUIRED);
+    # blocked reasons carry the preflight / resolver error code.
+    reason: str | None = None
     plan_fingerprint: str | None = None
     resolved_model_id: str | None = None
 
@@ -51,10 +58,9 @@ class BatchProductionPreviewRead(BaseModel):
     scene_id: UUID | None
     stage: PlanStage
     fingerprint: str
-    estimated_provider_calls: int
+    ready_count: int
+    skipped_count: int
     blocked_count: int
-    currently_queued: int
-    estimated_queue_seconds: int | None
     items: list[BatchPreviewItemRead]
 
 
@@ -64,8 +70,6 @@ class BatchProductionDispatchBody(BaseModel):
     preview_fingerprint: str = Field(min_length=64, max_length=64)
     batch_key: str = Field(min_length=1, max_length=120)
     max_provider_calls: int = Field(ge=1, le=500)
-    max_cost_per_call: Decimal = Field(gt=0, max_digits=12, decimal_places=4)
-    currency: Literal["CNY", "USD"]
     owner_authorized: Literal[True]
 
 
@@ -151,37 +155,6 @@ def _consistency_facts(shot: Shot) -> dict[str, str]:
     return facts
 
 
-async def _queue_estimate(session: AsyncSession, project_id: UUID) -> tuple[int, int | None]:
-    rows = (
-        (
-            await session.execute(
-                select(NodeRun)
-                .where(NodeRun.project_id == project_id)
-                .order_by(NodeRun.created_at.desc())
-                .limit(2000)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    media = [
-        row
-        for row in rows
-        if str((row.input_snapshot or {}).get("node_key") or "") in {"keyframe", "video"}
-    ]
-    queued = sum(1 for row in media if row.status == "queued")
-    durations = [
-        (row.finished_at - row.started_at).total_seconds()
-        for row in media
-        if row.started_at is not None
-        and row.finished_at is not None
-        and row.finished_at >= row.started_at
-        and row.status in {"completed", "cached", "completed_after_cancel"}
-    ][:50]
-    estimate = round(queued * (sum(durations) / len(durations))) if durations else None
-    return queued, estimate
-
-
 async def _prepare(
     session: AsyncSession,
     *,
@@ -227,36 +200,38 @@ async def _prepare(
     service = WorkbenchExecutionService(session, user_id=user_id)
     prepared: dict[UUID, tuple[WorkbenchExecutionInput, WorkbenchExecutionPlan]] = {}
     items: list[BatchPreviewItemRead] = []
+
+    def not_ready(shot: Shot, disposition: BatchDisposition, reason: str) -> None:
+        items.append(
+            BatchPreviewItemRead(
+                shot_id=shot.id,
+                scene_id=shot.scene_id,
+                shot_number=shot.shot_number,
+                disposition=disposition,
+                reason=reason,
+            )
+        )
+
     for shot in shots:
+        # "补齐" only fills gaps: shots that already have the stage's formal
+        # output, or an in-flight run for it, are skipped, never regenerated.
         already_formal = (
             shot.formal_keyframe_artifact_id is not None
             if stage == "image_keyframe"
             else shot.formal_video_artifact_id is not None
         )
         if already_formal:
+            not_ready(shot, "skipped", "ALREADY_FORMAL")
             continue
         if str(shot.id) in active_shots:
-            items.append(
-                BatchPreviewItemRead(
-                    shot_id=shot.id,
-                    scene_id=shot.scene_id,
-                    shot_number=shot.shot_number,
-                    ready=False,
-                    blocker="STAGE_ALREADY_ACTIVE",
-                )
-            )
+            not_ready(shot, "skipped", "STAGE_ALREADY_ACTIVE")
+            continue
+        if stage == "video" and shot.formal_keyframe_artifact_id is None:
+            not_ready(shot, "skipped", "FORMAL_KEYFRAME_REQUIRED")
             continue
         prompt = _prompt(shot, stage)
         if not prompt:
-            items.append(
-                BatchPreviewItemRead(
-                    shot_id=shot.id,
-                    scene_id=shot.scene_id,
-                    shot_number=shot.shot_number,
-                    ready=False,
-                    blocker="SHOT_PROMPT_REQUIRED",
-                )
-            )
+            not_ready(shot, "blocked", "SHOT_PROMPT_REQUIRED")
             continue
         try:
             references = await service.saved_shot_references(
@@ -274,15 +249,7 @@ async def _prepare(
             )
             plan = await service.build_plan(project=project, execution_input=execution_input)
         except Exception as exc:  # noqa: BLE001 - blockers belong in the preview
-            items.append(
-                BatchPreviewItemRead(
-                    shot_id=shot.id,
-                    scene_id=shot.scene_id,
-                    shot_number=shot.shot_number,
-                    ready=False,
-                    blocker=_reason(exc),
-                )
-            )
+            not_ready(shot, "blocked", _reason(exc))
             continue
         prepared[shot.id] = (execution_input, plan)
         items.append(
@@ -290,7 +257,7 @@ async def _prepare(
                 shot_id=shot.id,
                 scene_id=shot.scene_id,
                 shot_number=shot.shot_number,
-                ready=True,
+                disposition="ready",
                 plan_fingerprint=plan.plan_fingerprint,
                 resolved_model_id=plan.resolved_model.resolved_model_id,
             )
@@ -305,16 +272,14 @@ async def _prepare(
     fingerprint = hashlib.sha256(
         json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
-    currently_queued, estimated_queue_seconds = await _queue_estimate(session, project.id)
     preview = BatchProductionPreviewRead(
         project_id=project.id,
         scene_id=scene_id,
         stage=stage,
         fingerprint=fingerprint,
-        estimated_provider_calls=len(prepared),
-        blocked_count=sum(1 for item in items if not item.ready),
-        currently_queued=currently_queued,
-        estimated_queue_seconds=estimated_queue_seconds,
+        ready_count=len(prepared),
+        skipped_count=sum(1 for item in items if item.disposition == "skipped"),
+        blocked_count=sum(1 for item in items if item.disposition == "blocked"),
         items=items,
     )
     return preview, prepared
@@ -584,9 +549,9 @@ async def dispatch_batch_production(
         raise ConflictError("batch has no executable shots", details={"code": "BATCH_EMPTY"})
     if len(prepared) > body.max_provider_calls:
         raise ValidationAppError(
-            "batch exceeds the authorized provider-call ceiling",
+            "batch exceeds the authorized provider-operation limit",
             details={
-                "code": "BATCH_CALL_BUDGET_EXCEEDED",
+                "code": "BATCH_CALL_LIMIT_EXCEEDED",
                 "required_calls": len(prepared),
                 "max_provider_calls": body.max_provider_calls,
             },
@@ -618,18 +583,18 @@ async def dispatch_batch_production(
                 "accepted batch run could not be loaded",
                 details={"code": "BATCH_RUN_MISSING", "node_run_id": str(receipt.node_run_id)},
             )
-        # Paid authorization is persisted on every concrete operation. A batch
-        # acknowledgement is never treated as open-ended or reusable consent.
+        # Owner authorization is persisted on every concrete operation. A batch
+        # acknowledgement covers exactly this preview and operation count; it is
+        # never open-ended or reusable consent. Pricing stays with the provider.
         snapshot = dict(run.input_snapshot or {})
         snapshot["paid_authorization"] = {
             "kind": "batch_owner_authorization",
             "batch_key": body.batch_key,
+            "preview_fingerprint": preview.fingerprint,
             "authorized_by": str(user.id),
             "authorized_at": authorized_at,
             "call_index": call_index,
             "authorized_call_count": authorized_count,
-            "max_cost_per_call": str(body.max_cost_per_call),
-            "currency": body.currency,
         }
         run.input_snapshot = snapshot
         run_ids.append(receipt.node_run_id)

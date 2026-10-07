@@ -31,7 +31,7 @@ PR/MP/UI/RT 与 AC-01–AC-18 是目标要求，文档完成不代表开发、�
 ## 当前继续边界
 
 - 代码回归、部署与双路径制作验收分别留证；任一项通过不自动证明最新开发源码已正式发布。
-- Owner 授权的历史付费预算不延续；没有新的正数预算与逐操作授权时不得扩大 probe/production/repair。
+- Owner 的历史付费授权不延续；没有当前任务的 Owner 明确授权时不得扩大 probe/production/repair。
 - 不重跑已有图像/视频，不重试历史 `unknown_submission`。新的用户重生成意图必须作为新操作独立授权。
 - 后续进入 Owner 候选审阅与发布流程。
 
@@ -61,7 +61,7 @@ PR/MP/UI/RT 与 AC-01–AC-18 是目标要求，文档完成不代表开发、�
 指向 `main` 的 PR 自动执行 dependency-review 和完整依赖/安全门；`dev` 快速开发模式
 的 CI 边界及 Dependabot 配置见 [RELEASE.md](RELEASE.md)。
 
-真实 Provider probe/production/repair 每次都需要本任务明确的正数预算与 Owner 授权。历史预算不延续；可能已计费或 `unknown_submission` 的调用不能盲重试。
+真实 Provider probe/production/repair 每次都需要本任务的 Owner 明确授权（批量须说明允许创建的操作数）。历史授权不延续；可能已计费或 `unknown_submission` 的调用不能盲重试。
 
 ## 权威与历史
 

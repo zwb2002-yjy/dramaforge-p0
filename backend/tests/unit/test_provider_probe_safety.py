@@ -431,14 +431,12 @@ async def test_rotation_keeps_quality_and_capability_rows_but_clears_current_pro
     [("agnes", "agnes_cn_v1"), ("minimax", "minimax_cn_v1"), ("volcengine", "ark_cn_v1")],
 )
 @pytest.mark.parametrize("capability", ["image_t2i", "image_i2i", "video_i2v"])
-@pytest.mark.parametrize("confirmed", [False, True])
 async def test_generation_probes_fail_closed_before_credentials_clients_or_artifacts(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
     provider: str,
     profile: str,
     capability: str,
-    confirmed: bool,
 ) -> None:
     actor, workspace, service, connection, _ = await _seed(
         session, provider_type=provider, profile=profile
@@ -458,7 +456,6 @@ async def test_generation_probes_fail_closed_before_credentials_clients_or_artif
             capability=capability,
             model_binding_id=uuid4(),
             reference_artifact_id=uuid4(),
-            paid_request_confirmed=confirmed,
         )
     assert caught.value.details["code"] == "PAID_PROBE_AUTHORIZATION_UNAVAILABLE"
     settings.assert_not_called()
@@ -527,7 +524,6 @@ async def test_plugin_declared_paid_read_operations_also_fail_closed(
             connection_id=connection.id,
             actor=actor,
             capability=capability,
-            paid_request_confirmed=True,
         )
     assert caught.value.details["code"] == "PAID_PROBE_AUTHORIZATION_UNAVAILABLE"
 

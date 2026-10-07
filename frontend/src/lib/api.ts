@@ -226,7 +226,6 @@ export async function runProviderProbe(
     reference_artifact_id?: string;
     remote_task_id?: string;
     remote_query_kind?: string;
-    paid_request_confirmed?: boolean;
   },
 ): Promise<ProviderProbeRead> {
   const csrf = await fetchCsrf();

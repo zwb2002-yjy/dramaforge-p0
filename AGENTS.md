@@ -57,10 +57,18 @@
   an explicit reviewed title and body; never accept automatically concatenated
   branch history or unverified `Co-authored-by` trailers. Preserve only verified,
   intended attribution, then inspect the resulting remote commit before proceeding.
-- Paid provider operations (probe, production, repair) require an explicit
-  positive budget and Owner authorization per operation; historical
-  authorization never extends to a new task. Never blind-retry a possibly
-  billed or `unknown_submission` call.
+- A new paid Provider create (production, repair, batch fill) must be
+  explicitly triggered by the Owner. A batch create binds the current preview
+  fingerprint and states the maximum number of Provider operations it may
+  create. Provider pricing and actual charges are managed by the provider
+  account; DramaForge keeps no money budget, balance or credits. Poll,
+  download, resume and recovery of an existing remote task reuse the facts
+  frozen at creation; they are not a new create, are never resubmitted and
+  never blind-retried, nor is any possibly billed or `unknown_submission`
+  call. Generation probes stay unavailable until a standalone Owner
+  paid-probe authorization contract exists. Agents run paid operations only
+  under Owner authorization for the current task; historical authorization
+  never extends to a new task.
 
 ## Image Evidence Handling
 

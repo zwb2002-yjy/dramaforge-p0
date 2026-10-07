@@ -448,13 +448,12 @@ async def test_deprecated_catalog_binding_cannot_be_bound_to_a_new_project(
             actor=user,
             capability="video_poll_download",
             model_binding_id=legacy_binding.id,
-            paid_request_confirmed=True,
         )
 
     assert probe_caught.value.details["code"] == "MODEL_BINDING_CONTRACT_INACTIVE"
 
 
-def test_paid_probe_route_rejects_checkbox_consent_before_any_provider_dispatch(
+def test_paid_probe_route_rejects_before_any_provider_dispatch(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from unittest.mock import Mock
@@ -477,7 +476,7 @@ def test_paid_probe_route_rejects_checkbox_consent_before_any_provider_dispatch(
     monkeypatch.setattr(ProviderPlugin, "build_client", factory)
     rejected = client.post(
         f"/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/probes",
-        json={"capability": "image_t2i", "paid_request_confirmed": True},
+        json={"capability": "image_t2i"},
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert rejected.status_code == 422

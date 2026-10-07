@@ -172,7 +172,6 @@ class ProbeRequest(BaseModel):
     reference_artifact_id: UUID | None = None
     remote_task_id: str | None = None
     remote_query_kind: Literal["video_id", "task_id"] | None = None
-    paid_request_confirmed: bool = False
 
 
 class ProbeRead(BaseModel):
@@ -482,7 +481,6 @@ async def run_probe(
         reference_artifact_id=body.reference_artifact_id,
         remote_task_id=body.remote_task_id,
         remote_query_kind=body.remote_query_kind,
-        paid_request_confirmed=body.paid_request_confirmed,
     )
     await session.commit()
     return _probe_read(evidence)

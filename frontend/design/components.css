@@ -1228,6 +1228,121 @@ body {
   outline: var(--df-focus-width) solid var(--df-verdigris);
   outline-offset: var(--df-focus-offset);
 }
+
+/* Modal dialog: one overlay recipe; the backdrop never tints media. */
+.df-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--df-z-modal);
+  display: grid;
+  place-items: center;
+  padding: var(--df-space-4);
+  background: var(--df-backdrop);
+  animation: df-fade-in var(--df-duration-base) var(--df-ease);
+}
+.df-dialog {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(var(--df-dialog-width), 100%);
+  max-height: var(--df-dialog-max-height);
+  border: 1px solid var(--df-surface-tier-overlay-border);
+  border-radius: var(--df-radius-container-lg);
+  background: var(--df-surface-tier-overlay-bg);
+  box-shadow: var(--df-surface-tier-overlay-shadow);
+  animation: df-rise-in var(--df-duration-base) var(--df-ease);
+}
+.df-dialog.wide {
+  width: min(var(--df-dialog-wide-width), 100%);
+}
+.df-dialog:focus {
+  outline: none;
+}
+.df-dialog-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--df-space-4);
+  padding: var(--df-space-5) var(--df-space-6) var(--df-space-3);
+}
+.df-dialog-header h2 {
+  margin: 0;
+  font-size: var(--df-text-lg);
+  font-weight: var(--df-weight-semibold);
+}
+.df-dialog-header .kicker {
+  margin: 0 0 var(--df-space-1);
+}
+.df-dialog-close {
+  display: inline-grid;
+  place-items: center;
+  width: var(--df-space-8);
+  height: var(--df-space-8);
+  border: 0;
+  border-radius: var(--df-radius-control);
+  background: transparent;
+  color: var(--df-text-muted);
+  cursor: pointer;
+}
+.df-dialog-close:hover {
+  background: var(--df-control-background);
+  color: var(--df-text-primary);
+}
+.df-dialog-body {
+  min-height: 0;
+  overflow: auto;
+  padding: var(--df-space-2) var(--df-space-6) var(--df-space-5);
+}
+.df-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--df-space-3);
+  padding: var(--df-space-4) var(--df-space-6);
+  border-top: 1px solid var(--df-border-subtle);
+}
+
+/* Quiet status: a dot plus a short word, never a coloured banner. */
+.df-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--df-space-2);
+  color: var(--df-text-secondary);
+  font-size: var(--df-font-size-caption);
+  white-space: nowrap;
+}
+.df-status::before {
+  content: "";
+  width: var(--df-status-dot-size);
+  height: var(--df-status-dot-size);
+  border-radius: var(--df-radius-chip);
+  background: var(--df-text-muted);
+}
+.df-status.ok::before {
+  background: var(--df-success);
+}
+.df-status.warn::before {
+  background: var(--df-warning);
+}
+.df-status.err::before {
+  background: var(--df-danger);
+}
+.df-status.active::before {
+  background: var(--df-verdigris);
+}
+.df-num {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes df-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes df-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

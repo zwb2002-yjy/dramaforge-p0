@@ -21,7 +21,7 @@ import { fetchSceneWorkspace, type SceneWorkspaceRead } from "./api";
 import { queryKeys } from "../../lib/queryKeys";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 import { ResonanceStage } from "../resonance/ResonanceStage";
-import { BatchProductionPanel } from "../production";
+import { BatchFillActions } from "../production";
 
 type SceneWorkspaceProps = {
   projectId: string;
@@ -299,7 +299,8 @@ export function SceneWorkspace({
           {data?.scene.synopsis && <p>{data.scene.synopsis}</p>}
         </div>
         <div className="qc-scene-header-actions">
-          <span>{shots.length} 个镜头</span>
+          <span className="df-num">{shots.length} 个镜头</span>
+          <BatchFillActions projectId={projectId} sceneId={sceneId} />
           <a
             className="qc-overview-primary"
             href={`/projects/${projectId}/edit`}
@@ -315,11 +316,6 @@ export function SceneWorkspace({
           </a>
         </div>
       </header>
-
-      <details className="panel batch-production-disclosure">
-        <summary>按场景批量生成</summary>
-        <BatchProductionPanel projectId={projectId} sceneId={sceneId} />
-      </details>
 
       {data && selectedShotId !== null && !selected && (
         <p role="alert">目标镜头不在此场景，请重新选择镜头。</p>

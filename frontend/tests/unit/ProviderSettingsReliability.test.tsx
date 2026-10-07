@@ -479,7 +479,6 @@ describe("Provider settings honest state and isolated drafts", () => {
         model_binding_id: "video-two",
         remote_task_id: "synthetic-task-id",
         remote_query_kind: "video_id",
-        paid_request_confirmed: false,
       }),
     );
   });

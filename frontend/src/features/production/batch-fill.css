@@ -1,0 +1,109 @@
+/* "补齐" batch entry: two quiet header buttons plus one confirmation dialog. */
+.df-batch-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--df-space-2);
+}
+.df-batch-button svg {
+  color: var(--df-text-muted);
+}
+.df-batch-button.primary svg {
+  color: inherit;
+}
+.df-batch-button[data-state="running"] svg {
+  color: var(--df-verdigris);
+}
+
+.df-batch-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: var(--df-space-2);
+  margin: 0 0 var(--df-space-5);
+}
+.df-batch-summary > div {
+  display: grid;
+  gap: var(--df-space-1);
+  padding: var(--df-space-3) var(--df-space-4);
+  border-radius: var(--df-radius-container);
+  background: var(--df-control-background);
+}
+.df-batch-summary dt {
+  color: var(--df-text-muted);
+  font-size: var(--df-font-size-caption);
+}
+.df-batch-summary dd {
+  margin: 0;
+  color: var(--df-text-primary);
+  font-size: var(--df-text-2xl);
+  font-weight: var(--df-weight-semibold);
+  line-height: var(--df-leading-tight);
+}
+.df-batch-summary > div.warn dd {
+  color: var(--df-warning);
+}
+
+.df-batch-reasons {
+  display: grid;
+  gap: var(--df-space-2);
+  margin-bottom: var(--df-space-4);
+}
+.df-batch-reasons h3 {
+  margin: 0;
+  color: var(--df-text-muted);
+  font-size: var(--df-font-size-meta);
+  font-weight: var(--df-weight-medium);
+}
+.df-batch-reasons ul {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.df-batch-reasons li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--df-space-4);
+  padding: var(--df-space-2) 0;
+  border-bottom: 1px solid var(--df-border-subtle);
+  font-size: var(--df-font-size-body);
+}
+.df-batch-reasons li:last-child {
+  border-bottom: 0;
+}
+.df-batch-reasons li > span:first-child {
+  color: var(--df-text-secondary);
+}
+.df-batch-reasons li.blocked {
+  align-items: start;
+}
+.df-batch-shots {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--df-space-1) var(--df-space-3);
+  font-size: var(--df-font-size-caption);
+}
+.df-batch-shots a,
+.df-batch-setup-link {
+  color: var(--df-verdigris);
+  text-decoration: none;
+}
+.df-batch-shots a:hover,
+.df-batch-setup-link:hover {
+  text-decoration: underline;
+}
+.df-batch-setup-link {
+  justify-self: start;
+  font-size: var(--df-font-size-caption);
+}
+.df-batch-footnote,
+.df-batch-note {
+  margin: var(--df-space-2) 0 0;
+  color: var(--df-text-muted);
+  font-size: var(--df-font-size-caption);
+}
+.df-batch-note.err {
+  color: var(--df-danger-text);
+}

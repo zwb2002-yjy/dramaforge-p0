@@ -10,6 +10,7 @@
     "src/components/provider/TextGatewaySettings.tsx",
     "src/features/project/CreateProjectForm.tsx",
     "src/features/production/CreativeCapabilitiesPanel.tsx",
+    "src/features/production/BatchFillActions.tsx",
     "src/features/script/ScriptWorkspace.tsx",
     "src/features/assets/AssetCardsPanel.tsx",
     "src/features/review/ReviewWorkspace.tsx"

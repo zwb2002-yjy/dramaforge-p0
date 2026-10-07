@@ -89,7 +89,6 @@ export function TextGatewaySettings({ workspaceId }: { workspaceId: string | nul
       if (urlDraft !== null || keyDraft) throw new Error("请先保存或放弃连接草稿");
       return runProviderProbe(workspaceId, connection.id, {
         capability: "auth_models",
-        paid_request_confirmed: false,
       });
     },
     onMutate: resetFeedback,

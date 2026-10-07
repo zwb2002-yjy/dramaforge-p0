@@ -75,6 +75,7 @@ export const queryKeys = {
     summary: (projectId: string) => ["production-summary", projectId] as const,
     batchPreview: (projectId: string, sceneId: string | null, stage: string) =>
       ["batch-production-preview", projectId, sceneId, stage] as const,
+    batchPreviewRoot: (projectId: string) => ["batch-production-preview", projectId] as const,
     todos: (projectId: string) => ["production-todos", projectId] as const,
     runHistory: (projectId: string) => ["production-run-history", projectId] as const,
     artifactHistory: (projectId: string) => ["production-artifact-history", projectId] as const,

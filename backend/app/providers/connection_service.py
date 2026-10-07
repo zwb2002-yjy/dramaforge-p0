@@ -529,7 +529,6 @@ class ProviderConnectionService:
         reference_artifact_id: UUID | None = None,
         remote_task_id: str | None = None,
         remote_query_kind: str | None = None,
-        paid_request_confirmed: bool = False,
     ) -> ProviderCapabilityEvidence:
         if capability not in _CAPABILITIES:
             raise ValidationAppError("unsupported Provider capability")
@@ -547,8 +546,8 @@ class ProviderConnectionService:
             or capability in plugin.paid_capabilities
         ):
             raise ValidationAppError(
-                "paid Provider probes are unavailable without a positive per-call budget and Owner "
-                "authorization contract; a confirmation checkbox is not authorization",
+                "generation probes are unavailable: no standalone Owner paid-probe "
+                "authorization contract exists yet",
                 details={"code": "PAID_PROBE_AUTHORIZATION_UNAVAILABLE"},
             )
         # Only auth_models is a connection-level probe. Every model capability
@@ -642,7 +641,6 @@ class ProviderConnectionService:
                     ),
                     "remote_task_id": remote_task_id,
                     "remote_query_kind": remote_query_kind,
-                    "paid_request_confirmed": paid_request_confirmed,
                     "currency": probe_currency,
                 },
                 sort_keys=True,

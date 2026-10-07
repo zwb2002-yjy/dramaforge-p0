@@ -3056,10 +3056,13 @@ export interface components {
             scene_id: string;
             /** Shot Number */
             shot_number: number;
-            /** Ready */
-            ready: boolean;
-            /** Blocker */
-            blocker?: string | null;
+            /**
+             * Disposition
+             * @enum {string}
+             */
+            disposition: "ready" | "skipped" | "blocked";
+            /** Reason */
+            reason?: string | null;
             /** Plan Fingerprint */
             plan_fingerprint?: string | null;
             /** Resolved Model Id */
@@ -3080,13 +3083,6 @@ export interface components {
             batch_key: string;
             /** Max Provider Calls */
             max_provider_calls: number;
-            /** Max Cost Per Call */
-            max_cost_per_call: number | string;
-            /**
-             * Currency
-             * @enum {string}
-             */
-            currency: "CNY" | "USD";
             /**
              * Owner Authorized
              * @constant
@@ -3120,14 +3116,12 @@ export interface components {
             stage: "image_keyframe" | "video";
             /** Fingerprint */
             fingerprint: string;
-            /** Estimated Provider Calls */
-            estimated_provider_calls: number;
+            /** Ready Count */
+            ready_count: number;
+            /** Skipped Count */
+            skipped_count: number;
             /** Blocked Count */
             blocked_count: number;
-            /** Currently Queued */
-            currently_queued: number;
-            /** Estimated Queue Seconds */
-            estimated_queue_seconds: number | null;
             /** Items */
             items: components["schemas"]["BatchPreviewItemRead"][];
         };
@@ -5834,11 +5828,6 @@ export interface components {
             remote_task_id?: string | null;
             /** Remote Query Kind */
             remote_query_kind?: ("video_id" | "task_id") | null;
-            /**
-             * Paid Request Confirmed
-             * @default false
-             */
-            paid_request_confirmed: boolean;
         };
         /** ProductionArtifactPage */
         ProductionArtifactPage: {

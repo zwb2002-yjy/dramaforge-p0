@@ -75,9 +75,12 @@ Provider 特定的 reference URL/bytes 决策在 provider delivery 层内部。
 
 项目 / 场景批量生成只是同一命令入口的显式编排：preview 为每个 Shot 重建正式
 Workbench plan，dispatch 核对 preview fingerprint 后逐项调用
-`ProductionCommands.submit_user_execution`。它不创建第二套队列或执行事实。批量付费提交
-要求 Owner 为本批每一个具体操作给出正数单次金额上限、币种和调用数上限；授权随每个
-NodeRun 快照持久化，不能继承到下一批，也不能绕过 unknown-submission 防重。
+`ProductionCommands.submit_user_execution`。它不创建第二套队列或执行事实。「补齐」只处理
+缺少该环节正式产物、且没有在途任务的镜头；已有正式产物或正在生成的镜头记为 skipped，
+预检失败记为 blocked，dispatch 只消费 ready。批量提交要求 Owner 确认本次 preview
+fingerprint 与允许新建的 Provider 操作数（`max_provider_calls`）；授权随每个 NodeRun 快照
+持久化，不能继承到下一批，也不能绕过 unknown-submission 防重。供应商价格与实际收费由
+供应商账户管理，DramaForge 不维护金额预算。
 
 ## Workers 与队列
 
@@ -124,8 +127,10 @@ NodeRun 快照持久化，不能继承到下一批，也不能绕过 unknown-sub
 - Review/Repair/EditSession 只读取生产事实并显式提案，不反写 Production。
 - 媒体执行不依赖导演服务存活；MANUAL 路径在 worker-director 停止时完成
   全流程。
-- 单次手工主链没有旧 Director budget gate；批量 API 的逐操作正数金额授权是 Owner
-  授权上限与审计事实，不冒充 Provider 报价或最终账单，也不进入 Worker 内部另建预算状态机。
+- 单次手工主链没有旧 Director budget gate；批量 API 的操作数授权是 Owner 授权边界与
+  审计事实，不涉及金额，也不进入 Worker 内部另建预算状态机。
+- 已有 remote task 的 poll / download / resume / recovery 使用创建时冻结的执行事实，
+  不是新的 Provider create，不重新要求操作数或用户授权，也不盲重试。
 
 ## 审片与候选事实
 

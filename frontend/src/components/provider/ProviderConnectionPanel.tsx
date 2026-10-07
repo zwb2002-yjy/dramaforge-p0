@@ -312,7 +312,6 @@ function ProviderConnectionEditor({
         return runProviderProbe(workspaceId, connection.id, {
           capability: requestedCapability,
           ...(probeBinding ? { model_binding_id: probeBinding.id } : {}),
-          paid_request_confirmed: false,
           ...(!catalogOnly && referenceArtifactId.trim()
             ? { reference_artifact_id: referenceArtifactId.trim() }
             : {}),

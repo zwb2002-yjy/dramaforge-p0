@@ -205,4 +205,11 @@
   --df-form-field-min: 14rem; /* model/settings form column minimum */
   --df-sidebar-w: 216px;
   --df-inspector-w: 320px;
+
+  /* ---- Dialog ---- */
+  --df-dialog-width: 32rem;
+  --df-dialog-wide-width: 52rem;
+  --df-dialog-max-height: 86svh;
+  --df-backdrop: rgba(5, 6, 8, 0.66);
+  --df-status-dot-size: 6px;
 }
