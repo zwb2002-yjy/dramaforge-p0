@@ -54,7 +54,7 @@ from app.providers.model_resolution import ExecutionModelResolver
 from app.providers.models import ProviderConnection, ProviderConnectionRevision
 from app.providers.workbench_contract import select_workbench_contract
 from app.shared.enums import GraphStatus
-from app.shared.errors import ConflictError, ValidationAppError
+from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 PlanStage = Literal["image_keyframe", "video"]
 
@@ -1234,9 +1234,14 @@ class WorkbenchExecutionService:
     async def lock_command_scope(self, *, project_id: UUID) -> None:
         # Command keys are unique per project, including accidental reuse on
         # different Shots. Serialize the short DB-only queueing transaction.
-        await self._session.execute(
-            select(Project.id).where(Project.id == project_id).with_for_update()
+        project = await self._session.scalar(
+            select(Project)
+            .where(Project.id == project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
+        if project is None or project.deleted_at is not None:
+            raise NotFoundError("project not found")
 
     async def find_command_receipt(
         self,

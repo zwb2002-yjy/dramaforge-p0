@@ -19,6 +19,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -78,9 +79,7 @@ class InstanceBootstrapState(Base):
 
     __tablename__ = "instance_bootstrap_state"
     __table_args__ = (
-        CheckConstraint(
-            "singleton_id = 1", name="ck_instance_bootstrap_state_singleton"
-        ),
+        CheckConstraint("singleton_id = 1", name="ck_instance_bootstrap_state_singleton"),
     )
 
     singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
@@ -95,7 +94,14 @@ class InstanceBootstrapState(Base):
 class Project(Base):
     __tablename__ = "projects"
     __table_args__ = (
-        UniqueConstraint("workspace_id", "name", name="uq_projects_workspace_name"),
+        Index(
+            "uq_projects_workspace_name",
+            "workspace_id",
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
         CheckConstraint("aspect_ratio IN ('9:16','16:9')", name="ck_projects_aspect"),
         CheckConstraint("budget_limit >= 0", name="ck_projects_budget"),
         CheckConstraint("version > 0", name="ck_projects_version"),
@@ -117,10 +123,9 @@ class Project(Base):
         JSON_DOCUMENT, nullable=False, default=dict
     )
     budget_limit: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
-    budget_currency: Mapped[str] = mapped_column(
-        CURRENCY_CODE, nullable=False, default="USD"
-    )
+    budget_currency: Mapped[str] = mapped_column(CURRENCY_CODE, nullable=False, default="USD")
     provider_dispatch_frozen: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -140,9 +145,7 @@ class UserProjectPreference(Base):
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
-    workspace_state: Mapped[dict[str, object]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
+    workspace_state: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -161,14 +164,10 @@ class ProjectCreativeProfile(Base):
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True
     )
     start_type: Mapped[str] = mapped_column(String(16), nullable=False, default="FREE")
-    created_from_template_key: Mapped[str | None] = mapped_column(
-        String(80), nullable=True
-    )
+    created_from_template_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     template_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
     template_contract_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    director_autonomy: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="ASSIST"
-    )
+    director_autonomy: Mapped[str] = mapped_column(String(16), nullable=False, default="ASSIST")
     selected_genre: Mapped[str | None] = mapped_column(String(80), nullable=True)
     selected_style_ids: Mapped[list[str]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=list
@@ -176,9 +175,7 @@ class ProjectCreativeProfile(Base):
     selected_skill_ids: Mapped[list[str]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=list
     )
-    selected_shot_language: Mapped[str | None] = mapped_column(
-        String(80), nullable=True
-    )
+    selected_shot_language: Mapped[str | None] = mapped_column(String(80), nullable=True)
     asset_slot_requirements: Mapped[dict[str, object]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=dict
     )

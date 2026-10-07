@@ -22,10 +22,15 @@ Migration authority: [DATA_MODEL.md](DATA_MODEL.md)
 
 ## Route ownership
 
+`DELETE /api/v1/projects/{project_id}?expected_version=N` requires Owner workspace access
+and CSRF. Stale versions and active NodeRun/Director work return 409. Success returns 204,
+hides the project from lists and denies subsequent workbench access. Historical execution,
+provider evidence and media are retained; no old interface or recovery route is introduced.
+
 | Surface | Module | Current responsibility |
 |---|---|---|
 | Auth and workspaces | auth.py | session, CSRF, owner bootstrap, workspace CRUD |
-| Projects | projects.py | project shell and V1 CreativeTemplate profile |
+| Projects | projects.py | project shell, V1 CreativeTemplate profile and confirmed project deletion |
 | Script | scripts.py | script import, ScriptDocument/Episode/Scene/Shot reads, Shot canvas proposals |
 | Story | story.py | proposal-first Story authoring: generate, preview and partial apply through the shared command registry |
 | Assets | assets.py | Asset, AssetVersion, AssetVersionReference, asset cards and tags |

@@ -504,6 +504,16 @@ export function fetchProject(projectId: string, workspaceId?: string): Promise<P
   return apiGet<ProjectRead>(`/api/v1/projects/${projectId}`, workspaceId);
 }
 
+export async function deleteProject(projectId: string, expectedVersion: number): Promise<void> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "DELETE",
+    `/api/v1/projects/${projectId}?expected_version=${expectedVersion}`,
+    undefined,
+    csrf,
+  );
+}
+
 export type ResolvedProjectWorkspace = {
   project: ProjectRead;
   workspaceId: string;

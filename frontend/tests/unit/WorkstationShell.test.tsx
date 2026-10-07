@@ -354,11 +354,11 @@ describe("Workstation shell", () => {
 
     const projectList = await screen.findByRole("list", { name: "项目列表" });
     expect(screen.queryByRole("heading", { name: "继续创作" })).not.toBeInTheDocument();
-    expect(within(projectList).getAllByRole("button")).toHaveLength(12);
+    expect(within(projectList).getAllByRole("listitem")).toHaveLength(12);
 
     fireEvent.click(screen.getByRole("button", { name: "显示更多项目（剩余 2 个）" }));
 
-    expect(within(projectList).getAllByRole("button")).toHaveLength(14);
+    expect(within(projectList).getAllByRole("listitem")).toHaveLength(14);
     expect(screen.queryByRole("button", { name: /显示更多项目/ })).not.toBeInTheDocument();
   });
 

@@ -44,12 +44,64 @@ async function setup(page: Page) {
           name: "测试作品",
           stage: "production",
           aspect_ratio: "9:16",
+          version: 1,
         },
       ],
     }),
   );
   return { state, writes, errors };
 }
+
+test("project deletion needs confirmation, cancellation never deletes, and success refreshes the lobby", async ({
+  page,
+}) => {
+  const { errors } = await setup(page);
+  let removed = false;
+  const deletes: string[] = [];
+  await page.route(`**/api/v1/workspaces/${WORKSPACE_ID}/projects`, (route) =>
+    route.fulfill({
+      json: removed
+        ? []
+        : [
+            {
+              id: PROJECT_ID,
+              workspace_id: WORKSPACE_ID,
+              name: "测试作品",
+              aspect_ratio: "9:16",
+              stage: "draft",
+              version: 1,
+            },
+          ],
+    }),
+  );
+  await page.route(
+    new RegExp(`/api/v1/projects/${PROJECT_ID}\\?expected_version=1$`),
+    async (route) => {
+      expect(route.request().method()).toBe("DELETE");
+      deletes.push(route.request().url());
+      removed = true;
+      await route.fulfill({ status: 204 });
+    },
+  );
+  await page.goto("/");
+  const card = page.getByRole("article", { name: "测试作品" });
+  await card.getByLabel("更多操作 测试作品").click();
+  await card.getByRole("button", { name: "删除项目" }).click();
+  const dialog = page.getByTestId("project-delete-dialog");
+  await expect(dialog).toHaveAccessibleName("删除项目「测试作品」？");
+  expect(deletes).toHaveLength(0);
+  await dialog.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(card).toBeVisible();
+  await expect(card.getByLabel("更多操作 测试作品")).toBeFocused();
+  expect(deletes).toHaveLength(0);
+  await card.getByLabel("更多操作 测试作品").click();
+  await card.getByRole("button", { name: "删除项目" }).click();
+  await dialog.getByRole("button", { name: "确认删除", exact: true }).click();
+  await expect(card).toHaveCount(0);
+  await expect(dialog).toHaveCount(0);
+  expect(deletes).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
 
 test("create=false is normalized without logging out; only explicit logout changes the session", async ({
   page,

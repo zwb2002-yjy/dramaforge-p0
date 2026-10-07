@@ -750,7 +750,8 @@ export interface paths {
         get: operations["get_project_api_v1_projects__project_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** Delete Project */
+        delete: operations["delete_project_api_v1_projects__project_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -10133,6 +10134,44 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ProjectRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_project_api_v1_projects__project_id__delete: {
+        parameters: {
+            query: {
+                expected_version: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

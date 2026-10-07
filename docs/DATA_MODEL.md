@@ -2,8 +2,8 @@
 
 Status: current
 Date: 2026-10-07
-Alembic head: 20261007_0084
-Revisions: 88
+Alembic head: 20261007_0085
+Revisions: 89
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Canonical relational graph
@@ -121,6 +121,7 @@ Migration 20260902_0051 removes:
 | 20260929_0074–0077 | Model-system branch: Global/Connection targets and availability; immutable product-policy, model-history, protocol and handler revisions. The unused parallel schema is removed by the current cleanup head. |
 | 20260929_0078–20260930_0082 | Local-media branch: SGLang H3 contracts, MiniMax H3 v2 text/video contract, and separate bindings per contract revision. |
 | 20261007_0084 | One-way cleanup of unused cutover/experiment storage and obsolete fields; one model authority, multiple independent connections, explicit new contract revisions. |
+| 20261007_0085 | `projects.deleted_at` and uniqueness of names among active projects. Deleted projects leave the workbench; production/provider evidence and media remain under their original IDs. |
 | 20261007_0083 | Merge the model-system and local-media migration histories into one head without rewriting either branch. |
 
 No canonical Project, Shot, Artifact, ProviderOperation, or EditSession is

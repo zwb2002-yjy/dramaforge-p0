@@ -102,3 +102,8 @@ export function rememberProjectPath(projectId: string, path: string): void {
   if (!path.startsWith(`/projects/${projectId}/`)) return;
   writeNavigationPreference(`dramaforge.project-path:${projectId}`, path);
 }
+
+export function forgetProject(projectId: string): void {
+  if (getRememberedProjectId() === projectId) setRememberedProjectId(null);
+  writeNavigationPreference(`dramaforge.project-path:${projectId}`, null);
+}

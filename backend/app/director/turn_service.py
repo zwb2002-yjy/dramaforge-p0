@@ -125,6 +125,13 @@ class DirectorTurnService:
                 f"Director max_steps must be between 1 and {MAX_TURN_STEPS}",
                 details={"code": "DIRECTOR_STEP_LIMIT_INVALID"},
             )
+        # Serialize new Director work with project deletion, as media commands do.
+        locked_project = await self._session.scalar(
+            select(Project).where(Project.id == project.id).with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if locked_project is None or locked_project.deleted_at is not None:
+            raise NotFoundError("project not found")
         fingerprint = _context_hash(context_snapshot)
         if not allow_rejected_context_retry:
             await self.assert_context_not_rejected(project_id=project.id, context_hash=fingerprint)

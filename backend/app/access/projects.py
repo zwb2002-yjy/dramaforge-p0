@@ -103,6 +103,7 @@ class ProjectService:
             select(Project.id).where(
                 Project.workspace_id == workspace_id,
                 Project.name == name,
+                Project.deleted_at.is_(None),
             )
         )
         if existing_project_id is not None:
@@ -195,7 +196,9 @@ class ProjectService:
         return project
 
     async def get_project_for_owner(self, *, project_id: UUID, actor: User) -> Project:
-        result = await self._session.execute(select(Project).where(Project.id == project_id))
+        result = await self._session.execute(
+            select(Project).where(Project.id == project_id, Project.deleted_at.is_(None))
+        )
         project = result.scalar_one_or_none()
         if project is None:
             raise NotFoundError("project not found")
@@ -213,7 +216,30 @@ class ProjectService:
         await self._get_owned_workspace(workspace_id=workspace_id, actor=actor)
         result = await self._session.execute(
             select(Project)
-            .where(Project.workspace_id == workspace_id)
+            .where(Project.workspace_id == workspace_id, Project.deleted_at.is_(None))
             .order_by(Project.created_at.desc(), Project.id)
         )
         return list(result.scalars().all())
+
+    async def lock_project_for_deletion(
+        self,
+        *,
+        project_id: UUID,
+        actor: User,
+        expected_version: int,
+    ) -> Project:
+        await self.get_project_for_owner(project_id=project_id, actor=actor)
+        project = await self._session.scalar(
+            select(Project)
+            .where(Project.id == project_id, Project.deleted_at.is_(None))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if project is None:
+            raise NotFoundError("project not found")
+        if project.version != expected_version:
+            raise ConflictError(
+                "项目已发生变化，请刷新后重新确认删除。",
+                details={"code": "PROJECT_VERSION_CONFLICT"},
+            )
+        return project

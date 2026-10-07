@@ -35,6 +35,11 @@ async function installProgressMock(page: Page) {
     if (
       url.pathname.startsWith("/api/") &&
       !["GET", "HEAD", "OPTIONS"].includes(request.method()) &&
+      // Resolving saved references is a read, despite using POST.
+      !(
+        request.method() === "POST" &&
+        /^\/api\/v1\/projects\/[^/]+\/shots\/[^/]+\/references\/resolve$/.test(url.pathname)
+      ) &&
       // Existing navigation persistence changes only UserProjectPreference,
       // not production facts. All other writes remain forbidden here.
       !(

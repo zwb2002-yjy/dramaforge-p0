@@ -334,11 +334,20 @@ describe("ProviderList", () => {
       return undefined;
     });
     wrap(<ProviderList workspaceId={WS} adding={false} onAddingChange={() => undefined} />);
-    const list = await screen.findByRole("list", { name: "已连接的供应商" });
-    expect(within(list).getAllByRole("listitem")).toHaveLength(2);
-    expect(within(list).getByText("已连接")).toBeVisible();
-    expect(within(list).getByText("认证失败")).toBeVisible();
-    await waitFor(() => expect(within(list).getAllByText("2 个模型")).toHaveLength(2));
+    const list = await screen.findByRole("navigation", { name: "已连接的供应商" });
+    expect(within(list).getAllByRole("button", { name: /管理/ })).toHaveLength(2);
+    expect(within(list).getByText(/已连接/)).toBeVisible();
+    expect(within(list).getByText(/认证失败/)).toBeVisible();
+    const detail = screen.getByTestId("provider-detail");
+    await waitFor(() =>
+      expect(within(detail).getByRole("heading", { name: /模型.*2/ })).toBeVisible(),
+    );
+    fireEvent.click(within(list).getByRole("button", { name: "管理 火山 · 备用账号" }));
+    expect(await screen.findByRole("region", { name: "配置 火山 · 备用账号" })).toBeVisible();
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索供应商" }), {
+      target: { value: "备用" },
+    });
+    expect(within(list).getAllByRole("button", { name: /管理/ })).toHaveLength(1);
   });
 });
 

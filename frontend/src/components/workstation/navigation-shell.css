@@ -293,6 +293,7 @@
   display: flex;
 }
 .df-project-card {
+  position: relative;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -310,6 +311,37 @@
   transition:
     border-color var(--df-duration-fast),
     transform var(--df-duration-fast);
+}
+.df-project-menu {
+  position: absolute;
+  top: var(--df-space-2);
+  right: var(--df-space-2);
+  z-index: var(--df-z-dropdown);
+}
+.df-project-menu > summary {
+  display: grid;
+  place-items: center;
+  padding: var(--df-space-2);
+  background: var(--df-surface-tier-overlay-bg);
+  cursor: pointer;
+  list-style: none;
+}
+.df-project-menu > summary::-webkit-details-marker {
+  display: none;
+}
+.df-project-menu-items {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--df-space-1));
+  width: max-content;
+  padding: var(--df-space-1);
+  border: 1px solid var(--df-surface-tier-overlay-border);
+  border-radius: var(--df-radius-control);
+  background: var(--df-surface-tier-overlay-bg);
+  box-shadow: var(--df-surface-tier-overlay-shadow);
+}
+.df-project-menu-items .df-btn {
+  color: var(--df-danger-text);
 }
 .df-project-card:hover {
   border-color: var(--df-border-strong);

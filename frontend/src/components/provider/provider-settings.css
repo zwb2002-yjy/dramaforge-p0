@@ -28,53 +28,138 @@
   font-size: var(--df-font-size-caption);
 }
 
-/* ---- Provider cards ---- */
-.df-provider-list {
+/* ---- Supplier selector and selected connection ---- */
+.df-provider-workspace {
   display: grid;
-  gap: var(--df-space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
+  grid-template-columns: var(--df-vendor-rail-max) minmax(0, 1fr);
+  border: 1px solid var(--df-border-subtle);
+  border-radius: var(--df-radius-container-lg);
+  overflow: hidden;
+  background: var(--df-surface-1b);
 }
-.df-provider-card {
+.df-provider-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--df-space-3);
+  min-width: 0;
+  padding: var(--df-space-4);
+  background: var(--df-surface-2);
+  border-right: 1px solid var(--df-border-subtle);
+}
+.df-provider-sidebar > header {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--df-font-size-caption);
+  font-weight: var(--df-weight-medium);
+}
+.df-provider-options {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: var(--df-space-4);
+  gap: var(--df-space-1);
+  align-content: start;
+}
+.df-btn.df-provider-option {
+  display: flex;
+  justify-content: start;
+  width: 100%;
+  height: auto;
   min-height: var(--df-list-row-min);
-  padding: var(--df-space-3) var(--df-space-4);
-  border: 1px solid var(--df-surface-tier-raised-border);
-  border-radius: var(--df-radius-container);
-  background: var(--df-surface-tier-raised-bg);
-  transition: border-color var(--df-duration-fast) var(--df-ease);
+  gap: var(--df-space-2);
+  padding: var(--df-space-3) var(--df-space-2);
+  text-align: left;
+  white-space: normal;
 }
-.df-provider-card:hover {
-  border-color: var(--df-border);
+.df-provider-option[aria-pressed="true"] {
+  background: var(--df-nav-active-background);
 }
-.df-provider-card.skeleton {
-  background: var(--df-control-background);
-  animation: df-skeleton 1.4s var(--df-ease) infinite alternate;
+.df-provider-option[aria-pressed="true"] .df-provider-mark {
+  color: var(--df-verdigris);
 }
-.df-provider-card-icon {
+.df-provider-mark {
   display: inline-grid;
   place-items: center;
+  flex: none;
   width: var(--df-space-8);
   height: var(--df-space-8);
   border-radius: var(--df-radius-control);
   background: var(--df-control-background);
   color: var(--df-text-secondary);
 }
-.df-provider-card-body {
+.df-provider-option-copy {
   display: grid;
-  gap: var(--df-space-1);
+  flex: 1;
   min-width: 0;
+  gap: var(--df-space-1);
 }
-.df-provider-card-body strong {
-  color: var(--df-text-primary);
-  font-size: var(--df-font-size-body-lg);
+.df-provider-option-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--df-font-size-body);
+  font-weight: var(--df-weight-medium);
+}
+.df-provider-option-copy small {
+  color: var(--df-text-muted);
+  font-size: var(--df-font-size-meta);
+}
+.df-provider-status-dot {
+  flex: none;
+  width: var(--df-space-2);
+  height: var(--df-space-2);
+  border-radius: var(--df-radius-chip);
+  background: var(--df-text-muted);
+}
+.df-provider-status-dot.ok {
+  background: var(--df-success);
+}
+.df-provider-status-dot.warn {
+  background: var(--df-warning);
+}
+.df-provider-sidebar-note {
+  margin: auto 0 0;
+  padding-top: var(--df-space-5);
+  color: var(--df-text-muted);
+  font-size: var(--df-font-size-meta);
+  line-height: var(--df-leading-relaxed);
+}
+.df-provider-detail {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: var(--df-space-5);
+  padding: var(--df-space-5);
+}
+.df-provider-detail-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--df-space-3);
+  padding-bottom: var(--df-space-4);
+  border-bottom: 1px solid var(--df-border-subtle);
+}
+.df-provider-detail-heading h3 {
+  margin: var(--df-space-1) 0 0;
+  font-size: var(--df-text-lg);
   font-weight: var(--df-weight-semibold);
+  overflow-wrap: anywhere;
 }
-.df-provider-card-body code,
+.df-provider-detail-heading p {
+  margin: 0;
+}
+.df-provider-kind {
+  flex: none;
+  padding: var(--df-space-1) var(--df-space-2);
+  color: var(--df-text-secondary);
+  font-size: var(--df-font-size-meta);
+  background: var(--df-control-background);
+  border-radius: var(--df-radius-control);
+}
+.df-manage-section + .df-manage-section {
+  padding-top: var(--df-space-5);
+  border-top: 1px solid var(--df-border-subtle);
+}
+.df-manage-section > header > .muted {
+  font-size: var(--df-font-size-meta);
+}
 .df-model-name code {
   padding: 0;
   border: 0;
@@ -86,26 +171,24 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.df-provider-card-meta {
-  display: grid;
-  justify-items: end;
-  gap: var(--df-space-1);
-  font-size: var(--df-font-size-caption);
-}
 .df-provider-empty {
-  padding: var(--df-space-6);
+  display: grid;
+  justify-items: center;
+  gap: var(--df-space-3);
+  padding: var(--df-space-8);
   border: 1px dashed var(--df-border);
   border-radius: var(--df-radius-container);
   text-align: center;
+  color: var(--df-text-muted);
 }
+.df-provider-empty h3,
 .df-provider-empty p {
   margin: 0;
 }
-.df-provider-empty p + p {
-  margin-top: var(--df-space-1);
-  font-size: var(--df-font-size-caption);
+.df-provider-empty h3 {
+  color: var(--df-text-primary);
+  font-size: var(--df-font-size-body-lg);
 }
-
 /* ---- Add provider ---- */
 .df-add-provider {
   display: grid;
@@ -374,15 +457,6 @@
   flex: 1;
 }
 
-@keyframes df-skeleton {
-  from {
-    opacity: 0.55;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
 @media (max-width: 899px) {
   .df-add-provider {
     grid-template-columns: 1fr;
@@ -393,11 +467,10 @@
     border-bottom: 1px solid var(--df-border-subtle);
     padding-bottom: var(--df-space-3);
   }
-  .df-provider-card {
-    grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-  .df-provider-card-meta {
-    grid-column: 2;
-    justify-items: start;
+  .df-provider-workspace {
+    grid-template-columns: minmax(var(--df-vendor-rail-min), var(--df-vendor-rail-max)) minmax(
+        0,
+        1fr
+      );
   }
 }

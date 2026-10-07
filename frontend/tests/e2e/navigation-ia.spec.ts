@@ -557,7 +557,7 @@ test("model settings show providers and default models on one page, keeping add-
   await expect(page.getByRole("heading", { name: "供应商" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "默认模型" })).toBeVisible();
   await expect(page.getByLabel("文本模型")).toBeVisible();
-  await expect(page.getByText("还没有连接供应商。")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "连接你的第一个供应商" })).toBeVisible();
 
   await page.getByTestId("add-provider").click();
   const dialog = page.getByTestId("add-provider-dialog");

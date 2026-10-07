@@ -20,6 +20,7 @@ import { getRememberedProjectId } from "../lib/navigationPreferences";
 import { Button, Field, Input, Select, PageHeader } from "../components/ui";
 import { CreateProjectForm } from "../features/project/CreateProjectForm";
 import { QuickStartSteps } from "../features/project/QuickStartSteps";
+import { ProjectActions } from "../features/project/ProjectActions";
 import { LazyWorkspaceSettingsPage } from "./pages";
 import { rootRoute } from "./__root";
 
@@ -406,6 +407,7 @@ function HomePage() {
                 {displayedProjects.map((project) => (
                   <div role="listitem" key={project.id}>
                     <article className="df-project-card" aria-label={project.name}>
+                      <ProjectActions project={project} />
                       <span className="df-project-cover" aria-hidden="true">
                         <Clapperboard size={24} />
                       </span>

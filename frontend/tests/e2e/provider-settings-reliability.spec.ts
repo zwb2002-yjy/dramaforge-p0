@@ -136,12 +136,18 @@ test("supplier settings stay read-only while browsing, show failed evidence, and
   const { writes } = await setupProviders(page);
   const origin = `/projects/${PROJECT_ID}/scenes/${SCENE_ID}?shotId=${SHOT_ID}`;
   await page.goto(`/settings/models?returnTo=${encodeURIComponent(origin)}`);
-  const card = page.getByTestId("provider-card-connection-fixture");
+  const card = page.getByTestId("provider-connection-connection-fixture");
   await expect(card).toContainText("Fixture Provider");
   await expect(card).toContainText("已连接");
-  await card.getByRole("button", { name: "管理 Fixture Provider" }).click();
-  const dialog = page.getByTestId("provider-manage-dialog");
+  await card.click();
+  const dialog = page.getByTestId("provider-detail");
   await expect(dialog).toBeVisible();
+  const sidebarBox = await page.getByRole("navigation", { name: "已连接的供应商" }).boundingBox();
+  const detailBox = await dialog.boundingBox();
+  expect(sidebarBox).not.toBeNull();
+  expect(detailBox).not.toBeNull();
+  expect(sidebarBox!.x + sidebarBox!.width).toBeLessThanOrEqual(detailBox!.x + 1);
+  expect(detailBox!.width).toBeGreaterThan(sidebarBox!.width);
   await dialog.getByTestId("provider-diagnostics-disclosure").locator("summary").click();
   await expect(dialog.getByText("检查记录读取失败。")).toBeVisible();
   await expect(dialog.getByText("暂无检查记录。")).toHaveCount(0);
@@ -150,7 +156,6 @@ test("supplier settings stay read-only while browsing, show failed evidence, and
   await expect(dialog.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
   await dialog.getByRole("button", { name: "放弃修改" }).click();
   await expect(dialog.getByLabel("服务地址")).toHaveValue("https://saved.invalid");
-  await dialog.getByRole("button", { name: "完成" }).click();
 
   await page.getByTestId("project-models-disclosure").locator("summary").click();
   await page.getByLabel("项目模型覆盖").selectOption(PROJECT_ID);
@@ -245,7 +250,7 @@ test("adding models reads the free catalog, then binds only the ticked exact ide
     `/settings/models?returnTo=${encodeURIComponent(`/projects/${PROJECT_ID}/production`)}`,
   );
   await page.getByRole("button", { name: "管理 Fixture Provider" }).click();
-  const dialog = page.getByTestId("provider-manage-dialog");
+  const dialog = page.getByTestId("provider-detail");
   await dialog.getByRole("button", { name: "添加模型", exact: true }).click();
   const picker = dialog.getByTestId("provider-model-picker");
   await expect(picker.getByText("已发现 · 暂未支持执行 1")).toBeVisible();

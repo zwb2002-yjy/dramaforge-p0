@@ -1,74 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { Image as ImageIcon, MessageSquareText, Plus } from "lucide-react";
-import { useState } from "react";
-
-import {
-  listProviderConnections,
-  listProviderModelBindings,
-  listProviderPlugins,
-  listProviderProbes,
-  type ProviderConnectionRead,
-  type ProviderPluginRead,
-} from "../../lib/api";
+import { Image as ImageIcon, MessageSquareText, Plus, Search, Settings2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { listProviderConnections, listProviderPlugins } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
-import { Button } from "../ui";
+import { Button, Input } from "../ui";
 import { AddProviderDialog } from "./AddProviderDialog";
-import { ProviderManageDialog } from "./ProviderManageDialog";
-import { connectionStatus, latestCatalogRead, pluginFor } from "./providerSetup";
+import { ProviderDetails } from "./ProviderDetails";
+import { connectionStatus, pluginFor } from "./providerSetup";
 import "./provider-settings.css";
 
-function ProviderCard({
-  workspaceId,
-  connection,
-  plugin,
-  onManage,
-}: {
-  workspaceId: string;
-  connection: ProviderConnectionRead;
-  plugin: ProviderPluginRead | undefined;
-  onManage: () => void;
-}) {
-  const isText = plugin?.kind === "text";
-  const bindings = useQuery({
-    queryKey: queryKeys.provider.bindings(workspaceId, connection.id),
-    queryFn: () => listProviderModelBindings(workspaceId, connection.id),
-    enabled: !isText,
-    retry: false,
-  });
-  const probes = useQuery({
-    queryKey: queryKeys.provider.probes(workspaceId, connection.id),
-    queryFn: () => listProviderProbes(workspaceId, connection.id),
-    enabled: isText,
-    retry: false,
-  });
-  const count = isText
-    ? (latestCatalogRead(probes.data)?.discovered_model_ids.length ?? null)
-    : (bindings.data?.length ?? null);
-  const status = connectionStatus(connection);
-  const Icon = isText ? MessageSquareText : ImageIcon;
-  return (
-    <li className="df-provider-card" data-testid={`provider-card-${connection.id}`}>
-      <span className="df-provider-card-icon" aria-hidden="true">
-        <Icon size={18} />
-      </span>
-      <div className="df-provider-card-body">
-        <strong>{connection.display_name}</strong>
-        <code title={connection.base_url}>{connection.base_url}</code>
-      </div>
-      <div className="df-provider-card-meta">
-        <span className={`df-status ${status.tone}`}>{status.label}</span>
-        <span className="muted df-num">
-          {count === null ? "—" : `${count} 个${isText ? "文本" : ""}模型`}
-        </span>
-      </div>
-      <Button tone="ghost" onClick={onManage} aria-label={`管理 ${connection.display_name}`}>
-        管理
-      </Button>
-    </li>
-  );
-}
-
-/** Workspace connections as quiet cards, plus the single "添加供应商" entry. */
 export function ProviderList({
   workspaceId,
   adding,
@@ -78,7 +18,8 @@ export function ProviderList({
   adding: boolean;
   onAddingChange: (open: boolean) => void;
 }) {
-  const [managingId, setManagingId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const plugins = useQuery({
     queryKey: queryKeys.provider.plugins(),
     queryFn: listProviderPlugins,
@@ -90,11 +31,20 @@ export function ProviderList({
     queryFn: () => listProviderConnections(workspaceId),
     retry: false,
   });
-  const managing = connections.data?.find((item) => item.id === managingId) ?? null;
-  const list = [...(connections.data ?? [])].sort((left, right) =>
-    left.enabled === right.enabled ? 0 : left.enabled ? -1 : 1,
+  const list = [...(connections.data ?? [])].sort((a, b) => Number(b.enabled) - Number(a.enabled));
+  const selected = list.find((item) => item.id === selectedId) ?? list[0];
+  useEffect(() => {
+    if (connections.data && !connections.data.some((item) => item.id === selectedId)) {
+      setSelectedId(
+        connections.data.find((item) => item.enabled)?.id ?? connections.data[0]?.id ?? null,
+      );
+    }
+  }, [selectedId, connections.data]);
+  const filtered = list.filter((item) =>
+    `${item.display_name} ${pluginFor(plugins.data, item)?.display_name ?? ""}`
+      .toLocaleLowerCase()
+      .includes(search.trim().toLocaleLowerCase()),
   );
-
   return (
     <section
       className="df-settings-block"
@@ -104,7 +54,7 @@ export function ProviderList({
       <header className="df-settings-block-header">
         <div>
           <h2 id="providers-title">供应商</h2>
-          <p className="muted">填 Key 后自动读取账号可用的模型。</p>
+          <p className="muted">选择一个连接，配置服务地址、密钥和可用模型。</p>
         </div>
         <Button
           tone="primary"
@@ -116,11 +66,8 @@ export function ProviderList({
           添加供应商
         </Button>
       </header>
-      {connections.isPending ? (
-        <ul className="df-provider-list" aria-busy="true">
-          <li className="df-provider-card skeleton" />
-          <li className="df-provider-card skeleton" />
-        </ul>
+      {connections.isPending || plugins.isPending ? (
+        <p role="status">正在读取供应商…</p>
       ) : connections.isError || plugins.isError ? (
         <p role="alert">
           无法读取供应商。
@@ -135,21 +82,69 @@ export function ProviderList({
           </Button>
         </p>
       ) : list.length ? (
-        <ul className="df-provider-list" aria-label="已连接的供应商">
-          {list.map((connection) => (
-            <ProviderCard
-              key={connection.id}
+        <div className="df-provider-workspace" data-testid="provider-workspace">
+          <nav className="df-provider-sidebar" aria-label="已连接的供应商">
+            <header>
+              <span>我的连接</span>
+              <span className="muted df-num">{list.length}</span>
+            </header>
+            <span className="df-search-field">
+              <Search size={16} aria-hidden="true" />
+              <Input
+                aria-label="搜索供应商"
+                placeholder="搜索供应商"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+              />
+            </span>
+            <div className="df-provider-options">
+              {filtered.map((connection) => {
+                const plugin = pluginFor(plugins.data, connection);
+                const status = connectionStatus(connection);
+                const Icon = plugin?.kind === "text" ? MessageSquareText : ImageIcon;
+                return (
+                  <Button
+                    key={connection.id}
+                    tone="ghost"
+                    className="df-provider-option"
+                    aria-label={`管理 ${connection.display_name}`}
+                    aria-pressed={selected?.id === connection.id}
+                    data-testid={`provider-connection-${connection.id}`}
+                    onClick={() => setSelectedId(connection.id)}
+                  >
+                    <span className="df-provider-mark" aria-hidden="true">
+                      <Icon size={18} />
+                    </span>
+                    <span className="df-provider-option-copy">
+                      <strong>{connection.display_name}</strong>
+                      <small>
+                        {plugin?.kind === "text" ? "文本服务" : "图片与视频"} · {status.label}
+                      </small>
+                    </span>
+                    <span className={`df-provider-status-dot ${status.tone}`} aria-hidden="true" />
+                  </Button>
+                );
+              })}
+              {!filtered.length && <p className="muted">没有匹配的供应商。</p>}
+            </div>
+            <p className="df-provider-sidebar-note">
+              同一供应商可以添加多个连接，分别保存地址和密钥。
+            </p>
+          </nav>
+          {selected && (
+            <ProviderDetails
+              key={selected.id}
               workspaceId={workspaceId}
-              connection={connection}
-              plugin={pluginFor(plugins.data, connection)}
-              onManage={() => setManagingId(connection.id)}
+              connection={selected}
+              plugin={pluginFor(plugins.data, selected)}
             />
-          ))}
-        </ul>
+          )}
+        </div>
       ) : (
         <div className="df-provider-empty">
-          <p>还没有连接供应商。</p>
-          <p className="muted">添加一个图片 / 视频供应商和一个文本服务，就可以开始生成。</p>
+          <Settings2 size={28} aria-hidden="true" />
+          <h3>连接你的第一个供应商</h3>
+          <p className="muted">添加文本、图片或视频服务，读取模型后即可设置默认模型。</p>
         </div>
       )}
       {adding && plugins.data && (
@@ -157,15 +152,6 @@ export function ProviderList({
           workspaceId={workspaceId}
           plugins={plugins.data}
           onClose={() => onAddingChange(false)}
-        />
-      )}
-      {managing && (
-        <ProviderManageDialog
-          key={managing.id}
-          workspaceId={workspaceId}
-          connection={managing}
-          plugin={pluginFor(plugins.data, managing)}
-          onClose={() => setManagingId(null)}
         />
       )}
     </section>

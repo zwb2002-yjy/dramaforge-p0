@@ -42,6 +42,43 @@ async def test_current_schema_has_one_model_authority_and_rejects_downgrade() ->
                 await connection.fetchval("SELECT version_num FROM alembic_version")
                 == alembic_head()
             )
+            # Deleted projects retain their identity while freeing the active name.
+            owner_id, workspace_id, old_id, new_id = (uuid4() for _ in range(4))
+            await connection.execute(
+                "INSERT INTO users(id,email,display_name,password_hash,is_active,version) "
+                "VALUES($1,$2,'Deletion test','not-a-login',true,1)",
+                owner_id,
+                f"deletion-{owner_id}@example.test",
+            )
+            await connection.execute(
+                "INSERT INTO workspaces(id,owner_user_id,name,version) VALUES($1,$2,'Test',1)",
+                workspace_id,
+                owner_id,
+            )
+            insert_project = (
+                "INSERT INTO projects(id,workspace_id,name,stage,aspect_ratio,target_platform,"
+                "style_bible,budget_limit,budget_currency,provider_dispatch_frozen,version) "
+                "VALUES($1,$2,'Same name','draft','9:16','general','{}',0,'USD',false,1)"
+            )
+            await connection.execute(insert_project, old_id, workspace_id)
+            with pytest.raises(asyncpg.UniqueViolationError):
+                await connection.execute(insert_project, new_id, workspace_id)
+            await connection.execute("UPDATE projects SET deleted_at=now() WHERE id=$1", old_id)
+            await connection.execute(insert_project, new_id, workspace_id)
+            assert (
+                await connection.fetchval(
+                    "SELECT count(*) FROM projects WHERE workspace_id=$1",
+                    workspace_id,
+                )
+                == 2
+            )
+            assert (
+                await connection.fetchval(
+                    "SELECT id FROM projects WHERE workspace_id=$1 AND deleted_at IS NULL",
+                    workspace_id,
+                )
+                == new_id
+            )
             for table in (
                 "model_capability_revisions",
                 "connection_model_capability_revisions",

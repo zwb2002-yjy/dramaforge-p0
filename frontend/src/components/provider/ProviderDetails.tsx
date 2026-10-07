@@ -15,7 +15,7 @@ import {
   type ProviderProbeRead,
 } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
-import { Button, Dialog, Disclosure, Field, Input, Select } from "../ui";
+import { Button, Disclosure, Field, Input, Select } from "../ui";
 import { ModelPicker } from "./ModelPicker";
 import { bindingBatchMessage, createBindings } from "./providerBindings";
 import {
@@ -27,8 +27,16 @@ import {
   type ModelChoice,
 } from "./providerSetup";
 
-function bindingStatus(binding: ProviderModelBindingRead): { tone: string; label: string } {
+function bindingStatus(
+  binding: ProviderModelBindingRead,
+  plugin: ProviderPluginRead | undefined,
+): { tone: string; label: string } {
   if (!binding.enabled) return { tone: "", label: "已停用" };
+  const contract = plugin?.models.find(
+    (model) => model.catalog_entry_id === binding.catalog_entry_id,
+  );
+  if (!contract || contract.lifecycle !== "active")
+    return { tone: "warn", label: "调用方式待更新" };
   if (!binding.account_verified) return { tone: "warn", label: "待验证" };
   return { tone: "ok", label: "可用" };
 }
@@ -40,17 +48,15 @@ function contractName(plugin: ProviderPluginRead | undefined, binding: ProviderM
   );
 }
 
-/** Manage one connection: details, models, then diagnostics on demand. */
-export function ProviderManageDialog({
+/** Configure the selected connection inline; discovery remains explicit. */
+export function ProviderDetails({
   workspaceId,
   connection,
   plugin,
-  onClose,
 }: {
   workspaceId: string;
   connection: ProviderConnectionRead;
   plugin: ProviderPluginRead | undefined;
-  onClose: () => void;
 }) {
   const queryClient = useQueryClient();
   const [name, setName] = useState<string | null>(null);
@@ -176,33 +182,18 @@ export function ProviderManageDialog({
   const discoveredIds = (lastRead ?? catalog)?.discovered_model_ids ?? [];
 
   return (
-    <Dialog
-      title={connection.display_name}
-      kicker={plugin?.display_name}
-      onClose={onClose}
-      size="wide"
-      testId="provider-manage-dialog"
-      actions={
-        picking ? (
-          <>
-            <Button tone="ghost" disabled={busy} onClick={() => setPicking(false)}>
-              取消
-            </Button>
-            <Button
-              tone="primary"
-              disabled={busy || choices.size === 0}
-              onClick={() => addModels.mutate()}
-            >
-              {addModels.isPending ? "正在添加…" : `添加 ${choices.size} 个模型`}
-            </Button>
-          </>
-        ) : (
-          <Button tone="primary" onClick={onClose}>
-            完成
-          </Button>
-        )
-      }
+    <section
+      className="df-provider-detail"
+      aria-label={`配置 ${connection.display_name}`}
+      data-testid="provider-detail"
     >
+      <header className="df-provider-detail-heading">
+        <div>
+          <p className="kicker">{plugin?.display_name ?? connection.provider_type}</p>
+          <h3>{connection.display_name}</h3>
+        </div>
+        <span className="df-provider-kind">{isText ? "文本服务" : "图片 / 视频服务"}</span>
+      </header>
       <div className="df-manage-provider">
         <div className="df-manage-status">
           <span className={`df-status ${status.tone}`} data-testid="provider-connection-status">
@@ -220,17 +211,35 @@ export function ProviderManageDialog({
         </div>
 
         {picking && plugin ? (
-          <ModelPicker
-            plugin={plugin}
-            discoveredIds={discoveredIds}
-            existingKeys={existingKeys}
-            value={choices}
-            onChange={setChoices}
-            disabled={busy}
-          />
+          <>
+            <ModelPicker
+              plugin={plugin}
+              discoveredIds={discoveredIds}
+              existingKeys={existingKeys}
+              value={choices}
+              onChange={setChoices}
+              disabled={busy}
+            />
+            <div className="df-manage-row-actions">
+              <Button tone="ghost" disabled={busy} onClick={() => setPicking(false)}>
+                取消
+              </Button>
+              <Button
+                tone="primary"
+                disabled={busy || choices.size === 0}
+                onClick={() => addModels.mutate()}
+              >
+                {addModels.isPending ? "正在添加…" : `添加 ${choices.size} 个模型`}
+              </Button>
+            </div>
+          </>
         ) : (
           <>
             <section className="df-manage-section" aria-label="连接信息">
+              <header>
+                <h3>连接配置</h3>
+                <span className="muted">密钥保存后不会回显</span>
+              </header>
               <div className="df-manage-fields">
                 <Field>
                   名称
@@ -334,7 +343,7 @@ export function ProviderManageDialog({
               ) : bindings.data?.length ? (
                 <ul className="df-model-list">
                   {bindings.data.map((binding) => {
-                    const state = bindingStatus(binding);
+                    const state = bindingStatus(binding, plugin);
                     const Icon = binding.media_type === "image" ? ImageIcon : Video;
                     return (
                       <li key={binding.id} data-testid={`provider-model-${binding.id}`}>
@@ -376,7 +385,7 @@ export function ProviderManageDialog({
           </p>
         )}
       </div>
-    </Dialog>
+    </section>
   );
 }
 

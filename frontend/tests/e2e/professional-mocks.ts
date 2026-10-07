@@ -443,6 +443,12 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     }
     const method = request.method();
     const path = url.pathname;
+    if (
+      request.method() === "POST" &&
+      /^\/api\/v1\/projects\/[^/]+\/shots\/[^/]+\/references\/resolve$/.test(path)
+    ) {
+      return json(route, []);
+    }
     const body = request.postDataJSON?.() ?? {};
     state.editing.requests.push({ method, path, body: clone(body) });
     if (path === "/health") return json(route, { status: "ok", db: "up" });
