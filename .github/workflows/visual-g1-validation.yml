@@ -6,6 +6,10 @@ on:
       - codex/visual-storyboard-g1-20261008
     paths:
       - .github/workflows/visual-g1-validation.yml
+      - frontend/src/features/scenes/**
+      - frontend/tests/unit/SceneMediaGallery.test.tsx
+      - frontend/tests/unit/SceneStoryboardWall.test.tsx
+      - frontend/tests/e2e/visual-storyboard-g1.spec.ts
 
 permissions:
   contents: write
