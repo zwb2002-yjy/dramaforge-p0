@@ -21,6 +21,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError(
-        "Binding pricing/fallback were removed as non-authoritative product state; "
+        "This migration is irreversible: binding pricing/fallback were removed "
+        "as non-authoritative product state; "
         "restore a database snapshot to downgrade"
     )

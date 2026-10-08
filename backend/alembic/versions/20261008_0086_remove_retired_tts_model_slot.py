@@ -28,6 +28,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError(
-        "The retired audio.tts model slot has no canonical execution semantics; "
+        "This migration is irreversible: the retired audio.tts model slot has "
+        "no canonical execution semantics; "
         "restore a database snapshot to downgrade"
     )

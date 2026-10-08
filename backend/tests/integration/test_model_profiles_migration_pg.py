@@ -332,26 +332,27 @@ async def test_0087_removes_binding_pricing_and_fallback_columns() -> None:
             connection_id = conn.execute(
                 text(
                     "INSERT INTO provider_connections "
-                    "(workspace_id, provider_type, display_name, base_url, protocol_profile, "
+                    "(id, workspace_id, provider_type, display_name, base_url, protocol_profile, "
                     "credential_id, credential_revision, enabled, verification_status, "
                     "created_by, updated_by) "
-                    "VALUES (:w, 'agnes', 'Agnes', 'https://api.agnes-ai.cn', "
+                    "VALUES (:id, :w, 'agnes', 'Agnes', 'https://api.agnes-ai.cn', "
                     "'agnes_cn_v1', :credential, 1, true, 'verified', :u, :u) "
                     "RETURNING id"
                 ),
-                {"w": workspace_id, "credential": credential_id, "u": user_id},
+                {"id": uuid.uuid4(), "w": workspace_id, "credential": credential_id, "u": user_id},
             ).scalar_one()
             binding_id = conn.execute(
                 text(
                     "INSERT INTO provider_model_bindings "
-                    "(workspace_id, connection_id, media_type, model_id, purpose, enabled, "
+                    "(id, workspace_id, connection_id, media_type, model_id, purpose, enabled, "
                     "documented, contract_tested, account_verified, quality_gated, "
                     "pricing_snapshot_json, created_by, updated_by) "
-                    "VALUES (:w, :connection, 'image', 'agnes-image-2.1-flash', "
+                    "VALUES (:id, :w, :connection, 'image', 'agnes-image-2.1-flash', "
                     "'keyframe', true, true, true, true, false, "
                     "CAST(:pricing AS json), :u, :u) RETURNING id"
                 ),
                 {
+                    "id": uuid.uuid4(),
                     "w": workspace_id,
                     "connection": connection_id,
                     "pricing": '{"unit_amount":"0.1","currency":"USD"}',
@@ -361,12 +362,13 @@ async def test_0087_removes_binding_pricing_and_fallback_columns() -> None:
             conn.execute(
                 text(
                     "INSERT INTO project_provider_bindings "
-                    "(project_id, workspace_id, purpose, model_binding_id, "
+                    "(id, project_id, workspace_id, purpose, model_binding_id, "
                     "selection_strategy, fallback_policy, updated_by) "
-                    "VALUES (:project, :workspace, 'keyframe', :binding, "
+                    "VALUES (:id, :project, :workspace, 'keyframe', :binding, "
                     "'explicit_binding', 'none', :u)"
                 ),
                 {
+                    "id": uuid.uuid4(),
                     "project": project_id,
                     "workspace": workspace_id,
                     "binding": binding_id,
@@ -405,4 +407,3 @@ async def test_0087_removes_binding_pricing_and_fallback_columns() -> None:
         engine.dispose()
     finally:
         await _drop_db(dbname)
-
