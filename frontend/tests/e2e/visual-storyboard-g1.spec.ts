@@ -110,7 +110,7 @@ test("34-shot storyboards locate the sole missing Formal without creating media"
   });
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/projects/" + PROJECT_ID + "/scenes");
-  await expect(page.getByText("34 镜头", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("全片制作素材概览").getByText("34 镜头")).toBeVisible();
   await expect(page.getByText("正式视频 33 / 34")).toBeVisible();
   await expect(page.getByTestId("scene-shot-card")).toHaveCount(34);
   await page.getByRole("button", { name: "缺正式视频" }).click();
@@ -134,9 +134,9 @@ test("100-shot overview reads one scene at a time and restores focused scene", a
   });
   await page.goto("/projects/" + PROJECT_ID + "/scenes");
   await expect(page.getByTestId("scene-card")).toHaveCount(20);
-  await expect(page.getByText("100 镜头", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("全片制作素材概览").getByText("100 镜头")).toBeVisible();
   await expect.poll(() => reads.length).toBe(1);
-  await page.getByRole("button", { name: "查看镜头" }).first().click();
+  await page.getByRole("button", { name: "查看镜头", exact: true }).first().click();
   await expect.poll(() => reads.length).toBe(2);
   await page.reload();
   await expect(page.getByTestId("scene-card")).toHaveCount(20);
