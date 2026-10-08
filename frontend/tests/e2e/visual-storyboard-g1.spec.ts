@@ -121,6 +121,13 @@ test("34-shot storyboards locate the sole missing Formal without creating media"
   );
   expect(reads).toHaveLength(1);
   expect(writes).toEqual([]);
+  await page.getByRole("link", { name: "编辑镜头 17" }).click();
+  await expect(page.getByRole("link", { name: "返回全片分镜总览" })).toBeVisible();
+  await page.getByRole("link", { name: "返回全片分镜总览" }).click();
+  await expect(page.getByRole("button", { name: "缺正式视频" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
