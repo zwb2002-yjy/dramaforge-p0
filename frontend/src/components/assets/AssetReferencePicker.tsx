@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { Button, Select } from "../ui";
+import { Button, Input, Select } from "../ui";
 import { fetchProjectAssets } from "../../lib/api";
 import "./asset-reference-picker.css";
 import { queryKeys } from "../../lib/queryKeys";
@@ -113,6 +113,7 @@ export function AssetReferencePicker({
   const [resolvedReferences, setResolvedReferences] = useState<ResolvedReferenceRead[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAssetId, setEditAssetId] = useState("");
+  const [editLabel, setEditLabel] = useState("");
   const [editPurpose, setEditPurpose] = useState<string>(purpose);
   const [editMode, setEditMode] = useState<"current_formal" | "pinned_version">("current_formal");
   const [editError, setEditError] = useState<string | null>(null);
@@ -183,6 +184,13 @@ export function AssetReferencePicker({
     mutationFn: async (binding: ShotBindingRead) => {
       const assetId = editAssetId || binding.asset_id;
       if (!assetId) throw new Error("请先选择参考素材。");
+      const label = editLabel.trim();
+      if (!/^@[\\p{L}\\p{N}_-]+$/u.test(label)) {
+        throw new Error("引用标签必须以 @ 开头，仅使用文字、数字、下划线或短横线。");
+      }
+      if (rows.some((item) => item.id !== binding.id && item.label === label)) {
+        throw new Error("该镜头已有相同引用标签，请换一个名称。");
+      }
       let assetVersionId: string | null = null;
       if (editMode === "pinned_version") {
         const card = await fetchAssetCard(projectId, assetId);
@@ -197,6 +205,7 @@ export function AssetReferencePicker({
         asset_version_id: assetVersionId,
         resolution_mode: editMode,
         purpose: editPurpose,
+        label,
       });
     },
     onSuccess: async () => {
@@ -212,6 +221,7 @@ export function AssetReferencePicker({
   function startEditing(binding: ShotBindingRead) {
     setEditingId(binding.id);
     setEditAssetId(binding.asset_id ?? "");
+    setEditLabel(binding.label || "@参考");
     setEditPurpose(binding.purpose);
     setEditMode(binding.resolution_mode === "pinned_version" ? "pinned_version" : "current_formal");
     setEditError(null);
@@ -382,6 +392,12 @@ export function AssetReferencePicker({
             className="df-ref-editor"
             data-testid={`binding-editor-${binding.id}`}
           >
+            <Input
+              aria-label={`引用标签 ${binding.id}`}
+              value={editLabel}
+              onChange={(event) => setEditLabel(event.target.value)}
+              placeholder="@角色名"
+            />
             <Select
               aria-label={`参考素材 ${binding.id}`}
               value={editAssetId}

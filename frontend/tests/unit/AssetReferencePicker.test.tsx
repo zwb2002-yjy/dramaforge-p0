@@ -166,3 +166,50 @@ it("persists a new binding after existing reference slots instead of reusing sor
     expect(post?.body?.asset_id).toBe(ACTIVE_ASSET);
   });
 });
+
+it("updates a persistent @alias through the existing versioned binding API", async () => {
+  const calls: Array<{ method: string; url: string; body: unknown }> = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+    if (url.endsWith(`/projects/${PROJECT_ID}/assets`)) return json(ASSETS);
+    if (url.includes("/references/resolve")) return json([]);
+    if (url.endsWith(`/shots/${SHOT_ID}/references`)) return json([BINDING]);
+    if (method === "PATCH" && url.endsWith(`/references/${BINDING_ID}`)) {
+      calls.push({ method, url, body: JSON.parse(String(init?.body)) });
+      return json({ ...BINDING, label: "@林墨_正面", version: 2 });
+    }
+    return json([]);
+  });
+  renderPicker();
+  fireEvent.click(await screen.findByRole("button", { name: "编辑引用 @林墨" }));
+  fireEvent.change(screen.getByLabelText(`引用标签 ${BINDING_ID}`), {
+    target: { value: "@林墨_正面" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: `保存引用 ${BINDING_ID}` }));
+  await waitFor(() => expect(calls).toHaveLength(1));
+  expect(calls[0].body).toMatchObject({ expected_version: 1, label: "@林墨_正面" });
+});
+
+it("refuses an invalid @alias before sending any binding write", async () => {
+  const calls: string[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    if (method === "PATCH") calls.push(url);
+    if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+    if (url.endsWith(`/projects/${PROJECT_ID}/assets`)) return json(ASSETS);
+    if (url.includes("/references/resolve")) return json([]);
+    if (url.endsWith(`/shots/${SHOT_ID}/references`)) return json([BINDING]);
+    return json([]);
+  });
+  renderPicker();
+  fireEvent.click(await screen.findByRole("button", { name: "编辑引用 @林墨" }));
+  fireEvent.change(screen.getByLabelText(`引用标签 ${BINDING_ID}`), {
+    target: { value: "林墨（无@）" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: `保存引用 ${BINDING_ID}` }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("引用标签必须以 @ 开头");
+  expect(calls).toEqual([]);
+});
