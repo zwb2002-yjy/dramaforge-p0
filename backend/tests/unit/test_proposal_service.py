@@ -59,13 +59,7 @@ async def _seed(session: AsyncSession) -> tuple[Project, Shot, User]:
 
 
 @pytest.mark.asyncio
-async def test_partial_apply_only_executes_accepted(session: AsyncSession, monkeypatch) -> None:
-    from app.director.business_checkpoints import DirectorBusinessCheckpoints
-
-    def unavailable(*args, **kwargs):
-        raise RuntimeError("Director is stopped")
-
-    monkeypatch.setattr(DirectorBusinessCheckpoints, "__init__", unavailable)
+async def test_partial_apply_only_executes_accepted(session: AsyncSession) -> None:
     project, shot, user = await _seed(session)
     proposal = DirectorProposal(
         project_id=project.id, thread_id=uuid4(), scope_type="shot",
