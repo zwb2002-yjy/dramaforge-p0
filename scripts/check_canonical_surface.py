@@ -17,6 +17,9 @@ SCAN_ROOTS = (
 # Keep the spellings split so this checker cannot report its own policy table.
 FORBIDDEN_TEXT = (
     "LEGACY_" + "COMPAT",
+    "AUDIO_" + "TTS",
+    "audio." + "tts",
+    "TTS" + "Request",
     "litellm/text-" + "llm",
     "shot_" + "experiment_id",
     "translate_" + "v2",
