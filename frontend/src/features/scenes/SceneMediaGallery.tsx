@@ -5,6 +5,7 @@ import { artifactContentUrl } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { shotTypeLabel } from "../../lib/shotLabels";
 import { fetchSceneWorkspace, type SceneSummary, type ShotLite } from "./api";
+import { SceneAnimaticPreview } from "./SceneAnimaticPreview";
 
 export type SceneMediaFilter = "all" | "missing-keyframe" | "missing-video";
 type Preview = { shot: ShotLite; kind: "keyframe" | "video"; artifactId: string };
@@ -20,6 +21,7 @@ export function SceneMediaGallery({
   filter?: SceneMediaFilter;
 }) {
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [animaticOpen, setAnimaticOpen] = useState(false);
   const workspace = useQuery({
     queryKey: queryKeys.scene.workspace(projectId, scene.id),
     queryFn: () => fetchSceneWorkspace(projectId, scene.id),
@@ -64,6 +66,14 @@ export function SceneMediaGallery({
             {shotCount} 镜头 · 正式画面 {keyframeCount}/{shotCount} · 正式视频 {videoCount}/
             {shotCount}
           </p>
+          <Button
+            onClick={() => setAnimaticOpen((value) => !value)}
+            aria-expanded={animaticOpen}
+            data-testid="scene-animatic-toggle"
+          >
+            {animaticOpen ? "关闭动态分镜" : "播放动态分镜"}
+          </Button>
+          {animaticOpen && <SceneAnimaticPreview projectId={projectId} shots={shots} />}
           {displayedShots.length === 0 ? (
             <p role="status">本场景没有符合当前筛选的镜头。</p>
           ) : (
