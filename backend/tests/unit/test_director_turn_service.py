@@ -173,6 +173,30 @@ async def test_recovery_fails_unknown_text_submission_once_without_media_write(
 
 
 @pytest.mark.asyncio
+async def test_recovery_stales_unbound_turn_without_legacy_coordination(
+    session: AsyncSession,
+) -> None:
+    project, user, shot = await _seed(session)
+    service = DirectorTurnService(session)
+    turn, _ = await service.create_or_get(
+        project=project,
+        actor=user,
+        scope_type="shot",
+        scope_entity_id=shot.id,
+        request_key="director-cycle:unbound",
+        context_snapshot={"shot_version": shot.version},
+    )
+
+    recovered = await service.recover_interrupted(
+        project_id=project.id,
+        turn_id=turn.id,
+    )
+    assert recovered.status == "stale"
+    assert recovered.wait_reason == "runtime_binding_missing"
+    assert "legacy coordination is not resumed" in str(recovered.last_error)
+
+
+@pytest.mark.asyncio
 async def test_deadline_and_step_limit_are_readable_terminal_stops(session: AsyncSession) -> None:
     project, user, shot = await _seed(session)
     service = DirectorTurnService(session)
