@@ -573,6 +573,19 @@ class DirectorTurnService:
                     ),
                 },
             )
+        if turn.runtime_execution_id is None and turn.status in ACTIVE_TURN_STATUSES:
+            return await self.compare_and_set(
+                turn=turn,
+                expected_statuses=tuple(ACTIVE_TURN_STATUSES),
+                target_status="stale",
+                updates={
+                    "wait_reason": "runtime_binding_missing",
+                    "last_error": (
+                        "Director turn has no LangGraph runtime binding; "
+                        "legacy coordination is not resumed."
+                    ),
+                },
+            )
         return turn
 
     async def enforce_limits(
