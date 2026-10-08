@@ -151,3 +151,21 @@ test("100-shot overview reads one scene at a time and restores focused scene", a
   expect(reads.length).toBeLessThanOrEqual(3);
   expect(writes).toEqual([]);
 });
+
+test("unsaved shot design blocks return to overview until explicitly discarded", async ({ page }) => {
+  const { SCENE_ID } = await import("./professional-mocks");
+  await installProfessionalMock(page);
+  await page.goto("/projects/" + PROJECT_ID + "/scenes/" + SCENE_ID);
+  const description = page.getByRole("textbox", { name: "画面描述" });
+  await expect(description).toBeVisible();
+  await description.fill("尚未保存的镜头说明");
+  await expect(page.getByTestId("shot-design-dirty").first()).toBeVisible();
+  await page.getByRole("link", { name: "返回全片分镜总览" }).click();
+  await expect(page.getByRole("dialog", { name: "离开场景前先处理当前草稿" })).toBeVisible();
+  await expect(page).toHaveURL("/projects/" + PROJECT_ID + "/scenes/" + SCENE_ID);
+  await page.getByRole("button", { name: "返回保存" }).click();
+  await expect(description).toHaveValue("尚未保存的镜头说明");
+  await page.getByRole("link", { name: "返回全片分镜总览" }).click();
+  await page.getByRole("button", { name: "放弃并离开" }).click();
+  await expect(page).toHaveURL("/projects/" + PROJECT_ID + "/scenes");
+});

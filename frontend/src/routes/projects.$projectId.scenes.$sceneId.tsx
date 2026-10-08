@@ -41,6 +41,12 @@ function SceneWorkspacePage() {
         openGenerate={tool === "generate"}
         openCandidates={review}
         onDirtyStateChange={setHasUnsavedDesign}
+        onOpenOverview={() =>
+          void navigate({
+            to: "/projects/$projectId/scenes",
+            params: { projectId },
+          })
+        }
         onOpenEditing={() =>
           void navigate({
             to: "/projects/$projectId/edit",

@@ -26,6 +26,7 @@ type SceneWorkspaceProps = {
   openGenerate?: boolean;
   openCandidates?: boolean;
   onOpenEditing?: () => void;
+  onOpenOverview?: () => void;
   onDirtyStateChange?: (dirty: boolean) => void;
 };
 
@@ -83,6 +84,7 @@ export function SceneWorkspace({
   openGenerate = false,
   openCandidates = false,
   onOpenEditing,
+  onOpenOverview,
   onDirtyStateChange,
 }: SceneWorkspaceProps) {
   const [selectedShotId, setSelectedShotId] = useState<string | null>(initialShotId ?? null);
@@ -294,6 +296,12 @@ export function SceneWorkspace({
             className="qc-scene-back"
             href={`/projects/${projectId}/scenes`}
             aria-label="返回全片分镜总览"
+            onClick={(event) => {
+              if (onOpenOverview) {
+                event.preventDefault();
+                onOpenOverview();
+              }
+            }}
           >
             ← 全片分镜
           </a>
