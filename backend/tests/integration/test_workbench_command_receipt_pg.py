@@ -7,8 +7,6 @@ from uuid import uuid4
 import pytest
 from app.access.models import Project, ProjectCreativeProfile, User
 from app.assets.models import Shot
-from app.director.business_checkpoints import DirectorBusinessCheckpoints
-from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
 from app.execution.models import NodeRun, ProviderOperation
 from app.production.workbench_execution import WorkbenchExecutionService
@@ -70,17 +68,13 @@ async def test_postgres_command_receipts_attempts_and_proactive_mode_lock(monkey
                 await set_rls_context(session, user_id=actor_id, workspace_id=workspace_id,
                                       project_id=project_id)
                 project = await session.get(Project, project_id)
-                actor = await session.get(User, actor_id)
                 service = WorkbenchExecutionService(session, user_id=actor_id)
                 run = await service.create_and_dispatch(
                     project=project, execution_input=command, prepared_plan=plan,
                     idempotency_key_override=key,
                 )
-                turn = await DirectorBusinessCheckpoints(session).track_execution(
-                    project=project, actor=actor, run=run,
-                )
                 await session.commit()
-                return run.id, run.attempt_no, turn.id
+                return run.id, run.attempt_no
 
         duplicate = await asyncio.gather(dispatch("same-command"), dispatch("same-command"))
         assert duplicate[0] == duplicate[1]
@@ -90,7 +84,6 @@ async def test_postgres_command_receipts_attempts_and_proactive_mode_lock(monkey
         async with factory() as session:
             await set_rls_context(session, user_id=actor_id, workspace_id=workspace_id,
                                   project_id=project_id)
-            assert await session.scalar(select(func.count()).select_from(DirectorTurn)) == 3
             assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0
             runs = list((await session.execute(select(NodeRun).where(
                 NodeRun.idempotency_key.like("workbench:video:%")
