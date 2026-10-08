@@ -7,7 +7,11 @@
   border-radius: var(--df-radius-container);
   background: var(--df-surface-tier-raised-bg);
 }
-.scene-animatic header p { margin: var(--df-space-2) 0 0; color: var(--df-text-secondary); font-size: var(--df-font-size-caption); }
+.scene-animatic header p {
+  margin: var(--df-space-2) 0 0;
+  color: var(--df-text-secondary);
+  font-size: var(--df-font-size-caption);
+}
 .scene-animatic-media {
   display: grid;
   place-items: center;
@@ -18,11 +22,33 @@
   border-radius: var(--df-radius-control);
 }
 .scene-animatic-media img,
-.scene-animatic-media video { width: 100%; height: 100%; object-fit: contain; }
-.scene-animatic-missing { max-width: 40ch; color: var(--df-text-secondary); text-align: center; }
-.scene-animatic-dialogue { margin: 0; }
-.scene-animatic progress { width: 100%; }
+.scene-animatic-media video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.scene-animatic-missing {
+  max-width: 40ch;
+  color: var(--df-text-secondary);
+  text-align: center;
+}
+.scene-animatic-dialogue {
+  margin: 0;
+}
+.scene-animatic progress {
+  width: 100%;
+}
 .scene-animatic-controls,
-.scene-animatic nav { display: flex; align-items: center; flex-wrap: wrap; gap: var(--df-space-2); }
-.scene-animatic-controls span { color: var(--df-text-secondary); font-size: var(--df-font-size-caption); }
-.scene-animatic nav .df-btn[aria-pressed="true"] { border-color: var(--df-verdigris); }
+.scene-animatic nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--df-space-2);
+}
+.scene-animatic-controls span {
+  color: var(--df-text-secondary);
+  font-size: var(--df-font-size-caption);
+}
+.scene-animatic nav .df-btn[aria-pressed="true"] {
+  border-color: var(--df-verdigris);
+}

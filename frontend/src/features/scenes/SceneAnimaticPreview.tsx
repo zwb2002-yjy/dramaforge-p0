@@ -18,12 +18,11 @@ export function SceneAnimaticPreview({
   projectId: string;
   shots: ShotLite[];
 }) {
-  const ordered = useMemo(
-    () => [...shots].sort((a, b) => a.shot_number - b.shot_number),
-    [shots],
-  );
+  const ordered = useMemo(() => [...shots].sort((a, b) => a.shot_number - b.shot_number), [shots]);
   const mediaIdentity = ordered
-    .map((shot) => [shot.id, shot.formal_keyframe_artifact_id, shot.formal_video_artifact_id].join(":"))
+    .map((shot) =>
+      [shot.id, shot.formal_keyframe_artifact_id, shot.formal_video_artifact_id].join(":"),
+    )
     .join("|");
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -103,7 +102,9 @@ export function SceneAnimaticPreview({
       aria-label="动态分镜预览"
     >
       <header>
-        <strong>动态分镜 · {index + 1}/{ordered.length} 镜头</strong>
+        <strong>
+          动态分镜 · {index + 1}/{ordered.length} 镜头
+        </strong>
         <p>只读预览 · 正式素材优先 · 视频静音 · 不代表剪辑成片</p>
       </header>
       <div className="scene-animatic-media">
@@ -151,25 +152,21 @@ export function SceneAnimaticPreview({
       </div>
       {shot.dialogue && <p className="scene-animatic-dialogue">对白参考：{shot.dialogue}</p>}
       {mediaError && <p role="alert">{mediaError}</p>}
-      <progress
-        aria-label="动态分镜播放头"
-        value={Math.min(total, passed + elapsed)}
-        max={total}
-      />
+      <progress aria-label="动态分镜播放头" value={Math.min(total, passed + elapsed)} max={total} />
       <div className="scene-animatic-controls">
         <Button onClick={playOrPause} data-testid="animatic-play-toggle">
           {playing ? "暂停" : "播放"}
         </Button>
-        <Button onClick={goNext} disabled={index >= ordered.length - 1}>下一镜</Button>
-        <span>当前镜头 {elapsed.toFixed(1)} / {duration.toFixed(1)} 秒</span>
+        <Button onClick={goNext} disabled={index >= ordered.length - 1}>
+          下一镜
+        </Button>
+        <span>
+          当前镜头 {elapsed.toFixed(1)} / {duration.toFixed(1)} 秒
+        </span>
       </div>
       <nav aria-label="动态分镜镜头序列">
         {ordered.map((item, position) => (
-          <Button
-            key={item.id}
-            aria-pressed={index === position}
-            onClick={() => choose(position)}
-          >
+          <Button key={item.id} aria-pressed={index === position} onClick={() => choose(position)}>
             #{item.shot_number}
           </Button>
         ))}

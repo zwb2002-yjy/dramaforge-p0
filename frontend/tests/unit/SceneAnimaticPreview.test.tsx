@@ -22,10 +22,7 @@ it("plays existing Formal images in shot order and treats missing Formal as a ti
   vi.useFakeTimers();
   const writes = vi.spyOn(globalThis, "fetch");
   render(
-    <SceneAnimaticPreview
-      projectId="p1"
-      shots={[makeShot(2, "missing"), makeShot(1, "frame")]}
-    />,
+    <SceneAnimaticPreview projectId="p1" shots={[makeShot(2, "missing"), makeShot(1, "frame")]} />,
   );
   expect(screen.getByTestId("scene-animatic")).toHaveAttribute("data-shot-id", "shot-1");
   expect(screen.getByText("对白参考：开始")).toBeInTheDocument();
