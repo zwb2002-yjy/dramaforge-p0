@@ -71,7 +71,11 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
 }
 
 function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspaceProps) {
-  const explicitTarget = Object.keys(targetSearch).length > 0;
+  // A shot-only link is navigation, never an exact Artifact selection.
+  // Extra fields, even malformed, preserve strict fail-closed review semantics.
+  const explicitTarget =
+    Object.keys(targetSearch).some((key) => key !== "shotId") ||
+    ("shotId" in targetSearch && !targetSearch.shotId);
   const target = parseReviewTarget(targetSearch);
   const queryClient = useQueryClient();
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
@@ -85,7 +89,7 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
   });
   const shotId = explicitTarget
     ? (target?.shotId ?? null)
-    : (selectedShotId ?? shots.data?.[0]?.id ?? null);
+    : (selectedShotId ?? targetSearch.shotId ?? shots.data?.[0]?.id ?? null);
   const currentShot = useRef(shotId);
   currentShot.current = shotId;
   useEffect(() => {
@@ -187,6 +191,15 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
     .filter((annotation): annotation is VideoAnnotation => annotation !== null);
   const durationSeconds = Number(shot?.duration_seconds ?? 0);
 
+  if (
+    !explicitTarget &&
+    targetSearch.shotId &&
+    shots.isSuccess &&
+    !(shots.data ?? []).some((item) => item.id === targetSearch.shotId) &&
+    !selectedShotId
+  ) {
+    return <div role="alert">无法定位此镜头：它不在当前项目中，请返回审片列表选择。</div>;
+  }
   if (
     explicitTarget &&
     (!target ||

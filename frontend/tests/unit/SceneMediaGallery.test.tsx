@@ -146,3 +146,12 @@ it("locates the sole missing Formal video among 34 shots without any write", asy
   expect(screen.getByText(/34 镜头 · 正式画面 34\/34 · 正式视频 33\/34/)).toBeInTheDocument();
   expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
 });
+
+it("provides a shot-scoped review link for Formal media without mutating Formal", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ shots }), { headers: { "Content-Type": "application/json" } }),
+  );
+  mount();
+  const link = await screen.findByRole("link", { name: "审片镜头 1" });
+  expect(link).toHaveAttribute("href", "/projects/project-1/review?shotId=shot-1");
+});

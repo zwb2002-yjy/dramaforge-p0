@@ -131,6 +131,14 @@ export function SceneMediaGallery({
                       <a href={shotUrl(shot)} aria-label={"编辑镜头 " + shot.shot_number}>
                         进入工作台 →
                       </a>
+                      {(frameId || videoId) && (
+                        <a
+                          href={`/projects/${encodeURIComponent(projectId)}/review?shotId=${encodeURIComponent(shot.id)}`}
+                          aria-label={`审片镜头 ${shot.shot_number}`}
+                        >
+                          审片
+                        </a>
+                      )}
                     </div>
                   </li>
                 );
