@@ -42,11 +42,16 @@ export function EditingSourcePreview({
       ) : (
         <p>暂无可播放的正式视频。请先在分镜中审查并选择正式版本。</p>
       )}
-      <nav aria-label="时间线片段预览" className="editing-visual-track" data-testid="editing-visual-track">
+      <nav
+        aria-label="时间线片段预览"
+        className="editing-visual-track"
+        data-testid="editing-visual-track"
+      >
         {clips.map((item, i) => {
           const duration = Number(item.duration_seconds);
           return (
-            <div key={String(item.id ?? i)}
+            <div
+              key={String(item.id ?? i)}
               className="editing-track-segment"
               style={{ flexGrow: Number.isFinite(duration) && duration > 0 ? duration : 1 }}
             >

@@ -699,7 +699,9 @@ export function EditingWorkspace({
                 <section className="editing-session-editor" data-testid="edit-session-editor">
                   <header>
                     <h2>时间线草稿</h2>
-                    <p className="muted">在上方片段轨选择镜头，下方调整当前片段。保存后才能交付。</p>
+                    <p className="muted">
+                      在上方片段轨选择镜头，下方调整当前片段。保存后才能交付。
+                    </p>
                     {dirty && (
                       <span data-testid="edit-session-dirty" role="status">
                         有未保存修改

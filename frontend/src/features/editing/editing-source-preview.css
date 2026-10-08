@@ -125,7 +125,11 @@
   color: var(--df-text-primary);
   outline: 1px solid var(--df-verdigris);
 }
-.editing-cut-controls .editing-session-editor > ol > li[data-selected="false"] > :not(.editing-clip-summary) {
+.editing-cut-controls
+  .editing-session-editor
+  > ol
+  > li[data-selected="false"]
+  > :not(.editing-clip-summary) {
   display: none;
 }
 .editing-clip-summary {
