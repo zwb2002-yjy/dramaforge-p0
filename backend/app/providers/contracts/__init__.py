@@ -11,7 +11,7 @@ from app.providers.contracts.common import (
     ResolvedArtifact,
 )
 from app.providers.contracts.image import ImageEditRequest, ImageGenerateRequest
-from app.providers.contracts.text import TextGenerateRequest, TTSRequest
+from app.providers.contracts.text import TextGenerateRequest
 from app.providers.contracts.video import (
     FirstLastFrameVideoRequest,
     ImageToVideoRequest,
@@ -35,7 +35,6 @@ __all__ = [
     "ProviderPollResult",
     "ReferenceToVideoRequest",
     "ResolvedArtifact",
-    "TTSRequest",
     "TextGenerateRequest",
     "TextToVideoRequest",
 ]
