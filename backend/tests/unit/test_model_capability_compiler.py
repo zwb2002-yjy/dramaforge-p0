@@ -213,13 +213,12 @@ def test_every_seed_model_is_queryable_without_account_verification(model_id: st
     assert report.capabilities
 
 
-def test_local_tts_is_inspectable_without_starting_the_engine() -> None:
+def test_retired_local_tts_has_no_model_inspection_surface() -> None:
     from app.providers.capability_inspection import inspect_catalog_model
+    from app.shared.errors import NotFoundError
 
-    report = inspect_catalog_model("local_tts/espeak-ng")
-    assert "audio.tts" in report.capabilities
-    assert report.controls["camera_motion"] == "unsupported"
-    assert report.account_status == "not_checked"
+    with pytest.raises(NotFoundError, match="model not found"):
+        inspect_catalog_model("local_tts/espeak-ng")
 
 
 @pytest.mark.parametrize(

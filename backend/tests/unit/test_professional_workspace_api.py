@@ -267,8 +267,24 @@ def test_experiment_annotation_and_opencut_manifest(client: TestClient) -> None:
         json={"decision": "accepted"},
         headers={CSRF_HEADER: _csrf(client)},
     )
-    assert decision.status_code == 200, decision.text
-    assert decision.json()["status"] == "accepted"
+    assert decision.status_code == 409, decision.text
+    assert "adoption scope" in decision.json()["detail"]
+    missing_candidate = client.post(
+        f"/api/v1/projects/{project_id}/experiments/{experiment.json()['id']}/decision",
+        json={"decision": "accepted", "adoption_scope": "current_node"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert missing_candidate.status_code == 409, missing_candidate.text
+    experiments = client.get(f"/api/v1/projects/{project_id}/experiments")
+    unchanged = next(row for row in experiments.json() if row["id"] == experiment.json()["id"])
+    assert unchanged["status"] == "draft"
+    rejected = client.post(
+        f"/api/v1/projects/{project_id}/experiments/{experiment.json()['id']}/decision",
+        json={"decision": "rejected"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["status"] == "rejected"
 
     annotation = client.post(
         f"/api/v1/projects/{project_id}/shots/{shot_id}/annotations",

@@ -6,14 +6,14 @@ import asyncio
 import os
 import sys
 from datetime import UTC, datetime
-from uuid import UUID, uuid4
+from uuid import uuid4
 
+import app.director.wakeup as director_wakeup
 import pytest
 from app.contracts.production_commands import ExecutionBody
 from app.director.inbox import receive_production_event
 from app.director.inbox_models import DirectorWakeup
 from app.director.turn_models import DirectorTurn
-import app.director.wakeup as director_wakeup
 from app.director.wakeup_replay import replay_failed_wakeup
 from app.events.models import OutboxEvent
 from app.execution.models import NodeRun

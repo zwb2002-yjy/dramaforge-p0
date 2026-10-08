@@ -197,6 +197,49 @@ async def test_recovery_stales_unbound_turn_without_legacy_coordination(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["awaiting_execution", "awaiting_user"])
+async def test_worker_reconciliation_stales_unbound_turn_without_replaying_production(
+    session: AsyncSession, monkeypatch, status: str
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from app.director.runtime.reconcile import DirectorRuntimeFactReconciler
+    from app.workers import jobs
+
+    project, user, shot = await _seed(session)
+    turn, _ = await DirectorTurnService(session).create_or_get(
+        project=project,
+        actor=user,
+        scope_type="shot",
+        scope_entity_id=shot.id,
+        request_key=f"worker-unbound:{status}",
+        context_snapshot={"shot_version": shot.version},
+    )
+    turn.status = status
+    turn.node_run_ids = [str(uuid4())]
+    revision = turn.revision
+    await session.commit()
+    factory = async_sessionmaker(session.bind, expire_on_commit=False)
+    monkeypatch.setattr(jobs, "get_session_factory", lambda: factory)
+    runtime_reconcile = AsyncMock()
+    monkeypatch.setattr(DirectorRuntimeFactReconciler, "reconcile", runtime_reconcile)
+
+    result = await jobs.reconcile_waiting_director_turns({})
+    assert result == {"reconciled": 1, "unchanged": 0, "failed": 0}
+    await session.refresh(turn)
+    assert turn.status == "stale"
+    assert turn.wait_reason == "runtime_binding_missing"
+    assert turn.revision == revision + 1
+    runtime_reconcile.assert_not_awaited()
+    assert (await session.execute(select(NodeRun))).scalars().all() == []
+
+    second = await jobs.reconcile_waiting_director_turns({})
+    assert second == {"reconciled": 0, "unchanged": 0, "failed": 0}
+    await session.refresh(turn)
+    assert turn.revision == revision + 1
+
+
+@pytest.mark.asyncio
 async def test_deadline_and_step_limit_are_readable_terminal_stops(session: AsyncSession) -> None:
     project, user, shot = await _seed(session)
     service = DirectorTurnService(session)
@@ -567,7 +610,7 @@ async def test_text_decision_cannot_replace_a_production_confirmation(session):
 
 
 @pytest.mark.asyncio
-async def test_whole_detached_suggestion_acceptance_requires_explicit_save(session):
+async def test_detached_acceptance_waits_for_runtime_without_saving_design(session):
     project, _user, shot, turn, _context = await _decision_turn(session)
     turn.request_summary = {"task": "shot_director_suggestion", "max_steps": 4}
     turn.output_snapshot = {
@@ -587,7 +630,7 @@ async def test_whole_detached_suggestion_acceptance_requires_explicit_save(sessi
     audit = turn.response_summary["user_decision"]
     assert audit["accepted_operation_indices"] == [0]
     assert audit["rejected_operation_indices"] == []
-    assert turn.wait_reason == "design_save"
+    assert turn.wait_reason == "runtime_decision_pending"
     assert shot.image_prompt == "saved image prompt"
     assert shot.video_prompt == "saved video prompt"
 

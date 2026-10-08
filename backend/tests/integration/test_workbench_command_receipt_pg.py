@@ -5,7 +5,7 @@ import asyncio
 from uuid import uuid4
 
 import pytest
-from app.access.models import Project, ProjectCreativeProfile, User
+from app.access.models import Project, ProjectCreativeProfile
 from app.assets.models import Shot
 from app.director.turn_service import DirectorTurnService
 from app.execution.models import NodeRun, ProviderOperation

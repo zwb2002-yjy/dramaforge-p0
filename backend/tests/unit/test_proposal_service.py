@@ -130,7 +130,7 @@ async def test_partial_apply_only_executes_accepted(session: AsyncSession) -> No
 
 
 @pytest.mark.asyncio
-async def test_proposal_rejection_blocks_immediately_and_notifies_turn_independently(session):
+async def test_proposal_rejection_blocks_immediately_without_resuming_an_unbound_turn(session):
     from app.director.inbox import receive_production_event
     from app.director.turn_models import DirectorTurn
     from app.director.turn_service import DirectorTurnService
@@ -176,7 +176,12 @@ async def test_proposal_rejection_blocks_immediately_and_notifies_turn_independe
     assert await apply_director_wakeup(session, inbox_id=inbox_id)
     await session.commit()
     await session.refresh(turn)
-    assert turn.status == "completed" and turn.wait_reason == "proposal_rejected"
+    assert turn.status == "awaiting_user"
+    recovered = await DirectorTurnService(session).recover_interrupted(
+        project_id=project.id, turn_id=turn.id,
+    )
+    assert recovered.status == "stale"
+    assert recovered.wait_reason == "runtime_binding_missing"
     with pytest.raises(ValidationAppError) as duplicate:
         await service.partial_apply(project=project, proposal_id=proposal.id,
             apply_input=PartialApplyInput(decisions=[

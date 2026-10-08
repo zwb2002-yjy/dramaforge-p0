@@ -66,7 +66,7 @@ async def recover_interrupted_director_turns(ctx: dict[str, Any]) -> dict[str, i
     never invokes a text model, creates a NodeRun, or submits media.
     """
 
-    from app.director.turn_service import ACTIVE_TURN_STATUSES, DirectorTurnService
+    from app.director.turn_service import DirectorTurnService
     from app.shared.db import (
         list_recoverable_director_turn_rls_scopes,
         set_rls_context,
@@ -114,7 +114,7 @@ async def reconcile_waiting_director_turns(ctx: dict[str, Any]) -> dict[str, int
     """Low-rate, browser-independent reconciliation for runtime-bound Director turns."""
 
     from app.director.runtime.reconcile import DirectorRuntimeFactReconciler
-    from app.director.turn_service import DirectorTurnService
+    from app.director.turn_service import ACTIVE_TURN_STATUSES, DirectorTurnService
     from app.shared.db import (
         list_reconcilable_director_turn_rls_scopes,
         set_rls_context,

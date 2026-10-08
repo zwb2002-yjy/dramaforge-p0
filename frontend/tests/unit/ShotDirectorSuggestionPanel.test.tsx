@@ -496,9 +496,7 @@ describe("ShotDirectorSuggestionPanel", () => {
     fireEvent.click(screen.getByTestId("refresh-director-turn"));
     await waitFor(() =>
       expect(
-        calls.some(
-          (call) => call.url.endsWith(`/turns/${waiting.id}`) && call.method === "GET",
-        ),
+        calls.some((call) => call.url.endsWith(`/turns/${waiting.id}`) && call.method === "GET"),
       ).toBe(true),
     );
     expect(calls.some((call) => call.url.endsWith("/resume"))).toBe(false);

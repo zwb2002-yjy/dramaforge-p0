@@ -71,7 +71,6 @@ function understanding(turn: DirectorTurnRead): string {
   if (typeof instruction === "string" && instruction.trim()) return instruction;
   const kind = turn.intent_snapshot.kind;
   if (kind === "proactive_shot_analysis") return "主动分析当前镜头的表演与调度";
-  const task = turn.request_summary.task;
   return "基于当前已保存创作事实继续判断";
 }
 

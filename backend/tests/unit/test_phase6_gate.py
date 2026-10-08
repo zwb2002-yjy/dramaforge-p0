@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from datetime import date
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from app.access.models import Project, User, Workspace
@@ -267,11 +267,25 @@ async def test_phase6_gate_drift_repair_keeps_old_formal_in_history(session: Asy
     assert plan.affected_nodes == ["keyframe", "video"]
 
     # 3) regenerate keyframe candidate (new keyframe NodeRun queued)
-    keyframe_run = await repair.execute_repair(
+    request = await repair.create_repair(
         project=project,
         user=user,
         shot_id=shot.id,
-        repair_option="regenerate_keyframe_then_video",
+        option="regenerate_keyframe_then_video",
+        plan_hash=plan.plan_hash,
+        request_key="gate6-repair",
+    )
+    preview = await repair.build_step_plan(
+        project=project, user=user, shot_id=shot.id, repair_id=request.id,
+    )
+    assert preview.step_ordinal == 1
+    _, _, keyframe_run = await repair.execute_step(
+        project=project,
+        user=user,
+        shot_id=shot.id,
+        repair_id=request.id,
+        expected_step_ordinal=preview.step_ordinal,
+        expected_plan_fingerprint=preview.plan.plan_fingerprint,
         idempotency_key="gate6-kf",
     )
     assert keyframe_run.status == "queued"
@@ -285,8 +299,10 @@ async def test_phase6_gate_drift_repair_keeps_old_formal_in_history(session: Asy
         user=user,
         run=keyframe_run,
     )
-    repair_id = UUID(
+    repair_id = request.id
+    assert (
         keyframe_run.input_snapshot["workbench_plan"]["semantic_intent"]["repair_request_id"]
+        == str(repair_id)
     )
     # 5) continue the same repair, not a second workflow bypassing its review gate.
     preview = await repair.build_step_plan(

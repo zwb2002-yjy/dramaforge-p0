@@ -3754,8 +3754,15 @@ export interface components {
         };
         /** DirectorRuntimeDecisionBody */
         DirectorRuntimeDecisionBody: {
+            /**
+             * Signal Id
+             * Format: uuid
+             */
+            signal_id: string;
             /** Expected Revision */
             expected_revision: number;
+            /** Expected Runtime Revision */
+            expected_runtime_revision: number;
             /**
              * Decision
              * @enum {string}
@@ -3763,13 +3770,6 @@ export interface components {
             decision: "accept" | "reject";
             /** Accepted Operation Indices */
             accepted_operation_indices?: number[];
-            /**
-             * Signal Id
-             * Format: uuid
-             */
-            signal_id: string;
-            /** Expected Runtime Revision */
-            expected_runtime_revision: number;
         };
         /** DirectorRuntimeDelegationBody */
         DirectorRuntimeDelegationBody: {
@@ -5261,7 +5261,7 @@ export interface components {
          * @description Stable business slot vocabulary. Never branch on a provider here.
          * @enum {string}
          */
-        ModelSlot: "planning.brief" | "planning.script" | "planning.storyboard" | "visual.character" | "visual.storyboard" | "visual.keyframe" | "visual.image_edit" | "video.shot" | "audio.tts";
+        ModelSlot: "planning.brief" | "planning.script" | "planning.storyboard" | "visual.character" | "visual.storyboard" | "visual.keyframe" | "visual.image_edit" | "video.shot";
         /** ModelSlotRead */
         ModelSlotRead: {
             /** Id */

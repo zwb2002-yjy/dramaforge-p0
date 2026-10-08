@@ -53,11 +53,6 @@
       "reason": "Director/workflow text and execution coupling; ARCHITECTURE_MAPPING §4."
     },
     {
-      "from": "app.director.business_checkpoints",
-      "to": "app.production.application.facts",
-      "reason": "Director/workflow text and execution coupling; ARCHITECTURE_MAPPING §4."
-    },
-    {
       "from": "app.director.context_builder",
       "to": "app.providers.model_profiles.slots",
       "reason": "Director/workflow text and execution coupling; ARCHITECTURE_MAPPING §4."
@@ -65,11 +60,6 @@
     {
       "from": "app.director.editing_suggestion",
       "to": "app.providers.model_profiles.slots",
-      "reason": "Director/workflow text and execution coupling; ARCHITECTURE_MAPPING §4."
-    },
-    {
-      "from": "app.director.next_action",
-      "to": "app.production.application.facts",
       "reason": "Director/workflow text and execution coupling; ARCHITECTURE_MAPPING §4."
     },
     {

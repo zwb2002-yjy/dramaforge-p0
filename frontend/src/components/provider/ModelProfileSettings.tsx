@@ -229,23 +229,21 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
       ) : (
         <>
           <div className="status-grid">
-            {(slots.data ?? [])
-              .filter((slot) => slot.id !== "audio.tts")
-              .map((slot) => {
-                const value = advancedChoices[slot.id] ?? currentBindings[slot.id]?.model_id ?? "";
-                return (
-                  <Field key={slot.id} className="status-card">
-                    <span className="status-label">
-                      {slot.display_name}
-                      {slot.p0_scope ? "" : " · 扩展"}
-                    </span>
-                    {renderModelSelect(slot.id, value, (v) =>
-                      setAdvancedChoices((prev) => ({ ...prev, [slot.id]: v })),
-                    )}
-                    <span className="muted">{slot.description}</span>
-                  </Field>
-                );
-              })}
+            {(slots.data ?? []).map((slot) => {
+              const value = advancedChoices[slot.id] ?? currentBindings[slot.id]?.model_id ?? "";
+              return (
+                <Field key={slot.id} className="status-card">
+                  <span className="status-label">
+                    {slot.display_name}
+                    {slot.p0_scope ? "" : " · 扩展"}
+                  </span>
+                  {renderModelSelect(slot.id, value, (v) =>
+                    setAdvancedChoices((prev) => ({ ...prev, [slot.id]: v })),
+                  )}
+                  <span className="muted">{slot.description}</span>
+                </Field>
+              );
+            })}
           </div>
           <div className="toolbar">
             <Button type="button" className="primary" onClick={saveAdvanced} disabled={!canSave}>

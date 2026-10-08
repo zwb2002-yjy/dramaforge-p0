@@ -149,7 +149,10 @@ def test_legacy_turn_mutation_routes_are_not_served(api: tuple[TestClient, Any])
     headers = {CSRF_HEADER: _csrf(client)}
     base = f"/api/v1/projects/{project_id}/director/turns/{turn.id}"
 
-    assert client.post(f"{base}/stop", headers=headers, json={"expected_revision": 1}).status_code == 404
+    assert (
+        client.post(f"{base}/stop", headers=headers, json={"expected_revision": 1}).status_code
+        == 404
+    )
     assert client.post(
         f"{base}/resume",
         headers=headers,
