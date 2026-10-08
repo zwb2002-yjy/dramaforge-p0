@@ -187,12 +187,13 @@ async def test_current_formal_and_pinned_version_resolution() -> None:
         )
         await session.flush()
 
-        resolved = await service.resolve_shot(
-            project_id=project.id, shot_id=shot.id, actor=user
-        )
+        resolved = await service.resolve_shot(project_id=project.id, shot_id=shot.id, actor=user)
         assert len(resolved) == 4  # 2 per binding, same v1 artifacts
         assert [item.purpose for item in resolved] == [
-            "style", "style", "identity", "identity",
+            "style",
+            "style",
+            "identity",
+            "identity",
         ]  # persisted binding order, not the order of create calls
         artifact_ids = {item.artifact_id for item in resolved}
         assert artifact_ids == {artifacts[0].id, artifacts[1].id}
@@ -250,9 +251,7 @@ async def test_asset_rename_does_not_break_binding() -> None:
         # Rename the asset: the binding stores the UUID, not the prompt text.
         asset.name = "林墨·成年"
         await session.flush()
-        resolved = await service.resolve_shot(
-            project_id=project.id, shot_id=shot.id, actor=user
-        )
+        resolved = await service.resolve_shot(project_id=project.id, shot_id=shot.id, actor=user)
         assert len(resolved) == 2
         assert {item.artifact_id for item in resolved} == {
             artifacts[0].id,

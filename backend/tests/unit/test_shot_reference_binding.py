@@ -146,9 +146,7 @@ def test_binding_create_list_update_and_delete(client: TestClient) -> None:
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert deleted.status_code == 204, deleted.text
-    assert (
-        client.get(f"/api/v1/projects/{project_id}/shots/{shot_id}/references").json() == []
-    )
+    assert client.get(f"/api/v1/projects/{project_id}/shots/{shot_id}/references").json() == []
 
 
 def test_binding_requires_a_source_and_valid_purpose(client: TestClient) -> None:
@@ -178,19 +176,30 @@ def test_binding_requires_a_source_and_valid_purpose(client: TestClient) -> None
     )
     assert direct_without_artifact.status_code == 422, direct_without_artifact.text
 
+
 def test_binding_sort_order_is_persisted_and_reorder_is_versioned(client: TestClient) -> None:
     project_id, shot_id, asset_id = _project_with_shot_and_asset(client)
     url = f"/api/v1/projects/{project_id}/shots/{shot_id}/references"
     first = client.post(
         url,
-        json={"purpose": "identity", "asset_id": asset_id, "label": "@人物",
-              "resolution_mode": "current_formal", "sort_order": 7},
+        json={
+            "purpose": "identity",
+            "asset_id": asset_id,
+            "label": "@人物",
+            "resolution_mode": "current_formal",
+            "sort_order": 7,
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     second = client.post(
         url,
-        json={"purpose": "style", "asset_id": asset_id, "label": "@画风",
-              "resolution_mode": "current_formal", "sort_order": 1},
+        json={
+            "purpose": "style",
+            "asset_id": asset_id,
+            "label": "@画风",
+            "resolution_mode": "current_formal",
+            "sort_order": 1,
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert first.status_code == 201, first.text
@@ -211,5 +220,6 @@ def test_binding_sort_order_is_persisted_and_reorder_is_versioned(client: TestCl
     assert modified.json()["version"] == 2
     reordered = client.get(url)
     assert [item["id"] for item in reordered.json()] == [
-        first.json()["id"], second.json()["id"],
+        first.json()["id"],
+        second.json()["id"],
     ]
