@@ -905,40 +905,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{project_id}/director/turns/{turn_id}/stop": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Stop Director Turn */
-        post: operations["stop_director_turn_api_v1_projects__project_id__director_turns__turn_id__stop_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{project_id}/director/turns/{turn_id}/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Resume Director Turn */
-        post: operations["resume_director_turn_api_v1_projects__project_id__director_turns__turn_id__resume_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/projects/{project_id}/director/runtime/turns/{turn_id}/resume": {
         parameters: {
             query?: never;
@@ -984,23 +950,6 @@ export interface paths {
         put?: never;
         /** Stop Director Runtime Turn */
         post: operations["stop_director_runtime_turn_api_v1_projects__project_id__director_runtime_turns__turn_id__stop_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/projects/{project_id}/director/turns/{turn_id}/decision": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Decide Director Turn */
-        post: operations["decide_director_turn_api_v1_projects__project_id__director_turns__turn_id__decision_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3733,44 +3682,6 @@ export interface components {
             /** Schema Repair Count */
             schema_repair_count: number;
         };
-        /**
-         * DirectorNextAction
-         * @enum {string}
-         */
-        DirectorNextAction: "wait_for_execution" | "review_execution_failure" | "confirm_formal_candidate" | "review_production_result" | "review_proposal" | "review_accepted_changes" | "proposal_rejected" | "review_stale_proposal" | "review_suggestion" | "manual_no_advance" | "preview_next_stage" | "open_editing" | "review_saved_design" | "completed";
-        /** DirectorNextActionRead */
-        DirectorNextActionRead: {
-            /**
-             * Turn Id
-             * Format: uuid
-             */
-            turn_id: string;
-            action: components["schemas"]["DirectorNextAction"];
-            /** Requires Confirmation */
-            requires_confirmation: boolean;
-            /** Reason */
-            reason: string;
-            /** Autonomy */
-            autonomy: string;
-            /** Fact Hash */
-            fact_hash: string;
-            /** Event Key */
-            event_key: string;
-            /** Turn Status */
-            turn_status: string;
-            /** Turn Revision */
-            turn_revision: number;
-            /** Step Count */
-            step_count: number;
-            /** Shot Version */
-            shot_version?: number | null;
-            /** Node Run Ids */
-            node_run_ids?: string[];
-            /** Accepted Item Ids */
-            accepted_item_ids?: string[];
-            /** Rejected Item Ids */
-            rejected_item_ids?: string[];
-        };
         /** DirectorRecommendation */
         DirectorRecommendation: {
             /** Base Shot Version */
@@ -3923,18 +3834,6 @@ export interface components {
             /** Expected Turn Revision */
             expected_turn_revision: number;
         };
-        /** DirectorTurnDecisionBody */
-        DirectorTurnDecisionBody: {
-            /** Expected Revision */
-            expected_revision: number;
-            /**
-             * Decision
-             * @enum {string}
-             */
-            decision: "accept" | "reject";
-            /** Accepted Operation Indices */
-            accepted_operation_indices?: number[];
-        };
         /**
          * DirectorTurnRead
          * @description Secret-free durable Director coordination state.
@@ -4049,18 +3948,6 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
-        };
-        /** DirectorTurnResumeBody */
-        DirectorTurnResumeBody: {
-            /** Expected Revision */
-            expected_revision: number;
-            /** Event Key */
-            event_key: string;
-        };
-        /** DirectorTurnStopBody */
-        DirectorTurnStopBody: {
-            /** Expected Revision */
-            expected_revision: number;
         };
         /** DirectorWakeupReplayRequest */
         DirectorWakeupReplayRequest: {
@@ -6103,8 +5990,6 @@ export interface components {
             model_binding_id: string;
             /** Selection Strategy */
             selection_strategy: string;
-            /** Fallback Policy */
-            fallback_policy: string;
             /** Model Id */
             model_id?: string | null;
             /** Display Name */
@@ -6135,8 +6020,6 @@ export interface components {
             model_binding_id: string;
             /** Selection Strategy */
             selection_strategy: string;
-            /** Fallback Policy */
-            fallback_policy: string;
         };
         /** ProjectBindingWrite */
         ProjectBindingWrite: {
@@ -6151,12 +6034,6 @@ export interface components {
              * @constant
              */
             selection_strategy: "explicit_binding";
-            /**
-             * Fallback Policy
-             * @default none
-             * @constant
-             */
-            fallback_policy: "none";
         };
         /** ProjectCreate */
         ProjectCreate: {
@@ -10524,94 +10401,6 @@ export interface operations {
             };
         };
     };
-    stop_director_turn_api_v1_projects__project_id__director_turns__turn_id__stop_post: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                project_id: string;
-                turn_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DirectorTurnStopBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DirectorTurnRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    resume_director_turn_api_v1_projects__project_id__director_turns__turn_id__resume_post: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                project_id: string;
-                turn_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DirectorTurnResumeBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DirectorNextActionRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     resume_director_runtime_turn_api_v1_projects__project_id__director_runtime_turns__turn_id__resume_post: {
         parameters: {
             query?: {
@@ -10726,50 +10515,6 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DirectorTurnRead"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    decide_director_turn_api_v1_projects__project_id__director_turns__turn_id__decision_post: {
-        parameters: {
-            query?: {
-                workspace_id?: string | null;
-            };
-            header?: {
-                "X-Workspace-Id"?: string | null;
-                "X-CSRF-Token"?: string | null;
-            };
-            path: {
-                project_id: string;
-                turn_id: string;
-            };
-            cookie?: {
-                dramaforge_session?: string | null;
-                dramaforge_csrf?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DirectorTurnDecisionBody"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
                 headers: {
                     [name: string]: unknown;
                 };
