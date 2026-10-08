@@ -7,7 +7,7 @@ type DirectorTurnStatusProps = {
   syncError: string | null;
   busyTurnId: string | null;
   onStop: (turn: DirectorTurnRead) => void;
-  onResume: (turn: DirectorTurnRead) => void;
+  onRefresh: (turn: DirectorTurnRead) => void;
   requestPending?: boolean;
   requestFailed?: boolean;
 };
@@ -127,7 +127,7 @@ export function DirectorTurnStatus({
   syncError,
   busyTurnId,
   onStop,
-  onResume,
+  onRefresh,
   requestPending = false,
   requestFailed = false,
 }: DirectorTurnStatusProps) {
@@ -226,9 +226,9 @@ export function DirectorTurnStatus({
               <button
                 type="button"
                 className="secondary"
-                data-testid="resume-director-turn"
+                data-testid="refresh-director-turn"
                 disabled={busyTurnId === latest.id}
-                onClick={() => onResume(latest)}
+                onClick={() => onRefresh(latest)}
               >
                 刷新服务器状态
               </button>
