@@ -150,6 +150,7 @@ export function EditingWorkspace({
 }: EditingWorkspaceProps) {
   const queryClient = useQueryClient();
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [exported, setExported] = useState<EditExportRead | null>(null);
   const hasSession = Boolean(sessionId);
   const manifest = useQuery({
@@ -165,6 +166,14 @@ export function EditingWorkspace({
   const currentSessionVersion = persistedSession.data?.version;
   const timeline = useTimelineDraft(projectId, sessionId, persistedSession.data);
   const { draft, baseline, dirty, updateClipField, updateTimelineMetadata } = timeline;
+  const clipIndex = Math.max(
+    0,
+    draft?.clips.findIndex((clip) => String(clip.id ?? "") === selectedClipId) ?? -1,
+  );
+  const selectClip = (index: number) => {
+    const clip = draft?.clips[index];
+    if (clip) setSelectedClipId(String(clip.id ?? index));
+  };
 
   const {
     filmHistory,
@@ -183,6 +192,7 @@ export function EditingWorkspace({
   useEffect(() => {
     setFeedback(null);
     setExported(null);
+    setSelectedClipId(null);
   }, [projectId, sessionId]);
 
   const {
@@ -344,7 +354,12 @@ export function EditingWorkspace({
         {persistedSession.data && draft && baseline && (
           <>
             <div className="editing-cut-layout">
-              <EditingSourcePreview projectId={projectId} clips={draft.clips} />
+              <EditingSourcePreview
+                projectId={projectId}
+                clips={draft.clips}
+                selectedIndex={clipIndex}
+                onSelectClip={selectClip}
+              />
               <div className="editing-cut-controls">
                 <Disclosure title="版本与来源">
                   <section className="editing-session-facts" data-testid="edit-session-facts">
@@ -684,6 +699,7 @@ export function EditingWorkspace({
                 <section className="editing-session-editor" data-testid="edit-session-editor">
                   <header>
                     <h2>时间线草稿</h2>
+                    <p className="muted">在上方片段轨选择镜头，下方调整当前片段。保存后才能交付。</p>
                     {dirty && (
                       <span data-testid="edit-session-dirty" role="status">
                         有未保存修改
@@ -700,12 +716,21 @@ export function EditingWorkspace({
                         <li
                           key={`${clipValue(clip, "id")}-${index}`}
                           data-testid="edit-session-clip"
+                          data-selected={clipIndex === index ? "true" : "false"}
                         >
-                          <div>
-                            <strong>
-                              {index + 1}.{" "}
-                              {clipLabel(shotNumberById, clipValue(clip, "shot_id"), index)}
-                            </strong>
+                          <div className="editing-clip-summary">
+                            <button
+                              type="button"
+                              className="editing-clip-focus"
+                              aria-pressed={clipIndex === index}
+                              data-testid={`editing-clip-focus-${index}`}
+                              onClick={() => selectClip(index)}
+                            >
+                              <strong>
+                                {index + 1}.{" "}
+                                {clipLabel(shotNumberById, clipValue(clip, "shot_id"), index)}
+                              </strong>
+                            </button>
                             <small>
                               {clipValue(clip, "artifact_id") ? "正式素材已绑定" : "未绑定正式素材"}
                             </small>
