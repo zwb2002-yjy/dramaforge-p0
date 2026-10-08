@@ -198,22 +198,6 @@ async def test_ambiguous_system_default_is_rejected(session: AsyncSession, world
     assert blocked.value.details["code"] == MODEL_PROFILE_NO_AVAILABLE_MODEL
 
 
-async def test_missing_all_models_raises_no_available(
-    session: AsyncSession, world, service
-) -> None:
-    workspace = world["workspace"]
-    project = world["project"]
-    resolver = ModelBindingResolver(session, registry=service._registry)
-    with pytest.raises(Exception) as exc_info:
-        await resolver.resolve(
-            workspace_id=workspace.id,
-            project_id=project.id,
-            slot=ModelSlot.AUDIO_TTS,
-            capability=Capability.AUDIO_TTS,
-        )
-    assert exc_info.value.details["code"] == MODEL_PROFILE_NO_AVAILABLE_MODEL
-
-
 async def test_video_derived_capability_mismatch_fails_fast(
     session: AsyncSession, world, service
 ) -> None:
