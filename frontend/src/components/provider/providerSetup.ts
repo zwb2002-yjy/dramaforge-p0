@@ -13,6 +13,43 @@ export function pluginKey(plugin: { provider_type: string; protocol_profile: str
   return `${plugin.provider_type}/${plugin.protocol_profile}`;
 }
 
+/** Presentation names keep native cloud APIs separate from compatible endpoints. */
+export function providerLabel(plugin: ProviderPluginRead): string {
+  if (plugin.provider_type === "agnes") return "Agnes";
+  if (plugin.provider_type === "minimax") return "MiniMax";
+  if (plugin.provider_type === "volcengine") return "Seedance";
+  if (plugin.provider_type === "openai_compatible_media") return "自定义供应商";
+  if (plugin.kind === "text") return "文本服务";
+  return plugin.display_name;
+}
+
+export function isLocalServiceUrl(value: string): boolean {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    if (
+      host === "localhost" ||
+      host === "[::1]" ||
+      host.endsWith(".local") ||
+      host.endsWith(".internal")
+    )
+      return true;
+    const parts = host.split(".").map(Number);
+    if (
+      parts.length !== 4 ||
+      parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+    )
+      return false;
+    return (
+      parts[0] === 10 ||
+      parts[0] === 127 ||
+      (parts[0] === 192 && parts[1] === 168) ||
+      (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function pluginFor(
   plugins: ProviderPluginRead[] | undefined,
   connection: ProviderConnectionRead,
@@ -34,12 +71,20 @@ export function connectionStatus(connection: ProviderConnectionRead): {
   return { tone: "warn", label: "待验证" };
 }
 
-/** The latest passed catalog read for the connection, if any. */
+/** Passed discovery belongs to the current endpoint and credential revision. */
 export function latestCatalogRead(
   probes: ProviderProbeRead[] | undefined,
+  connection: ProviderConnectionRead,
 ): ProviderProbeRead | null {
+  if (connection.verification_status !== "verified" || !connection.connection_revision_id)
+    return null;
   return (
-    probes?.find((probe) => probe.capability === "auth_models" && probe.status === "passed") ?? null
+    probes?.find(
+      (probe) =>
+        probe.capability === "auth_models" &&
+        probe.status === "passed" &&
+        probe.connection_revision_id === connection.connection_revision_id,
+    ) ?? null
   );
 }
 
@@ -119,7 +164,16 @@ export function choiceKey(choice: Pick<ModelChoice, "modelId" | "mediaType">): s
 }
 
 export function bindingChoiceKey(binding: ProviderModelBindingRead): string {
-  return `${binding.media_type}:${binding.model_id}`;
+  return contractChoiceKey({
+    mediaType: binding.media_type as MediaKind,
+    modelId: binding.model_id,
+    contractId: binding.catalog_entry_id ?? "",
+  });
+}
+
+/** A remote id can have different immutable capability contract revisions. */
+export function contractChoiceKey(choice: ModelChoice): string {
+  return `${choiceKey(choice)}:${choice.contractId}`;
 }
 
 export const MEDIA_LABEL: Record<MediaKind, string> = { image: "图片", video: "视频" };

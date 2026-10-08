@@ -1,5 +1,8 @@
-import type { ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
+import { Menu } from "lucide-react";
+import { Button } from "../ui";
 import { ProjectStageGuide } from "./ProjectStageGuide";
+import { ProjectNavigationContext, PROJECT_VIEW_LABELS } from "./projectNavigation";
 
 import "./project-shell.css";
 import "./project-shell-visual.css";
@@ -18,13 +21,8 @@ type ProjectWorkspaceShellProps = {
 };
 
 const VIEW_LABELS: Record<ProjectWorkspaceView, string> = {
-  overview: "场景总览",
-  script: "故事剧本",
-  assets: "角色素材",
-  scenes: "分镜与生成",
-  production: "作品总览",
-  review: "审片确认",
-  edit: "剪辑成片",
+  overview: "项目总览",
+  ...PROJECT_VIEW_LABELS,
 };
 
 export function ProjectWorkspaceShell({
@@ -36,6 +34,7 @@ export function ProjectWorkspaceShell({
   creationControls,
 }: ProjectWorkspaceShellProps) {
   const displayModeLabel = modeLabel ?? VIEW_LABELS[activeView];
+  const navigation = useContext(ProjectNavigationContext);
 
   return (
     <div
@@ -44,6 +43,19 @@ export function ProjectWorkspaceShell({
       data-project-id={projectId}
     >
       <header className="qc-project-bar">
+        {navigation && (
+          <Button
+            ref={navigation.triggerRef}
+            tone="ghost"
+            aria-controls="project-navigation"
+            aria-expanded={navigation.open}
+            data-testid="project-navigation-toggle"
+            onClick={navigation.toggle}
+          >
+            <Menu size={17} aria-hidden="true" />
+            项目导航
+          </Button>
+        )}
         <span className="qc-project-name">{projectName}</span>
         <span className="qc-project-mode">{displayModeLabel}</span>
         <ProjectStageGuide projectId={projectId} view={activeView} />

@@ -1,11 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AddProviderDialog } from "../../src/components/provider/AddProviderDialog";
-import { DefaultModelSettings } from "../../src/components/provider/DefaultModelSettings";
+import { useModelActivation } from "../../src/components/provider/useModelActivation";
+import type { WorkspaceModelRole } from "../../src/lib/workspaceModelRoles";
 import { ProviderList } from "../../src/components/provider/ProviderList";
+import { ProviderDetails } from "../../src/components/provider/ProviderDetails";
 import type { ProviderPluginRead } from "../../src/lib/api";
 
 const WS = "11111111-1111-4111-8111-111111111111";
@@ -88,6 +90,8 @@ function connection(overrides: Record<string, unknown> = {}) {
     credential_configured: true,
     credential_key_version: "v1",
     verification_status: "unverified",
+    verified_at: null,
+    connection_revision_id: "revision-1",
     ...overrides,
   };
 }
@@ -107,6 +111,7 @@ function probe(status: "passed" | "failed", ids: string[], http_status = 200) {
     tested_at: "2026-10-07T00:00:00Z",
     error_code: status === "failed" ? "AUTH_REJECTED" : null,
     discovered_model_ids: ids,
+    connection_revision_id: "revision-1",
   };
 }
 
@@ -146,6 +151,30 @@ async function connectWith(plugins: ProviderPluginRead[], key = "sk-test") {
 describe("AddProviderDialog", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("adds a local service as custom without a vendor category selector", async () => {
+    mockApi(() => undefined);
+    wrap(
+      <AddProviderDialog
+        workspaceId={WS}
+        custom
+        plugins={[COMPAT_PLUGIN]}
+        onClose={() => undefined}
+      />,
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByRole("navigation")).toBeNull();
+    expect(within(dialog).getByLabelText("连接名称")).toHaveValue("");
+    expect(within(dialog).getByLabelText("服务地址")).toHaveValue("");
+    fireEvent.change(within(dialog).getByLabelText("连接名称"), { target: { value: "本地部署" } });
+    fireEvent.change(within(dialog).getByLabelText("服务地址"), {
+      target: { value: "http://172.18.6.80:30020/v1" },
+    });
+    fireEvent.change(within(dialog).getByLabelText("API Key"), {
+      target: { value: "test-local-key" },
+    });
+    expect(within(dialog).getByRole("button", { name: "连接并读取模型" })).toBeEnabled();
+  });
+
   it("connects, reads the catalog and binds only the ticked exact contracts", async () => {
     const calls = mockApi(({ method, url }) => {
       if (method === "POST" && url.endsWith("/provider-connections"))
@@ -159,11 +188,11 @@ describe("AddProviderDialog", () => {
     await connectWith([MEDIA_PLUGIN]);
 
     const picker = await screen.findByTestId("provider-model-picker");
-    expect(within(picker).getByText("Seedream 4")).toBeVisible();
-    expect(within(picker).getByText("Seedance 2")).toBeVisible();
+    expect(within(picker).getByText("seedream-4")).toBeVisible();
+    expect(within(picker).getByText("seedance-2")).toBeVisible();
     // Unknown ids are listed but never bound by name guessing.
     expect(within(picker).getByText("已发现 · 暂未支持执行 1")).toBeInTheDocument();
-    fireEvent.click(within(picker).getByRole("checkbox", { name: /Seedream 4/ }));
+    fireEvent.click(within(picker).getByRole("checkbox", { name: /seedream-4/ }));
     fireEvent.click(screen.getByRole("button", { name: "添加 1 个模型" }));
 
     await waitFor(() =>
@@ -175,7 +204,7 @@ describe("AddProviderDialog", () => {
     expect(create?.body).toMatchObject({
       provider_type: "volcengine",
       protocol_profile: "ark_cn_v1",
-      display_name: "火山方舟",
+      display_name: "Seedance",
       base_url: "https://ark.example.test",
       api_key: "sk-test",
     });
@@ -297,26 +326,161 @@ describe("AddProviderDialog", () => {
         return json(probe("passed", ["script-quality", "fast-chat"]));
       return undefined;
     });
-    wrap(
-      <AddProviderDialog
-        workspaceId={WS}
-        plugins={[MEDIA_PLUGIN, TEXT_PLUGIN]}
-        onClose={() => undefined}
-      />,
-    );
+    wrap(<AddProviderDialog workspaceId={WS} plugins={[TEXT_PLUGIN]} onClose={() => undefined} />);
     const dialog = await screen.findByRole("dialog", { name: "添加供应商" });
-    fireEvent.click(within(dialog).getByRole("button", { name: /LiteLLM/ }));
-    expect(within(dialog).getByLabelText("服务地址")).toHaveValue("http://litellm:4000");
+    expect(within(dialog).getByLabelText("服务地址")).toHaveValue("");
+    fireEvent.change(within(dialog).getByLabelText("服务地址"), {
+      target: { value: "https://my-text.test/v1" },
+    });
     fireEvent.change(within(dialog).getByLabelText("API Key"), { target: { value: "sk-gw" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "连接并读取模型" }));
     expect(await screen.findByText("已发现 2 个文本模型")).toBeVisible();
     expect(screen.getByText("script-quality")).toBeVisible();
     expect(calls.some((call) => call.url.endsWith("/model-bindings"))).toBe(false);
+    expect(
+      calls.find((call) => call.method === "POST" && call.url.endsWith("/provider-connections"))
+        ?.body,
+    ).toMatchObject({
+      provider_type: "litellm",
+      base_url: "https://my-text.test/v1",
+      api_key: "sk-gw",
+    });
   });
 });
 
 describe("ProviderList", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("offers a separate text connection and never carries Agnes edits into local deployment", async () => {
+    const agnes = { ...MEDIA_PLUGIN, provider_type: "agnes", protocol_profile: "agnes_cn_v1" };
+    mockApi(({ url }) => {
+      if (url.endsWith("/provider-plugins")) return json([agnes, COMPAT_PLUGIN, TEXT_PLUGIN]);
+      if (url.endsWith("/provider-connections"))
+        return json([
+          connection({
+            display_name: "Agnes",
+            provider_type: "agnes",
+            protocol_profile: "agnes_cn_v1",
+            base_url: "https://api.agnes-ai.cn",
+          }),
+          connection({
+            id: "local",
+            display_name: "本地部署",
+            provider_type: "openai_compatible_media",
+            protocol_profile: "openai_media_v1",
+            base_url: "http://local.test:30020/v1",
+          }),
+        ]);
+      return undefined;
+    });
+    wrap(<ProviderList workspaceId={WS} adding={false} onAddingChange={() => undefined} />);
+    await screen.findByRole("region", { name: "配置 Agnes" });
+    fireEvent.change(screen.getByLabelText("服务地址"), {
+      target: { value: "https://edited.agnes.test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "管理 本地部署" }));
+    expect(screen.getByLabelText("服务地址")).toHaveValue("http://local.test:30020/v1");
+    expect(screen.queryByText("seedream-4")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "选择 文本服务" }));
+    const text = screen.getByRole("region", { name: "配置 文本服务" });
+    expect(within(text).getByLabelText("API Key")).toHaveValue("");
+  });
+
+  it("keeps inline model selection through a connection refresh and creates the connection only once", async () => {
+    let created = false;
+    const saved = connection({ display_name: "Seedance" });
+    const calls = mockApi(({ method, url }) => {
+      if (url.endsWith("/provider-plugins")) return json([MEDIA_PLUGIN]);
+      if (url.endsWith("/provider-connections")) {
+        if (method === "POST") {
+          created = true;
+          return json(saved, 201);
+        }
+        return json(created ? [saved] : []);
+      }
+      if (url.endsWith("/probes") && method === "POST")
+        return json(probe("passed", ["seedream-4"]));
+      if (url.endsWith("/model-bindings") && method === "POST") return json({ id: "b1" }, 201);
+      return undefined;
+    });
+    wrap(<ProviderList workspaceId={WS} adding={false} onAddingChange={() => undefined} />);
+    const detail = await screen.findByRole("region", { name: "配置 Seedance" });
+    fireEvent.change(within(detail).getByLabelText("API Key"), { target: { value: "mock-key" } });
+    fireEvent.click(within(detail).getByRole("button", { name: "连接并读取模型" }));
+    const choice = await screen.findByRole("checkbox", { name: /seedream-4/ });
+    expect(screen.getByRole("region", { name: "配置 Seedance" })).toBeVisible();
+    fireEvent.click(choice);
+    fireEvent.click(screen.getByRole("button", { name: "添加 1 个模型" }));
+    await screen.findByRole("button", { name: "管理 Seedance" });
+    expect(screen.queryByRole("button", { name: "选择 Seedance" })).toBeNull();
+    expect(
+      calls.filter((call) => call.method === "POST" && call.url.endsWith("/provider-connections")),
+    ).toHaveLength(1);
+  });
+
+  it("keeps four independent supplier entries even before official accounts are configured", async () => {
+    const agnes = {
+      ...MEDIA_PLUGIN,
+      provider_type: "agnes",
+      protocol_profile: "agnes_cn_v1",
+      display_name: "Agnes",
+    };
+    const minimax = {
+      ...MEDIA_PLUGIN,
+      provider_type: "minimax",
+      protocol_profile: "minimax_cn_v1",
+      display_name: "MiniMax",
+      default_base_url: "https://api.minimaxi.com",
+    };
+    const calls = mockApi(({ url }) => {
+      if (url.endsWith("/provider-plugins"))
+        return json([agnes, minimax, MEDIA_PLUGIN, COMPAT_PLUGIN]);
+      if (url.endsWith("/provider-connections"))
+        return json([
+          connection({
+            provider_type: "agnes",
+            protocol_profile: "agnes_cn_v1",
+            display_name: "Agnes",
+          }),
+          connection({
+            id: "local",
+            provider_type: "openai_compatible_media",
+            protocol_profile: "openai_media_v1",
+            display_name: "本地部署",
+            base_url: "http://172.18.6.80:30020/v1",
+          }),
+          connection({
+            id: "old",
+            provider_type: "minimax",
+            protocol_profile: "minimax_cn_v1",
+            display_name: "MiniMax（旧配置）",
+            enabled: false,
+          }),
+        ]);
+      return undefined;
+    });
+    function Settings() {
+      const [adding, setAdding] = useState(false);
+      return <ProviderList workspaceId={WS} adding={adding} onAddingChange={setAdding} />;
+    }
+    wrap(<Settings />);
+    const list = await screen.findByRole("navigation", { name: "已连接的供应商" });
+    expect(within(list).getByRole("button", { name: "管理 Agnes" })).toBeVisible();
+    expect(within(list).getByRole("button", { name: "管理 本地部署" })).toBeVisible();
+    expect(within(list).getByRole("button", { name: "选择 Seedance" })).toBeVisible();
+    expect(within(list).queryByRole("button", { name: "管理 MiniMax（旧配置）" })).toBeNull();
+    fireEvent.click(within(list).getByRole("button", { name: "选择 MiniMax" }));
+    expect(screen.getByRole("region", { name: "配置 MiniMax" })).toBeVisible();
+    const detail = screen.getByRole("region", { name: "配置 MiniMax" });
+    expect(within(detail).getByLabelText("服务地址")).toHaveValue("https://api.minimaxi.com");
+    expect(within(detail).getByLabelText("API Key")).toHaveValue("");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(within(list).getByRole("button", { name: "选择 Seedance" }));
+    const seedance = screen.getByRole("region", { name: "配置 Seedance" });
+    expect(within(seedance).getByLabelText("连接名称")).toHaveValue("Seedance");
+    expect(within(seedance).getByLabelText("服务地址")).toHaveValue(MEDIA_PLUGIN.default_base_url);
+    expect(calls.every((call) => call.method === "GET")).toBe(true);
+  });
 
   it("shows every connection, including two of the same vendor", async () => {
     mockApi(({ url }) => {
@@ -351,70 +515,489 @@ describe("ProviderList", () => {
   });
 });
 
-describe("DefaultModelSettings", () => {
+describe("ProviderDetails model revisions", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("offers only workspace models and creates the default profile on first save", async () => {
-    const calls = mockApi(({ method, url }) => {
-      if (url.endsWith("/model-profiles") && method === "GET") return json([]);
-      if (url.endsWith("/model-profiles") && method === "POST")
-        return json(
-          { id: "prof-1", name: "默认", is_default: true, version: 1, bindings: {} },
-          201,
-        );
-      if (url.endsWith("/simple-mode"))
-        return json({ id: "prof-1", name: "默认", is_default: true, version: 2, bindings: {} });
-      if (url.includes("/api/v1/models"))
+  it.each(["address", "key"])(
+    "invalidates the old text catalog after changing the %s",
+    async (field) => {
+      let current = connection({
+        provider_type: "litellm",
+        protocol_profile: "openai_chat_v1",
+        display_name: "文本服务",
+        verification_status: "verified",
+        verified_at: "2026-10-07T00:00:00Z",
+      });
+      let refreshed = false;
+      mockApi(({ method, url }) => {
+        if (url.endsWith("/provider-plugins")) return json([TEXT_PLUGIN]);
+        if (url.endsWith("/provider-connections")) return json([current]);
+        if (url.endsWith("/probes") && method === "GET") {
+          // History still contains the old successful read after rotation.
+          return json([probe("passed", ["old-chat"])]);
+        }
+        if (method !== "GET" && (url.endsWith(`/${CONN}`) || url.endsWith("/credential"))) {
+          current = {
+            ...current,
+            base_url: "https://changed.test/v1",
+            verification_status: "unverified",
+            verified_at: null,
+            connection_revision_id: "revision-2",
+          };
+          refreshed = true;
+          return json(current);
+        }
+        return undefined;
+      });
+      wrap(<ProviderList workspaceId={WS} adding={false} onAddingChange={() => undefined} />);
+      const panel = await screen.findByRole("region", { name: "配置 文本服务" });
+      expect(await within(panel).findByText("old-chat", { exact: true })).toBeVisible();
+      if (field === "address") {
+        fireEvent.change(within(panel).getByLabelText("服务地址"), {
+          target: { value: "https://changed.test/v1" },
+        });
+        fireEvent.click(within(panel).getByRole("button", { name: /^保存$/ }));
+      } else {
+        fireEvent.change(within(panel).getByLabelText("更换 API Key"), {
+          target: { value: "new-fixture-key" },
+        });
+        fireEvent.click(within(panel).getByRole("button", { name: /^更换 Key$/ }));
+      }
+      await waitFor(() => expect(refreshed).toBe(true));
+      await waitFor(() =>
+        expect(within(panel).queryByText("old-chat", { exact: true })).toBeNull(),
+      );
+      expect(within(panel).queryByText("可用", { exact: true })).toBeNull();
+      expect(within(panel).getByTestId("provider-connection-status")).toHaveTextContent("待验证");
+    },
+  );
+
+  it("uses only the current revision even if an old successful read arrives last", async () => {
+    mockApi(({ url }) => {
+      if (url.endsWith("/probes"))
         return json([
+          { ...probe("passed", ["old-chat"]), probe_id: "old" },
           {
-            id: "litellm/script-quality",
-            provider_id: "litellm",
-            display_name: "实例网关",
-            enabled: true,
-            configured: true,
-            available: true,
-            capabilities: ["text.generate"],
-            source: "installed",
-          },
-          {
-            id: `litellm/${CONN}/script-quality`,
-            provider_id: "litellm",
-            display_name: "script-quality · 我的网关",
-            enabled: true,
-            configured: true,
-            available: true,
-            capabilities: ["text.generate"],
-            source: "workspace",
-          },
-          {
-            id: "binding:b1",
-            provider_id: "volcengine",
-            display_name: "Seedream 4 · 火山方舟",
-            enabled: true,
-            configured: true,
-            available: true,
-            capabilities: ["image.generate"],
-            source: "workspace",
+            ...probe("passed", ["current-chat"]),
+            probe_id: "current",
+            connection_revision_id: "revision-2",
           },
         ]);
       return undefined;
     });
-    wrap(<DefaultModelSettings workspaceId={WS} onAddProvider={() => undefined} />);
-    const text = await screen.findByLabelText("文本模型");
-    await waitFor(() => expect(text).toBeEnabled());
-    expect(within(text).queryByText("实例网关")).toBeNull();
-    expect(screen.getByText("还没有可用的视频模型")).toBeVisible();
-    fireEvent.change(text, { target: { value: `litellm/${CONN}/script-quality` } });
-    fireEvent.change(screen.getByLabelText("图片模型"), { target: { value: "binding:b1" } });
-    fireEvent.click(screen.getByTestId("save-default-models"));
-    await waitFor(() => expect(calls.some((call) => call.url.endsWith("/simple-mode"))).toBe(true));
+    wrap(
+      <ProviderDetails
+        workspaceId={WS}
+        connection={connection({
+          provider_type: "litellm",
+          protocol_profile: "openai_chat_v1",
+          display_name: "文本服务",
+          verification_status: "verified",
+          connection_revision_id: "revision-2",
+        })}
+        plugin={TEXT_PLUGIN}
+      />,
+    );
+    expect(await screen.findByText("current-chat", { exact: true })).toBeVisible();
+    expect(screen.queryByText("old-chat", { exact: true })).toBeNull();
+  });
+
+  it("allows a current contract to replace the retired binding for the same remote model", async () => {
+    const oldContract = {
+      ...MEDIA_PLUGIN.models[0],
+      catalog_entry_id: "c-old",
+      lifecycle: "retired",
+    };
+    const plugin = { ...MEDIA_PLUGIN, models: [oldContract, ...MEDIA_PLUGIN.models] };
+    const calls = mockApi(({ method, url }) => {
+      if (url.endsWith("/model-bindings") && method === "GET")
+        return json([
+          {
+            id: "old-binding",
+            model_id: "seedream-4",
+            media_type: "image",
+            enabled: true,
+            catalog_entry_id: "c-old",
+            account_verified: true,
+          },
+        ]);
+      if (url.endsWith("/probes") && method === "POST")
+        return json(probe("passed", ["seedream-4"]));
+      if (url.endsWith("/model-bindings") && method === "POST")
+        return json(
+          {
+            id: "new-binding",
+            model_id: "seedream-4",
+            media_type: "image",
+            enabled: true,
+            catalog_entry_id: "c-image",
+            account_verified: true,
+          },
+          201,
+        );
+      return undefined;
+    });
+    wrap(
+      <ProviderDetails
+        workspaceId={WS}
+        connection={connection({ verification_status: "verified" })}
+        plugin={plugin}
+      />,
+    );
+    expect(await screen.findByText("调用方式待更新")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "添加模型" }));
+    const picker = await screen.findByTestId("provider-model-picker");
+    const checkbox = within(picker).getByRole("checkbox", { name: /seedream-4/ });
+    expect(checkbox).toBeEnabled();
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole("button", { name: "添加 1 个模型" }));
+    await waitFor(() =>
+      expect(
+        calls.some((call) => call.method === "POST" && call.url.endsWith("/model-bindings")),
+      ).toBe(true),
+    );
+    expect(
+      calls.find((call) => call.method === "POST" && call.url.endsWith("/model-bindings"))?.body,
+    ).toMatchObject({
+      model_id: "seedream-4",
+      capability_contract_id: "c-image",
+      media_type: "image",
+    });
+    expect(
+      calls
+        .filter((call) => call.method === "POST")
+        .every((call) => /\/(probes|model-bindings)$/.test(call.url)),
+    ).toBe(true);
+  });
+});
+
+function Activation({ role = "llm", modelId }: { role?: WorkspaceModelRole; modelId: string }) {
+  const usage = useModelActivation(WS);
+  const active = usage.isActive(role, modelId);
+  return (
+    <>
+      <button
+        disabled={active || !usage.canActivate(role, modelId) || usage.activate.isPending}
+        onClick={() => usage.activate.mutate({ role, modelId })}
+      >
+        {active ? "已启用" : "启用"}
+      </button>
+      {usage.activate.isError && <p role="alert">{usage.activate.error.message}</p>}
+    </>
+  );
+}
+const planningSlots = ["planning.brief", "planning.script", "planning.storyboard"];
+function availableModel(id: string, capability = "text.generate") {
+  return { id, display_name: id, source: "workspace", available: true, capabilities: [capability] };
+}
+
+describe("saved model activation", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    "video.text_to_video",
+    "video.image_to_video",
+    "video.last_frame_to_video",
+    "video.first_last_frame",
+    "video.reference_to_video",
+  ])("activates an available video model supporting %s", async (capability) => {
+    const profile = { id: "prof", is_default: true, version: 3, bindings: {} };
+    const calls = mockApi(({ url }) => {
+      if (url.endsWith("/model-profiles")) return json([profile]);
+      if (url.endsWith("/model-profiles/prof") || url.endsWith("/simple-mode"))
+        return json(profile);
+      if (url.includes("/api/v1/models"))
+        return json([availableModel("binding:video", capability)]);
+      return undefined;
+    });
+    wrap(<Activation role="video" modelId="binding:video" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "启用" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "启用" }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.url.endsWith("/simple-mode"))?.body).toEqual({
+        video_model_id: "binding:video",
+        expected_version: 3,
+      }),
+    );
+  });
+
+  it("switches between saved LLM accounts with the same model name without altering credentials or media", async () => {
+    const second = "33333333-3333-4333-8333-333333333333";
+    const firstId = `litellm/${CONN}/chat`,
+      secondId = `litellm/${second}/chat`;
+    const connections = [
+      connection({
+        provider_type: "litellm",
+        protocol_profile: "openai_chat_v1",
+        display_name: "LLM A",
+        base_url: "https://a.test/v1",
+        verification_status: "verified",
+      }),
+      connection({
+        id: second,
+        provider_type: "litellm",
+        protocol_profile: "openai_chat_v1",
+        display_name: "LLM B",
+        base_url: "https://b.test/v1",
+        verification_status: "verified",
+      }),
+    ];
+    let profile = {
+      id: "prof",
+      name: "默认",
+      is_default: true,
+      version: 3,
+      bindings: {
+        ...Object.fromEntries(
+          planningSlots.map((slot) => [
+            slot,
+            { model_id: firstId, native_options: { temperature: 0.3 }, enabled: true },
+          ]),
+        ),
+        "video.shot": {
+          model_id: "binding:video",
+          native_options: { duration: 8 },
+          enabled: false,
+        },
+      },
+    };
+    const originalConnections = structuredClone(connections);
+    const calls = mockApi(({ method, url, body }) => {
+      if (url.endsWith("/provider-plugins")) return json([TEXT_PLUGIN]);
+      if (url.endsWith("/provider-connections")) return json(connections);
+      if (url.endsWith("/probes")) return json([probe("passed", ["chat"])]);
+      if (url.endsWith("/model-profiles")) return json([profile]);
+      if (url.endsWith("/model-profiles/prof")) return json(profile);
+      if (url.includes("/api/v1/models"))
+        return json([availableModel(firstId), availableModel(secondId)]);
+      if (method === "POST" && url.endsWith("/simple-mode")) {
+        const input = body as { llm_model_id: string; expected_version: number };
+        expect(input.expected_version).toBe(profile.version);
+        profile = {
+          ...profile,
+          version: profile.version + 1,
+          bindings: {
+            ...profile.bindings,
+            ...Object.fromEntries(
+              planningSlots.map((slot) => [
+                slot,
+                { model_id: input.llm_model_id, native_options: {}, enabled: true },
+              ]),
+            ),
+          },
+        };
+        return json(profile);
+      }
+      return undefined;
+    });
+    wrap(<ProviderList workspaceId={WS} adding={false} onAddingChange={() => undefined} />);
+    await screen.findByRole("button", { name: "已启用 chat" });
+    fireEvent.click(screen.getByRole("button", { name: "管理 LLM B" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "启用 chat" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "启用 chat" }));
+    await screen.findByRole("button", { name: "已启用 chat" });
+    fireEvent.click(screen.getByRole("button", { name: "管理 LLM A" }));
+    expect(screen.getByLabelText("服务地址")).toHaveValue("https://a.test/v1");
+    await waitFor(() => expect(screen.getByRole("button", { name: "启用 chat" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "启用 chat" }));
+    await screen.findByRole("button", { name: "已启用 chat" });
+    expect(
+      calls.filter((call) => call.method !== "GET").map((call) => [call.method, call.body]),
+    ).toEqual([
+      ["POST", { llm_model_id: secondId, expected_version: 3 }],
+      ["POST", { llm_model_id: firstId, expected_version: 4 }],
+    ]);
+    expect(profile.bindings["video.shot"]).toEqual({
+      model_id: "binding:video",
+      native_options: { duration: 8 },
+      enabled: false,
+    });
+    expect(connections).toEqual(originalConnections);
+  });
+
+  it("activates an image while retaining an unavailable saved text model and video settings", async () => {
+    const profile = {
+      id: "prof",
+      is_default: true,
+      version: 3,
+      bindings: {
+        "planning.script": { model_id: "litellm/stale/chat", native_options: { temperature: 0.3 } },
+        "video.shot": {
+          model_id: "binding:video",
+          native_options: { duration: 8 },
+          enabled: false,
+        },
+      },
+    };
+    const calls = mockApi(({ url }) => {
+      if (url.endsWith("/model-profiles")) return json([profile]);
+      if (url.endsWith("/model-profiles/prof") || url.endsWith("/simple-mode"))
+        return json(profile);
+      if (url.includes("/api/v1/models"))
+        return json([availableModel("binding:image", "image.generate")]);
+      return undefined;
+    });
+    wrap(<Activation role="image" modelId="binding:image" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "启用" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "启用" }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.url.endsWith("/simple-mode"))?.body).toEqual({
+        image_model_id: "binding:image",
+        expected_version: 3,
+      }),
+    );
+  });
+
+  it("explicitly re-enables the same model and preserves its parameters and other roles", async () => {
+    const profile = {
+      id: "prof",
+      is_default: true,
+      version: 3,
+      bindings: {
+        ...Object.fromEntries(
+          planningSlots.map((slot) => [
+            slot,
+            { model_id: "chat", native_options: { temperature: 0.3 }, enabled: false },
+          ]),
+        ),
+        "video.shot": {
+          model_id: "binding:video",
+          native_options: { duration: 8 },
+          enabled: false,
+        },
+      },
+    };
+    const calls = mockApi(({ url }) => {
+      if (url.endsWith("/model-profiles")) return json([profile]);
+      if (url.endsWith("/model-profiles/prof")) return json(profile);
+      if (url.includes("/api/v1/models")) return json([availableModel("chat")]);
+      return undefined;
+    });
+    wrap(<Activation modelId="chat" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "启用" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "启用" }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.method === "PUT")?.body).toEqual({
+        expected_version: 3,
+        bindings: {
+          ...Object.fromEntries(
+            planningSlots.map((slot) => [
+              slot,
+              { model_id: "chat", native_options: { temperature: 0.3 }, enabled: true },
+            ]),
+          ),
+          "video.shot": profile.bindings["video.shot"],
+        },
+      }),
+    );
+  });
+
+  it("creates an internal default only on first activation, then applies only that role", async () => {
+    const profile = { id: "prof", is_default: true, version: 1, bindings: {} };
+    let created = false;
+    const calls = mockApi(({ method, url }) => {
+      if (url.endsWith("/model-profiles")) {
+        if (method === "POST") {
+          created = true;
+          return json(profile, 201);
+        }
+        return json(created ? [profile] : []);
+      }
+      if (url.endsWith("/model-profiles/prof") || url.endsWith("/simple-mode"))
+        return json(profile);
+      if (url.includes("/api/v1/models"))
+        return json([
+          availableModel("chat"),
+          { ...availableModel("installed"), source: "installed" },
+        ]);
+      return undefined;
+    });
+    wrap(<Activation modelId="chat" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "启用" })).toBeEnabled());
+    expect(calls.every((call) => call.method === "GET")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "启用" }));
+    await waitFor(() =>
+      expect(calls.find((call) => call.url.endsWith("/simple-mode"))?.body).toEqual({
+        llm_model_id: "chat",
+        expected_version: 1,
+      }),
+    );
     expect(
       calls.find((call) => call.method === "POST" && call.url.endsWith("/model-profiles"))?.body,
     ).toEqual({ name: "默认", bindings: {}, is_default: true });
-    expect(calls.find((call) => call.url.endsWith("/simple-mode"))?.body).toEqual({
-      llm_model_id: `litellm/${CONN}/script-quality`,
-      image_model_id: "binding:b1",
-      expected_version: 1,
+  });
+
+  it("retains a created default after activation fails instead of creating it again", async () => {
+    let created = false;
+    let attempts = 0;
+    let profile = { id: "prof", is_default: true, version: 1, bindings: {} };
+    const calls = mockApi(({ method, url }) => {
+      if (url.endsWith("/model-profiles")) {
+        if (method === "POST") {
+          created = true;
+          return json(profile, 201);
+        }
+        return json(created ? [profile] : []);
+      }
+      if (url.endsWith("/model-profiles/prof")) return json(profile);
+      if (url.endsWith("/simple-mode")) {
+        attempts += 1;
+        if (attempts === 1) return json({ detail: "暂时无法启用" }, 503);
+        profile = {
+          ...profile,
+          version: 2,
+          bindings: Object.fromEntries(planningSlots.map((slot) => [slot, { model_id: "chat" }])),
+        };
+        return json(profile);
+      }
+      if (url.includes("/api/v1/models")) return json([availableModel("chat")]);
+      return undefined;
     });
+    wrap(<Activation modelId="chat" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "启用" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "启用" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("暂时无法启用");
+    expect(attempts).toBe(1);
+    await waitFor(() => expect(screen.getByRole("button", { name: "启用" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "启用" }));
+    await screen.findByRole("button", { name: "已启用" });
+    expect(
+      calls.filter((call) => call.method === "POST" && call.url.endsWith("/model-profiles")),
+    ).toHaveLength(1);
+    expect(attempts).toBe(2);
+  });
+
+  it.each(["unavailable", "installed"])("does not enable a %s model", async (reason) => {
+    mockApi(({ url }) => {
+      if (url.includes("/api/v1/models"))
+        return json([
+          {
+            ...availableModel("chat"),
+            ...(reason === "installed" ? { source: "installed" } : { available: false }),
+          },
+        ]);
+      return undefined;
+    });
+    wrap(<Activation modelId="chat" />);
+    await waitFor(() => expect(screen.getByRole("button")).toBeDisabled());
+  });
+
+  it("surfaces a version conflict without retrying or replacing another user's selection", async () => {
+    let profile = { id: "prof", is_default: true, version: 3, bindings: {} };
+    const calls = mockApi(({ url }) => {
+      if (url.endsWith("/model-profiles")) return json([profile]);
+      if (url.endsWith("/model-profiles/prof")) return json(profile);
+      if (url.endsWith("/simple-mode")) {
+        profile = { ...profile, version: 4 };
+        return json({ code: "CONFLICT", detail: "模型配置已被修改", details: {} }, 409);
+      }
+      if (url.includes("/api/v1/models")) return json([availableModel("chat")]);
+      return undefined;
+    });
+    wrap(<Activation modelId="chat" />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "启用" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "启用" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("模型配置已被修改");
+    expect(calls.filter((call) => call.url.endsWith("/simple-mode"))).toHaveLength(1);
   });
 });

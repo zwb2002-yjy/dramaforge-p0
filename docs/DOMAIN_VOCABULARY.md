@@ -1,7 +1,7 @@
 # DOMAIN_VOCABULARY — 术语唯一解
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Updated: 2026-10-07；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
+Updated: 2026-10-08；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 
 本文件是 DramaForge 的**唯一词典**。任何模块、PR、Review、文档只能使用这里的词。
 
@@ -45,6 +45,26 @@ Updated: 2026-10-07；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 | **Resonance** | 前端表现层的受控视觉例外（共鸣舞台），**不是产品实体或第二主链**；仅允许在既定局部范围内偏离全局 Visual System | 见 [frontend/design/README.md](../frontend/design/README.md) §5.5 |
 
 ---
+
+### 界面入口与导航
+
+界面入口与制作导航使用下列显示名称，不改变产品实体或业务路由：
+
+| 显示名称 | 含义 / 既有地址 | 前端代码锚点 |
+|---|---|---|
+| 我的项目 | 全局唯一项目列表 `/`；创建、查找、切换当前空间项目 | `routes/index.tsx` |
+| 进入工作台 | 卡片唯一主动作 `/projects/:id`；按本项目导航偏好恢复，不推断业务进度 | `routes/projects.$projectId.tsx` |
+| 项目导航 | 项目顶栏的侧栏/抽屉开关 | `components/workstation/ProjectWorkspaceShell.tsx` |
+| 项目总览 | `/projects/:id/production` | `components/workstation/projectNavigation.ts` |
+| 故事剧本 | `/projects/:id/script` | 同上 |
+| 角色与素材 | `/projects/:id/assets` | 同上 |
+| 分镜制作 | `/projects/:id/scenes` 及具体场景；生成关键帧/视频仍是独立业务操作 | 同上 |
+| 审片确认 | `/projects/:id/review` | 同上 |
+| 剪辑成片 | `/projects/:id/edit` | 同上 |
+| 最近打开 | 当前空间中匹配单个记忆项目 ID 的筛选；不是多条历史记录 | `lib/navigationPreferences.ts` |
+
+本地项目路径、服务器 `workspace_state.last_view` 均为导航偏好；Project `stage` 是业务事实，
+不得拼接成导航地址。模型就绪提示复用目录与工作空间默认绑定，不声明实际生成成功。
 
 ## 二、Creative Layer
 

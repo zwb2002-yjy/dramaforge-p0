@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test";
-import { installProfessionalMock, PROJECT_ID } from "./professional-mocks";
+import { installProfessionalMock, PROJECT_ID, WORKSPACE_ID } from "./professional-mocks";
 
 async function expectReadableOptions(select: Locator) {
   await expect(select).toHaveCSS("color-scheme", "dark");
@@ -22,8 +22,16 @@ test("model setting options have their own opaque dark surface, not just a style
   page,
 }) => {
   const state = await installProfessionalMock(page);
+  await page.route("**/api/v1/workspaces", (route) =>
+    route.fulfill({
+      json: [
+        { id: WORKSPACE_ID, name: "当前空间" },
+        { id: "workspace-other", name: "其他空间" },
+      ],
+    }),
+  );
   await page.goto("/settings/models");
-  const textModel = page.getByRole("combobox", { name: "文本模型", exact: true });
+  const textModel = page.getByRole("combobox", { name: "设置工作空间", exact: true });
   await expect(textModel).toBeVisible();
   await expectReadableOptions(textModel);
   const value = await textModel.inputValue();

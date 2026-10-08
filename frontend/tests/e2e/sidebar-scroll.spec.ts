@@ -91,11 +91,11 @@ async function scrollReview(page: Page) {
 }
 
 async function expectPrimaryVisible(page: Page) {
-  await expect(page.getByRole("link", { name: "DramaForge 项目大厅" })).toBeInViewport({
+  await expect(page.getByRole("link", { name: "DramaForge 我的项目" })).toBeInViewport({
     ratio: 1,
   });
   const primary = page.getByRole("navigation", { name: "一级导航" });
-  for (const name of ["项目", "创作", "设置"]) {
+  for (const name of ["我的项目", "设置"]) {
     await expect(primary.getByRole("link", { name, exact: true })).toBeInViewport({ ratio: 1 });
   }
   await expect
@@ -118,15 +118,15 @@ for (const viewport of [
     await scrollReview(page);
     await recordLayout(page, testInfo);
     await expectPrimaryVisible(page);
-    const secondary = page.getByRole("complementary", { name: "二级导航" });
-    for (const name of ["作品总览", "故事剧本", "角色素材", "分镜与生成", "审片确认", "剪辑成片"]) {
+    const secondary = page.locator("#project-navigation");
+    for (const name of ["项目总览", "故事剧本", "角色与素材", "分镜制作", "审片确认", "剪辑成片"]) {
       await expect(secondary.getByRole("link", { name, exact: true })).toBeInViewport({ ratio: 1 });
     }
     await expect.poll(async () => (await secondary.boundingBox())?.y).toBe(0);
 
     // Folding the navigation must not take the user back to the top or hide L1.
     const primary = page.getByRole("navigation", { name: "一级导航" });
-    const creation = primary.getByRole("link", { name: "创作", exact: true });
+    const creation = page.getByRole("button", { name: "项目导航", exact: true });
     await creation.click();
     await expect(secondary).not.toBeVisible();
     await expectPrimaryVisible(page);
@@ -138,7 +138,7 @@ for (const viewport of [
     await primary.getByRole("link", { name: "设置", exact: true }).click();
     await expect(page).toHaveURL(/\/settings\/models(?:\?|$)/);
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
-    await creation.click();
+    await page.getByRole("link", { name: "返回工作台" }).click();
     await expect(page).toHaveURL(`/projects/${PROJECT_ID}/review`);
     await expect(page.getByRole("heading", { name: "审片确认" })).toBeInViewport();
     expect(writes).toEqual([]);
@@ -154,10 +154,8 @@ test("narrow-window drawer remains usable after scrolling a long review", async 
   await scrollReview(page);
   await recordLayout(page, testInfo);
   await expectPrimaryVisible(page);
-  const secondary = page.getByRole("complementary", { name: "二级导航" });
-  const creation = page
-    .getByRole("navigation", { name: "一级导航" })
-    .getByRole("link", { name: "创作", exact: true });
+  const secondary = page.locator("#project-navigation");
+  const creation = page.getByRole("button", { name: "项目导航", exact: true });
   await expect(secondary).not.toBeVisible();
   await creation.focus();
   await page.keyboard.press("Enter");
@@ -178,7 +176,7 @@ test("narrow-window drawer remains usable after scrolling a long review", async 
 test("short desktop window scrolls secondary navigation independently", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 320 });
   const { errors, writes } = await openPortraitReview(page);
-  const secondary = page.getByRole("complementary", { name: "二级导航" });
+  const secondary = page.locator("#project-navigation");
   await secondary.hover();
   await page.mouse.wheel(0, 300);
   await expect.poll(() => secondary.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);

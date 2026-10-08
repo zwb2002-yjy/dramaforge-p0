@@ -367,7 +367,7 @@ export function AssetReferencePicker({
             添加引用
           </Button>
           {!assetOptions.length && assets.isSuccess && (
-            <p className="df-ref-note">素材库还没有可用素材，先在「角色素材」中添加。</p>
+            <p className="df-ref-note">素材库还没有可用素材，先在「角色与素材」中添加。</p>
           )}
         </form>
       )}

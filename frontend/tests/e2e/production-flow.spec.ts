@@ -16,10 +16,19 @@ const stageKeys = [
 
 async function setup(page: Page, summaryMissing = false) {
   const writes: string[] = [];
+  const referenceReads: string[] = [];
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname;
+    // This POST resolves existing references without persisting or generating.
+    if (
+      request.method() === "POST" &&
+      /^\/api\/v1\/projects\/[^/]+\/shots\/[^/]+\/references\/resolve$/.test(path)
+    ) {
+      referenceReads.push(path);
+      return;
+    }
     if (
       path.startsWith("/api/") &&
       !["GET", "HEAD", "OPTIONS"].includes(request.method()) &&
@@ -69,13 +78,13 @@ async function setup(page: Page, summaryMissing = false) {
           },
     ),
   );
-  return { writes, errors, state };
+  return { writes, errors, state, referenceReads };
 }
 
 test("production exposes the whole read-only flow and links a failure to the exact shot", async ({
   page,
 }) => {
-  const { writes, errors } = await setup(page);
+  const { writes, errors, referenceReads } = await setup(page);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(`/projects/${PROJECT_ID}/production`);
   const flow = page.getByRole("region", { name: "制作流程", exact: true });
@@ -108,6 +117,9 @@ test("production exposes the whole read-only flow and links a failure to the exa
   await target.click();
   await expect(page).toHaveURL(new RegExp(`/scenes/${SCENE_ID}\\?shotId=${SHOT_ID}$`));
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
+  await expect
+    .poll(() => referenceReads)
+    .toContain(`/api/v1/projects/${PROJECT_ID}/shots/${SHOT_ID}/references/resolve`);
   expect(writes).toEqual([]);
   expect(errors).toEqual([]);
 });

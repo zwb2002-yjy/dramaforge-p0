@@ -37,7 +37,7 @@ test("Project Lobby removes empty and internal explanation clutter", async ({ pa
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "项目大厅" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "我的项目" })).toBeVisible();
   await expect(page.getByText("PROJECTS", { exact: true })).toHaveCount(0);
   await expect(page.getByText("服务就绪", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "继续创作" })).toHaveCount(0);
@@ -47,7 +47,7 @@ test("Project Lobby removes empty and internal explanation clutter", async ({ pa
     .toBe(true);
 });
 
-test("permanent L1 owns Project, Creation and Settings while L2 follows context", async ({
+test("global navigation owns projects and settings; the project top bar controls L2", async ({
   page,
 }) => {
   const pageErrors: string[] = [];
@@ -57,9 +57,10 @@ test("permanent L1 owns Project, Creation and Settings while L2 follows context"
   await page.goto(`/projects/${PROJECT_ID}/production`);
 
   const primaryNavigation = page.getByRole("navigation", { name: "一级导航" });
-  await expect(primaryNavigation.getByRole("link", { name: "项目" })).toBeVisible();
-  const creationEntry = primaryNavigation.getByRole("link", { name: "创作" });
-  await expect(creationEntry).toHaveAttribute("aria-current", "page");
+  await expect(primaryNavigation.getByRole("link", { name: "我的项目" })).toBeVisible();
+  const creationEntry = page.getByRole("button", { name: "项目导航" });
+  await expect(primaryNavigation.getByRole("link")).toHaveCount(2);
+  await expect(creationEntry).toHaveAttribute("aria-controls", "project-navigation");
   await expect(primaryNavigation.getByRole("link", { name: "设置" })).toBeVisible();
 
   await creationEntry.click();
@@ -72,11 +73,11 @@ test("permanent L1 owns Project, Creation and Settings while L2 follows context"
   const creationNavigation = page.getByRole("navigation", { name: "创作导航" });
   await expect(creationNavigation.getByRole("link")).toHaveCount(6);
   await expect(creationNavigation).toContainText(
-    /作品总览.*故事剧本.*角色素材.*分镜与生成.*审片确认.*剪辑成片/s,
+    /项目总览.*故事剧本.*角色与素材.*分镜制作.*审片确认.*剪辑成片/s,
   );
   await expect(creationNavigation).toContainText("审片确认");
   await expect(creationNavigation).not.toContainText("专业");
-  await expect(page.getByRole("link", { name: "作品总览" })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "项目总览" })).toHaveAttribute(
     "aria-current",
     "page",
   );
@@ -105,22 +106,10 @@ test("permanent L1 owns Project, Creation and Settings while L2 follows context"
     "data-primary-section",
     "settings",
   );
-  await expect(page.getByRole("navigation", { name: "一级导航" })).toContainText(
-    /项目.*创作.*设置/s,
-  );
+  await expect(page.getByRole("navigation", { name: "一级导航" })).toContainText(/我的项目.*设置/s);
   await expect(page.getByRole("navigation", { name: "设置导航" })).toContainText(/模型设置.*账号/s);
-  await page.getByTestId("project-models-disclosure").locator("summary").click();
-  await page.getByRole("combobox", { name: "项目模型覆盖" }).selectOption(PROJECT_ID);
-  await page.getByRole("link", { name: "设置项目模型", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/settings/projects/${PROJECT_ID}(?:\\?|$)`));
+  await page.goto(`/settings/projects/${PROJECT_ID}`);
   await expect(page.getByTestId("project-settings-page")).toBeVisible();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () => (window as typeof window & { __dfNavigationMarker?: string }).__dfNavigationMarker,
-      ),
-    )
-    .toBe("alive");
 });
 
 test("Project navigation survives losing tab-scoped context", async ({ page }) => {
@@ -131,7 +120,7 @@ test("Project navigation survives losing tab-scoped context", async ({ page }) =
   await page.evaluate(() => sessionStorage.clear());
   await page.getByRole("link", { name: "设置" }).click();
   await expect(page).toHaveURL(/\/settings\/models(?:\?|$)/);
-  await page.getByRole("link", { name: "创作", exact: true }).click();
+  await page.getByRole("link", { name: "返回工作台", exact: true }).click();
 
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/script`);
   await expect(page.getByRole("heading", { name: "故事剧本" })).toBeVisible();
@@ -146,18 +135,16 @@ test("project reentry preserves the scene and exposes production and editing at 
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "创作导航" })).toBeVisible();
-  await page.getByRole("link", { name: "项目", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "项目大厅" })).toBeVisible();
-  await page.getByRole("link", { name: "创作", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "选择项目开始创作" })).toBeVisible();
-  await page.getByRole("list", { name: "项目列表" }).getByRole("button").first().click();
+  await page.getByRole("link", { name: "我的项目", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "我的项目" })).toBeVisible();
+  await page.getByRole("button", { name: /进入工作台/ }).click();
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
-  await page.getByRole("link", { name: "作品总览", exact: true }).click();
+  await page.getByRole("link", { name: "项目总览", exact: true }).click();
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/production`);
   await page.getByRole("link", { name: "剪辑成片", exact: true }).click();
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/edit`);
-  await page.getByRole("link", { name: "创作", exact: true }).click();
-  await page.getByRole("link", { name: "创作", exact: true }).click();
+  await page.getByRole("button", { name: "项目导航", exact: true }).click();
+  await page.getByRole("button", { name: "项目导航", exact: true }).click();
   await expect(page.getByRole("navigation", { name: "创作导航" })).toBeVisible();
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/edit`);
 });
@@ -166,12 +153,13 @@ test("lobby filters are a focused view rather than a scroll anchor", async ({ pa
   await installProfessionalMock(page);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/");
-  await page.getByRole("link", { name: "工作空间", exact: true }).click();
+  await page.getByRole("link", { name: "管理工作空间", exact: true }).click();
   await expect(page).toHaveURL(/panel=workspace/);
   expect(new URL(page.url()).hash).toBe("");
   await expect(page.getByRole("textbox", { name: "新空间名" })).toBeFocused();
   const box = await page.getByRole("textbox", { name: "新空间名" }).boundingBox();
   expect(box!.y).toBeLessThan(400);
+  await page.getByRole("link", { name: "我的项目", exact: true }).click();
   await page.getByRole("link", { name: "最近打开", exact: true }).click();
   await expect(page.getByText("当前空间还没有最近打开的项目。")).toBeVisible();
   await expect(page.getByRole("list", { name: "项目列表" })).not.toBeVisible();
@@ -181,11 +169,12 @@ test("lobby filters are a focused view rather than a scroll anchor", async ({ pa
   await expect(page).toHaveURL(/panel=workspace$/);
   await expect(page.getByRole("textbox", { name: "新空间名" })).toBeFocused();
   expect(await page.evaluate(() => scrollY)).toBe(0);
-  await page.getByRole("link", { name: "新建项目", exact: true }).click();
+  await page.getByRole("link", { name: "我的项目", exact: true }).click();
+  await page.getByRole("button", { name: "新建项目", exact: true }).click();
   await expect(page.getByRole("region", { name: "新建项目" })).toBeVisible();
   await page.getByRole("button", { name: "取消", exact: true }).click();
   await expect(page.getByRole("region", { name: "新建项目" })).not.toBeVisible();
-  await page.getByRole("link", { name: "新建项目", exact: true }).click();
+  await page.getByRole("button", { name: "新建项目", exact: true }).click();
   await expect(page.getByRole("region", { name: "新建项目" })).toBeVisible();
 });
 
@@ -197,8 +186,8 @@ test("mobile keeps L1 fixed and exposes L2 as a labelled drawer without overflow
   await page.goto(`/projects/${PROJECT_ID}/scenes`);
 
   await expect(page.getByRole("navigation", { name: "一级导航" })).toBeVisible();
-  await page.getByRole("link", { name: "创作", exact: true }).click();
-  await expect(page.getByRole("complementary", { name: "二级导航" })).toBeVisible();
+  await page.getByRole("button", { name: "项目导航", exact: true }).click();
+  await expect(page.locator("#project-navigation")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "创作导航" })).toBeVisible();
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
@@ -209,18 +198,18 @@ test("mobile keeps L1 fixed and exposes L2 as a labelled drawer without overflow
     .getByRole("link", { name: "故事剧本", exact: true })
     .click();
   await expect(page).toHaveURL(`/projects/${PROJECT_ID}/script`);
-  await expect(page.getByRole("link", { name: "创作", exact: true })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: "项目导航", exact: true })).toHaveAttribute(
     "aria-expanded",
     "false",
   );
-  await expect(page.getByRole("complementary", { name: "二级导航" })).not.toBeVisible();
+  await expect(page.locator("#project-navigation")).not.toBeVisible();
 
-  await page.getByRole("link", { name: "创作", exact: true }).click();
+  await page.getByRole("button", { name: "项目导航", exact: true }).click();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("link", { name: "创作", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "项目导航", exact: true })).toBeVisible();
 
-  await page.getByRole("link", { name: "创作", exact: true }).click();
-  const drawer = page.getByRole("complementary", { name: "二级导航" });
+  await page.getByRole("button", { name: "项目导航", exact: true }).click();
+  const drawer = page.locator("#project-navigation");
   const drawerBox = await drawer.boundingBox();
   const scrim = page.getByRole("button", { name: "关闭二级导航" });
   const scrimBox = await scrim.boundingBox();
@@ -228,7 +217,7 @@ test("mobile keeps L1 fixed and exposes L2 as a labelled drawer without overflow
   expect(scrimBox).not.toBeNull();
   expect(scrimBox!.x).toBeGreaterThanOrEqual(drawerBox!.x + drawerBox!.width);
   await scrim.click();
-  await expect(page.getByRole("link", { name: "创作", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "项目导航", exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: "设置" }).click();
   await expect(page).toHaveURL(/\/settings\/models(?:\?|$)/);
@@ -253,7 +242,7 @@ test("mobile Production prioritizes the cross-scene overview and progressively d
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/projects/${PROJECT_ID}/production`);
 
-  await expect(page.getByRole("heading", { level: 1, name: "作品总览" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "项目总览" })).toBeVisible();
   const monitor = page.getByTestId("production-monitor");
   await expect(monitor).toBeVisible();
   await expect(page.getByRole("tab", { name: "作品进度", exact: true })).toHaveAttribute(
@@ -335,10 +324,7 @@ test("mobile Review keeps the keyframe and normalized annotation surface inside 
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/projects/${PROJECT_ID}/production`);
-  await page
-    .getByRole("navigation", { name: "一级导航" })
-    .getByRole("link", { name: "创作", exact: true })
-    .click();
+  await page.getByRole("button", { name: "项目导航", exact: true }).click();
   await page
     .getByRole("navigation", { name: "创作导航" })
     .getByRole("link", { name: "审片确认", exact: true })
@@ -414,15 +400,15 @@ test("global settings never adopt a remembered project and restore lobby filters
   await expect(page.getByRole("link", { name: "项目设置", exact: true })).toHaveCount(0);
   await page.getByRole("link", { name: "账号", exact: true }).click();
   await page.reload();
-  await page.getByRole("link", { name: "返回项目大厅", exact: true }).first().click();
+  await page.getByRole("link", { name: "返回我的项目", exact: true }).first().click();
   await expect(page).toHaveURL(/panel=workspace/);
-  await page.getByRole("link", { name: "创作", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "选择项目开始创作" })).toBeVisible();
-  await expect(page).toHaveURL(/panel=select/);
+  await page.getByRole("link", { name: "我的项目", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "我的项目" })).toBeVisible();
+  await expect(page).toHaveURL("/");
   await page.goBack();
   await expect(page).toHaveURL(/panel=workspace/);
   await page.goForward();
-  await expect(page).toHaveURL(/panel=select/);
+  await expect(page).toHaveURL("/");
 });
 
 test("settings activation reveals navigation without resetting the page, and returns to the exact scene", async ({
@@ -432,7 +418,7 @@ test("settings activation reveals navigation without resetting the page, and ret
   const scenePath = "/projects/" + PROJECT_ID + "/scenes/" + SCENE_ID;
   await page.goto(scenePath);
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
-  await page.getByRole("link", { name: "创作", exact: true }).click();
+  await page.getByRole("button", { name: "项目导航", exact: true }).click();
   await page.getByRole("link", { name: "设置", exact: true }).click();
   await expect(page.getByRole("navigation", { name: "设置导航" })).toBeVisible();
   await page.getByRole("link", { name: "账号", exact: true }).click();
@@ -446,7 +432,7 @@ test("settings activation reveals navigation without resetting the page, and ret
   await page.goForward();
   await expect(page).toHaveURL(settingsUrl);
   await page.reload();
-  await page.getByRole("link", { name: "返回创作", exact: true }).click();
+  await page.getByRole("link", { name: "返回工作台", exact: true }).click();
   await expect(page).toHaveURL(scenePath);
 });
 
@@ -515,7 +501,7 @@ test("new project keeps essentials visible and retains collapsed options without
   expect(state.editing.requests.filter((request) => request.method !== "GET")).toEqual([]);
 });
 
-test("model settings show providers and default models on one page, keeping add-provider drafts", async ({
+test("model settings activate models inside providers and add custom connections without categories", async ({
   page,
 }) => {
   const state = await installProfessionalMock(page);
@@ -523,8 +509,8 @@ test("model settings show providers and default models on one page, keeping add-
     route.fulfill({
       json: [
         {
-          provider_type: "fixture",
-          protocol_profile: "fixture-v1",
+          provider_type: "openai_compatible_media",
+          protocol_profile: "openai_media_v1",
           display_name: "Fixture Provider",
           default_base_url: "https://fixture.invalid",
           kind: "media",
@@ -555,15 +541,15 @@ test("model settings show providers and default models on one page, keeping add-
   await page.goto("/settings/models");
   await expect(page.getByRole("tab")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "供应商" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "默认模型" })).toBeVisible();
-  await expect(page.getByLabel("文本模型")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "连接你的第一个供应商" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "默认模型" })).toHaveCount(0);
+  await expect(page.getByLabel("文本模型")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "配置 文本服务" })).toBeVisible();
 
   await page.getByTestId("add-provider").click();
   const dialog = page.getByTestId("add-provider-dialog");
-  // Text gateways sit in the same vendor list, not behind an advanced tab.
-  await dialog.getByRole("button", { name: /LiteLLM/ }).click();
-  await expect(dialog.getByLabel("服务地址")).toHaveValue("http://litellm:4000");
+  await expect(dialog.getByRole("navigation", { name: "选择供应商" })).toHaveCount(0);
+  await expect(dialog.getByLabel("连接名称")).toHaveValue("");
+  await expect(dialog.getByLabel("服务地址")).toHaveValue("");
   await dialog.getByLabel("服务地址").fill("https://example.invalid/unsaved");
   await expect(dialog.getByRole("button", { name: "连接并读取模型" })).toBeDisabled();
   await dialog.getByLabel("API Key").fill("sk-unsaved");

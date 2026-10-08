@@ -50,6 +50,9 @@ chmod +x install.sh
 The installer verifies `release.env`, pulls the immutable release images,
 generates unique secrets by running `app.install_env` inside the backend image,
 and starts the stack with `--no-build`. It never invokes a host package manager.
+Initialization also generates a separate `DIRECTOR_CHECKPOINT_PASSWORD` and
+its local `DIRECTOR_CHECKPOINT_DATABASE_URL`; the release workflow supplies
+the checkpoint password explicitly when validating and smoke-testing Compose.
 
 Open `http://localhost:8080`. A clean instance lets the first person create the
 Owner account. Public registration is closed after that bootstrap unless an

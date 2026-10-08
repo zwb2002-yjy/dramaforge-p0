@@ -63,6 +63,7 @@ async function setupProviders(page: Page) {
     credential_key_version: "v1",
     verification_status: "verified",
     verified_at: null,
+    connection_revision_id: "fixture-revision",
   };
   await page.route("**/api/v1/provider-plugins", (route) => route.fulfill({ json: [plugin] }));
   await page.route(`**/api/v1/workspaces/${WORKSPACE_ID}/projects`, (route) =>
@@ -130,6 +131,123 @@ async function setupProviders(page: Page) {
   return { writes, model, connection };
 }
 
+test("text service owns its URL and key and its discovered model can be activated for the workspace", async ({
+  page,
+}) => {
+  const { connection } = await setupProviders(page);
+  const textConnection = {
+    ...connection,
+    id: "text-connection",
+    display_name: "文本服务",
+    provider_type: "litellm",
+    protocol_profile: "openai_chat_v1",
+    base_url: "https://my-text.invalid/v1",
+  };
+  const modelId = `litellm/${textConnection.id}/my-chat`;
+  const creates: Record<string, unknown>[] = [];
+  const saves: Record<string, unknown>[] = [];
+  let connected = false;
+  let discovered = false;
+  await page.route("**/api/v1/provider-plugins", (route) =>
+    route.fulfill({
+      json: [
+        {
+          provider_type: "litellm",
+          protocol_profile: "openai_chat_v1",
+          display_name: "LiteLLM",
+          default_base_url: "http://litellm:4000",
+          implemented: true,
+          kind: "text",
+          models: [],
+          paid_capabilities: [],
+          capabilities: ["auth_models"],
+        },
+      ],
+    }),
+  );
+  await page.route(`**/api/v1/workspaces/${WORKSPACE_ID}/provider-connections`, async (route) => {
+    if (route.request().method() === "POST") {
+      creates.push(route.request().postDataJSON());
+      connected = true;
+      await route.fulfill({ status: 201, json: textConnection });
+    } else await route.fulfill({ json: connected ? [connection, textConnection] : [connection] });
+  });
+  const catalog = {
+    probe_id: "text-probe",
+    capability: "auth_models",
+    status: "passed",
+    discovered_model_ids: ["my-chat"],
+    connection_revision_id: "fixture-revision",
+  };
+  await page.route(`**/provider-connections/text-connection/probes`, async (route) => {
+    if (route.request().method() === "POST") {
+      expect(route.request().postDataJSON()).toEqual({ capability: "auth_models" });
+      discovered = true;
+      await route.fulfill({ json: catalog });
+    } else await route.fulfill({ json: discovered ? [catalog] : [] });
+  });
+  await page.route("**/api/v1/models", (route) =>
+    route.fulfill({
+      json: discovered
+        ? [
+            {
+              id: modelId,
+              display_name: "my-chat · 文本服务",
+              source: "workspace",
+              capabilities: ["text.generate"],
+              available: true,
+            },
+          ]
+        : [],
+    }),
+  );
+  let profile: Record<string, unknown> | null = null;
+  await page.route(`**/workspaces/${WORKSPACE_ID}/model-profiles`, async (route) => {
+    if (route.request().method() === "POST") {
+      profile = { id: "text-profile", name: "默认", is_default: true, version: 1, bindings: {} };
+      await route.fulfill({ status: 201, json: profile });
+    } else await route.fulfill({ json: profile ? [profile] : [] });
+  });
+  await page.route(`**/model-profiles/text-profile`, (route) => route.fulfill({ json: profile }));
+  await page.route(`**/model-profiles/text-profile/simple-mode`, async (route) => {
+    saves.push(route.request().postDataJSON());
+    profile = {
+      ...profile,
+      version: 2,
+      bindings: Object.fromEntries(
+        ["planning.brief", "planning.script", "planning.storyboard"].map((slot) => [
+          slot,
+          { model_id: modelId },
+        ]),
+      ),
+    };
+    await route.fulfill({ json: profile });
+  });
+  await page.goto("/settings/models");
+  await page.getByRole("button", { name: "选择 文本服务", exact: true }).click();
+  const panel = page.getByRole("region", { name: "配置 文本服务", exact: true });
+  await expect(panel.getByLabel("服务地址")).toHaveValue("");
+  await panel.getByLabel("服务地址").fill(textConnection.base_url);
+  await panel.getByLabel("API Key", { exact: true }).fill("text-only-fixture-key");
+  await panel.getByRole("button", { name: "连接并读取模型" }).click();
+  await expect(panel.getByText("my-chat", { exact: true })).toBeVisible();
+  await panel.getByRole("button", { name: "完成", exact: true }).click();
+  await panel.getByRole("button", { name: "启用 my-chat", exact: true }).click();
+  await expect(panel.getByRole("button", { name: "已启用 my-chat", exact: true })).toBeDisabled();
+  expect(creates).toEqual([
+    {
+      provider_type: "litellm",
+      protocol_profile: "openai_chat_v1",
+      display_name: "文本服务",
+      base_url: textConnection.base_url,
+      api_key: "text-only-fixture-key",
+      enabled: true,
+    },
+  ]);
+  expect(saves).toEqual([{ llm_model_id: modelId, expected_version: 1 }]);
+  await expect(page.getByLabel("文本模型", { exact: true })).toHaveCount(0);
+});
+
 test("supplier settings stay read-only while browsing, show failed evidence, and keep the return context", async ({
   page,
 }) => {
@@ -151,15 +269,15 @@ test("supplier settings stay read-only while browsing, show failed evidence, and
   await dialog.getByTestId("provider-diagnostics-disclosure").locator("summary").click();
   await expect(dialog.getByText("检查记录读取失败。")).toBeVisible();
   await expect(dialog.getByText("暂无检查记录。")).toHaveCount(0);
-  await expect(dialog.getByText(/生成类检查暂不提供/)).toBeVisible();
+  await expect(dialog.getByLabel("诊断模型")).toHaveCount(0);
+  await expect(dialog.getByText("NodeRun ID")).toHaveCount(0);
   await dialog.getByLabel("服务地址").fill("");
   await expect(dialog.getByRole("button", { name: "保存", exact: true })).toBeDisabled();
   await dialog.getByRole("button", { name: "放弃修改" }).click();
   await expect(dialog.getByLabel("服务地址")).toHaveValue("https://saved.invalid");
 
-  await page.getByTestId("project-models-disclosure").locator("summary").click();
-  await page.getByLabel("项目模型覆盖").selectOption(PROJECT_ID);
-  await page.getByRole("link", { name: "设置项目模型", exact: true }).click();
+  await expect(page.getByTestId("project-models-disclosure")).toHaveCount(0);
+  await page.goto(`/settings/projects/${PROJECT_ID}?returnTo=${encodeURIComponent(origin)}`);
   await expect(page.getByTestId("project-settings-page")).toBeVisible();
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe(origin);
   await page.getByTestId("project-model-source-disclosure").locator("summary").click();
@@ -181,7 +299,7 @@ test("supplier settings stay read-only while browsing, show failed evidence, and
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe(origin);
   const returnToCreation = page
     .getByRole("navigation", { name: "页面返回" })
-    .getByRole("link", { name: "返回创作", exact: true });
+    .getByRole("link", { name: "返回工作台", exact: true });
   await expect(returnToCreation).toHaveAttribute("href", origin);
   await returnToCreation.click();
   await expect(page).toHaveURL(origin);
@@ -215,6 +333,7 @@ test("adding models reads the free catalog, then binds only the ticked exact ide
             tested_at: "2026-10-07T00:00:00Z",
             error_code: null,
             discovered_model_ids: [model.model_id, "unknown-remote-model"],
+            connection_revision_id: "fixture-revision",
           },
         });
       } else await route.fulfill({ json: [] });
@@ -254,7 +373,7 @@ test("adding models reads the free catalog, then binds only the ticked exact ide
   await dialog.getByRole("button", { name: "添加模型", exact: true }).click();
   const picker = dialog.getByTestId("provider-model-picker");
   await expect(picker.getByText("已发现 · 暂未支持执行 1")).toBeVisible();
-  await picker.getByRole("checkbox", { name: /Fixture Image/ }).check();
+  await picker.getByRole("checkbox", { name: model.model_id }).check();
   expect(saved).toEqual([]);
   await dialog.getByRole("button", { name: "添加 1 个模型" }).click();
   await expect(dialog.getByText("已添加 1 个模型。")).toBeVisible();

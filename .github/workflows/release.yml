@@ -94,6 +94,7 @@ jobs:
     env:
       POSTGRES_PASSWORD: release-compose-postgres-password
       POSTGRES_APP_PASSWORD: release-compose-app-password
+      DIRECTOR_CHECKPOINT_PASSWORD: release-compose-checkpoint-password
       MINIO_ROOT_PASSWORD: release-compose-minio-password
       LITELLM_DB_PASSWORD: release-compose-litellm-db-password
       LITELLM_MASTER_KEY: sk-release-compose-master-key

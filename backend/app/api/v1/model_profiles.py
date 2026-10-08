@@ -359,7 +359,7 @@ async def get_effective_bindings(
         return []
     from app.providers.model_profiles.service import parse_bindings
 
-    resolver = ModelBindingResolver(session, registry=service._registry)
+    resolver = ModelBindingResolver(session)
     result: list[EffectiveBindingRead] = []
     for slot, binding in parse_bindings(profile.bindings).items():
         if not binding.enabled:

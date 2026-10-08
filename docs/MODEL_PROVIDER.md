@@ -91,7 +91,7 @@ revision 会报告工作台开放子集，且只有 active revision 可新建 Bi
 插件以 `kind` 区分 `media`（发现的模型须匹配目录合同并建 Binding）与 `text`（LiteLLM /
 OpenAI 兼容 Chat 连接，发现的别名直接成为 `litellm/{connection_id}/{alias}` 模型）。
 `GET /api/v1/models` 以 `source` 区分 `workspace`（本工作空间连接下的 Binding 或文本
-别名）与 `installed`（进程级目录或网关配置）；设置页的默认模型与项目覆盖只提供
+别名）与 `installed`（进程级目录或网关配置）；供应商面板的模型启用与项目覆盖只提供
 `workspace` 模型，进程级网关别名保留为内部回退，不与工作空间模型并列。
 官方能力中不属于当前 `image.generate` / `video.generate` 合同的编辑、延长、组图和
 图层操作，记录在 Manifest 的 `documented_features`，不会因此变成可执行 Product 能力。
@@ -210,19 +210,25 @@ BF16 或量化权重只要由同一 SGLang H3 协议提供相同分区能力，�
 ## 文本凭证边界
 
 文本设置页使用工作空间级 `litellm/openai_chat_v1` 连接保存 URL / Key 的加密 revision。
-`workspace_registry.py` 先复制进程静态模型，再为当前 revision 的成功目录 evidence 中
-尚不存在的 ID 注册 `litellm/<model>` 动态 adapter。用户在工作空间 / 项目模型方案中
-选择具体模型。媒体 BYOK 同样使用 `ProviderConnection` 及其不可变 credential revision。
+`workspace_registry.py` 先复制进程静态模型，仅在连接当前认证投影为 `verified` 时，
+为当前 connection / credential revision 的成功目录 evidence 中模型注册
+`litellm/<connection-UUID>/<remote-model-id>` 动态 adapter。当前 401/403 撤销资格，历史成功
+evidence 仍保留；429、超时与空目录不单独撤销既有认证。用户在工作空间 / 项目模型方案中
+选择具体模型；生效预览也加载这一空间 registry，保留具体 Binding 与文本连接身份。
+媒体 BYOK 同样使用 `ProviderConnection` 及其不可变 credential revision。
 
 **当前实现限制**：静态 `script-quality` / `script-fast` 等模型仍使用部署级
-`LITELLM_GATEWAY_URL` / `LITELLM_API_KEY`；发现同名 alias 时动态 registry 跳过注册，
-并不会把该静态 adapter 改绑到工作空间连接。配置摘要也仍把部署环境视为文本已配置
+`LITELLM_GATEWAY_URL` / `LITELLM_API_KEY`；发现同名 alias 时连接身份仍独立注册，
+不会把该静态 adapter 改绑到工作空间连接。配置摘要仍把部署环境视为文本已配置
 的来源之一。此调用路径存在来源混淆风险，不能据此声称已经发生凭证泄漏，也不能把
 “工作空间 URL / Key 已保存”当作所有文本模型均使用它的证明。
 
 目标是工作空间、显式部署连接及历史模型各有明确来源，选择后不静默切换；具体迁移与
 验收见下文 MP-01、MP-09。经 LiteLLM Proxy 的文本请求由 Proxy 路由上游；直接连接
 兼容端点的请求不由本地 Proxy 接管。两者共用文本 HTTP 合同。
+
+文本连接的免费目录读取与 LiteLLM 文本客户端复用 `normalize_models_url`，接受带或
+不带 `/v1` 的 Base URL，不再重复拼接版本段。
 
 ## 不可绕过的规则
 
@@ -265,7 +271,7 @@ BF16 或量化权重只要由同一 SGLang H3 协议提供相同分区能力，�
   账号返回但尚无精确目录项的模型可显式复用兼容合同。这不证明远端接受该合同，
   也不能仅凭 ID 推断图片 / 视频能力、参考槽位或参数协议。
 - 媒体服务地址使用独立草稿，空输入不回弹为旧地址；媒体轮换 Key 不保存地址草稿。
-  文本连接使用一个保存操作依次更新地址和 Key，尚不是跨两项修改的原子事务。
+  已保存的文本连接同样分别保存地址与更换 Key；新增连接的 URL / Key 一次创建。
   切换供应商 / 工作空间清除未提交凭证与旧操作反馈；凭证从不回读。
 - 选择目录模型只更新本地选择，点击「添加模型绑定」才写入；绑定所选项目
   仍需另一显式操作。历史合同、停用连接 / 绑定和未验证状态不伪装为可用。
@@ -273,9 +279,19 @@ BF16 或量化权重只要由同一 SGLang H3 协议提供相同分区能力，�
   HTTP 成功但业务状态失败，不显示成功提示。当前认证状态读取后端按连接版本核对的
   `verification_status`；历史 probe 的时间顺序不能覆盖当前状态，因为可能包含旧凭证
   的迟到失败。旧通过仅标注为历史证据。变更配置后重新读取事实，不自动探测。
-- 工作空间方案只提交用户修改的模型组，不把一组中首个模型写回全部环节。
-  后台刷新保留草稿；版本变化阻止覆盖，必须核对并显式放弃草稿后重新选择。
-  保存名称与保存模型选择互不吞掉另一份草稿。
+  连接与目录证据在读取接口中返回 `connection_revision_id`；可选目录只采用当前版本
+  的成功记录，更换地址或 Key 后不再用旧账号的模型列表标注“可用”。
+- 设置页在模型列表直接「启用」当前用途（文本 / 图片 / 视频），移除重复的默认模型、
+  多套方案和按项目覆盖入口。多份 LLM 的连接、地址、Key 保留，点击另一模型只切换
+  当前文本用途；不增加自动路由池或隐式 fallback。后台继续使用默认 Profile 保存当前选择。
+  启用只提交对应模型组，不把未操作的用途写回。
+  视频用途接受 `video.shot` 的任一声明能力（文生、首帧、尾帧、首尾帧或参考素材），
+  配置提示采用相同资格；生成前再校验当前请求所需的具体能力。
+  保存仅校验新增或修改的槽位；未修改的失效配置继续保留，不能阻塞其他模型组的保存。
+  简单模式选择同一个模型时保留参数与启用状态；无变更保存仍检查版本，但不增加版本号。
+  保留失效配置不表示可执行，生成前仍按当前连接和模型资格校验并阻塞。
+  显式启用同一模型可恢复被停用槽位并保留其参数。版本冲突刷新当前选择并显示错误，
+  不自动重试或覆盖他人的修改。连接配置与模型启用互不吞掉草稿。
 - 从作品进入设置时保留已校验的返回路径，按当前工作空间作品列表选定上下文。
   只读摘要展示方案解析 API 返回的完整模型 ID、来源和方案版本，并与保存的
   项目供应商绑定分列；缺失结果标为「未确认」，不推断未配置或已就绪。
@@ -336,10 +352,10 @@ Seedance 1.0 Pro 旧目录项保留以避免既有绑定失效；新连接优先
 
 ## 真实接入流程与停止条件
 
-流程：「模型设置 → 添加供应商」→ 选择厂商、确认地址、填写 Key →「连接并读取模型」
+流程：「模型设置」→ 选择已有预设或添加自定义供应商 → 填写地址与 Key →「连接并读取模型」
 先运行不付费的认证 / 模型目录（401/403 或目录缺失即停止）→ 勾选要用的模型并创建
 绑定（模型出现在当前连接修订最近一次通过的目录读取中即继承该次账号可见证据，
-精确目录项与复用其他目录项的发现 ID 规则一致）→ 在「默认模型」中选择 →
+精确目录项与复用其他目录项的发现 ID 规则一致）→ 在模型列表点击「启用」→
 核对账号价格。当前尚未提供独立的 Owner paid-probe 授权合同，设置页和后端均阻止
 生成式探测；已有价格快照不等于操作授权。首次真实生成走正常生产入口并由 Owner
 明确触发，不通过其他入口绕开。
@@ -376,7 +392,6 @@ create。能力边界细节见 [PRODUCTION_RUNTIME.md](PRODUCTION_RUNTIME.md)。
 
 | 当前实现 | 对目标的缺口 | 代码依据 |
 | --- | --- | --- |
-| 设置探测直接拼 Base URL 与插件目录路径，文本执行另有规范化函数 | 输入带 `/v1` 的文本地址时，目录路径可能重复版本段 | `connection_service.py::probe`、`litellm_gateway/client.py::normalize_models_url` |
 | 文本发现统一注册 Chat 能力，同名静态 alias 不替换 adapter | 目录分类及空间/部署来源尚不满足 MP-03、MP-09 | `litellm_gateway/workspace_registry.py`、`litellm_gateway/model_catalog.py` |
 | Workbench 预览生成语义计划，Provider Compiler 在 Worker 执行；创意上下文直接追加 JSON | 尚无可确认的最终 payload 预览；模型 prompt 策略和编译证据需要统一 | `production/workbench_execution.py::_compose_effective_prompt / build_plan`、`execution/media_submission.py` |
 | 编译器摘要字段形状不同，执行层从摘要顶层读取生效参数 | wire 已有参数仍可能在统一转换记录中缺失 | `providers/minimax.py::MiniMaxVideoCompiler`、`providers/openai_compatible_media.py`、`execution/media_submission.py` |

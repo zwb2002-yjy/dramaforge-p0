@@ -3512,6 +3512,11 @@ export interface components {
             verification_status: string;
             /** Verified At */
             verified_at: string | null;
+            /**
+             * Connection Revision Id
+             * Format: uuid
+             */
+            connection_revision_id: string;
         };
         /** ConsistencyRiskRead */
         ConsistencyRiskRead: {
@@ -5818,6 +5823,8 @@ export interface components {
             error_code: string | null;
             /** Discovered Model Ids */
             discovered_model_ids: string[];
+            /** Connection Revision Id */
+            connection_revision_id: string | null;
         };
         /** ProbeRequest */
         ProbeRequest: {

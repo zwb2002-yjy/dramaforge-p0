@@ -160,6 +160,7 @@ class ConnectionRead(BaseModel):
     credential_key_version: str | None
     verification_status: str
     verified_at: datetime | None
+    connection_revision_id: UUID
 
 
 class ProbeRequest(BaseModel):
@@ -190,6 +191,7 @@ class ProbeRead(BaseModel):
     tested_at: datetime
     error_code: str | None
     discovered_model_ids: list[str]
+    connection_revision_id: UUID | None
 
 
 class ModelBindingCreate(BaseModel):
@@ -271,6 +273,7 @@ async def _connection_read(
     # without one (created before a key was saved, or after its credential row was
     # removed), and claiming "已保存" then is a state lie the Owner cannot detect.
     credential_version = await service.credential_version(connection)
+    revision = await service.current_connection_revision(connection=connection)
     return ConnectionRead(
         id=connection.id,
         workspace_id=connection.workspace_id,
@@ -283,6 +286,7 @@ async def _connection_read(
         credential_key_version=credential_version,
         verification_status=connection.verification_status,
         verified_at=connection.verified_at,
+        connection_revision_id=revision.id,
     )
 
 
@@ -301,6 +305,7 @@ def _probe_read(evidence: ProviderCapabilityEvidence) -> ProbeRead:
         tested_at=evidence.tested_at,
         error_code=evidence.error_code,
         discovered_model_ids=list(evidence.discovered_model_ids or []),
+        connection_revision_id=evidence.connection_revision_id,
     )
 
 
@@ -600,12 +605,16 @@ async def list_project_bindings(
     """Read-only view of the project's Provider bindings (one row per purpose)."""
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     rows = (
-        await session.execute(
-            select(ProjectProviderBinding)
-            .where(ProjectProviderBinding.project_id == project.id)
-            .order_by(ProjectProviderBinding.purpose)
+        (
+            await session.execute(
+                select(ProjectProviderBinding)
+                .where(ProjectProviderBinding.project_id == project.id)
+                .order_by(ProjectProviderBinding.purpose)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     details: list[ProjectBindingDetailRead] = []
     for row in rows:
         model = await session.get(ProviderModelBinding, row.model_binding_id)

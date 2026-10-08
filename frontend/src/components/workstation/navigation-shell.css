@@ -79,6 +79,59 @@
   font-size: var(--df-font-size-meta);
 }
 
+.df-primary-sidebar nav > a > span {
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.df-model-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--df-space-3);
+  padding: var(--df-space-3) var(--df-space-4);
+  margin-bottom: var(--df-space-5);
+  border: 1px solid var(--df-border-subtle);
+  border-radius: var(--df-radius-container);
+  background: var(--df-surface-1);
+  font-size: var(--df-font-size-caption);
+}
+
+.df-model-notice > div {
+  flex: 1;
+  display: grid;
+  gap: var(--df-space-1);
+  min-width: 0;
+}
+
+.df-workspace-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--df-space-2);
+  min-width: 0;
+}
+
+.df-project-filters .qc-local-tabs {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  flex-shrink: 0;
+}
+
+.df-project-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--df-space-2);
+  margin-top: var(--df-space-3);
+}
+
+.df-project-card-actions .df-btn {
+  min-height: var(--df-chip-height);
+  padding-inline: var(--df-space-3);
+  font-size: var(--df-font-size-caption);
+}
+
 .df-primary-disabled {
   opacity: 0.45;
 }
@@ -185,21 +238,6 @@
   color: var(--df-brass);
 }
 
-.df-context-primary-action {
-  min-width: calc(var(--df-context-nav-width) - 32px);
-  display: block;
-  margin: var(--df-space-2) var(--df-space-4);
-  padding: var(--df-space-3) var(--df-space-4);
-  border: 1px solid var(--df-verdigris-dim);
-  border-radius: var(--df-radius-control);
-  color: var(--df-text-primary);
-  background: var(--df-verdigris-tint);
-  font-size: var(--df-text-sm);
-  font-weight: var(--df-weight-semibold);
-  text-align: center;
-  text-decoration: none;
-}
-
 .df-shell-content {
   background: var(--df-canvas-background);
   grid-column: 3;
@@ -267,6 +305,7 @@
 
 .df-project-filters {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--df-space-3);
   margin-bottom: var(--df-space-4);
@@ -274,6 +313,20 @@
 
 .df-project-filters input {
   flex: 1;
+}
+
+.df-project-filters > label {
+  flex: 1;
+  min-width: 0;
+}
+
+.df-workspace-filter > label {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.df-workspace-filter select {
+  max-width: 100%;
 }
 
 .df-project-grid {

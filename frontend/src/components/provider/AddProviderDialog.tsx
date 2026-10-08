@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Image as ImageIcon, MessageSquareText } from "lucide-react";
+import { Check } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
@@ -15,12 +15,18 @@ import { queryKeys } from "../../lib/queryKeys";
 import { Button, Dialog, Field, Input } from "../ui";
 import { ModelPicker } from "./ModelPicker";
 import { bindingBatchMessage, createBindings } from "./providerBindings";
-import { catalogFailureText, pluginKey, probeErrorText, type ModelChoice } from "./providerSetup";
+import {
+  catalogFailureText,
+  probeErrorText,
+  providerLabel,
+  isLocalServiceUrl,
+  type ModelChoice,
+} from "./providerSetup";
 
 type Phase = "connect" | "models";
 
 /**
- * Toonflow/ArcReel-style setup: pick a vendor, enter name / URL / Key, read
+ * Enter name / URL / Key for the selected connection, read
  * the account's model catalog (a free, read-only check), then tick the models
  * to use. Text gateways expose discovered models directly; media vendors bind
  * each ticked model to its catalog contract. Nothing generates media here.
@@ -28,11 +34,19 @@ type Phase = "connect" | "models";
 export function AddProviderDialog({
   workspaceId,
   plugins,
+  inline = false,
+  custom = false,
+  onConnectionCreated,
+  onBusyChange,
   onClose,
 }: {
   workspaceId: string;
   plugins: ProviderPluginRead[];
-  onClose: () => void;
+  inline?: boolean;
+  custom?: boolean;
+  onConnectionCreated?: (connection: ProviderConnectionRead) => void;
+  onBusyChange?: (busy: boolean) => void;
+  onClose: (connectionId?: string) => void;
 }) {
   const queryClient = useQueryClient();
   const ordered = useMemo(
@@ -42,8 +56,7 @@ export function AddProviderDialog({
         .sort((left, right) => (left.kind === right.kind ? 0 : left.kind === "media" ? -1 : 1)),
     [plugins],
   );
-  const [selectedKey, setSelectedKey] = useState(() => (ordered[0] ? pluginKey(ordered[0]) : ""));
-  const plugin = ordered.find((item) => pluginKey(item) === selectedKey) ?? null;
+  const plugin = ordered[0] ?? null;
   const [name, setName] = useState<string | null>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
@@ -53,8 +66,15 @@ export function AddProviderDialog({
   const [choices, setChoices] = useState<Map<string, ModelChoice>>(new Map());
   const [error, setError] = useState<string | null>(null);
 
-  const nameValue = name ?? connection?.display_name ?? plugin?.display_name ?? "";
-  const urlValue = url ?? connection?.base_url ?? plugin?.default_base_url ?? "";
+  const nameValue =
+    name ?? connection?.display_name ?? (custom ? "" : plugin ? providerLabel(plugin) : "");
+  const urlValue =
+    url ??
+    connection?.base_url ??
+    (custom || plugin?.kind === "text" ? "" : plugin?.default_base_url) ??
+    "";
+  const localMiniMax = plugin?.provider_type === "minimax" && isLocalServiceUrl(urlValue);
+  const finish = () => onClose(connection?.id);
 
   const refresh = async () => {
     await Promise.all([
@@ -69,6 +89,7 @@ export function AddProviderDialog({
     retry: false,
     mutationFn: async () => {
       if (!plugin) throw new Error("请选择供应商");
+      if (localMiniMax) throw new Error("本地 MiniMax 请使用 OpenAI 兼容服务。");
       if (!urlValue.trim()) throw new Error("请填写服务地址");
       let saved = connection;
       if (!saved) {
@@ -79,6 +100,7 @@ export function AddProviderDialog({
           display_name: nameValue.trim() || plugin.display_name,
           base_url: urlValue.trim(),
         });
+        onConnectionCreated?.(saved);
       } else {
         const patch: { display_name?: string; base_url?: string } = {};
         if (nameValue.trim() && nameValue.trim() !== saved.display_name) {
@@ -98,7 +120,11 @@ export function AddProviderDialog({
       setUrl(null);
       return runProviderProbe(workspaceId, saved.id, { capability: "auth_models" });
     },
-    onMutate: () => setError(null),
+    onMutate: () => {
+      setError(null);
+      onBusyChange?.(true);
+    },
+    onSettled: () => onBusyChange?.(false),
     onSuccess: async (probe) => {
       await refresh();
       if (probe.status === "passed") {
@@ -117,7 +143,11 @@ export function AddProviderDialog({
   const addModels = useMutation({
     retry: false,
     mutationFn: () => createBindings(workspaceId, connection!.id, [...choices.values()]),
-    onMutate: () => setError(null),
+    onMutate: () => {
+      setError(null);
+      onBusyChange?.(true);
+    },
+    onSettled: () => onBusyChange?.(false),
     onSuccess: async (result) => {
       await refresh();
       const failure = bindingBatchMessage(result);
@@ -133,7 +163,7 @@ export function AddProviderDialog({
         );
         return;
       }
-      onClose();
+      finish();
     },
     onError: (cause) => setError(cause instanceof Error ? cause.message : "添加失败"),
   });
@@ -145,25 +175,30 @@ export function AddProviderDialog({
   const actions =
     phase === "connect" ? (
       <>
-        <Button tone="ghost" onClick={onClose}>
-          取消
-        </Button>
+        {!inline && (
+          <Button tone="ghost" onClick={finish}>
+            取消
+          </Button>
+        )}
         <Button
           tone="primary"
           data-testid="add-provider-connect"
-          disabled={busy || !plugin || !urlValue.trim() || (!connection && !apiKey.trim())}
+          title="只读取模型列表，不产生生成费用"
+          disabled={
+            busy || !plugin || localMiniMax || !urlValue.trim() || (!connection && !apiKey.trim())
+          }
           onClick={() => connect.mutate()}
         >
           {connect.isPending ? "正在连接…" : "连接并读取模型"}
         </Button>
       </>
     ) : isText ? (
-      <Button tone="primary" onClick={onClose}>
+      <Button tone="primary" onClick={finish}>
         完成
       </Button>
     ) : (
       <>
-        <Button tone="ghost" onClick={onClose} disabled={busy}>
+        <Button tone="ghost" onClick={finish} disabled={busy}>
           稍后再选
         </Button>
         <Button
@@ -177,51 +212,25 @@ export function AddProviderDialog({
       </>
     );
 
-  return (
-    <Dialog
-      title={phase === "connect" ? "添加供应商" : isText ? "已连接" : "选择要使用的模型"}
-      kicker={phase === "models" ? (connection?.display_name ?? undefined) : undefined}
-      onClose={onClose}
-      size="wide"
-      testId="add-provider-dialog"
-      actions={actions}
-    >
+  const content = (
+    <>
       {phase === "connect" ? (
-        <div className="df-add-provider">
-          <nav className="df-vendor-rail" aria-label="选择供应商">
-            {ordered.map((item) => {
-              const key = pluginKey(item);
-              const Icon = item.kind === "text" ? MessageSquareText : ImageIcon;
-              return (
-                <Button
-                  tone="ghost"
-                  key={key}
-                  className={key === selectedKey ? "df-vendor-option active" : "df-vendor-option"}
-                  aria-pressed={key === selectedKey}
-                  disabled={busy || Boolean(connection)}
-                  onClick={() => {
-                    setSelectedKey(key);
-                    setName(null);
-                    setUrl(null);
-                    setError(null);
-                  }}
-                >
-                  <Icon size={16} aria-hidden="true" />
-                  <span>{item.display_name}</span>
-                  <small>{item.kind === "text" ? "文本" : "图片 · 视频"}</small>
-                </Button>
-              );
-            })}
-          </nav>
+        <div className={inline ? "df-manage-section" : "df-add-provider-form"}>
           {plugin ? (
             <div
               className="df-add-provider-form"
               onKeyDown={(event) => {
                 if (event.key !== "Enter" || !(event.target instanceof HTMLInputElement)) return;
                 event.preventDefault();
-                if (!busy && urlValue.trim() && (connection || apiKey.trim())) connect.mutate();
+                if (!busy && !localMiniMax && urlValue.trim() && (connection || apiKey.trim()))
+                  connect.mutate();
               }}
             >
+              {inline && (
+                <header>
+                  <h3>连接配置</h3>
+                </header>
+              )}
               <Field>
                 名称
                 <Input
@@ -237,7 +246,9 @@ export function AddProviderDialog({
                   aria-label="服务地址"
                   value={urlValue}
                   disabled={busy}
-                  placeholder="https://api.example.com"
+                  placeholder={
+                    isText ? "兼容文本服务或 LiteLLM 代理地址" : "https://api.example.com"
+                  }
                   onChange={(event) => setUrl(event.target.value)}
                 />
               </Field>
@@ -253,12 +264,7 @@ export function AddProviderDialog({
                   onChange={(event) => setApiKey(event.target.value)}
                 />
               </Field>
-              <p className="df-add-provider-hint">
-                {isText
-                  ? "支持 LiteLLM 或任意 OpenAI 兼容 Chat 接口。"
-                  : "支持官方地址或局域网服务地址。"}
-                只读取模型列表，不会产生生成费用。
-              </p>
+              {localMiniMax && <p role="alert">本地 MiniMax 请使用 OpenAI 兼容服务。</p>}
             </div>
           ) : (
             <p className="muted">当前没有可添加的供应商。</p>
@@ -275,7 +281,7 @@ export function AddProviderDialog({
               </li>
             ))}
           </ul>
-          <p className="muted">在「默认模型」中选择用于剧本与分镜的模型。</p>
+          <p className="muted">保存后，点击模型旁的「启用」切换。</p>
         </div>
       ) : plugin ? (
         <ModelPicker
@@ -292,6 +298,45 @@ export function AddProviderDialog({
           {error}
         </p>
       )}
+    </>
+  );
+
+  if (inline && plugin)
+    return (
+      <section
+        className="df-provider-detail"
+        aria-label={`配置 ${providerLabel(plugin)}`}
+        data-testid="provider-detail"
+      >
+        <header className="df-provider-detail-heading">
+          <h3>{providerLabel(plugin)}</h3>
+          <span className="df-provider-kind">{isText ? "文本服务" : "图片 / 视频服务"}</span>
+        </header>
+        <span className={`df-status ${catalog?.status === "passed" ? "ok" : "idle"}`}>
+          {catalog?.status === "passed" ? "已连接" : connection ? "待验证" : "未配置"}
+        </span>
+        {content}
+        <div className="df-manage-row-actions">{actions}</div>
+      </section>
+    );
+  return (
+    <Dialog
+      title={
+        phase === "connect"
+          ? custom && isText
+            ? "添加 LLM 配置"
+            : "添加供应商"
+          : isText
+            ? "已连接"
+            : "选择要使用的模型"
+      }
+      kicker={phase === "models" ? (connection?.display_name ?? undefined) : undefined}
+      onClose={finish}
+      size="wide"
+      testId="add-provider-dialog"
+      actions={actions}
+    >
+      {content}
     </Dialog>
   );
 }

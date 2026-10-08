@@ -5,7 +5,6 @@ import { useState } from "react";
 import {
   listProviderModelBindings,
   listProviderProbes,
-  recordProviderQualityEvidence,
   runProviderProbe,
   updateProviderConnection,
   updateProviderConnectionCredential,
@@ -15,8 +14,9 @@ import {
   type ProviderProbeRead,
 } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
-import { Button, Disclosure, Field, Input, Select } from "../ui";
+import { Button, Disclosure, Field, Input } from "../ui";
 import { ModelPicker } from "./ModelPicker";
+import { useModelActivation } from "./useModelActivation";
 import { bindingBatchMessage, createBindings } from "./providerBindings";
 import {
   bindingChoiceKey,
@@ -41,13 +41,6 @@ function bindingStatus(
   return { tone: "ok", label: "可用" };
 }
 
-function contractName(plugin: ProviderPluginRead | undefined, binding: ProviderModelBindingRead) {
-  return (
-    plugin?.models.find((model) => model.catalog_entry_id === binding.catalog_entry_id)
-      ?.display_name ?? binding.model_id
-  );
-}
-
 /** Configure the selected connection inline; discovery remains explicit. */
 export function ProviderDetails({
   workspaceId,
@@ -70,6 +63,7 @@ export function ProviderDetails({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const isText = plugin?.kind === "text";
+  const usage = useModelActivation(workspaceId);
 
   const probes = useQuery({
     queryKey: queryKeys.provider.probes(workspaceId, connection.id),
@@ -82,7 +76,10 @@ export function ProviderDetails({
     enabled: !isText,
     retry: false,
   });
-  const catalog = latestCatalogRead(probes.data);
+  const catalog = latestCatalogRead(
+    [...(lastRead ? [lastRead] : []), ...(probes.data ?? [])],
+    connection,
+  );
   const status = connectionStatus(connection);
   const nameValue = name ?? connection.display_name;
   const urlValue = url ?? connection.base_url;
@@ -111,7 +108,12 @@ export function ProviderDetails({
         ...(url !== null && url.trim() ? { base_url: url.trim() } : {}),
       }),
     onMutate: feedback,
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
+      if (saved.connection_revision_id !== connection.connection_revision_id) {
+        setLastRead(null);
+        setChoices(new Map());
+        setPicking(false);
+      }
       setName(null);
       setUrl(null);
       setMessage("已保存。地址变化后请重新读取模型。");
@@ -125,6 +127,9 @@ export function ProviderDetails({
     onMutate: feedback,
     onSuccess: async () => {
       setApiKey("");
+      setLastRead(null);
+      setChoices(new Map());
+      setPicking(false);
       setMessage("Key 已更换，请重新读取模型以验证。");
       await refresh();
     },
@@ -145,6 +150,7 @@ export function ProviderDetails({
     onSuccess: async (probe) => {
       await refresh();
       if (probe.status === "passed") {
+        setChoices(new Map());
         setLastRead(probe);
         if (!isText) setPicking(true);
         setMessage(`已读取 ${probe.discovered_model_ids.length} 个模型。`);
@@ -177,9 +183,24 @@ export function ProviderDetails({
     rotateKey.isPending ||
     toggle.isPending ||
     readCatalog.isPending ||
-    addModels.isPending;
-  const existingKeys = new Set((bindings.data ?? []).map(bindingChoiceKey));
-  const discoveredIds = (lastRead ?? catalog)?.discovered_model_ids ?? [];
+    addModels.isPending ||
+    usage.activate.isPending;
+  const enabledBindings = (bindings.data ?? []).filter((binding) => binding.enabled !== false);
+  const existingKeys = new Set(enabledBindings.map(bindingChoiceKey));
+  const discoveredIds = catalog?.discovered_model_ids ?? [];
+  const activationButton = (role: "llm" | "image" | "video", modelId: string, label: string) => {
+    const active = usage.isActive(role, modelId);
+    return (
+      <Button
+        tone={active ? "ghost" : "default"}
+        aria-label={`${active ? "已启用" : "启用"} ${label}`}
+        disabled={busy || active || !connection.enabled || !usage.canActivate(role, modelId)}
+        onClick={() => usage.activate.mutate({ role, modelId })}
+      >
+        {active ? "已启用" : "启用"}
+      </Button>
+    );
+  };
 
   return (
     <section
@@ -189,7 +210,6 @@ export function ProviderDetails({
     >
       <header className="df-provider-detail-heading">
         <div>
-          <p className="kicker">{plugin?.display_name ?? connection.provider_type}</p>
           <h3>{connection.display_name}</h3>
         </div>
         <span className="df-provider-kind">{isText ? "文本服务" : "图片 / 视频服务"}</span>
@@ -206,11 +226,11 @@ export function ProviderDetails({
             onClick={() => toggle.mutate()}
           >
             <Power size={16} aria-hidden="true" />
-            {connection.enabled ? "停用" : "启用"}
+            {connection.enabled ? "停用连接" : "恢复连接"}
           </Button>
         </div>
 
-        {picking && plugin ? (
+        {picking && plugin && catalog ? (
           <>
             <ModelPicker
               plugin={plugin}
@@ -238,7 +258,6 @@ export function ProviderDetails({
             <section className="df-manage-section" aria-label="连接信息">
               <header>
                 <h3>连接配置</h3>
-                <span className="muted">密钥保存后不会回显</span>
               </header>
               <div className="df-manage-fields">
                 <Field>
@@ -260,6 +279,7 @@ export function ProviderDetails({
                   />
                 </Field>
               </div>
+              {isText && <p className="muted">保留多个配置，点击模型旁的「启用」切换。</p>}
               {detailsDirty && (
                 <div className="df-manage-row-actions">
                   <Button
@@ -283,9 +303,7 @@ export function ProviderDetails({
                     autoComplete="new-password"
                     value={apiKey}
                     disabled={busy}
-                    placeholder={
-                      connection.credential_configured ? "已保存，输入新 Key 可更换" : "粘贴密钥"
-                    }
+                    placeholder={connection.credential_configured ? "已保存" : "输入 API Key"}
                     onChange={(event) => setApiKey(event.target.value)}
                   />
                 </Field>
@@ -300,7 +318,7 @@ export function ProviderDetails({
                 <h3>
                   模型{" "}
                   <span className="muted df-num">
-                    {isText ? discoveredIds.length : (bindings.data?.length ?? 0)}
+                    {isText ? discoveredIds.length : enabledBindings.length}
                   </span>
                 </h3>
                 <Button
@@ -326,7 +344,7 @@ export function ProviderDetails({
                         <span className="df-model-name">
                           <strong>{id}</strong>
                         </span>
-                        <span className="df-status ok">可用</span>
+                        {activationButton("llm", `litellm/${connection.id}/${id}`, id)}
                       </li>
                     ))}
                   </ul>
@@ -340,19 +358,23 @@ export function ProviderDetails({
                     重试
                   </Button>
                 </p>
-              ) : bindings.data?.length ? (
+              ) : enabledBindings.length ? (
                 <ul className="df-model-list">
-                  {bindings.data.map((binding) => {
+                  {enabledBindings.map((binding) => {
                     const state = bindingStatus(binding, plugin);
                     const Icon = binding.media_type === "image" ? ImageIcon : Video;
                     return (
                       <li key={binding.id} data-testid={`provider-model-${binding.id}`}>
                         <Icon size={16} aria-hidden="true" />
                         <span className="df-model-name">
-                          <strong>{contractName(plugin, binding)}</strong>
-                          <code>{binding.model_id}</code>
+                          <strong>{binding.model_id}</strong>
                         </span>
                         <span className={`df-status ${state.tone}`}>{state.label}</span>
+                        {activationButton(
+                          binding.media_type === "image" ? "image" : "video",
+                          `binding:${binding.id}`,
+                          binding.model_id,
+                        )}
                       </li>
                     );
                   })}
@@ -362,21 +384,26 @@ export function ProviderDetails({
               )}
             </section>
 
-            <ProviderDiagnostics
-              workspaceId={workspaceId}
-              connection={connection}
-              plugin={plugin}
-              bindings={bindings.data ?? []}
-              probes={probes.data ?? []}
-              probesFailed={probes.isError}
-              busy={busy}
-              onDone={refresh}
-            />
+            <ProviderHistory probes={probes.data ?? []} probesFailed={probes.isError} />
           </>
         )}
         {message && !error && (
           <p className="df-status ok" role="status">
             {message}
+          </p>
+        )}
+        {usage.activate.isSuccess && (
+          <p className="df-status ok" role="status">
+            已启用，后续任务使用这个模型。
+          </p>
+        )}
+        {(usage.loadError || usage.activate.isError) && (
+          <p role="alert">
+            {usage.loadError
+              ? "无法读取当前启用的模型。"
+              : usage.activate.error instanceof Error
+                ? usage.activate.error.message
+                : "启用失败。"}
           </p>
         )}
         {error && (
@@ -394,88 +421,24 @@ const PROBE_LABEL: Record<string, string> = {
   video_poll_download: "查询已有任务",
 };
 
-/** Technical facts and read-only checks; collapsed so setup never needs them. */
-function ProviderDiagnostics({
-  workspaceId,
-  connection,
-  plugin,
-  bindings,
+/** Saved connection checks are available without exposing runtime internals. */
+function ProviderHistory({
   probes,
   probesFailed,
-  busy,
-  onDone,
 }: {
-  workspaceId: string;
-  connection: ProviderConnectionRead;
-  plugin: ProviderPluginRead | undefined;
-  bindings: ProviderModelBindingRead[];
   probes: Awaited<ReturnType<typeof listProviderProbes>>;
   probesFailed: boolean;
-  busy: boolean;
-  onDone: () => Promise<void>;
 }) {
-  const [bindingId, setBindingId] = useState("");
-  const [remoteTaskId, setRemoteTaskId] = useState("");
-  const [queryKind, setQueryKind] = useState("video_id");
-  const [runId, setRunId] = useState("");
-  const [artifactId, setArtifactId] = useState("");
-  const [note, setNote] = useState<string | null>(null);
-  const videoBindings = bindings.filter((binding) => binding.media_type === "video");
-  const poll = useMutation({
-    retry: false,
-    mutationFn: () =>
-      runProviderProbe(workspaceId, connection.id, {
-        capability: "video_poll_download",
-        model_binding_id: bindingId,
-        remote_task_id: remoteTaskId.trim(),
-        remote_query_kind: queryKind,
-      }),
-    onSuccess: async (probe) => {
-      setNote(probe.status === "passed" ? "任务查询成功。" : "任务查询失败。");
-      await onDone();
-    },
-    onError: (cause) => setNote(probeErrorText(cause)),
-  });
-  const quality = useMutation({
-    retry: false,
-    mutationFn: () =>
-      recordProviderQualityEvidence(workspaceId, connection.id, bindingId, {
-        node_run_id: runId.trim(),
-        artifact_id: artifactId.trim(),
-      }),
-    onSuccess: async () => {
-      setNote("质量证据已记录。");
-      setRunId("");
-      setArtifactId("");
-      await onDone();
-    },
-    onError: (cause) => setNote(probeErrorText(cause)),
-  });
-  const disabled = busy || poll.isPending || quality.isPending;
-
   return (
-    <Disclosure title="诊断与验证" testId="provider-diagnostics-disclosure">
-      <dl className="df-manage-facts">
-        <dt>协议</dt>
-        <dd>
-          <code>{connection.protocol_profile}</code>
-        </dd>
-        <dt>凭证版本</dt>
-        <dd>
-          <code>{connection.credential_key_version ?? "未配置"}</code>
-        </dd>
-        <dt>插件</dt>
-        <dd>{plugin?.implemented ? "已实现" : "仅目录"}</dd>
-      </dl>
+    <Disclosure title="连接记录" testId="provider-diagnostics-disclosure">
       <ul className="df-manage-probes" data-testid="provider-probes">
         {probes.slice(0, 6).map((probe) => (
           <li key={probe.probe_id}>
-            <span>{PROBE_LABEL[probe.capability] ?? probe.capability}</span>
+            <span>{PROBE_LABEL[probe.capability] ?? "连接检查"}</span>
             <span className={`df-status ${probe.status === "passed" ? "ok" : "err"}`}>
               {probe.status === "passed" ? "通过" : "失败"}
             </span>
             <time dateTime={probe.tested_at}>{new Date(probe.tested_at).toLocaleString()}</time>
-            {probe.error_code && <code>{probe.error_code}</code>}
           </li>
         ))}
         {probesFailed ? (
@@ -484,67 +447,6 @@ function ProviderDiagnostics({
           !probes.length && <li className="muted">暂无检查记录。</li>
         )}
       </ul>
-      {bindings.length > 0 && (
-        <div className="df-manage-diagnostic-forms">
-          <Field>
-            模型
-            <Select
-              aria-label="诊断模型"
-              value={bindingId}
-              disabled={disabled}
-              onChange={(event) => setBindingId(event.target.value)}
-            >
-              <option value="">选择模型</option>
-              {bindings.map((binding) => (
-                <option key={binding.id} value={binding.id}>
-                  {contractName(plugin, binding)} · {binding.model_id}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {videoBindings.some((binding) => binding.id === bindingId) && (
-            <div className="df-manage-fields">
-              <Field>
-                远端任务 ID
-                <Input
-                  value={remoteTaskId}
-                  onChange={(event) => setRemoteTaskId(event.target.value)}
-                />
-              </Field>
-              <Field>
-                查询类型
-                <Select value={queryKind} onChange={(event) => setQueryKind(event.target.value)}>
-                  <option value="video_id">视频 ID</option>
-                  <option value="task_id">任务 ID</option>
-                </Select>
-              </Field>
-              <Button disabled={disabled || !remoteTaskId.trim()} onClick={() => poll.mutate()}>
-                查询已有任务
-              </Button>
-            </div>
-          )}
-          {bindingId && (
-            <div className="df-manage-fields">
-              <Field>
-                NodeRun ID
-                <Input value={runId} onChange={(event) => setRunId(event.target.value)} />
-              </Field>
-              <Field>
-                产物 ID
-                <Input value={artifactId} onChange={(event) => setArtifactId(event.target.value)} />
-              </Field>
-              <Button
-                disabled={disabled || !runId.trim() || !artifactId.trim()}
-                onClick={() => quality.mutate()}
-              >
-                记录质量证据
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
-      <p className="muted">生成类检查暂不提供：尚无独立的 Owner 付费探测授权合同。</p>
-      {note && <p role="status">{note}</p>}
     </Disclosure>
   );
 }

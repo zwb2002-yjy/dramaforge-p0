@@ -58,12 +58,13 @@ export function useProjectWorkspaceState(projectId: string) {
     queryFn: () => fetchWorkspaceState(projectId),
     enabled: Boolean(projectId),
     staleTime: 30_000,
+    retry: false,
   });
 
   const mutation = useMutation({
     mutationFn: (state: Record<string, unknown>) => updateWorkspaceState(projectId, state),
     onSuccess: (result) => {
-      queryClient.setQueryData(["workspace-state", projectId], result);
+      queryClient.setQueryData(queryKeys.workspace.state(projectId), result);
     },
   });
 
@@ -78,6 +79,10 @@ export function useProjectWorkspaceState(projectId: string) {
     state,
     lastView,
     isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    isError: query.isError,
+    error: query.error,
+    retry: query.refetch,
     isSaving: mutation.isPending,
     rememberState(partial: Record<string, unknown>) {
       mutation.mutate(partial);

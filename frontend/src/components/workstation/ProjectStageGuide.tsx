@@ -19,11 +19,11 @@ const NEXT_STEP: Partial<
     }
   >
 > = {
-  script: { label: "准备角色素材", to: "/projects/$projectId/assets" },
-  assets: { label: "进入分镜与生成", to: "/projects/$projectId/scenes" },
+  script: { label: "准备角色与素材", to: "/projects/$projectId/assets" },
+  assets: { label: "进入分镜制作", to: "/projects/$projectId/scenes" },
   scenes: { label: "进入审片确认", to: "/projects/$projectId/review" },
   review: { label: "进入剪辑成片", to: "/projects/$projectId/edit" },
-  edit: { label: "返回作品总览", to: "/projects/$projectId/production" },
+  edit: { label: "返回项目总览", to: "/projects/$projectId/production" },
 };
 
 export function ProjectStageGuide({

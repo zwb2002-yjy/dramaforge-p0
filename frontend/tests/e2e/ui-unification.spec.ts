@@ -43,8 +43,8 @@ test("real creation, model and script forms use one control recipe across lazy r
     route.fulfill({
       json: [
         {
-          provider_type: "fixture",
-          protocol_profile: "fixture-v1",
+          provider_type: "openai_compatible_media",
+          protocol_profile: "openai_media_v1",
           display_name: "Fixture Provider",
           default_base_url: "https://fixture.invalid",
           kind: "media",
@@ -76,9 +76,7 @@ test("real creation, model and script forms use one control recipe across lazy r
   expect(await input.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe("solid");
 
   await page.goto("/settings/models");
-  const textModel = page.getByLabel("文本模型", { exact: true });
-  await expect(textModel).toHaveClass(/df-input/);
-  expect(await controlStyle(textModel)).toEqual(expected);
+  await expect(page.getByLabel("文本模型", { exact: true })).toHaveCount(0);
   await page.getByTestId("add-provider").click();
   const address = page.getByTestId("add-provider-dialog").getByLabel("服务地址");
   await expect(address).toHaveClass(/df-input/);

@@ -114,7 +114,7 @@ test("create=false is normalized without logging out; only explicit logout chang
   expect(writes).toEqual([]);
   await page.goto("/settings/defaults");
   await expect(page).toHaveURL("/settings/defaults");
-  await expect(page.getByRole("heading", { name: "默认模型" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "模型设置", exact: true })).toBeVisible();
   expect(writes).toEqual([]);
   await page.goto("/settings/account");
   await expect(page.getByText("owner@example.com")).toBeVisible();
@@ -153,11 +153,11 @@ test("director policy follows creation, not project model settings", async ({ pa
       body: { expected_version: 1, director_autonomy: "MANUAL" },
     },
   ]);
-  // At this width the project navigation is a drawer opened from 「创作」.
-  await page.getByRole("link", { name: "创作", exact: true }).click();
+  // At this width the project navigation is a drawer opened from 「项目导航」.
+  await page.getByRole("button", { name: "项目导航", exact: true }).click();
   await page
     .getByRole("navigation", { name: "创作导航" })
-    .getByRole("link", { name: "分镜与生成" })
+    .getByRole("link", { name: "分镜制作" })
     .click();
   await expect(policy).toHaveValue("MANUAL");
   await page.goto(`/settings/projects/${PROJECT_ID}`);
@@ -174,7 +174,7 @@ test("workspace management belongs to Projects and no longer contains model conf
   const { writes, errors } = await setup(page);
   await page.goto("/settings/workspaces");
   await expect(page).toHaveURL(/panel=workspace$/);
-  await expect(page.getByRole("link", { name: "项目", exact: true })).toHaveAttribute(
+  await expect(page.getByRole("link", { name: "我的项目", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
   );
@@ -203,8 +203,7 @@ test("project model fields fit a narrow window without overlapping or overflowin
   );
   await page.setViewportSize({ width: 600, height: 730 });
   await page.goto(`/settings/projects/${PROJECT_ID}`);
-  // Close the small-window navigation through its single active control.
-  await page.getByRole("link", { name: "设置", exact: true }).click();
+  // The settings drawer starts closed at this width.
   const controls = page.getByTestId("model-profile-settings").locator("select");
   await expect(controls).toHaveCount(3);
   await expect(page.getByTestId("model-picker-audio.tts")).toHaveCount(0);
@@ -246,7 +245,7 @@ test("active primary navigation supports double click and keyboard without dupli
   const { writes, errors } = await setup(page);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
-  const creation = page.getByRole("link", { name: "创作", exact: true });
+  const creation = page.getByRole("button", { name: "项目导航", exact: true });
   await expect(creation).toHaveAttribute("aria-expanded", "true");
   // Every click toggles: a double click returns to the initial state.
   await creation.dblclick();
@@ -269,7 +268,7 @@ test("active primary navigation supports double click and keyboard without dupli
   expect(errors).toEqual([]);
 });
 
-test("primary navigation has one selection after visiting home, Projects and Creation", async ({
+test("primary navigation has one selection across the list, project and settings", async ({
   page,
 }) => {
   const { writes, errors } = await setup(page);
@@ -281,17 +280,17 @@ test("primary navigation has one selection after visiting home, Projects and Cre
     await expect(sidebar.locator("a.active")).toHaveCount(1);
     await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
     await expect(nav.getByRole("link", { name: label, exact: true })).toHaveClass("active");
-    await expect(page.getByRole("link", { name: "DramaForge 项目大厅" })).not.toHaveClass(/active/);
+    await expect(page.getByRole("link", { name: "DramaForge 我的项目" })).not.toHaveClass(/active/);
   };
-  await expectSelection("项目");
-  await page.getByRole("link", { name: "DramaForge 项目大厅" }).click();
-  await nav.getByRole("link", { name: "项目", exact: true }).click();
-  await nav.getByRole("link", { name: "创作", exact: true }).click();
-  await expect(page).toHaveURL(/panel=select$/);
-  await expectSelection("创作");
-  await nav.getByRole("link", { name: "项目", exact: true }).click();
+  await expectSelection("我的项目");
+  await page.getByRole("link", { name: "DramaForge 我的项目" }).click();
+  await nav.getByRole("link", { name: "我的项目", exact: true }).click();
+  await page.getByRole("button", { name: /进入工作台/ }).click();
+  await expect(page).toHaveURL(`/projects/${PROJECT_ID}/script`);
+  await expectSelection("我的项目");
+  await nav.getByRole("link", { name: "我的项目", exact: true }).click();
   await expect(page).toHaveURL("/");
-  await expectSelection("项目");
+  await expectSelection("我的项目");
   await nav.getByRole("link", { name: "设置", exact: true }).click();
   await expectSelection("设置");
   expect(writes).toEqual([]);
@@ -303,11 +302,11 @@ test("in-page return remains available with the sidebar closed and on direct lin
 }) => {
   const { writes, errors } = await setup(page);
   await page.setViewportSize({ width: 600, height: 900 });
-  for (const path of ["/?panel=select", "/?panel=recent", "/?panel=workspace", "/?create=true"]) {
+  for (const path of ["/?panel=recent", "/?panel=workspace", "/?create=true"]) {
     await page.goto(path);
     const back = page
       .getByTestId("workspace-return")
-      .getByRole("link", { name: "返回项目大厅", exact: true });
+      .getByRole("link", { name: "返回我的项目", exact: true });
     await expect(back).toBeInViewport();
     await back.click();
     await expect(page).toHaveURL("/");
@@ -324,7 +323,7 @@ test("in-page return remains available with the sidebar closed and on direct lin
   );
   const returnToCreation = page
     .getByTestId("workspace-return")
-    .getByRole("link", { name: "返回创作" });
+    .getByRole("link", { name: "返回工作台" });
   await expect(returnToCreation).toBeInViewport();
   await returnToCreation.click();
   await expect(page).toHaveURL(scenePath);
@@ -333,7 +332,7 @@ test("in-page return remains available with the sidebar closed and on direct lin
     "aria-expanded",
     "false",
   );
-  await page.getByTestId("workspace-return").getByRole("link", { name: "返回项目大厅" }).click();
+  await page.getByTestId("workspace-return").getByRole("link", { name: "返回我的项目" }).click();
   await expect(page).toHaveURL("/");
   expect(writes).toEqual([]);
   expect(errors).toEqual([]);
@@ -344,8 +343,8 @@ test("return links respect production and model parents instead of relying on br
 }) => {
   const { writes, errors } = await setup(page);
   for (const [path, label, target] of [
-    [`/projects/${PROJECT_ID}/production`, "返回项目大厅", "/"],
-    [`/projects/${PROJECT_ID}/review`, "返回作品总览", `/projects/${PROJECT_ID}/production`],
+    [`/projects/${PROJECT_ID}/production`, "返回我的项目", "/"],
+    [`/projects/${PROJECT_ID}/review`, "返回项目总览", `/projects/${PROJECT_ID}/production`],
     [`/settings/projects/${PROJECT_ID}`, "返回模型设置", "/settings/models"],
   ]) {
     await page.goto(path);
@@ -356,10 +355,11 @@ test("return links respect production and model parents instead of relying on br
     await expect(page).toHaveURL(target);
   }
   await page.goto(`/settings/projects/${PROJECT_ID}`);
-  const creation = page
-    .getByRole("navigation", { name: "一级导航" })
-    .getByRole("link", { name: "创作", exact: true });
-  await expect(creation).toHaveAttribute("href", `/projects/${PROJECT_ID}`);
+  await expect(page.getByRole("button", { name: "项目导航" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "我的项目", exact: true })).toHaveAttribute(
+    "href",
+    "/",
+  );
   expect(writes).toEqual([]);
   expect(errors).toEqual([]);
 });

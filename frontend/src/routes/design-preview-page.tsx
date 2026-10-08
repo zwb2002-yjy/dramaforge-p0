@@ -44,7 +44,7 @@ export function DesignPreviewPage() {
         actions={
           <Link to="/" search={{ create: undefined }} className="df-btn ghost">
             <span aria-hidden="true">←</span>
-            返回项目大厅
+            返回我的项目
           </Link>
         }
       />

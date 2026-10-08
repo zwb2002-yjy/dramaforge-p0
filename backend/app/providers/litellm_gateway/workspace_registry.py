@@ -44,6 +44,7 @@ async def workspace_model_registry(
                     ProviderConnection.provider_type == "litellm",
                     ProviderConnection.protocol_profile == "openai_chat_v1",
                     ProviderConnection.enabled.is_(True),
+                    ProviderConnection.verification_status == "verified",
                 )
             )
         ).all()
@@ -64,8 +65,10 @@ async def workspace_model_registry(
                 ProviderCapabilityEvidence.capability == "auth_models",
                 ProviderCapabilityEvidence.status == "passed",
                 ProviderCapabilityEvidence.connection_revision_id == revision.id,
+                ProviderCapabilityEvidence.credential_revision == connection.credential_revision,
             )
             .order_by(ProviderCapabilityEvidence.tested_at.desc())
+            .limit(1)
         )
         if evidence is None:
             continue
@@ -114,7 +117,7 @@ async def workspace_model_registry(
         ).model_copy(
             update={
                 "id": f"binding:{binding.id}",
-                "display_name": f"{catalog.display_name} · {connection.display_name}",
+                "display_name": f"{binding.model_id} · {connection.display_name}",
             }
         )
         manifest.metadata.update(

@@ -656,9 +656,14 @@ class ProviderConnectionService:
         catalog_received = False
         if capability == "auth_models":
             try:
+                models_url = f"{probe_revision.base_url}{plugin.model_list_path}"
+                if plugin.provider_type == "litellm":
+                    from app.providers.litellm_gateway.client import normalize_models_url
+
+                    models_url = normalize_models_url(probe_revision.base_url)
                 async with httpx.AsyncClient(timeout=30.0) as http:
                     response = await http.get(
-                        f"{probe_revision.base_url}{plugin.model_list_path}",
+                        models_url,
                         headers={
                             "Authorization": f"Bearer {getattr(cfg, f'{plugin.prefix}_api_key')}"
                         },

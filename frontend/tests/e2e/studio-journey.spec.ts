@@ -6,7 +6,7 @@ test("the overview keeps engine details behind one disclosure and one project na
 }) => {
   await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/production`);
-  await expect(page.getByRole("heading", { name: "作品总览", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "项目总览", exact: true })).toBeVisible();
   // Only one project navigation exists; there is no second in-page step map.
   await expect(page.getByRole("navigation", { name: "创作流程" })).toHaveCount(0);
   const nav = page.getByRole("navigation", { name: "创作导航", exact: true });
@@ -20,11 +20,11 @@ test("the overview keeps engine details behind one disclosure and one project na
 test("every creative workspace offers one next step without generating", async ({ page }) => {
   const state = await installProfessionalMock(page);
   const expected: Record<string, [string, RegExp]> = {
-    script: ["准备角色素材", /\/assets$/],
-    assets: ["进入分镜与生成", /\/scenes$/],
+    script: ["准备角色与素材", /\/assets$/],
+    assets: ["进入分镜制作", /\/scenes$/],
     scenes: ["进入审片确认", /\/review$/],
     review: ["进入剪辑成片", /\/edit$/],
-    edit: ["返回作品总览", /\/production$/],
+    edit: ["返回项目总览", /\/production$/],
   };
   for (const [view, [label, target]] of Object.entries(expected)) {
     await page.goto(`/projects/${PROJECT_ID}/${view}`);

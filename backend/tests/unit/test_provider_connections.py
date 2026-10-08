@@ -122,6 +122,162 @@ async def _seed_owner(session: AsyncSession) -> tuple[User, Workspace]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("base_url", ["https://text.example.test", "https://text.example.test/v1"])
+async def test_text_catalog_uses_the_same_normalized_url_and_own_key_as_litellm(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    base_url: str,
+) -> None:
+    import httpx
+
+    key = Fernet.generate_key().decode("ascii")
+    monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
+    monkeypatch.setenv("BYOK_KEYRING", f"v1:{key}")
+    clear_settings_cache()
+    user, workspace = await _seed_owner(session)
+    service = ProviderConnectionService(session)
+    connection = await service.create_connection(
+        workspace_id=workspace.id,
+        actor=user,
+        display_name="文本服务",
+        api_key="text-only-key",
+        enabled=True,
+        provider_type="litellm",
+        protocol_profile="openai_chat_v1",
+        base_url=base_url,
+    )
+    requests: list[tuple[str, str]] = []
+
+    async def get(
+        _client: httpx.AsyncClient, url: str, *, headers: dict[str, str]
+    ) -> httpx.Response:
+        requests.append((url, headers["Authorization"]))
+        return httpx.Response(200, json={"data": [{"id": "my-chat"}]})
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", get)
+    evidence = await service.probe(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        capability="auth_models",
+    )
+    assert requests == [("https://text.example.test/v1/models", "Bearer text-only-key")]
+    assert evidence.status == "passed"
+    assert evidence.discovered_model_ids == ["my-chat"]
+    from app.api.v1.provider_connections import _connection_read, _probe_read
+
+    original = await _connection_read(service, connection)
+    historical = _probe_read(evidence)
+    assert original.connection_revision_id == historical.connection_revision_id
+    renamed = await service.update_connection(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        display_name="改名",
+        enabled=None,
+    )
+    assert (
+        await _connection_read(service, renamed)
+    ).connection_revision_id == original.connection_revision_id
+    changed = await service.update_connection(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        base_url="https://other-text.example.test/v1",
+        display_name=None,
+        enabled=None,
+    )
+    changed_read = await _connection_read(service, changed)
+    assert changed_read.connection_revision_id != historical.connection_revision_id
+    assert changed_read.verification_status == "unverified"
+    rotated = await service.update_credential(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        api_key="rotated-fixture",
+    )
+    assert (
+        await _connection_read(service, rotated)
+    ).connection_revision_id != changed_read.connection_revision_id
+    assert _probe_read(evidence) == historical
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [401, 403, 429, "empty-catalog"])
+async def test_text_registry_uses_current_auth_projection_and_preserves_evidence(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch, failure: int | str
+) -> None:
+    from datetime import timedelta
+
+    import httpx
+    from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
+    from app.providers.registry import ModelRegistry
+
+    monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
+    monkeypatch.setenv("BYOK_KEYRING", f"v1:{Fernet.generate_key().decode('ascii')}")
+    clear_settings_cache()
+    user, workspace = await _seed_owner(session)
+    service = ProviderConnectionService(session)
+    connection = await service.create_connection(
+        workspace_id=workspace.id,
+        actor=user,
+        display_name="Text auth regression",
+        api_key="test-only-key",
+        enabled=True,
+        provider_type="litellm",
+        protocol_profile="openai_chat_v1",
+        base_url="https://auth.example.test/v1",
+    )
+    response = httpx.Response(200, json={"data": [{"id": "chat"}]})
+
+    async def get(
+        _client: httpx.AsyncClient, url: str, *, headers: dict[str, str]
+    ) -> httpx.Response:
+        assert url == "https://auth.example.test/v1/models"
+        return response
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", get)
+
+    async def probe() -> ProviderCapabilityEvidence:
+        return await service.probe(
+            workspace_id=workspace.id,
+            connection_id=connection.id,
+            actor=user,
+            capability="auth_models",
+        )
+
+    async def registered() -> bool:
+        registry = await workspace_model_registry(
+            session, workspace_id=workspace.id, base_registry=ModelRegistry()
+        )
+        return registry.get_or_none(f"litellm/{connection.id}/chat") is not None
+
+    passed = await probe()
+    assert passed.status == "passed"
+    assert await registered()
+    passed.tested_at -= timedelta(minutes=1)
+    await session.flush()
+    response = (
+        httpx.Response(200, json={"data": []})
+        if failure == "empty-catalog"
+        else httpx.Response(int(failure))
+    )
+    failed = await probe()
+    assert failed.status == "failed"
+    revoked = failure in {401, 403}
+    assert connection.verification_status == ("failed" if revoked else "verified")
+    assert await registered() is not revoked
+    history = list(await session.scalars(select(ProviderCapabilityEvidence)))
+    assert {item.id for item in history} == {passed.id, failed.id}
+    failed.tested_at -= timedelta(minutes=1)
+    await session.flush()
+    response = httpx.Response(200, json={"data": [{"id": "chat"}]})
+    assert (await probe()).status == "passed"
+    assert await registered()
+
+
+@pytest.mark.asyncio
 async def test_same_named_text_models_keep_connection_and_credentials_separate(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -148,6 +304,7 @@ async def test_same_named_text_models_keep_connection_and_credentials_separate(
             base_url=f"https://{label}.example.test/v1",
         )
         revision = await service.current_connection_revision(connection=connection)
+        connection.verification_status = "verified"
         session.add(
             ProviderCapabilityEvidence(
                 workspace_id=workspace.id,
@@ -178,6 +335,12 @@ async def test_same_named_text_models_keep_connection_and_credentials_separate(
     }
     # The same alias on two connections stays distinguishable in pickers.
     assert {model.manifest.display_name.rsplit(" · ", 1)[-1] for model in models} == {"a", "b"}
+    for label, model in zip(("a", "b"), models, strict=True):
+        # The adapter receives this text connection's settings, never the
+        # selected media provider's address or credential.
+        assert model.adapter is not None
+        assert model.adapter._settings.litellm_gateway_url == f"https://{label}.example.test/v1"
+        assert model.adapter._settings.litellm_api_key == f"secret-{label}"
 
 
 @pytest.mark.asyncio

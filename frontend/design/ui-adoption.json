@@ -10,7 +10,6 @@
     "src/components/provider/ProviderDetails.tsx",
     "src/features/project/ProjectActions.tsx",
     "src/components/provider/ModelPicker.tsx",
-    "src/components/provider/DefaultModelSettings.tsx",
     "src/features/project/CreateProjectForm.tsx",
     "src/features/production/CreativeCapabilitiesPanel.tsx",
     "src/features/production/BatchFillActions.tsx",
@@ -19,8 +18,7 @@
     "src/features/review/ReviewWorkspace.tsx",
     "src/features/shots/ShotInspector.tsx",
     "src/features/shots/ShotDesignPanel.tsx",
-    "src/features/shots/ShotProductionActions.tsx",
-    "src/features/project/QuickStartSteps.tsx"
+    "src/features/shots/ShotProductionActions.tsx"
   ],
   "pageHeaders": [
     "src/routes/index.tsx",

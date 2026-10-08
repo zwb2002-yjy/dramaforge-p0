@@ -63,7 +63,10 @@ for (const width of [1920, 1440, 1024, 768]) {
         await expect
           .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
           .toBe(true);
-        await expect(page.locator(".df-context-sidebar")).toBeVisible({ visible: width >= 1100 });
+        if (url.startsWith("/?") || url === "/")
+          await expect(page.locator(".df-context-sidebar")).toHaveCount(0);
+        else
+          await expect(page.locator(".df-context-sidebar")).toBeVisible({ visible: width >= 1100 });
         const content = await page.locator(".df-shell-content").boundingBox();
         expect(content!.width).toBeGreaterThan(width >= 1100 ? width * 0.7 : width * 0.85);
         if (url.includes("/projects/")) {
@@ -102,14 +105,14 @@ test("navigation folds on resize and does not obscure the creation workflow", as
   await expect(page.locator(".df-context-sidebar")).toBeVisible();
   await page.setViewportSize({ width: 768, height: 900 });
   await expect(page.locator(".df-context-sidebar")).not.toBeVisible();
-  await page.getByRole("link", { name: "创作", exact: true }).click();
+  await page.getByRole("button", { name: "项目导航", exact: true }).click();
   await expect(page.getByRole("navigation", { name: "创作导航" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.locator(".df-context-sidebar")).not.toBeVisible();
-  await page.getByRole("link", { name: "创作", exact: true }).click();
+  await page.getByRole("button", { name: "项目导航", exact: true }).click();
   await page
     .getByRole("navigation", { name: "创作导航" })
-    .getByRole("link", { name: "角色素材" })
+    .getByRole("link", { name: "角色与素材" })
     .click();
   await expect(page).toHaveURL(/\/assets$/);
 });

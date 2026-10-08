@@ -15,6 +15,9 @@ for (const path of routes) {
     await installProfessionalMock(page);
     await page.goto(path);
     await expect(page.locator(".df-page-header h1")).toBeVisible();
+    // The shell heading appears before the lazy form and its initial autofocus.
+    if (path === "/settings/workspaces")
+      await expect(page.getByTestId("workspace-settings-page")).toBeVisible();
     const shell = page.locator(".df-shell-content");
     await expect(shell).toHaveCSS("background-image", "none");
     const theme = await page.evaluate(() => {
@@ -34,9 +37,10 @@ for (const path of routes) {
     }
     await page.emulateMedia({ reducedMotion: "reduce" });
     const nav = page.locator(".df-primary-sidebar a").first();
-    // :focus-visible follows input modality; use keyboard input before focusing.
-    await page.keyboard.press("Tab");
+    // Return through the actual tab order, including routes with autofocus inputs.
     await nav.focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Shift+Tab");
     await expect(nav).toBeFocused();
     await expect(nav).toHaveCSS("outline-style", "solid");
     expect(

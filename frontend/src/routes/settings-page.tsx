@@ -1,9 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams, useRouterState } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 
 import { Button, Disclosure, Field, Input, Select, PageHeader } from "../components/ui";
-import { DefaultModelSettings } from "../components/provider/DefaultModelSettings";
 import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
 import { ProjectModelSourceSummary } from "../components/provider/ProjectModelSourceSummary";
 import { ProviderList } from "../components/provider/ProviderList";
@@ -24,7 +23,6 @@ import {
   type WorkspaceRead,
 } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
-import { validateSettingsReturnTo } from "../lib/navigationPreferences";
 
 function SettingsHeader({ title }: { title: string }) {
   return <PageHeader title={title} />;
@@ -340,21 +338,8 @@ export function WorkspaceSettingsPage({
 }
 
 export function ModelConnectionSettingsPage() {
-  const { workspaces, projects, selectedWorkspaceId, selectWorkspace } = useSettingsWorkspace();
+  const { workspaces, selectedWorkspaceId, selectWorkspace } = useSettingsWorkspace();
   const [adding, setAdding] = useState(false);
-  const returnTo = useRouterState({
-    select: (state) => validateSettingsReturnTo(state.location.search.returnTo),
-  });
-  // Coming from a project preselects it, but only if this workspace lists it.
-  const originProjectId = returnTo?.match(/^\/projects\/([^/?#]+)/)?.[1];
-  const selectionScope = JSON.stringify([selectedWorkspaceId, returnTo]);
-  const [projectChoice, setProjectChoice] = useState<{ scope: string; id: string } | null>(null);
-  const overrideProjectId =
-    (projects.data ?? []).find(
-      (project) =>
-        project.id ===
-        (projectChoice?.scope === selectionScope ? projectChoice.id : originProjectId),
-    )?.id ?? "";
 
   return (
     <main className="df-page df-settings-page df-model-settings" data-testid="model-settings-page">
@@ -382,44 +367,6 @@ export function ModelConnectionSettingsPage() {
             adding={adding}
             onAddingChange={setAdding}
           />
-          <DefaultModelSettings
-            key={`defaults-${selectedWorkspaceId}`}
-            workspaceId={selectedWorkspaceId}
-            onAddProvider={() => setAdding(true)}
-          />
-          {(projects.data ?? []).length > 0 && (
-            <Disclosure title="按项目覆盖" testId="project-models-disclosure">
-              <div className="df-project-override">
-                <Field>
-                  项目
-                  <Select
-                    aria-label="项目模型覆盖"
-                    value={overrideProjectId}
-                    onChange={(event) =>
-                      setProjectChoice({ scope: selectionScope, id: event.target.value })
-                    }
-                  >
-                    <option value="">选择项目</option>
-                    {(projects.data ?? []).map((project) => (
-                      <option key={project.id} value={project.id}>
-                        {project.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                {overrideProjectId && (
-                  <Link
-                    className="df-btn"
-                    to="/settings/projects/$projectId"
-                    params={{ projectId: overrideProjectId }}
-                    search={returnTo ? { returnTo } : {}}
-                  >
-                    设置项目模型
-                  </Link>
-                )}
-              </div>
-            </Disclosure>
-          )}
         </>
       ) : (
         !workspaces.isPending && <p className="muted">请先创建工作空间。</p>
@@ -446,7 +393,7 @@ export function ProjectSettingsPage() {
           正在读取项目设置…
         </p>
       ) : project.isError || !project.data ? (
-        <p className="flash err">无法读取当前项目，请返回项目大厅重新选择。</p>
+        <p className="flash err">无法读取当前项目，请返回我的项目重新选择。</p>
       ) : (
         <>
           <section className="df-settings-section">

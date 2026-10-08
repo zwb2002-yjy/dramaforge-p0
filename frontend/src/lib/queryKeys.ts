@@ -146,7 +146,8 @@ export const queryKeys = {
   },
 
   model: {
-    catalog: () => ["models"] as const,
+    catalog: (workspaceId?: string | null) =>
+      workspaceId === undefined ? (["models"] as const) : (["models", workspaceId] as const),
     slots: () => ["model-slots"] as const,
     workspaceProfiles: (workspaceId: string | null) =>
       ["workspace-model-profiles", workspaceId] as const,

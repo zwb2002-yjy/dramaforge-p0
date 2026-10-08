@@ -90,8 +90,8 @@ export function setRememberedProjectId(projectId: string | null): void {
 export function getRememberedProjectPath(projectId: string): string | null {
   const path = readNavigationPreference(`dramaforge.project-path:${projectId}`);
   const prefix = `/projects/${projectId}/`;
-  if (!path?.startsWith(prefix)) return null;
-  const suffix = path.slice(prefix.length);
+  if (!path?.startsWith(prefix) || !validateSettingsReturnTo(path)) return null;
+  const suffix = path.split(/[?#]/)[0].slice(prefix.length);
   return /^(script|assets|production|review|edit|scenes|scenes\/[^/?#]+)$/.test(suffix) &&
     !suffix.includes("..")
     ? path
@@ -99,7 +99,7 @@ export function getRememberedProjectPath(projectId: string): string | null {
 }
 
 export function rememberProjectPath(projectId: string, path: string): void {
-  if (!path.startsWith(`/projects/${projectId}/`)) return;
+  if (!path.startsWith(`/projects/${projectId}/`) || !validateSettingsReturnTo(path)) return;
   writeNavigationPreference(`dramaforge.project-path:${projectId}`, path);
 }
 

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, createRoute, useNavigate, redirect } from "@tanstack/react-router";
+import { Link, createRoute, useNavigate, useRouterState, redirect } from "@tanstack/react-router";
 import { Clapperboard, Plus, Search } from "lucide-react";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
@@ -19,7 +19,7 @@ import { queryKeys } from "../lib/queryKeys";
 import { getRememberedProjectId } from "../lib/navigationPreferences";
 import { Button, Field, Input, Select, PageHeader } from "../components/ui";
 import { CreateProjectForm } from "../features/project/CreateProjectForm";
-import { QuickStartSteps } from "../features/project/QuickStartSteps";
+import { WorkspaceModelNotice } from "../features/project/WorkspaceModelNotice";
 import { ProjectActions } from "../features/project/ProjectActions";
 import { LazyWorkspaceSettingsPage } from "./pages";
 import { rootRoute } from "./__root";
@@ -28,6 +28,9 @@ export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
   beforeLoad: ({ location }) => {
+    if (new URLSearchParams(location.searchStr).get("panel") === "select") {
+      throw redirect({ to: "/", search: { ...location.search, panel: undefined }, replace: true });
+    }
     const hash = location.hash.replace(/^#/, "");
     if (hash === "project-filters" || hash === "recent-projects") {
       throw redirect({
@@ -49,14 +52,14 @@ export const indexRoute = createRoute({
   },
   validateSearch: (
     search: Record<string, unknown>,
-  ): { create?: boolean; panel?: "workspace" | "recent" | "select" } => ({
+  ): { create?: boolean; panel?: "workspace" | "recent" } => ({
     create:
       search.create === true || search.create === "1" || search.create === "true"
         ? true
         : undefined,
-    panel: (search.panel === "workspace" || search.panel === "recent" || search.panel === "select"
+    panel: (search.panel === "workspace" || search.panel === "recent"
       ? search.panel
-      : undefined) as "workspace" | "recent" | "select" | undefined,
+      : undefined) as "workspace" | "recent" | undefined,
   }),
   component: HomePage,
 });
@@ -66,6 +69,7 @@ const PROJECT_PAGE_SIZE = 12;
 function HomePage() {
   const navigate = useNavigate();
   const search = indexRoute.useSearch();
+  const returnTo = useRouterState({ select: (state) => state.location.href });
   const queryClient = useQueryClient();
   const health = useQuery({
     queryKey: queryKeys.health(),
@@ -167,22 +171,22 @@ function HomePage() {
   const ownerInitialized = bootstrapStatus.data?.owner_initialized === true;
   const bootstrapReady = bootstrapStatus.data !== undefined;
   const authFormReady = email.trim().length > 0 && password.length > 0;
+  const rememberedProjectId = getRememberedProjectId();
+  const recentProject =
+    (projects.data ?? []).find((project) => project.id === rememberedProjectId) ?? null;
   const visibleProjects = useMemo(() => {
+    const scope =
+      search.panel === "recent" ? (recentProject ? [recentProject] : []) : (projects.data ?? []);
     const value = projectFilter.trim().toLocaleLowerCase();
-    if (!value) return projects.data ?? [];
-    return (projects.data ?? []).filter((project) =>
-      project.name.toLocaleLowerCase().includes(value),
-    );
-  }, [projectFilter, projects.data]);
+    if (!value) return scope;
+    return scope.filter((project) => project.name.toLocaleLowerCase().includes(value));
+  }, [projectFilter, projects.data, search.panel, recentProject]);
   const displayedProjects = visibleProjects.slice(0, visibleProjectLimit);
   const remainingProjectCount = visibleProjects.length - displayedProjects.length;
 
   useEffect(() => {
     setVisibleProjectLimit(PROJECT_PAGE_SIZE);
-  }, [projectFilter, selectedWorkspaceId]);
-  const rememberedProjectId = getRememberedProjectId();
-  const recentProject =
-    (projects.data ?? []).find((project) => project.id === rememberedProjectId) ?? null;
+  }, [projectFilter, selectedWorkspaceId, search.panel]);
   const queryError =
     workspaces.error instanceof Error
       ? workspaces.error.message
@@ -197,17 +201,7 @@ function HomePage() {
   return (
     <main className="df-page df-project-lobby" data-testid="home-panel">
       <PageHeader
-        title={
-          createOpen
-            ? "新建项目"
-            : search.panel === "workspace"
-              ? "工作空间"
-              : search.panel === "recent"
-                ? "最近打开"
-                : search.panel === "select"
-                  ? "选择项目开始创作"
-                  : "项目大厅"
-        }
+        title={createOpen ? "新建项目" : search.panel === "workspace" ? "工作空间" : "我的项目"}
         actions={
           <>
             {!apiLive && <span className="status-bad">服务未就绪</span>}
@@ -328,41 +322,42 @@ function HomePage() {
               </Suspense>
             </section>
           )}
-          {!createOpen && !search.panel && projects.isSuccess && (
-            <QuickStartSteps
-              recentProject={recentProject ?? projects.data[0] ?? null}
-              hasProjects={projects.data.length > 0}
-              onCreateProject={() => setCreateOpen(true)}
-              onOpenProject={openProject}
-            />
-          )}
-
-          {search.panel === "recent" && !recentProject && (
-            <p role="status">当前空间还没有最近打开的项目。</p>
-          )}
+          {!createOpen &&
+            search.panel !== "workspace" &&
+            selectedWorkspaceId &&
+            workspaces.isSuccess &&
+            workspaces.data.some((workspace) => workspace.id === selectedWorkspaceId) && (
+              <WorkspaceModelNotice
+                key={selectedWorkspaceId}
+                workspaceId={selectedWorkspaceId}
+                returnTo={returnTo}
+              />
+            )}
           <section
-            hidden={createOpen || search.panel === "recent" || search.panel === "workspace"}
+            hidden={createOpen || search.panel === "workspace"}
             className="df-lobby-section"
-            aria-labelledby="all-projects-title"
+            aria-label="项目列表与筛选"
           >
-            <header>
-              <h2 id="all-projects-title">全部项目</h2>
-            </header>
             <div className="df-project-filters" id="project-filters">
-              <Field>
-                <span className="sr-only">工作空间</span>
-                <Select
-                  aria-label="工作空间筛选"
-                  value={selectedWorkspaceId ?? ""}
-                  onChange={(event) => selectWorkspace(event.target.value || null)}
-                >
-                  {(workspaces.data ?? []).map((workspace) => (
-                    <option key={workspace.id} value={workspace.id}>
-                      {workspace.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
+              <div className="df-workspace-filter">
+                <Field>
+                  <span className="sr-only">工作空间</span>
+                  <Select
+                    aria-label="工作空间筛选"
+                    value={selectedWorkspaceId ?? ""}
+                    onChange={(event) => selectWorkspace(event.target.value || null)}
+                  >
+                    {(workspaces.data ?? []).map((workspace) => (
+                      <option key={workspace.id} value={workspace.id}>
+                        {workspace.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Link className="df-btn ghost" to="/" search={{ panel: "workspace" }}>
+                  管理工作空间
+                </Link>
+              </div>
               <Field>
                 <span className="sr-only">搜索项目</span>
                 <span className="df-search-field">
@@ -375,6 +370,24 @@ function HomePage() {
                   />
                 </span>
               </Field>
+              <nav className="qc-local-tabs" aria-label="项目筛选">
+                <Link
+                  to="/"
+                  search={{}}
+                  activeProps={{}}
+                  aria-current={search.panel !== "recent" ? "page" : undefined}
+                >
+                  全部项目
+                </Link>
+                <Link
+                  to="/"
+                  search={{ panel: "recent" }}
+                  activeProps={{}}
+                  aria-current={search.panel === "recent" ? "page" : undefined}
+                >
+                  最近打开
+                </Link>
+              </nav>
             </div>
 
             {workspaces.isError || projects.isError ? (
@@ -398,7 +411,7 @@ function HomePage() {
                   管理工作空间
                 </Link>
               </div>
-            ) : projects.isLoading ? (
+            ) : projects.isPending ? (
               <div className="panel muted" role="status">
                 正在读取项目…
               </div>
@@ -421,17 +434,10 @@ function HomePage() {
                           <Button
                             type="button"
                             onClick={() => openProject(project.id)}
-                            aria-label={`打开 ${project.name}`}
+                            aria-label={`进入工作台 ${project.name}`}
                           >
-                            打开
+                            进入工作台
                           </Button>
-                          <Link
-                            className="df-btn ghost"
-                            to="/projects/$projectId/scenes"
-                            params={{ projectId: project.id }}
-                          >
-                            分镜与生成
-                          </Link>
                         </span>
                       </span>
                     </article>
@@ -440,8 +446,14 @@ function HomePage() {
               </div>
             ) : (
               <div className="panel muted">
-                <p>{projectFilter.trim() ? "没有符合搜索条件的项目。" : "当前空间暂无项目。"}</p>
-                {!projectFilter.trim() && (
+                <p>
+                  {search.panel === "recent" && !recentProject
+                    ? "当前空间还没有最近打开的项目。"
+                    : projectFilter.trim()
+                      ? "没有符合搜索条件的项目。"
+                      : "当前空间暂无项目。"}
+                </p>
+                {!projectFilter.trim() && search.panel !== "recent" && (
                   <Button tone="primary" onClick={() => setCreateOpen(true)}>
                     创建第一个项目
                   </Button>

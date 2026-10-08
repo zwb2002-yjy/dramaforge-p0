@@ -281,7 +281,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
 
       {workspace.isError && (
         <div className="flash err" role="alert">
-          无法读取剧本，请稍后重试或返回项目大厅。
+          无法读取剧本，请稍后重试或返回我的项目。
         </div>
       )}
 

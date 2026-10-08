@@ -254,6 +254,87 @@ def test_execution_preflight_requires_immutable_connection_revision(
     }
 
 
+def test_effective_preview_retains_saved_workspace_media_and_text_identities(
+    api: tuple[TestClient, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import httpx
+    from app.access.models import Project, User
+    from app.providers.connection_service import ProviderConnectionService
+    from app.providers.models import ProviderModelBinding
+    from cryptography.fernet import Fernet
+    from model_infra_fixture import seed_model_infra
+    from sqlalchemy import select
+
+    monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
+    monkeypatch.setenv("BYOK_KEYRING", f"v1:{Fernet.generate_key().decode('ascii')}")
+    clear_settings_cache()
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _create_project(client, workspace_id)
+    requests: list[str] = []
+
+    async def catalog(_client: httpx.AsyncClient, url: str, **kwargs: Any) -> httpx.Response:
+        requests.append(url)
+        return httpx.Response(200, json={"data": [{"id": "preview-chat"}]})
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", catalog)
+
+    async def seed() -> dict[str, dict[str, str]]:
+        async with factory() as session:
+            user = (await session.scalars(select(User))).one()
+            project = await session.get(Project, UUID(project_id))
+            assert project is not None
+            await seed_model_infra(session, project=project, user=user)
+            media = list(await session.scalars(select(ProviderModelBinding)))
+            bindings = {
+                "video.shot" if item.media_type == "video" else "visual.keyframe": {
+                    "model_id": f"binding:{item.id}"
+                }
+                for item in media
+            }
+            service = ProviderConnectionService(session)
+            connection = await service.create_connection(
+                workspace_id=project.workspace_id,
+                actor=user,
+                display_name="Preview text",
+                api_key="test-only-key",
+                enabled=True,
+                provider_type="litellm",
+                protocol_profile="openai_chat_v1",
+                base_url="https://preview.example.test/v1",
+            )
+            await service.probe(
+                workspace_id=project.workspace_id,
+                connection_id=connection.id,
+                actor=user,
+                capability="auth_models",
+            )
+            bindings["planning.script"] = {
+                "model_id": f"litellm/{connection.id}/preview-chat"
+            }
+            await session.commit()
+            return bindings
+
+    bindings = _run_create(seed())
+    saved = client.put(
+        f"/api/v1/projects/{project_id}/model-profile",
+        json={"bindings": bindings, "expected_version": 1},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert saved.status_code == 200, saved.text
+    request_count = len(requests)
+    response = client.get(f"/api/v1/projects/{project_id}/model-bindings/effective")
+    assert response.status_code == 200, response.text
+    effective = {item["slot"]: item for item in response.json()}
+    assert effective.keys() == bindings.keys()
+    for slot, binding in bindings.items():
+        assert effective[slot]["model_id"] == binding["model_id"]
+        assert effective[slot]["source"] == "project_profile"
+        assert effective[slot]["profile_id"] == saved.json()["id"]
+        assert effective[slot]["profile_version"] == saved.json()["version"]
+    assert len(requests) == request_count  # Preview never probes a Provider.
+
+
 def test_text_video_preflight_rejects_an_i2v_only_binding(api: tuple[TestClient, Any]) -> None:
     client, factory = api
     workspace_id = _register(client)

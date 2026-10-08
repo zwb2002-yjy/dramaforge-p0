@@ -5,6 +5,7 @@ import { Checkbox, Disclosure, Field, Input, Select } from "../ui";
 import {
   MEDIA_LABEL,
   choiceKey,
+  contractChoiceKey,
   discoveredModels,
   protocolContracts,
   type MediaKind,
@@ -66,7 +67,13 @@ export function ModelPicker({
   };
 
   const renderRow = (row: Row) => {
-    const added = existingKeys.has(row.key);
+    const added = existingKeys.has(
+      contractChoiceKey({
+        modelId: row.modelId,
+        mediaType: row.mediaType,
+        contractId: row.contract.catalog_entry_id,
+      }),
+    );
     return (
       <li key={row.key} className={added ? "added" : undefined}>
         <Field className="df-model-check">
@@ -84,9 +91,8 @@ export function ModelPicker({
               )
             }
           />
-          <span className="df-model-name">
-            <strong>{row.contract.display_name}</strong>
-            <code>{row.modelId}</code>
+          <span className="df-model-name" title={row.contract.display_name}>
+            <strong>{row.modelId}</strong>
           </span>
           {added && <span className="df-status ok">已添加</span>}
         </Field>
@@ -126,7 +132,15 @@ export function ModelPicker({
               const contract = protocols.find((item) => item.catalog_entry_id === contractId);
               const mediaType = (contract?.media_type ?? "image") as MediaKind;
               const key = choiceKey({ modelId, mediaType });
-              const added = contract ? existingKeys.has(key) : false;
+              const added = contract
+                ? existingKeys.has(
+                    contractChoiceKey({
+                      modelId,
+                      mediaType,
+                      contractId: contract.catalog_entry_id,
+                    }),
+                  )
+                : false;
               return (
                 <li key={modelId}>
                   <Field className="df-model-check">

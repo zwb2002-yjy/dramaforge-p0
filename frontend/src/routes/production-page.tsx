@@ -96,7 +96,7 @@ export function ProductionPage({
 
   return (
     <div data-testid="production-mode">
-      <PageHeader title="作品总览" actions={<BatchFillActions projectId={projectId} />} />
+      <PageHeader title="项目总览" actions={<BatchFillActions projectId={projectId} />} />
 
       <Tabs label="制作内容">
         {views.map((item) => (

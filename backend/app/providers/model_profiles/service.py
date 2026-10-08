@@ -302,7 +302,11 @@ class ProductionModelProfileService:
         if name is not None:
             profile.name = name
         if bindings is not None:
-            report = self.validate_bindings(bindings)
+            existing = parse_bindings(profile.bindings)
+            changed = {
+                slot: binding for slot, binding in bindings.items() if existing.get(slot) != binding
+            }
+            report = self.validate_bindings(changed)
             report.raise_if_invalid()
             profile.bindings = bindings_to_json(bindings)
         if is_default is not None and profile.project_id is None:
@@ -339,13 +343,20 @@ class ProductionModelProfileService:
             "image": selection.image_model_id,
             "video": selection.video_model_id,
         }
+        changed: dict[ModelSlot, ModelSlotBinding] = {}
         for group, model_id in patches.items():
             if model_id is None:
                 continue
             for slot in SIMPLE_MODE_SLOT_GROUPS[group]:
-                bindings[slot] = ModelSlotBinding(slot=slot, model_id=model_id)
-        report = self.validate_bindings(bindings)
+                current = bindings.get(slot)
+                if current is not None and current.model_id == model_id:
+                    continue
+                changed[slot] = ModelSlotBinding(slot=slot, model_id=model_id)
+        if not changed:
+            return profile
+        report = self.validate_bindings(changed)
         report.raise_if_invalid()
+        bindings.update(changed)
         profile.bindings = bindings_to_json(bindings)
         profile.updated_by = actor_id
         profile.version += 1

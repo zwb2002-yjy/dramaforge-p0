@@ -819,7 +819,11 @@ export type InputSlotSpecRead = components["schemas"]["InputSlotSpec"];
 export type ConditionalConstraintRead = components["schemas"]["ConditionalConstraint"];
 export type CapabilitySpecRead = components["schemas"]["CapabilitySpec"];
 
-export async function listModels(capability?: string): Promise<ModelRead[]> {
+export async function listModels(
+  capability?: string,
+  workspaceId?: string | null,
+  signal?: AbortSignal,
+): Promise<ModelRead[]> {
   const query = capability ? `?capability=${encodeURIComponent(capability)}` : "";
-  return apiGetList<ModelRead>(`/api/v1/models${query}`);
+  return apiGetList<ModelRead>(`/api/v1/models${query}`, workspaceId, signal);
 }

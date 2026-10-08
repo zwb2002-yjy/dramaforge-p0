@@ -1,4 +1,4 @@
-/* Model settings: provider cards, add/manage dialogs and default models.
+/* Model settings: provider connections, custom setup and model activation.
    Structure is carried by spacing and type; only interactive rows get edges. */
 
 .df-model-settings {
@@ -14,6 +14,7 @@
 }
 .df-settings-block-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: end;
   justify-content: space-between;
   gap: var(--df-space-4);
@@ -114,13 +115,6 @@
 .df-provider-status-dot.warn {
   background: var(--df-warning);
 }
-.df-provider-sidebar-note {
-  margin: auto 0 0;
-  padding-top: var(--df-space-5);
-  color: var(--df-text-muted);
-  font-size: var(--df-font-size-meta);
-  line-height: var(--df-leading-relaxed);
-}
 .df-provider-detail {
   display: grid;
   align-content: start;
@@ -190,57 +184,11 @@
   font-size: var(--df-font-size-body-lg);
 }
 /* ---- Add provider ---- */
-.df-add-provider {
-  display: grid;
-  grid-template-columns: minmax(var(--df-vendor-rail-min), var(--df-vendor-rail-max)) minmax(0, 1fr);
-  gap: var(--df-space-6);
-  min-height: var(--df-dialog-body-min);
-}
-.df-vendor-rail {
-  display: grid;
-  align-content: start;
-  gap: var(--df-space-1);
-  padding-right: var(--df-space-4);
-  border-right: 1px solid var(--df-border-subtle);
-}
-.df-btn.df-vendor-option {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  justify-items: start;
-  column-gap: var(--df-space-2);
-  height: auto;
-  padding: var(--df-space-2) var(--df-space-3);
-  text-align: left;
-}
-.df-btn.df-vendor-option svg {
-  grid-row: span 2;
-  align-self: center;
-  color: var(--df-text-muted);
-}
-.df-btn.df-vendor-option span {
-  color: var(--df-text-primary);
-  font-weight: var(--df-weight-medium);
-}
-.df-btn.df-vendor-option small {
-  color: var(--df-text-muted);
-  font-size: var(--df-font-size-meta);
-}
-.df-btn.df-vendor-option.active {
-  background: var(--df-nav-active-background);
-}
-.df-btn.df-vendor-option.active svg {
-  color: var(--df-verdigris);
-}
 .df-add-provider-form {
   display: grid;
   align-content: start;
   gap: var(--df-space-4);
   min-width: 0;
-}
-.df-add-provider-hint {
-  margin: 0;
-  color: var(--df-text-muted);
-  font-size: var(--df-font-size-caption);
 }
 
 /* ---- Model picker ---- */
@@ -261,7 +209,6 @@
 .df-model-picker ul,
 .df-model-list,
 .df-text-models ul,
-.df-profile-list,
 .df-manage-probes {
   display: grid;
   margin: 0;
@@ -294,6 +241,7 @@
   min-width: 0;
 }
 .df-model-name strong {
+  overflow-wrap: anywhere;
   color: var(--df-text-primary);
   font-weight: var(--df-weight-medium);
 }
@@ -357,6 +305,7 @@
 }
 .df-manage-row-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--df-space-2);
 }
@@ -374,19 +323,6 @@
   flex: none;
   color: var(--df-text-muted);
 }
-.df-manage-facts {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: var(--df-space-1) var(--df-space-4);
-  margin: 0 0 var(--df-space-3);
-  font-size: var(--df-font-size-caption);
-}
-.df-manage-facts dt {
-  color: var(--df-text-muted);
-}
-.df-manage-facts dd {
-  margin: 0;
-}
 .df-manage-probes li {
   display: flex;
   flex-wrap: wrap;
@@ -398,79 +334,24 @@
 .df-manage-probes time {
   color: var(--df-text-muted);
 }
-.df-manage-diagnostic-forms {
-  display: grid;
-  gap: var(--df-space-3);
-  margin-top: var(--df-space-3);
-}
-
-/* ---- Default models ---- */
-.df-default-models {
-  display: grid;
-  gap: var(--df-space-4);
-  padding: var(--df-space-5);
-  border: 1px solid var(--df-surface-tier-raised-border);
-  border-radius: var(--df-radius-container);
-  background: var(--df-surface-tier-raised-bg);
-}
-.df-default-model-row {
-  display: grid;
-  gap: var(--df-space-2);
-}
-.df-default-model-empty {
-  display: flex;
-  align-items: center;
-  gap: var(--df-space-2);
-  margin: 0;
-}
-.df-default-models-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--df-space-2);
-}
-.df-profile-list li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--df-space-3);
-  padding: var(--df-space-2) 0;
-  border-bottom: 1px solid var(--df-border-subtle);
-}
-.df-profile-list li > span:first-child {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--df-space-3);
-}
-.df-profile-actions {
-  display: inline-flex;
-  gap: var(--df-space-1);
-}
-.df-profile-create,
-.df-project-override {
-  display: flex;
-  align-items: end;
-  gap: var(--df-space-3);
-  margin-top: var(--df-space-3);
-}
-.df-profile-create .df-input,
-.df-project-override .df-field {
-  flex: 1;
-}
 
 @media (max-width: 899px) {
-  .df-add-provider {
-    grid-template-columns: 1fr;
-  }
-  .df-vendor-rail {
-    padding-right: 0;
-    border-right: 0;
-    border-bottom: 1px solid var(--df-border-subtle);
-    padding-bottom: var(--df-space-3);
-  }
   .df-provider-workspace {
     grid-template-columns: minmax(var(--df-vendor-rail-min), var(--df-vendor-rail-max)) minmax(
         0,
         1fr
       );
+  }
+}
+@media (max-width: 599px) {
+  .df-provider-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .df-provider-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--df-border-subtle);
+  }
+  .df-model-list li {
+    flex-wrap: wrap;
   }
 }

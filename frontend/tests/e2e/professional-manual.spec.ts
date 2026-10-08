@@ -258,7 +258,7 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("分镜与生成");
+  await expect(page.locator(".qc-project-mode")).toHaveText("分镜制作");
   await expect(page.getByTestId("scene-stage")).toBeVisible();
   await expect(page.getByTestId("cinematic-canvas")).toBeVisible();
   await expect(page.getByTestId("shot-strip")).toBeVisible();
@@ -282,7 +282,7 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
 
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("作品总览");
+  await expect(page.locator(".qc-project-mode")).toHaveText("项目总览");
   await expect(page.locator(".qc-content-grid")).toHaveClass(/no-inspector/);
 
   // Keep the Asset page's own data requests isolated while asserting that the
@@ -296,7 +296,7 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
   await page.goto(`/projects/${PROJECT_ID}/assets`);
   await expect(page.getByTestId("asset-cards-panel")).toBeVisible();
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
-  await expect(page.locator(".qc-project-mode")).toHaveText("角色素材");
+  await expect(page.locator(".qc-project-mode")).toHaveText("角色与素材");
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
