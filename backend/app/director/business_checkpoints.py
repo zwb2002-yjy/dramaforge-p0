@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from contextlib import suppress
-from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy import select
@@ -14,26 +13,13 @@ from app.contracts.production_facts import ExecutionTrackingFact
 from app.director.next_action import DirectorNextActionService
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import ACTIVE_TURN_STATUSES, DirectorTurnService
-from app.production.application.facts import ProductionFacts
 from app.shared.errors import ConflictError, ValidationAppError
-
-
-class ExecutionIdentity(Protocol):
-    @property
-    def id(self) -> UUID: ...
 
 
 class DirectorBusinessCheckpoints:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._turns = DirectorTurnService(session)
-
-    async def track_execution(
-        self, *, project: Project, actor: User, run: ExecutionIdentity,
-    ) -> DirectorTurn | None:
-        """Legacy adapter; callers migrate to the independent event worker."""
-        fact = await ProductionFacts(self._session).tracking(project_id=project.id, run_id=run.id)
-        return await self.track_fact(project=project, actor=actor, run=fact)
 
     async def track_fact(
         self, *, project: Project, actor: User, run: ExecutionTrackingFact,

@@ -86,6 +86,24 @@ FORBIDDEN_FILES = (
     ROOT / "scripts" / "rerun_drift_blocks.py",
     ROOT / "frontend" / "src" / "routes" / "projects.$projectId.quick.tsx",
 )
+FORBIDDEN_PATH_TEXT = {
+    ROOT / "backend" / "app" / "api" / "v1" / "experiments.py": (
+        "accepted_" + "without_candidate",
+    ),
+    ROOT / "backend" / "app" / "editing" / "proposal_plan.py": (
+        '"session_' + 'id"',
+        '"timeline_' + 'plan"',
+        'aliases = ("kind", "type", "op")',
+    ),
+    ROOT / "backend" / "app" / "production" / "repair_service.py": (
+        "def execute_" + "repair(",
+        "def create_and_" + "execute_first_step(",
+    ),
+    ROOT / "backend" / "app" / "director" / "business_checkpoints.py": (
+        "def track_" + "execution(",
+    ),
+}
+
 IGNORED_PARTS = {".git", ".venv", "node_modules", "__pycache__", "dist", "tmp"}
 
 
@@ -121,6 +139,15 @@ def main() -> int:
             if token in source:
                 failures.append(
                     f"{path.relative_to(ROOT)} contains retired token {token!r}"
+                )
+    for path, tokens in FORBIDDEN_PATH_TEXT.items():
+        if not path.is_file():
+            continue
+        source = path.read_text(encoding="utf-8", errors="replace")
+        for token in tokens:
+            if token in source:
+                failures.append(
+                    f"{path.relative_to(ROOT)} contains retired compatibility token {token!r}"
                 )
     if failures:
         print("Canonical surface check FAILED:", file=sys.stderr)
