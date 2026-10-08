@@ -1,4 +1,4 @@
-name: Temporary G3-G5 Integrated Frontend Validation
+name: Temporary Scene Animatic & Editing Validation
 on:
   push:
     branches: [codex/visual-storyboard-g1-20261008]
@@ -36,7 +36,10 @@ jobs:
             src/features/editing/editing-source-preview.css \
             tests/unit/ReviewExactTarget.test.tsx \
             tests/unit/SceneMediaGallery.test.tsx \
-            tests/unit/EditingWorkspace.test.tsx
+            tests/unit/EditingWorkspace.test.tsx \
+            src/features/scenes/SceneAnimaticPreview.tsx \
+            src/features/scenes/scene-animatic.css \
+            tests/unit/SceneAnimaticPreview.test.tsx
           cd ..
           git add frontend/src/components/assets/AssetReferencePicker.tsx \
             frontend/tests/unit/AssetReferencePicker.test.tsx \
@@ -47,7 +50,10 @@ jobs:
             frontend/src/features/editing/editing-source-preview.css \
             frontend/tests/unit/ReviewExactTarget.test.tsx \
             frontend/tests/unit/SceneMediaGallery.test.tsx \
-            frontend/tests/unit/EditingWorkspace.test.tsx
+            frontend/tests/unit/EditingWorkspace.test.tsx \
+            frontend/src/features/scenes/SceneAnimaticPreview.tsx \
+            frontend/src/features/scenes/scene-animatic.css \
+            frontend/tests/unit/SceneAnimaticPreview.test.tsx
           if ! git diff --cached --quiet; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
