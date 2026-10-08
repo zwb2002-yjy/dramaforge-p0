@@ -18,7 +18,7 @@ Director Runtime 是**独立于生产执行的编排 runtime**：它驱动导演
 | Proposal | 类型化 diff 提案（story / shot / editing 等），只能通过 typed command registry 应用；Assistant 永远 proposal-only。 |
 | NextAction | 导演给出的下一步建议；不是自动执行。 |
 | 用户决策 | 用户对 Proposal 的接受 / 部分接受 / 拒绝，持久化记录。 |
-| BusinessCheckpoints | 业务检查点（授权、确认）持久化，供恢复使用。 |
+| Runtime signals | 用户决定与生产事实作为持久事件/Runtime wakeup 恢复；不再维护第二套 BusinessCheckpoints 协调器。 |
 
 三种身份不得混淆：DirectorThread（对话容器）、DirectorTurn（轮次业务身份）、
 `runtime_execution_id`（实现层检查点执行身份，与 Turn 及 engine_version 绑定）。
