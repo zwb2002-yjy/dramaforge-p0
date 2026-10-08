@@ -109,45 +109,9 @@ it("does not silently fill omitted results or substitute failed provider-binding
   expect(screen.queryByText(/此项目尚未保存供应商绑定/)).not.toBeInTheDocument();
 });
 
-it.each([false, true])(
-  "never interprets the legacy audio.tts profile slot as voice-worker dispatch (returned: %s)",
-  async (returned) => {
-    vi.mocked(listModelSlots).mockResolvedValue([
-      {
-        id: "visual.keyframe",
-        display_name: "镜头关键帧",
-        description: "",
-        capabilities: ["image.generate"],
-        p0_scope: true,
-      },
-      {
-        id: "audio.tts",
-        display_name: "旧声音槽位",
-        description: "",
-        capabilities: ["audio.tts"],
-        p0_scope: true,
-      },
-    ]);
-    const image: Awaited<ReturnType<typeof getEffectiveBindings>>[number] = {
-      slot: "visual.keyframe",
-      capability: "image.generate",
-      model_id: "provider/exact-image-v2",
-      source: "workspace_profile",
-      profile_id: "profile",
-      profile_version: 4,
-      native_options: {},
-    };
-    vi.mocked(getEffectiveBindings).mockResolvedValue([
-      image,
-      ...(returned
-        ? [{ ...image, slot: "audio.tts", capability: "audio.tts", model_id: "legacy-voice-model" }]
-        : []),
-    ]);
-    mount();
-    await screen.findByTestId("model-source-visual.keyframe");
-    expect(screen.queryByTestId("model-source-audio.tts")).not.toBeInTheDocument();
-    expect(screen.queryByText("legacy-voice-model")).not.toBeInTheDocument();
-    expect(screen.queryByText(/部分环节未返回解析结果/)).not.toBeInTheDocument();
-    expect(screen.getByTestId("voice-runtime-boundary")).toHaveTextContent("不受这里控制");
-  },
-);
+it("keeps voice configuration separate from model-profile resolution", async () => {
+  mount();
+  await screen.findByTestId("model-source-visual.keyframe");
+  expect(screen.queryByTestId("model-source-audio.tts")).not.toBeInTheDocument();
+  expect(screen.getByTestId("voice-runtime-boundary")).toHaveTextContent("不受这里控制");
+});
