@@ -27,7 +27,11 @@ function readSelection(projectId: string): WallSelection {
     if (!parsed || typeof parsed !== "object") return fallback;
     const stored = parsed as Partial<WallSelection>;
     if (!FILTERS.some((row) => row.value === stored.filter)) return fallback;
-    return { projectId, filter: stored.filter!, sceneId: typeof stored.sceneId === "string" ? stored.sceneId : null };
+    return {
+      projectId,
+      filter: stored.filter!,
+      sceneId: typeof stored.sceneId === "string" ? stored.sceneId : null,
+    };
   } catch {
     return fallback;
   }
@@ -45,10 +49,13 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
   useEffect(() => {
     if (selection.projectId !== projectId) return;
     try {
-      sessionStorage.setItem("df:scene-wall:" + projectId, JSON.stringify({
-        filter: selection.filter,
-        sceneId: selection.sceneId,
-      }));
+      sessionStorage.setItem(
+        "df:scene-wall:" + projectId,
+        JSON.stringify({
+          filter: selection.filter,
+          sceneId: selection.sceneId,
+        }),
+      );
     } catch {
       // Browser storage is optional; navigation still works without it.
     }
@@ -81,9 +88,7 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
         : true,
   );
   const activeSceneId =
-    filteredRows.find((scene) => scene.id === current.sceneId)?.id ??
-    filteredRows[0]?.id ??
-    null;
+    filteredRows.find((scene) => scene.id === current.sceneId)?.id ?? filteredRows[0]?.id ?? null;
   const totalShots = rows.reduce((count, scene) => count + scene.shot_count, 0);
   const formalVideos = rows.reduce((count, scene) => count + scene.formal_video_count, 0);
 
@@ -100,7 +105,10 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
 
   return (
     <div data-testid="scene-storyboard-wall" className="qc-scene-wall scene-browser">
-      <PageHeader title="分镜总览" description="按场景查看全片镜头。展开场景后可直接查看正式画面、视频和缺失位置。" />
+      <PageHeader
+        title="分镜总览"
+        description="按场景查看全片镜头。展开场景后可直接查看正式画面、视频和缺失位置。"
+      />
       {scenes.isError && (
         <div className="flash err" role="alert">
           无法读取场景：{String(scenes.error)}
@@ -112,7 +120,9 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
           <div className="scene-wall-summary" aria-label="全片制作素材概览">
             <strong>{rows.length} 场景</strong>
             <span>{totalShots} 镜头</span>
-            <span>正式视频 {formalVideos} / {totalShots}</span>
+            <span>
+              正式视频 {formalVideos} / {totalShots}
+            </span>
           </div>
           <div className="scene-wall-filters" role="group" aria-label="筛选分镜">
             {FILTERS.map((option) => (
@@ -134,21 +144,36 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
           const expanded = activeSceneId === scene.id;
           return (
             <li key={scene.id} className="qc-scene-card" data-testid="scene-card">
-              <header draggable onDragStart={() => setDragIndex(index)}
-                onDragOver={(event) => event.preventDefault()} onDrop={() => onDrop(index)}>
-                <a href={"/projects/" + projectId + "/scenes/" + scene.id} className="qc-scene-enter">
+              <header
+                draggable
+                onDragStart={() => setDragIndex(index)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => onDrop(index)}
+              >
+                <a
+                  href={"/projects/" + projectId + "/scenes/" + scene.id}
+                  className="qc-scene-enter"
+                >
                   {scene.location_name}
                 </a>
-                <span>{scene.episode_number}.{scene.scene_number} · {timeOfDayLabel(scene.time_of_day)}</span>
+                <span>
+                  {scene.episode_number}.{scene.scene_number} · {timeOfDayLabel(scene.time_of_day)}
+                </span>
                 <div className="scene-header-actions">
                   <span className="scene-wall-count">{scene.shot_count} 镜头</span>
-                  <span className="scene-wall-count">画面 {scene.formal_keyframe_count}/{scene.shot_count}</span>
-                  <span className="scene-wall-count">视频 {scene.formal_video_count}/{scene.shot_count}</span>
+                  <span className="scene-wall-count">
+                    画面 {scene.formal_keyframe_count}/{scene.shot_count}
+                  </span>
+                  <span className="scene-wall-count">
+                    视频 {scene.formal_video_count}/{scene.shot_count}
+                  </span>
                   {scene.risk_count > 0 && <span className="qc-risk">{scene.risk_count} 风险</span>}
                   <Button
                     aria-expanded={expanded}
                     aria-controls={"scene-media-" + scene.id}
-                    onClick={() => setSelection({ projectId, filter: current.filter, sceneId: scene.id })}
+                    onClick={() =>
+                      setSelection({ projectId, filter: current.filter, sceneId: scene.id })
+                    }
                   >
                     {expanded ? "正在查看镜头" : "查看镜头"}
                   </Button>
@@ -179,9 +204,16 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
       {scenes.isSuccess && rows.length > 0 && filteredRows.length === 0 && (
         <p role="status">没有符合当前筛选的场景。可切换到“全部镜头”查看所有场景。</p>
       )}
-      {scenes.isPending && <p className="muted" data-testid="scene-wall-loading" role="status">正在读取场景…</p>}
+      {scenes.isPending && (
+        <p className="muted" data-testid="scene-wall-loading" role="status">
+          正在读取场景…
+        </p>
+      )}
       {scenes.isSuccess && rows.length === 0 && (
-        <EmptyState title="先写下你的故事" description="导入剧本并确认分场后，这里会按顺序呈现每一段故事。">
+        <EmptyState
+          title="先写下你的故事"
+          description="导入剧本并确认分场后，这里会按顺序呈现每一段故事。"
+        >
           <Link className="df-btn primary" to="/projects/$projectId/script" params={{ projectId }}>
             去写剧本
           </Link>

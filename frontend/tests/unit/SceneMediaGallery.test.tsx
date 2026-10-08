@@ -1,7 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { SceneMediaGallery, type SceneMediaFilter } from "../../src/features/scenes/SceneMediaGallery";
+import {
+  SceneMediaGallery,
+  type SceneMediaFilter,
+} from "../../src/features/scenes/SceneMediaGallery";
 import type { SceneSummary, ShotLite } from "../../src/features/scenes/api";
 
 const scene: SceneSummary = {
@@ -95,9 +98,11 @@ it("shows an explicit empty scene after a successful read", async () => {
 });
 
 it("filters by actual Formal video identity, without confusing absent video with a failed read", async () => {
-  const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-    new Response(JSON.stringify({ shots }), { headers: { "Content-Type": "application/json" } }),
-  );
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(
+      new Response(JSON.stringify({ shots }), { headers: { "Content-Type": "application/json" } }),
+    );
   mount("missing-video");
   const list = await screen.findByRole("list", { name: "场景镜头列表" });
   expect(within(list).getAllByRole("listitem")).toHaveLength(1);

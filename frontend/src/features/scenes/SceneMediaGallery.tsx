@@ -61,7 +61,8 @@ export function SceneMediaGallery({
       ) : (
         <>
           <p className="scene-media-note">
-            {shotCount} 镜头 · 正式画面 {keyframeCount}/{shotCount} · 正式视频 {videoCount}/{shotCount}
+            {shotCount} 镜头 · 正式画面 {keyframeCount}/{shotCount} · 正式视频 {videoCount}/
+            {shotCount}
           </p>
           {displayedShots.length === 0 ? (
             <p role="status">本场景没有符合当前筛选的镜头。</p>
@@ -72,7 +73,12 @@ export function SceneMediaGallery({
                 const videoId = shot.formal_video_artifact_id;
                 const previewKind = videoId ? "video" : "keyframe";
                 return (
-                  <li key={shot.id} className="scene-shot-card" data-testid="scene-shot-card" data-shot-id={shot.id}>
+                  <li
+                    key={shot.id}
+                    className="scene-shot-card"
+                    data-testid="scene-shot-card"
+                    data-shot-id={shot.id}
+                  >
                     <header>
                       <strong>镜头 {shot.shot_number}</strong>
                       <span>{shotTypeLabel(shot.shot_type)}</span>
@@ -93,17 +99,38 @@ export function SceneMediaGallery({
                         <span>{videoId ? "有正式视频，暂无正式关键帧" : "暂无正式素材"}</span>
                       )}
                     </Button>
-                    <div className="scene-shot-evidence" aria-label={"镜头 " + shot.shot_number + " 素材状态"}>
-                      <span data-present={Boolean(frameId)}>正式画面：{frameId ? "已选定" : "未选定"}</span>
-                      <span data-present={Boolean(videoId)}>正式视频：{videoId ? "已选定" : "未选定"}</span>
+                    <div
+                      className="scene-shot-evidence"
+                      aria-label={"镜头 " + shot.shot_number + " 素材状态"}
+                    >
+                      <span data-present={Boolean(frameId)}>
+                        正式画面：{frameId ? "已选定" : "未选定"}
+                      </span>
+                      <span data-present={Boolean(videoId)}>
+                        正式视频：{videoId ? "已选定" : "未选定"}
+                      </span>
                     </div>
-                    <p className="scene-shot-description">{shot.visual_description || shot.dialogue || "暂无镜头描述"}</p>
+                    <p className="scene-shot-description">
+                      {shot.visual_description || shot.dialogue || "暂无镜头描述"}
+                    </p>
                     <div className="scene-shot-actions">
-                      <Button disabled={!frameId} onClick={() => open(shot, "keyframe")}
-                        aria-label={"查看关键帧 · 镜头 " + shot.shot_number}>查看画面</Button>
-                      <Button disabled={!videoId} onClick={() => open(shot, "video")}
-                        aria-label={"播放视频 · 镜头 " + shot.shot_number}>播放视频</Button>
-                      <a href={shotUrl(shot)} aria-label={"编辑镜头 " + shot.shot_number}>进入工作台 →</a>
+                      <Button
+                        disabled={!frameId}
+                        onClick={() => open(shot, "keyframe")}
+                        aria-label={"查看关键帧 · 镜头 " + shot.shot_number}
+                      >
+                        查看画面
+                      </Button>
+                      <Button
+                        disabled={!videoId}
+                        onClick={() => open(shot, "video")}
+                        aria-label={"播放视频 · 镜头 " + shot.shot_number}
+                      >
+                        播放视频
+                      </Button>
+                      <a href={shotUrl(shot)} aria-label={"编辑镜头 " + shot.shot_number}>
+                        进入工作台 →
+                      </a>
                     </div>
                   </li>
                 );

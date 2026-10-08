@@ -201,7 +201,9 @@
   font-size: var(--df-text-md);
   color: var(--df-text-secondary);
 }
-.scene-wall-summary strong { color: var(--df-text-primary); }
+.scene-wall-summary strong {
+  color: var(--df-text-primary);
+}
 .scene-wall-count {
   font-size: var(--df-text-sm);
   color: var(--df-text-secondary);
@@ -222,8 +224,13 @@
 .scene-shot-evidence span[data-present="true"] {
   color: var(--df-text-primary);
 }
-.scene-media-gallery .scene-media-note { margin: 0; }
-.scene-shot-thumbnail.df-btn:disabled { opacity: 1; cursor: default; }
+.scene-media-gallery .scene-media-note {
+  margin: 0;
+}
+.scene-shot-thumbnail.df-btn:disabled {
+  opacity: 1;
+  cursor: default;
+}
 .scene-shot-thumbnail.df-btn > span {
   margin: auto;
   padding: var(--df-space-3);

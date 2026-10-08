@@ -160,22 +160,37 @@ describe("Scene wall focused loading", () => {
   it("only fetches the focused scene until another scene is opened", async () => {
     const calls = mockBackend();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(<QueryClientProvider client={client}><SceneStoryboardWall projectId="project-1" /></QueryClientProvider>);
+    render(
+      <QueryClientProvider client={client}>
+        <SceneStoryboardWall projectId="project-1" />
+      </QueryClientProvider>,
+    );
     await screen.findAllByTestId("scene-card");
-    await waitFor(() => expect(calls.filter((row) => row.url.endsWith("/workspace"))).toHaveLength(1));
+    await waitFor(() =>
+      expect(calls.filter((row) => row.url.endsWith("/workspace"))).toHaveLength(1),
+    );
     expect(calls.filter((row) => row.url.includes("scene-2/workspace"))).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "查看镜头" }));
-    await waitFor(() => expect(calls.filter((row) => row.url.includes("scene-2/workspace"))).toHaveLength(1));
+    await waitFor(() =>
+      expect(calls.filter((row) => row.url.includes("scene-2/workspace"))).toHaveLength(1),
+    );
     expect(calls.filter((row) => row.method !== "GET")).toHaveLength(0);
   });
 
   it("filters scenes from server counts without triggering production writes", async () => {
     const calls = mockBackend();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(<QueryClientProvider client={client}><SceneStoryboardWall projectId="project-1" /></QueryClientProvider>);
+    render(
+      <QueryClientProvider client={client}>
+        <SceneStoryboardWall projectId="project-1" />
+      </QueryClientProvider>,
+    );
     await screen.findAllByTestId("scene-card");
     fireEvent.click(screen.getByRole("button", { name: "缺正式画面" }));
-    expect(screen.getByRole("button", { name: "缺正式画面" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "缺正式画面" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(calls.every((row) => row.method === "GET")).toBe(true);
   });
 });
