@@ -290,6 +290,13 @@ export function SceneWorkspace({
     <div className="qc-scene-workspace" data-testid="scene-workspace">
       <header className="qc-scene-header">
         <div className="qc-scene-context" data-testid="scene-context">
+          <a
+            className="qc-scene-back"
+            href={`/projects/${projectId}/scenes`}
+            aria-label="返回全片分镜总览"
+          >
+            ← 全片分镜
+          </a>
           <span className="director-stage-kicker">分镜</span>
           <h1>{data?.scene.location_name ?? "场景"}</h1>
           <span>
