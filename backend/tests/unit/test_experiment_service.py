@@ -205,3 +205,34 @@ async def test_ambiguous_director_payload_fails_closed(session: AsyncSession, ex
             payload={"shot_id": str(shot.id), **extra},
         )
     assert (await session.scalars(select(ExperimentBranch))).all() == []
+
+@pytest.mark.asyncio
+async def test_accept_experiment_requires_explicit_adoption_scope(session: AsyncSession) -> None:
+    from app.api.v1.experiments import ExperimentDecisionBody, decide_experiment
+
+    project, shot, user = await _seed(session)
+    row = await create_experiment_branch(
+        session,
+        project_id=project.id,
+        actor_id=user.id,
+        body=ExperimentCreateBody(
+            source_shot_id=shot.id,
+            name="Canonical adoption",
+            idempotency_key="canonical-adoption",
+            parameters={"target_node_key": "video"},
+        ),
+    )
+
+    with pytest.raises(ConflictError, match="adoption scope"):
+        await decide_experiment(
+            project.id,
+            row.id,
+            ExperimentDecisionBody(decision="accepted"),
+            user,
+            session,
+            None,
+        )
+
+    await session.refresh(row)
+    assert row.status == "draft"
+
