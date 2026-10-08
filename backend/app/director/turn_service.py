@@ -464,25 +464,21 @@ class DirectorTurnService:
                     "Shot changed since this suggestion was produced",
                     details={"code": "DIRECTOR_DECISION_STALE"},
                 )
+        if turn.runtime_execution_id is None:
+            raise ValidationAppError(
+                "Director decision requires a LangGraph runtime binding",
+                details={"code": "DIRECTOR_RUNTIME_BINDING_REQUIRED"},
+            )
         summary["user_decision"] = audit
-        runtime_managed = turn.runtime_execution_id is not None
         try:
             turn = await self.compare_and_set(
-                turn=turn, expected_statuses=("awaiting_user",),
-                target_status=(
-                    "awaiting_user"
-                    if runtime_managed
-                    else "completed" if decision == "reject" else "awaiting_user"
-                ),
+                turn=turn,
+                expected_statuses=("awaiting_user",),
+                target_status="awaiting_user",
                 updates={
                     "response_summary": summary,
-                    "wait_reason": (
-                        "runtime_decision_pending"
-                        if runtime_managed
-                        else "user_rejected" if decision == "reject" else "design_save"
-                    ),
+                    "wait_reason": "runtime_decision_pending",
                 },
-                increment_step=decision == "accept" and not runtime_managed,
             )
         except ConflictError:
             await self._session.refresh(turn)
