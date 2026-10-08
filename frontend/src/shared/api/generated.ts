@@ -3203,7 +3203,7 @@ export interface components {
          * @description Stable business capabilities the product layer can request.
          * @enum {string}
          */
-        Capability: "text.generate" | "image.generate" | "image.edit" | "video.text_to_video" | "video.image_to_video" | "video.last_frame_to_video" | "video.first_last_frame" | "video.reference_to_video" | "audio.tts";
+        Capability: "text.generate" | "image.generate" | "image.edit" | "video.text_to_video" | "video.image_to_video" | "video.last_frame_to_video" | "video.first_last_frame" | "video.reference_to_video";
         /**
          * CapabilityAssessmentSummary
          * @description Assessed multi-subject capability of the keyframe model for a shot.
