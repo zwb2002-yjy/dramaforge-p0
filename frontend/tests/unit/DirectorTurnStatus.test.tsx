@@ -29,7 +29,7 @@ function renderStatus(rows: unknown[]) {
       syncError={null}
       busyTurnId={null}
       onStop={vi.fn()}
-      onResume={vi.fn()}
+      onRefresh={vi.fn()}
     />,
   );
 }

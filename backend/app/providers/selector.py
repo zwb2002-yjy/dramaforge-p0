@@ -3,10 +3,9 @@
 Priority: requested model → project/workspace default → system default → error.
 P0 keeps a deterministic system default: the first registered model (stable
 sort) that satisfies the capability. Project/workspace defaults are resolved by
-the DB-bound service layer (Phase 11); until then the selector only handles the
-explicit request and the system default. ``policy`` is accepted for signature
-compatibility; smart routing/fallback is a P1 concern (spec §36/§37 — P0 never
-auto-falls back).
+the DB-bound service layer; this selector handles only an explicit request or
+one unambiguous system default. Smart routing and implicit fallback are not part
+of the current contract.
 """
 
 from __future__ import annotations

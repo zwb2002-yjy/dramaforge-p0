@@ -29,10 +29,9 @@ from app.providers.transport_registry import TransportRegistry
 # The LiteLLM text model registered in the default V3 registry (M7/M8). The
 # manifest carries a ``ModelBackendBinding`` so the generic adapter knows which
 # gateway model to send. P0 exposes ``text.generate`` through the gateway.
-# The text-llm model is a *bootstrap bridge* (fix spec §34/§103): it maps to the
-# configurable ``compatibility-text`` logical alias so the gateway can serve the compatibility
-# BYOK text path while logical aliases (script-quality / script-fast) are
-# registered separately by :func:`register_litellm_logical_models`.
+# The text model is the bootstrap identity for the configured LiteLLM logical
+# alias. The canonical aliases (script-quality / script-fast) are registered by
+# :func:`register_litellm_logical_models` and route through the same gateway.
 DEFAULT_TEXT_MODEL_ID = "litellm/script-quality"
 
 # Transport profiles. One profile per wire endpoint family; a model's

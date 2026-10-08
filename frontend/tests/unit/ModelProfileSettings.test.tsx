@@ -22,7 +22,6 @@ vi.mock("../../src/lib/api", async (original) => ({
 afterEach(() => vi.clearAllMocks());
 beforeEach(() => {
   vi.mocked(listModelSlots).mockResolvedValue([
-    { id: "audio.tts", display_name: "对白语音", capabilities: ["audio.tts"], p0_scope: true },
     {
       id: "visual.character",
       display_name: "关键帧",
@@ -31,14 +30,6 @@ beforeEach(() => {
     },
   ] as never);
   vi.mocked(listModels).mockResolvedValue([
-    {
-      id: "voice-a",
-      display_name: "声音 A",
-      capabilities: ["audio.tts"],
-      configured: true,
-      available: true,
-      source: "workspace",
-    },
     {
       id: "image-a",
       display_name: "图片 A",
@@ -69,20 +60,7 @@ function show() {
     </QueryClientProvider>,
   );
 }
-it("hides the non-executing voice slot in both modes and preserves its historical data on media save", async () => {
-  const historicalVoice = {
-    model_id: "voice-a",
-    enabled: true,
-    native_options: { legacy: true },
-  };
-  vi.mocked(getProjectModelProfile).mockResolvedValue({
-    id: "profile-1",
-    version: 1,
-    bindings: {
-      "visual.keyframe": { model_id: "image-a", enabled: true, native_options: {} },
-      "audio.tts": historicalVoice,
-    },
-  } as never);
+it("keeps voice configuration outside model selection and preserves other active bindings on save", async () => {
   show();
   await screen.findByTestId("model-picker-visual.character");
   expect(screen.queryByTestId("model-picker-audio.tts")).not.toBeInTheDocument();
@@ -99,7 +77,6 @@ it("hides the non-executing voice slot in both modes and preserves its historica
       bindings: {
         "visual.keyframe": { model_id: "image-a", enabled: true, native_options: {} },
         "visual.character": { model_id: "image-a", enabled: true },
-        "audio.tts": historicalVoice,
       },
     }),
   );

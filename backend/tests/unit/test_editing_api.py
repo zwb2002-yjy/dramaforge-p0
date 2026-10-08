@@ -564,39 +564,9 @@ def test_editing_director_suggestion_http_returns_exact_persisted_identity(
     turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}").json()
     assert turn["status"] == "awaiting_user"
 
-    async def deliver_decision_notice():
-        from app.access.models import Project, User, Workspace
-        from app.director.business_checkpoints import DirectorBusinessCheckpoints
-
-        async with factory() as session:
-            project = await session.get(Project, UUID(project_id))
-            assert project is not None
-            workspace = await session.get(Workspace, project.workspace_id)
-            assert workspace is not None
-            actor = await session.get(User, workspace.owner_user_id)
-            assert actor is not None
-            await DirectorBusinessCheckpoints(session).reconcile_business_fact(
-                project=project, proposal_id=proposal_id,
-            )
-            await session.commit()
-
-    _run(factory, deliver_decision_notice())
-    turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}").json()
-    assert turn["status"] == "completed" and turn["wait_reason"] == "proposal_rejected"
-
-    async def refused_context():
-        from app.director.turn_service import DirectorTurnService
-        from app.shared.errors import ConflictError
-
-        async with factory() as session:
-            with pytest.raises(ConflictError) as refused:
-                await DirectorTurnService(session).assert_context_not_rejected(
-                    project_id=UUID(project_id),
-                    context_hash="d" * 64,
-                )
-            assert refused.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
-
-    _run(factory, refused_context())
+    # Runtime progression is handled by the Director worker from the persisted
+    # ProposalDecided event; this HTTP test only proves the editing decision is
+    # durable and does not mutate the EditSession or Formal facts.
 
     reopened = client.get(f"/api/v1/projects/{project_id}/edit-sessions/{session_id}")
     assert reopened.status_code == 200, reopened.text

@@ -141,47 +141,6 @@ class ProviderConnectionService:
             .all()
         )
 
-    async def set_binding_pricing(
-        self,
-        *,
-        workspace_id: UUID,
-        connection_id: UUID,
-        model_binding_id: UUID,
-        actor: User,
-        unit_amount: Decimal,
-        currency: str,
-        billing_unit: str,
-        source_note: str,
-    ) -> ProviderModelBinding:
-        await self.get_connection(workspace_id=workspace_id, connection_id=connection_id)
-        binding = await self._session.scalar(
-            select(ProviderModelBinding).where(
-                ProviderModelBinding.id == model_binding_id,
-                ProviderModelBinding.workspace_id == workspace_id,
-                ProviderModelBinding.connection_id == connection_id,
-            )
-        )
-        if binding is None:
-            raise NotFoundError("model binding not found")
-        if unit_amount < 0 or len(currency.strip()) != 3 or not billing_unit.strip():
-            raise ValidationAppError("invalid binding pricing snapshot")
-        binding.pricing_snapshot_json = {
-            "unit_amount": str(unit_amount),
-            "currency": currency.upper(),
-            "billing_unit": billing_unit.strip(),
-            "source": "workspace_owner_verified",
-            "source_note": source_note.strip(),
-            "verified_at": datetime.now(UTC).isoformat(),
-            "verified_by": str(actor.id),
-            "catalog_entry_id": (
-                str(binding.catalog_entry_id) if binding.catalog_entry_id else None
-            ),
-            "capability_manifest_hash": binding.capability_manifest_hash,
-        }
-        binding.updated_by = actor.id
-        await self._session.flush()
-        return binding
-
     async def get_connection(
         self, *, workspace_id: UUID, connection_id: UUID
     ) -> ProviderConnection:
@@ -492,32 +451,6 @@ class ProviderConnectionService:
             )
         return entry
 
-    @staticmethod
-    def _probe_currency(
-        binding: ProviderModelBinding | None,
-        *,
-        require_pricing: bool = False,
-    ) -> str:
-        if binding is None:
-            return "USD"
-        raw_currency = (binding.pricing_snapshot_json or {}).get("currency")
-        if not isinstance(raw_currency, str) and not require_pricing:
-            return "USD"
-        if not isinstance(raw_currency, str):
-            raise ValidationAppError(
-                "model capability Probe requires a verified Binding pricing currency",
-                details={"code": "PROBE_PRICING_CURRENCY_REQUIRED"},
-            )
-        currency = raw_currency.strip().upper()
-        if len(currency) == 3 and currency.isalpha():
-            return currency
-        if not require_pricing:
-            return "USD"
-        raise ValidationAppError(
-            "model capability Probe has an invalid Binding pricing currency",
-            details={"code": "PROBE_PRICING_CURRENCY_INVALID"},
-        )
-
     async def probe(
         self,
         *,
@@ -575,10 +508,7 @@ class ProviderConnectionService:
             connection=connection,
             model_binding_id=model_binding_id,
         )
-        probe_currency = self._probe_currency(
-            binding,
-            require_pricing=capability in plugin.paid_capabilities,
-        )
+        probe_currency = "USD"
         recent = await self._session.scalar(
             select(ProviderCapabilityEvidence)
             .where(
@@ -1511,11 +1441,10 @@ class ProviderConnectionService:
         project: Project,
         purpose: str,
         model_binding_id: UUID,
-        fallback_policy: str,
         actor: User,
         selection_strategy: str = "explicit_binding",
     ) -> ProjectProviderBinding:
-        if purpose not in {"keyframe", "video"} or fallback_policy != "none":
+        if purpose not in {"keyframe", "video"}:
             raise ValidationAppError("unsupported project Provider binding")
         if selection_strategy != "explicit_binding":
             raise ValidationAppError(
@@ -1565,14 +1494,12 @@ class ProviderConnectionService:
                 purpose=purpose,
                 model_binding_id=model.id,
                 selection_strategy="explicit_binding",
-                fallback_policy="none",
                 updated_by=actor.id,
             )
             self._session.add(binding)
         else:
             binding.model_binding_id = model.id
             binding.selection_strategy = "explicit_binding"
-            binding.fallback_policy = "none"
             binding.updated_by = actor.id
         await self._session.flush()
         return binding

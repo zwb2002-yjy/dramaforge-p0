@@ -3,13 +3,10 @@ import { useEffect, useState } from "react";
 
 import {
   decideDirectorRuntimeTurn,
-  decideDirectorTurn,
   getDirectorTurn,
   listDirectorTurns,
   recommendShotDesign,
-  refreshDirectorRuntimeTurn,
-  resumeDirectorTurn,
-  stopDirectorTurn,
+  refreshDirectorTurn,
   stopDirectorRuntimeTurn,
   suggestShotDesign,
 } from "./api";
@@ -71,7 +68,6 @@ const MODEL_SLOTS = new Set<ModelSlot>([
   "visual.keyframe",
   "visual.image_edit",
   "video.shot",
-  "audio.tts",
 ]);
 
 function isRecommendationCategory(value: string): value is RecommendationCategory {
@@ -372,16 +368,13 @@ export function ShotDirectorSuggestionPanel({
     if (["stale", "cancelled", "failed"].includes(current.status)) {
       throw new Error(`该导演轮次已${current.status}，不能再应用。`);
     }
-    return current.runtime_execution_id
-      ? decideDirectorRuntimeTurn(projectId, current, {
-          decision,
-          accepted_operation_indices: acceptedOperationIndices,
-        })
-      : decideDirectorTurn(projectId, turnId, {
-          expected_revision: current.revision,
-          decision,
-          accepted_operation_indices: acceptedOperationIndices,
-        });
+    if (!current.runtime_execution_id) {
+      throw new Error("导演轮次缺少 LangGraph 运行时身份，不能继续旧协调路径。");
+    }
+    return decideDirectorRuntimeTurn(projectId, current, {
+      decision,
+      accepted_operation_indices: acceptedOperationIndices,
+    });
   }
 
   const proposalDecision = useMutation({
@@ -454,25 +447,15 @@ export function ShotDirectorSuggestionPanel({
       action,
     }: {
       turn: DirectorTurnRead;
-      action: "stop" | "resume";
+      action: "stop" | "refresh";
     }): Promise<void> => {
       if (action === "stop") {
-        if (turn.runtime_execution_id) {
-          await stopDirectorRuntimeTurn(projectId, turn);
-        } else {
-          await stopDirectorTurn(projectId, turn.id, turn.revision);
+        if (!turn.runtime_execution_id) {
+          throw new Error("导演轮次缺少 LangGraph 运行时身份，不能停止旧协调路径。");
         }
+        await stopDirectorRuntimeTurn(projectId, turn);
       } else {
-        if (turn.runtime_execution_id) {
-          await refreshDirectorRuntimeTurn(projectId, turn);
-        } else {
-          await resumeDirectorTurn(
-            projectId,
-            turn.id,
-            turn.revision,
-            `ui-resume:${turn.id}:${globalThis.crypto.randomUUID()}`,
-          );
-        }
+        await refreshDirectorTurn(projectId, turn);
       }
     },
     onSuccess: () => void refreshTurns(),
@@ -517,7 +500,7 @@ export function ShotDirectorSuggestionPanel({
           request.submittedAt >= proactive.submittedAt ? request.isError : proactive.isError
         }
         onStop={(turn) => turnControl.mutate({ turn, action: "stop" })}
-        onResume={(turn) => turnControl.mutate({ turn, action: "resume" })}
+        onRefresh={(turn) => turnControl.mutate({ turn, action: "refresh" })}
       />
 
       <button

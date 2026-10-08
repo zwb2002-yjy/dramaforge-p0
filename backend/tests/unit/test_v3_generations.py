@@ -89,7 +89,7 @@ class TestReadSurface:
         ids = {item["id"] for item in response.json()}
         assert "image.generate" in ids
         assert "video.image_to_video" in ids
-        assert "audio.tts" in ids
+        assert "audio.tts" not in ids
 
     def test_list_models_by_capability(self, api: tuple[TestClient, Any]) -> None:
         client, _ = api

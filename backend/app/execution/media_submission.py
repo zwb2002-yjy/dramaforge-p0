@@ -59,21 +59,6 @@ from app.shared.errors import (
 from app.storage.minio_store import ObjectStore
 
 
-def _binding_pricing_currency(binding: object, *, required: bool) -> str | None:
-    snapshot = getattr(binding, "pricing_snapshot_json", None)
-    raw = snapshot.get("currency") if isinstance(snapshot, dict) else None
-    if isinstance(raw, str):
-        currency = raw.strip().upper()
-        if len(currency) == 3 and currency.isalpha():
-            return currency
-    if required:
-        raise ValidationAppError(
-            "frozen model Binding has no valid pricing currency",
-            details={"code": "MODEL_BINDING_PRICING_CURRENCY_REQUIRED"},
-        )
-    return None
-
-
 async def _unified_resolved_reference(
     session: AsyncSession,
     *,
@@ -426,7 +411,6 @@ async def prepare_media_submission(
             mode_id=frozen_identity.mode_id,
             manifest_hash=frozen_identity.manifest_hash,
         )
-        pricing_currency = _binding_pricing_currency(binding, required=False)
     else:
         if workbench_plan is not None:
             # P4 Workbench plans are already frozen at queue time.  Their
@@ -514,8 +498,7 @@ async def prepare_media_submission(
                     "professional workbench connection revision is unavailable",
                     details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
                 )
-            pricing_currency = _binding_pricing_currency(binding, required=False)
-            resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_resolution(
+                resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_resolution(
                 resolution=frozen_resolution,
                 workspace_id=project.workspace_id,
                 connection_revision_id=connection_revision.id,
@@ -631,7 +614,6 @@ async def prepare_media_submission(
             invoke_model_value = plan.invoke_model_value
             provider_type = plan.provider_type
             protocol_profile = plan.protocol_profile
-            pricing_currency = _binding_pricing_currency(binding, required=False)
 
     if frozen_identity is None:
         snap = {
@@ -1128,7 +1110,6 @@ async def prepare_media_submission(
             capability_manifest_hash=plan.manifest_hash,
             selection_plan=selection_snapshot,
             execution_path_version=UNIFIED_PATH_VERSION,
-            currency=pricing_currency or "USD",
         )
         session.add(op)
     else:
@@ -1142,7 +1123,6 @@ async def prepare_media_submission(
         op.response_summary = {}
         op.completed_at = None
         op.resume_token = None
-        op.currency = pricing_currency or op.currency
     await session.flush()
     await session.commit()
     await set_node_run_rls_context(session, node_run_id=run.id)

@@ -63,11 +63,6 @@
       "reason": "Director/workflow text and execution coupling; ARCHITECTURE_MAPPING §4."
     },
     {
-      "from": "app.director.next_action",
-      "to": "app.production.application.facts",
-      "reason": "Director/workflow text and execution coupling; ARCHITECTURE_MAPPING §4."
-    },
-    {
       "from": "app.director.proposal_commands",
       "to": "app.execution.models",
       "reason": "Director/workflow text and execution coupling; ARCHITECTURE_MAPPING §4."

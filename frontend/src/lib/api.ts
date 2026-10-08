@@ -293,7 +293,7 @@ export async function bindProjectProvider(
   return apiSend(
     "PUT",
     `/api/v1/projects/${projectId}/provider-bindings/${purpose}`,
-    { model_binding_id: modelBindingId, fallback_policy: "none" },
+    { model_binding_id: modelBindingId },
     csrf,
   );
 }

@@ -46,10 +46,7 @@ export function ProjectModelSourceSummary({
     void bindings.refetch();
     void preflight.refetch();
   };
-  // The legacy profile slot is not consumed by the current voice worker.
-  // Keep this display boundary out of the execution resolver and do not infer
-  // TTS readiness from a present or absent profile-preview row.
-  const previewSlots = (slots.data ?? []).filter((slot) => slot.id !== "audio.tts");
+  const previewSlots = slots.data ?? [];
   const missing =
     slots.isSuccess &&
     effective.isSuccess &&

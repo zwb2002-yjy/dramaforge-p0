@@ -5,13 +5,10 @@ import asyncio
 from uuid import uuid4
 
 import pytest
-from app.access.models import Project, ProjectCreativeProfile, User
+from app.access.models import Project, ProjectCreativeProfile
 from app.assets.models import Shot
-from app.director.business_checkpoints import DirectorBusinessCheckpoints
-from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
 from app.execution.models import NodeRun, ProviderOperation
-from app.production.application.facts import ProductionFacts
 from app.production.workbench_execution import WorkbenchExecutionService
 from app.providers.models import ProviderModelBinding
 from app.shared.db import set_rls_context
@@ -71,19 +68,13 @@ async def test_postgres_command_receipts_attempts_and_proactive_mode_lock(monkey
                 await set_rls_context(session, user_id=actor_id, workspace_id=workspace_id,
                                       project_id=project_id)
                 project = await session.get(Project, project_id)
-                actor = await session.get(User, actor_id)
                 service = WorkbenchExecutionService(session, user_id=actor_id)
                 run = await service.create_and_dispatch(
                     project=project, execution_input=command, prepared_plan=plan,
                     idempotency_key_override=key,
                 )
-                fact = await ProductionFacts(session).tracking(project_id=project_id, run_id=run.id)
-                turn = await DirectorBusinessCheckpoints(session).track_fact(
-                    project=project, actor=actor, run=fact,
-                )
-                assert turn is not None
                 await session.commit()
-                return run.id, run.attempt_no, turn.id
+                return run.id, run.attempt_no
 
         duplicate = await asyncio.gather(dispatch("same-command"), dispatch("same-command"))
         assert duplicate[0] == duplicate[1]
@@ -93,7 +84,6 @@ async def test_postgres_command_receipts_attempts_and_proactive_mode_lock(monkey
         async with factory() as session:
             await set_rls_context(session, user_id=actor_id, workspace_id=workspace_id,
                                   project_id=project_id)
-            assert await session.scalar(select(func.count()).select_from(DirectorTurn)) == 3
             assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0
             runs = list((await session.execute(select(NodeRun).where(
                 NodeRun.idempotency_key.like("workbench:video:%")

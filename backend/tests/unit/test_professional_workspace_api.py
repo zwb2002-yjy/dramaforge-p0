@@ -269,15 +269,16 @@ def test_experiment_annotation_and_opencut_manifest(client: TestClient) -> None:
     )
     assert decision.status_code == 409, decision.text
     assert "adoption scope" in decision.json()["detail"]
-    # A draft without a produced candidate cannot cross the explicit adoption gate.
-    unavailable = client.post(
+    missing_candidate = client.post(
         f"/api/v1/projects/{project_id}/experiments/{experiment.json()['id']}/decision",
         json={"decision": "accepted", "adoption_scope": "current_node"},
         headers={CSRF_HEADER: _csrf(client)},
     )
-    assert unavailable.status_code == 409, unavailable.text
-    assert "candidate is not ready" in unavailable.json()["detail"]
-    assert client.get(f"/api/v1/projects/{project_id}/experiments").json()[0]["status"] == "draft"
+    assert missing_candidate.status_code == 409, missing_candidate.text
+    assert "candidate is not ready" in missing_candidate.json()["detail"]
+    experiments = client.get(f"/api/v1/projects/{project_id}/experiments")
+    unchanged = next(row for row in experiments.json() if row["id"] == experiment.json()["id"])
+    assert unchanged["status"] == "draft"
     kept = client.post(
         f"/api/v1/projects/{project_id}/experiments/{experiment.json()['id']}/decision",
         json={"decision": "kept"},
@@ -285,6 +286,13 @@ def test_experiment_annotation_and_opencut_manifest(client: TestClient) -> None:
     )
     assert kept.status_code == 200, kept.text
     assert kept.json()["status"] == "active"
+    rejected = client.post(
+        f"/api/v1/projects/{project_id}/experiments/{experiment.json()['id']}/decision",
+        json={"decision": "rejected"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert rejected.status_code == 200, rejected.text
+    assert rejected.json()["status"] == "rejected"
 
     annotation = client.post(
         f"/api/v1/projects/{project_id}/shots/{shot_id}/annotations",

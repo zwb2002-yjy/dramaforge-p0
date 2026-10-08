@@ -180,7 +180,7 @@ CapabilityRouter → validator（manifest/mode/slots/options）
 | 生产通用语义Prompt | workbench_execution._compose_effective_prompt | 显式说明P级控制，不宣称native参数 |
 | 角色一致性辅助措辞 | execution/product_path.identity_priority_keyframe_prompt 与参考/审核链 | 不能单靠文本保证身份；以真实reference与review证据为准 |
 | 模型wire规则 | Agnes/Ark/MiniMax compiler + builders | 此处拥有参数名/固定值，不在Agent prompt硬编码 |
-| TTS文本 | voice_config 冻结身份；voice_runtime 选择 Edge/eSpeak/静音实现 | 与媒体目录和 audio.tts 模型槽分开；失败不换引擎 |
+| TTS文本 | voice_config 冻结身份；voice_runtime 选择 Edge/eSpeak/静音实现 | 不经过 Model Profile/CapabilityRouter；失败不换引擎 |
 
 ## 5. native / prompt-only / unsupported 的准确语义
 

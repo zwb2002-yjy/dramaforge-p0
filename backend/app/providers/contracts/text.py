@@ -26,12 +26,3 @@ class TextGenerateRequest(BaseModel):
     tools: list[dict[str, Any]] | None = None
     response_format: dict[str, Any] | None = None
     native_options: dict[str, Any] = Field(default_factory=dict)
-
-
-class TTSRequest(BaseModel):
-    """Text-to-speech (``audio.tts``)."""
-
-    text: str
-    voice: str | None = None
-    language: str | None = None
-    native_options: dict[str, Any] = Field(default_factory=dict)

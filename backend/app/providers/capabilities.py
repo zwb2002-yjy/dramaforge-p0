@@ -30,7 +30,6 @@ class Capability(StrEnum):
     VIDEO_FIRST_LAST_FRAME = "video.first_last_frame"
     VIDEO_REFERENCE_TO_VIDEO = "video.reference_to_video"
 
-    AUDIO_TTS = "audio.tts"
 
 
 # Map a coarse V3 capability to fine-grained capability groups the A+B model
@@ -55,7 +54,6 @@ CAPABILITY_FINE_GRAINED: dict[Capability, tuple[tuple[str, ...], ...]] = {
         ("video.reference.video",),
         ("video.reference.audio",),
     ),
-    Capability.AUDIO_TTS: (("audio.tts",),),
 }
 
 

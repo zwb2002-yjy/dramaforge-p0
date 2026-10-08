@@ -17,6 +17,13 @@ SCAN_ROOTS = (
 # Keep the spellings split so this checker cannot report its own policy table.
 FORBIDDEN_TEXT = (
     "LEGACY_" + "COMPAT",
+    "AUDIO_" + "TTS",
+    "audio." + "tts",
+    "TTS" + "Request",
+    "fallback_" + "policy",
+    "/director/turns/{turn_id}/" + "decision",
+    "/director/turns/{turn_id}/" + "resume",
+    "/director/turns/{turn_id}/" + "stop",
     "litellm/text-" + "llm",
     "shot_" + "experiment_id",
     "translate_" + "v2",
@@ -74,6 +81,8 @@ FORBIDDEN_FILES = (
     / "provider"
     / "WorkspaceTextCredentialSettings.tsx",
     ROOT / "backend" / "app" / "api" / "v1" / "shot_ops.py",
+    ROOT / "backend" / "app" / "director" / "business_checkpoints.py",
+    ROOT / "backend" / "app" / "director" / "next_action.py",
     ROOT / "backend" / "app" / "director" / "legacy_guard.py",
     ROOT / "backend" / "app" / "director" / "execution_guard.py",
     ROOT / "backend" / "app" / "director" / "registry.py",
@@ -87,6 +96,26 @@ FORBIDDEN_FILES = (
     ROOT / "frontend" / "src" / "routes" / "projects.$projectId.quick.tsx",
 )
 FORBIDDEN_PATH_TEXT = {
+    ROOT / "backend" / "app" / "production" / "models.py": (
+        "Graph = Production" + "Graph",
+    ),
+    ROOT / "backend" / "app" / "director" / "editing_suggestion.py": (
+        "def suggestion(",
+        "Compatibility " + "alias",
+    ),
+    ROOT / "backend" / "app" / "providers" / "intents.py": (
+        "ReferenceRole = ReferenceRole" + "Value",
+    ),
+    ROOT / "backend" / "app" / "providers" / "models.py": (
+        "pricing_" + "snapshot_json",
+    ),
+    ROOT / "backend" / "app" / "providers" / "connection_service.py": (
+        "set_binding_" + "pricing",
+        "PROBE_PRICING_" + "CURRENCY",
+    ),
+    ROOT / "backend" / "app" / "execution" / "media_submission.py": (
+        "_binding_pricing_" + "currency",
+    ),
     ROOT / "backend" / "app" / "api" / "v1" / "experiments.py": (
         "accepted_" + "without_candidate",
     ),

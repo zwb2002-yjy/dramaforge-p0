@@ -111,12 +111,10 @@ async def recover_interrupted_director_turns(ctx: dict[str, Any]) -> dict[str, i
 
 
 async def reconcile_waiting_director_turns(ctx: dict[str, Any]) -> dict[str, int]:
-    """Low-rate, browser-independent next-checkpoint reconciliation."""
+    """Low-rate, browser-independent reconciliation for runtime-bound Director turns."""
 
-    from app.access.models import Project
-    from app.director.next_action import DirectorNextActionService
     from app.director.runtime.reconcile import DirectorRuntimeFactReconciler
-    from app.director.turn_service import DirectorTurnService
+    from app.director.turn_service import ACTIVE_TURN_STATUSES, DirectorTurnService
     from app.shared.db import (
         list_reconcilable_director_turn_rls_scopes,
         set_rls_context,
@@ -144,32 +142,35 @@ async def reconcile_waiting_director_turns(ctx: dict[str, Any]) -> dict[str, int
                 project_id=scope.project_id,
             )
             try:
-                project = await session.get(Project, scope.project_id)
-                if project is None:
-                    failed += 1
-                    await session.rollback()
-                    continue
-                turn = await DirectorTurnService(session).get(
-                    project_id=project.id,
+                service = DirectorTurnService(session)
+                turn = await service.get(
+                    project_id=scope.project_id,
                     turn_id=turn_id,
                 )
-                if turn.runtime_execution_id is not None:
-                    wakeup = await DirectorRuntimeFactReconciler(session).reconcile(turn)
-                    if wakeup is None:
-                        unchanged += 1
-                    else:
+                if turn.runtime_execution_id is None:
+                    if turn.status in ACTIVE_TURN_STATUSES:
+                        await service.compare_and_set(
+                            turn=turn,
+                            expected_statuses=tuple(ACTIVE_TURN_STATUSES),
+                            target_status="stale",
+                            updates={
+                                "wait_reason": "runtime_binding_missing",
+                                "last_error": (
+                                    "Director turn has no LangGraph runtime binding; "
+                                    "legacy coordination is not resumed."
+                                ),
+                            },
+                        )
                         reconciled += 1
+                    else:
+                        unchanged += 1
                     await session.commit()
                     continue
-                revision = turn.revision
-                result = await DirectorNextActionService(session).reconcile(
-                    project=project,
-                    turn_id=turn_id,
-                )
-                if result.turn_revision != revision:
-                    reconciled += 1
-                else:
+                wakeup = await DirectorRuntimeFactReconciler(session).reconcile(turn)
+                if wakeup is None:
                     unchanged += 1
+                else:
+                    reconciled += 1
                 await session.commit()
             except ConflictError as exc:
                 failed += 1
