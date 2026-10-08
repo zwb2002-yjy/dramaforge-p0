@@ -13,6 +13,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.providers.reference_roles import ReferenceRoleValue
+
 class VideoOutputIntent(BaseModel):
     aspect_ratio: Literal["9:16", "16:9", "1:1", "adaptive"] | None = None
     duration_seconds: int | None = None
