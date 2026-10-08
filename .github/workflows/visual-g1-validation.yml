@@ -34,13 +34,15 @@ jobs:
             src/features/scenes/SceneStoryboardWall.tsx \
             src/features/scenes/scene-wall-surface.css \
             tests/unit/SceneMediaGallery.test.tsx \
-            tests/unit/SceneStoryboardWall.test.tsx
+            tests/unit/SceneStoryboardWall.test.tsx \
+            tests/e2e/visual-storyboard-g1.spec.ts
           cd ..
           git add frontend/src/features/scenes/SceneMediaGallery.tsx \
             frontend/src/features/scenes/SceneStoryboardWall.tsx \
             frontend/src/features/scenes/scene-wall-surface.css \
             frontend/tests/unit/SceneMediaGallery.test.tsx \
-            frontend/tests/unit/SceneStoryboardWall.test.tsx
+            frontend/tests/unit/SceneStoryboardWall.test.tsx \
+            frontend/tests/e2e/visual-storyboard-g1.spec.ts
           if ! git diff --cached --quiet; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -57,3 +59,7 @@ jobs:
         run: npm run --prefix frontend test -- SceneMediaGallery.test.tsx SceneStoryboardWall.test.tsx --maxWorkers=1 --minWorkers=1
       - name: Production build
         run: npm run --prefix frontend build
+      - name: Install Chromium for focused browser verification
+        run: cd frontend && npx --no-install playwright install --with-deps chromium
+      - name: Focused storyboard browser tests
+        run: cd frontend && npx --no-install playwright test visual-storyboard-g1.spec.ts
