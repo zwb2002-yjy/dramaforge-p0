@@ -1,167 +1,117 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button, Tab, Tabs } from "../../components/ui";
+import { Button } from "../../components/ui";
 import { artifactContentUrl } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { shotTypeLabel } from "../../lib/shotLabels";
 import { fetchSceneWorkspace, type SceneSummary, type ShotLite } from "./api";
 
-type View = "shots" | "keyframes" | "videos";
+export type SceneMediaFilter = "all" | "missing-keyframe" | "missing-video";
 type Preview = { shot: ShotLite; kind: "keyframe" | "video"; artifactId: string };
 
-/** Read-only browser over the canonical scene snapshot, never a second production state. */
+/** Project-scoped, server-owned Shot facts. Filter never mutates Candidate or Formal. */
 export function SceneMediaGallery({
   projectId,
   scene,
+  filter = "all",
 }: {
   projectId: string;
   scene: SceneSummary;
+  filter?: SceneMediaFilter;
 }) {
-  const [view, setView] = useState<View>("shots");
   const [preview, setPreview] = useState<Preview | null>(null);
   const workspace = useQuery({
     queryKey: queryKeys.scene.workspace(projectId, scene.id),
     queryFn: () => fetchSceneWorkspace(projectId, scene.id),
   });
   const shots = workspace.data?.shots ?? [];
+  const displayedShots = shots.filter((shot) =>
+    filter === "missing-keyframe"
+      ? !shot.formal_keyframe_artifact_id
+      : filter === "missing-video"
+        ? !shot.formal_video_artifact_id
+        : true,
+  );
   const shotCount = workspace.data ? shots.length : scene.shot_count;
   const keyframeCount = workspace.data
-    ? shots.filter((s) => s.formal_keyframe_artifact_id).length
+    ? shots.filter((shot) => shot.formal_keyframe_artifact_id).length
     : scene.formal_keyframe_count;
   const videoCount = workspace.data
-    ? shots.filter((s) => s.formal_video_artifact_id).length
+    ? shots.filter((shot) => shot.formal_video_artifact_id).length
     : scene.formal_video_count;
-  const tabs: { id: View; label: string }[] = [
-    { id: "shots", label: `${shotCount} 镜头` },
-    { id: "keyframes", label: `${keyframeCount} 关键帧` },
-    { id: "videos", label: `${videoCount} 视频` },
-  ];
-  const shotUrl = (shot: ShotLite) => `/projects/${projectId}/scenes/${scene.id}?shotId=${shot.id}`;
+  const shotUrl = (shot: ShotLite) =>
+    "/projects/" + projectId + "/scenes/" + scene.id + "?shotId=" + shot.id;
   const open = (shot: ShotLite, kind: Preview["kind"]) => {
     const artifactId =
       kind === "video" ? shot.formal_video_artifact_id : shot.formal_keyframe_artifact_id;
     if (artifactId) setPreview({ shot, kind, artifactId });
   };
+
   return (
-    <section className="scene-media-gallery" aria-label={`${scene.location_name} 镜头与素材`}>
-      <Tabs label={`${scene.location_name} 内容切换`}>
-        {tabs.map((tab) => (
-          <Tab
-            key={tab.id}
-            id={`${scene.id}-${tab.id}`}
-            aria-controls={`${scene.id}-media-panel`}
-            active={view === tab.id}
-            onClick={() => setView(tab.id)}
-          >
-            {tab.label}
-          </Tab>
-        ))}
-      </Tabs>
-      <div role="tabpanel" id={`${scene.id}-media-panel`} aria-labelledby={`${scene.id}-${view}`}>
-        {workspace.isPending ? (
-          <p role="status">正在读取镜头与素材…</p>
-        ) : workspace.isError ? (
-          <div role="alert">
-            <p>镜头与素材读取失败，不能据此判断素材缺失。</p>
-            <Button onClick={() => void workspace.refetch()}>重新读取</Button>
-          </div>
-        ) : shots.length === 0 ? (
-          <p>此场景尚无镜头。</p>
-        ) : (
-          <>
-            {view === "videos" && videoCount < shotCount && (
-              <p className="scene-media-note">
-                {videoCount} 个正式视频 · {shotCount - videoCount} 个镜头尚无正式视频
-              </p>
-            )}
-            <ol
-              className="scene-shot-grid"
-              aria-label={
-                view === "videos"
-                  ? "场景视频列表"
-                  : view === "keyframes"
-                    ? "场景关键帧列表"
-                    : "场景镜头列表"
-              }
-            >
-              {shots.map((shot) => {
-                const kind = view === "videos" ? "video" : "keyframe";
-                const available =
-                  kind === "video"
-                    ? shot.formal_video_artifact_id
-                    : shot.formal_keyframe_artifact_id;
+    <section className="scene-media-gallery" aria-label={scene.location_name + " 镜头与素材"}>
+      {workspace.isPending ? (
+        <p role="status">正在读取镜头与素材…</p>
+      ) : workspace.isError ? (
+        <div role="alert">
+          <p>镜头与素材读取失败，不能据此判断素材缺失。</p>
+          <Button onClick={() => void workspace.refetch()}>重新读取</Button>
+        </div>
+      ) : shots.length === 0 ? (
+        <p>此场景尚无镜头。</p>
+      ) : (
+        <>
+          <p className="scene-media-note">
+            {shotCount} 镜头 · 正式画面 {keyframeCount}/{shotCount} · 正式视频 {videoCount}/{shotCount}
+          </p>
+          {displayedShots.length === 0 ? (
+            <p role="status">本场景没有符合当前筛选的镜头。</p>
+          ) : (
+            <ol className="scene-shot-grid" aria-label="场景镜头列表">
+              {displayedShots.map((shot) => {
+                const frameId = shot.formal_keyframe_artifact_id;
+                const videoId = shot.formal_video_artifact_id;
+                const previewKind = videoId ? "video" : "keyframe";
                 return (
-                  <li key={shot.id} className="scene-shot-card">
+                  <li key={shot.id} className="scene-shot-card" data-testid="scene-shot-card" data-shot-id={shot.id}>
                     <header>
                       <strong>镜头 {shot.shot_number}</strong>
                       <span>{shotTypeLabel(shot.shot_type)}</span>
                     </header>
                     <Button
                       className="scene-shot-thumbnail"
-                      aria-label={`${kind === "video" ? "播放视频" : "放大关键帧"} · 镜头 ${shot.shot_number}`}
-                      disabled={!available}
-                      onClick={() => open(shot, kind)}
+                      aria-label={"预览镜头 " + shot.shot_number}
+                      disabled={!frameId && !videoId}
+                      onClick={() => open(shot, previewKind)}
                     >
-                      {shot.formal_keyframe_artifact_id ? (
+                      {frameId ? (
                         <img
                           loading="lazy"
-                          src={artifactContentUrl(projectId, shot.formal_keyframe_artifact_id)}
-                          alt={`镜头 ${shot.shot_number} 正式关键帧`}
+                          src={artifactContentUrl(projectId, frameId)}
+                          alt={"镜头 " + shot.shot_number + " 正式关键帧"}
                         />
                       ) : (
-                        <span>暂无正式关键帧</span>
+                        <span>{videoId ? "有正式视频，暂无正式关键帧" : "暂无正式素材"}</span>
                       )}
-                      <span className="scene-shot-media-label">
-                        {available
-                          ? kind === "video"
-                            ? "▶ 播放视频"
-                            : "放大关键帧"
-                          : kind === "video"
-                            ? "暂无正式视频"
-                            : "暂无正式关键帧"}
-                      </span>
                     </Button>
-                    {view === "shots" && (
-                      <p className="scene-shot-description">
-                        {shot.visual_description || shot.dialogue || "暂无镜头描述"}
-                      </p>
-                    )}
+                    <div className="scene-shot-evidence" aria-label={"镜头 " + shot.shot_number + " 素材状态"}>
+                      <span data-present={Boolean(frameId)}>正式画面：{frameId ? "已选定" : "未选定"}</span>
+                      <span data-present={Boolean(videoId)}>正式视频：{videoId ? "已选定" : "未选定"}</span>
+                    </div>
+                    <p className="scene-shot-description">{shot.visual_description || shot.dialogue || "暂无镜头描述"}</p>
                     <div className="scene-shot-actions">
-                      {view === "shots" && (
-                        <>
-                          <Button
-                            disabled={!shot.formal_keyframe_artifact_id}
-                            onClick={() => open(shot, "keyframe")}
-                            aria-label={`查看关键帧 · 镜头 ${shot.shot_number}`}
-                          >
-                            {shot.formal_keyframe_artifact_id ? "查看关键帧" : "暂无关键帧"}
-                          </Button>
-                          <Button
-                            disabled={!shot.formal_video_artifact_id}
-                            onClick={() => open(shot, "video")}
-                            aria-label={`播放视频 · 镜头 ${shot.shot_number}`}
-                          >
-                            {shot.formal_video_artifact_id ? "播放视频" : "暂无视频"}
-                          </Button>
-                        </>
-                      )}
-                      <a
-                        href={`${shotUrl(shot)}&tool=prompts`}
-                        aria-label={`编辑提示词 · 镜头 ${shot.shot_number}`}
-                      >
-                        编辑提示词
-                      </a>
-                      <a href={shotUrl(shot)} aria-label={`编辑镜头 ${shot.shot_number}`}>
-                        编辑镜头 →
-                      </a>
+                      <Button disabled={!frameId} onClick={() => open(shot, "keyframe")}
+                        aria-label={"查看关键帧 · 镜头 " + shot.shot_number}>查看画面</Button>
+                      <Button disabled={!videoId} onClick={() => open(shot, "video")}
+                        aria-label={"播放视频 · 镜头 " + shot.shot_number}>播放视频</Button>
+                      <a href={shotUrl(shot)} aria-label={"编辑镜头 " + shot.shot_number}>进入工作台 →</a>
                     </div>
                   </li>
                 );
               })}
             </ol>
-          </>
-        )}
-      </div>
+          )}
+        </>
+      )}
       {preview && (
         <MediaPreview
           key={preview.artifactId}

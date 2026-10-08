@@ -624,8 +624,8 @@ async def test_malformed_edit_session_plans_fail_closed_without_mutation(
     assert edit_session.production_lineage == before[2]
 
 
-def test_plan_rejects_forbidden_fields_and_accepts_aliases() -> None:
-    from app.editing.proposal_plan import EditSessionTimelinePlan
+def test_plan_rejects_forbidden_fields_and_retired_aliases() -> None:
+    from app.editing.proposal_plan import EditSessionTimelineCommand, EditSessionTimelinePlan
 
     with pytest.raises(ValueError):
         EditSessionTimelinePlan.model_validate(
@@ -640,7 +640,20 @@ def test_plan_rejects_forbidden_fields_and_accepts_aliases() -> None:
                 ]
             }
         )
-    plan = EditSessionTimelinePlan.model_validate(
-        {"operations": [{"kind": "reorder_clips", "clip_ids": ["clip-a"]}]}
-    )
-    assert plan.operations[0].operation == "reorder_clips"
+    with pytest.raises(ValueError):
+        EditSessionTimelinePlan.model_validate(
+            {"operations": [{"kind": "reorder_clips", "clip_ids": ["clip-a"]}]}
+        )
+
+    session_id = str(uuid4())
+    canonical_plan = {
+        "operations": [{"operation": "reorder_clips", "clip_ids": ["clip-a"]}]
+    }
+    retired_payloads = [
+        {"session_id": session_id, "plan": canonical_plan},
+        {"edit_session_id": session_id, "timeline_plan": canonical_plan},
+        {"edit_session_id": session_id, "operations": canonical_plan["operations"]},
+    ]
+    for payload in retired_payloads:
+        with pytest.raises(ValueError):
+            EditSessionTimelineCommand.model_validate(payload)

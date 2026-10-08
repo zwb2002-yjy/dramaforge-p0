@@ -537,16 +537,6 @@ async def decide_experiment(
         await session.commit()
         return _read(row, candidate_artifact_ids=candidate_ids, comparison=row.comparison)
 
-    # Keep the pre-v2 decision contract compatible for draft records created by
-    # older clients. A bare ``accepted`` decision records acceptance only when
-    # no candidate has been generated yet; once candidates exist, the user must
-    # choose an explicit adoption scope so formal lineage cannot be ambiguous.
-    if body.adoption_scope is None and not candidate_ids and not runs:
-        row.status = "accepted"
-        row.decided_at = datetime.now(UTC)
-        row.comparison = {**comparison, "decision": "accepted_without_candidate"}
-        await session.commit()
-        return _read(row, candidate_artifact_ids=candidate_ids, comparison=row.comparison)
     if body.adoption_scope is None:
         raise ConflictError("accepting an experiment requires an adoption scope")
     target_node_key = str((row.parameters or {}).get("target_node_key") or "video")

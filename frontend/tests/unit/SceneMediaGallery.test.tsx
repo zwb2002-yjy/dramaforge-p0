@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { SceneMediaGallery } from "../../src/features/scenes/SceneMediaGallery";
+import { SceneMediaGallery, type SceneMediaFilter } from "../../src/features/scenes/SceneMediaGallery";
 import type { SceneSummary, ShotLite } from "../../src/features/scenes/api";
 
 const scene: SceneSummary = {
@@ -39,11 +39,11 @@ const shots: ShotLite[] = Array.from({ length: 6 }, (_, index) => ({
   formal_video_artifact_id: index < 5 ? `video-${index + 1}` : null,
   formal_composite_artifact_id: null,
 }));
-function mount() {
+function mount(filter: SceneMediaFilter = "all") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <SceneMediaGallery projectId="project-1" scene={scene} />
+      <SceneMediaGallery projectId="project-1" scene={scene} filter={filter} />
     </QueryClientProvider>,
   );
 }
@@ -58,9 +58,8 @@ it("exposes all six shots, six frame actions and five playable videos without wr
   const list = await screen.findByRole("list", { name: "场景镜头列表" });
   expect(within(list).getAllByRole("listitem")).toHaveLength(6);
   expect(within(list).getAllByRole("img")).toHaveLength(6);
-  expect(screen.getByRole("tab", { name: "6 镜头" })).toHaveAttribute("aria-selected", "true");
-  expect(screen.getByRole("tab", { name: "6 关键帧" })).toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "5 视频" })).toBeInTheDocument();
+  expect(screen.getByText(/6 镜头 · 正式画面 6\/6 · 正式视频 5\/6/)).toBeInTheDocument();
+  expect(screen.getAllByTestId("scene-shot-card")).toHaveLength(6);
   expect(
     screen
       .getAllByRole("button", { name: /^播放视频 · 镜头/ })
@@ -93,4 +92,16 @@ it("shows an explicit empty scene after a successful read", async () => {
   );
   mount();
   expect(await screen.findByText("此场景尚无镜头。")).toBeInTheDocument();
+});
+
+it("filters by actual Formal video identity, without confusing absent video with a failed read", async () => {
+  const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ shots }), { headers: { "Content-Type": "application/json" } }),
+  );
+  mount("missing-video");
+  const list = await screen.findByRole("list", { name: "场景镜头列表" });
+  expect(within(list).getAllByRole("listitem")).toHaveLength(1);
+  expect(within(list).getByRole("link", { name: "编辑镜头 6" })).toBeInTheDocument();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
 });
