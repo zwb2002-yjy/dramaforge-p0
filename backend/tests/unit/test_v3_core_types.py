@@ -21,7 +21,6 @@ from app.providers.contracts import (
     ReferenceToVideoRequest,
     TextGenerateRequest,
     TextToVideoRequest,
-    TTSRequest,
 )
 from app.providers.contracts.text import TextMessage
 from app.providers.errors import (
@@ -50,7 +49,6 @@ class TestCapability:
     def test_enum_values_are_stable(self) -> None:
         assert Capability.VIDEO_IMAGE_TO_VIDEO == "video.image_to_video"
         assert Capability.IMAGE_GENERATE == "image.generate"
-        assert Capability.AUDIO_TTS == "audio.tts"
 
     def test_all_capabilities_have_fine_grained_mapping(self) -> None:
         for capability in Capability:
@@ -110,14 +108,13 @@ class TestContracts:
         assert len(req.reference_audio) == 1
         assert req.reference_videos == []
 
-    def test_text_and_audio_contracts(self) -> None:
+    def test_text_contracts(self) -> None:
         assert (
             TextGenerateRequest(messages=[TextMessage(role="user", content="hi")])
             .messages[0]
             .content
             == "hi"
         )
-        assert TTSRequest(text="hello", voice="zh-CN-Xiaoxiao").voice == "zh-CN-Xiaoxiao"
         edit = ImageEditRequest(prompt="edit", image=ArtifactRef(artifact_id="x"))
         assert edit.image.artifact_id == "x"
         assert TextToVideoRequest(prompt="p").duration_seconds is None
