@@ -11,6 +11,7 @@ from app.director.business_checkpoints import DirectorBusinessCheckpoints
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
 from app.execution.models import NodeRun, ProviderOperation
+from app.production.application.facts import ProductionFacts
 from app.production.workbench_execution import WorkbenchExecutionService
 from app.providers.models import ProviderModelBinding
 from app.shared.db import set_rls_context
@@ -76,9 +77,11 @@ async def test_postgres_command_receipts_attempts_and_proactive_mode_lock(monkey
                     project=project, execution_input=command, prepared_plan=plan,
                     idempotency_key_override=key,
                 )
-                turn = await DirectorBusinessCheckpoints(session).track_execution(
-                    project=project, actor=actor, run=run,
+                fact = await ProductionFacts(session).tracking(project_id=project_id, run_id=run.id)
+                turn = await DirectorBusinessCheckpoints(session).track_fact(
+                    project=project, actor=actor, run=fact,
                 )
+                assert turn is not None
                 await session.commit()
                 return run.id, run.attempt_no, turn.id
 
