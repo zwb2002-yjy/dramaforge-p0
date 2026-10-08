@@ -129,10 +129,10 @@ function directorTurn(
     },
     transport_record_id: "provider-request-1",
     transport_status: "succeeded",
-    engine_version: null,
-    state_schema_version: null,
-    runtime_execution_id: null,
-    runtime_revision: null,
+    engine_version: "langgraph:1.2.11:director-runtime-state-v1",
+    state_schema_version: "director-runtime-state-v1",
+    runtime_execution_id: "44444444-4444-4444-8444-444444444444",
+    runtime_revision: 2,
     request_summary: { task, max_steps: 4 },
     response_summary: { actual_model: "upstream/director-v1" },
     token_usage: { total_tokens: 42 },
@@ -244,7 +244,7 @@ describe("ShotDirectorSuggestionPanel", () => {
       if (url.endsWith("/auth/csrf")) return Promise.resolve(json({ csrf_token: "csrf" }));
       if (url.includes("/director/turns?")) return Promise.resolve(json([]));
       if (url.endsWith(`/turns/${turn.id}`)) return Promise.resolve(json(turn));
-      if (url.endsWith(`/turns/${turn.id}/decision`)) {
+      if (url.endsWith(`/runtime/turns/${turn.id}/decision`)) {
         return Promise.resolve(
           json({
             ...turn,
@@ -288,6 +288,8 @@ describe("ShotDirectorSuggestionPanel", () => {
     const decision = calls.find((call) => call.url.endsWith("/decision"));
     expect(decision?.body).toEqual({
       expected_revision: 3,
+      expected_runtime_revision: 2,
+      signal_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
       decision: "accept",
       accepted_operation_indices: [0],
     });
@@ -455,46 +457,36 @@ describe("ShotDirectorSuggestionPanel", () => {
     expect(calls.some((call) => call.method === "POST")).toBe(false);
   });
 
-  it("reconciles and stops only through revision-bound server controls", async () => {
+  it("refreshes read-only state and stops only through runtime controls", async () => {
     const waiting = directorTurn(
-      "workbench_followup",
+      "shot_director_suggestion",
       {},
       {
         status: "awaiting_execution",
-        wait_reason: "execution_in_progress",
+        wait_reason: "production_fact",
         revision: 6,
+        runtime_revision: 2,
         output_hash: null,
         node_run_ids: ["run-1"],
       },
     );
     let current = waiting;
-    const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
+      const method = init?.method ?? "GET";
       calls.push({
         url,
+        method,
         body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined,
       });
       if (url.includes("/director/turns?")) return Promise.resolve(json([current]));
       if (url.endsWith("/auth/csrf")) return Promise.resolve(json({ csrf_token: "csrf" }));
-      if (url.endsWith(`/turns/${waiting.id}/resume`)) {
-        current = { ...waiting, revision: 7, step_count: 3 };
-        return Promise.resolve(
-          json({
-            turn_id: waiting.id,
-            action: "wait_for_execution",
-            requires_confirmation: false,
-            reason: "Production is still active.",
-            autonomy: "AUTO",
-            fact_hash: "f".repeat(64),
-            event_key: "event",
-            turn_status: "awaiting_execution",
-            turn_revision: 7,
-            step_count: 3,
-          }),
-        );
+      if (url.endsWith(`/turns/${waiting.id}`) && method === "GET") {
+        current = { ...current, revision: 7 };
+        return Promise.resolve(json(current));
       }
-      if (url.endsWith(`/turns/${waiting.id}/stop`)) {
+      if (url.endsWith(`/runtime/turns/${waiting.id}/stop`)) {
         current = { ...current, status: "cancelled", revision: 8 };
         return Promise.resolve(json(current));
       }
@@ -503,17 +495,24 @@ describe("ShotDirectorSuggestionPanel", () => {
     renderPanel();
     await screen.findByTestId("director-current-turn");
 
-    fireEvent.click(screen.getByTestId("resume-director-turn"));
+    fireEvent.click(screen.getByTestId("refresh-director-turn"));
     await waitFor(() =>
-      expect(calls.find((call) => call.url.endsWith("/resume"))?.body).toMatchObject({
-        expected_revision: 6,
-      }),
+      expect(
+        calls.some(
+          (call) => call.url.endsWith(`/turns/${waiting.id}`) && call.method === "GET",
+        ),
+      ).toBe(true),
     );
-    await waitFor(() => expect(screen.getByText(/revision 7/)).toBeInTheDocument());
+    expect(calls.some((call) => call.url.endsWith("/resume"))).toBe(false);
+
     fireEvent.click(screen.getByTestId("stop-director-turn"));
     await waitFor(() =>
-      expect(calls.find((call) => call.url.endsWith("/stop"))?.body).toEqual({
-        expected_revision: 7,
+      expect(
+        calls.find((call) => call.url.endsWith(`/runtime/turns/${waiting.id}/stop`))?.body,
+      ).toEqual({
+        request_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        expected_runtime_revision: 2,
+        expected_turn_revision: 6,
       }),
     );
   });
