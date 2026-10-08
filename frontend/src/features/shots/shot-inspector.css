@@ -351,3 +351,26 @@
   justify-content: space-between;
   gap: var(--df-space-3);
 }
+
+/* G2: keep navigation and successful execution detail available but secondary. */
+.qc-scene-back {
+  display: inline-block;
+  width: fit-content;
+  color: var(--df-text-secondary);
+  font-size: var(--df-font-size-caption);
+  text-decoration: none;
+}
+.qc-scene-back:hover {
+  color: var(--df-text-primary);
+}
+.df-shot-plan-details > summary {
+  cursor: pointer;
+  color: var(--df-text-secondary);
+  font-size: var(--df-font-size-caption);
+}
+.df-shot-plan-details[open] > summary {
+  margin-bottom: var(--df-space-2);
+}
+.df-shot-plan-details > p + p {
+  margin-top: var(--df-space-2);
+}
