@@ -846,12 +846,26 @@ export function ShotProductionActions({
           <strong>模型适配：{referenceDeliveryLabel(delivery)}</strong>
           {displayedPlan && (
             <>
-              <p data-testid="shot-execution-plan-model">执行模型：{planModel.label}</p>
-              <p data-testid="shot-execution-plan-references">
-                引用：完全支持 {plannedReferences.filter((row) => row.delivery === "exact").length}{" "}
-                · 近似 {plannedReferences.filter((row) => row.delivery === "approximate").length} ·
-                不支持 {plannedReferences.filter((row) => row.delivery === "unsupported").length}
-              </p>
+              {delivery === "exact" ? (
+                <details className="df-shot-plan-details" data-testid="shot-exact-plan-details">
+                  <summary>查看本次模型与参考</summary>
+                  <p data-testid="shot-execution-plan-model">执行模型：{planModel.label}</p>
+                  <p data-testid="shot-execution-plan-references">
+                    引用：完全支持 {plannedReferences.filter((row) => row.delivery === "exact").length}{" "}
+                    · 近似 {plannedReferences.filter((row) => row.delivery === "approximate").length} ·
+                    不支持 {plannedReferences.filter((row) => row.delivery === "unsupported").length}
+                  </p>
+                </details>
+              ) : (
+                <>
+                  <p data-testid="shot-execution-plan-model">执行模型：{planModel.label}</p>
+                  <p data-testid="shot-execution-plan-references">
+                    引用：完全支持 {plannedReferences.filter((row) => row.delivery === "exact").length}{" "}
+                    · 近似 {plannedReferences.filter((row) => row.delivery === "approximate").length} ·
+                    不支持 {plannedReferences.filter((row) => row.delivery === "unsupported").length}
+                  </p>
+                </>
+              )}
               {(displayedPlan.plan.capability_gaps ?? []).map((gap, index) => {
                 const gapReason = capabilityGapReason(gap.reason);
                 return (
