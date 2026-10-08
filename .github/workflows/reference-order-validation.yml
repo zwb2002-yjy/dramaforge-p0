@@ -1,0 +1,71 @@
+name: Temporary Reference Ordering Validation
+
+on:
+  push:
+    branches:
+      - codex/visual-storyboard-g1-20261008
+    paths:
+      - .github/workflows/reference-order-validation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate-reference-order:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: astral-sh/setup-uv@v6
+      - name: Install Python
+        run: uv python install 3.14
+      - name: Install locked Node dependencies
+        run: npm ci --prefix frontend
+      - name: Format only changed reference files
+        run: |
+          set -euo pipefail
+          uv run --directory backend --extra dev ruff format \
+            app/api/v1/references.py \
+            app/production/workbench_execution.py \
+            tests/unit/test_asset_reference_resolution.py \
+            tests/unit/test_shot_reference_binding.py
+          cd frontend
+          npx --no-install prettier --write \
+            src/features/assets/api.ts \
+            src/components/assets/AssetReferencePicker.tsx \
+            tests/unit/AssetReferencePicker.test.tsx
+          cd ..
+          git add backend/app/api/v1/references.py \
+            backend/app/production/workbench_execution.py \
+            backend/tests/unit/test_asset_reference_resolution.py \
+            backend/tests/unit/test_shot_reference_binding.py \
+            frontend/src/features/assets/api.ts \
+            frontend/src/components/assets/AssetReferencePicker.tsx \
+            frontend/tests/unit/AssetReferencePicker.test.tsx
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "style(references): format ordered reference implementation"
+            git push origin HEAD:codex/visual-storyboard-g1-20261008
+          fi
+      - name: Python Ruff lint
+        run: uv run --directory backend --extra dev ruff check app/api/v1/references.py app/production/workbench_execution.py tests/unit/test_asset_reference_resolution.py tests/unit/test_shot_reference_binding.py
+      - name: Reference service focused tests
+        run: uv run --directory backend --extra dev pytest tests/unit/test_shot_reference_binding.py tests/unit/test_asset_reference_resolution.py -q
+      - name: Frontend formatting
+        run: npm run --prefix frontend format:check
+      - name: Frontend typecheck
+        run: npm run --prefix frontend typecheck
+      - name: Frontend lint and UI checks
+        run: npm run --prefix frontend lint
+      - name: Asset reference picker tests
+        run: npm run --prefix frontend test -- AssetReferencePicker.test.tsx --maxWorkers=1 --minWorkers=1
+      - name: Frontend production build
+        run: npm run --prefix frontend build
