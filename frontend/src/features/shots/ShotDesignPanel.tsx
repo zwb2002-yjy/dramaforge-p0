@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Button, Disclosure, Field, Input, Select, Textarea } from "../../components/ui";
 import { ApiError, updateShotCanvas } from "../../lib/api";
@@ -139,6 +139,10 @@ export function ShotDesignPanel({
   references,
   production,
 }: ShotDesignPanelProps) {
+  // An unsaved draft keeps the server version it was edited from. A background
+  // refresh may reveal a conflict, but cannot silently rebase or erase it.
+  const [baseline, setBaseline] = useState(shot);
+  const syncAfterExplicitSave = useRef(false);
   const [visual, setVisual] = useState(shot.visual_description);
   // Canvas facts: stored on the Shot itself and written through the CanvasRevision
   // gate (`PATCH /shots/{id}/canvas`), which is the only endpoint that advances
@@ -179,24 +183,38 @@ export function ShotDesignPanel({
     });
   };
 
-  const serverDirectorStateText = serializeDirectorState(shot.director_state);
+  const serverDirectorStateText = serializeDirectorState(baseline.director_state);
   const designDirty =
-    draft.image_prompt !== shot.image_prompt ||
-    draft.video_prompt !== shot.video_prompt ||
+    draft.image_prompt !== baseline.image_prompt ||
+    draft.video_prompt !== baseline.video_prompt ||
     directorStateText !== serverDirectorStateText;
   const canvasDirty =
-    dialogue !== (shot.dialogue ?? "") ||
-    visual !== shot.visual_description ||
-    shotType !== shot.shot_type ||
-    cameraMove !== (shot.camera_move ?? "") ||
-    durationSeconds !== (shot.duration_seconds ?? "");
+    dialogue !== (baseline.dialogue ?? "") ||
+    visual !== baseline.visual_description ||
+    shotType !== baseline.shot_type ||
+    cameraMove !== (baseline.camera_move ?? "") ||
+    durationSeconds !== (baseline.duration_seconds ?? "");
   const dirty = designDirty || canvasDirty;
 
   // The panel remains mounted while the shot strip changes selection. Reset
-  // editor state to the newly selected shot's server read model so edits and
-  // subsequent production actions cannot leak across shots. A version change
-  // is also a server refresh signal after a successful save.
+  // editor state to the newly selected shot's server read model. Clean editors
+  // and explicit Save/reload can adopt a refresh; dirty editors keep their inputs.
   useEffect(() => {
+    // Clearing a Scene-owned draft can render the old snapshot before refetch
+    // finishes. Only a new server revision can consume the Save/reload boundary.
+    if (shot.id === baseline.id && shot.version === baseline.version) return;
+    if (shot.id === baseline.id && dirty && !syncAfterExplicitSave.current) {
+      if (shot.version !== baseline.version) {
+        setConflict({
+          expectedVersion: baseline.version,
+          actualVersion: shot.version,
+          message: "服务器镜头已更新，草稿已保留，请核对后载入最新版本。",
+        });
+      }
+      return;
+    }
+    syncAfterExplicitSave.current = false;
+    setBaseline(shot);
     setVisual(shot.visual_description);
     setShotType(shot.shot_type);
     setCameraMove(shot.camera_move ?? "");
@@ -210,19 +228,7 @@ export function ShotDesignPanel({
         director_state_text: serializeDirectorState(shot.director_state),
       });
     }
-  }, [
-    shot.id,
-    shot.version,
-    shot.visual_description,
-    shot.shot_type,
-    shot.camera_move,
-    shot.duration_seconds,
-    shot.dialogue,
-    shot.image_prompt,
-    shot.video_prompt,
-    shot.director_state,
-    onDraftChange,
-  ]);
+  }, [baseline.id, baseline.version, dirty, shot, onDraftChange]);
 
   useEffect(() => {
     setMessage("");
@@ -261,7 +267,7 @@ export function ShotDesignPanel({
       // honest: the CanvasRevision gate owns the Shot's canvas facts and is the
       // only writer of a new Shot version, so the design write that follows must
       // use the version that write produced instead of the stale prop.
-      let expectedVersion = shot.version;
+      let expectedVersion = baseline.version;
       if (canvasDirty) {
         const canvas = await updateShotCanvas(projectId, shot.id, {
           expected_version: expectedVersion,
@@ -288,6 +294,7 @@ export function ShotDesignPanel({
       // SceneWorkspace refetch is the only path that can make this draft
       // clean and enable production again.
       setConflict(null);
+      syncAfterExplicitSave.current = true;
       await onSaved?.();
       setMessage(
         result.canvasChanged || result.designChanged ? "已保存。" : "没有需要保存的修改。",
@@ -298,7 +305,7 @@ export function ShotDesignPanel({
       // the user can compare it with the server truth and decide whether to
       // retry. ApiError.message is the backend's real detail.
       void context;
-      setConflict(conflictOf(error, shot.version));
+      setConflict(conflictOf(error, baseline.version));
       setMessage(`保存失败：${errorMessage(error)}`);
     },
   });
@@ -309,6 +316,7 @@ export function ShotDesignPanel({
       const workbench = await fetchShotWorkbench(projectId, shot.id);
       const freshShot = workbench.shot;
       if (!freshShot) throw new Error("服务器未返回该镜头的当前设计");
+      syncAfterExplicitSave.current = true;
       setVisual(freshShot.visual_description);
       setShotType(freshShot.shot_type);
       setCameraMove(freshShot.camera_move ?? "");

@@ -266,12 +266,29 @@ async def test_phase6_gate_drift_repair_keeps_old_formal_in_history(session: Asy
     assert plan.suggested_option == "regenerate_keyframe_then_video"
     assert plan.affected_nodes == ["keyframe", "video"]
 
-    # 3) regenerate keyframe candidate (new keyframe NodeRun queued)
-    keyframe_run = await repair.execute_repair(
+    # 3) confirm this repair intent, freeze the first step, then explicitly execute.
+    request = await repair.create_repair(
         project=project,
         user=user,
         shot_id=shot.id,
-        repair_option="regenerate_keyframe_then_video",
+        option="regenerate_keyframe_then_video",
+        plan_hash=plan.plan_hash,
+        request_key="gate6-repair",
+    )
+    preview = await repair.build_step_plan(
+        project=project,
+        user=user,
+        shot_id=shot.id,
+        repair_id=request.id,
+    )
+    assert preview.step_ordinal == 1
+    _, _, keyframe_run = await repair.execute_step(
+        project=project,
+        user=user,
+        shot_id=shot.id,
+        repair_id=request.id,
+        expected_step_ordinal=preview.step_ordinal,
+        expected_plan_fingerprint=preview.plan.plan_fingerprint,
         idempotency_key="gate6-kf",
     )
     assert keyframe_run.status == "queued"
@@ -288,6 +305,7 @@ async def test_phase6_gate_drift_repair_keeps_old_formal_in_history(session: Asy
     repair_id = UUID(
         keyframe_run.input_snapshot["workbench_plan"]["semantic_intent"]["repair_request_id"]
     )
+    assert repair_id == request.id
     # 5) continue the same repair, not a second workflow bypassing its review gate.
     preview = await repair.build_step_plan(
         project=project,
