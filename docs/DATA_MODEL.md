@@ -2,8 +2,8 @@
 
 Status: current
 Date: 2026-10-08
-Alembic head: 20261008_0086
-Revisions: 90
+Alembic head: 20261008_0087
+Revisions: 91
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Canonical relational graph
@@ -123,6 +123,7 @@ Migration 20260902_0051 removes:
 | 20261007_0084 | One-way cleanup of unused cutover/experiment storage and obsolete fields; one model authority, multiple independent connections, explicit new contract revisions. |
 | 20261007_0085 | `projects.deleted_at` and uniqueness of names among active projects. Deleted projects leave the workbench; production/provider evidence and media remain under their original IDs. |
 | 20261008_0086 | Remove the retired `audio.tts` key from `production_model_profiles.bindings`; voice execution remains owned by frozen `voice_execution` facts. |
+| 20261008_0087 | Remove workspace-entered Binding pricing and the constant `fallback_policy`; catalog pricing is informational only and historical ProviderOperation receipts are preserved. |
 | 20261007_0083 | Merge the model-system and local-media migration histories into one head without rewriting either branch. |
 
 No canonical Project, Shot, Artifact, ProviderOperation, or EditSession is
@@ -131,7 +132,7 @@ tag data before enforcing the canonical constraints.
 
 ## Schema invariants
 
-- Alembic has one head: 20261008_0086 (verify with `alembic heads` on the candidate).
+- Alembic has one head: 20261008_0087 (verify with `alembic heads` on the candidate).
 - Metadata registration is centralized in app/shared/model_registry.py.
 - ProviderOperation is NodeRun-owned only.
 - Identity reference resolution is explicit and version-pinned.
