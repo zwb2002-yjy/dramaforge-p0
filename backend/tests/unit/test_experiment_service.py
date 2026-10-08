@@ -206,6 +206,7 @@ async def test_ambiguous_director_payload_fails_closed(session: AsyncSession, ex
         )
     assert (await session.scalars(select(ExperimentBranch))).all() == []
 
+
 @pytest.mark.asyncio
 async def test_accept_experiment_requires_explicit_adoption_scope(session: AsyncSession) -> None:
     from app.api.v1.experiments import ExperimentDecisionBody, decide_experiment
