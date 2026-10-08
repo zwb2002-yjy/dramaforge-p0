@@ -259,7 +259,6 @@ async def _seed_binding(
         remote_resource_kind="model",
         remote_resource_id=model_id,
         invoke_model_value=invoke_model_value,
-        pricing_snapshot_json={"unit_amount": "1", "currency": "USD"},
         created_by=user_id,
         updated_by=user_id,
     )
@@ -273,7 +272,6 @@ async def _seed_binding(
                 purpose=purpose,
                 model_binding_id=binding.id,
                 selection_strategy="explicit_binding",
-                fallback_policy="none",
                 updated_by=user_id,
             )
         )
