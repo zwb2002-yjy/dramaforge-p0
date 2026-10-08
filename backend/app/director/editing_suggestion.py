@@ -234,12 +234,6 @@ class EditingDirectorSuggestionResult(EditingDirectorSuggestionCandidate):
 
         return self._candidate
 
-    @property
-    def suggestion(self) -> EditingDirectorSuggestionCandidate:
-        """Compatibility alias for callers using the HTTP response vocabulary."""
-
-        return self._candidate
-
 
 class EditingDirectorSuggestionTransport(Protocol):
     async def generate(self, context: EditingDirectorSuggestionContext) -> object:
