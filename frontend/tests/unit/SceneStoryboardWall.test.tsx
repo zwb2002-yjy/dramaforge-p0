@@ -194,3 +194,62 @@ describe("Scene wall focused loading", () => {
     expect(calls.every((row) => row.method === "GET")).toBe(true);
   });
 });
+
+
+describe("Large storyboard and project-scoped focus", () => {
+  it("does not fan out into 20 workspace calls when displaying 100 Shot summaries", async () => {
+    const requests: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.endsWith("/scenes")) {
+        return json(
+          Array.from({ length: 20 }, (_, index) => ({
+            id: "scene-" + index,
+            project_id: "project-100",
+            episode_id: "episode-1",
+            episode_number: 1,
+            scene_number: index + 1,
+            location_name: "场景 " + (index + 1),
+            time_of_day: "day",
+            synopsis: "",
+            version: 1,
+            shot_count: 5,
+            formal_keyframe_count: 5,
+            formal_video_count: 4,
+            risk_count: 0,
+            representative_artifact: null,
+          })),
+        );
+      }
+      if (url.endsWith("/workspace")) {
+        return json({
+          shots: Array.from({ length: 5 }, (_, index) => ({
+            id: "shot-" + index,
+            shot_number: index + 1,
+            shot_type: "wide",
+            visual_description: "画面",
+            dialogue: "",
+            duration_seconds: "3",
+            formal_keyframe_artifact_id: "frame-" + index,
+            formal_video_artifact_id: index < 4 ? "video-" + index : null,
+          })),
+        });
+      }
+      return json({});
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <SceneStoryboardWall projectId="project-100" />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findAllByTestId("scene-card")).toHaveLength(20);
+    await waitFor(() => {
+      expect(requests.filter((url) => url.endsWith("/workspace"))).toHaveLength(1);
+    });
+    expect(screen.getByText("100 镜头")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "缺正式视频" }));
+    expect(requests.filter((url) => url.endsWith("/workspace"))).toHaveLength(1);
+  });
+});
