@@ -35,7 +35,6 @@ class ModelSlot(StrEnum):
 
     VIDEO_SHOT = "video.shot"
 
-    AUDIO_TTS = "audio.tts"
 
 
 class ModelSlotDefinition(BaseModel):
@@ -96,11 +95,6 @@ MODEL_SLOT_DEFINITIONS: dict[ModelSlot, ModelSlotDefinition] = {
             "镜头视频。一个 Slot 可服务多个视频 Capability；具体模型不必支持全部，"
             "最终 Router 按实际请求 Capability 验证（spec §10）。"
         ),
-    ),
-    ModelSlot.AUDIO_TTS: ModelSlotDefinition(
-        slot=ModelSlot.AUDIO_TTS,
-        required_capabilities=[Capability.AUDIO_TTS],
-        description="对白 / 旁白语音合成。",
     ),
 }
 

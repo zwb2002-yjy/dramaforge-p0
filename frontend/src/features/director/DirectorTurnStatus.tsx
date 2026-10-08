@@ -7,7 +7,7 @@ type DirectorTurnStatusProps = {
   syncError: string | null;
   busyTurnId: string | null;
   onStop: (turn: DirectorTurnRead) => void;
-  onResume: (turn: DirectorTurnRead) => void;
+  onRefresh: (turn: DirectorTurnRead) => void;
   requestPending?: boolean;
   requestFailed?: boolean;
 };
@@ -71,8 +71,6 @@ function understanding(turn: DirectorTurnRead): string {
   if (typeof instruction === "string" && instruction.trim()) return instruction;
   const kind = turn.intent_snapshot.kind;
   if (kind === "proactive_shot_analysis") return "主动分析当前镜头的表演与调度";
-  const task = turn.request_summary.task;
-  if (task === "workbench_followup") return "跟进已提交的镜头生产任务";
   return "基于当前已保存创作事实继续判断";
 }
 
@@ -127,7 +125,7 @@ export function DirectorTurnStatus({
   syncError,
   busyTurnId,
   onStop,
-  onResume,
+  onRefresh,
   requestPending = false,
   requestFailed = false,
 }: DirectorTurnStatusProps) {
@@ -226,9 +224,9 @@ export function DirectorTurnStatus({
               <button
                 type="button"
                 className="secondary"
-                data-testid="resume-director-turn"
+                data-testid="refresh-director-turn"
                 disabled={busyTurnId === latest.id}
-                onClick={() => onResume(latest)}
+                onClick={() => onRefresh(latest)}
               >
                 刷新服务器状态
               </button>

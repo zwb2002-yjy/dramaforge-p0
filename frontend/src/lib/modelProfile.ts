@@ -1,7 +1,7 @@
 /**
  * Model-profile pure helpers (spec §30/§77/§78).
  *
- * Simple mode maps LLM / Image / Video / Voice onto slot groups; ``bindings`` stays the
+ * Simple mode maps LLM / Image / Video onto slot groups; ``bindings`` stays the
  * single source of truth — simple mode only generates a bindings patch, never a
  * second state. No model/provider-name branching anywhere.
  */
@@ -12,7 +12,6 @@ export const SIMPLE_MODE_SLOT_GROUPS: Record<string, string[]> = {
   llm: ["planning.brief", "planning.script", "planning.storyboard"],
   image: ["visual.character", "visual.storyboard", "visual.keyframe"],
   video: ["video.shot"],
-  voice: ["audio.tts"],
 };
 
 /**
@@ -28,7 +27,6 @@ const SLOT_LABELS: Record<string, string> = {
   "visual.keyframe": "镜头关键帧",
   "visual.image_edit": "图片编辑",
   "video.shot": "镜头视频",
-  "audio.tts": "对白语音",
 };
 
 export function slotLabel(slotId: string): string {
@@ -42,7 +40,6 @@ export type SimpleModeSelection = {
   llm?: string;
   image?: string;
   video?: string;
-  voice?: string;
 };
 
 export function simpleModeToBindings(

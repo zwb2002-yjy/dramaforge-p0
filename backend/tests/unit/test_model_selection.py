@@ -138,7 +138,6 @@ async def test_explicit_project_binding_resolves_plan(session: AsyncSession) -> 
             purpose="video",
             model_binding_id=binding.id,
             selection_strategy="explicit_binding",
-            fallback_policy="none",
             updated_by=uuid4(),
         )
     )
@@ -224,7 +223,6 @@ async def test_profile_binding_without_concrete_binding_fails_closed(
             purpose="video",
             model_binding_id=binding.id,
             selection_strategy="explicit_binding",
-            fallback_policy="none",
             updated_by=uuid4(),
         )
     )
@@ -245,7 +243,6 @@ async def test_unverified_binding_is_fail_closed(session: AsyncSession) -> None:
             purpose="video",
             model_binding_id=binding.id,
             selection_strategy="explicit_binding",
-            fallback_policy="none",
             updated_by=uuid4(),
         )
     )
@@ -274,7 +271,6 @@ async def test_uncertified_binding_still_resolves(session: AsyncSession) -> None
             purpose="video",
             model_binding_id=binding.id,
             selection_strategy="explicit_binding",
-            fallback_policy="none",
             updated_by=uuid4(),
         )
     )
@@ -295,7 +291,6 @@ async def test_unsatisfiable_required_capability_is_fail_closed(
             purpose="video",
             model_binding_id=binding.id,
             selection_strategy="explicit_binding",
-            fallback_policy="none",
             updated_by=uuid4(),
         )
     )
@@ -321,7 +316,6 @@ async def test_real_video_model_with_first_frame_is_selectable(
             purpose="video",
             model_binding_id=binding.id,
             selection_strategy="explicit_binding",
-            fallback_policy="none",
             updated_by=uuid4(),
         )
     )

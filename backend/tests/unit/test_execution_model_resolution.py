@@ -297,7 +297,6 @@ async def test_no_profile_uses_legacy_binding_only_as_system_default(session: As
             purpose="video",
             model_binding_id=binding.id,
             selection_strategy="explicit_binding",
-            fallback_policy="none",
             updated_by=user.id,
         )
     )
@@ -329,8 +328,7 @@ async def test_unavailable_profile_model_does_not_run_legacy_binding(session: As
                 purpose="video",
                 model_binding_id=binding.id,
                 selection_strategy="explicit_binding",
-                fallback_policy="none",
-                updated_by=user.id,
+                    updated_by=user.id,
             ),
         ]
     )

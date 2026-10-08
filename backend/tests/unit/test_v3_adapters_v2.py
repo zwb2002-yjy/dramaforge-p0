@@ -261,7 +261,7 @@ class TestBridgeRefusesWithoutRuntime:
         bridge = _bridge_for("agnes", "video")
         with pytest.raises(ValueError):
             await bridge.translate(
-                Capability.AUDIO_TTS,
+                Capability.IMAGE_GENERATE,
                 ImageToVideoRequest(
                     prompt="p",
                     image=ArtifactRef(artifact_id="00000000-0000-0000-0000-000000000001"),

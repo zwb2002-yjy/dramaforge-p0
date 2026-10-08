@@ -104,6 +104,7 @@ def test_model_slots_api(api: tuple[TestClient, Any]) -> None:
     assert "planning.script" in ids
     assert "visual.keyframe" in ids
     assert "video.shot" in ids
+    assert "audio.tts" not in ids
     script = next(s for s in slots.json() if s["id"] == "planning.script")
     assert script["capabilities"] == ["text.generate"]
 

@@ -20,7 +20,6 @@ from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_work
 from app.config import get_settings
 from app.contracts.director_runtime import ResumeSignal, RuntimeScope, StopRequest
 from app.contracts.production_commands import ExecutionBody
-from app.director.next_action import DirectorNextActionRead, DirectorNextActionService
 from app.director.recommendation import (
     DirectorRecommendation,
     DirectorRecommendationRequest,
@@ -133,27 +132,6 @@ class DirectorTurnRead(BaseModel):
         )
 
 
-class DirectorTurnStopBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    expected_revision: int = Field(ge=1)
-
-
-class DirectorTurnResumeBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    expected_revision: int = Field(ge=1)
-    event_key: str = Field(min_length=1, max_length=200)
-
-
-class DirectorTurnDecisionBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    expected_revision: int = Field(ge=1)
-    decision: Literal["accept", "reject"]
-    accepted_operation_indices: list[StrictInt] = Field(default_factory=list, max_length=20)
-
-
 class DirectorRuntimeStartBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -171,9 +149,14 @@ class DirectorRuntimeResumeBody(BaseModel):
     expected_runtime_revision: int = Field(ge=1)
 
 
-class DirectorRuntimeDecisionBody(DirectorTurnDecisionBody):
+class DirectorRuntimeDecisionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     signal_id: UUID
+    expected_revision: int = Field(ge=1)
     expected_runtime_revision: int = Field(ge=1)
+    decision: Literal["accept", "reject"]
+    accepted_operation_indices: list[StrictInt] = Field(default_factory=list, max_length=20)
 
 
 class DirectorRuntimeStopBody(BaseModel):
@@ -365,75 +348,6 @@ async def get_director_turn(
 
 
 @router.post(
-    "/projects/{project_id}/director/turns/{turn_id}/stop",
-    response_model=DirectorTurnRead,
-)
-async def stop_director_turn(
-    project_id: UUID,
-    turn_id: UUID,
-    body: DirectorTurnStopBody,
-    user: CurrentUser,
-    session: SessionDep,
-    _csrf: CsrfDep,
-) -> DirectorTurnRead:
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    existing = await DirectorTurnService(session).get(
-        project_id=project_id, turn_id=turn_id,
-    )
-    if existing.runtime_execution_id is not None:
-        raise ConflictError(
-            "Use the versioned runtime stop endpoint for this turn",
-            details={"code": "DIRECTOR_RUNTIME_ENDPOINT_REQUIRED"},
-        )
-    turn = await DirectorTurnService(session).stop(
-        project_id=project_id,
-        turn_id=turn_id,
-        expected_revision=body.expected_revision,
-    )
-    await session.commit()
-    return DirectorTurnRead.from_model(turn)
-
-
-@router.post(
-    "/projects/{project_id}/director/turns/{turn_id}/resume",
-    response_model=DirectorNextActionRead,
-)
-async def resume_director_turn(
-    project_id: UUID,
-    turn_id: UUID,
-    body: DirectorTurnResumeBody,
-    user: CurrentUser,
-    session: SessionDep,
-    _csrf: CsrfDep,
-) -> DirectorNextActionRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id,
-        actor=user,
-    )
-    existing = await DirectorTurnService(session).get(
-        project_id=project_id, turn_id=turn_id,
-    )
-    if existing.runtime_execution_id is not None:
-        raise ConflictError(
-            "Use the versioned runtime resume endpoint for this turn",
-            details={"code": "DIRECTOR_RUNTIME_ENDPOINT_REQUIRED"},
-        )
-    try:
-        result = await DirectorNextActionService(session).reconcile(
-            project=project,
-            turn_id=turn_id,
-            event_key=body.event_key,
-            expected_revision=body.expected_revision,
-        )
-    except ConflictError as exc:
-        if exc.details.get("code") == "DIRECTOR_TURN_LIMIT_REACHED":
-            await session.commit()
-        raise
-    await session.commit()
-    return result
-
-
-@router.post(
     "/projects/{project_id}/director/runtime/turns/{turn_id}/resume",
     response_model=DirectorTurnRead,
     status_code=status.HTTP_202_ACCEPTED,
@@ -610,34 +524,6 @@ async def stop_director_runtime_turn(
     return DirectorTurnRead.from_model(turn)
 
 
-@router.post(
-    "/projects/{project_id}/director/turns/{turn_id}/decision",
-    response_model=DirectorTurnRead,
-)
-async def decide_director_turn(
-    project_id: UUID, turn_id: UUID, body: DirectorTurnDecisionBody,
-    user: CurrentUser, session: SessionDep, _csrf: CsrfDep,
-) -> DirectorTurnRead:
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    existing = await DirectorTurnService(session).get(
-        project_id=project_id, turn_id=turn_id,
-    )
-    if existing.runtime_execution_id is not None:
-        raise ConflictError(
-            "Use the versioned runtime resume endpoint for this turn",
-            details={"code": "DIRECTOR_RUNTIME_ENDPOINT_REQUIRED"},
-        )
-    try:
-        turn = await DirectorTurnService(session).record_user_decision(
-            project_id=project_id, turn_id=turn_id, expected_revision=body.expected_revision,
-            decision=body.decision, accepted_operation_indices=body.accepted_operation_indices,
-        )
-    except ConflictError as exc:
-        if exc.details.get("code") == "DIRECTOR_TURN_LIMIT_REACHED":
-            await session.commit()
-        raise
-    await session.commit()
-    return DirectorTurnRead.from_model(turn)
 
 
 __all__ = ["router", "suggest_shot_design"]

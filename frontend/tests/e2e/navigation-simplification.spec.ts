@@ -190,7 +190,7 @@ test("project model fields fit a narrow window without overlapping or overflowin
   page,
 }) => {
   const { writes, errors } = await setup(page);
-  const slots = ["planning.brief", "visual.character", "video.shot", "audio.tts"];
+  const slots = ["planning.brief", "visual.character", "video.shot"];
   await page.route("**/api/v1/model-slots", (route) =>
     route.fulfill({
       json: slots.map((id) => ({

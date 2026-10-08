@@ -128,27 +128,6 @@ def inspect_catalog_model(
         None,
     )
     catalog = ModelCapabilityManifest.model_validate(catalog_row) if catalog_row else None
-    from app.providers.local_tts import LocalEspeakAdapter
-
-    if model_id == f"{LocalEspeakAdapter.provider}/{LocalEspeakAdapter.model}":
-        spec = CapabilitySpec(capability=Capability.AUDIO_TTS, transport_profile_id="local-process")
-        return ModelCapabilityReport(
-            model_id=model_id,
-            manifest_version="local-espeak-contract-v1",
-            manifest_hash=hash_manifest({"model": model_id, "output": "audio/wav"}),
-            catalog_lifecycle="local_runtime",
-            capabilities={str(Capability.AUDIO_TTS): spec},
-            controls={
-                "camera_motion": "unsupported",
-                "style": "unsupported",
-                "tool_calling": "unsupported",
-                "native_audio": "native",
-            },
-            limitations=[
-                "Local executable availability is not checked; no process was started.",
-                "Voice and engine are deployment configuration, not request options.",
-            ],
-        )
     if registry is None:
         registry, _ = build_v3_registry()
         from app.config import get_settings

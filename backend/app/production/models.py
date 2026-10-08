@@ -179,9 +179,6 @@ def assert_graph_version_mutable(version: GraphVersion) -> None:
         raise ValidationAppError("published graph version is immutable")
 
 
-# Backward-compatible alias used by older imports during transition.
-Graph = ProductionGraph
-
 
 SHOT_REFERENCE_PURPOSES = (
     "identity",

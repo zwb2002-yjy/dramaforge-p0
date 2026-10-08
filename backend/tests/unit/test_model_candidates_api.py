@@ -276,7 +276,8 @@ def test_project_provider_bindings_can_be_read_back_with_their_model_identity(
     assert row["provider_type"] == "agnes"
     assert row["model_binding_enabled"] is True
     assert row["selection_strategy"] == "explicit_binding"
-    assert row["fallback_policy"] == "none"
+    assert "fallback_policy" not in row
+    assert "pricing_snapshot_json" not in row
 
 
 def test_model_candidates_api_requires_project_ownership(api: tuple[TestClient, Any]) -> None:

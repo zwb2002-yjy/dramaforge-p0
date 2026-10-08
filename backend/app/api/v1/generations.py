@@ -70,7 +70,6 @@ _CAPABILITY_DISPLAY_NAMES: dict[Capability, str] = {
     Capability.VIDEO_LAST_FRAME_TO_VIDEO: "尾帧视频",
     Capability.VIDEO_FIRST_LAST_FRAME: "首尾帧视频",
     Capability.VIDEO_REFERENCE_TO_VIDEO: "多参考视频",
-    Capability.AUDIO_TTS: "语音合成",
 }
 
 

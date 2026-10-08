@@ -716,14 +716,17 @@ class Acceptance:
                 paid=True,
             )
             turn_id = suggestion["director_evidence"]["turn_id"]
+            turn_state = self.read(f"/projects/{project}/director/turns/{turn_id}")
+            if not turn_state.get("runtime_execution_id") or turn_state.get("runtime_revision") is None:
+                raise RuntimeError("Director suggestion is missing its LangGraph runtime identity")
             self.once(
                 f"{label}:accept-shot",
                 "POST",
-                f"/projects/{project}/director/turns/{turn_id}/decision",
-                lambda project=project, turn_id=turn_id: {
-                    "expected_revision": self.read(f"/projects/{project}/director/turns/{turn_id}")[
-                        "revision"
-                    ],
+                f"/projects/{project}/director/runtime/turns/{turn_id}/decision",
+                lambda turn_state=turn_state: {
+                    "signal_id": str(uuid4()),
+                    "expected_revision": turn_state["revision"],
+                    "expected_runtime_revision": turn_state["runtime_revision"],
                     "decision": "accept",
                     "accepted_operation_indices": [0],
                 },

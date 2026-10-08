@@ -308,19 +308,17 @@ async def test_plugin_extension_needs_no_service_branch(
         )
     assert blocked.value.details["code"] == "MODEL_CONTRACT_NOT_TESTED"
 
-    # Account pricing is not an Owner paid-probe authorization contract. Even
-    # an extension plugin must fail closed.
-    for pricing in ({}, {"unit_amount": "0.25", "currency": "USD"}):
-        binding.pricing_snapshot_json = pricing
-        with pytest.raises(ValidationAppError) as denied:
-            await service.probe(
-                workspace_id=workspace.id,
-                connection_id=connection.id,
-                actor=user,
-                capability="image_t2i",
-                model_binding_id=binding.id,
-            )
-        assert denied.value.details["code"] == "PAID_PROBE_AUTHORIZATION_UNAVAILABLE"
+    # Workspace pricing is not an authorization surface. Paid probes remain
+    # unavailable until a dedicated explicit authorization contract exists.
+    with pytest.raises(ValidationAppError) as denied:
+        await service.probe(
+            workspace_id=workspace.id,
+            connection_id=connection.id,
+            actor=user,
+            capability="image_t2i",
+            model_binding_id=binding.id,
+        )
+    assert denied.value.details["code"] == "PAID_PROBE_AUTHORIZATION_UNAVAILABLE"
     assert (
         await session.scalar(
             select(ProviderCapabilityEvidence.id).where(

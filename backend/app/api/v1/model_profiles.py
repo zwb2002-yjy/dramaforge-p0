@@ -82,7 +82,6 @@ def _slot_display_name(slot: ModelSlot) -> str:
         ModelSlot.VISUAL_KEYFRAME: "镜头关键帧",
         ModelSlot.VISUAL_IMAGE_EDIT: "图片编辑",
         ModelSlot.VIDEO_SHOT: "镜头视频",
-        ModelSlot.AUDIO_TTS: "语音合成",
     }.get(slot, str(slot))
 
 

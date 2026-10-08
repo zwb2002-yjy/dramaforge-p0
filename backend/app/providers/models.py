@@ -198,12 +198,6 @@ class ProviderModelBinding(Base):
     )
     remote_resource_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
     invoke_model_value: Mapped[str | None] = mapped_column(String(160), nullable=True)
-    # Workspace owner supplied, explicitly acknowledged estimate.  Catalog
-    # prices remain immutable global documentation; this snapshot captures the
-    # user's actual account/contract price for a concrete binding revision.
-    pricing_snapshot_json: Mapped[dict[str, object]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
@@ -239,7 +233,6 @@ class ProjectProviderBinding(Base):
     selection_strategy: Mapped[str] = mapped_column(
         String(32), nullable=False, default="explicit_binding"
     )
-    fallback_policy: Mapped[str] = mapped_column(String(20), nullable=False, default="none")
     updated_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )

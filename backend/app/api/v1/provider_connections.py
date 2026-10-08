@@ -223,7 +223,6 @@ class ModelBindingRead(BaseModel):
 class ProjectBindingWrite(BaseModel):
     model_binding_id: UUID
     selection_strategy: Literal["explicit_binding"] = "explicit_binding"
-    fallback_policy: Literal["none"] = "none"
 
 
 class ProjectBindingRead(BaseModel):
@@ -232,7 +231,6 @@ class ProjectBindingRead(BaseModel):
     purpose: str
     model_binding_id: UUID
     selection_strategy: str
-    fallback_policy: str
 
 
 class ProjectBindingDetailRead(ProjectBindingRead):
@@ -635,7 +633,6 @@ async def list_project_bindings(
                 purpose=row.purpose,
                 model_binding_id=row.model_binding_id,
                 selection_strategy=row.selection_strategy,
-                fallback_policy=row.fallback_policy,
                 model_id=model.model_id if model is not None else None,
                 display_name=(
                     entry.display_name
@@ -667,7 +664,6 @@ async def put_project_binding(
         project=project,
         purpose=purpose,
         model_binding_id=body.model_binding_id,
-        fallback_policy=body.fallback_policy,
         actor=user,
         selection_strategy=body.selection_strategy,
     )
@@ -678,5 +674,4 @@ async def put_project_binding(
         purpose=binding.purpose,
         model_binding_id=binding.model_binding_id,
         selection_strategy=binding.selection_strategy,
-        fallback_policy=binding.fallback_policy,
     )

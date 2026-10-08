@@ -464,25 +464,21 @@ class DirectorTurnService:
                     "Shot changed since this suggestion was produced",
                     details={"code": "DIRECTOR_DECISION_STALE"},
                 )
+        if turn.runtime_execution_id is None:
+            raise ValidationAppError(
+                "Director decision requires a LangGraph runtime binding",
+                details={"code": "DIRECTOR_RUNTIME_BINDING_REQUIRED"},
+            )
         summary["user_decision"] = audit
-        runtime_managed = turn.runtime_execution_id is not None
         try:
             turn = await self.compare_and_set(
-                turn=turn, expected_statuses=("awaiting_user",),
-                target_status=(
-                    "awaiting_user"
-                    if runtime_managed
-                    else "completed" if decision == "reject" else "awaiting_user"
-                ),
+                turn=turn,
+                expected_statuses=("awaiting_user",),
+                target_status="awaiting_user",
                 updates={
                     "response_summary": summary,
-                    "wait_reason": (
-                        "runtime_decision_pending"
-                        if runtime_managed
-                        else "user_rejected" if decision == "reject" else "design_save"
-                    ),
+                    "wait_reason": "runtime_decision_pending",
                 },
-                increment_step=decision == "accept" and not runtime_managed,
             )
         except ConflictError:
             await self._session.refresh(turn)
@@ -574,6 +570,19 @@ class DirectorTurnService:
                     "last_error": (
                         "Interrupted text submission has no pollable remote identity; "
                         "automatic replay is forbidden. Start an explicit new request."
+                    ),
+                },
+            )
+        if turn.runtime_execution_id is None and turn.status in ACTIVE_TURN_STATUSES:
+            return await self.compare_and_set(
+                turn=turn,
+                expected_statuses=tuple(ACTIVE_TURN_STATUSES),
+                target_status="stale",
+                updates={
+                    "wait_reason": "runtime_binding_missing",
+                    "last_error": (
+                        "Director turn has no LangGraph runtime binding; "
+                        "legacy coordination is not resumed."
                     ),
                 },
             )
