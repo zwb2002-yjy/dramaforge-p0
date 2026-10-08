@@ -315,7 +315,7 @@ describe("ShotDirectorSuggestionPanel", () => {
       if (url.endsWith("/auth/csrf")) return Promise.resolve(json({ csrf_token: "csrf" }));
       if (url.includes("/director/turns?")) return Promise.resolve(json([]));
       if (url.endsWith(`/turns/${turn.id}`)) return Promise.resolve(json(turn));
-      if (url.endsWith(`/turns/${turn.id}/decision`)) {
+      if (url.endsWith(`/runtime/turns/${turn.id}/decision`)) {
         return Promise.resolve(
           json({
             ...turn,
@@ -512,7 +512,7 @@ describe("ShotDirectorSuggestionPanel", () => {
       ).toEqual({
         request_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
         expected_runtime_revision: 2,
-        expected_turn_revision: 6,
+        expected_turn_revision: 7,
       }),
     );
   });
@@ -525,7 +525,7 @@ describe("ShotDirectorSuggestionPanel", () => {
       if (url.endsWith("/auth/csrf")) return Promise.resolve(json({ csrf_token: "csrf" }));
       if (url.endsWith("/suggestion")) return Promise.resolve(json(suggestion()));
       if (url.endsWith(`/turns/${turn.id}`)) return Promise.resolve(json(turn));
-      if (url.endsWith(`/turns/${turn.id}/decision`)) {
+      if (url.endsWith(`/runtime/turns/${turn.id}/decision`)) {
         return Promise.resolve(
           json({ detail: "turn revision conflict", code: "DIRECTOR_TURN_REVISION_CONFLICT" }, 409),
         );
