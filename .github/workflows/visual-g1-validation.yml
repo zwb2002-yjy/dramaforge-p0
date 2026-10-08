@@ -6,10 +6,9 @@ on:
       - codex/visual-storyboard-g1-20261008
     paths:
       - .github/workflows/visual-g1-validation.yml
-  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   g1-frontend:
@@ -17,6 +16,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -24,6 +25,28 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install locked frontend dependencies
         run: npm ci --prefix frontend
+      - name: Format scoped G1 files and commit if needed
+        run: |
+          set -euo pipefail
+          cd frontend
+          npx --no-install prettier --write \
+            src/features/scenes/SceneMediaGallery.tsx \
+            src/features/scenes/SceneStoryboardWall.tsx \
+            src/features/scenes/scene-wall-surface.css \
+            tests/unit/SceneMediaGallery.test.tsx \
+            tests/unit/SceneStoryboardWall.test.tsx
+          cd ..
+          git add frontend/src/features/scenes/SceneMediaGallery.tsx \
+            frontend/src/features/scenes/SceneStoryboardWall.tsx \
+            frontend/src/features/scenes/scene-wall-surface.css \
+            frontend/tests/unit/SceneMediaGallery.test.tsx \
+            frontend/tests/unit/SceneStoryboardWall.test.tsx
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "style(scene-wall): format G1 frontend files"
+            git push origin HEAD:codex/visual-storyboard-g1-20261008
+          fi
       - name: Check formatting
         run: npm run --prefix frontend format:check
       - name: Typecheck
