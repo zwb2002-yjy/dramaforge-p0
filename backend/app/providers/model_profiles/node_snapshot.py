@@ -27,7 +27,6 @@ NODE_SLOT_MAP: dict[str, tuple[ModelSlot, Capability]] = {
     # validated at execution (spec §10/§43). The snapshot uses i2v as the
     # representative planned capability.
     "video": (ModelSlot.VIDEO_SHOT, Capability.VIDEO_IMAGE_TO_VIDEO),
-    "voice": (ModelSlot.AUDIO_TTS, Capability.AUDIO_TTS),
     "canonical": (ModelSlot.VISUAL_CHARACTER, Capability.IMAGE_GENERATE),
 }
 
