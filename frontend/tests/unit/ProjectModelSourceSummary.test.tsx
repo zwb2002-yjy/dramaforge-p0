@@ -71,7 +71,6 @@ it("does not present a saved lower-priority provider binding as the effective se
       purpose: "keyframe",
       model_binding_id: "old-model-binding",
       selection_strategy: "explicit_binding",
-      fallback_policy: "none",
       model_id: "different-model",
       provider_type: "fixture",
       display_name: "Different Model",
