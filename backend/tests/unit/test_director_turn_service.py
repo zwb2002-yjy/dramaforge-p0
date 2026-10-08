@@ -348,6 +348,12 @@ async def _decision_turn(session: AsyncSession):
         "base_shot_version": shot.version,
         "typed_operations": [{"op": "first"}, {"op": "second"}],
     }
+    from app.director.runtime.langgraph_adapter import ENGINE_VERSION, STATE_SCHEMA_VERSION
+
+    turn.engine_version = ENGINE_VERSION
+    turn.state_schema_version = STATE_SCHEMA_VERSION
+    turn.runtime_execution_id = uuid4()
+    turn.runtime_revision = 1
     await session.flush()
     return project, user, shot, turn, context
 
@@ -375,15 +381,7 @@ async def test_detached_partial_decision_is_durable_and_never_applies_design(ses
             context_hash=turn.context_hash,
         )
     assert refused_subset.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
-    assert turn.wait_reason == "design_save"
-    from app.director.next_action import DirectorNextActionService
-
-    checkpoint = await DirectorNextActionService(session).reconcile(
-        project=project,
-        turn_id=turn.id,
-    )
-    assert checkpoint.action == "review_accepted_changes"
-    assert turn.wait_reason == "design_save"
+    assert turn.wait_reason == "runtime_decision_pending"
     assert shot.version == 1
     assert shot.image_prompt == "saved image prompt"
     assert shot.formal_video_artifact_id is None
@@ -429,7 +427,7 @@ async def test_rejection_closes_inflight_siblings_and_blocks_new_key_same_contex
     await session.commit()
     await session.refresh(sibling)
     assert sibling.status == "stale"
-    assert turn.status == "completed"
+    assert turn.status == "awaiting_user"
     with pytest.raises(ConflictError) as rejected:
         await service.create_or_get(
             project=project,
@@ -449,6 +447,25 @@ async def test_rejection_closes_inflight_siblings_and_blocks_new_key_same_contex
         context_snapshot={**context, "instruction": "wide"},
     )
     assert created and changed.status == "queued"
+
+
+@pytest.mark.asyncio
+async def test_unbound_detached_decision_is_rejected(session: AsyncSession):
+    project, _user, _shot, turn, _context = await _decision_turn(session)
+    turn.engine_version = None
+    turn.state_schema_version = None
+    turn.runtime_execution_id = None
+    turn.runtime_revision = None
+    await session.flush()
+    with pytest.raises(ValidationAppError) as blocked:
+        await DirectorTurnService(session).record_user_decision(
+            project_id=project.id,
+            turn_id=turn.id,
+            expected_revision=turn.revision,
+            decision="reject",
+            accepted_operation_indices=[],
+        )
+    assert blocked.value.details["code"] == "DIRECTOR_RUNTIME_BINDING_REQUIRED"
 
 
 @pytest.mark.asyncio
