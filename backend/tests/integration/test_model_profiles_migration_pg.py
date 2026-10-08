@@ -248,3 +248,45 @@ async def test_model_profiles_migration_and_rls_on_isolated_db() -> None:
         engine.dispose()
     finally:
         await _drop_db(dbname)
+
+@pytest.mark.asyncio
+async def test_0086_removes_retired_audio_tts_profile_binding() -> None:
+    dbname = f"dramaforge_mp_tts_{uuid.uuid4().hex[:10]}"
+    try:
+        await _create_db(dbname)
+        _alembic(dbname, "upgrade", "20261007_0085")
+        seeded = _seed_workspace_default(dbname)
+
+        engine = create_engine(_db_sync_url(dbname))
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE production_model_profiles "
+                    "SET bindings = CAST(:bindings AS json) WHERE id = :profile_id"
+                ),
+                {
+                    "profile_id": seeded["profile_id"],
+                    "bindings": (
+                        '{"planning.script":{"model_id":"litellm/script-quality"},'
+                        '"audio.tts":{"model_id":"legacy/voice"}}'
+                    ),
+                },
+            )
+        engine.dispose()
+
+        _alembic(dbname, "upgrade", "20261008_0086")
+
+        engine = create_engine(_db_sync_url(dbname))
+        with engine.connect() as conn:
+            head = conn.execute(text("select version_num from alembic_version")).scalar_one()
+            assert head == "20261008_0086"
+            bindings = conn.execute(
+                text("SELECT bindings FROM production_model_profiles WHERE id = :profile_id"),
+                {"profile_id": seeded["profile_id"]},
+            ).scalar_one()
+            assert "audio.tts" not in bindings
+            assert bindings["planning.script"]["model_id"] == "litellm/script-quality"
+        engine.dispose()
+    finally:
+        await _drop_db(dbname)
+
