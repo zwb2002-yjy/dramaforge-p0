@@ -136,3 +136,33 @@ describe("AssetReferencePicker recycled assets and empty resolution", () => {
     expect(screen.queryByTestId("reference-binding-invalid-hint")).not.toBeInTheDocument();
   });
 });
+
+it("persists a new binding after existing reference slots instead of reusing sort_order zero", async () => {
+  const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    calls.push({
+      method,
+      url,
+      body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined,
+    });
+    if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+    if (url.endsWith(`/projects/${PROJECT_ID}/assets`)) return json(ASSETS);
+    if (url.includes("/references/resolve")) return json([]);
+    if (url.endsWith(`/shots/${SHOT_ID}/references`)) {
+      if (method === "POST") return json({ ...BINDING, id: "new-binding", sort_order: 8 }, 201);
+      return json([{ ...BINDING, sort_order: 7 }]);
+    }
+    return json([]);
+  });
+  renderPicker();
+  fireEvent.click(await screen.findByRole("button", { name: "添加" }));
+  fireEvent.change(await screen.findByLabelText("选择资产"), { target: { value: ACTIVE_ASSET } });
+  fireEvent.click(screen.getByRole("button", { name: "添加引用" }));
+  await waitFor(() => {
+    const post = calls.find((call) => call.method === "POST" && call.url.endsWith("/references"));
+    expect(post?.body?.sort_order).toBe(8);
+    expect(post?.body?.asset_id).toBe(ACTIVE_ASSET);
+  });
+});

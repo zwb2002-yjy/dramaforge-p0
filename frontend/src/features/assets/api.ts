@@ -225,6 +225,7 @@ export async function createShotReference(
     resolution_mode?: string;
     label?: string;
     stage?: string;
+    sort_order?: number;
   },
 ): Promise<ShotBindingRead> {
   const csrf = await fetchCsrf();
@@ -239,6 +240,7 @@ export async function createShotReference(
       resolution_mode: input.resolution_mode ?? "current_formal",
       label: input.label ?? "",
       stage: input.stage ?? "both",
+      ...(input.sort_order === undefined ? {} : { sort_order: input.sort_order }),
     },
     csrf,
   );

@@ -290,7 +290,11 @@ class ShotReferenceService:
                         ShotReferenceBinding.project_id == project_id,
                         ShotReferenceBinding.shot_id == shot_id,
                     )
-                    .order_by(ShotReferenceBinding.sort_order, ShotReferenceBinding.created_at)
+                    .order_by(
+                        ShotReferenceBinding.sort_order,
+                        ShotReferenceBinding.created_at,
+                        ShotReferenceBinding.id,
+                    )
                 )
             )
             .scalars()
@@ -442,7 +446,11 @@ class ShotReferenceService:
                 await self._session.execute(
                     select(AssetVersionReference)
                     .where(AssetVersionReference.asset_version_id == version.id)
-                    .order_by(AssetVersionReference.sort_order, AssetVersionReference.label)
+                    .order_by(
+                        AssetVersionReference.sort_order,
+                        AssetVersionReference.label,
+                        AssetVersionReference.id,
+                    )
                 )
             )
             .scalars()

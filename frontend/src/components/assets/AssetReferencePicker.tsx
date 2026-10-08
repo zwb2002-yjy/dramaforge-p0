@@ -163,6 +163,9 @@ export function AssetReferencePicker({
         asset_id: selectedAssetId || null,
         resolution_mode: "current_formal",
         label: selectedAssetId ? labelFor(selectedAssetId) : "",
+        // Persist the chosen reference order instead of trusting a later
+        // browser-only sort. Existing ties retain their stable created_at/id order.
+        sort_order: rows.reduce((max, binding) => Math.max(max, binding.sort_order), -1) + 1,
       }),
     onSuccess: async () => {
       setAdding(false);

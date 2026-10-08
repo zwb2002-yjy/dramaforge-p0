@@ -920,7 +920,11 @@ class WorkbenchExecutionService:
                         ("both", "image" if stage == "image_keyframe" else "video")
                     ),
                 )
-                .order_by(ShotReferenceBinding.sort_order, ShotReferenceBinding.id)
+                .order_by(
+                    ShotReferenceBinding.sort_order,
+                    ShotReferenceBinding.created_at,
+                    ShotReferenceBinding.id,
+                )
                 .execution_options(populate_existing=True)
             )
         ).all()
@@ -947,7 +951,11 @@ class WorkbenchExecutionService:
                             AssetVersionReference.project_id == project.id,
                             AssetVersionReference.asset_version_id == version_id,
                         )
-                        .order_by(AssetVersionReference.sort_order, AssetVersionReference.id)
+                        .order_by(
+                            AssetVersionReference.sort_order,
+                            AssetVersionReference.label,
+                            AssetVersionReference.id,
+                        )
                     )
                 )
             else:
