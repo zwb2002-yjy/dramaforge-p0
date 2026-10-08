@@ -644,7 +644,7 @@ class TestRouter:
         router, _ = self._router()
         with pytest.raises(UnsupportedCapabilityError):
             await router.create(
-                capability=Capability.AUDIO_TTS,
+                capability=Capability.VIDEO_TEXT_TO_VIDEO,
                 request=ImageGenerateRequest(prompt="p"),
                 context=ExecutionContext(trace_id="t"),
             )
