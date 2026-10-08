@@ -152,7 +152,9 @@ test("100-shot overview reads one scene at a time and restores focused scene", a
   expect(writes).toEqual([]);
 });
 
-test("unsaved shot design blocks return to overview until explicitly discarded", async ({ page }) => {
+test("unsaved shot design blocks return to overview until explicitly discarded", async ({
+  page,
+}) => {
   const { SCENE_ID } = await import("./professional-mocks");
   await installProfessionalMock(page);
   await page.goto("/projects/" + PROJECT_ID + "/scenes/" + SCENE_ID);

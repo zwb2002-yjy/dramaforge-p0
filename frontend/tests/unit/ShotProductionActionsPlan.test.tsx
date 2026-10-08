@@ -191,7 +191,5 @@ it("keeps exact adaptation details accessible but collapsed by default", async (
   expect(screen.getByTestId("shot-execution-plan-model")).toHaveTextContent(
     "执行模型：Agnes Image Flash",
   );
-  expect(screen.getByTestId("shot-execution-plan-references")).toHaveTextContent(
-    "完全支持 1",
-  );
+  expect(screen.getByTestId("shot-execution-plan-references")).toHaveTextContent("完全支持 1");
 });

@@ -362,41 +362,41 @@ export function ShotDesignPanel({
         testId="shot-camera-parameters"
       >
         <div className="df-shot-camera" data-testid="shot-design-camera-facts">
-        <Field>
-          景别
-          <Select
-            aria-label="镜头类型"
-            value={shotType}
-            onChange={(event) => setShotType(event.target.value)}
-          >
-            {shotTypeOptionsFor(shotType).map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field>
-          运镜
-          <Input
-            aria-label="机位运动"
-            value={cameraMove}
-            onChange={(event) => setCameraMove(event.target.value)}
-            placeholder="缓慢推近"
-          />
-        </Field>
-        <Field>
-          时长
-          <Input
-            aria-label="时长（秒）"
-            type="number"
-            min="0.1"
-            max="30"
-            step="0.1"
-            value={durationSeconds}
-            onChange={(event) => setDurationSeconds(event.target.value)}
-          />
-        </Field>
+          <Field>
+            景别
+            <Select
+              aria-label="镜头类型"
+              value={shotType}
+              onChange={(event) => setShotType(event.target.value)}
+            >
+              {shotTypeOptionsFor(shotType).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field>
+            运镜
+            <Input
+              aria-label="机位运动"
+              value={cameraMove}
+              onChange={(event) => setCameraMove(event.target.value)}
+              placeholder="缓慢推近"
+            />
+          </Field>
+          <Field>
+            时长
+            <Input
+              aria-label="时长（秒）"
+              type="number"
+              min="0.1"
+              max="30"
+              step="0.1"
+              value={durationSeconds}
+              onChange={(event) => setDurationSeconds(event.target.value)}
+            />
+          </Field>
         </div>
       </Disclosure>
 

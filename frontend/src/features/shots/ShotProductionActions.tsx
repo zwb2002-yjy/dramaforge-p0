@@ -851,18 +851,22 @@ export function ShotProductionActions({
                   <summary>查看本次模型与参考</summary>
                   <p data-testid="shot-execution-plan-model">执行模型：{planModel.label}</p>
                   <p data-testid="shot-execution-plan-references">
-                    引用：完全支持 {plannedReferences.filter((row) => row.delivery === "exact").length}{" "}
-                    · 近似 {plannedReferences.filter((row) => row.delivery === "approximate").length} ·
-                    不支持 {plannedReferences.filter((row) => row.delivery === "unsupported").length}
+                    引用：完全支持{" "}
+                    {plannedReferences.filter((row) => row.delivery === "exact").length} · 近似{" "}
+                    {plannedReferences.filter((row) => row.delivery === "approximate").length} ·
+                    不支持{" "}
+                    {plannedReferences.filter((row) => row.delivery === "unsupported").length}
                   </p>
                 </details>
               ) : (
                 <>
                   <p data-testid="shot-execution-plan-model">执行模型：{planModel.label}</p>
                   <p data-testid="shot-execution-plan-references">
-                    引用：完全支持 {plannedReferences.filter((row) => row.delivery === "exact").length}{" "}
-                    · 近似 {plannedReferences.filter((row) => row.delivery === "approximate").length} ·
-                    不支持 {plannedReferences.filter((row) => row.delivery === "unsupported").length}
+                    引用：完全支持{" "}
+                    {plannedReferences.filter((row) => row.delivery === "exact").length} · 近似{" "}
+                    {plannedReferences.filter((row) => row.delivery === "approximate").length} ·
+                    不支持{" "}
+                    {plannedReferences.filter((row) => row.delivery === "unsupported").length}
                   </p>
                 </>
               )}
