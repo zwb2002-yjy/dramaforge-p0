@@ -356,7 +356,12 @@ export function ShotDesignPanel({
         </div>
       )}
 
-      <div className="df-shot-camera" data-testid="shot-design-camera-facts">
+      <Disclosure
+        title="镜头参数"
+        description={`${shotTypeOptionsFor(shotType).find((option) => option.value === shotType)?.label ?? "景别"} · ${cameraMove || "固定机位"} · ${durationSeconds || "—"} 秒`}
+        testId="shot-camera-parameters"
+      >
+        <div className="df-shot-camera" data-testid="shot-design-camera-facts">
         <Field>
           景别
           <Select
@@ -392,7 +397,8 @@ export function ShotDesignPanel({
             onChange={(event) => setDurationSeconds(event.target.value)}
           />
         </Field>
-      </div>
+        </div>
+      </Disclosure>
 
       {message && (
         <p className="df-shot-hint" data-testid="shot-design-message" role="status">
