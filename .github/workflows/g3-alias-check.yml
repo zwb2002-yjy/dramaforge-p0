@@ -1,4 +1,4 @@
-name: Temporary G3 Alias & Regression Validation
+name: Temporary G3-G5 Integrated Frontend Validation
 on:
   push:
     branches: [codex/visual-storyboard-g1-20261008]
@@ -28,9 +28,26 @@ jobs:
           cd frontend
           npx --no-install prettier --write \
             src/components/assets/AssetReferencePicker.tsx \
-            tests/unit/AssetReferencePicker.test.tsx
+            tests/unit/AssetReferencePicker.test.tsx \
+            src/features/review/ReviewWorkspace.tsx \
+            src/features/scenes/SceneMediaGallery.tsx \
+            src/features/editing/EditingSourcePreview.tsx \
+            src/features/editing/EditingWorkspace.tsx \
+            src/features/editing/editing-source-preview.css \
+            tests/unit/ReviewExactTarget.test.tsx \
+            tests/unit/SceneMediaGallery.test.tsx \
+            tests/unit/EditingWorkspace.test.tsx
           cd ..
-          git add frontend/src/components/assets/AssetReferencePicker.tsx frontend/tests/unit/AssetReferencePicker.test.tsx
+          git add frontend/src/components/assets/AssetReferencePicker.tsx \
+            frontend/tests/unit/AssetReferencePicker.test.tsx \
+            frontend/src/features/review/ReviewWorkspace.tsx \
+            frontend/src/features/scenes/SceneMediaGallery.tsx \
+            frontend/src/features/editing/EditingSourcePreview.tsx \
+            frontend/src/features/editing/EditingWorkspace.tsx \
+            frontend/src/features/editing/editing-source-preview.css \
+            frontend/tests/unit/ReviewExactTarget.test.tsx \
+            frontend/tests/unit/SceneMediaGallery.test.tsx \
+            frontend/tests/unit/EditingWorkspace.test.tsx
           if ! git diff --cached --quiet; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -53,4 +70,4 @@ jobs:
         run: npm run --prefix frontend build
       - run: cd frontend && npx --no-install playwright install --with-deps chromium
       - name: Browser regressions
-        run: cd frontend && npx --no-install playwright test visual-storyboard-g1.spec.ts navigation-ia.spec.ts
+        run: cd frontend && npx --no-install playwright test visual-storyboard-g1.spec.ts navigation-ia.spec.ts professional-review.spec.ts
