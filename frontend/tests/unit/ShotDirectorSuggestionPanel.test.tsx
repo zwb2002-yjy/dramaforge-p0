@@ -98,16 +98,14 @@ function recommendation() {
 }
 
 function directorTurn(
-  task: "shot_director_suggestion" | "shot_director_recommendation" | "workbench_followup",
+  task: "shot_director_suggestion" | "shot_director_recommendation",
   output: Record<string, unknown>,
   overrides: Partial<DirectorTurnRead> = {},
 ): DirectorTurnRead {
   const id =
     task === "shot_director_recommendation"
       ? "22222222-2222-4222-8222-222222222222"
-      : task === "workbench_followup"
-        ? "33333333-3333-4333-8333-333333333333"
-        : "11111111-1111-4111-8111-111111111111";
+      : "11111111-1111-4111-8111-111111111111";
   return {
     id,
     project_id: "project-1",
