@@ -153,6 +153,10 @@ describe("SceneWorkspace", () => {
       "href",
       "/projects/project-1/edit",
     );
+    expect(screen.getByRole("link", { name: "返回全片分镜总览" })).toHaveAttribute(
+      "href",
+      "/projects/project-1/scenes",
+    );
 
     // One inspector, organised around the Shot: no tool dock, no tab layers.
     expect(screen.queryByTestId("context-dock")).not.toBeInTheDocument();
