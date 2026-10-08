@@ -185,7 +185,7 @@ export function AssetReferencePicker({
       const assetId = editAssetId || binding.asset_id;
       if (!assetId) throw new Error("请先选择参考素材。");
       const label = editLabel.trim();
-      if (!/^@[\\p{L}\\p{N}_-]+$/u.test(label)) {
+      if (!/^@[\p{L}\p{N}_-]+$/u.test(label)) {
         throw new Error("引用标签必须以 @ 开头，仅使用文字、数字、下划线或短横线。");
       }
       if (rows.some((item) => item.id !== binding.id && item.label === label)) {
