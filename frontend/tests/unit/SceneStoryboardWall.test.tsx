@@ -195,7 +195,6 @@ describe("Scene wall focused loading", () => {
   });
 });
 
-
 describe("Large storyboard and project-scoped focus", () => {
   it("does not fan out into 20 workspace calls when displaying 100 Shot summaries", async () => {
     const requests: string[] = [];

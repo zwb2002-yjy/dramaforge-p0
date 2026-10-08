@@ -111,7 +111,6 @@ it("filters by actual Formal video identity, without confusing absent video with
   expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
 });
 
-
 it("locates the sole missing Formal video among 34 shots without any write", async () => {
   const all = Array.from({ length: 34 }, (_, index) => ({
     ...shots[0],
@@ -126,7 +125,12 @@ it("locates the sole missing Formal video among 34 shots without any write", asy
       headers: { "Content-Type": "application/json" },
     }),
   );
-  const largeScene = { ...scene, shot_count: 34, formal_keyframe_count: 34, formal_video_count: 33 };
+  const largeScene = {
+    ...scene,
+    shot_count: 34,
+    formal_keyframe_count: 34,
+    formal_video_count: 33,
+  };
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
