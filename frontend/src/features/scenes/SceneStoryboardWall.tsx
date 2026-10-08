@@ -1,7 +1,7 @@
 import { PageHeader, EmptyState, Button } from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SceneMediaGallery, type SceneMediaFilter } from "./SceneMediaGallery";
 import "../resonance/resonance.css";
 import "./scene-wall-surface.css";
@@ -80,6 +80,17 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
   });
 
   const rows = scenes.data ?? [];
+  const restoredProject = useRef<string | null>(null);
+  useEffect(() => {
+    if (!scenes.isSuccess || restoredProject.current === projectId) return;
+    restoredProject.current = projectId;
+    const previousSceneId = readSelection(projectId).sceneId;
+    if (!previousSceneId || !rows.some((scene) => scene.id === previousSceneId)) return;
+    document.getElementById("scene-media-" + previousSceneId)?.scrollIntoView?.({
+      block: "center",
+    });
+  }, [projectId, rows, scenes.isSuccess]);
+
   const filteredRows = rows.filter((scene) =>
     current.filter === "missing-keyframe"
       ? scene.formal_keyframe_count < scene.shot_count
