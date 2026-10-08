@@ -68,7 +68,6 @@ const MODEL_SLOTS = new Set<ModelSlot>([
   "visual.keyframe",
   "visual.image_edit",
   "video.shot",
-  "audio.tts",
 ]);
 
 function isRecommendationCategory(value: string): value is RecommendationCategory {
