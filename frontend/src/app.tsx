@@ -12,6 +12,12 @@ const queryClient = new QueryClient({
       retry: 1,
       refetchOnWindowFocus: false,
     },
+    // Explicit writes fail in the context where the user requested them.
+    // Reconnecting must not flush a paused Save/Formal/Generate/Export command.
+    mutations: {
+      networkMode: "always",
+      retry: false,
+    },
   },
 });
 

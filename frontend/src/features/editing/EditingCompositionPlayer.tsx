@@ -65,7 +65,9 @@ export function EditingCompositionPlayer({
       return;
     }
     const target = (clip.source_in_ms + elapsed * rate) / 1000;
-    if (Math.abs(video.currentTime - target) > 0.02) video.currentTime = target;
+    // Timeline seeks use millisecond precision; a nearby paused frame still
+    // needs a seek instead of being accepted within a playback drift tolerance.
+    if (Math.abs(video.currentTime - target) > 0.001) video.currentTime = target;
     else setReady(true);
   }, [clip, elapsed, rate]);
   useEffect(() => {

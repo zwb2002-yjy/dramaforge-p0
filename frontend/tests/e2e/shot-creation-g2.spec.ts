@@ -165,6 +165,38 @@ test("a refused save retains the Shot draft and blocks implicit generation and s
   expect(productionWrites(state)).toEqual([]);
 });
 
+test("offline writes fail in place and reconnect never flushes a Save or generation", async ({
+  page,
+  context,
+}) => {
+  const state = await installShotJourneyMock(page);
+  await page.goto(sceneUrl);
+  let offline = false;
+  await expect(page.getByTestId("generate-keyframe")).toBeEnabled();
+  await page.route("**/api/**", (route) =>
+    offline ? route.abort("internetdisconnected") : route.fallback(),
+  );
+  offline = true;
+  await context.setOffline(true);
+  await page.getByTestId("generate-keyframe").click();
+  await expect(page.getByTestId("generate-keyframe")).toBeEnabled();
+  await page.getByLabel("画面描述").fill("断网失败后保留，联网仍需显式保存");
+  await page.getByTestId("shot-primary-save").click();
+  await expect(page.getByTestId("shot-design-message")).toContainText("保存失败");
+  await expect(page.getByLabel("画面描述")).toHaveValue("断网失败后保留，联网仍需显式保存");
+  offline = false;
+  await context.setOffline(false);
+  await expect(page.getByTestId("shot-primary-save")).toBeEnabled();
+  await expect(page.getByLabel("画面描述")).toHaveValue("断网失败后保留，联网仍需显式保存");
+  expect(state.shots[0].version).toBe(1);
+  expect(productionWrites(state)).toEqual([]);
+  expect(state.requests.filter((item) => item.method === "PATCH")).toEqual([]);
+  await page.getByTestId("shot-primary-save").click();
+  await expect(page.getByTestId("shot-design-message")).toHaveText("已保存。");
+  expect(state.shots[0].version).toBe(2);
+  expect(productionWrites(state)).toEqual([]);
+});
+
 test("approval survives a refused Formal selection and recovery never regenerates the candidate", async ({
   page,
 }) => {
