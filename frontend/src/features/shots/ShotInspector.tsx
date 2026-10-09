@@ -38,6 +38,8 @@ type ShotInspectorProps = {
   intentSeed?: { text: string; revision: number } | null;
   /** Bumps whenever something asks for a section; the latest request wins. */
   focusRequest?: { focus: InspectorFocus; revision: number } | null;
+  /** Open model settings in a drawer without leaving the canvas. */
+  onOpenModelSettings?: () => void;
 };
 
 /**
@@ -68,6 +70,7 @@ export function ShotInspector({
   onDesignSaved,
   intentSeed,
   focusRequest,
+  onOpenModelSettings,
 }: ShotInspectorProps) {
   const root = useRef<HTMLElement>(null);
   const [directorOpen, setDirectorOpen] = useState(false);
@@ -167,6 +170,7 @@ export function ShotInspector({
             onReviewCandidates={onReviewCandidates}
             onOpenDetails={() => setDetailsOpen(true)}
             onDirectorDelegated={() => setDirectorOpen(true)}
+            onOpenModelSettings={onOpenModelSettings}
           />
         )}
       />

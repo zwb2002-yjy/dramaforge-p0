@@ -351,3 +351,130 @@
   justify-content: space-between;
   gap: var(--df-space-3);
 }
+
+/* ---- Animatic Player ---- */
+.df-animatic-container {
+  display: grid;
+  gap: var(--df-space-4);
+}
+.df-animatic-screen {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: var(--df-surface-screen);
+  border-radius: var(--df-radius-container);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.df-animatic-placeholder {
+  text-align: center;
+  padding: var(--df-space-4);
+}
+.df-animatic-badge {
+  position: absolute;
+  top: var(--df-space-3);
+  left: var(--df-space-3);
+  padding: var(--df-space-1) var(--df-space-3);
+  border-radius: var(--df-radius-chip);
+  background: var(--df-surface-overlay);
+  color: var(--df-text-secondary);
+  font-size: var(--df-font-size-caption);
+  backdrop-filter: blur(8px);
+}
+.df-animatic-subtitle {
+  position: absolute;
+  bottom: var(--df-space-4);
+  left: var(--df-space-4);
+  right: var(--df-space-4);
+  padding: var(--df-space-2) var(--df-space-4);
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: var(--df-radius-control);
+  color: var(--df-text-primary);
+  text-align: center;
+  font-size: var(--df-text-md);
+}
+.df-animatic-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--df-space-2) var(--df-space-1);
+}
+.df-animatic-buttons {
+  display: flex;
+  align-items: center;
+  gap: var(--df-space-2);
+}
+.df-animatic-info {
+  font-size: var(--df-font-size-caption);
+  color: var(--df-text-muted);
+}
+.df-animatic-strip {
+  display: flex;
+  gap: var(--df-space-2);
+  overflow-x: auto;
+  padding-bottom: var(--df-space-2);
+}
+.df-animatic-thumb {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--df-space-2) var(--df-space-3);
+  border: 1px solid var(--df-border-subtle);
+  border-radius: var(--df-radius-control);
+  background: var(--df-surface-1);
+  cursor: pointer;
+  color: var(--df-text-secondary);
+}
+.df-animatic-thumb.active {
+  border-color: var(--df-verdigris);
+  background: var(--df-surface-tier-raised-bg);
+  color: var(--df-text-primary);
+}
+.df-animatic-thumb-number {
+  font-weight: var(--df-weight-semibold);
+  font-size: var(--df-font-size-caption);
+}
+.df-animatic-thumb-type {
+  font-size: var(--df-font-size-meta);
+  color: var(--df-text-muted);
+}
+
+/* ---- Continuity Overlay ---- */
+.df-continuity-overlay {
+  margin-top: var(--df-space-2);
+  padding: var(--df-space-3);
+  border: 1px solid var(--df-border-subtle);
+  border-radius: var(--df-radius-control);
+  background: var(--df-surface-1);
+  display: grid;
+  gap: var(--df-space-2);
+}
+.df-continuity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--df-font-size-caption);
+  font-weight: var(--df-weight-semibold);
+}
+.df-continuity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--df-space-2);
+}
+.df-continuity-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--df-space-1);
+  font-size: var(--df-font-size-meta);
+  color: var(--df-text-muted);
+}
+.df-continuity-card img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--df-radius-control);
+  border: 1px solid var(--df-border-subtle);
+}

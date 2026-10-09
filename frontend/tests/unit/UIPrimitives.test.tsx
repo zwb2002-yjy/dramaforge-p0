@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   Button,
   Checkbox,
+  Drawer,
   Field,
   EmptyState,
   Input,
@@ -181,4 +182,29 @@ it("empty state keeps its title, explanation and explicit action accessible", ()
   expect(action).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "新建项目" }));
   expect(action).toHaveBeenCalledTimes(1);
+});
+
+it("drawer traps focus, supports Escape, and renders overlay content", () => {
+  const close = vi.fn();
+  function DrawerExample() {
+    return (
+      <Drawer open={true} onClose={close} title="侧滑抽屉" testId="test-drawer">
+        <p>抽屉内容</p>
+        <Button onClick={close}>完成</Button>
+      </Drawer>
+    );
+  }
+  render(<DrawerExample />);
+  expect(screen.getByTestId("test-drawer")).toBeInTheDocument();
+  expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
+  expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("侧滑抽屉");
+  expect(screen.getByText("抽屉内容")).toBeInTheDocument();
+
+  // Test close button
+  fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+  expect(close).toHaveBeenCalledTimes(1);
+
+  // Test escape key
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(close).toHaveBeenCalledTimes(2);
 });

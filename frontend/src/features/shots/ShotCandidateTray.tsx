@@ -13,6 +13,7 @@ import {
   setShotFormalVideo,
   type FormalKeyframeRead,
   type FormalVideoRead,
+  type ShotExecutionReference,
   type ShotLite,
 } from "./api";
 import {
@@ -27,6 +28,7 @@ type ShotCandidateTrayProps = {
   projectId: string;
   shot: ShotLite | null;
   candidates?: unknown[];
+  references?: ShotExecutionReference[];
   selectedCandidate?: ShotCandidate | null;
   /** Local-only selection; the callback must not persist a candidate. */
   onPreviewCandidate?: (candidate: ShotCandidate) => void;
@@ -57,6 +59,7 @@ export function ShotCandidateTray({
   projectId,
   shot,
   candidates = [],
+  references = [],
   selectedCandidate = null,
   onPreviewCandidate,
   onConfirmed,
@@ -68,15 +71,22 @@ export function ShotCandidateTray({
     null,
   );
   const [assetCandidate, setAssetCandidate] = useState<ShotCandidate | null>(null);
+  const [comparingCandidateId, setComparingCandidateId] = useState<string | null>(null);
 
   useEffect(() => {
     setFeedback(null);
     setAssetCandidate(null);
+    setComparingCandidateId(null);
   }, [shot?.id]);
 
   const parsedCandidates = useMemo(
     () => parseShotCandidates(candidates).filter(isConfirmableShotCandidate),
     [candidates],
+  );
+
+  const characterReferences = useMemo(
+    () => references.filter((ref) => Boolean(ref.artifact_id)),
+    [references],
   );
 
   const confirm = useMutation({
@@ -279,7 +289,66 @@ export function ShotCandidateTray({
                   >
                     加入资产
                   </button>
+                  {characterReferences.length > 0 && (
+                    <button
+                      type="button"
+                      className="df-btn ghost"
+                      data-testid={`shot-candidate-continuity-${candidate.artifactId}`}
+                      onClick={() =>
+                        setComparingCandidateId((current) =>
+                          current === candidate.artifactId ? null : candidate.artifactId,
+                        )
+                      }
+                    >
+                      {comparingCandidateId === candidate.artifactId ? "收起设定" : "对比设定"}
+                    </button>
+                  )}
                 </div>
+                {comparingCandidateId === candidate.artifactId && (
+                  <div
+                    className="df-continuity-overlay"
+                    data-testid={`shot-continuity-overlay-${candidate.artifactId}`}
+                  >
+                    <div className="df-continuity-header">
+                      <span>角色基准设定图 ({characterReferences.length})</span>
+                      <button
+                        type="button"
+                        className="df-dialog-close"
+                        style={{ width: "1.25rem", height: "1.25rem" }}
+                        aria-label="关闭比对"
+                        onClick={() => setComparingCandidateId(null)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <div className="df-continuity-grid">
+                      {characterReferences.map((ref) => {
+                        const purposeName =
+                          ref.purpose === "identity"
+                            ? "角色基准"
+                            : ref.purpose === "clothing"
+                              ? "服装设定"
+                              : ref.purpose === "style"
+                                ? "风格基准"
+                                : ref.purpose === "pose"
+                                  ? "姿势参考"
+                                  : "基准设定";
+                        return (
+                          <div
+                            key={`${candidate.artifactId}-${ref.artifact_id}`}
+                            className="df-continuity-card"
+                          >
+                            <img
+                              src={artifactContentUrl(projectId, ref.artifact_id!)}
+                              alt={purposeName}
+                            />
+                            <span>{purposeName}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </article>
             );
           })}

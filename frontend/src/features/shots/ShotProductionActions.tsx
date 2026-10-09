@@ -67,6 +67,8 @@ type ShotProductionActionsProps = {
   /** Parsed candidates of this Shot; drive the "检查候选" primary action. */
   candidates?: ShotCandidate[];
   onReviewCandidates?: () => void;
+  /** Open model settings in a drawer without leaving the canvas. */
+  onOpenModelSettings?: () => void;
 };
 
 type ActionFeedback = {
@@ -180,6 +182,7 @@ export function ShotProductionActions({
   saving = false,
   candidates = [],
   onReviewCandidates,
+  onOpenModelSettings,
 }: ShotProductionActionsProps) {
   const queryClient = useQueryClient();
   const delegationDecisionIds = useRef(new Map<string, string>());
@@ -749,15 +752,31 @@ export function ShotProductionActions({
       data-shot-id={shot.id}
       data-next-action={next.kind}
     >
-      <dl className="df-shot-facts" data-testid="shot-production-preflight">
+      <dl
+        className="df-shot-facts"
+        data-testid="shot-production-preflight"
+        data-active-stage={focusStage}
+      >
+        <div data-testid="production-stage-indicator">
+          <dt>阶段</dt>
+          <dd data-testid={`stage-indicator-${focusStage}`}>
+            {focusStage === "video" ? "视频生成 (图生视频)" : "画面打样 (文生图)"}
+          </dd>
+        </div>
         <div data-testid={`production-preflight-${focusStage}`}>
-          <dt>模型</dt>
+          <dt>{focusStage === "video" ? "视频模型" : "生图模型"}</dt>
           <dd title={focusPreflight?.resolved_model_id ?? undefined}>{modelText}</dd>
         </div>
         <div>
-          <dt>输入</dt>
+          <dt>{focusStage === "video" ? "视频输入" : "画面输入"}</dt>
           <dd>{inputText}</dd>
         </div>
+        {focusStage === "video" && Boolean(shot.formal_keyframe_artifact_id) && (
+          <div data-testid="production-preflight-source-frame">
+            <dt>基准画面</dt>
+            <dd>已绑定正式关键帧</dd>
+          </div>
+        )}
       </dl>
 
       <Button
@@ -772,7 +791,20 @@ export function ShotProductionActions({
       {blockedReason && (
         <p className="df-shot-hint" data-testid="shot-primary-blocked" role="status">
           {blockedReason}
-          {blockedByModel && <a href={settingsHref}>去设置模型</a>}
+          {blockedByModel && (
+            <a
+              href={settingsHref}
+              role="button"
+              onClick={(e) => {
+                if (onOpenModelSettings) {
+                  e.preventDefault();
+                  onOpenModelSettings();
+                }
+              }}
+            >
+              去设置模型
+            </a>
+          )}
         </p>
       )}
 
@@ -942,7 +974,18 @@ export function ShotProductionActions({
           {/MODEL_BINDING_MISSING/.test(feedback.message) ? (
             <>
               还没有可用的{STAGE_NOUN[feedback.stage]}模型，本次没有提交。
-              <a href={settingsHref}>去设置模型</a>
+              <a
+                href={settingsHref}
+                role="button"
+                onClick={(e) => {
+                  if (onOpenModelSettings) {
+                    e.preventDefault();
+                    onOpenModelSettings();
+                  }
+                }}
+              >
+                去设置模型
+              </a>
             </>
           ) : (
             <>
