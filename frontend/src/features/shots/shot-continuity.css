@@ -1,0 +1,35 @@
+.shot-continuity {
+  display: grid;
+  gap: var(--df-space-3);
+}
+.shot-continuity-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--df-space-3);
+}
+.shot-continuity-item {
+  display: grid;
+  align-content: start;
+  gap: var(--df-space-2);
+  margin: 0;
+  padding: var(--df-space-3);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-control);
+}
+.shot-continuity-item img,
+.shot-continuity-item video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  background: var(--df-surface-3);
+}
+.shot-continuity-note {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--df-text-secondary);
+}
+@media (max-width: 899px) {
+  .shot-continuity-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -7,6 +7,8 @@ import { useEffect, useMemo, useState } from "react";
 import { artifactContentUrl } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { AddArtifactToAssetDialog } from "../assets/AddArtifactToAssetDialog";
+import { HumanReviewDecisionPanel } from "../review";
+import { Button } from "../../components/ui";
 import "./shot-inspector.css";
 import {
   setShotFormalKeyframe,
@@ -68,15 +70,20 @@ export function ShotCandidateTray({
     null,
   );
   const [assetCandidate, setAssetCandidate] = useState<ShotCandidate | null>(null);
+  const [reviewArtifactId, setReviewArtifactId] = useState<string | null>(null);
 
   useEffect(() => {
     setFeedback(null);
     setAssetCandidate(null);
+    setReviewArtifactId(null);
   }, [shot?.id]);
 
   const parsedCandidates = useMemo(
     () => parseShotCandidates(candidates).filter(isConfirmableShotCandidate),
     [candidates],
+  );
+  const reviewCandidate = parsedCandidates.find(
+    (candidate) => candidate.artifactId === reviewArtifactId,
   );
 
   const confirm = useMutation({
@@ -257,19 +264,32 @@ export function ShotCandidateTray({
                       {activeArtifactId === candidate.artifactId ? "确认中…" : "设为正式"}
                     </button>
                   ) : (
-                    <a
-                      className="df-btn"
-                      href={reviewTargetHref(projectId, {
-                        shotId: shot.id,
-                        artifactId: candidate.artifactId,
-                        stage:
-                          candidate.stage === "image_keyframe" ? "formal_keyframe" : "formal_video",
-                        reviewKind:
-                          candidate.stage === "image_keyframe" ? "identity" : "video_drift",
-                      })}
-                    >
-                      审查
-                    </a>
+                    <>
+                      <Button
+                        tone="primary"
+                        onClick={() => {
+                          setReviewArtifactId(candidate.artifactId);
+                          onPreviewCandidate?.(candidate);
+                        }}
+                      >
+                        就地审查
+                      </Button>
+                      <a
+                        className="df-btn"
+                        href={reviewTargetHref(projectId, {
+                          shotId: shot.id,
+                          artifactId: candidate.artifactId,
+                          stage:
+                            candidate.stage === "image_keyframe"
+                              ? "formal_keyframe"
+                              : "formal_video",
+                          reviewKind:
+                            candidate.stage === "image_keyframe" ? "identity" : "video_drift",
+                        })}
+                      >
+                        审查
+                      </a>
+                    </>
                   )}
                   <button
                     type="button"
@@ -301,6 +321,28 @@ export function ShotCandidateTray({
           }}
           onClose={() => setAssetCandidate(null)}
         />
+      )}
+      {reviewCandidate && (
+        <section data-testid="shot-inline-review" aria-label="当前候选审查">
+          <Button tone="ghost" onClick={() => setReviewArtifactId(null)}>
+            返回候选
+          </Button>
+          <HumanReviewDecisionPanel
+            projectId={projectId}
+            shotId={shot.id}
+            artifactId={reviewCandidate.artifactId}
+            reviewKind={reviewCandidate.stage === "image_keyframe" ? "identity" : "video_drift"}
+            stage={reviewCandidate.stage === "image_keyframe" ? "formal_keyframe" : "formal_video"}
+            shotVersion={shot.version}
+            title={reviewCandidate.stage === "image_keyframe" ? "关键帧身份审查" : "视频漂移审查"}
+            showFormalAction={false}
+            onChanged={async () => {
+              await queryClient.invalidateQueries({
+                queryKey: queryKeys.scene.workspace(projectId, shot.scene_id),
+              });
+            }}
+          />
+        </section>
       )}
 
       {feedback?.kind === "success" && (

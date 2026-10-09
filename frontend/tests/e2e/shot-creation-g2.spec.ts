@@ -24,8 +24,9 @@ async function reviewCandidate(
   await expect(page.getByTestId(`shot-candidate-preview-${artifact}`)).toBeVisible();
   expect(productionWrites(state)).toHaveLength(before);
   await expect(candidate.getByTestId(`shot-candidate-confirm-${artifact}`)).toHaveCount(0);
-  await candidate.getByRole("link", { name: "审查", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`shotId=${JOURNEY_SHOT_IDS[index]}`));
+  await candidate.getByRole("button", { name: "就地审查", exact: true }).click();
+  await expect(page.getByTestId("shot-inline-review")).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/scenes/${SCENE_ID}`));
   await page.getByTestId(`review-request-evidence-${kind}`).click();
   const reason = page.getByLabel(
     `${stage === "video" ? "视频漂移审查" : "关键帧身份审查"}判断理由`,
@@ -45,7 +46,7 @@ async function reviewCandidate(
       .slice(before)
       .map((item) => item.path.split("/").at(-1)),
   ).toEqual(["review-decisions"]);
-  await page.getByRole("link", { name: "返回此镜头选择正式版本" }).click();
+  await page.getByRole("button", { name: "返回候选", exact: true }).click();
   await expect(page.getByTestId("shot-strip")).toHaveAttribute(
     "data-selected-shot-id",
     JOURNEY_SHOT_IDS[index],

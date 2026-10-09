@@ -809,6 +809,16 @@ export function artifactContentUrl(projectId: string, artifactId: string): strin
   return workspaceScopedUrl(`/api/v1/projects/${projectId}/artifacts/${artifactId}/content`);
 }
 
+export function artifactVideoFrameUrl(
+  projectId: string,
+  artifactId: string,
+  role: "start" | "end",
+): string {
+  return workspaceScopedUrl(
+    `/api/v1/projects/${projectId}/artifacts/${artifactId}/video-frames/${role}`,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // V3 model capability / unified generation API (spec §58).
 // ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import { CinematicCanvas } from "../shots/CinematicCanvas";
 import { ShotCandidateTray } from "../shots/ShotCandidateTray";
 import { ShotInspector, type InspectorFocus } from "../shots/ShotInspector";
 import { ShotStrip } from "../shots/ShotStrip";
+import { ShotContinuityCompare } from "../shots/ShotContinuityCompare";
 import { parseShotCandidates, type ShotCandidate } from "../shots/shotCandidates";
 import type { ShotExecutionReference, ShotLite } from "../shots/api";
 import type { ShotDesignDraft } from "../shots/ShotDesignPanel";
@@ -29,6 +30,7 @@ type SceneWorkspaceProps = {
   onOpenEditing?: () => void;
   onOpenOverview?: () => void;
   onDirtyStateChange?: (dirty: boolean) => void;
+  onSelectedShotChange?: (shotId: string) => void;
 };
 
 type ShotReferenceContext = {
@@ -87,6 +89,7 @@ export function SceneWorkspace({
   onOpenEditing,
   onOpenOverview,
   onDirtyStateChange,
+  onSelectedShotChange,
 }: SceneWorkspaceProps) {
   const [selectedShotId, setSelectedShotId] = useState<string | null>(initialShotId ?? null);
   const [previewCandidate, setPreviewCandidate] = useState<ShotCandidate | null>(null);
@@ -130,7 +133,9 @@ export function SceneWorkspace({
     setDesignDrafts({});
     setSuggestionDraft(null);
     setPendingShotId(null);
-  }, [projectId, sceneId, initialShotId, openDirector, openPrompts, openGenerate, openCandidates]);
+    // Scope changes reset drafts; navigating within the same Scene must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, sceneId]);
 
   useEffect(() => {
     onDirtyStateChange?.(designDirty);
@@ -186,9 +191,20 @@ export function SceneWorkspace({
       }
       setSelectedShotId(shotId);
       setPreviewCandidate(null);
+      onSelectedShotChange?.(shotId);
     },
-    [designDirty, selectedShotKey],
+    [designDirty, selectedShotKey, onSelectedShotChange],
   );
+  const selectFromRoute = useRef(selectShot);
+  selectFromRoute.current = selectShot;
+  useEffect(() => {
+    if (initialShotId) selectFromRoute.current(initialShotId);
+  }, [initialShotId]);
+  useEffect(() => {
+    const focus = initialFocus(openGenerate, openPrompts, openDirector);
+    if (focus) setFocusRequest((current) => ({ ...focus, revision: (current?.revision ?? 0) + 1 }));
+    if (openCandidates) setTrayExpanded(true);
+  }, [openGenerate, openPrompts, openDirector, openCandidates]);
 
   const requestFocus = useCallback((focus: InspectorFocus) => {
     setFocusRequest((current) => ({ focus, revision: (current?.revision ?? 0) + 1 }));
@@ -381,6 +397,12 @@ export function SceneWorkspace({
               trace={trace}
             />
           </ResonanceStage>
+          <ShotContinuityCompare
+            projectId={projectId}
+            shots={shots}
+            shotId={selectedShotKey}
+            candidate={previewCandidate}
+          />
           <div ref={trayAnchor}>
             <ShotCandidateTray
               projectId={projectId}
@@ -462,6 +484,7 @@ export function SceneWorkspace({
             setDesignDirty(false);
             setSuggestionDraft(null);
             setSelectedShotId(pendingShotId);
+            onSelectedShotChange?.(pendingShotId);
             setPreviewCandidate(null);
             setPendingShotId(null);
           }}
