@@ -6626,6 +6626,13 @@ export interface components {
         };
         /** ResolvedReferenceRead */
         ResolvedReferenceRead: {
+            /**
+             * Binding Id
+             * Format: uuid
+             */
+            binding_id: string;
+            /** Stage */
+            stage: string;
             /** Purpose */
             purpose: string;
             /** Role */
@@ -6643,6 +6650,10 @@ export interface components {
             asset_id?: string | null;
             /** Asset Version Id */
             asset_version_id?: string | null;
+            /** Mime Type */
+            mime_type: string;
+            /** Fingerprint */
+            fingerprint: string;
         };
         /**
          * ReviewDecisionBody

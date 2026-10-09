@@ -205,8 +205,16 @@ async def prepare_media_submission(
             aspect_ratio=image_ratio,
             seed=None,
             reference_artifact_ids=[
-                reference_id for reference_id in [(reference_uuid)] if reference_id is not None
-            ],
+                reference.artifact_id
+                for reference in workbench_planned_references
+                if reference.role == "reference_image"
+                and reference.artifact_id is not None
+                and reference.delivery != "unsupported"
+            ]
+            if workbench_plan is not None
+            else [reference_uuid]
+            if reference_uuid is not None
+            else [],
             reference_fingerprint=(
                 workbench_image_reference.fingerprint
                 if workbench_image_reference is not None
@@ -498,7 +506,7 @@ async def prepare_media_submission(
                     "professional workbench connection revision is unavailable",
                     details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
                 )
-                resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_resolution(
+            resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_resolution(
                 resolution=frozen_resolution,
                 workspace_id=project.workspace_id,
                 connection_revision_id=connection_revision.id,

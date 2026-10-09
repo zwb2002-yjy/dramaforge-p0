@@ -7,6 +7,7 @@ resolution follows the binding's ``resolution_mode`` to a concrete artifact.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -85,6 +86,8 @@ class BindingRead(BaseModel):
 
 
 class ResolvedReferenceRead(BaseModel):
+    binding_id: UUID
+    stage: str
     purpose: str
     role: str
     artifact_id: UUID
@@ -92,6 +95,8 @@ class ResolvedReferenceRead(BaseModel):
     source: str
     asset_id: UUID | None = None
     asset_version_id: UUID | None = None
+    mime_type: str
+    fingerprint: str
 
 
 def _binding_read(binding: ShotReferenceBinding) -> BindingRead:
@@ -197,6 +202,40 @@ class ShotReferenceService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def _validate_mention_label(
+        self,
+        *,
+        project_id: UUID,
+        shot_id: UUID,
+        label: str,
+        binding_id: UUID | None = None,
+    ) -> None:
+        if not label.startswith("@"):
+            return
+        if not re.fullmatch(r"@[\w-]+", label):
+            raise ValidationAppError(
+                "invalid @reference label", details={"code": "REFERENCE_LABEL_INVALID"}
+            )
+        # Serialize labels on their owning Shot, including concurrent creates.
+        await self._session.scalar(
+            select(Shot.id)
+            .where(Shot.id == shot_id, Shot.project_id == project_id)
+            .with_for_update()
+        )
+        duplicate = await self._session.scalar(
+            select(ShotReferenceBinding.id).where(
+                ShotReferenceBinding.project_id == project_id,
+                ShotReferenceBinding.shot_id == shot_id,
+                ShotReferenceBinding.label == label,
+                *([ShotReferenceBinding.id != binding_id] if binding_id else []),
+            )
+        )
+        if duplicate is not None:
+            raise ConflictError(
+                "reference label is already bound on this Shot",
+                details={"code": "REFERENCE_LABEL_CONFLICT"},
+            )
+
     async def _require_project_shot(self, *, project_id: UUID, shot_id: UUID, actor: User) -> None:
         await ProjectService(self._session).get_project_for_owner(
             project_id=project_id, actor=actor
@@ -274,6 +313,7 @@ class ShotReferenceService:
             metadata_json=dict(body.metadata),
             created_by=actor.id,
         )
+        await self._validate_mention_label(project_id=project_id, shot_id=shot_id, label=body.label)
         self._session.add(binding)
         await self._session.flush()
         return binding
@@ -360,6 +400,12 @@ class ShotReferenceService:
         if body.experiment_branch_id is not None:
             binding.experiment_branch_id = body.experiment_branch_id
         if body.label is not None:
+            await self._validate_mention_label(
+                project_id=project_id,
+                shot_id=binding.shot_id,
+                label=body.label,
+                binding_id=binding.id,
+            )
             binding.label = body.label
         if body.sort_order is not None:
             binding.sort_order = body.sort_order
@@ -400,21 +446,25 @@ class ShotReferenceService:
         if binding.resolution_mode == "direct_artifact":
             if binding.artifact_id is None:
                 return []
-            artifact_exists = await self._session.scalar(
-                select(Artifact.id).where(
+            artifact = await self._session.scalar(
+                select(Artifact).where(
                     Artifact.id == binding.artifact_id,
                     Artifact.project_id == project_id,
                 )
             )
-            if artifact_exists is None:
+            if artifact is None or artifact.deleted_at is not None:
                 return []
             return [
                 ResolvedReferenceRead(
+                    binding_id=binding.id,
+                    stage=binding.stage,
                     purpose=binding.purpose,
                     role=binding.purpose,
                     artifact_id=binding.artifact_id,
                     label=binding.label,
                     source="direct_artifact",
+                    mime_type=artifact.mime_type or "application/octet-stream",
+                    fingerprint=artifact.content_hash,
                     asset_id=binding.asset_id,
                     asset_version_id=binding.asset_version_id,
                 )
@@ -456,8 +506,22 @@ class ShotReferenceService:
             .scalars()
             .all()
         )
+        artifacts = {
+            item.id: item
+            for item in (
+                await self._session.scalars(
+                    select(Artifact).where(
+                        Artifact.project_id == project_id,
+                        Artifact.id.in_([ref.artifact_id for ref in refs]),
+                        Artifact.deleted_at.is_(None),
+                    )
+                )
+            ).all()
+        }
         return [
             ResolvedReferenceRead(
+                binding_id=binding.id,
+                stage=binding.stage,
                 purpose=binding.purpose,
                 role=ref.reference_role,
                 artifact_id=ref.artifact_id,
@@ -469,8 +533,11 @@ class ShotReferenceService:
                 ),
                 asset_id=binding.asset_id,
                 asset_version_id=version.id,
+                mime_type=artifacts[ref.artifact_id].mime_type or "application/octet-stream",
+                fingerprint=artifacts[ref.artifact_id].content_hash,
             )
             for ref in refs
+            if ref.artifact_id in artifacts
         ]
 
 

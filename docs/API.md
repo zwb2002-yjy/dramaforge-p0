@@ -22,6 +22,15 @@ Migration authority: [DATA_MODEL.md](DATA_MODEL.md)
 
 ## Route ownership
 
+素材引用仍使用 `ShotReferenceBinding` 的 CRUD 与 `references/resolve`。
+解析结果明确返回 `binding_id`、`stage`、Artifact ID、真实 MIME 和内容指纹；前端不从名字或
+展示标签猜测绑定身份。`@标签` 在同一 Shot 内唯一，非法/重复标签分别返回
+`REFERENCE_LABEL_INVALID` / `REFERENCE_LABEL_CONFLICT`，更新继续要求 `expected_version`。
+`execution-plan` 根据保存的绑定顺序和 AssetVersionReference 顺序编译编号，将原始提示词
+保存在 `semantic_intent.source_prompt`，标签到 Artifact/版本/编号映射保存在
+`semantic_intent.prompt_reference_map`。未解析标签拒绝预检；顺序、标签及绑定版本变化影响计划指纹。
+已接受 NodeRun 的 Worker 继续消费冻结提示词及完整 Artifact 列表，不再解析可变资产名称或当前版本。
+
 `DELETE /api/v1/projects/{project_id}?expected_version=N` requires Owner workspace access
 and CSRF. Stale versions and active NodeRun/Director work return 409. Success returns 204,
 hides the project from lists and denies subsequent workbench access. Historical execution,

@@ -16,6 +16,7 @@ import { queryKeys } from "../../lib/queryKeys";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 import { ResonanceStage } from "../resonance/ResonanceStage";
 import { BatchFillActions } from "../production";
+import { replaceMentionLabel } from "../../lib/mentionLabels";
 
 type SceneWorkspaceProps = {
   projectId: string;
@@ -420,6 +421,20 @@ export function SceneWorkspace({
           onDesignDirtyChange={updateDesignDirty}
           designDraft={designDraft}
           onDesignDraftChange={updateDesignDraft}
+          onReferenceLabelChanged={(before, after) => {
+            if (!selected) return;
+            setDesignDrafts((current) => {
+              const draft = current[selected.id] ?? draftFromShot(selected);
+              return {
+                ...current,
+                [selected.id]: {
+                  ...draft,
+                  image_prompt: replaceMentionLabel(draft.image_prompt, before, after),
+                  video_prompt: replaceMentionLabel(draft.video_prompt, before, after),
+                },
+              };
+            });
+          }}
           suggestionDraft={suggestionDraft}
           onApplySuggestionDraft={setSuggestionDraft}
           onDesignSaved={handleDesignSaved}

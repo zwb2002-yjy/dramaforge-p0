@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from typing import Final, Literal, cast
 from uuid import UUID
@@ -518,10 +519,16 @@ class WorkbenchExecutionService:
             binding_rows = (
                 (
                     await self._session.execute(
-                        select(ShotReferenceBinding).where(
+                        select(ShotReferenceBinding)
+                        .where(
                             ShotReferenceBinding.id.in_(binding_ids),
                             ShotReferenceBinding.project_id == project.id,
                             ShotReferenceBinding.shot_id == shot.id,
+                        )
+                        .order_by(
+                            ShotReferenceBinding.sort_order,
+                            ShotReferenceBinding.created_at,
+                            ShotReferenceBinding.id,
                         )
                     )
                 )
@@ -597,6 +604,20 @@ class WorkbenchExecutionService:
                         "reference binding is not enabled for this execution stage",
                         details={"code": "REFERENCE_STAGE_MISMATCH"},
                     )
+                if binding.asset_id is not None:
+                    asset = await self._session.get(Asset, binding.asset_id, populate_existing=True)
+                    if asset is None or asset.status == "recycled":
+                        raise WorkbenchExecutionError(
+                            "reference asset is unavailable",
+                            details={"code": "REFERENCE_NOT_RESOLVED"},
+                        )
+            if artifact.deleted_at is not None or artifact.storage_state not in {
+                "available",
+                "stored",
+            }:
+                raise WorkbenchExecutionError(
+                    "reference media is unavailable", details={"code": "REFERENCE_NOT_RESOLVED"}
+                )
 
             version_id = reference.asset_version_id
             if binding is not None:
@@ -658,7 +679,116 @@ class WorkbenchExecutionService:
                     }
                 )
             )
-        return hydrated
+        # The saved binding order and asset-version reference order are the input
+        # slots' authority. The client cannot change model numbering by shuffling IDs.
+        binding_order = {binding.id: index for index, binding in enumerate(bindings.values())}
+        version_order = (
+            await self._session.scalars(
+                select(AssetVersionReference)
+                .where(
+                    AssetVersionReference.project_id == project.id,
+                    AssetVersionReference.asset_version_id.in_(
+                        [ref.asset_version_id for ref in hydrated if ref.asset_version_id]
+                    ),
+                )
+                .order_by(
+                    AssetVersionReference.sort_order,
+                    AssetVersionReference.label,
+                    AssetVersionReference.id,
+                )
+            )
+        ).all()
+        artifact_order = {
+            (item.asset_version_id, item.artifact_id): index
+            for index, item in enumerate(version_order)
+        }
+        return sorted(
+            hydrated,
+            key=lambda ref: (
+                binding_order.get(ref.binding_id, len(bindings))
+                if ref.binding_id is not None
+                else len(bindings),
+                artifact_order.get((ref.asset_version_id, ref.artifact_id), 0)
+                if ref.asset_version_id is not None and ref.artifact_id is not None
+                else 0,
+            ),
+        )
+
+    async def _compile_prompt_mentions(
+        self,
+        *,
+        project: Project,
+        prompt: str,
+        references: list[ShotReferenceIntent],
+        semantic_intent: dict[str, JsonValue],
+    ) -> str:
+        """Compile saved @labels into deterministic, auditable media ordinals.
+
+        These are natural-language slot descriptions, not an invented provider
+        token syntax. The same ordered Artifact list is consumed by the Worker.
+        """
+        source_prompt = semantic_intent.get("source_prompt")
+        tokens = set(
+            re.findall(r"@[\w-]*", source_prompt if isinstance(source_prompt, str) else prompt)
+        )
+        if not tokens:
+            return prompt
+        bindings = (
+            await self._session.scalars(
+                select(ShotReferenceBinding).where(
+                    ShotReferenceBinding.project_id == project.id,
+                    ShotReferenceBinding.id.in_(
+                        [ref.binding_id for ref in references if ref.binding_id]
+                    ),
+                )
+            )
+        ).all()
+        labels = {binding.id: binding for binding in bindings}
+        counts: dict[str, int] = {}
+        mappings: list[dict[str, JsonValue]] = []
+        for reference in references:
+            media = reference.mime_type.split("/", 1)[0]
+            counts[media] = counts.get(media, 0) + 1
+            binding = labels.get(reference.binding_id) if reference.binding_id is not None else None
+            if binding is None or binding.label not in tokens:
+                continue
+            noun = {"image": "参考图片", "video": "参考视频", "audio": "参考音频"}.get(
+                media, "参考素材"
+            )
+            mappings.append(
+                {
+                    "label": binding.label,
+                    "binding_id": str(binding.id),
+                    "binding_version": binding.version,
+                    "asset_id": str(binding.asset_id) if binding.asset_id else None,
+                    "asset_version_id": str(reference.asset_version_id)
+                    if reference.asset_version_id
+                    else None,
+                    "artifact_id": str(reference.artifact_id),
+                    "role": PURPOSE_TO_ROLE.get(reference.purpose),
+                    "ordinal": counts[media],
+                    "notation": f"{noun}{counts[media]}",
+                }
+            )
+        for token in tokens:
+            matches = [binding for binding in bindings if binding.label == token]
+            if len(matches) != 1 or not any(item["label"] == token for item in mappings):
+                raise WorkbenchExecutionError(
+                    "prompt @reference is unresolved or ambiguous",
+                    details={"code": "REFERENCE_MENTION_UNRESOLVED", "label": token},
+                )
+        semantic_intent["prompt_reference_map"] = cast(JsonValue, mappings)
+        return re.sub(
+            r"@[\w-]*",
+            lambda match: (
+                "、".join(
+                    str(item["notation"]) for item in mappings if item["label"] == match.group()
+                )
+                if match.group() in tokens
+                else match.group()
+            ),
+            prompt,
+        )
 
     async def _authoritative_creative_input(
         self,
@@ -781,6 +911,7 @@ class WorkbenchExecutionService:
             "shot_version": shot.version,
             "scene_version": scene.version,
             "visual_description": shot.visual_description,
+            "source_prompt": base_prompt,
             "director_state": cast(JsonValue, director_state),
             "effective_creative_intent": cast(JsonValue, effective_intent),
             "creative_value_sources": cast(JsonValue, value_sources),
@@ -1198,6 +1329,9 @@ class WorkbenchExecutionService:
             references=references,
             mode_id=effective_mode_id,
             accept_approximations=execution_input.accept_approximations,
+        )
+        prompt = await self._compile_prompt_mentions(
+            project=project, prompt=prompt, references=references, semantic_intent=semantic_intent
         )
         pending_suggestions = await self._pending_creative_suggestions(
             project=project,

@@ -26,6 +26,7 @@ export type AssetReferencePickerProps = {
   /** Concrete, backend-recognised references for the selected Shot. */
   onReferencesChange?: (references: ShotExecutionReference[]) => void;
   onResolutionStateChange?: (state: ReferenceResolutionState) => void;
+  onLabelChanged?: (before: string, after: string) => void;
 };
 
 export type ReferenceResolutionState = "loading" | "ready" | "error";
@@ -106,6 +107,7 @@ export function AssetReferencePicker({
   purpose = "identity",
   onReferencesChange,
   onResolutionStateChange,
+  onLabelChanged,
 }: AssetReferencePickerProps) {
   const queryClient = useQueryClient();
   const [selectedAssetId, setSelectedAssetId] = useState("");
@@ -114,6 +116,8 @@ export function AssetReferencePicker({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAssetId, setEditAssetId] = useState("");
   const [editLabel, setEditLabel] = useState("");
+  const [editStage, setEditStage] = useState<"image" | "video" | "both">("both");
+  const [editOrder, setEditOrder] = useState("0");
   const [editPurpose, setEditPurpose] = useState<string>(purpose);
   const [editMode, setEditMode] = useState<"current_formal" | "pinned_version">("current_formal");
   const [editError, setEditError] = useState<string | null>(null);
@@ -184,6 +188,8 @@ export function AssetReferencePicker({
     mutationFn: async (binding: ShotBindingRead) => {
       const assetId = editAssetId || binding.asset_id;
       if (!assetId) throw new Error("请先选择参考素材。");
+      const order = Number(editOrder);
+      if (!Number.isInteger(order) || order < 0) throw new Error("引用顺序必须是非负整数。");
       const label = editLabel.trim();
       if (!/^@[\p{L}\p{N}_-]+$/u.test(label)) {
         throw new Error("引用标签必须以 @ 开头，仅使用文字、数字、下划线或短横线。");
@@ -201,6 +207,8 @@ export function AssetReferencePicker({
       }
       return updateShotReference(projectId, binding.id, {
         expected_version: binding.version,
+        stage: editStage,
+        sort_order: order,
         asset_id: assetId,
         asset_version_id: assetVersionId,
         resolution_mode: editMode,
@@ -208,7 +216,8 @@ export function AssetReferencePicker({
         label,
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (saved, binding) => {
+      if (saved.label !== binding.label) onLabelChanged?.(binding.label, saved.label);
       setEditingId(null);
       setEditError(null);
       await queryClient.cancelQueries({ queryKey: resolutionQueryKey });
@@ -222,6 +231,8 @@ export function AssetReferencePicker({
     setEditingId(binding.id);
     setEditAssetId(binding.asset_id ?? "");
     setEditLabel(binding.label || "@参考");
+    setEditStage(binding.stage === "image" || binding.stage === "video" ? binding.stage : "both");
+    setEditOrder(String(binding.sort_order));
     setEditPurpose(binding.purpose);
     setEditMode(binding.resolution_mode === "pinned_version" ? "pinned_version" : "current_formal");
     setEditError(null);
@@ -275,7 +286,7 @@ export function AssetReferencePicker({
     if (!Array.isArray(resolution.data)) return;
     const next = resolution.data as ResolvedReferenceRead[];
     setResolvedReferences(next);
-    onReferencesChange?.(next.map((reference) => toExecutionReference(reference, rows)));
+    onReferencesChange?.(next.map(toExecutionReference));
   }, [onReferencesChange, resolution.data, rows]);
 
   const resolved = resolvedReferences;
@@ -283,9 +294,7 @@ export function AssetReferencePicker({
   // though it is stored: after a version change without usable material, or for a
   // recycled asset, resolution is empty. Surface that instead of showing nothing.
   const resolvedBindingIds = new Set(
-    resolved
-      .map((reference) => bindingIdForResolvedReference(reference, rows))
-      .filter((id): id is string => Boolean(id)),
+    resolved.map((reference) => reference.binding_id).filter((id): id is string => Boolean(id)),
   );
   const invalidBindings = rows.filter(
     (binding) => resolution.isSuccess && !resolvedBindingIds.has(binding.id),
@@ -399,6 +408,23 @@ export function AssetReferencePicker({
               placeholder="@角色名"
             />
             <Select
+              aria-label={`引用作用域 ${binding.id}`}
+              value={editStage}
+              onChange={(event) => setEditStage(event.target.value as "image" | "video" | "both")}
+            >
+              <option value="image">仅图片提示词</option>
+              <option value="video">仅视频提示词</option>
+              <option value="both">图片与视频</option>
+            </Select>
+            <Input
+              type="number"
+              min={0}
+              step={1}
+              aria-label={`引用顺序 ${binding.id}`}
+              value={editOrder}
+              onChange={(event) => setEditOrder(event.target.value)}
+            />
+            <Select
               aria-label={`参考素材 ${binding.id}`}
               value={editAssetId}
               onChange={(event) => setEditAssetId(event.target.value)}
@@ -505,10 +531,7 @@ export function AssetReferencePicker({
 
 /** Convert the server's resolved reference (including concrete artifact id)
  * into the exact WorkbenchExecutionInput shape. */
-function toExecutionReference(
-  reference: ResolvedReferenceRead,
-  bindings: ShotBindingRead[],
-): ShotExecutionReference {
+function toExecutionReference(reference: ResolvedReferenceRead): ShotExecutionReference {
   const resolutionMode =
     reference.source === "pinned_version"
       ? "pinned_version"
@@ -516,7 +539,7 @@ function toExecutionReference(
         ? "direct_artifact"
         : "current_formal";
   return {
-    binding_id: reference.binding_id ?? bindingIdForResolvedReference(reference, bindings),
+    binding_id: reference.binding_id,
     purpose: reference.purpose,
     asset_version_id: reference.asset_version_id ?? null,
     artifact_id: reference.artifact_id,
@@ -524,27 +547,4 @@ function toExecutionReference(
     mime_type: reference.mime_type || "image/png",
     fingerprint: reference.fingerprint ?? null,
   };
-}
-
-function bindingIdForResolvedReference(
-  reference: ResolvedReferenceRead,
-  bindings: ShotBindingRead[],
-): string | null {
-  const matching = bindings.find((binding) => {
-    if (binding.purpose !== reference.purpose) return false;
-    if (reference.source === "direct_artifact") {
-      return (
-        binding.resolution_mode === "direct_artifact" &&
-        binding.artifact_id === reference.artifact_id
-      );
-    }
-    if (reference.source === "pinned_version") {
-      return (
-        binding.resolution_mode === "pinned_version" &&
-        binding.asset_version_id === reference.asset_version_id
-      );
-    }
-    return binding.resolution_mode === "current_formal" && binding.asset_id === reference.asset_id;
-  });
-  return matching?.id ?? null;
 }

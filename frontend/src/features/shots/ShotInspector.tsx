@@ -32,6 +32,7 @@ type ShotInspectorProps = {
   onDesignDirtyChange: (dirty: boolean) => void;
   designDraft?: ShotDesignDraft;
   onDesignDraftChange: (draft: ShotDesignDraft) => void;
+  onReferenceLabelChanged?: (before: string, after: string) => void;
   suggestionDraft: ShotDesignDraft | null;
   onApplySuggestionDraft: (draft: ShotDesignDraft | null) => void;
   onDesignSaved: () => void | Promise<void>;
@@ -63,6 +64,7 @@ export function ShotInspector({
   onDesignDirtyChange,
   designDraft,
   onDesignDraftChange,
+  onReferenceLabelChanged,
   suggestionDraft,
   onApplySuggestionDraft,
   onDesignSaved,
@@ -149,6 +151,7 @@ export function ShotInspector({
             shotId={shot.id}
             onReferencesChange={onReferencesChange}
             onResolutionStateChange={onResolutionStateChange}
+            onLabelChanged={onReferenceLabelChanged}
           />
         }
         production={(control) => (
@@ -158,6 +161,7 @@ export function ShotInspector({
             shot={shot}
             references={references}
             referencesReady={referencesReady}
+            promptReferencesReady={control.promptReferencesReady}
             dirty={designDirty}
             trace={trace}
             candidates={candidates}

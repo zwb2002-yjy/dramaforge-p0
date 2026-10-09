@@ -8,11 +8,13 @@ import { updateShotDesign } from "./api";
 import { fetchShotWorkbench } from "./api";
 import type { ShotLite, ShotVoiceSettings as ShotVoiceSettingsValue } from "./api";
 import { ShotVoiceSettings } from "./ShotVoiceSettings";
+import { AssetMentionInput } from "../../components/assets/AssetMentionInput";
 
 /** Save control handed to the production block so "保存镜头" can be primary. */
 export type ShotDesignSaveControl = {
   dirty: boolean;
   saving: boolean;
+  promptReferencesReady: { image_keyframe: boolean; video: boolean };
   save: () => void;
 };
 
@@ -143,6 +145,8 @@ export function ShotDesignPanel({
   // refresh may reveal a conflict, but cannot silently rebase or erase it.
   const [baseline, setBaseline] = useState(shot);
   const syncAfterExplicitSave = useRef(false);
+  const [imageReferencesReady, setImageReferencesReady] = useState(true);
+  const [videoReferencesReady, setVideoReferencesReady] = useState(true);
   const [visual, setVisual] = useState(shot.visual_description);
   // Canvas facts: stored on the Shot itself and written through the CanvasRevision
   // gate (`PATCH /shots/{id}/canvas`), which is the only endpoint that advances
@@ -431,7 +435,15 @@ export function ShotDesignPanel({
       )}
 
       {production ? (
-        production({ dirty, saving: save.isPending, save: () => save.mutate() })
+        production({
+          dirty,
+          saving: save.isPending,
+          promptReferencesReady: {
+            image_keyframe: imageReferencesReady,
+            video: videoReferencesReady,
+          },
+          save: () => save.mutate(),
+        })
       ) : (
         // Standalone use (outside the inspector) keeps its own save row.
         <div className="df-shot-design-save">
@@ -456,26 +468,27 @@ export function ShotDesignPanel({
       )}
 
       <Disclosure title="提示词" testId="shot-design-prompts">
-        <Field>
-          画面提示词
-          <Textarea
-            aria-label="图片提示词"
-            rows={4}
-            value={draft.image_prompt}
-            placeholder="留空时使用画面描述"
-            onChange={(event) => updateDraft({ ...draft, image_prompt: event.target.value })}
-          />
-        </Field>
-        <Field>
-          视频提示词
-          <Textarea
-            aria-label="视频提示词"
-            rows={4}
-            value={draft.video_prompt}
-            placeholder="动作如何发展；留空时使用画面描述"
-            onChange={(event) => updateDraft({ ...draft, video_prompt: event.target.value })}
-          />
-        </Field>
+        <AssetMentionInput
+          projectId={projectId}
+          shotId={shot.id}
+          stage="image"
+          ariaLabel="图片提示词"
+          label="画面提示词"
+          onValidityChange={setImageReferencesReady}
+          value={draft.image_prompt}
+          placeholder="留空时使用画面描述"
+          onChange={(value) => updateDraft({ ...draft, image_prompt: value })}
+        />
+        <AssetMentionInput
+          projectId={projectId}
+          shotId={shot.id}
+          stage="video"
+          ariaLabel="视频提示词"
+          onValidityChange={setVideoReferencesReady}
+          value={draft.video_prompt}
+          placeholder="动作如何发展；留空时使用画面描述"
+          onChange={(value) => updateDraft({ ...draft, video_prompt: value })}
+        />
       </Disclosure>
       <Disclosure title="配音" testId="shot-design-voice">
         {voiceSettings ? (

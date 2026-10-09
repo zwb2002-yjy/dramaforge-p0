@@ -52,6 +52,7 @@ const BINDING = {
   resolution_mode: "current_formal",
   label: "@林墨",
   stage: "both",
+  sort_order: 0,
   version: 1,
   created_at: "2026-09-18T00:00:00Z",
   updated_at: "2026-09-18T00:00:00Z",
@@ -116,6 +117,10 @@ describe("AssetReferencePicker recycled assets and empty resolution", () => {
   it("keeps a binding valid while it still resolves to concrete material", async () => {
     mockApi([
       {
+        binding_id: BINDING_ID,
+        stage: "both",
+        mime_type: "image/png",
+        fingerprint: "a".repeat(64),
         purpose: "identity",
         role: "identity",
         artifact_id: "55555555-5555-4555-8555-555555555555",

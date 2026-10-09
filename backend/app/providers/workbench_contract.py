@@ -66,8 +66,8 @@ def select_workbench_contract(
             )
         allowed_options = frozenset({"aspect_ratio", "duration_seconds"})
     elif media_kind == "image":
-        if roles not in ([], ["reference_image"]):
-            raise ValueError("当前关键帧主链最多接受一张参考图片")
+        if any(role != "reference_image" for role in roles):
+            raise ValueError("当前关键帧主链仅接受合同声明的参考图片")
         allowed_options = frozenset({"aspect_ratio"})
     else:
         raise ValueError(f"unsupported Workbench media kind: {media_kind}")

@@ -177,6 +177,25 @@ def test_binding_requires_a_source_and_valid_purpose(client: TestClient) -> None
     assert direct_without_artifact.status_code == 422, direct_without_artifact.text
 
 
+def test_mention_labels_are_unique_and_resolve_to_explicit_binding_identity(
+    client: TestClient,
+) -> None:
+    project_id, shot_id, asset_id = _project_with_shot_and_asset(client)
+    url = f"/api/v1/projects/{project_id}/shots/{shot_id}/references"
+    body = {"purpose": "identity", "asset_id": asset_id, "label": "@林墨", "stage": "image"}
+    created = client.post(url, json=body, headers={CSRF_HEADER: _csrf(client)})
+    assert created.status_code == 201, created.text
+    duplicate = client.post(url, json=body, headers={CSRF_HEADER: _csrf(client)})
+    assert duplicate.status_code == 409, duplicate.text
+    assert duplicate.json()["details"]["code"] == "REFERENCE_LABEL_CONFLICT"
+    invalid = client.post(
+        url, json={**body, "label": "@林 墨"}, headers={CSRF_HEADER: _csrf(client)}
+    )
+    assert invalid.status_code == 422, invalid.text
+    assert invalid.json()["details"]["code"] == "REFERENCE_LABEL_INVALID"
+    assert len(client.get(url).json()) == 1
+
+
 def test_binding_sort_order_is_persisted_and_reorder_is_versioned(client: TestClient) -> None:
     project_id, shot_id, asset_id = _project_with_shot_and_asset(client)
     url = f"/api/v1/projects/{project_id}/shots/{shot_id}/references"

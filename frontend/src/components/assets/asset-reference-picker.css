@@ -78,3 +78,39 @@
 .df-ref-note.err {
   color: var(--df-danger-text);
 }
+.df-mention {
+  display: grid;
+  gap: var(--df-space-2);
+  position: relative;
+}
+.df-mention-options {
+  margin: 0;
+  padding: var(--df-space-2);
+  list-style: none;
+  background: var(--df-surface-3);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-control);
+}
+.df-mention-options li[aria-selected="true"] {
+  background: var(--df-control-background);
+}
+.df-mention-options .df-btn {
+  width: 100%;
+  justify-content: space-between;
+}
+.df-mention-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--df-space-2);
+}
+.df-mention-chips > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--df-space-1);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-chip);
+  padding-inline: var(--df-space-2);
+}
+.df-mention-chips > span[data-resolved="false"] {
+  border-color: var(--df-danger-border);
+}

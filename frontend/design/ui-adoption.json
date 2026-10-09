@@ -1,5 +1,6 @@
 {
   "controls": [
+    "src/components/assets/AssetMentionInput.tsx",
     "src/routes/index.tsx",
     "src/routes/settings-page.tsx",
     "src/routes/production-page.tsx",
