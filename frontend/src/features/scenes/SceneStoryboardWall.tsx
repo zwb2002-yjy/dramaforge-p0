@@ -1,8 +1,14 @@
 import { PageHeader, EmptyState, Button } from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
-import { SceneMediaGallery, type SceneMediaFilter } from "./SceneMediaGallery";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { SceneMediaGallery } from "./SceneMediaGallery";
+import {
+  SCENE_MEDIA_FILTERS as FILTERS,
+  sceneMatchesFilter,
+  type SceneMediaFilter,
+} from "./sceneOverviewState";
+import { SCENE_ACTIVE_REFETCH_MS } from "../production";
 import "../resonance/resonance.css";
 import "./scene-wall-surface.css";
 
@@ -12,11 +18,6 @@ import { copyScene, fetchScenes, reorderScene } from "./api";
 
 type SceneStoryboardWallProps = { projectId: string };
 type WallSelection = { projectId: string; filter: SceneMediaFilter; sceneId: string | null };
-const FILTERS: { value: SceneMediaFilter; label: string }[] = [
-  { value: "all", label: "全部镜头" },
-  { value: "missing-keyframe", label: "缺正式画面" },
-  { value: "missing-video", label: "缺正式视频" },
-];
 
 function readSelection(projectId: string): WallSelection {
   const fallback: WallSelection = { projectId, filter: "all", sceneId: null };
@@ -65,6 +66,10 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
     queryKey: queryKeys.scene.summaries(projectId),
     queryFn: () => fetchScenes(projectId),
     enabled: Boolean(projectId),
+    refetchInterval: (query) =>
+      query.state.data?.some((scene) => scene.generating_count > 0)
+        ? SCENE_ACTIVE_REFETCH_MS
+        : false,
   });
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.scene.summaries(projectId) });
@@ -79,7 +84,7 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
     onSuccess: invalidate,
   });
 
-  const rows = scenes.data ?? [];
+  const rows = useMemo(() => scenes.data ?? [], [scenes.data]);
   const restoredProject = useRef<string | null>(null);
   useEffect(() => {
     if (!scenes.isSuccess || restoredProject.current === projectId) return;
@@ -91,13 +96,7 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
     });
   }, [projectId, rows, scenes.isSuccess]);
 
-  const filteredRows = rows.filter((scene) =>
-    current.filter === "missing-keyframe"
-      ? scene.formal_keyframe_count < scene.shot_count
-      : current.filter === "missing-video"
-        ? scene.formal_video_count < scene.shot_count
-        : true,
-  );
+  const filteredRows = rows.filter((scene) => sceneMatchesFilter(scene, current.filter));
   const activeSceneId =
     filteredRows.find((scene) => scene.id === current.sceneId)?.id ?? filteredRows[0]?.id ?? null;
   const totalShots = rows.reduce((count, scene) => count + scene.shot_count, 0);
@@ -179,6 +178,18 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
                     视频 {scene.formal_video_count}/{scene.shot_count}
                   </span>
                   {scene.risk_count > 0 && <span className="qc-risk">{scene.risk_count} 风险</span>}
+                  {scene.pending_review_count > 0 && (
+                    <span className="scene-wall-count">待审 {scene.pending_review_count}</span>
+                  )}
+                  {scene.generating_count > 0 && (
+                    <span className="scene-wall-count">生成中 {scene.generating_count}</span>
+                  )}
+                  {scene.failed_count > 0 && (
+                    <span className="scene-wall-count">失败或阻断 {scene.failed_count}</span>
+                  )}
+                  {scene.unknown_count > 0 && (
+                    <span className="scene-wall-count">待核对 {scene.unknown_count}</span>
+                  )}
                   <Button
                     aria-expanded={expanded}
                     aria-controls={"scene-media-" + scene.id}

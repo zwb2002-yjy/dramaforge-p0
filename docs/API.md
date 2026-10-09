@@ -138,6 +138,14 @@ evidence, never an approval.
 - Asset status is `draft | active | recycled`; AssetVersion status is
   `candidate | formal | historical | rejected`. Ordinary Asset creation makes
   v1 Formal and stores it in `current_version_id`; `archived` is rejected.
+- Scene summaries include `pending_review_count`, `generating_count`,
+  `failed_count` and `unknown_count`, counting Shots with each independent fact.
+  Workspace `overview` exposes the corresponding typed flags by Shot ID.
+  `risk_count` counts Shots with a failed/blocked latest media attempt or an
+  unknown Provider outcome. This read projection replaces the old raw
+  Shot.status risk heuristic; it does not write lifecycle state or imply Formal.
+  Superseded attempts and decisions follow the same ordering and fingerprint
+  rules as the workbench. `SceneSummaryService` lives in `app/workbench/scene_summary.py`.
 - Asset create/update accepts top-level `tags`. `asset_tags` and
   `asset_tag_links` are the only tag query source; `metadata.tags` has no
   runtime meaning.

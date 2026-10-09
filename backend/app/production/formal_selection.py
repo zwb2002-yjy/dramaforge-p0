@@ -120,7 +120,7 @@ async def _candidate_lineage(
     return artifact, run, node
 
 
-async def list_formal_candidates(
+async def list_candidate_facts(
     session: AsyncSession,
     *,
     project_id: UUID,
@@ -202,6 +202,17 @@ async def list_formal_candidates(
             }
         )
 
+    return result
+
+
+async def list_formal_candidates(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    shot_ids: list[UUID],
+) -> dict[UUID, list[dict[str, object]]]:
+    """Candidate facts enriched with the exact server Formal admission."""
+    result = await list_candidate_facts(session, project_id=project_id, shot_ids=shot_ids)
     # Formal controls must be driven by the same server admission fact used by
     # the mutation, not by a transient client guess after returning from the
     # review page.  Enrich the existing candidate projection instead of
@@ -215,9 +226,7 @@ async def list_formal_candidates(
             hash_counts[identity] = hash_counts.get(identity, 0) + 1
         for candidate in candidates:
             stage = (
-                "formal_keyframe"
-                if candidate.get("stage") == "image_keyframe"
-                else "formal_video"
+                "formal_keyframe" if candidate.get("stage") == "image_keyframe" else "formal_video"
             )
             admission = await evaluate_artifact_admission(
                 session,
@@ -311,9 +320,7 @@ async def set_formal_keyframe(
 ) -> Shot:
     """Validate and set ``Shot.formal_keyframe_artifact_id`` (03 §38)."""
     shot = await session.scalar(
-        select(Shot)
-        .where(Shot.id == shot_id, Shot.project_id == project_id)
-        .with_for_update()
+        select(Shot).where(Shot.id == shot_id, Shot.project_id == project_id).with_for_update()
     )
     if shot is None:
         raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
@@ -391,9 +398,7 @@ async def set_formal_video(
 ) -> Shot:
     """Validate and set ``Shot.formal_video_artifact_id`` (03 §39)."""
     shot = await session.scalar(
-        select(Shot)
-        .where(Shot.id == shot_id, Shot.project_id == project_id)
-        .with_for_update()
+        select(Shot).where(Shot.id == shot_id, Shot.project_id == project_id).with_for_update()
     )
     if shot is None:
         raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})

@@ -7042,6 +7042,14 @@ export interface components {
             formal_video_count: number;
             /** Risk Count */
             risk_count: number;
+            /** Pending Review Count */
+            pending_review_count: number;
+            /** Generating Count */
+            generating_count: number;
+            /** Failed Count */
+            failed_count: number;
+            /** Unknown Count */
+            unknown_count: number;
             representative_artifact: components["schemas"]["ArtifactSummaryRead"] | null;
         };
         /**
@@ -7096,6 +7104,10 @@ export interface components {
             /** Trace */
             trace: {
                 [key: string]: unknown[];
+            };
+            /** Overview */
+            overview: {
+                [key: string]: components["schemas"]["ShotOverviewRead"];
             };
         };
         /** ScriptDocumentRead */
@@ -7497,6 +7509,17 @@ export interface components {
             image_model_id?: string | null;
             /** Video Model Id */
             video_model_id?: string | null;
+        };
+        /** ShotOverviewRead */
+        ShotOverviewRead: {
+            /** Pending Review */
+            pending_review: boolean;
+            /** Generating */
+            generating: boolean;
+            /** Generation Failed */
+            generation_failed: boolean;
+            /** Outcome Unknown */
+            outcome_unknown: boolean;
         };
         /** ShotPromptRead */
         ShotPromptRead: {

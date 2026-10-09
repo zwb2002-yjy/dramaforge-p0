@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Button } from "../../components/ui";
+import { Badge, Button } from "../../components/ui";
 import { artifactContentUrl } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { shotTypeLabel } from "../../lib/shotLabels";
 import { fetchSceneWorkspace, type SceneSummary, type ShotLite } from "./api";
 import { SceneAnimaticPreview } from "./SceneAnimaticPreview";
+import { shotMatchesFilter, type SceneMediaFilter } from "./sceneOverviewState";
+import { SCENE_ACTIVE_REFETCH_MS } from "../production";
 
-export type SceneMediaFilter = "all" | "missing-keyframe" | "missing-video";
 type Preview = { shot: ShotLite; kind: "keyframe" | "video"; artifactId: string };
 
 /** Project-scoped, server-owned Shot facts. Filter never mutates Candidate or Formal. */
@@ -25,14 +26,14 @@ export function SceneMediaGallery({
   const workspace = useQuery({
     queryKey: queryKeys.scene.workspace(projectId, scene.id),
     queryFn: () => fetchSceneWorkspace(projectId, scene.id),
+    refetchInterval: (query) =>
+      Object.values(query.state.data?.overview ?? {}).some((facts) => facts.generating)
+        ? SCENE_ACTIVE_REFETCH_MS
+        : false,
   });
   const shots = workspace.data?.shots ?? [];
   const displayedShots = shots.filter((shot) =>
-    filter === "missing-keyframe"
-      ? !shot.formal_keyframe_artifact_id
-      : filter === "missing-video"
-        ? !shot.formal_video_artifact_id
-        : true,
+    shotMatchesFilter(shot, workspace.data?.overview?.[shot.id], filter),
   );
   const shotCount = workspace.data ? shots.length : scene.shot_count;
   const keyframeCount = workspace.data
@@ -93,6 +94,22 @@ export function SceneMediaGallery({
                       <strong>镜头 {shot.shot_number}</strong>
                       <span>{shotTypeLabel(shot.shot_type)}</span>
                     </header>
+                    <div className="scene-shot-status" aria-label="镜头制作状态">
+                      {workspace.data?.overview?.[shot.id]?.pending_review && (
+                        <Badge tone="warning">待审候选</Badge>
+                      )}
+                      {workspace.data?.overview?.[shot.id]?.generating && (
+                        <Badge tone="info">生成中</Badge>
+                      )}
+                      {workspace.data?.overview?.[shot.id]?.generation_failed && (
+                        <Badge tone="danger">生成失败或阻断</Badge>
+                      )}
+                      {workspace.data?.overview?.[shot.id]?.outcome_unknown && (
+                        <Badge tone="warning" title="进入镜头查看已有执行">
+                          状态待核对
+                        </Badge>
+                      )}
+                    </div>
                     <Button
                       className="scene-shot-thumbnail"
                       aria-label={"预览镜头 " + shot.shot_number}

@@ -31,7 +31,6 @@ from app.assets.models import (
     ScriptDocument,
     Shot,
 )
-from app.assets.scene_service import SceneSummaryService
 from app.assets.script_import import import_script
 from app.delivery.models import Export, ExportItem
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
@@ -42,6 +41,7 @@ from app.shared.db import set_rls_context
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from app.workbench.scene_service import SceneWorkspaceService, ShotWorkbenchService
+from app.workbench.scene_summary import SceneSummaryService
 from pg_support import available, database_url
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -352,9 +352,7 @@ async def test_historical_project_readable_by_new_workbench_pg(pg_session: Async
     assert canonical.asset_version_id == seed["lead_version_id"]
 
     # node run + provider operation + artifact via build_execution_trace
-    trace = await build_execution_trace(
-        pg_session, project_id=project.id, run_id=seed["run_id"]
-    )
+    trace = await build_execution_trace(pg_session, project_id=project.id, run_id=seed["run_id"])
     assert trace.model_binding["resolved_model_id"] == f"agnes/{suffix}"
     assert trace.actual_provider == "agnes"
     assert trace.actual_model == f"agnes/{suffix}"
@@ -366,8 +364,10 @@ async def test_historical_project_readable_by_new_workbench_pg(pg_session: Async
     export = await pg_session.get(Export, seed["export_id"])
     assert export is not None and export.status == "completed"
     items = (
-        await pg_session.execute(select(ExportItem).where(ExportItem.export_id == export.id))
-    ).scalars().all()
+        (await pg_session.execute(select(ExportItem).where(ExportItem.export_id == export.id)))
+        .scalars()
+        .all()
+    )
     assert len(items) == 1
 
 

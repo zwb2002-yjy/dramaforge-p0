@@ -48,6 +48,10 @@ function mockBackend() {
           formal_keyframe_count: 1,
           formal_video_count: 0,
           risk_count: 1,
+          pending_review_count: 0,
+          generating_count: 0,
+          failed_count: 1,
+          unknown_count: 0,
           representative_artifact: null,
         },
         {
@@ -64,6 +68,10 @@ function mockBackend() {
           formal_keyframe_count: 0,
           formal_video_count: 0,
           risk_count: 0,
+          pending_review_count: 0,
+          generating_count: 0,
+          failed_count: 0,
+          unknown_count: 0,
           representative_artifact: null,
         },
       ]);
@@ -217,6 +225,10 @@ describe("Large storyboard and project-scoped focus", () => {
             formal_keyframe_count: 5,
             formal_video_count: 4,
             risk_count: 0,
+            pending_review_count: 0,
+            generating_count: 0,
+            failed_count: 0,
+            unknown_count: 0,
             representative_artifact: null,
           })),
         );

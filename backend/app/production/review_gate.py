@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 from uuid import UUID
@@ -177,14 +178,23 @@ async def _latest_decision(
     decision must win regardless of storage order.
     """
     rows = (
-        await session.execute(
-            select(HumanReviewDecision).where(
-                HumanReviewDecision.project_id == project_id,
-                HumanReviewDecision.artifact_id == artifact_id,
-                HumanReviewDecision.review_kind == review_kind,
+        (
+            await session.execute(
+                select(HumanReviewDecision).where(
+                    HumanReviewDecision.project_id == project_id,
+                    HumanReviewDecision.artifact_id == artifact_id,
+                    HumanReviewDecision.review_kind == review_kind,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
+    return latest_review_decision(rows)
+
+
+def latest_review_decision(rows: Sequence[HumanReviewDecision]) -> HumanReviewDecision | None:
+    """Choose a supersession head, identically for individual gates and batch readers."""
     if not rows:
         return None
     superseded = {row.supersedes_id for row in rows if row.supersedes_id is not None}
@@ -235,21 +245,23 @@ async def _review_run_for_artifact(
     # Older snapshots may carry the source under a different key, or none at all;
     # those are still usable for this Shot.
     candidates = (
-        await session.execute(
-            select(NodeRun)
-            .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
-            .where(
-                NodeRun.project_id == project_id,
-                GraphNode.node_key == node_key,
-                NodeRun.status.in_(
-                    ("completed", "cached", "completed_after_cancel", "failed")
-                ),
-                NodeRun.input_snapshot["shot_id"].as_string() == str(shot_id),
+        (
+            await session.execute(
+                select(NodeRun)
+                .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+                .where(
+                    NodeRun.project_id == project_id,
+                    GraphNode.node_key == node_key,
+                    NodeRun.status.in_(("completed", "cached", "completed_after_cancel", "failed")),
+                    NodeRun.input_snapshot["shot_id"].as_string() == str(shot_id),
+                )
+                .order_by(NodeRun.created_at.desc(), NodeRun.attempt_no.desc())
+                .limit(50)
             )
-            .order_by(NodeRun.created_at.desc(), NodeRun.attempt_no.desc())
-            .limit(50)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for candidate in candidates:
         snapshot = candidate.input_snapshot or {}
         upstream = snapshot.get("upstream_artifact_id") or snapshot.get("source_artifact_id")
@@ -284,9 +296,7 @@ async def evaluate_artifact_admission(
             "artifact not found in project", details={"code": "ARTIFACT_NOT_FOUND"}
         )
     if artifact.deleted_at is not None:
-        raise ValidationAppError(
-            "artifact was deleted", details={"code": "ARTIFACT_DELETED"}
-        )
+        raise ValidationAppError("artifact was deleted", details={"code": "ARTIFACT_DELETED"})
 
     decision = await _latest_decision(
         session, project_id=project_id, artifact_id=artifact_id, review_kind=review_kind
@@ -318,9 +328,7 @@ async def evaluate_artifact_admission(
     )
 
     if decision is not None and decision.decision == "rejected":
-        requirement = _with_reason(
-            requirement, "REVIEW_DECISION_REJECTED"
-        )
+        requirement = _with_reason(requirement, "REVIEW_DECISION_REJECTED")
         return StageAdmission(allowed=False, review_kind=review_kind, requirements=[requirement])
 
     if decision is not None and decision.decision == "approved":
@@ -338,9 +346,7 @@ async def evaluate_artifact_admission(
         )
         if decision.subject_fingerprint != expected:
             requirement = _with_reason(requirement, "REVIEW_DECISION_STALE")
-            requirement = ReviewRequirement(
-                **{**requirement.__dict__, "applies": False}
-            )
+            requirement = ReviewRequirement(**{**requirement.__dict__, "applies": False})
             return StageAdmission(
                 allowed=False, review_kind=review_kind, requirements=[requirement]
             )
@@ -465,9 +471,8 @@ async def record_human_decision(
     snapshot_artifact_id = snapshot.get("upstream_artifact_id") or snapshot.get(
         "source_artifact_id"
     )
-    if (
-        (snapshot_shot_id is not None and str(snapshot_shot_id) != str(shot_id))
-        or (snapshot_artifact_id is not None and str(snapshot_artifact_id) != str(artifact_id))
+    if (snapshot_shot_id is not None and str(snapshot_shot_id) != str(shot_id)) or (
+        snapshot_artifact_id is not None and str(snapshot_artifact_id) != str(artifact_id)
     ):
         raise ValidationAppError(
             "review target does not belong to this shot and Artifact",

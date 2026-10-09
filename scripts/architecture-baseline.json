@@ -29,11 +29,6 @@
     },
     {
       "from": "app.assets.scene_service",
-      "to": "app.execution.models",
-      "reason": "Existing domain/application initialization and production coupling; ARCHITECTURE_MAPPING §4."
-    },
-    {
-      "from": "app.assets.scene_service",
       "to": "app.production.models",
       "reason": "Existing domain/application initialization and production coupling; ARCHITECTURE_MAPPING §4."
     },

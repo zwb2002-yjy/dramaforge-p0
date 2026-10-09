@@ -1,10 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import {
-  SceneMediaGallery,
-  type SceneMediaFilter,
-} from "../../src/features/scenes/SceneMediaGallery";
+import { SceneMediaGallery } from "../../src/features/scenes/SceneMediaGallery";
+import type { SceneMediaFilter } from "../../src/features/scenes/sceneOverviewState";
 import type { SceneSummary, ShotLite } from "../../src/features/scenes/api";
 
 const scene: SceneSummary = {
@@ -20,6 +18,10 @@ const scene: SceneSummary = {
   formal_keyframe_count: 6,
   formal_video_count: 5,
   risk_count: 0,
+  pending_review_count: 0,
+  generating_count: 0,
+  failed_count: 0,
+  unknown_count: 0,
   representative_artifact: null,
 };
 const shots: ShotLite[] = Array.from({ length: 6 }, (_, index) => ({

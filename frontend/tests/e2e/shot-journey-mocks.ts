@@ -84,6 +84,23 @@ export async function installShotJourneyMock(page: Page) {
         version: 1,
         design_state: {},
       };
+      const overview = Object.fromEntries(
+        shots.map((shot) => [
+          shot.id,
+          {
+            pending_review: candidates[shot.id].some(
+              (candidate) =>
+                candidate.artifact_id !== shot.formal_keyframe_artifact_id &&
+                candidate.artifact_id !== shot.formal_video_artifact_id &&
+                !candidate.review_allowed &&
+                candidate.review_decision !== "rejected",
+            ),
+            generating: false,
+            generation_failed: false,
+            outcome_unknown: false,
+          },
+        ]),
+      );
       if (path === `${base}/scenes` && method === "GET") {
         return json([
           {
@@ -93,12 +110,17 @@ export async function installShotJourneyMock(page: Page) {
             formal_keyframe_count: shots.filter((shot) => shot.formal_keyframe_artifact_id).length,
             formal_video_count: shots.filter((shot) => shot.formal_video_artifact_id).length,
             risk_count: 0,
+            pending_review_count: Object.values(overview).filter((facts) => facts.pending_review)
+              .length,
+            generating_count: 0,
+            failed_count: 0,
+            unknown_count: 0,
             representative_artifact: null,
           },
         ]);
       }
       if (path === `${base}/scenes/${SCENE_ID}/workspace` && method === "GET") {
-        return json({ scene, shots, references: {}, candidates, trace: {} });
+        return json({ scene, shots, references: {}, candidates, trace: {}, overview });
       }
       if (path === `${base}/shots` && method === "GET") return json(shots);
       const match = path.match(/\/shots\/([^/]+)\/(.+)$/);
