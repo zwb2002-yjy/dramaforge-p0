@@ -49,10 +49,12 @@ from app.production.reference_intents import (
 from app.production.service import GraphService
 from app.providers.capabilities import Capability
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.errors import ProviderError
 from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.model_resolution import ExecutionModelResolver
 from app.providers.models import ProviderConnection, ProviderConnectionRevision
+from app.providers.validator import validate_parameter
 from app.providers.workbench_contract import select_workbench_contract
 from app.shared.enums import GraphStatus
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
@@ -1322,6 +1324,25 @@ class WorkbenchExecutionService:
                 ) from exc
             effective_mode_id = selected_contract.contract_id
             resolution = resolution.model_copy(update={"mode_id": effective_mode_id})
+
+        # The Worker compiles the project's aspect ratio into the actual request.
+        # Reject a fixed or enumerated output mismatch in the read-only preview,
+        # before a queued run can turn a predictable contract error into a failure.
+        spec = v3_manifest.capability_specs.get(capability)
+        if spec is not None:
+            ratio_spec = spec.mode_spec(effective_mode_id).common_options.get("aspect_ratio")
+            if ratio_spec is not None and ratio_spec.enum != ["adaptive"]:
+                try:
+                    validate_parameter("aspect_ratio", project.aspect_ratio, ratio_spec)
+                except ProviderError as exc:
+                    raise WorkbenchExecutionError(
+                        f"Selected model cannot output project aspect ratio {project.aspect_ratio}",
+                        details={
+                            "code": "MODEL_OUTPUT_ASPECT_RATIO_UNSUPPORTED",
+                            "aspect_ratio": project.aspect_ratio,
+                            "supported": ratio_spec.enum,
+                        },
+                    ) from exc
 
         compiled = compile_references(
             manifest=v3_manifest,

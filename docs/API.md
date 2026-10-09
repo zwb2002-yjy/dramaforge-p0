@@ -30,6 +30,9 @@ Migration authority: [DATA_MODEL.md](DATA_MODEL.md)
 保存在 `semantic_intent.source_prompt`，标签到 Artifact/版本/编号映射保存在
 `semantic_intent.prompt_reference_map`。未解析标签拒绝预检；顺序、标签及绑定版本变化影响计划指纹。
 已接受 NodeRun 的 Worker 继续消费冻结提示词及完整 Artifact 列表，不再解析可变资产名称或当前版本。
+预检按所选能力及输入合同校验项目比例；固定/枚举输出比例冲突返回
+`MODEL_OUTPUT_ASPECT_RATIO_UNSUPPORTED`，不会创建 NodeRun 或调用 Provider。提交继续重验同一合同，
+不通过改写比例或替换模型修复冲突。
 
 `DELETE /api/v1/projects/{project_id}?expected_version=N` requires Owner workspace access
 and CSRF. Stale versions and active NodeRun/Director work return 409. Success returns 204,
