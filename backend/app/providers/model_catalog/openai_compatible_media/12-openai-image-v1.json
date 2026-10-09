@@ -1,0 +1,44 @@
+{
+  "manifest_version": "2026-09-21",
+  "provider_type": "openai_compatible_media",
+  "protocol_profile": "openai_media_v1",
+  "model_id": "@contract/openai-image-v1",
+  "model_revision": "v2",
+  "media_kind": "image",
+  "display_name": "OpenAI 兼容图像协议",
+  "lifecycle": "active",
+  "catalog_source": "protocol_contract",
+  "documented_at": "2026-09-21",
+  "operations": {
+    "image.generate": {
+      "operation": "image.generate",
+      "capabilities": [
+        "image.t2i",
+        "image.i2i"
+      ],
+      "output_constraints": {
+        "response_format": "url",
+        "size": "1024x1024"
+      },
+      "reference_constraints": {
+        "reference_image": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      "exclusive_groups": []
+    }
+  },
+  "option_schema": {
+    "namespace": "",
+    "options": {}
+  },
+  "implementation_status": "contract_tested",
+  "evidence": {
+    "current_contract": {
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit",
+      "checked_at": "2026-10-07"
+    }
+  }
+}

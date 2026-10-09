@@ -173,6 +173,73 @@ async def test_recovery_fails_unknown_text_submission_once_without_media_write(
 
 
 @pytest.mark.asyncio
+async def test_recovery_stales_unbound_turn_without_legacy_coordination(
+    session: AsyncSession,
+) -> None:
+    project, user, shot = await _seed(session)
+    service = DirectorTurnService(session)
+    turn, _ = await service.create_or_get(
+        project=project,
+        actor=user,
+        scope_type="shot",
+        scope_entity_id=shot.id,
+        request_key="director-cycle:unbound",
+        context_snapshot={"shot_version": shot.version},
+    )
+
+    recovered = await service.recover_interrupted(
+        project_id=project.id,
+        turn_id=turn.id,
+    )
+    assert recovered.status == "stale"
+    assert recovered.wait_reason == "runtime_binding_missing"
+    assert "legacy coordination is not resumed" in str(recovered.last_error)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["awaiting_execution", "awaiting_user"])
+async def test_worker_reconciliation_stales_unbound_turn_without_replaying_production(
+    session: AsyncSession, monkeypatch, status: str
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from app.director.runtime.reconcile import DirectorRuntimeFactReconciler
+    from app.workers import jobs
+
+    project, user, shot = await _seed(session)
+    turn, _ = await DirectorTurnService(session).create_or_get(
+        project=project,
+        actor=user,
+        scope_type="shot",
+        scope_entity_id=shot.id,
+        request_key=f"worker-unbound:{status}",
+        context_snapshot={"shot_version": shot.version},
+    )
+    turn.status = status
+    turn.node_run_ids = [str(uuid4())]
+    revision = turn.revision
+    await session.commit()
+    factory = async_sessionmaker(session.bind, expire_on_commit=False)
+    monkeypatch.setattr(jobs, "get_session_factory", lambda: factory)
+    runtime_reconcile = AsyncMock()
+    monkeypatch.setattr(DirectorRuntimeFactReconciler, "reconcile", runtime_reconcile)
+
+    result = await jobs.reconcile_waiting_director_turns({})
+    assert result == {"reconciled": 1, "unchanged": 0, "failed": 0}
+    await session.refresh(turn)
+    assert turn.status == "stale"
+    assert turn.wait_reason == "runtime_binding_missing"
+    assert turn.revision == revision + 1
+    runtime_reconcile.assert_not_awaited()
+    assert (await session.execute(select(NodeRun))).scalars().all() == []
+
+    second = await jobs.reconcile_waiting_director_turns({})
+    assert second == {"reconciled": 0, "unchanged": 0, "failed": 0}
+    await session.refresh(turn)
+    assert turn.revision == revision + 1
+
+
+@pytest.mark.asyncio
 async def test_deadline_and_step_limit_are_readable_terminal_stops(session: AsyncSession) -> None:
     project, user, shot = await _seed(session)
     service = DirectorTurnService(session)
@@ -316,9 +383,15 @@ async def test_independent_worker_runs_director_restart_recovery(monkeypatch) ->
     ]
     recovery = AsyncMock()
     monkeypatch.setattr(director, "recover_interrupted_director_turns", recovery)
+    checkpoint = AsyncMock()
+    monkeypatch.setattr(
+        "app.director.runtime.checkpoint.verify_checkpoint_store",
+        checkpoint,
+    )
     ctx = {"redis": object()}
     await director.WorkerSettings.on_startup(ctx)
     recovery.assert_awaited_once_with(ctx)
+    checkpoint.assert_awaited_once()
     assert isinstance(ctx["director_consumer"], director.DirectorEventConsumer)
 
 
@@ -327,8 +400,12 @@ async def _decision_turn(session: AsyncSession):
     context = {"shot": str(shot.id), "version": shot.version, "instruction": "restrained"}
     service = DirectorTurnService(session)
     turn, _ = await service.create_or_get(
-        project=project, actor=user, scope_type="shot", scope_entity_id=shot.id,
-        request_key="decision:one", context_snapshot=context,
+        project=project,
+        actor=user,
+        scope_type="shot",
+        scope_entity_id=shot.id,
+        request_key="decision:one",
+        context_snapshot=context,
         input_versions={"shot": shot.version},
     )
     turn.status = "awaiting_user"
@@ -338,6 +415,12 @@ async def _decision_turn(session: AsyncSession):
         "base_shot_version": shot.version,
         "typed_operations": [{"op": "first"}, {"op": "second"}],
     }
+    from app.director.runtime.langgraph_adapter import ENGINE_VERSION, STATE_SCHEMA_VERSION
+
+    turn.engine_version = ENGINE_VERSION
+    turn.state_schema_version = STATE_SCHEMA_VERSION
+    turn.runtime_execution_id = uuid4()
+    turn.runtime_revision = 1
     await session.flush()
     return project, user, shot, turn, context
 
@@ -348,8 +431,11 @@ async def test_detached_partial_decision_is_durable_and_never_applies_design(ses
     service = DirectorTurnService(session)
     revision = turn.revision
     result = await service.record_user_decision(
-        project_id=project.id, turn_id=turn.id, expected_revision=revision,
-        decision="accept", accepted_operation_indices=[1],
+        project_id=project.id,
+        turn_id=turn.id,
+        expected_revision=revision,
+        decision="accept",
+        accepted_operation_indices=[1],
     )
     await session.commit()
     await session.refresh(turn)
@@ -358,30 +444,30 @@ async def test_detached_partial_decision_is_durable_and_never_applies_design(ses
     assert audit["rejected_operation_indices"] == [0]
     with pytest.raises(ConflictError) as refused_subset:
         await service.assert_context_not_rejected(
-            project_id=project.id, context_hash=turn.context_hash,
+            project_id=project.id,
+            context_hash=turn.context_hash,
         )
     assert refused_subset.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
-    assert turn.wait_reason == "design_save"
-    from app.director.next_action import DirectorNextActionService
-
-    checkpoint = await DirectorNextActionService(session).reconcile(
-        project=project, turn_id=turn.id,
-    )
-    assert checkpoint.action == "review_accepted_changes"
-    assert turn.wait_reason == "design_save"
+    assert turn.wait_reason == "runtime_decision_pending"
     assert shot.version == 1
     assert shot.image_prompt == "saved image prompt"
     assert shot.formal_video_artifact_id is None
     revision_before_replay = result.revision
     replay = await service.record_user_decision(
-        project_id=project.id, turn_id=turn.id, expected_revision=revision,
-        decision="accept", accepted_operation_indices=[1],
+        project_id=project.id,
+        turn_id=turn.id,
+        expected_revision=revision,
+        decision="accept",
+        accepted_operation_indices=[1],
     )
     assert replay.revision == revision_before_replay
     with pytest.raises(ConflictError, match="different explicit decision"):
         await service.record_user_decision(
-            project_id=project.id, turn_id=turn.id, expected_revision=turn.revision,
-            decision="accept", accepted_operation_indices=[0],
+            project_id=project.id,
+            turn_id=turn.id,
+            expected_revision=turn.revision,
+            decision="accept",
+            accepted_operation_indices=[0],
         )
     assert list((await session.execute(select(NodeRun))).scalars()) == []
 
@@ -391,28 +477,62 @@ async def test_rejection_closes_inflight_siblings_and_blocks_new_key_same_contex
     project, user, shot, turn, context = await _decision_turn(session)
     service = DirectorTurnService(session)
     sibling, _ = await service.create_or_get(
-        project=project, actor=user, scope_type="shot", scope_entity_id=shot.id,
-        request_key="decision:sibling", context_snapshot=context,
+        project=project,
+        actor=user,
+        scope_type="shot",
+        scope_entity_id=shot.id,
+        request_key="decision:sibling",
+        context_snapshot=context,
     )
     await service.record_user_decision(
-        project_id=project.id, turn_id=turn.id, expected_revision=turn.revision,
-        decision="reject", accepted_operation_indices=[],
+        project_id=project.id,
+        turn_id=turn.id,
+        expected_revision=turn.revision,
+        decision="reject",
+        accepted_operation_indices=[],
     )
     await session.commit()
     await session.refresh(sibling)
     assert sibling.status == "stale"
-    assert turn.status == "completed"
+    assert turn.status == "awaiting_user"
     with pytest.raises(ConflictError) as rejected:
         await service.create_or_get(
-            project=project, actor=user, scope_type="shot", scope_entity_id=shot.id,
-            request_key="decision:new-key", context_snapshot=context,
+            project=project,
+            actor=user,
+            scope_type="shot",
+            scope_entity_id=shot.id,
+            request_key="decision:new-key",
+            context_snapshot=context,
         )
     assert rejected.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
     changed, created = await service.create_or_get(
-        project=project, actor=user, scope_type="shot", scope_entity_id=shot.id,
-        request_key="decision:changed", context_snapshot={**context, "instruction": "wide"},
+        project=project,
+        actor=user,
+        scope_type="shot",
+        scope_entity_id=shot.id,
+        request_key="decision:changed",
+        context_snapshot={**context, "instruction": "wide"},
     )
     assert created and changed.status == "queued"
+
+
+@pytest.mark.asyncio
+async def test_unbound_detached_decision_is_rejected(session: AsyncSession):
+    project, _user, _shot, turn, _context = await _decision_turn(session)
+    turn.engine_version = None
+    turn.state_schema_version = None
+    turn.runtime_execution_id = None
+    turn.runtime_revision = None
+    await session.flush()
+    with pytest.raises(ValidationAppError) as blocked:
+        await DirectorTurnService(session).record_user_decision(
+            project_id=project.id,
+            turn_id=turn.id,
+            expected_revision=turn.revision,
+            decision="reject",
+            accepted_operation_indices=[],
+        )
+    assert blocked.value.details["code"] == "DIRECTOR_RUNTIME_BINDING_REQUIRED"
 
 
 @pytest.mark.asyncio
@@ -421,8 +541,11 @@ async def test_invalid_decision_indices_fail_before_mutation(session, indices):
     project, _user, _shot, turn, _context = await _decision_turn(session)
     with pytest.raises(ValidationAppError):
         await DirectorTurnService(session).record_user_decision(
-            project_id=project.id, turn_id=turn.id, expected_revision=turn.revision,
-            decision="accept", accepted_operation_indices=indices,
+            project_id=project.id,
+            turn_id=turn.id,
+            expected_revision=turn.revision,
+            decision="accept",
+            accepted_operation_indices=indices,
         )
     assert "user_decision" not in turn.response_summary
 
@@ -434,8 +557,11 @@ async def test_accept_rechecks_canonical_shot_version(session):
     await session.flush()
     with pytest.raises(ConflictError) as stale:
         await DirectorTurnService(session).record_user_decision(
-            project_id=project.id, turn_id=turn.id, expected_revision=turn.revision,
-            decision="accept", accepted_operation_indices=[0],
+            project_id=project.id,
+            turn_id=turn.id,
+            expected_revision=turn.revision,
+            decision="accept",
+            accepted_operation_indices=[0],
         )
     assert stale.value.details["code"] == "DIRECTOR_DECISION_STALE"
     assert "user_decision" not in turn.response_summary
@@ -446,15 +572,21 @@ async def test_claim_after_reload_uses_database_deadline_predicate(session):
     project, user, shot = await _seed(session)
     service = DirectorTurnService(session)
     turn, _ = await service.create_or_get(
-        project=project, actor=user, scope_type="shot", scope_entity_id=shot.id,
-        request_key="claim:reload", context_snapshot={"shot": str(shot.id)},
+        project=project,
+        actor=user,
+        scope_type="shot",
+        scope_entity_id=shot.id,
+        request_key="claim:reload",
+        context_snapshot={"shot": str(shot.id)},
     )
     await session.commit()
     await session.refresh(turn)
     # SQLite reloads DateTime without a tz offset. SQL must evaluate the
     # deadline predicate, not SQLAlchemy's Python identity-map evaluator.
     claimed = await service.claim(
-        project_id=project.id, turn_id=turn.id, expected_revision=turn.revision,
+        project_id=project.id,
+        turn_id=turn.id,
+        expected_revision=turn.revision,
     )
     assert claimed.status == "thinking"
     assert claimed.step_count == 1
@@ -467,30 +599,38 @@ async def test_text_decision_cannot_replace_a_production_confirmation(session):
     await session.flush()
     with pytest.raises(ValidationAppError) as unsupported:
         await DirectorTurnService(session).record_user_decision(
-            project_id=project.id, turn_id=turn.id, expected_revision=turn.revision,
-            decision="reject", accepted_operation_indices=[],
+            project_id=project.id,
+            turn_id=turn.id,
+            expected_revision=turn.revision,
+            decision="reject",
+            accepted_operation_indices=[],
         )
     assert unsupported.value.details["code"] == "DIRECTOR_DECISION_UNSUPPORTED"
     assert turn.status == "awaiting_user"
 
 
 @pytest.mark.asyncio
-async def test_whole_detached_suggestion_acceptance_requires_explicit_save(session):
+async def test_detached_acceptance_waits_for_runtime_without_saving_design(session):
     project, _user, shot, turn, _context = await _decision_turn(session)
     turn.request_summary = {"task": "shot_director_suggestion", "max_steps": 4}
     turn.output_snapshot = {
-        "base_shot_version": shot.version, "suggested_director_state": {"mood": "quiet"},
-        "suggested_image_prompt": "new image", "suggested_video_prompt": "new video",
+        "base_shot_version": shot.version,
+        "suggested_director_state": {"mood": "quiet"},
+        "suggested_image_prompt": "new image",
+        "suggested_video_prompt": "new video",
     }
     await session.flush()
     await DirectorTurnService(session).record_user_decision(
-        project_id=project.id, turn_id=turn.id, expected_revision=turn.revision,
-        decision="accept", accepted_operation_indices=[0],
+        project_id=project.id,
+        turn_id=turn.id,
+        expected_revision=turn.revision,
+        decision="accept",
+        accepted_operation_indices=[0],
     )
     audit = turn.response_summary["user_decision"]
     assert audit["accepted_operation_indices"] == [0]
     assert audit["rejected_operation_indices"] == []
-    assert turn.wait_reason == "design_save"
+    assert turn.wait_reason == "runtime_decision_pending"
     assert shot.image_prompt == "saved image prompt"
     assert shot.video_prompt == "saved video prompt"
 
@@ -508,8 +648,11 @@ async def test_accept_does_not_trust_a_cached_shot_from_an_earlier_transaction(s
     assert shot.version == 1
     with pytest.raises(ConflictError) as stale:
         await DirectorTurnService(session).record_user_decision(
-            project_id=project.id, turn_id=turn.id, expected_revision=turn.revision,
-            decision="accept", accepted_operation_indices=[0],
+            project_id=project.id,
+            turn_id=turn.id,
+            expected_revision=turn.revision,
+            decision="accept",
+            accepted_operation_indices=[0],
         )
     assert stale.value.details["code"] == "DIRECTOR_DECISION_STALE"
     assert "user_decision" not in turn.response_summary

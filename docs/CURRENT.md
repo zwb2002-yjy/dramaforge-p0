@@ -1,113 +1,113 @@
 # CURRENT — DramaForge 唯一文档入口
 
-本文件是仓库的当前状态入口。新开发者、Codex、Claude 或任何 Agent 从这里开始；
-不要从历史设计稿、Task Contract、Review 或执行记录开始。
+本文件是仓库当前文档入口。代码、迁移、测试和运行结果是“现在实际是什么”的最终事实；
+文档用于说明产品边界、架构约束和操作方式。历史方案、阶段审计、Task Contract、Review、
+Golden/验收流水和一次性执行记录不留在当前树中，只通过 Git 历史追溯。
 
-## 当前产品是什么
+文档同步日期：2026-10-07。当前开发内容已统一到 `dev`；`main` 仍是独立的受保护发布
+基线。源码整合不表示运行实例已更新、模型账号已验证或版本已发布。迁移头唯一记录在
+[DATA_MODEL.md](DATA_MODEL.md)，发布条件与运行身份见 [V1_STATUS.md](V1_STATUS.md)。
 
-DramaForge 是面向专业个人创作者的开源 AI 短剧 / 漫剧导演工作台。
-首要目标是完成真实生产闭环：
+## 未发布阶段的统一规则
 
-> 故事 / 剧本 → 资产 → Scene / Shot → 关键帧 → 视频生成 → Review / Repair
-> → 剪辑 → Final Film（MP4 + SRT）
+当前能力只保留一套实现：LangGraph 是唯一可执行 Director 引擎；媒体必须通过
+已确认的冻结模型计划 → NodeRun → ProviderOperation → Artifact 生产链。模型合同来自
+文件目录，连接下的模型以具体 Binding 或带连接身份的文本 ID 选择。已替换的执行路径、
+DTO 别名和未接入的第二套身份表不保留兼容。历史迁移、证据和旧数据不用于自动启动工作
+或恢复成新调用；新 Create 仍须当前资格和显式用户授权。
 
-首版聚焦一部 15–30 秒、真人写实风格、角色对白驱动的多镜头短剧：生成前确认
-创作与拍摄方案，用代表镜头试拍降低盲抽成本，失败后提供有证据和成本范围的
-局部修复，并保留完整产物血缘。
+## 当前产品
 
-## 当前核心架构（概念）
+DramaForge 是面向专业个人创作者的 AI 短剧 / 漫剧导演工作台。首版主链为
+（**摘要**；canonical 定义见 [CREATION_FLOW.md](CREATION_FLOW.md)）：
 
 ```text
-用户
-  ↓
-Director Runtime（提案式导演编排，不拥有媒体）
-  ↓
-Proposal / User Decision（Apply / Save / Formal / Export 显式用户门）
-  ↓
-WorkbenchExecutionPlan → Production Runtime（统一生产执行）
-  ↓
-Provider（ModelManifest 冻结身份，无静默回退）
-  ↓
-Artifact（不可变产物与血缘）
-  ↓
-Review / Repair → Editing → Final Film
+故事 / 剧本 → 资产 → Scene / Shot → 视频生成（文生视频、正式关键帧或参考素材）
+→ Review / Repair → Editing → Final Film（MP4 + SRT）
 ```
 
-本文件不重新设计这些模块；概念细节见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+Director Runtime 负责提案和编排；Production Runtime 负责真实生产执行。
+用户通过显式 Apply / Save / Formal / Export 门决定哪些内容进入正式生产事实。
 
 ## 当前权威文档
 
 | 领域 | 文档 |
 |---|---|
-| **架构宪法（目标世界观）** | [CANONICAL_ARCHITECTURE.md](CANONICAL_ARCHITECTURE.md) |
-| **术语唯一解** | [DOMAIN_VOCABULARY.md](DOMAIN_VOCABULARY.md) |
-| **模块依赖允许/禁止** | [MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) |
-| **Graph / Node / NodeRun 定义** | [PRODUCTION_GRAPH.md](PRODUCTION_GRAPH.md) |
-| **当前代码 → 目标架构映射** | [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) |
+| 架构宪法 | [CANONICAL_ARCHITECTURE.md](CANONICAL_ARCHITECTURE.md) |
+| 当前架构 | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| 当前代码到目标架构映射 | [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) |
+| 术语 | [DOMAIN_VOCABULARY.md](DOMAIN_VOCABULARY.md) |
+| 模块边界 | [MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) |
 | 产品 | [PRODUCT.md](PRODUCT.md) |
-| 架构与代码归属（当前实际结构） | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | 创作主链 | [CREATION_FLOW.md](CREATION_FLOW.md) |
+| Production Graph | [PRODUCTION_GRAPH.md](PRODUCTION_GRAPH.md) |
 | Director Runtime | [DIRECTOR_RUNTIME.md](DIRECTOR_RUNTIME.md) |
 | Production Runtime | [PRODUCTION_RUNTIME.md](PRODUCTION_RUNTIME.md) |
 | 模型与 Provider | [MODEL_PROVIDER.md](MODEL_PROVIDER.md) |
 | 数据模型 | [DATA_MODEL.md](DATA_MODEL.md) |
-| API 表面 | [API.md](API.md) |
+| API | [API.md](API.md) |
 | 前端工作台 | [FRONTEND_WORKBENCH.md](FRONTEND_WORKBENCH.md) |
-| V1 当前状态 | [V1_STATUS.md](V1_STATUS.md) |
+| 当前 V1 / 发布状态 | [V1_STATUS.md](V1_STATUS.md) |
 | 开发与测试 | [DEVELOPMENT.md](DEVELOPMENT.md) |
 | 部署 | [DEPLOYMENT.md](DEPLOYMENT.md) |
-| 发布与分支保护 | [RELEASE.md](RELEASE.md) |
-| 历史技术决策 | [adr/](adr/)（ADR，仅记录已做出的决策） |
+| 发布 | [RELEASE.md](RELEASE.md) |
+| 已做出的技术决策 | [adr/](adr/) |
 
-**文档分工（不要互相重复）：**
+文档发生冲突时，以代码、迁移、自动化测试和实际运行结果为当前事实；
+目标架构冲突记录在 `ARCHITECTURE_MAPPING.md`，不要重新引入第二套方案文档。
 
-```text
-CURRENT.md                 当前哪些文档是权威的（索引，不是词典）
-CANONICAL_ARCHITECTURE.md  DramaForge 整体到底是什么（宪法 / 目标世界观）
-ARCHITECTURE.md            当前实际系统结构和组件实现（组织结构图）
-PRODUCTION_RUNTIME.md      Production Runtime 怎么跑
-PRODUCTION_GRAPH.md        Graph / Node / NodeRun 怎么定义与组织执行计划
-DOMAIN_VOCABULARY.md       项目里的词只能是什么意思
-MODULE_BOUNDARIES.md       模块之间谁能依赖谁
-ARCHITECTURE_MAPPING.md    当前代码 → 目标架构的映射、差距与违规清单
-```
+## 创作体验改进：开发入口
 
-若 [CANONICAL_ARCHITECTURE.md](CANONICAL_ARCHITECTURE.md) 与
-[ARCHITECTURE.md](ARCHITECTURE.md) 冲突：前者是目标世界观，后者是当前实际结构；
-**两者冲突处即 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) 中记录的差距**，
-以代码为当前事实，以宪法为目标方向。
+“先做顺创作流程与模型接入，再补 LibTV 能力”的开发合同位于
+[ARCHITECTURE_MAPPING.md 第 6 节](ARCHITECTURE_MAPPING.md#creation-improvement-contract)。
+其中给出 D0–D6 交付顺序、AC-01–AC-18 验收、资源基准和真实样片的作品评审要求。
+产品需求 PR、模型接入 MP、界面交互 UI、执行资源 RT 分别归属上表相应领域文档；
+API 与数据模型的目标扩展节约束接口演进和迁移。
 
-代码、迁移、测试和运行证据说明"现在实际是什么"；以上文档与之冲突时以代码为
-准，并同步更新文档。
+这些章节属于**目标合同，完整验收未完成**；已具备的基础能力和仍有缺口的部分，以
+各领域「当前实现」及源码为准，不能把整份目标合同当作已实现的功能清单，
+也不自动改写 V1 发布状态。开发时按对应切片读取相关章节，不另建平行 PRD 或历史流水。
 
-## 第一版发布工作文档
+## 历史 Phase / 「本轮」标记
 
-- [首版开发方案与实施计划](V1_DEVELOPMENT_PLAN.md)：当前规划入口，合并功能设计、数据/API/前端开发与实施顺序。
-- [原发布设计](V1_RELEASE_DESIGN.md) 与 [原发布执行](V1_RELEASE_EXECUTION.md)：已由合并方案替代，仅供编号及内容对照，不并行执行。
+文档中出现的 “Phase 2/3/4/5/7”、「本轮」等是**历史推进批次标记**，不是仍然有效的
+路线图索引。没有单独的 Phase 路线图文件。若条款与 Status: current 的权威文档冲突，
+以权威文档和代码为准；不要按 Phase 编号启动新工作。
 
-这些文件是面向首版闭环的计划，不替代上表的领域权威，也不代表开发或发布已完成。
-输入事实快照见 [产品闭环审计](PRODUCT_CLOSURE_AUDIT.md) 与
-[能力矩阵](PRODUCT_CAPABILITY_MATRIX.md)；实际状态仍见 [V1_STATUS.md](V1_STATUS.md)。
+## Director Agent 详细参考
 
-## 历史文档规则
+以下是现有权威文档的细化视图与尚未实施的设计，不增加第二套领域权威；
+目标/缺口归属仍由 ARCHITECTURE_MAPPING 维护，完成实施后同步收敛设计与计划。
 
-任何已删除或只存在于 Git 历史中的旧设计、历史 Task Contract、Review、
-Execution Record、旧检查点和旧 Release Board，不得作为当前实现依据；
-它们只能通过 `git log` / `git show` 追溯。当前实现依据只有：本目录权威文档、
-代码、迁移、测试和运行证据。
+- [当前实现与职责审计](architecture/DIRECTOR_AGENT_CURRENT_STATE.md)
+- [目标架构与边界合同（未实现）](architecture/DIRECTOR_AGENT_TARGET_ARCHITECTURE.md)
+- [依赖有序实施计划（未启动）](architecture/DIRECTOR_AGENT_IMPLEMENTATION_PLAN.md)
+- [Model Capability / Prompt Compiler 指南](architecture/MODEL_CAPABILITY_PROMPT_COMPILER.md)
 
-仓库根目录不再存放方案类文档；[plans/](plans/) 保留历史方案与执行总结的原始副本
-（`DramaForge_*.md`），仅供追溯背景。它们描述的是当时的设计意向，不是当前行为，
-也不构成任何任务的授权；当前发布范围与执行顺序见本文件上方的两份 V1 发布工作文档。
+## 历史资料规则
+
+以下内容不属于当前树的长期文档：
+
+- 已完成或已被替代的开发/发布方案；
+- 某个 SHA 的能力矩阵、闭环审计和阶段 Review；
+- 真实 Provider / 付费测试的逐次调用说明、临时预算说明和 Golden 流水；
+- DEV/REL 的一次性执行记录、截图清单、临时 evidence 清单；
+- 已完成的 Task Contract 和旧 Release Board。
+
+需要追溯时使用 `git log` / `git show`。正式可重复验证逻辑保留在测试、CI 和
+`scripts/` 中；临时运行证据写入被忽略的 `tmp/`，不提交仓库。
 
 ## 仓库布局
 
 ```text
-backend/    FastAPI、领域服务、Arq workers、Alembic 迁移（见 backend/README.md）
-frontend/   React 18 + TS + Vite 工作台（骨架约定见 frontend/design/README.md）
-infra/      LiteLLM、Nginx、Prometheus、Grafana 配置
-scripts/    CI/部署/验收仍在使用的脚本
-fixtures/   测试与证明脚本引用的固定输入
-deploy/     AIOS 交接描述
-.github/    CI / Release / Security 工作流
+backend/    FastAPI、领域服务、Workers、Alembic、测试
+frontend/   React/TypeScript 工作台与前端测试
+infra/      LiteLLM、Nginx 等运行配置
+scripts/    CI、发布、可重复验收与维护脚本
+fixtures/   自动化测试和验收固定输入
+deploy/     部署交接描述
+.github/    CI / Release / Security
 ```
+
+编码 Agent 先读根目录 [AGENTS.md](../AGENTS.md)（从仓库根打开时为 `AGENTS.md`），
+再从本文件定位对应领域文档。

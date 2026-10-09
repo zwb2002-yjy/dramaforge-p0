@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from app.assets.voice import ShotVoiceSettings
+
 
 class SceneDesignState(BaseModel):
     """Serialized professional scene design state.
@@ -66,4 +68,5 @@ class ShotDirectorState(BaseModel):
     composition: ShotCompositionState = Field(default_factory=ShotCompositionState)
     continuity_constraints: list[dict[str, object]] = Field(default_factory=list)
     model_overrides: ShotModelOverrides = Field(default_factory=ShotModelOverrides)
+    voice: ShotVoiceSettings = Field(default_factory=ShotVoiceSettings)
     video_reference_risk: dict[str, object] | None = Field(default=None)

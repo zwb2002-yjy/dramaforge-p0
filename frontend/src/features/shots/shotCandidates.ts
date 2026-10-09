@@ -20,6 +20,12 @@ export type ShotCandidate = {
   mimeType: string | null;
   storageState: string | null;
   createdAt: string | null;
+  reviewAllowed: boolean;
+  reviewDecision: string | null;
+  reviewBlockedReason: string | null;
+  reviewNodeRunId: string | null;
+  contentHash: string | null;
+  duplicateContent: boolean;
 };
 
 const SUCCESSFUL_STATUSES = new Set(["completed", "cached", "completed_after_cancel", "succeeded"]);
@@ -90,6 +96,12 @@ export function parseShotCandidate(value: unknown): ShotCandidate | null {
     mimeType: nonEmptyString(row.mime_type),
     storageState,
     createdAt: nonEmptyString(row.created_at),
+    reviewAllowed: row.review_allowed === true,
+    reviewDecision: nonEmptyString(row.review_decision),
+    reviewBlockedReason: nonEmptyString(row.review_blocked_reason),
+    reviewNodeRunId: nonEmptyString(row.review_node_run_id),
+    contentHash: nonEmptyString(row.content_hash),
+    duplicateContent: row.duplicate_content === true,
   };
 }
 

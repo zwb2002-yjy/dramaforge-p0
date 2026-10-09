@@ -38,7 +38,7 @@ def _register_and_select_workspace(client: TestClient) -> str:
     return workspace_id
 
 
-def test_connection_api_is_fixed_write_only_and_duplicate_is_conflict(
+def test_same_protocol_connections_are_independent_and_credentials_are_write_only(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -65,6 +65,10 @@ def test_connection_api_is_fixed_write_only_and_duplicate_is_conflict(
     assert body["base_url"] == "https://api.agnes-ai.cn"
     assert body["protocol_profile"] == "agnes_cn_v1"
     assert body["credential_configured"] is True
+    # The read model reports the stored credential instead of assuming one: the
+    # two fields must never contradict each other.
+    assert body["credential_key_version"] is not None
+    assert body["credential_configured"] is (body["credential_key_version"] is not None)
     assert "api_key" not in body
     assert secret not in created.text
 
@@ -84,8 +88,12 @@ def test_connection_api_is_fixed_write_only_and_duplicate_is_conflict(
         },
         headers={CSRF_HEADER: _csrf(client)},
     )
-    assert duplicate.status_code == 409
-    assert duplicate.json()["code"] == "CONFLICT"
+    assert duplicate.status_code == 201
+    assert duplicate.json()["id"] != body["id"]
+    assert "credential_id" not in duplicate.json()
+    listed = client.get(f"/api/v1/workspaces/{workspace_id}/provider-connections")
+    assert len(listed.json()) == 2
+    assert "second-secret" not in listed.text
 
 
 @pytest.fixture
@@ -114,14 +122,236 @@ async def _seed_owner(session: AsyncSession) -> tuple[User, Workspace]:
 
 
 @pytest.mark.asyncio
-async def test_credential_rotation_clears_capability_and_quality_flags(
+@pytest.mark.parametrize("base_url", ["https://text.example.test", "https://text.example.test/v1"])
+async def test_text_catalog_uses_the_same_normalized_url_and_own_key_as_litellm(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    base_url: str,
+) -> None:
+    import httpx
+
+    key = Fernet.generate_key().decode("ascii")
+    monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
+    monkeypatch.setenv("BYOK_KEYRING", f"v1:{key}")
+    clear_settings_cache()
+    user, workspace = await _seed_owner(session)
+    service = ProviderConnectionService(session)
+    connection = await service.create_connection(
+        workspace_id=workspace.id,
+        actor=user,
+        display_name="文本服务",
+        api_key="text-only-key",
+        enabled=True,
+        provider_type="litellm",
+        protocol_profile="openai_chat_v1",
+        base_url=base_url,
+    )
+    requests: list[tuple[str, str]] = []
+
+    async def get(
+        _client: httpx.AsyncClient, url: str, *, headers: dict[str, str]
+    ) -> httpx.Response:
+        requests.append((url, headers["Authorization"]))
+        return httpx.Response(200, json={"data": [{"id": "my-chat"}]})
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", get)
+    evidence = await service.probe(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        capability="auth_models",
+    )
+    assert requests == [("https://text.example.test/v1/models", "Bearer text-only-key")]
+    assert evidence.status == "passed"
+    assert evidence.discovered_model_ids == ["my-chat"]
+    from app.api.v1.provider_connections import _connection_read, _probe_read
+
+    original = await _connection_read(service, connection)
+    historical = _probe_read(evidence)
+    assert original.connection_revision_id == historical.connection_revision_id
+    renamed = await service.update_connection(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        display_name="改名",
+        enabled=None,
+    )
+    assert (
+        await _connection_read(service, renamed)
+    ).connection_revision_id == original.connection_revision_id
+    changed = await service.update_connection(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        base_url="https://other-text.example.test/v1",
+        display_name=None,
+        enabled=None,
+    )
+    changed_read = await _connection_read(service, changed)
+    assert changed_read.connection_revision_id != historical.connection_revision_id
+    assert changed_read.verification_status == "unverified"
+    rotated = await service.update_credential(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        api_key="rotated-fixture",
+    )
+    assert (
+        await _connection_read(service, rotated)
+    ).connection_revision_id != changed_read.connection_revision_id
+    assert _probe_read(evidence) == historical
+    assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [401, 403, 429, "empty-catalog"])
+async def test_text_registry_uses_current_auth_projection_and_preserves_evidence(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch, failure: int | str
+) -> None:
+    from datetime import timedelta
+
+    import httpx
+    from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
+    from app.providers.registry import ModelRegistry
+
+    monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
+    monkeypatch.setenv("BYOK_KEYRING", f"v1:{Fernet.generate_key().decode('ascii')}")
+    clear_settings_cache()
+    user, workspace = await _seed_owner(session)
+    service = ProviderConnectionService(session)
+    connection = await service.create_connection(
+        workspace_id=workspace.id,
+        actor=user,
+        display_name="Text auth regression",
+        api_key="test-only-key",
+        enabled=True,
+        provider_type="litellm",
+        protocol_profile="openai_chat_v1",
+        base_url="https://auth.example.test/v1",
+    )
+    response = httpx.Response(200, json={"data": [{"id": "chat"}]})
+
+    async def get(
+        _client: httpx.AsyncClient, url: str, *, headers: dict[str, str]
+    ) -> httpx.Response:
+        assert url == "https://auth.example.test/v1/models"
+        return response
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", get)
+
+    async def probe() -> ProviderCapabilityEvidence:
+        return await service.probe(
+            workspace_id=workspace.id,
+            connection_id=connection.id,
+            actor=user,
+            capability="auth_models",
+        )
+
+    async def registered() -> bool:
+        registry = await workspace_model_registry(
+            session, workspace_id=workspace.id, base_registry=ModelRegistry()
+        )
+        return registry.get_or_none(f"litellm/{connection.id}/chat") is not None
+
+    passed = await probe()
+    assert passed.status == "passed"
+    assert await registered()
+    passed.tested_at -= timedelta(minutes=1)
+    await session.flush()
+    response = (
+        httpx.Response(200, json={"data": []})
+        if failure == "empty-catalog"
+        else httpx.Response(int(failure))
+    )
+    failed = await probe()
+    assert failed.status == "failed"
+    revoked = failure in {401, 403}
+    assert connection.verification_status == ("failed" if revoked else "verified")
+    assert await registered() is not revoked
+    history = list(await session.scalars(select(ProviderCapabilityEvidence)))
+    assert {item.id for item in history} == {passed.id, failed.id}
+    failed.tested_at -= timedelta(minutes=1)
+    await session.flush()
+    response = httpx.Response(200, json={"data": [{"id": "chat"}]})
+    assert (await probe()).status == "passed"
+    assert await registered()
+
+
+@pytest.mark.asyncio
+async def test_same_named_text_models_keep_connection_and_credentials_separate(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
+    from app.providers.registry import ModelRegistry
+
+    key = Fernet.generate_key().decode("ascii")
+    monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
+    monkeypatch.setenv("BYOK_KEYRING", f"v1:{key}")
+    clear_settings_cache()
+    user, workspace = await _seed_owner(session)
+    service = ProviderConnectionService(session)
+    connections = []
+    for label in ("a", "b"):
+        connection = await service.create_connection(
+            workspace_id=workspace.id,
+            actor=user,
+            display_name=label,
+            api_key=f"secret-{label}",
+            enabled=True,
+            provider_type="litellm",
+            protocol_profile="openai_chat_v1",
+            base_url=f"https://{label}.example.test/v1",
+        )
+        revision = await service.current_connection_revision(connection=connection)
+        connection.verification_status = "verified"
+        session.add(
+            ProviderCapabilityEvidence(
+                workspace_id=workspace.id,
+                connection_id=connection.id,
+                capability="auth_models",
+                status="passed",
+                evidence_level="account_verified",
+                request_fingerprint="a" * 64,
+                credential_revision=connection.credential_revision,
+                created_by=user.id,
+                connection_revision_id=revision.id,
+                discovered_model_ids=["same-model"],
+            )
+        )
+        connections.append(connection)
+    await session.flush()
+    registry = await workspace_model_registry(
+        session,
+        workspace_id=workspace.id,
+        base_registry=ModelRegistry(),
+    )
+    models = [registry.get(f"litellm/{connection.id}/same-model") for connection in connections]
+    assert models[0].manifest.id != models[1].manifest.id
+    assert connections[0].credential_id != connections[1].credential_id
+    assert all(model.manifest.model_name == "same-model" for model in models)
+    assert {model.manifest.metadata["connection_id"] for model in models} == {
+        str(connection.id) for connection in connections
+    }
+    # The same alias on two connections stays distinguishable in pickers.
+    assert {model.manifest.display_name.rsplit(" · ", 1)[-1] for model in models} == {"a", "b"}
+    for label, model in zip(("a", "b"), models, strict=True):
+        # The adapter receives this text connection's settings, never the
+        # selected media provider's address or credential.
+        assert model.adapter is not None
+        assert model.adapter._settings.litellm_gateway_url == f"https://{label}.example.test/v1"
+        assert model.adapter._settings.litellm_api_key == f"secret-{label}"
+
+
+@pytest.mark.asyncio
+async def test_credential_rotation_clears_flags_but_preserves_historical_evidence(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from datetime import date
 
+    from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 
     keyring_key = Fernet.generate_key().decode("ascii")
     monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
@@ -136,9 +366,7 @@ async def test_credential_rotation_clears_capability_and_quality_flags(
         api_key="first-secret",
         enabled=True,
     )
-    manifest = next(
-        m for m in SEED_MANIFESTS if m["model_id"] == "agnes-image-2.1-flash"
-    )
+    manifest = next(m for m in CATALOG_MODELS if m["model_id"] == "agnes-image-2.1-flash")
     session.add(
         ModelCatalogEntry(
             provider_type=manifest["provider_type"],
@@ -205,7 +433,7 @@ async def test_credential_rotation_clears_capability_and_quality_flags(
                 ProviderCapabilityEvidence.connection_id == connection.id
             )
         )
-    ) is None
+    ) == evidence.id
 
     other_workspace = Workspace(
         owner_user_id=user.id,
@@ -221,76 +449,6 @@ async def test_credential_rotation_clears_capability_and_quality_flags(
 
 
 @pytest.mark.asyncio
-async def test_owner_can_freeze_account_pricing_on_exact_binding(
-    session: AsyncSession,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from datetime import date
-    from decimal import Decimal
-
-    from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
-
-    keyring_key = Fernet.generate_key().decode("ascii")
-    monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
-    monkeypatch.setenv("BYOK_KEYRING", f"v1:{keyring_key}")
-    clear_settings_cache()
-    user, workspace = await _seed_owner(session)
-    service = ProviderConnectionService(session)
-    connection = await service.create_connection(
-        workspace_id=workspace.id,
-        actor=user,
-        display_name="Agnes China",
-        api_key="secret",
-        enabled=True,
-    )
-    manifest = next(
-        item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash"
-    )
-    session.add(
-        ModelCatalogEntry(
-            provider_type=manifest["provider_type"],
-            protocol_profile=manifest["protocol_profile"],
-            model_id=manifest["model_id"],
-            model_revision=manifest["model_revision"],
-            display_name=manifest["display_name"],
-            media_kind=manifest["media_kind"],
-            lifecycle="active",
-            catalog_source="official_static",
-            capability_manifest_json=manifest,
-            option_schema_json=manifest.get("option_schema") or {},
-            documented_at=date.fromisoformat(manifest["documented_at"]),
-            contract_manifest_hash=hash_manifest(manifest),
-        )
-    )
-    await session.flush()
-    binding = await service.create_model_binding(
-        workspace_id=workspace.id,
-        connection_id=connection.id,
-        actor=user,
-        media_type="image",
-        model_id="agnes-image-2.1-flash",
-        purpose="keyframe",
-        enabled=True,
-    )
-
-    frozen = await service.set_binding_pricing(
-        workspace_id=workspace.id,
-        connection_id=connection.id,
-        model_binding_id=binding.id,
-        actor=user,
-        unit_amount=Decimal("0.125"),
-        currency="usd",
-        billing_unit="per_generated_image",
-        source_note="account console price",
-    )
-
-    assert frozen.pricing_snapshot_json["unit_amount"] == "0.125"
-    assert frozen.pricing_snapshot_json["currency"] == "USD"
-    assert frozen.pricing_snapshot_json["verified_by"] == str(user.id)
-
-
-@pytest.mark.asyncio
 async def test_deprecated_catalog_binding_cannot_be_bound_to_a_new_project(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -298,8 +456,8 @@ async def test_deprecated_catalog_binding_cannot_be_bound_to_a_new_project(
     from datetime import date
 
     from app.access.models import Project
+    from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 
     keyring_key = Fernet.generate_key().decode("ascii")
     monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
@@ -315,7 +473,7 @@ async def test_deprecated_catalog_binding_cannot_be_bound_to_a_new_project(
         enabled=True,
     )
     active_manifest = next(
-        item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash"
+        item for item in CATALOG_MODELS if item["model_id"] == "agnes-image-2.1-flash"
     )
     legacy_manifest = {
         **active_manifest,
@@ -374,7 +532,6 @@ async def test_deprecated_catalog_binding_cannot_be_bound_to_a_new_project(
             project=project,
             purpose="keyframe",
             model_binding_id=legacy_binding.id,
-            fallback_policy="none",
             actor=user,
         )
 
@@ -385,9 +542,39 @@ async def test_deprecated_catalog_binding_cannot_be_bound_to_a_new_project(
             workspace_id=workspace.id,
             connection_id=connection.id,
             actor=user,
-            capability="image_t2i",
+            capability="video_poll_download",
             model_binding_id=legacy_binding.id,
-            paid_request_confirmed=True,
         )
 
     assert probe_caught.value.details["code"] == "MODEL_BINDING_CONTRACT_INACTIVE"
+
+
+def test_paid_probe_route_rejects_before_any_provider_dispatch(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unittest.mock import Mock
+
+    from app.providers.registry import ProviderPlugin
+
+    key = Fernet.generate_key().decode("ascii")
+    monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
+    monkeypatch.setenv("BYOK_KEYRING", f"v1:{key}")
+    clear_settings_cache()
+    workspace_id = _register_and_select_workspace(client)
+    created = client.post(
+        f"/api/v1/workspaces/{workspace_id}/provider-connections",
+        json={"api_key": "synthetic-paid-probe-test-key"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert created.status_code == 201
+    connection_id = created.json()["id"]
+    factory = Mock(side_effect=AssertionError("Provider must not be constructed"))
+    monkeypatch.setattr(ProviderPlugin, "build_client", factory)
+    rejected = client.post(
+        f"/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/probes",
+        json={"capability": "image_t2i"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["details"]["code"] == "PAID_PROBE_AUTHORIZATION_UNAVAILABLE"
+    factory.assert_not_called()

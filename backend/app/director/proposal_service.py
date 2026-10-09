@@ -108,6 +108,7 @@ class ProposalService:
                     command=item.command,
                     payload=item.payload,
                     expected_target_version=item.expected_target_version,
+                    command_key=f"proposal-item-{item.id}",
                 )
             except ProposalCommandError as exc:
                 if exc.details.get("code") == "PROPOSAL_STALE":

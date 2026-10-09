@@ -17,6 +17,7 @@ def test_shot_director_state_defaults_are_serializable() -> None:
         "continuity_constraints": [],
         "model_overrides": {"image_model_id": None, "video_model_id": None},
         "video_reference_risk": None,
+        "voice": {"voice_id": None, "rate_percent": 0},
     }
 
 
@@ -31,6 +32,7 @@ def test_shot_director_state_round_trips_design_example() -> None:
         "continuity_constraints": [{"kind": "screen_direction", "value": "right"}],
         "model_overrides": {"image_model_id": None, "video_model_id": "provider/video-x"},
         "video_reference_risk": {"level": "low"},
+        "voice": {"voice_id": "zh-CN-XiaoxiaoNeural", "rate_percent": 10},
     }
     state = ShotDirectorState.model_validate(payload)
     assert state.model_dump() == payload

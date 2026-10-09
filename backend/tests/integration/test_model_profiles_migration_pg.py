@@ -32,24 +32,16 @@ def _pg_port() -> str:
 
 
 def _pg_admin_url() -> str:
-    default = (
-        f"postgresql://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/postgres"
-    )
+    default = f"postgresql://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/postgres"
     return os.environ.get("TEST_PG_ADMIN_URL", default)
 
 
 def _db_sync_url(dbname: str) -> str:
-    return (
-        f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}"
-        f"@{_pg_host()}:{_pg_port()}/{dbname}"
-    )
+    return f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/{dbname}"
 
 
 def _db_async_url(dbname: str) -> str:
-    return (
-        f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}"
-        f"@{_pg_host()}:{_pg_port()}/{dbname}"
-    )
+    return f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@{_pg_host()}:{_pg_port()}/{dbname}"
 
 
 def _pg_available_sync() -> bool:
@@ -85,9 +77,7 @@ def _alembic(dbname: str, *args: str) -> None:
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("TEST_PG_ENABLED") != "1" or not _pg_available_sync(),
-    reason=(
-        "set TEST_PG_ENABLED=1 with an explicitly configured isolated PostgreSQL target"
-    ),
+    reason=("set TEST_PG_ENABLED=1 with an explicitly configured isolated PostgreSQL target"),
 )
 
 
@@ -127,7 +117,7 @@ def _seed_workspace_default(dbname: str) -> dict:
                 "INSERT INTO production_model_profiles "
                 "(id, workspace_id, name, version, is_default, bindings, created_by, updated_by) "
                 "VALUES (gen_random_uuid(), :w, '默认方案', 1, true, "
-                ' \'{"planning.script": {"model_id": "litellm/text-llm"}}\'::json, :u, :u) '
+                ' \'{"planning.script": {"model_id": "litellm/script-quality"}}\'::json, :u, :u) '
                 "RETURNING id"
             ),
             {"w": workspace_id, "u": user_id},
@@ -253,6 +243,165 @@ async def test_model_profiles_migration_and_rls_on_isolated_db() -> None:
                         "where table_name='production_model_profiles'"
                     )
                 ).scalar()
+                == 1
+            )
+        engine.dispose()
+    finally:
+        await _drop_db(dbname)
+
+
+@pytest.mark.asyncio
+async def test_0086_removes_retired_audio_tts_profile_binding() -> None:
+    dbname = f"dramaforge_mp_tts_{uuid.uuid4().hex[:10]}"
+    try:
+        await _create_db(dbname)
+        _alembic(dbname, "upgrade", "20261007_0085")
+        seeded = _seed_workspace_default(dbname)
+
+        engine = create_engine(_db_sync_url(dbname))
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE production_model_profiles "
+                    "SET bindings = CAST(:bindings AS json) WHERE id = :profile_id"
+                ),
+                {
+                    "profile_id": seeded["profile_id"],
+                    "bindings": (
+                        '{"planning.script":{"model_id":"litellm/script-quality"},'
+                        '"audio.tts":{"model_id":"legacy/voice"}}'
+                    ),
+                },
+            )
+        engine.dispose()
+
+        _alembic(dbname, "upgrade", "20261008_0086")
+
+        engine = create_engine(_db_sync_url(dbname))
+        with engine.connect() as conn:
+            head = conn.execute(text("select version_num from alembic_version")).scalar_one()
+            assert head == "20261008_0086"
+            bindings = conn.execute(
+                text("SELECT bindings FROM production_model_profiles WHERE id = :profile_id"),
+                {"profile_id": seeded["profile_id"]},
+            ).scalar_one()
+            assert "audio.tts" not in bindings
+            assert bindings["planning.script"]["model_id"] == "litellm/script-quality"
+        engine.dispose()
+    finally:
+        await _drop_db(dbname)
+
+@pytest.mark.asyncio
+async def test_0087_removes_binding_pricing_and_fallback_columns() -> None:
+    dbname = f"dramaforge_provider_cut_{uuid.uuid4().hex[:10]}"
+    try:
+        await _create_db(dbname)
+        _alembic(dbname, "upgrade", "20261008_0086")
+
+        engine = create_engine(_db_sync_url(dbname))
+        with engine.begin() as conn:
+            user_id = conn.execute(
+                text(
+                    "INSERT INTO users (email, display_name, password_hash) "
+                    "VALUES (:e, 'Provider cutover', 'x') RETURNING id"
+                ),
+                {"e": f"provider-cut-{uuid.uuid4().hex}@example.com"},
+            ).scalar_one()
+            workspace_id = conn.execute(
+                text(
+                    "INSERT INTO workspaces (owner_user_id, name) "
+                    "VALUES (:u, :n) RETURNING id"
+                ),
+                {"u": user_id, "n": f"provider-cut-{uuid.uuid4().hex[:8]}"},
+            ).scalar_one()
+            project_id = conn.execute(
+                text(
+                    "INSERT INTO projects (workspace_id, name, aspect_ratio, budget_limit) "
+                    "VALUES (:w, 'Provider cutover', '9:16', 0) RETURNING id"
+                ),
+                {"w": workspace_id},
+            ).scalar_one()
+            credential_id = conn.execute(
+                text(
+                    "INSERT INTO encrypted_provider_credentials "
+                    "(workspace_id, provider, ciphertext, key_version) "
+                    "VALUES (:w, 'agnes', 'x', 'v1') RETURNING id"
+                ),
+                {"w": workspace_id},
+            ).scalar_one()
+            connection_id = conn.execute(
+                text(
+                    "INSERT INTO provider_connections "
+                    "(id, workspace_id, provider_type, display_name, base_url, protocol_profile, "
+                    "credential_id, credential_revision, enabled, verification_status, "
+                    "created_by, updated_by) "
+                    "VALUES (:id, :w, 'agnes', 'Agnes', 'https://api.agnes-ai.cn', "
+                    "'agnes_cn_v1', :credential, 1, true, 'verified', :u, :u) "
+                    "RETURNING id"
+                ),
+                {"id": uuid.uuid4(), "w": workspace_id, "credential": credential_id, "u": user_id},
+            ).scalar_one()
+            binding_id = conn.execute(
+                text(
+                    "INSERT INTO provider_model_bindings "
+                    "(id, workspace_id, connection_id, media_type, model_id, purpose, enabled, "
+                    "documented, contract_tested, account_verified, quality_gated, "
+                    "pricing_snapshot_json, created_by, updated_by) "
+                    "VALUES (:id, :w, :connection, 'image', 'agnes-image-2.1-flash', "
+                    "'keyframe', true, true, true, true, false, "
+                    "CAST(:pricing AS json), :u, :u) RETURNING id"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "w": workspace_id,
+                    "connection": connection_id,
+                    "pricing": '{"unit_amount":"0.1","currency":"USD"}',
+                    "u": user_id,
+                },
+            ).scalar_one()
+            conn.execute(
+                text(
+                    "INSERT INTO project_provider_bindings "
+                    "(id, project_id, workspace_id, purpose, model_binding_id, "
+                    "selection_strategy, fallback_policy, updated_by) "
+                    "VALUES (:id, :project, :workspace, 'keyframe', :binding, "
+                    "'explicit_binding', 'none', :u)"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "project": project_id,
+                    "workspace": workspace_id,
+                    "binding": binding_id,
+                    "u": user_id,
+                },
+            )
+        engine.dispose()
+
+        _alembic(dbname, "upgrade", "20261008_0087")
+
+        engine = create_engine(_db_sync_url(dbname))
+        with engine.connect() as conn:
+            head = conn.execute(text("select version_num from alembic_version")).scalar_one()
+            assert head == "20261008_0087"
+            retired = conn.execute(
+                text(
+                    "SELECT table_name, column_name "
+                    "FROM information_schema.columns "
+                    "WHERE (table_name='provider_model_bindings' "
+                    "AND column_name='pricing_snapshot_json') "
+                    "OR (table_name='project_provider_bindings' "
+                    "AND column_name='fallback_policy')"
+                )
+            ).fetchall()
+            assert retired == []
+            assert (
+                conn.execute(
+                    text(
+                        "SELECT count(*) FROM information_schema.columns "
+                        "WHERE table_name='provider_model_catalog_entries' "
+                        "AND column_name='pricing_snapshot_json'"
+                    )
+                ).scalar_one()
                 == 1
             )
         engine.dispose()

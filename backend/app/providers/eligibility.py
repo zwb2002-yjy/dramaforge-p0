@@ -2,10 +2,16 @@
 
 One implementation is used by both the model-candidates API and the runtime
 ``ModelSelectionService`` (stage B1), so the management view and the execution
-resolver can never disagree about why a model is (not) eligible. Filters follow
-design §9.1 order: binding enabled -> connection enabled -> documented +
-contract_tested -> account_verified -> quality_gated -> required capabilities +
-reference constraints -> exclusive groups -> preferred capabilities.
+resolver can never disagree about why a model is (not) eligible. Blocking filters
+are, in order: binding enabled -> connection enabled -> documented +
+contract_tested -> account_verified -> required capabilities + reference
+constraints -> exclusive groups -> preferred capabilities.
+
+``quality_gated`` is NOT one of them. It records that a human accepted a
+representative artifact of the binding, i.e. quality certification / formal
+support evidence, and it is reported through ``CandidateEvaluation.certified``
+instead of refusing execution. The experiment line and normal production run on
+an uncertified binding; the surfaces state the certification state.
 """
 
 from __future__ import annotations
@@ -48,6 +54,9 @@ class CandidateEvaluation:
     supported_capabilities: list[str] = field(default_factory=list)
     unmet_preferences: list[str] = field(default_factory=list)
     evidence: dict[str, bool] = field(default_factory=dict)
+    #: Quality certification, reported as evidence rather than enforced as an
+    #: admission gate: a binding without it runs, and the surfaces say so.
+    certified: bool = False
     estimated_cost: dict[str, Any] | None = None
 
 
@@ -109,11 +118,13 @@ async def evaluate_candidate(
         _issues_add(issues, "MODEL_NOT_CONTRACT_TESTED")
     if not binding.account_verified:
         _issues_add(issues, "MODEL_NOT_ACCOUNT_VERIFIED")
-    if not binding.quality_gated:
-        _issues_add(issues, "MODEL_QUALITY_GATE_MISSING")
+    # Quality certification is deliberately NOT an eligibility issue. It records
+    # that a human accepted a representative artifact of this binding; a binding
+    # without it still runs (normal production and the experiment line), and the
+    # management view plus the experiment form report it as certification state.
 
     # Catalog snapshot consistency (review gate 8): the binding must reference an
-    # active catalog revision of the same provider/profile/media with a complete
+    # executable catalog revision of the same provider/profile/media with a complete
     # invoke value and a matching manifest hash.
     if binding.catalog_entry_id is None:
         _issues_add(issues, "MODEL_NOT_IN_CATALOG")
@@ -155,9 +166,20 @@ async def evaluate_candidate(
         if not _capability_satisfied(capability, capabilities):
             _issues_add(issues, "CAPABILITY_REQUIRED_MISSING", capability)
     reference_constraints = op.get("reference_constraints") or {}
+    input_contracts = op.get("input_contracts") or {}
     for role in sorted(reference_roles):
-        constraint = reference_constraints.get(role)
-        if constraint is None or int(constraint.get("max", 0)) < 1:
+        if input_contracts:
+            supported = any(
+                isinstance(contract, dict)
+                and isinstance(contract.get("input_slots"), dict)
+                and isinstance(slot := contract["input_slots"].get(role), dict)
+                and (slot.get("maximum") is None or int(slot["maximum"]) > 0)
+                for contract in input_contracts.values()
+            )
+        else:
+            constraint = reference_constraints.get(role)
+            supported = constraint is not None and int(constraint.get("max", 0)) > 0
+        if not supported:
             _issues_add(issues, "CAPABILITY_REQUIRED_MISSING", f"reference role {role}")
     for group in op.get("exclusive_groups") or []:
         members = group.get("members") or []
@@ -181,5 +203,6 @@ async def evaluate_candidate(
         supported_capabilities=supported_capabilities,
         unmet_preferences=unmet_preferences,
         evidence=_evidence_dict(binding),
+        certified=bool(binding.quality_gated),
         estimated_cost=None,
     )

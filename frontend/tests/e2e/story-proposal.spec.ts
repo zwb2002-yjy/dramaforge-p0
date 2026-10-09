@@ -182,16 +182,17 @@ test("Story proposal: create typed diff, partial accept only the episode", async
   await page.getByTestId("story-proposal-create").click();
 
   await expect(page.getByTestId("story-proposal-preview")).toBeVisible();
+  await expect(page.getByTestId("story-proposal-create")).toHaveCount(0);
   await expect(page.getByTestId(/story-operation-create/)).toHaveCount(3);
 
   // Partial accept: only keep the Episode operation checked.
-  const sceneCheckbox = page.getByLabel("采用 Scene 1.1");
-  const shotCheckbox = page.getByLabel("采用 Shot 1.1.1");
+  const sceneCheckbox = page.getByLabel("采用 场景 1.1");
+  const shotCheckbox = page.getByLabel("采用 镜头 1.1.1");
   await sceneCheckbox.uncheck();
   await shotCheckbox.uncheck();
   await page.getByTestId("story-proposal-apply-selected").click();
 
-  await expect(page.getByRole("status")).toContainText("Story 更新完成");
+  await expect(page.getByRole("status")).toContainText("故事更新完成");
   await expect(page.getByTestId("script-episodes")).toContainText("双人冲突");
   await expect(page.getByTestId("script-episodes")).not.toContainText("咖啡厅");
 });
@@ -207,6 +208,8 @@ test("Story proposal: a brief generates an audited draft and reject-all keeps St
 
   await expect(page.getByTestId("story-proposal-preview")).toBeVisible();
   await expect(page.getByLabel("剧本文本")).toHaveValue(DRAFT);
+  await expect(page.getByTestId("story-proposal-create")).toHaveCount(0);
+  await expect(page.getByTestId("story-draft-preview").locator(".qc-script-raw")).toHaveText(DRAFT);
   await expect(page.getByTestId("story-generation-evidence")).toContainText("upstream/story-e2e");
   await expect(page.getByTestId("story-generation-evidence")).toContainText("0.005 USD");
   expect(state.generationBody()).toEqual({
@@ -219,4 +222,8 @@ test("Story proposal: a brief generates an audited draft and reject-all keeps St
   await expect(page.getByRole("status")).toContainText("拒绝 3");
   await expect(page.getByTestId("script-empty")).toBeVisible();
   await expect(page.getByTestId("script-episodes")).toHaveCount(0);
+
+  await page.getByTestId("story-proposal-generate").click();
+  await expect(page.getByTestId("story-proposal-preview")).toBeVisible();
+  await expect(page.getByLabel("剧本文本")).toHaveValue(DRAFT);
 });

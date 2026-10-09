@@ -19,19 +19,12 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.providers import availability_models as _availability_models  # noqa: F401
 from app.shared.base import Base
 
 
 class ProviderConnection(Base):
     __tablename__ = "provider_connections"
-    __table_args__ = (
-        UniqueConstraint(
-            "workspace_id",
-            "provider_type",
-            "protocol_profile",
-            name="uq_provider_connection_profile",
-        ),
-    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     workspace_id: Mapped[UUID] = mapped_column(
@@ -90,9 +83,7 @@ class ProviderConnectionRevision(Base):
         ),
         nullable=False,
     )
-    revision_no: Mapped[int] = mapped_column(
-        nullable=False, default=1, server_default="1"
-    )
+    revision_no: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
     provider_type: Mapped[str] = mapped_column(String(40), nullable=False)
     protocol_profile: Mapped[str] = mapped_column(String(80), nullable=False)
     base_url: Mapped[str] = mapped_column(String(240), nullable=False)
@@ -146,6 +137,13 @@ class ProviderCapabilityEvidence(Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="USD")
     cost_status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_reported")
     error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Exact model ids returned by a successful read-only account catalog probe.
+    # Keeping this on immutable evidence lets the settings UI show what the
+    # current endpoint/account actually exposed after a refresh.
+    discovered_model_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    connection_revision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("provider_connection_revisions.id", ondelete="RESTRICT"), nullable=True
+    )
     tested_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -157,13 +155,14 @@ class ProviderCapabilityEvidence(Base):
 class ProviderModelBinding(Base):
     __tablename__ = "provider_model_bindings"
     __table_args__ = (
-        # One binding per (connection, media, catalog revision, purpose): the
-        # same model may have multiple revisions coexist as distinct bindings.
+        # One binding per discovered model, purpose and immutable capability
+        # contract. A corrected contract creates a new binding identity.
         UniqueConstraint(
             "connection_id",
             "media_type",
-            "catalog_entry_id",
+            "model_id",
             "purpose",
+            "catalog_entry_id",
             name="uq_provider_model_binding_revision",
         ),
     )
@@ -199,12 +198,6 @@ class ProviderModelBinding(Base):
     )
     remote_resource_id: Mapped[str | None] = mapped_column(String(240), nullable=True)
     invoke_model_value: Mapped[str | None] = mapped_column(String(160), nullable=True)
-    # Workspace owner supplied, explicitly acknowledged estimate.  Catalog
-    # prices remain immutable global documentation; this snapshot captures the
-    # user's actual account/contract price for a concrete binding revision.
-    pricing_snapshot_json: Mapped[dict[str, object]] = mapped_column(
-        JSON, nullable=False, default=dict
-    )
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
@@ -240,7 +233,6 @@ class ProjectProviderBinding(Base):
     selection_strategy: Mapped[str] = mapped_column(
         String(32), nullable=False, default="explicit_binding"
     )
-    fallback_policy: Mapped[str] = mapped_column(String(20), nullable=False, default="none")
     updated_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )

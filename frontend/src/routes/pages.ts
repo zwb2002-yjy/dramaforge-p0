@@ -63,11 +63,6 @@ export const LazyModelConnectionSettingsPage = lazyRouteComponent(
   "ModelConnectionSettingsPage",
 );
 
-export const LazyDefaultPreferencesSettingsPage = lazyRouteComponent(
-  () => import("./settings-page"),
-  "DefaultPreferencesSettingsPage",
-);
-
 export const LazyProjectSettingsPage = lazyRouteComponent(
   () => import("./settings-page"),
   "ProjectSettingsPage",

@@ -1,549 +1,305 @@
-# ARCHITECTURE_MAPPING — 当前代码 → 目标架构映射
+# ARCHITECTURE_MAPPING — 当前代码到架构的映射
+
+未发布阶段已经按现有功能收敛为单一路径：Director 仅使用 LangGraph；媒体在用户
+确认计划后冻结模型、连接和凭证修订，Worker 不再现场重新选模型。未接入的模型
+Cutover / Policy / Handler 第二套表与服务、独立 Generation writer 和旧实验 ORM 已退役。
+当前模型来源、输入合同及可用性证据见 [MODEL_PROVIDER.md](MODEL_PROVIDER.md)，
+唯一迁移头和不可逆清理边界见 [DATA_MODEL.md](DATA_MODEL.md)。
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Date: 2026-09-15 / Base: dev 5ea45d6 / Alembic head: 20260910_0066
 
-本文件是 Phase 1 产物：**当前代码到目标架构的映射，以及真实差距清单**。
+本文维护当前模块归属、能力处置与尚未解决的结构问题。某次扫描的行数、边数、
+阶段执行记录和工期估计不作为当前事实；历史快照通过 Git 追溯。
+§6 是当前创作体验改进的开发合同与验收索引；它引用各领域唯一权威，不另建平行方案。
+架构规则见 [MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md)，模型事实见
+[DATA_MODEL.md](DATA_MODEL.md)，前端能力消费合同见 [API.md](API.md)。
 
-- 目标世界观见 [CANONICAL_ARCHITECTURE.md](CANONICAL_ARCHITECTURE.md)；
-- 依赖规则见 [MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md)；
-- 术语见 [DOMAIN_VOCABULARY.md](DOMAIN_VOCABULARY.md)。
+## 1. 整理顺序：用户能力优先，不以“无消费者”推导删除
 
-**取证方式：** 用 `scripts/arch_import_scan.py`（本次新增，只读）对
-`backend/app/**.py`（278 个文件）做 AST import 静态扫描，输出层间依赖矩阵与逐边明细。
-本文件所有结论均可由该脚本复现，不依赖人工目测。
+1. 找到该能力在桌面创作、审核、修复、交付中的实际用途。
+2. 检查是否已有完整的权威替代路径；区分缺失的前端消费与无价值的旧实现。
+3. 区分 UI、Worker、Provider 回调/投递、运维、持久历史的消费者。
+4. 需要而未接入的能力先补设计；已有替代的旧入口才清退；持久数据另外确认。
+5. 不为了减少目录数量移动大量活跃代码，不按 legacy/v1/phase 字样删文件。
 
-**本轮未修改任何业务代码、DB 迁移或 API。**
+## 2. 当前模块归属
 
----
-
-## 一、层间依赖矩阵（扫描实测）
-
-`src → dst` 表示存在多少条"来源模块 → 目标模块"的跨层 import 边。
-**标记 FORBIDDEN 的行与 [MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) §三 冲突。**
-
-```text
-  contract -> production   1 FORBIDDEN
-  creative -> domain       1
-  creative -> shared       2
-  director -> contract    21
-  director -> domain      47
-  director -> other        9
-  director -> production  18
-  director -> provider    24 FORBIDDEN
-  director -> shared      53
-    domain -> creative     1 FORBIDDEN
-    domain -> other        1
-    domain -> production   3
-    domain -> shared      24
-  frontend -> contract     5
-  frontend -> creative     7
-  frontend -> director    40
-  frontend -> domain      54
-  frontend -> other       10
-  frontend -> production  37
-  frontend -> provider    30
-  frontend -> shared      38
-     other -> frontend     2
-     other -> provider     1
-     other -> shared       2
-production -> contract     5
-production -> director     4
-production -> domain      41
-production -> other        7
-production -> provider    34
-production -> shared      43
-  provider -> domain       8
-  provider -> other       16
-  provider -> production   6 FORBIDDEN
-  provider -> shared      21
-    shared -> director     3
-    shared -> domain       5
-    shared -> other        2
-    shared -> production   3
-    shared -> provider     2
-```
-
-复现命令：`py -3.12 scripts/arch_import_scan.py --matrix`
-
-**结论摘要：**
-
-- **Creative 出向完全干净**（只有 1 条 `→ domain`、2 条 `→ shared`，且无出向违规）。
-- 真正需要处理的耦合：`director → provider`（24）、`production → director`（4）、
-  `provider → production`（6）、`contract → production`（1）、
-  `domain → creative`（1），以及 `shared → 全部`（13）。
-- `director → domain`（47）与 `production → provider`（34）是**规则允许**的方向。
-
----
-
-## 二、八个必查问题的结论
-
-### 问题 1：是否存在 Creative 代码反向依赖 Director Runtime？
-
-**结论：不存在。这是全场最干净的一块。**
-
-`director/creative_capabilities/`（15 文件 / 2107 行）的全部 `app.*` import 只有三类：
-
-| 目标 | 边数 | 判定 |
+| 模块位置 | 拥有的职责 | 当前处置 |
 |---|---|---|
-| `app.director.creative_capabilities.*`（自引用） | 14 | 包内 |
-| `app.shared.errors` | 2 | 允许（shared 被所有层依赖） |
-| `app.assets.models` | 1 | 允许（`director → domain` / `creative → domain`） |
+| api/v1、workers | HTTP/Arq/dispatcher 入站与命令转发 | KEEP；不能在这里复制业务与 Provider 执行规则 |
+| access、assets | 工作空间、Project、Story/Scene/Shot、资产与版本 | KEEP；域模型不是临时 UI 状态 |
+| director/assistant_*、proposal_*、story_* | 上下文、提案、显式部分接受 | KEEP；不自动创建媒体或 Formal |
+| director/runtime、turn_*、invocation*、inbox*、wakeup* | 有界导演编排、引擎身份、恢复与信号 | KEEP；仅 LangGraph 是可执行身份；业务观察记录不构成第二种引擎 |
+| director/creative_capabilities、workflows | 创作意图、模板、能力规划及镜头执行模板 | KEEP；逻辑职责与物理路径的整理另见待决问题 |
+| production/application、execution_plan、workbench_execution | 类型化业务命令、授权、冻结计划、生产受理 | KEEP；用户生成/修复不能改走底层队列 helper |
+| production/models、service、formal_selection、experiment_service、repair_service | Graph、当前 ExperimentBranch、显式 Formal、分步修复 | KEEP；当前实验创建已统一，不复活旧轨 |
+| execution、runtime | NodeRun 执行、ProviderOperation/Artifact 血缘、调度与恢复 | KEEP；删除 HTTP helper 不删除内部 Worker 能力 |
+| providers | Catalog/Manifest、编译、供应商 Runtime、连接/凭证版本、逻辑模型选择 | KEEP；不将名称含 bridge/legacy 的活跃实现当成死代码 |
+| consistency、delivery、editing | 审核证据、人工决定、导出、EditSession | KEEP；视频证据需补桌面消费设计，不因缺入口删除 |
+| events、security、storage | Outbox/死信/事件、加密与审计、对象存储 | KEEP；无直接 UI 不代表无消费者 |
+| contracts | 共享业务命令、事实和 Runtime 端口 | KEEP；不引入第二份领域事实 |
+| shared | 配置/DB/RLS/模型注册等公共设施 | KEEP 活跃设施；删除仅包装 stdlib 且无独立契约的死 helper |
 
-对 `app.director.runtime` / `app.director.workflows` / `app.director.<业务模块>` /
-`app.production` / `app.providers` / `app.execution` / `app.workers` / `app.api`
-的 import **实测为 0**。
+当前源码仍使用这些物理目录；目标职责划分不等于已完成目录迁移。
 
-**含义：** Creative Layer 的逻辑解耦（Phase 2）**不需要拆代码**，只需要
-① 锁定依赖 Gate 防止回归；② 决定物理目录是否迁移。原方案担心的"Creative 反向依赖
-Director Runtime"在当前代码中并不存在。
+## 3. 本轮已确定的能力处置
 
-**但要反向记录一条：唯一的 `domain → creative` 边构成违规。**
-
-| # | 边 | 判定 | 真实性质 |
-|---|---|---|---|
-| V-6 | `access/projects.py → director.creative_capabilities.creative_templates` | **违规（规则层面）** | 项目创建时要校验 `template_key` 并记录 `created_from_template_key`，因此 domain 需要知道模板目录。这是**语义合理的调用，但方向违规**：模板目录属 Creative Layer。处置二选一：① 把模板查找改为由 application/API 层注入（推荐，保持 domain 纯净）；② 在 [MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) 正式声明 `domain → creative` 为**允许例外**（因为 Creative Profile 本身就挂在 Project 上） |
-
-> 本项是本次盘点**修正了初稿判断**的发现：初稿按"执行方案未提及"记为允许，
-> 但按已落地的依赖规则它就是违规。规则与语义在此冲突，必须由 Owner 决定，
-> 不得默认放过（见 §五 待决问题 7）。
-
----
-
-### 问题 2：是否存在 Production 代码直接调用 Director 业务？
-
-**结论：存在，4 条越界边，其中 2 条是真实架构违规。**
-
-| # | 边 | 判定 | 真实性质 |
-|---|---|---|---|
-| V-1 | `contracts/production_commands.py → production/reference_intents.ShotReferenceIntent` | **违规** | 契约层反向依赖实现层。`ShotReferenceIntent` 是被 `ProductionCommand.references` 引用的公共类型，应定义在 contract 层，由 production 反向 import |
-| V-2 | `production/repair_service.py → director.workflows.contracts.ShotParticipationPlan` | **违规** | 修复执行直接消费 Director workflow 的数据类型 |
-| V-3 | `production/golden_project.py → director.proposal_models` + `director.assistant_models` | **违规** | Golden project fixture 构造 Director 提案用于演示；属测试/种子数据，不该让 Production 生产代码依赖 Director 业务模型 |
-| V-4 | `workbench/shot_service.py → director/turn_service.DirectorTurnService` | **违规** | Shot workbench 服务直接驱动 Director 轮次 |
-
-**反向也存在一条越界：**
-
-| # | 边 | 判定 | 真实性质 |
-|---|---|---|---|
-| V-5 | `director/workflows/library.py → production/templates` | **越界但方向合理** | Director 的模板目录消费 Production 的图定义构造器。因为该构造器就是 ProductionGraph 的 `definition` 生产者，故**物理归属应在 production，逻辑调用允许**；建议改为 `production → creative.contracts` 风格的类型契约，而非直接 import 实现 |
-
-**Scheduler 侧参考（非违规）：** `api/v1/workbench.py::create_execution` 已经正确地
-走 `ProductionCommands.submit_user_execution()`，是本次盘点中**唯一完全合规的
-生产入口**，可作为 Phase 5 的目标形态样板。
-
----
-
-### 问题 3：是否存在 Provider 代码包含创作决策？
-
-**结论：不存在真实违规。但有一条需要收敛的 Director → Provider 硬耦合。**
-
-`app/providers/**`（65 文件 / 12944 行）对 `app.director.*` import **实测为 0**。
-
-创意相关字样只出现在三处，均非违规：
-
-| 位置 | 内容 | 判定 |
+| 对象 | 产品判断 | 处置 |
 |---|---|---|
-| `providers/fake.py:41,96,159,247` | 假 Provider 的 fixture 视觉风格/VisualBible 文本 | KEEP——它是测试替身，不是创作决策 |
-| `providers/intents.py:1` | "Unified creative-intent domain models for image/video generation" | KEEP——这正是 `EffectiveProviderRequest` 的位置 |
-| `providers/manifest.py:5` | "creative intent → model ability layer" 三层切分注释 | KEEP——与宪法第四节一致 |
+| TEXT_LLM_* 旧直连配置 | 由当前文本 HTTP adapter 和 ProviderConnection / 显式部署来源取代 | 清理旧 knobs/helper/Compose 透传；保留实际网关配置、逻辑模型绑定与安全隔离；来源缺口见 MODEL_PROVIDER |
+| dispatch/enqueue HTTP | 生成/修复/恢复已有业务命令，用户不应操作队列 | 退役 HTTP；保留 scheduler/Worker 与 qualified maintenance recovery |
+| video-frames | 人工审片需要时间采样与参考对照 | KEEP + DESIGN；完整候选/修复证据消费方案见 API.md |
+| ProductionExperiment/ShotExperiment | 当前实验已由 ExperimentBranch 拥有 | 只保留 ExperimentBranch；旧 ORM 和空的废弃表清退，非空旧表阻止清理 |
+| ExecuteKeyframeResult、_input_hash、shared/ids.py | 无独立用户能力；前者有 ExecuteNodeResult，后者只是未使用包装 | 删除别名/死函数，不改变当前执行 DTO 与 ID 策略 |
+| checkpoint、Outbox、credential revision、reference token | 属恢复、隔离、投递和审计事实 | 保留，不按空表或缺前端按钮清空 |
 
-**真正的问题在反方向：** Director 有 24 条指向 Provider 的边，且
-`director/text_transport.py::DirectorTextRuntimeAdapter` 直接
-import `providers.registry` / `providers.model_profiles.{resolver,slots}` /
-`providers.contracts.{common,text}`，并在 `generate_structured` 内读取
-`registered.adapter.provider_id`——即 **Director 直接持有 Provider adapter**。
+视频设计尚未实现、存量数据需要单独保管，不能把本表解释成发布完成记录。
 
-判定：Director 需要文本 LLM 才能工作，属
-[MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) §四.3 的**受限例外**，但当前形态是
-"直接 import adapter registry"，不是"经由 `app/contracts/` 声明的端口"。这是
-Phase 2/5 需要收敛的点：把文本推理能力抽成 contract 端口，Director 只依赖端口。
+## 4. 尚未解决的结构问题
 
-**未发现** Director 直接调用**媒体** Provider 的证据，符合宪法禁令。
+以下是有真实调用链的结构债务，不是本轮自动获准的大重构。编号与
+[MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) / [PRODUCTION_GRAPH.md](PRODUCTION_GRAPH.md)
+的交叉引用一致。
 
----
+1. **（预留）** 宏观依赖方向与组合根边界总述；新债务先归入下条之一再开新号。
+2. **production → director 越界**：`execution.media_submission → director.workflows`、
+   `workbench.shot_service → director.turn_service` 等约 4 条边仍由 Production/Workbench
+   编排 Director 业务，违反 MODULE_BOUNDARIES §4.4。收敛顺序中应最先处理。
+3. **Director 文本推理直连 Provider adapter**：`director/text_transport.py` 仍直接接触
+   Provider adapter；若收敛为 contract 端口，必须保留精确模型身份、冻结上下文、
+   错误语义和测试 seam，不能用空壳转发掩盖依赖。
+4. **workflows 跨 creative/production 职责**：执行模板、参与计划与引用能力跨域；
+   是否拆分物理路径需结合实际调用，不先大搬文件。
+5. **模板目录分散**：`execution/shot_pipeline.py`、`production/templates.py` 与
+   `director/workflows/template_nodes.py` 三处 Graph/Workflow 模板来源需要统一发现
+   路径（概念上仍是单一 ProductionGraph 世界观）。
+6. **creative_capabilities 与 access → creative 初始化依赖**：职责与 director 路径
+   不完全一致；`access/projects` 对 creative_templates 的依赖仍需明确是应用层注入
+   还是允许的初始化依赖。
+7. **ShotReferenceIntent 已迁至 contracts/shot_reference**：production 编译器重新导出
+   同一类型，序列化与既有调用语义保持不变，contract → production 的这条依赖已移除。
+8. **Provider 对 execution/models 的事实依赖**：与对 production/runtime 业务的
+   依赖应分别判断；在修改 MODULE_BOUNDARIES 规则前，不把现状自动宣告合规。
+9. **shared 组合根**：shared/db 的事务上下文、shared/rls_scopes 的持久归属发现与
+   model_registry 的全图注册是组合根性质；拆分职责没有消除 scope discovery 的域模型
+   依赖，不能因为 shared 理想上是叶子层，就删除这些有消费者的基础设施。
+10. **golden_project 是证明/测试种子**：迁出前要核对证明脚本，不因位置看起来旧就
+    删除测试资产。
+11. **实验分支身份**：当前 DTO/ORM/计划统一为 `experiment_branch_id`，不保留旧字段别名。
 
-### 问题 4：是否存在 Node 被滥用成普通函数包装？
+收敛优先级（Owner 已定）：问题 2 → 问题 3（text_transport 端口化）→ 问题 9（shared
+组合根分类）→ 问题 6（domain→creative 初始化依赖）→ 再逐步清剩余
+`architecture-baseline.json` 豁免。
 
-**结论：不存在滥用。10 个 node_type 全部通过准入规则。**
+## 5. Director Agent 目标设计的详细映射
 
-持久化 `node_type` 枚举（`execution/models.py`）只有十个值，逐一按
-[PRODUCTION_GRAPH.md](PRODUCTION_GRAPH.md) §五 判定：
+Director 当前为结构化文本任务加确定性持久编排，尚无完整自主工具循环。
+本领域只保留本表作为目标映射入口；下列文档是详细参考，不是第二套架构权威：
 
-| node_type | 独立失败 | 独立重试 | 显著成本 | 独立产物 | 异步等待 | 血缘追踪 | 下游依赖 | 判定 |
-|---|---|---|---|---|---|---|---|---|
-| `prompt_compose` | ✓ | ✓ | — | ✓(document) | — | ✓ | ✓ | **BORDERLINE → KEEP** |
-| `keyframe` | ✓ | ✓ | ✓ | ✓(image) | ✓ | ✓ | ✓ | KEEP |
-| `identity_review` | ✓ | ✓ | — | ✓(document) | — | ✓ | ✓ | KEEP |
-| `video` | ✓ | ✓ | ✓ | ✓(video) | ✓ | ✓ | ✓ | KEEP |
-| `video_review` | ✓ | ✓ | — | ✓(document) | — | ✓ | ✓ | KEEP |
-| `voice` | ✓ | ✓ | — | ✓(audio) | — | ✓ | ✓ | KEEP |
-| `subtitle` | ✓ | ✓ | — | ✓(subtitle) | — | ✓ | ✓ | KEEP |
-| `composite` | ✓ | ✓ | — | ✓(video) | — | ✓ | ✓ | KEEP |
-| `continuity_review` | ✓ | ✓ | — | ✓(document) | — | ✓ | ✓ | KEEP |
-| `export` | ✓ | ✓ | — | ✓(export_package) | — | ✓ | ✓ | KEEP |
-
-- **无 DEMOTE_TO_FUNCTION、无 DELETE。**
-- `prompt` 作为独立 `node_type` **不存在**（只出现在纯节点判定集合中），说明历史上
-  已经做过一次正确的降级。
-- 唯一边界项是 `prompt_compose`：无 Provider 成本、无异步等待，但**有独立产物**
-  且被 `keyframe` 显式依赖，并已被标记为纯上游节点
-  （`production/workbench_execution.py::_PURE_UPSTREAM_NODE_TYPES`）。保留。
-
-**含义：** Phase 4 的 "Node 清理" 在当前代码中**基本无事可做**。原方案假设的
-"只有字符串拼接作用的 Node / 只有 enum 转换作用的 Node" 已不存在。
-
----
-
-### 问题 5：是否存在多个 Graph 概念？
-
-**结论：领域 Graph 概念只有一个。存在的是"模板目录分散"，不是"两套 Graph 世界观"。**
-
-**不是违规的证据（关键）：**
-
-`director/workflows/contracts.py` 明确定义：
-
-```python
-# A provider-neutral graph definition builder.  The concrete signature varies by
-# template but always returns a ProductionGraph ``definition`` dict.
-GraphFactory = Callable[..., dict[str, object]]
-```
-
-即 `WorkflowTemplateRegistry` 的 `graph_factory`**就是 ProductionGraph 的
-definition 生产者**。`director/workflows/` 是**模板目录 + 只读导航**，不是并行执行引擎。
-
-**真实事实——7 个 template_key 分布在 3 个模块：**
-
-| template_key | 定义位置 | 是否被真实生产执行 |
-|---|---|---|
-| `shot-p0-v1` | `execution/shot_pipeline.py` | **是**（Workbench execution 与 Experiment 的规范 Shot 图） |
-| `final-film-v1` | `production/final_film.py` | **是**（成片尾部渲染） |
-| `dialogue-post-dub-shot-v1` | `production/templates.py` | 否——仅模板目录内容 |
-| `single-character-monologue-v1` | `director/workflows/template_nodes.py` | 否 |
-| `two-character-dialogue-v1` | `director/workflows/template_nodes.py` | 否 |
-| `action-motion-shot-v1` | `director/workflows/template_nodes.py` | 否 |
-| `establishing-reaction-insert-v1` | `director/workflows/template_nodes.py` | 否 |
-| `montage-sequence-v1` | `director/workflows/template_nodes.py` | 否 |
-
-**关键事实：真实 Shot 生产只使用一个模板。**
-`production/workbench_execution.py:865` 硬编码
-`template_key=SHOT_PIPELINE_TEMPLATE_KEY`（`shot-p0-v1`），图定义来自
-`shot_pipeline_definition(...)`。5 个 `*-v1` 镜头模板**不参与真实生产**，只被
-`api/v1/workflow_planning.py`（规划写入）与 `api/v1/workflow_overview.py`
-（只读导航）使用。前端只调用只读的 `workflow-overview`。
-
-**重复代码证据：** `_node()` 助手函数在两个模块中逐字重复
-（`director/workflows/template_nodes.py:13` 与 `production/templates.py:11`），
-`dialogue_post_dub_definition` 又构建了一份与 `shot-p0-v1` 高度重合的节点/边集合。
-
-**处置建议（Phase 4）：**
-
-| 现状 | 动作 |
+| 视图 | 用途 |
 |---|---|
-| `shot-p0-v1`（唯一真实执行模板） | **KEEP**，并提升为文档中的"规范 Shot Graph" |
-| `final-film-v1` | **KEEP** |
-| 5 个 `*-v1` 镜头模板 + `dialogue-post-dub-shot-v1` | **KEEP 作为模板目录**，但必须集中到单一模块、共享一个 `_node()` 构造器；并在文档中标注"规划目录，不驱动执行" |
-| `director/workflows/` 目录位置 | **RENAME/MOVE**——它是"镜头模板 + 参与计划 + 能力闸门"的目录，不是 Director Runtime 的一部分。其中 `reference_capability` 与 `character_participation` 实际服务 **Production 执行**（见问题 2 的 V-2） |
+| [当前实现](architecture/DIRECTOR_AGENT_CURRENT_STATE.md) | 调用链、逐图节点行为、状态权威与保留/重构映射 |
+| [目标设计](architecture/DIRECTOR_AGENT_TARGET_ARCHITECTURE.md) | 自有 Agent Loop + 现有 TextModelPort + ToolRegistry；LangGraph 留作 durable workflow，Production 不重写 |
+| [实施计划](architecture/DIRECTOR_AGENT_IMPLEMENTATION_PLAN.md) | P1 合同 → 只读 loop → Proposal → Workflow → Memory/Skill → 可选 MCP，逐项验收与回滚 |
+| [模型/编译指南](architecture/MODEL_CAPABILITY_PROMPT_COMPILER.md) | 文件目录、官方模型与协议合同、逻辑文本和语音；区分源码支持、官方声明和账号证据 |
 
-**明确结论：不得报告"需要消灭第二套 Graph 世界观"——该问题在当前代码中不存在。**
+Agent runtime/ToolRegistry/会话迁移仍为未实现目标；模型能力查询、compiler dry-run及生成快照
+已提供共享只读 service/API（详见模型指南），并补 ImageEdit/严格参数校验。只读查询
+不替换执行模型、删除表或触发生产写入；目录 revision 的演进另按 MODEL_PROVIDER 管理。
+后续完成实施后继续收敛本表，过时计划仅留 Git 历史。
 
----
+## 可重复核查与门禁
 
-### 问题 6：是否存在重复的 Task / Job / Run 概念？
+先构建当前源码的 quality image，再运行已有信息性扫描：
 
-**结论：不存在同义概念泛滥。只有一个需要改名的词。**
+    docker compose -f docker-compose.quality.yml build backend-quality
+    docker compose -f docker-compose.quality.yml run --rm --no-deps backend-quality python scripts/arch_import_scan.py --matrix
+    docker compose -f docker-compose.quality.yml run --rm --no-deps backend-quality python scripts/arch_import_scan.py --violations
 
-`app/**` 中所有继承 `Base` 的模型类，按 `Graph|Flow|Workflow|Job|Task|Run|Node|Operation|Artifact` 模式实测：
+上述两个模式只报告 import 结构，退出 0 不代表不存在架构违规或产品缺口。
+`arch_import_scan.py --check` 则由 backend full/fast 容器门强制：当前结构与逐边债务基线
+比较，拒绝新增越界依赖和过期豁免。基线不是放宽依赖方向的许可，详见 MODULE_BOUNDARIES §六。
+静态图也不能独自证明反射、注册、HTTP、Worker 或仓库外调用已不存在。
 
-```text
-director/runtime/models.py :: DirectorRuntimeControl / DirectorRuntimeSignalClaim / DirectorRuntimeWakeup
-execution/models.py        :: GraphNode / GraphEdge / Artifact / NodeRun / ProviderOperation
-production/models.py       :: ProductionGraph / GraphVersion
-providers/models.py        :: ArtifactReferenceToken
-```
+现有硬门分别负责：canonical-surface 禁止已退役入口与归档模型回流；Provider
+权威 map 检查旧 Adapter 缺席和替代实现存在；OpenAPI generated client 检查契约；
+PostgreSQL metadata/CHECK/enum 与 RLS 集成测试检查迁移和隔离；完整容器门见
+DEVELOPMENT.md。上述检查不能用修改错误期望或仅靠文件数量下降替代。
 
-- **没有** `GenerationTask`、`RenderTask`、`WorkflowTask`、`MediaJob`、
-  `VideoJob`、`GenerationRun` 等独立持久化模型。
-- "Job" 只出现在非领域层：`workers/jobs.py`（Arq 作业函数命名空间）、
-  `FinalFilmJobRead`（成片渲染作业的**读模型**，非独立领域实体）。
-- `provider_operation_id` 是远端调用 ID 字段，不是新概念。
+<a id="creation-improvement-contract"></a>
 
-**处置：KEEP。** 唯一命名债是 `GenerationService`
-（`providers/generation_service.py`）——见问题 8，它虽是"服务名"而非"模型名"，
-但读起来像一个平行概念。
+## 6. 创作体验改进开发合同
 
----
+**状态：目标需求已成文；实现、测试、真实制作、Owner 验收均须分别举证。**
+本文不是完成记录。编写/读取合同不授权付费调用、生产迁移、部署、删除数据、合并或发布。
+本合同解决“先把现有创作流程和模型接入做顺，再补 LibTV 功能”，完成条件是可核对的
+创作闭环与质量改进能力，不是 UI 页面数或供应商数量。
 
-### 问题 7：是否存在前端绕过统一 Application Command 的入口？
+### 6.1 文档归属与用语
 
-**结论：生产写入路径合规。发现 1 处前端死代码和 1 处 Director 侧旁路。**
+| 权威 | 本合同中的职责 |
+|---|---|
+| [PRODUCT.md](PRODUCT.md) 的 PR-01 至 PR-08 | 用户目标、首轮范围、非目标与样片边界 |
+| [CREATION_FLOW.md](CREATION_FLOW.md) | 单一主链、预览/正式事实区别、用户门与修改流程 |
+| [MODEL_PROVIDER.md](MODEL_PROVIDER.md) 的 MP 要求 | 连接/模型身份、发现、官方合同、编译与最终请求 |
+| [FRONTEND_WORKBENCH.md](FRONTEND_WORKBENCH.md) 的 UI 要求 | 页面、布局、动态分镜、审片、剪辑预览与恢复 |
+| [PRODUCTION_RUNTIME.md](PRODUCTION_RUNTIME.md) 的 RT 要求 | 排队、轮询、资源、恢复、取消与观测 |
+| [API.md](API.md)、[DATA_MODEL.md](DATA_MODEL.md) 的目标扩展节 | 服务边界与前向迁移；当前 OpenAPI/迁移事实不提前改写 |
+| 本节 | 交付依赖、需求追踪、跨域验收、完成定义 |
+| [DEVELOPMENT.md](DEVELOPMENT.md)、[V1_STATUS.md](V1_STATUS.md) | 现有可运行门、证据分类及独立发布条件 |
 
-**合规证据：** 前端 64 个 API 函数集中在 `frontend/src/lib/api.ts` 统一客户端
-（含 CSRF、workspace header、错误解析）。全前端裸 `fetch` 只有 3 处，且都在
-`lib/api.ts` 内部（第 49、71、1109 行）——没有散落在 feature 组件中。
-生产写入 `POST .../executions` 由 `features/shots/ShotProductionActions.tsx`
-发起，服务端经 `api/v1/workbench.py::create_execution` →
-`ProductionCommands.submit_user_execution()`，**完全合规**。
+“必须”表示本开发合同的通过条件；“后续”表示不计入首轮完成，不能做一半再以它替代核心闭环。
+文档的目标状态不替代 PRODUCT 的能力三态。当前未实现的目标不可在 UI/API/发布说明中宣传为已交付。
+文档内字段清单是开发所需语义，新增具体字段以实现后的 Pydantic/OpenAPI 和迁移为准。
 
-**发现 7-a（前端死代码）：** `frontend/src/lib/api.ts:1090 createGeneration()` 与
-`:1083 GenerationCreateResult` 定义后**无任何调用方**（实测）。它指向
-`POST /api/v1/projects/{id}/generations`，即"独立生成"入口。前端已不再使用，但
-后端路由仍注册且被单元/集成测试覆盖。属**待决表面**，见问题 8。
+### 6.2 现状与第一批范围
 
-**发现 7-b（Director 侧旁路，重要）：**
-`director/runtime/delegation.py:71` 的 `DirectorRuntimeDelegationService.accept`
-**直接实例化** `WorkbenchExecutionService(self._session, user_id=actor.id)` 并自行
-重新校验 `plan_fingerprint` 与 `accepted_approximations`（第 76–85 行）。
+当前有统一生产实体、版本和用户门，也有模型连接、目录发现、Compiler、LiteLLM HTTP adapter、
+基础剪辑及 UI 原语；这些应扩展复用。静态审计确认的缺口包括 URL 发现/执行规则不一致、
+同协议连接唯一约束、空间与静态同名模型身份冲突风险、文本目录能力过度推断、最终请求展示未闭环、
+重复导航与参数入口、缺少动态分镜/真实剪辑预览、长轮询占重型槽和全量媒体字节缓冲。
+代码路径见各领域文档；不能把工作树实现当成运行实例版本。
 
-对照宪法第二节的硬禁令——"Director Runtime **不允许**绕过 Production Runtime
-直接创建 NodeRun"与第 2.1 节"决策和委派"的边界：
+首轮范围包括 PR-01 至 PR-08。默认继续已有关键帧→视频主链，完成一种明确受支持的图像模式、
+一种视频模式和文本任务的真实闭环即可；通用兼容协议必须覆盖确定性测试，不承诺任意供应商实测。
+新增厂商数量、无限画布、3D、社区和 LibTV MCP 接入不是首轮门槛。当前已支持的导出、引用、修复、
+实验与模板/自由创建路径不能退化；不是首轮重做对象的能力至少运行受影响回归。
 
-- 它没有直接写 NodeRun 表，因此**不是最严重形态**；
-- 但它**直接持有 Production 的具体服务类**，并复制了
-  `ProductionCommands.submit_user_execution()` 的验收校验逻辑，绕开了统一
-  Application Command 边界。
+### 6.3 交付切片与依赖
 
-**处置：** 这是 Phase 5 的首要收敛点。`delegation.py` 应改为经由
-`ProductionCommands`（或一个显式的 ProductionCommand 端口）提交，不得自行
-实例化 `WorkbenchExecutionService`，也不得复制指纹/近似值校验。
+每个切片同时交付最小 UI、后端行为、错误反馈、回归及权威文档更新，不按“先做全部页面/再接接口”拆分。
 
-**前端一级区域现状（Phase 6 输入）：**
+| 切片 | 前置 | 必须交付 | 主要落点 | 退出条件 |
+|---|---|---|---|---|
+| D0 候选与测试基线 | 无 | 核对源码/前端/API/Worker/迁移身份；冻结隔离 fixture 与协议矩阵；记录缺陷回归 | 现有 health、quality、tests、fixtures | AC-01；不为核对而接管已有运行实例 |
+| D1 模型连接闭环 | D0 | 多连接迁移、endpoint resolver、同名隔离、目录/能力/验证分离、统一连接 UI、选择默认用途 | providers、现有 Provider API、provider UI | AC-02 至 AC-05、AC-16；无手改环境文件的常用 BYOK 路径 |
+| D2 可检查的真实请求 | D1 | 参数合同与提示词分工；同源编译预览、失效规则、脱敏回显；执行消费冻结结果 | providers compiler、production plan、execution、模型控件 | AC-06 至 AC-09；纯预览零生成副作用 |
+| D3 分镜与试拍 | D2 | 单一导航/主操作、候选与引用、动态分镜、前后镜头对照、上下文导演 | scenes/shots/director/review 与既有 UI 原语 | AC-10 至 AC-12；已有素材即可完成无付费预演 |
+| D4 审片与剪辑成片 | D3 | 问题标注与明确修改范围、正式采纳、最小时间线与效果预览、Save/Export | review/repair/editing/delivery | AC-13、AC-14；修改一镜不自动覆盖其它正式结果 |
+| D5 调度与资源 | D2；可与 D3/D4 并行 | 轮询释放重槽、连接限流、本地编码上限、媒体流式处理、按需查询、可选 Proxy 部署 | execution/workers/storage/infra、Query 生命周期 | AC-15、AC-17；恢复身份不被调度改动破坏 |
+| D6 综合制作验收 | D1–D5 | 当前候选完整门、真实授权样片、一次有证据的修复、作品评审 | 现有测试/证据工具加必要新验收 | AC-01 至 AC-18 有结论；无阻断项；Owner 作品验收 |
 
-| 现状组件 | 当前实际角色 | 建议 |
+不用历史 Phase 编号自动启动架构债清理；只有直接妨碍该切片的依赖问题进入范围，遵守 §4 已定边界。
+不在合同里猜测工期；实际排期以 D0 的回归与数据迁移规模确定，不以省略验证压缩时间。
+
+需求追踪用于拆开发任务；一个编号可由多个切片协同完成，但不能只改文案后关闭：
+
+| 领域需求 | 主交付切片 | 跨域验收 |
 |---|---|---|
-| `ProductionWorkspaceShell`（`components/workstation/ProjectWorkspaceShell.tsx`） | 项目工作区外壳 | KEEP |
-| `ProfessionalWorkbench`（`features/production/`） | 生产主视图外壳，内部以 tab 组织 canvas / assets / director / review | KEEP，作为 Production 区域容器 |
-| `SceneWorkspace`、`SceneStoryboardWall`（`features/scenes/`） | 场级视图 | KEEP，Production 区域内视图 |
-| `DirectorBoard2D`（`features/director/`） | **已是 `ProfessionalWorkbench` 的内部 tab 组件**（`data-testid="director-board-workspace"`、`"director-board-2d"`） | KEEP，**不构成并列产品** |
-| `ShotStrip`、`CinematicCanvas`、`ShotProductionActions`（`features/shots/`） | Shot 级组件 | KEEP |
-| `MediaReviewCanvas` / `ReviewWorkspace`（`features/review/`） | Review 区域 | KEEP |
-| `EditingWorkspace`（`features/editing/`） | Editing 区域 | KEEP |
-| `ScriptWorkspace`（`features/script/`） | Creation 区域 | KEEP |
-| `WorkflowNavigator`（`features/production/`） | 只读模板导航（消费 `workflow-overview`） | KEEP |
+| PR-01；MP-01–MP-04、MP-08、MP-09；UI-03 | D1 | AC-02–AC-05、AC-16 |
+| PR-02；MP-05–MP-07、MP-11、MP-12；UI-05、UI-06；RT-01 | D2 | AC-06–AC-09；权限/恢复错误同时覆盖 AC-03、AC-15 |
+| PR-03–PR-05；UI-01、UI-02、UI-04、UI-07、UI-08 | D3 | AC-10–AC-12 |
+| PR-05–PR-07；UI-09–UI-11 | D4 | AC-13、AC-14，恢复覆盖 AC-15 |
+| PR-07、PR-08；MP-10；UI-12；RT-02–RT-08 | D5 | AC-15、AC-17 |
+| 全部目标 | D0 / D6 | AC-01 与 AC-18；其余 AC 汇总不得遗漏 |
 
-**结论：前端没有 `SceneWorkbench` / `ShotWorkbench` / `CreativeWorkspace` /
-`ProductionWorkbench` 这类并列一级产品。** `ShotWorkbench` / `SceneWorkspace`
-只作为 **API 名称**存在（`fetchShotWorkbench`、`fetchSceneWorkspace`），是后端
-读模型的命名，不是前端产品分层。Phase 6 的真实工作量远小于原方案估计。
+### 6.4 API、数据与模块实施约束
 
----
+1. 沿用 ProviderConnection/Revision、ModelManifest、ModelBindingResolver、WorkbenchExecutionPlan、
+   CompiledImageRequest/CompiledVideoRequest、NodeRun/ProviderOperation/Artifact；不新建平行模型注册或任务体系。
+2. 连接多实例改动必须前向迁移并更新查询、RLS、缓存键、默认选择及冻结引用；不能只删唯一约束。
+   历史冻结计划保持原始解释；不能唯一回填的绑定停止执行并要求明确重绑，禁止按名称猜测。
+3. 预览采用 Provider 编译结果的安全投影；服务端私有模板/请求与公共响应分离。
+   只有鉴权材料和契约明确允许的短期传输值可晚绑定；参数、模型、参考内容不能二次变化。
+4. 模型选择的项目/场景/镜头继承与实际执行来源使用同一 resolver；表单不复制资格规则。
+5. 动态分镜使用已有对象的播放投影；剪辑预览使用既有 EditSession 草稿与共同时间映射。
+   最小实现不增加服务端生成 preview 的收费入口；如后续需要生成持久预演媒体，另经现有 Runtime 设计。
+6. 新增读字段与错误详情从 Pydantic 导出，重新生成客户端；不得手写第二份 DTO。
+   HTTP 与数据库具体扩展分别按 API/DATA_MODEL 的目标节落实并补集成验证。
+7. 数据库迁移不能暗中轮换 Key、解密回填明文、修改历史 ProviderOperation、清除未知提交、重写 Formal。
+   数据备份、迁移与部署仅在目标环境得到明确授权后执行；本合同不是授权记录。
 
-### 问题 8：是否存在同一业务有多条生产链？
+### 6.5 跨域验收矩阵
 
-**结论：只有一条生产链，但有 2 个不同的授权入口和 1 个未决表面。**
+以下是**待实现/待执行的验收要求**，不是已存在命令或通过记录。
+每条结果必须记录：候选与环境、输入 fixture、操作、观察值、预期、结论、证据位置、
+自动/人工、是否外部付费。失败写出复现步骤；未运行不得写通过。
 
-**唯一生产链的五条来源全部收口到同一个 choke point：**
-
-```text
-WorkbenchExecutionService  ← 唯一创建 NodeRun 的各类入口
-  ├── api/v1/workbench.py:182            （用户直接命令，经 ProductionCommands）
-  ├── director/runtime/delegation.py:71  （Director 委派，⚠ 旁路，见问题 7-b）
-  ├── production/repair_service.py:120   （显式修复计划）
-  ├── production/application/authorization.py:28 （授权/锁定范围）
-  └── production/application/commands.py:72      （ProductionCommands 本体）
-```
-
-下游全部收敛：
-
-```text
-GraphService.create_graph / materialize_definition
-  → NodeRun → Outbox → Arq Worker → execute_media_node_run
-  → ProviderOperation → Artifact
-```
-
-`GraphService` 的四个调用方也全部收敛到同一条链：
-`production/workbench_execution.py:850`、`execution/experiment_nodes.py:227`、
-`production/final_film.py:450`、`providers/generation_service.py:367`。
-
-**唯一的未决表面：** `providers/generation_service.py::GenerationService`。
-它创建"最小单节点图 + NodeRun"，引擎正确（复用同一套提交安全机制），但它是一个
-**独立生成域**，绕过了 `WorkbenchExecutionPlan` 的冻结阶段契约。
-
-- 前端已不再使用（问题 7-a）；
-- 后端路由仍注册（`api/v1/router.py:52`），且被
-  `tests/unit/test_model_profiles_api.py`、`tests/unit/test_model_profile_snapshot.py`、
-  `tests/integration/test_runtime_recovery_matrix_pg.py` 覆盖；
-- 其自身 docstring 声明 video 能力**有意拒绝**，必须走 Shot 门链。
-
-**处置选项（留待 Phase 4/5 决策，本轮不改动）：**
-
-1. **保留**并明确记为"独立单节点生成域"，由图模板统一收敛（推荐——它没有制造
-   第二套 NodeRun/ProviderOperation/Artifact 真相）；
-2. 删除路由与 `GenerationService`，同步删除前端死代码与相关测试。
-
-**不得**在两处同时实现同一业务的 NodeRun 创建——目前已满足该条件。
-
----
-
-### 附加发现 A：`shared` 层不是叶子层（9 条说明）
-
-矩阵显示 `shared → {director: 3, domain: 5, production: 3, provider: 2}`，
-与 [MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) §二 "shared → 无内部层依赖"冲突。
-
-逐条核实后，**全部是函数内延迟 import（`from ... import` 写在函数体里），不是模块级依赖**：
-
-| 来源 | 目标 | 用途 | 判定 |
-|---|---|---|---|
-| `shared/db.py` | `access.models`、`execution.models`、`director.turn_models`、`events.models` | RLS 上下文解析与恢复查询（`app.node_run_context(...)`、`director_turn` 状态过滤等） | **语义合理，位置不当** |
-| `shared/model_registry.py` | 几乎每一层的 ORM 模型模块 | `load_all_models()`：为独立进程注册完整 SQLAlchemy 模型图，使跨域外键可解析 | **语义合理，位置不当** |
-
-**性质：** 这两者不是"shared 依赖业务"，而是**两个跨层职责被放在了 shared 包里**：
-
-- `db.py` 承担的是 **RLS / 恢复上下文解析**，本质上是一个需要知道各域模型的
-  基础设施适配器；
-- `model_registry.py` 承担的是 **ORM 元数据引导**，天然需要 import 全部模型。
-
-**处置建议（Phase 2）：** 把 RLS 上下文解析与模型注册引导上移到独立的
-`app/bootstrap/`（或 `app/runtime/`），使 `shared` 回到真正的叶子层。
-**不得**为了让规则"通过"而删除这两个功能——它们是 RLS 隔离与独立进程启动的硬依赖。
-
----
-
-### 附加发现 B：`provider !→ production` 规则本身需要细化
-
-见 §3.4 注。`providers/*` 的 6 条出向边指向
-`execution/models`、`production/service`、`runtime/scheduler`、`execution/branches`。
-其中"Provider 需要持久化 ProviderOperation / Artifact 事实"是**被 production 反向
-调用时对数据模型的复用**，不是 Provider 在编排生产。强行反转会制造循环依赖。
-
-**建议：** 把规则细化为
-
-```text
-provider !→ production 的业务服务
-provider  → execution.models（数据模型）允许
-```
-
----
-
-## 三、模块映射表
-
-`action` 取值：**KEEP** / **RENAME** / **MOVE** / **MERGE** / **DELETE** /
-**DECIDE**。`violation` 指向 §二 的问题编号或 NONE。
-
-### 3.1 Director 层
-
-| current_path | current_concept | target_layer | action | violation |
+| 编号 | 对应目标 | 输入与操作 | 通过条件 | 验证与费用 |
 |---|---|---|---|---|
-| `director/runtime/`（14 文件 / 2382 行） | Director Runtime Flow、checkpoint、wakeup、ports、executor | director | KEEP | NONE |
-| `director/turn_*`、`invocation*`、`inbox*`、`wakeup*` | DirectorTurn / Invocation / Inbox / Wakeup | director | KEEP | NONE |
-| `director/proposal_*`、`proposal_commands` | DirectorProposal / Decision 与应用 | director | KEEP | NONE |
-| `director/assistant_*`、`context_builder`、`next_action`、`suggestion`、`recommendation` | Director 上下文与建议 | director | KEEP | NONE |
-| `director/text_model.py`、`text_transport.py` | 文本推理适配（直接持有 Provider adapter） | director + contract | **RENAME** | **问题 3**（应收敛为 contract 端口） |
-| `director/story_generation.py`、`story_proposal.py`、`scene_assembler.py` | Story / Scene 提案生成 | director | KEEP | NONE |
-| `director/editing_repair.py`、`editing_suggestion.py` | 成片领域的 Director 建议 | director | KEEP | NONE |
-| `director/workflows/`（16 文件 / 2446 行） | 镜头模板目录 + 参与计划 + 能力闸门 | **creative + production** | **MOVE** | **问题 2 (V-2)、问题 5** |
-| `director/creative_capabilities/`（15 文件 / 2107 行） | Creative Layer | **creative** | **MOVE**（逻辑已解耦，仅物理迁移） | NONE（问题 1 已证明干净） |
-| `director/autonomy_policy.py`、`business_checkpoints.py`、`event_consumer.py` | 自主度策略、业务检查点、事件消费 | director | KEEP | NONE |
+| AC-01 | 全部 | 隔离候选上核对前端构建、API/Worker、迁移和 Git 来源 | 被验收内容身份一致；不一致则停止归因/验收；旧证据复用有精确等价边界 | 自动元数据；无 Provider 费用 |
+| AC-02 | PR-01 | mock 端点分别使用根路径、`/v1`、尾斜杠、合法自定义前缀；执行目录发现 | 发现与调用的 endpoint resolver 一致，无重复版本路径；探测不发生成 POST，不产生 NodeRun | 自动 HTTP 记录；离线 |
+| AC-03 | PR-01/07 | 空间 A 配两条同协议连接且模型同名，另建空间 B；分别选择、刷新、轮换/禁用 | 调用固定在所选 connection/revision；不采用同名 env 或其它空间凭据；旧预览失效；越权读取/写入拒绝 | 自动 API+PostgreSQL+UI；离线 |
+| AC-04 | PR-01 | 返回混合 text/image/embedding ID、空目录、404、不合法响应、401/403/429、超时；手工输入未知 ID | 类别、鉴权、目录支持和可执行能力分别回显；错误分类可恢复；未知合同不自动冒充支持；手工已知合同路径可保存 | 自动+人工文字核对；离线 |
+| AC-05 | PR-01/02 | 保存工作空间默认、项目覆盖、镜头覆盖，再恢复继承 | 保存与运行共用解析；来源清楚且重开不丢失；不静默降级或换模型；本地合同测试不标成账号实测 | 自动 UI→API；离线 |
+| AC-06 | PR-02 | 为每个受支持操作提供合法、边界和不合法参数/引用组合 | 范围/互斥/必需引用均执行服务端校验；硬参数不只拼进 prompt；unsupported 阻断、approximate 明确确认 | 自动 contract fixtures；离线 |
+| AC-07 | PR-02 | 从 UI 查看最终请求、确认生成，mock runtime 捕获发出请求 | 原文、转换后 prompt、参数、模型、引用与冻结快照一致；允许晚绑定项逐字段列举；预览/日志无 Key/签名凭据/二进制 | 自动完整调用链；离线 |
+| AC-08 | PR-02/07 | 预览后依次修改 prompt、时长、模型、Key、引用、合同版本、镜头版本 | 旧指纹全部拒绝且零 create；重新预览才可提交；重复提交同操作只建一次；明确再次生成有独立身份 | 自动 API/并发/恢复；离线 |
+| AC-09 | PR-02 | 一次不润色直接编译，一次显式请求 LLM 优化，一次 LLM 输出不合法 | 直接编译不调用 LLM；优化先有提案与差异，未 Apply/Save 不影响执行；无静默重复优化或丢参 | 自动 mock 文本服务；真实润色另授权 |
+| AC-10 | PR-03/07 | 1440×900、1280×720、1024×768；键盘完成模型选择、镜头编辑、候选比较、审片 | 单一主导航和局部主操作；画布/关键操作无横向溢出或遮挡；焦点可达与返回；诊断字段不占普通首屏 | DOM/可访问性/布局断言+人工体验；离线 |
+| AC-11 | PR-04 | 固定样片已有关键帧、保存时长、字幕和可选音频，播放/暂停/跳镜；再保存时长或引用修改 | 播放顺序、累计时间和选中媒体一致；缺失显式提示；Save只写目标对象并使旧投影失效；播放/投影重建不发生产命令或改变正式指针 | 自动播放状态/网络断言；离线 |
+| AC-12 | PR-03/05 | 当前镜头切换候选，查看相邻镜头首尾、角色引用，采纳导演建议 | 对照始终绑定真实对象/版本；缺证据为未评估；建议先入草稿且显示差异；不能自动放行一致性 | 自动关联+人工检查；离线 |
+| AC-13 | PR-05/07 | 给指定候选标时间码问题；建立修改方案；生成测试候选、批准并设正式 | 影响范围和整镜/局部能力清楚；旧 Artifact 不变；仅指定正式指针变化；失败不先报成功；下一修复步遵循前一步审核门 | 自动完整命令链；mock，真实修复另授权 |
+| AC-14 | PR-06 | 正式片段组成 20–30 秒时间线，调整顺序、入出点、现有配音及片段配音音量、字幕；保存导出，再制造409 | 预览和导出采用同一时间语义/来源；支持集合内硬切/裁切边界误差不超过输出一帧，字幕时间一致到毫秒序列化精度；音轨无截断/漂移；完整解码MP4；409保留草稿 | 自动浏览器+真实本地FFmpeg；不调用模型 |
+| AC-15 | PR-07/08 | 多个远端任务长期running、重启worker/dispatcher、丢响应、到取消边界 | poll不占本地编码槽；同一个远端任务恢复零新create；未知提交不自动重试；重复回调/轮询不重复产物；取消状态诚实 | 故障注入/队列集成；离线 |
+| AC-16 | PR-01/07 | 从旧schema迁移含两空间、绑定、历史计划、已完成与未知任务的fixture | 前向迁移成功且alembic check通过；原始身份/凭证/历史/正式指针不变；歧义绑定被明确阻断；不能靠清表通过 | PostgreSQL迁移/RLS；离线 |
+| AC-17 | PR-08 | 固定资源基准、隐藏页签、长远端等待、流式大媒体下载、单次编码；Proxy开/关两配置 | 满足RT资源约束及本节基准，隐藏面板无无关轮询，关闭本地Proxy仍可走已选兼容端点，报告各进程峰值 | 本地可复现基准；mock媒体服务 |
+| AC-18 | PR-01–08 | 完成规定真实样片，记录一次发现问题→修改→再审片，交付MP4+SRT | 技术硬失败清零；逐镜头要求与连续性有人工结论；未读剧本评审可理解核心行动与转折；Owner明确接受作品及已知限制 | 人工+媒体检查；真实调用逐操作正预算授权 |
 
-### 3.2 Creative 层
+AC-14 的视觉预览与导出允许编码压缩、浏览器字体栅格化差异，不允许顺序、对白、字幕内容或时间映射差异。
+不支持的高级效果必须明确显示预览覆盖范围，保留原数据与导出语义；既有 crossfade 的 FFmpeg 回归仍须通过。
 
-| current_path | current_concept | target_layer | action | violation |
-|---|---|---|---|---|
-| `creative_capabilities/creative_compiler.py` | CreativeIntent（`CompiledCreativeIntent`） | creative | KEEP（Phase 3 决定字段收敛） | NONE |
-| `creative_capabilities/visual_bible.py`、`packs.py` | Style → VisualBible | creative | KEEP | NONE |
-| `creative_capabilities/shot_language*.py` | ShotLanguage + QualityPolicy | creative | KEEP | NONE |
-| `creative_capabilities/skill_library.py`、`contracts.py`、`registry.py`、`composer.py` | Skill 库与解析 | creative | KEEP | NONE |
-| `creative_capabilities/packs_library.py`、`pack_registry.py` | Creative Pack | creative | KEEP | NONE |
-| `creative_capabilities/creative_templates.py` | 项目启动模板 | creative | KEEP | NONE（被 `access/projects.py` 引用，方向为 domain → creative，允许） |
-| `creative_capabilities/freeze.py` | CreativeIntent 冻结与 resume hash | creative | KEEP | NONE |
+### 6.6 资源与体验基准
 
-### 3.3 Production 层
+这是开发目标基准，**尚无本合同的实测通过结论**。环境固定 Docker 分配 4 vCPU / 8 GiB、SSD、
+项目锁定容器依赖与 Chromium；使用 1440×900 桌面视口，同机隔离 mock 服务；不计第三方排队耗时。
+证据记录实际 OS、CPU、容器限制、版本、视频编码与缓存状态；不满足基准环境时单列结果，不冒充达标。
 
-| current_path | current_concept | target_layer | action | violation |
-|---|---|---|---|---|
-| `production/models.py` | ProductionGraph / GraphVersion | production | KEEP | NONE |
-| `production/service.py` | GraphService（图创建/物化/发布） | production | KEEP | NONE |
-| `production/workbench_execution.py` | **唯一 NodeRun 创建 choke point** | production | KEEP | NONE |
-| `production/execution_plan.py` | WorkbenchExecutionPlan（冻结计划） | production | KEEP | NONE |
-| `production/application/`（authorization / commands / events / facts） | Application Command 边界 | production | KEEP（作为合规范板） | NONE |
-| `production/formal_selection.py` | Candidate / Formal | production | KEEP | NONE |
-| `production/repair_service.py` | Repair 显式计划 | production | KEEP | **问题 2 (V-2)** |
-| `production/golden_project.py` | Golden project 种子/fixture | production | **MOVE**（移至测试或工具位置） | **问题 2 (V-3)** |
-| `production/experiment_service.py`、`models.py::ExperimentBranch` 等 | Experiment 隔离分支 | production | KEEP | NONE |
-| `production/final_film.py`、`timeline_renderer.py`、`timeline_subtitles.py` | Final Film（MP4 + SRT） | production + domain/editing | KEEP | NONE |
-| `production/reference_intents.py` | `ShotReferenceIntent`（被 contract 反向引用） | **contract** | **MOVE** | **问题 2 (V-1)** |
-| `production/templates.py` | `dialogue-post-dub-shot-v1` 图定义 | production | **MERGE**（合并进统一模板模块） | 问题 5 |
-| `execution/models.py` | GraphNode / NodeRun / ProviderOperation / Artifact | production | KEEP | NONE |
-| `execution/product_path.py`、`voice_path.py` | 统一媒体执行 | production | KEEP | **问题 2 (V-2 引用面)** |
-| `execution/shot_pipeline.py` | `shot-p0-v1` **规范 Shot Graph** | production | KEEP（提升为规范） | NONE |
-| `execution/artifact_lineage.py` | Artifact 身份与血缘不变量 | production | KEEP | NONE |
-| `execution/shot_locks.py`、`branches.py`、`composite_media.py`、`experiment_nodes.py`、`runtime_invariants.py` | Shot 锁、实验节点、合成、不变量 | production | KEEP | NONE |
-| `runtime/scheduler.py` | Outbox / NodeRun 调度 | production | KEEP | NONE |
-| `workbench/shot_service.py` | Shot workbench 服务 | production + **director** | **RENAME** | **问题 2 (V-4)** |
-| `workbench/scene_service.py`、`workspace_state_service.py` | 场与工作区状态 | production | KEEP | NONE |
+| 负载 | 目标 / 断言 |
+|---|---|
+| 100个镜头、300个Artifact的列表 | 首屏分页不超过50条，视频不整批预加载；暖态本地列表/详情与纯编译预览30次请求的p95≤2秒，不包含用户选择的LLM优化/媒体上传 |
+| UI切镜头/打开已缓存检查器 | 至少30次交互，从输入到当前对象界面更新p95≤200ms；未缓存媒体可显示加载状态，不能等待全片下载才响应 |
+| 6镜头、30秒、720p动态分镜/支持集合剪辑 | 全部源媒体缓存后，播放/暂停/跳转30次p95≤1秒；顺序/时间映射通过AC-11/14；不要求移动设备专业编辑性能 |
+| 隐藏实验/高级/批量面板 | 初始不读取面板专属资源；推进60秒测试时钟仍无该面板轮询；共享项目摘要/SSE心跳不计违规；重新打开按失效状态补读 |
+| 4个远端视频等待+1个本地编码 | 远端poll占本地编码并发槽数量为0；本地空闲时编码能在一个已配置调度周期内取得执行资格；不扩大Provider create数 |
+| 单次256MiB流式视频传输 | 下载/上传阶段相对该worker暖态RSS增量≤128MiB，不包含解码/FFmpeg进程；边传边校验，超限/中断清理仅本次临时文件 |
+| 本地编码与连接并发 | 默认本地编码最多1个；连接提交默认最多1个且可按Provider合同配置；多进程合计不越界；额外任务可观察地排队 |
 
-### 3.4 Provider 层
+记录 Proxy 可选模式的冷启动、空闲和峰值占用，不在缺少实测前承诺全栈固定内存或节省百分比。
+上述目标如需改变，须先说明硬件/负载或设计依据并修订需求，再评估验收；不得看到失败后直接放宽断言。
 
-| current_path | current_concept | target_layer | action | violation |
-|---|---|---|---|---|
-| `providers/manifest.py`、`capabilities.py`、`contracts/` | ModelManifest / Capability / Provider 契约 | provider | KEEP | NONE |
-| `providers/model_profiles/`（含 `slots.py`、`node_snapshot.py`） | ModelSlot 与能力映射 | provider | KEEP | NONE |
-| `providers/registry.py`、`router.py`、`runtime.py`、`selection.py`、`model_resolution.py` | 注册、路由、运行时、选择 | provider | KEEP | NONE（但被 Director 直接 import，见问题 3） |
-| `providers/generation_service.py` | 独立单节点生成域 | provider | **DECIDE** | **问题 8** |
-| `providers/connection_service.py`、`workspace_credentials.py`、`idempotency.py`、`execution_identity.py` | 连接、凭据、幂等、执行身份 | provider | KEEP | NONE |
-| `providers/reference_delivery.py` | 引用字节投递 | provider | KEEP | 需确认不与 provider → production 规则冲突（见下注） |
-| `providers/fake.py` | 假 Provider 测试替身 | provider | KEEP | NONE（问题 3） |
+### 6.7 真实样片与作品质量验收
 
-> **注：** `providers/*` 有 6 条指向 `app.execution.*` / `app.production.*` /
-> `app.runtime.*` 的边（`connection_service`、`generation_service`、
-> `reference_delivery`）。按 [MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) §三
-> `provider !→ production` 属违规方向，但性质是"Provider 需要持久化
-> ProviderOperation/Artifact 事实"——即 provider 被 production 反向调用时复用其
-> 模型。**处置：Phase 2 决定是 (a) 收紧为只依赖 `execution/models` 这一数据层，
-> 还是 (b) 把 `provider !→ production` 规则细化为"禁止依赖 production 的
-> 业务服务，允许依赖 `execution.models` 数据模型"。建议 (b)，因为强行反转会制造
-> 循环。这是本次盘点发现的**规则本身需要细化**之处。**
+样片遵循 PRODUCT 的固定规模。生成前保存剧本、角色参考、每镜头的叙事目的/关键动作/情绪、
+景别与运镜、对白及预期顺序；这些是验收输入，不由模型结果反向改写成“预期如此”。
+用户可以有意识修订创意，修订需保留版本和理由，不能为绕过失败而悄悄改测试目标。
 
-### 3.5 Domain / Contract / Shared 层
-
-| current_path | current_concept | target_layer | action | violation |
-|---|---|---|---|---|
-| `contracts/production_commands.py`、`production_facts.py`、`domain_events.py`、`director_runtime.py` | 共享契约 | contract | KEEP | **问题 2 (V-1)**（等待 `ShotReferenceIntent` 迁入） |
-| `access/models.py`、`projects.py` | Project / Workspace / CreativeProfile | domain | KEEP | **`access/projects.py:19` 有 1 条模块级 `→ creative_capabilities.creative_templates` import（问题 1 / V-6）** |
-| `assets/models.py`、`scene_service.py`、`version_service.py`、`script_import.py` | Scene / Shot / Asset | domain | KEEP | NONE（`scene_service` 有 1 条局部 `ExperimentBranch` import，影响面报告用，可接受） |
-| `consistency/` | identity / continuity / drift 证据 | domain | KEEP | NONE |
-| `delivery/models.py`、`download.py` | Review 标注与导出 | domain | KEEP | NONE |
-| `editing/`（5 文件 / 504 行） | EditSession / Timeline | domain | KEEP | NONE |
-| `shared/`、`events/`、`security/`、`storage/` | 基础设施原语 | shared | KEEP | NONE |
-| `workers/`（7 文件 / 602 行） | Arq 入口 | frontend | KEEP | NONE |
-| `api/`（36 文件 / 8199 行） | HTTP 表面 | frontend | KEEP | NONE |
-
----
-
-## 四、Phase 2–7 的实际工作量修正
-
-基于以上实测，原执行方案的难度估计需要修正：
-
-| Phase | 原方案假设 | 实测结论 |
+| 检查项 | 通过判据 | 必留证据 |
 |---|---|---|
-| **Phase 2** Creative Layer 解耦 | 需要拆依赖、可能需要 facade 过渡 | **依赖已解耦**。工作量 = 物理目录迁移决策 + 依赖 Gate。7 条 director → provider 文本推理边 + 4 条 production → director 边才是真正要处理的对象 |
-| **Phase 3** CreativeIntent Contract | 需要"新建" CreativeIntent | **已存在** `CompiledCreativeIntent`。真实任务是决定是否把嵌套 patch 结构收敛为 canonical 顶层字段表，并定义版本化/持久化/来源记录 |
-| **Phase 4** ProductionGraph 收敛 | 需要删除/降级大量滥用 Node | **Node 无滥用**（10 个全部 KEEP）。真实任务是① 统一 3 个模块中的模板目录；② 消除 `_node()` 重复；③ 成形 Production Planner 以支持自动最小重算 |
-| **Phase 5** 入口统一 | 需要清查大量旁路 | 生产写入路径**已合规**。真实任务是 ① 修 `director/runtime/delegation.py:71` 旁路；② 决定 `GenerationService` 去留 |
-| **Phase 6** 前端收敛 | 需要拆多个并列工作台 | **无并列一级产品**。`DirectorBoard2D` 已是内部 tab。真实任务主要是命名与文档对齐 |
-| **Phase 7** 验证与防回归 | 需要新写依赖测试 | 需要，且应立即做——因为 Phase 2–6 的改动面比预期小，**依赖 Gate 是防止未来回归的主要价值** |
+| 技术完整性 | MP4可完整解码和播放，长度/画幅符合确认设置；对白无缺失或截断；SRT内容与时间正确 | ffprobe/解码输出、字幕检查、成片哈希 |
+| 单镜头完成度 | 每镜头的关键动作、叙事目的与约定情绪分别人工标“满足/部分满足/不满足”；未满足项明确改或由Owner接受限制 | Shot/Artifact身份、观察时间码、具体原因 |
+| 连续性 | 角色身份、服装、道具、空间、视线/运动方向逐项检查；影响理解的未解决穿帮为阻断 | 参考版本、相邻镜头、时间码与结论；不做人脸分数 |
+| 故事理解 | 至少一名未看剧本的评审观看成片后，能描述主角在做什么、为何行动及发生的关键转折；答案与事先保存意图核对 | 独立回答、偏差和Owner结论；缺评审记未验收 |
+| 可控修改 | 明确修改一处有证据的问题后，保住范围外正式Artifact；新候选能比较并人工采用 | 修改前后版本、影响范围、拒绝/采用理由 |
+| 制作成本 | 所有真实操作在有效逐操作授权内；调用数、耗时、失败、人工操作时间和费用可追溯 | 真实账单/Provider报告与未知费用分列；未知不记零 |
 
-**总判断：** 当前代码的"缝合怪感"主要来自**物理目录布局与文档缺失**，
-而不是**逻辑依赖混乱**。因此最高性价比的下一步是
-**Phase 7 的依赖 Gate + Phase 2 的物理收敛**，而非大规模重写。
+不设“必须几次抽卡出佳作”的无依据保证，不以Agent主观分数或driver的complete=true替代作品评审。
+最终要有Owner的“接受/需修改”及已知限制；艺术偏好单独记录。技术通过但作品未接受，只能报告技术通过。
 
----
+### 6.8 测试实施与证据
 
-## 五、本轮遗留的待决问题
+优先从现有边界补回归：Provider连接/修订与安全探测测试、wire contract、Workbench执行、
+PostgreSQL/RLS、恢复幂等、前端provider-settings、professional-edit、editing-audio以及真实本地FFmpeg测试。
+新增测试覆盖用户可见行为与故障条件，不为每个薄函数建镜像断言。
 
-以下问题本轮**未决定**，需在进入 Phase 2 前由 Owner 确认：
+动态分镜、UI到wire同源验证、资源基准等缺失的可重复驱动必须随实现补入现有tests/scripts；
+它们不是当前已存在命令。命令来源仍为 DEVELOPMENT、package.json、pyproject、CI及quality compose。
+涉及本合同的Provider/API/Worker/迁移及前后端联合改动按现有CI运行完整容器门，局部通过不能代替。
 
-1. `director/creative_capabilities/` 是否物理迁移到 `app/creative/`？
-   （依赖已干净，迁移是纯目录收益，风险来自 30+ 处 import 与 generated OpenAPI 稳定性）
-2. `ShotReferenceIntent` 迁入 `app/contracts/` 是否接受一次契约层新增？
-3. `provider !→ production` 规则是否按 §3.4 注细化为"允许依赖 `execution.models`"？
-4. `GenerationService` 保留还是删除？
-5. `director/workflows/` 中的 `reference_capability` / `character_participation`
-   迁往何处（creative 还是 production）？
-6. `production/golden_project.py` 迁往测试工具位置是否影响现有证明脚本
-   （`scripts/prove_*.py`）？
-7. `domain → creative`（`access/projects.py → creative_templates`）是改为由
-   application 层注入模板查找，还是正式声明为允许例外？
-8. `shared/db.py` 的 RLS 上下文解析与 `shared/model_registry.py` 的模型引导是否
-   上移到新包，使 `shared` 回到叶子层？
-9. [MODULE_BOUNDARIES.md](MODULE_BOUNDARIES.md) §三 的
-   `provider !→ production` 是否按附加发现 B 细化？
+每条证据最少含 requirement/acceptance ID、候选来源、fixture/模型合同版本、操作者、执行时间、
+观察值、结果、费用属性和证据路径。媒体另存大小、尺寸/时长、SHA-256及自动断言；不得写入Key、
+签名URL或媒体base64。临时记录与媒体留在gitignored tmp，正式可重复逻辑进入tests/scripts。
+当前合同不保存某个候选的测试计数、SHA或已完成勾选表，历史结果按项目规则追溯。
+
+### 6.9 完成与交接
+
+- 每个PR明确覆盖PR/MP/UI/RT与AC编号、当前范围、迁移和验证结果；不把未运行写成通过。
+- 开发完成：D1–D5范围内目标实现，AC-01–AC-17及受影响回归/完整门通过；无数据/身份/计费/正式版本回退。
+- 制作验收完成：AC-18证据与Owner判断齐全；缺预算、模型权限或人工评审时标明具体未验收项，不伪造关闭。
+- 发布完成：另按V1_STATUS/RELEASE执行最终候选、安装制品、Owner合并发布等现有条件；本合同无权替代。
+- 已确认的目标在实施后更新各权威文档为真实现状；完成/被替代的计划性内容按CURRENT规则收敛，不积累第二套历史方案。
+
+阻断项至少包括：跨空间/连接身份混用、秘密泄漏、重复提交可能重复计费、丢失历史或正式结果、
+预览与实际请求不一致、规定主链动作无法完成、恢复丢稿/串稿，以及范围内成片无法解码或关键
+对白/字幕丢失。不能用“仅UI问题”或平均通过率抵消这些失败；未支持的能力如实披露不等于
+自动豁免本合同必需项。样片叙事和连续性阻断按 §6.7 由证据及 Owner 判断闭合。

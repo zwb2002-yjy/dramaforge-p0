@@ -65,9 +65,23 @@ def test_execution_identity_is_complete_json_safe_and_immutable() -> None:
 
 def test_execution_identity_rejects_secret_bearing_evidence_keys() -> None:
     with pytest.raises(ValidationError, match="forbidden evidence key"):
-        _identity().model_copy(
-            update={"effective_options": {"api_key": "must-not-persist"}}
-        )
+        _identity().model_copy(update={"effective_options": {"api_key": "must-not-persist"}})
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "remote_task_id",
+        "remoteTaskId",
+        "provider_operation_id",
+        "providerOperationId",
+        "resume_token",
+        "resumeToken",
+    ],
+)
+def test_execution_identity_rejects_provider_operation_state(key: str) -> None:
+    with pytest.raises(ValidationError, match="forbidden evidence key"):
+        _identity().model_copy(update={"translation_report": {"nested": {key: "operation-only"}}})
 
 
 def test_execution_identity_requires_consistent_connection_revision_aliases() -> None:

@@ -2,8 +2,10 @@
 
 ## Supported versions
 
-Security updates are provided for the latest tagged release. Development
-branches and historical P0 artifacts are not supported releases.
+There is no tagged release yet, so no released version is currently in a
+supported security-maintenance window. Reports against the current code are
+accepted and fixes follow the protected `dev` to `main` integration path. This
+section will name supported version ranges when the first release is tagged.
 
 ## Reporting a vulnerability
 

@@ -44,7 +44,7 @@ describe("CinematicCanvas", () => {
 
     expect(screen.getByTestId("shot-candidate")).toBeInTheDocument();
     expect(screen.getByTestId("shot-candidate-preview-candidate-a")).toBeInTheDocument();
-    expect(screen.getByTestId("shot-candidate")).toHaveTextContent("未确认候选");
+    expect(screen.getByTestId("shot-candidate")).toHaveTextContent("未确认");
     expect(screen.getByTestId("shot-candidate")).not.toHaveTextContent("candidate-a");
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
@@ -149,5 +149,24 @@ describe("CinematicCanvas", () => {
     expect(screen.getByRole("status")).toHaveTextContent("正在执行");
     expect(screen.getByTestId("shot-execution-state")).not.toHaveTextContent("keyframe");
     expect(screen.queryByTestId("shot-placeholder")).not.toBeInTheDocument();
+  });
+
+  it("keeps an ambiguous provider submission separate from an ordinary failure", () => {
+    render(
+      <CinematicCanvas
+        projectId="project-1"
+        shot={SHOT}
+        trace={[
+          {
+            node_key: "video",
+            status: "failed",
+            error_code: "PROVIDER_SUBMISSION_UNKNOWN",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId("shot-execution-state")).toHaveTextContent("提交结果未知");
+    expect(screen.getByRole("status")).toHaveTextContent("不要盲目重试");
   });
 });

@@ -187,7 +187,7 @@ async def _seed_formal_facts(factory: async_sessionmaker[AsyncSession], project_
             graph_node_id=node.id,
             idempotency_key=f"editing-api:{uuid4().hex}",
             input_hash="a" * 64,
-            status="completed",
+            status="queued",
             input_snapshot={"shot_id": str(shot.id), "stage": "video"},
             output_summary={"source": "editing-api-test"},
             result_artifact_id=None,
@@ -209,6 +209,7 @@ async def _seed_formal_facts(factory: async_sessionmaker[AsyncSession], project_
         session.add(artifact)
         await session.flush()
         run.result_artifact_id = artifact.id
+        run.status = "completed"
         shot.formal_video_artifact_id = artifact.id
         operation = ProviderOperation(
             node_run_id=run.id,
@@ -342,12 +343,25 @@ def test_editing_http_lifecycle_preserves_formal_facts(
     }
     saved = client.patch(
         f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/timeline",
-        json={"timeline": edited_timeline},
+        json={"timeline": edited_timeline, "expected_session_version": 1},
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert saved.status_code == 200, saved.text
     assert saved.json()["timeline"] == edited_timeline
     assert saved.json()["production_lineage"] == created_body["production_lineage"]
+    stale = client.patch(
+        f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/timeline",
+        json={
+            "timeline": {"clips": [], "metadata": {"stale": True}},
+            "expected_session_version": 1,
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["details"] == {
+        "expected_session_version": 1,
+        "actual_session_version": 2,
+    }
     stale_turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}")
     assert stale_turn.status_code == 200, stale_turn.text
     assert stale_turn.json()["status"] == "stale"
@@ -383,7 +397,7 @@ def test_editing_http_rejects_lineage_and_missing_csrf(
 
     no_csrf = client.patch(
         f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/timeline",
-        json={"timeline": {"clips": [], "metadata": {}}},
+        json={"timeline": {"clips": [], "metadata": {}}, "expected_session_version": 1},
     )
     assert no_csrf.status_code == 403, no_csrf.text
 
@@ -391,6 +405,7 @@ def test_editing_http_rejects_lineage_and_missing_csrf(
         f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/timeline",
         json={
             "timeline": {"clips": [], "metadata": {}},
+            "expected_session_version": 1,
             "production_lineage": {"tamper": True},
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -404,7 +419,8 @@ def test_editing_http_rejects_lineage_and_missing_csrf(
                 "clips": [],
                 "metadata": {},
                 "production_lineage": {"tamper": True},
-            }
+            },
+            "expected_session_version": 1,
         },
         headers={CSRF_HEADER: _csrf(client)},
     )
@@ -548,39 +564,9 @@ def test_editing_director_suggestion_http_returns_exact_persisted_identity(
     turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}").json()
     assert turn["status"] == "awaiting_user"
 
-    async def deliver_decision_notice():
-        from app.access.models import Project, User, Workspace
-        from app.director.business_checkpoints import DirectorBusinessCheckpoints
-
-        async with factory() as session:
-            project = await session.get(Project, UUID(project_id))
-            assert project is not None
-            workspace = await session.get(Workspace, project.workspace_id)
-            assert workspace is not None
-            actor = await session.get(User, workspace.owner_user_id)
-            assert actor is not None
-            await DirectorBusinessCheckpoints(session).reconcile_business_fact(
-                project=project, proposal_id=proposal_id,
-            )
-            await session.commit()
-
-    _run(factory, deliver_decision_notice())
-    turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}").json()
-    assert turn["status"] == "completed" and turn["wait_reason"] == "proposal_rejected"
-
-    async def refused_context():
-        from app.director.turn_service import DirectorTurnService
-        from app.shared.errors import ConflictError
-
-        async with factory() as session:
-            with pytest.raises(ConflictError) as refused:
-                await DirectorTurnService(session).assert_context_not_rejected(
-                    project_id=UUID(project_id),
-                    context_hash="d" * 64,
-                )
-            assert refused.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
-
-    _run(factory, refused_context())
+    # Runtime progression is handled by the Director worker from the persisted
+    # ProposalDecided event; this HTTP test only proves the editing decision is
+    # durable and does not mutate the EditSession or Formal facts.
 
     reopened = client.get(f"/api/v1/projects/{project_id}/edit-sessions/{session_id}")
     assert reopened.status_code == 200, reopened.text

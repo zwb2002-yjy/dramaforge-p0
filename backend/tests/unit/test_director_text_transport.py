@@ -24,7 +24,7 @@ from app.director.text_transport import DirectorTextTransport
 from app.director.turn_models import DirectorTurn
 from app.execution.models import Artifact, NodeRun
 from app.providers.contracts.common import ExecutionContext, GenerationStatus
-from app.providers.contracts.text import TextGenerateRequest
+from app.providers.contracts.text import TextGenerateRequest, TextMessage
 from app.providers.litellm_adapter import LiteLLMModelAdapter
 from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
 from app.providers.model_profiles.orm import ProductionModelProfile
@@ -50,10 +50,13 @@ async def test_text_model_port_runs_without_business_session_and_preserves_unkno
 
     port = CapabilityTextModel(_registry(handler))
     result = await port.generate(
-        request=TextGenerateRequest(prompt="Return a structured suggestion"),
+        request=TextGenerateRequest(
+            messages=[TextMessage(role="user", content="Return a structured suggestion")]
+        ),
         model_id=MODEL_ID,
-        context=ExecutionContext(trace_id="turn", operation_id="invocation:primary",
-                                 idempotency_key="invocation:primary"),
+        context=ExecutionContext(
+            trace_id="turn", operation_id="invocation:primary", idempotency_key="invocation:primary"
+        ),
     )
     assert result.status == GenerationStatus.SUBMIT_UNKNOWN
     assert len(calls) == 1
@@ -96,8 +99,9 @@ async def _seed(session: AsyncSession) -> tuple[User, Project, Scene, Shot, Shot
     await session.flush()
     from app.access.models import ProjectCreativeProfile
 
-    session.add(ProjectCreativeProfile(project_id=project.id, start_type="FREE",
-                                       director_autonomy="ASSIST"))
+    session.add(
+        ProjectCreativeProfile(project_id=project.id, start_type="FREE", director_autonomy="ASSIST")
+    )
     await session.flush()
     episode = Episode(project_id=project.id, episode_number=1, title="E1", synopsis="")
     session.add(episode)
@@ -260,9 +264,7 @@ async def test_same_model_uses_distinct_shot_context_and_persists_exact_evidence
     assert {turn.transport_record_id for turn in turns} == {"call-1", "call-2"}
     assert all(turn.token_usage == {"prompt_tokens": 20, "completion_tokens": 10} for turn in turns)
     assert all(turn.provider_cost == Decimal("0.00420000") for turn in turns)
-    invocations = list(
-        (await session.execute(select(DirectorInvocation))).scalars()
-    )
+    invocations = list((await session.execute(select(DirectorInvocation))).scalars())
     assert len(invocations) == 2
     assert {invocation.status for invocation in invocations} == {"completed"}
     assert await session.scalar(select(func.count()).select_from(NodeRun)) == 0
@@ -340,7 +342,9 @@ async def test_completed_invocation_recovers_interrupted_turn_without_second_mod
     turn_id = first.director_evidence.turn_id
 
     await session.execute(
-        update(DirectorTurn).where(DirectorTurn.id == turn_id).values(
+        update(DirectorTurn)
+        .where(DirectorTurn.id == turn_id)
+        .values(
             status="thinking",
             transport_status="prepared",
             transport_record_id=None,
@@ -466,9 +470,9 @@ async def test_schema_repair_is_same_model_and_bounded_to_one_attempt(
     invocations = list(
         (
             await session.execute(
-                select(DirectorInvocation).where(
-                    DirectorInvocation.turn_id == result.director_evidence.turn_id
-                ).order_by(DirectorInvocation.created_at)
+                select(DirectorInvocation)
+                .where(DirectorInvocation.turn_id == result.director_evidence.turn_id)
+                .order_by(DirectorInvocation.created_at)
             )
         ).scalars()
     )
@@ -643,31 +647,41 @@ async def test_rejected_context_new_request_key_never_calls_text_provider(sessio
 
     async def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
-        return httpx.Response(200, json={
-            "choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}],
-        })
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}],
+            },
+        )
 
     bridge = DirectorTextTransport(session, registry=_registry(handler))
     service = ShotDirectorSuggestionService(session, text_transport=bridge)
     result = await service.suggest(
-        project_id=project.id, actor=user, request=_request(scene, shot, key="rejection:one"),
+        project_id=project.id,
+        actor=user,
+        request=_request(scene, shot, key="rejection:one"),
     )
     turn = await session.get(DirectorTurn, result.director_evidence.turn_id)
     await DirectorTurnService(session).record_user_decision(
-        project_id=project.id, turn_id=turn.id, expected_revision=turn.revision,
-        decision="reject", accepted_operation_indices=[],
+        project_id=project.id,
+        turn_id=turn.id,
+        expected_revision=turn.revision,
+        decision="reject",
+        accepted_operation_indices=[],
     )
     await session.commit()
     with pytest.raises(ConflictError) as rejected:
         await service.suggest(
-            project_id=project.id, actor=user,
+            project_id=project.id,
+            actor=user,
             request=_request(scene, shot, key="rejection:new-key"),
         )
     assert rejected.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
     assert len(calls) == 1
     assert await session.scalar(select(func.count()).select_from(DirectorTurn)) == 1
     await service.suggest(
-        project_id=project.id, actor=user,
+        project_id=project.id,
+        actor=user,
         request=_request(scene, shot, key="rejection:changed", instruction="Changed goal"),
     )
     assert len(calls) == 2
@@ -678,29 +692,40 @@ async def test_manual_blocks_proactive_text_but_preserves_explicit_user_requests
     from app.access.models import ProjectCreativeProfile
 
     user, project, scene, shot, _other = await _seed(session)
-    profile = await session.scalar(select(ProjectCreativeProfile).where(
-        ProjectCreativeProfile.project_id == project.id))
+    profile = await session.scalar(
+        select(ProjectCreativeProfile).where(ProjectCreativeProfile.project_id == project.id)
+    )
     profile.director_autonomy = "MANUAL"
     await session.commit()
     calls = []
 
     async def handler(request):
         calls.append(request)
-        return httpx.Response(200, json={
-            "choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}],
-        })
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}],
+            },
+        )
 
     bridge = DirectorTextTransport(session, registry=_registry(handler))
     with pytest.raises(ValidationAppError) as disabled:
         await DirectorRecommendationService(session, text_transport=bridge).recommend(
-            project_id=project.id, actor=user,
-            request=DirectorRecommendationRequest(scene_id=scene.id, shot_id=shot.id,
-                expected_shot_version=shot.version, request_key="manual:proactive"),
+            project_id=project.id,
+            actor=user,
+            request=DirectorRecommendationRequest(
+                scene_id=scene.id,
+                shot_id=shot.id,
+                expected_shot_version=shot.version,
+                request_key="manual:proactive",
+            ),
         )
     assert disabled.value.details["code"] == "DIRECTOR_PROACTIVE_DISABLED"
     assert calls == []
     assert await session.scalar(select(func.count()).select_from(DirectorTurn)) == 0
     await ShotDirectorSuggestionService(session, text_transport=bridge).suggest(
-        project_id=project.id, actor=user, request=_request(scene, shot, key="manual:explicit"),
+        project_id=project.id,
+        actor=user,
+        request=_request(scene, shot, key="manual:explicit"),
     )
     assert len(calls) == 1

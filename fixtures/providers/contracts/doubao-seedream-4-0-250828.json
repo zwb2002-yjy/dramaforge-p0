@@ -32,41 +32,49 @@
     }
   },
   "manifest": {
-    "catalog_source": "official_static",
-    "display_name": "Seedream 4.0",
-    "documented_at": "2026-08-10",
-    "lifecycle": "active",
     "manifest_version": "2026-08-10",
-    "media_kind": "image",
+    "provider_type": "volcengine",
+    "protocol_profile": "ark_cn_v1",
     "model_id": "doubao-seedream-4-0-250828",
-    "model_revision": "v1",
+    "model_revision": "v3",
+    "media_kind": "image",
+    "display_name": "Seedream 4.0",
+    "lifecycle": "active",
+    "catalog_source": "official_static",
+    "documented_at": "2026-08-10",
     "operations": {
       "image.generate": {
+        "operation": "image.generate",
         "capabilities": [
           "image.t2i",
           "image.i2i"
         ],
-        "exclusive_groups": [],
-        "operation": "image.generate",
         "output_constraints": {
-          "response_format": "url",
           "size": "2048x2048",
+          "response_format": "url",
           "watermark": false
         },
         "reference_constraints": {
           "reference_image": {
-            "max": 1,
-            "min": 0
+            "min": 0,
+            "max": 1
           }
-        }
+        },
+        "exclusive_groups": []
       }
     },
     "option_schema": {
       "namespace": "",
       "options": {}
     },
-    "protocol_profile": "ark_cn_v1",
-    "provider_type": "volcengine"
+    "implementation_status": "contract_tested",
+    "evidence": {
+      "current_contract": {
+        "source_type": "contract_fixture",
+        "source_url": "repository:backend/tests/unit",
+        "checked_at": "2026-10-07"
+      }
+    }
   },
-  "manifest_hash": "8cec18e61bf09ca76399f6d49db38ca45a5b712c230973d16688b4ccbf19f77c"
+  "manifest_hash": "7a5e1e29fdbbb26a1a78f5aa8a2faf903ca094e89a387d0dbe389cfb5c423372"
 }

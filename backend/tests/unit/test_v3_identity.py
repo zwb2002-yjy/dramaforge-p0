@@ -9,15 +9,18 @@ surface and fails if a Kling/Flux label leaks into the model identity.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from app.providers.adapters_v2 import BridgeComponents, ProviderAdapterBridge
 from app.providers.bootstrap import build_v3_registry
 from app.providers.capabilities import Capability
-from app.providers.catalog_seed_data import seed_manifests_for
+from app.providers.catalog_loader import active_manifests_for
 from app.providers.contracts import ArtifactRef, ImageToVideoRequest, ResolvedArtifact
 from app.providers.manifest import (
     ModelCapabilityManifest,
     to_v3_model_manifest,
 )
+from app.providers.runtime import ResolvedReference
 
 
 def _frame() -> ResolvedArtifact:
@@ -45,7 +48,7 @@ class TestAgnesIdentity:
         assert all(m.manifest.provider_id not in {"kling", "flux"} for m in models)
 
     async def test_compiled_request_carries_agnes_identity(self) -> None:
-        seed = seed_manifests_for(provider_type="agnes")
+        seed = active_manifests_for(provider_type="agnes")
         manifest = ModelCapabilityManifest.model_validate(seed[1])
         v3 = to_v3_model_manifest(manifest, transport_profile_id="agnes-video-v1")
         from app.providers.agnes import AgnesVideoCompiler
@@ -67,7 +70,16 @@ class TestAgnesIdentity:
         result = await bridge.translate(
             Capability.VIDEO_IMAGE_TO_VIDEO,
             request,
-            {"first_frame": _frame()},
+            [
+                ResolvedReference(
+                    role="first_frame",
+                    artifact_id=UUID(_frame().artifact_id),
+                    content_url=_frame().signed_url,
+                    content_bytes=_frame().content_bytes,
+                    mime_type=_frame().mime_type,
+                    fingerprint=_frame().sha256,
+                )
+            ],
         )
         # the wire model field is the actual model id, not a flux/kling label
         assert result.native_request["model"] == "agnes-video-v2.0"

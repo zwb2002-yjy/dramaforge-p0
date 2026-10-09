@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header
@@ -18,6 +19,8 @@ from app.assets.from_artifact_service import (
 )
 from app.assets.models import (
     Asset,
+    AssetTag,
+    AssetTagLink,
     AssetVersion,
 )
 from app.assets.tag_service import AssetTagService
@@ -32,7 +35,8 @@ class AssetCreateBody(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     description: str = Field(default="", max_length=12000)
     metadata: dict[str, object] = Field(default_factory=dict)
-    status: str = Field(default="draft", pattern="^(draft|active|archived)$")
+    status: Literal["draft", "active", "recycled"] = "active"
+    tags: list[str] = Field(default_factory=list, max_length=40)
 
 
 class AssetUpdateBody(AssetCreateBody):
@@ -47,6 +51,7 @@ class AssetRead(BaseModel):
     description: str
     metadata: dict[str, object]
     status: str
+    tags: list[str]
     version: int
     created_at: datetime
     updated_at: datetime
@@ -65,7 +70,7 @@ class AssetVersionRead(BaseModel):
     created_at: datetime
 
 
-def _asset_read(asset: Asset) -> AssetRead:
+def _asset_read(asset: Asset, *, tags: list[str] | None = None) -> AssetRead:
     return AssetRead(
         id=asset.id,
         project_id=asset.project_id,
@@ -74,10 +79,23 @@ def _asset_read(asset: Asset) -> AssetRead:
         description=asset.description,
         metadata=dict(asset.metadata_json),
         status=asset.status,
+        tags=list(tags or []),
         version=asset.version,
         created_at=asset.created_at,
         updated_at=asset.updated_at,
     )
+
+
+async def _asset_tag_names(session: SessionDep, asset_id: UUID) -> list[str]:
+    rows = (
+        await session.execute(
+            select(AssetTag.name)
+            .join(AssetTagLink, AssetTagLink.tag_id == AssetTag.id)
+            .where(AssetTagLink.asset_id == asset_id)
+            .order_by(AssetTag.normalized_name)
+        )
+    ).scalars()
+    return list(rows)
 
 
 def _version_read(version: AssetVersion) -> AssetVersionRead:
@@ -114,7 +132,19 @@ async def list_project_assets(
         name=name,
         tags=tag_list,
     )
-    return [_asset_read(row) for row in rows]
+    asset_ids = [row.id for row in rows]
+    tag_rows = (
+        await session.execute(
+            select(AssetTagLink.asset_id, AssetTag.name)
+            .join(AssetTag, AssetTag.id == AssetTagLink.tag_id)
+            .where(AssetTagLink.asset_id.in_(asset_ids))
+            .order_by(AssetTag.normalized_name)
+        )
+    ).all() if asset_ids else []
+    tags_by_asset: dict[UUID, list[str]] = {asset_id: [] for asset_id in asset_ids}
+    for asset_id, tag_name in tag_rows:
+        tags_by_asset[asset_id].append(tag_name)
+    return [_asset_read(row, tags=tags_by_asset[row.id]) for row in rows]
 
 
 @router.post("/projects/{project_id}/assets", response_model=AssetRead, status_code=201)
@@ -137,21 +167,28 @@ async def create_project_asset(
     )
     session.add(asset)
     await session.flush()
-    session.add(
-        AssetVersion(
-            project_id=project_id,
-            asset_id=asset.id,
-            version_number=1,
-            kind=body.kind,
-            name=body.name,
-            description=body.description,
-            metadata_json=dict(body.metadata),
-            status=body.status,
-            created_by=user.id,
-        )
+    version = AssetVersion(
+        project_id=project_id,
+        asset_id=asset.id,
+        version_number=1,
+        kind=body.kind,
+        name=body.name,
+        description=body.description,
+        metadata_json=dict(body.metadata),
+        status="formal",
+        created_by=user.id,
+    )
+    session.add(version)
+    await session.flush()
+    asset.current_version_id = version.id
+    tags = await AssetTagService(session).set_asset_tags(
+        project_id=project_id,
+        asset_id=asset.id,
+        actor=user,
+        names=list(body.tags),
     )
     await session.commit()
-    return _asset_read(asset)
+    return _asset_read(asset, tags=[tag.name for tag in tags])
 
 
 @router.patch("/projects/{project_id}/assets/{asset_id}", response_model=AssetRead)
@@ -185,21 +222,41 @@ async def update_project_asset(
     asset.metadata_json = dict(body.metadata)
     asset.status = body.status
     asset.version = next_version
-    session.add(
-        AssetVersion(
-            project_id=project_id,
-            asset_id=asset.id,
-            version_number=next_version,
-            kind=body.kind,
-            name=body.name,
-            description=body.description,
-            metadata_json=dict(body.metadata),
-            status=body.status,
-            created_by=user.id,
+    current_formals = (
+        await session.execute(
+            select(AssetVersion)
+            .where(
+                AssetVersion.project_id == project_id,
+                AssetVersion.asset_id == asset.id,
+                AssetVersion.status == "formal",
+            )
+            .with_for_update()
         )
+    ).scalars().all()
+    for current in current_formals:
+        current.status = "historical"
+    version = AssetVersion(
+        project_id=project_id,
+        asset_id=asset.id,
+        version_number=next_version,
+        kind=body.kind,
+        name=body.name,
+        description=body.description,
+        metadata_json=dict(body.metadata),
+        status="formal",
+        created_by=user.id,
+    )
+    session.add(version)
+    await session.flush()
+    asset.current_version_id = version.id
+    tags = await AssetTagService(session).set_asset_tags(
+        project_id=project_id,
+        asset_id=asset.id,
+        actor=user,
+        names=list(body.tags),
     )
     await session.commit()
-    return _asset_read(asset)
+    return _asset_read(asset, tags=[tag.name for tag in tags])
 
 
 @router.get(
@@ -357,7 +414,7 @@ async def recycle_asset(
         project_id=project_id, asset_id=asset_id, actor=user
     )
     await session.commit()
-    return _asset_read(asset)
+    return _asset_read(asset, tags=await _asset_tag_names(session, asset.id))
 
 
 @router.post(
@@ -375,7 +432,7 @@ async def restore_asset(
         project_id=project_id, asset_id=asset_id, actor=user
     )
     await session.commit()
-    return _asset_read(asset)
+    return _asset_read(asset, tags=await _asset_tag_names(session, asset.id))
 
 
 @router.post(
@@ -412,7 +469,7 @@ async def create_asset_from_artifact(
         request_key=idempotency_key,
     )
     await session.commit()
-    return _asset_read(asset)
+    return _asset_read(asset, tags=await _asset_tag_names(session, asset.id))
 
 
 @router.get("/projects/{project_id}/assets/{asset_id}/card", response_model=AssetCardRead)

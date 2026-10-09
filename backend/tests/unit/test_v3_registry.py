@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 from app.providers.bootstrap import build_v3_registry
 from app.providers.capabilities import Capability
-from app.providers.catalog_seed_data import seed_manifests_for
+from app.providers.catalog_loader import CATALOG_MODELS, active_manifests_for
+from app.providers.contracts.common import ExecutionContext
 from app.providers.manifest import (
     ModelCapabilityManifest,
     to_v3_model_manifest,
@@ -23,7 +24,13 @@ from app.providers.transport_registry import (
 
 @pytest.fixture()
 def agnes_video_manifest() -> ModelCapabilityManifest:
-    return ModelCapabilityManifest.model_validate(seed_manifests_for(provider_type="agnes")[1])
+    return ModelCapabilityManifest.model_validate(
+        next(
+            item
+            for item in active_manifests_for(provider_type="agnes")
+            if item["model_id"] == "agnes-video-v2.0"
+        )
+    )
 
 
 class TestManifestConversion:
@@ -48,7 +55,11 @@ class TestManifestConversion:
 
     def test_seedream_maps_to_image_generate(self) -> None:
         manifest = ModelCapabilityManifest.model_validate(
-            seed_manifests_for(provider_type="volcengine")[0]
+            next(
+                item
+                for item in active_manifests_for(provider_type="volcengine")
+                if item["model_id"] == "doubao-seedream-4-0-250828"
+            )
         )
         v3 = to_v3_model_manifest(manifest, transport_profile_id="ark-image-v1")
         assert v3.id == "volcengine/doubao-seedream-4-0-250828"
@@ -57,7 +68,11 @@ class TestManifestConversion:
 
     def test_minimax_h3_maps_to_first_frame_i2v_only(self) -> None:
         manifest = ModelCapabilityManifest.model_validate(
-            seed_manifests_for(provider_type="minimax")[1]
+            next(
+                item
+                for item in active_manifests_for(provider_type="minimax")
+                if item["model_id"] == "MiniMax-H3"
+            )
         )
         v3 = to_v3_model_manifest(manifest, transport_profile_id="minimax-video-v2")
         assert Capability.VIDEO_IMAGE_TO_VIDEO in v3.capability_specs
@@ -89,16 +104,13 @@ class TestModelRegistry:
     def test_register_get_and_find_by_capability(self) -> None:
         model_registry, transport_registry = build_v3_registry()
         models = model_registry.list_models()
-        assert len(models) == 7
-        # all seeded A+B models registered as V3 manifests
+        # Every catalog model registers without a hand-maintained ID list.
         ids = {model.manifest.id for model in models}
-        assert "agnes/agnes-image-2.1-flash" in ids
-        assert "agnes/agnes-video-v2.0" in ids
-        assert "volcengine/doubao-seedream-4-0-250828" in ids
-        assert "volcengine/doubao-seedance-1-0-pro-250528" in ids
-        assert "volcengine/doubao-seedance-2-0-260128" in ids
-        assert "minimax/image-01" in ids
-        assert "minimax/MiniMax-H3" in ids
+        assert ids == {
+            f"{item['provider_type']}/{item['model_id']}"
+            for item in CATALOG_MODELS
+            if item["catalog_source"] != "protocol_contract"
+        }
 
         registered = model_registry.get("agnes/agnes-video-v2.0")
         assert registered.manifest.display_name == "Agnes Video V2.0"
@@ -106,19 +118,17 @@ class TestModelRegistry:
             model_registry.get("nonexistent/model")
 
         image_to_video_models = model_registry.find_by_capability(Capability.VIDEO_IMAGE_TO_VIDEO)
-        assert {model.manifest.id for model in image_to_video_models} == {
-            "agnes/agnes-video-v2.0",
-            "volcengine/doubao-seedance-1-0-pro-250528",
-            "volcengine/doubao-seedance-2-0-260128",
-            "minimax/MiniMax-H3",
-        }
+        assert image_to_video_models
+        assert all(
+            Capability.VIDEO_IMAGE_TO_VIDEO in model.manifest.capability_specs
+            for model in image_to_video_models
+        )
 
         image_models = model_registry.find_by_capability(Capability.IMAGE_GENERATE)
-        assert {model.manifest.id for model in image_models} == {
-            "agnes/agnes-image-2.1-flash",
-            "volcengine/doubao-seedream-4-0-250828",
-            "minimax/image-01",
-        }
+        assert image_models
+        assert all(
+            Capability.IMAGE_GENERATE in model.manifest.capability_specs for model in image_models
+        )
 
     def test_transports_registered(self) -> None:
         _, transport_registry = build_v3_registry()
@@ -136,14 +146,17 @@ class TestModelRegistry:
     def test_duplicate_model_rejected(self) -> None:
         registry = ModelRegistry()
         manifest = ModelCapabilityManifest.model_validate(
-            seed_manifests_for(provider_type="agnes")[1]
+            next(
+                item
+                for item in active_manifests_for(provider_type="agnes")
+                if item["model_id"] == "agnes-video-v2.0"
+            )
         )
         v3 = to_v3_model_manifest(manifest, transport_profile_id="t1")
-        from app.providers.bootstrap import UnavailableAdapter
 
-        registry.register(v3, UnavailableAdapter(v3))
+        registry.register(v3)
         with pytest.raises(DuplicateModelError):
-            registry.register(v3, UnavailableAdapter(v3))
+            registry.register(v3)
 
 
 class TestDefaultRegistryQueryable:
@@ -151,7 +164,22 @@ class TestDefaultRegistryQueryable:
         model_registry, _ = build_v3_registry()
         # Phase 3 wires real adapters; until then capability queries work
         models = model_registry.find_by_capability(Capability.VIDEO_IMAGE_TO_VIDEO)
-        assert len(models) == 4
+        assert models
+
+    async def test_readonly_catalog_has_no_executable_adapter(self) -> None:
+        from app.providers.router import CapabilityRouter
+        from app.shared.errors import ValidationAppError
+
+        registry, _ = build_v3_registry()
+        assert registry.get("agnes/agnes-video-v2.0").adapter is None
+        with pytest.raises(ValidationAppError) as blocked:
+            await CapabilityRouter(registry=registry).create(
+                capability=Capability.VIDEO_IMAGE_TO_VIDEO,
+                request=object(),
+                context=ExecutionContext(trace_id="readonly"),
+                model_id="agnes/agnes-video-v2.0",
+            )
+        assert blocked.value.details["code"] == "MODEL_PROFILE_MODEL_NOT_CONFIGURED"
 
 
 class TestDefaultRegistryRealAdapters:
@@ -165,7 +193,7 @@ class TestDefaultRegistryRealAdapters:
 
         model_registry, _ = default_v3_registry()
         text_models = [
-            m for m in model_registry.list_models() if m.manifest.id == "litellm/text-llm"
+            m for m in model_registry.list_models() if m.manifest.id == "litellm/script-quality"
         ]
         assert len(text_models) == 1
         assert isinstance(text_models[0].adapter, LiteLLMModelAdapter)

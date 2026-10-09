@@ -23,7 +23,7 @@ def identity_evidence_policy_snapshot() -> dict[str, object]:
         "required_evidence": [
             "canonical_binding",
             "generated_artifact",
-            "effective_request",
+            "effective_request_redacted",
             "human_review",
         ],
     }

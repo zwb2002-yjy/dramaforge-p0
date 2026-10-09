@@ -34,7 +34,7 @@ router = APIRouter(tags=["references"], dependencies=[Depends(require_selected_w
 
 class BindingCreate(BaseModel):
     stage: str = Field(default="both", pattern="^(image|video|both)$")
-    shot_experiment_id: UUID | None = None
+    experiment_branch_id: UUID | None = None
     asset_id: UUID | None = None
     asset_version_id: UUID | None = None
     artifact_id: UUID | None = None
@@ -51,7 +51,7 @@ class BindingCreate(BaseModel):
 class BindingUpdate(BaseModel):
     expected_version: int = Field(ge=1)
     stage: str | None = Field(default=None, pattern="^(image|video|both)$")
-    shot_experiment_id: UUID | None = None
+    experiment_branch_id: UUID | None = None
     asset_id: UUID | None = None
     asset_version_id: UUID | None = None
     artifact_id: UUID | None = None
@@ -69,7 +69,7 @@ class BindingRead(BaseModel):
     id: UUID
     project_id: UUID
     shot_id: UUID
-    shot_experiment_id: UUID | None
+    experiment_branch_id: UUID | None
     stage: str
     asset_id: UUID | None
     asset_version_id: UUID | None
@@ -99,7 +99,7 @@ def _binding_read(binding: ShotReferenceBinding) -> BindingRead:
         id=binding.id,
         project_id=binding.project_id,
         shot_id=binding.shot_id,
-        shot_experiment_id=binding.shot_experiment_id,
+        experiment_branch_id=binding.experiment_branch_id,
         stage=binding.stage,
         asset_id=binding.asset_id,
         asset_version_id=binding.asset_version_id,
@@ -151,13 +151,21 @@ async def _validate_binding_source_ownership(
     """
 
     if asset_id is not None:
-        asset = await session.scalar(
-            select(Asset.id).where(Asset.id == asset_id, Asset.project_id == project_id)
+        asset_status = await session.scalar(
+            select(Asset.status).where(Asset.id == asset_id, Asset.project_id == project_id)
         )
-        if asset is None:
+        if asset_status is None:
             raise ValidationAppError(
                 "reference asset does not belong to the current project",
                 details={"code": "REFERENCE_PROJECT_MISMATCH"},
+            )
+        # A recycled asset is retired from production. Binding it would put a
+        # discarded asset back into a generation input (and the picker would keep
+        # offering it), so the write fails closed instead.
+        if asset_status == "recycled":
+            raise ValidationAppError(
+                "reference asset is recycled",
+                details={"code": "REFERENCE_ASSET_RECYCLED"},
             )
     if asset_version_id is not None:
         version = await session.scalar(
@@ -189,9 +197,7 @@ class ShotReferenceService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def _require_project_shot(
-        self, *, project_id: UUID, shot_id: UUID, actor: User
-    ) -> None:
+    async def _require_project_shot(self, *, project_id: UUID, shot_id: UUID, actor: User) -> None:
         await ProjectService(self._session).get_project_for_owner(
             project_id=project_id, actor=actor
         )
@@ -217,9 +223,7 @@ class ShotReferenceService:
         )
         if for_update:
             query = query.with_for_update()
-        binding = (
-            await self._session.execute(query)
-        ).scalar_one_or_none()
+        binding = (await self._session.execute(query)).scalar_one_or_none()
         if binding is None:
             raise NotFoundError("reference binding not found")
         return binding
@@ -258,7 +262,7 @@ class ShotReferenceService:
         binding = ShotReferenceBinding(
             project_id=project_id,
             shot_id=shot_id,
-            shot_experiment_id=body.shot_experiment_id,
+            experiment_branch_id=body.experiment_branch_id,
             stage=body.stage,
             asset_id=body.asset_id,
             asset_version_id=body.asset_version_id,
@@ -279,15 +283,19 @@ class ShotReferenceService:
     ) -> list[ShotReferenceBinding]:
         await self._require_project_shot(project_id=project_id, shot_id=shot_id, actor=actor)
         rows = (
-            await self._session.execute(
-                select(ShotReferenceBinding)
-                .where(
-                    ShotReferenceBinding.project_id == project_id,
-                    ShotReferenceBinding.shot_id == shot_id,
+            (
+                await self._session.execute(
+                    select(ShotReferenceBinding)
+                    .where(
+                        ShotReferenceBinding.project_id == project_id,
+                        ShotReferenceBinding.shot_id == shot_id,
+                    )
+                    .order_by(ShotReferenceBinding.sort_order, ShotReferenceBinding.created_at)
                 )
-                .order_by(ShotReferenceBinding.sort_order, ShotReferenceBinding.created_at)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return list(rows)
 
     async def update_binding(
@@ -314,13 +322,9 @@ class ShotReferenceService:
             )
         new_asset_id = body.asset_id if body.asset_id is not None else binding.asset_id
         new_version_id = (
-            body.asset_version_id
-            if body.asset_version_id is not None
-            else binding.asset_version_id
+            body.asset_version_id if body.asset_version_id is not None else binding.asset_version_id
         )
-        new_artifact_id = (
-            body.artifact_id if body.artifact_id is not None else binding.artifact_id
-        )
+        new_artifact_id = body.artifact_id if body.artifact_id is not None else binding.artifact_id
         new_mode = (
             body.resolution_mode if body.resolution_mode is not None else binding.resolution_mode
         )
@@ -349,8 +353,8 @@ class ShotReferenceService:
         binding.resolution_mode = new_mode
         binding.stage = new_stage
         binding.purpose = new_purpose
-        if body.shot_experiment_id is not None:
-            binding.shot_experiment_id = body.shot_experiment_id
+        if body.experiment_branch_id is not None:
+            binding.experiment_branch_id = body.experiment_branch_id
         if body.label is not None:
             binding.label = body.label
         if body.sort_order is not None:
@@ -362,15 +366,11 @@ class ShotReferenceService:
         await self._session.flush()
         return binding
 
-    async def delete_binding(
-        self, *, project_id: UUID, binding_id: UUID, actor: User
-    ) -> None:
+    async def delete_binding(self, *, project_id: UUID, binding_id: UUID, actor: User) -> None:
         await ProjectService(self._session).get_project_for_owner(
             project_id=project_id, actor=actor
         )
-        binding = await self._get_binding(
-            project_id=project_id, binding_id=binding_id, actor=actor
-        )
+        binding = await self._get_binding(project_id=project_id, binding_id=binding_id, actor=actor)
         await self._session.delete(binding)
         await self._session.flush()
 
@@ -438,12 +438,16 @@ class ShotReferenceService:
         if version is None:
             return []
         refs = (
-            await self._session.execute(
-                select(AssetVersionReference)
-                .where(AssetVersionReference.asset_version_id == version.id)
-                .order_by(AssetVersionReference.sort_order, AssetVersionReference.label)
+            (
+                await self._session.execute(
+                    select(AssetVersionReference)
+                    .where(AssetVersionReference.asset_version_id == version.id)
+                    .order_by(AssetVersionReference.sort_order, AssetVersionReference.label)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         return [
             ResolvedReferenceRead(
                 purpose=binding.purpose,

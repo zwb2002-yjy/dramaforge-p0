@@ -1,25 +1,20 @@
-"""Unified Generation API (V3 spec §58).
+"""Read-only Generation catalog API (V3 spec §58).
 
-Read surface (capabilities / models / model manifest) comes from the V3 model
-registry; generation creation is NodeRun-backed through the existing engine
-(see :mod:`app.providers.generation_service`). Routes are project-scoped per the
-repo convention (mirrors ``model-candidates`` / ``characters``). The API never
-exposes provider headers, base URLs, raw payloads or credentials (spec §24/§64).
+Capabilities / models / model manifest come from the V3 model registry. Media
+generation has exactly one product writer — the workbench execution path
+(execution-plan -> executions -> NodeRun) — so this module deliberately has no
+create/get/cancel product surface. The API never exposes provider headers, base
+URLs, raw payloads or credentials (spec §24/§64).
 """
 
 from __future__ import annotations
 
-from typing import Any
-from uuid import UUID
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Header, status
-from pydantic import BaseModel, Field
-from sqlalchemy import select
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
-from app.access.projects import ProjectService
 from app.api.deps import (
-    CsrfDep,
-    CurrentUser,
     SelectedWorkspace,
     SessionDep,
     SettingsDep,
@@ -27,11 +22,8 @@ from app.api.deps import (
 )
 from app.providers.bootstrap import default_v3_registry
 from app.providers.capabilities import Capability
-from app.providers.generation_service import GenerationService
-from app.providers.manifest import ModelManifest
-from app.providers.models import ProviderConnection
+from app.providers.manifest import CapabilitySpec, ModelManifest
 from app.providers.registry import ModelRegistry
-from app.providers.router import CapabilityRouter
 from app.shared.errors import NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["generations"])
@@ -52,6 +44,11 @@ class ModelRead(BaseModel):
     configured: bool
     available: bool
     capabilities: list[str]
+    # ``workspace``: a model behind one of this workspace's provider connections
+    # (a media binding or a discovered text alias). ``installed``: process-level
+    # catalog or gateway configuration. Normal settings surfaces offer only
+    # workspace models so one model never appears under two identities.
+    source: Literal["workspace", "installed"]
 
 
 class ManifestRead(BaseModel):
@@ -61,40 +58,7 @@ class ManifestRead(BaseModel):
     display_name: str
     execution_mode: str
     supports_cancel: bool
-    capability_specs: dict[str, Any]
-
-
-class GenerationCreateBody(BaseModel):
-    capability: str = Field(min_length=1)
-    model_id: str | None = None
-    slot: str | None = None
-    input: dict[str, Any] = Field(default_factory=dict)
-    options: dict[str, Any] = Field(default_factory=dict)
-    native_options: dict[str, Any] = Field(default_factory=dict)
-
-
-class GenerationCreateResponse(BaseModel):
-    operation_id: UUID
-    status: str
-    requested_capability: str
-    requested_model: str | None
-
-
-class ProviderOperationRead(BaseModel):
-    provider_operation_id: UUID | None
-    provider: str | None
-    model: str | None
-    remote_task_id: str | None
-
-
-class GenerationOperationRead(BaseModel):
-    operation_id: UUID
-    status: str
-    requested_capability: str
-    requested_model: str | None
-    error_code: str | None
-    result_artifact_id: UUID | None
-    provider_operation: ProviderOperationRead
+    capability_specs: dict[str, CapabilitySpec]
 
 
 _CAPABILITY_DISPLAY_NAMES: dict[Capability, str] = {
@@ -103,9 +67,9 @@ _CAPABILITY_DISPLAY_NAMES: dict[Capability, str] = {
     Capability.IMAGE_EDIT: "图片编辑",
     Capability.VIDEO_TEXT_TO_VIDEO: "文生视频",
     Capability.VIDEO_IMAGE_TO_VIDEO: "图生视频",
+    Capability.VIDEO_LAST_FRAME_TO_VIDEO: "尾帧视频",
     Capability.VIDEO_FIRST_LAST_FRAME: "首尾帧视频",
     Capability.VIDEO_REFERENCE_TO_VIDEO: "多参考视频",
-    Capability.AUDIO_TTS: "语音合成",
 }
 
 
@@ -134,12 +98,19 @@ async def list_capabilities() -> list[CapabilityRead]:
     dependencies=[Depends(require_selected_workspace)],
 )
 async def list_models(
+    workspace: SelectedWorkspace,
+    session: SessionDep,
+    settings: SettingsDep,
     capability: str | None = None,
-    workspace: SelectedWorkspace = None,  # type: ignore[assignment]
-    session: SessionDep = None,  # type: ignore[assignment]
-    settings: SettingsDep = None,  # type: ignore[assignment]
 ) -> list[ModelRead]:
     registry = _registry()
+    from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
+
+    registry = await workspace_model_registry(
+        session,
+        workspace_id=workspace.id,
+        base_registry=registry,
+    )
     if capability is not None:
         try:
             selected = registry.find_by_capability(Capability(capability))
@@ -150,27 +121,10 @@ async def list_models(
             ) from exc
     else:
         selected = registry.list_models()
-    configured: set[str] = set()
-    if session is not None and workspace is not None:
-        rows = list(
-            (
-                await session.execute(
-                    select(ProviderConnection).where(
-                        ProviderConnection.workspace_id == workspace.id,
-                        ProviderConnection.enabled.is_(True),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        configured = {row.provider_type for row in rows}
     # The LiteLLM gateway is process-level configuration, not a workspace
     # ProviderConnection. Keep this read surface aligned with ModelProfile reads.
     litellm_configured = bool(
-        settings is not None
-        and settings.litellm_gateway_url.strip()
-        and settings.litellm_api_key.strip()
+        settings.litellm_gateway_url.strip() and settings.litellm_api_key.strip()
     )
     return [
         ModelRead(
@@ -179,16 +133,23 @@ async def list_models(
             display_name=model.manifest.display_name,
             enabled=True,
             configured=(
-                litellm_configured
+                (bool(model.manifest.metadata.get("connection_id")) or litellm_configured)
                 if model.manifest.provider_id == "litellm"
-                else model.manifest.provider_id in configured
+                else bool(model.manifest.metadata.get("binding_id"))
             ),
             available=(
-                litellm_configured
+                (bool(model.manifest.metadata.get("connection_id")) or litellm_configured)
                 if model.manifest.provider_id == "litellm"
-                else model.manifest.provider_id in configured
+                else bool(model.manifest.metadata.get("binding_id"))
+                and bool(model.manifest.metadata.get("account_verified"))
             ),
             capabilities=sorted(str(cap) for cap in model.manifest.capability_specs),
+            source=(
+                "workspace"
+                if model.manifest.metadata.get("connection_id")
+                or model.manifest.metadata.get("binding_id")
+                else "installed"
+            ),
         )
         for model in selected
     ]
@@ -199,8 +160,19 @@ async def list_models(
     response_model=ManifestRead,
     dependencies=[Depends(require_selected_workspace)],
 )
-async def get_model_manifest(model_id: str) -> ManifestRead:
-    model = _registry().get_or_none(model_id)
+async def get_model_manifest(
+    model_id: str,
+    workspace: SelectedWorkspace,
+    session: SessionDep,
+) -> ManifestRead:
+    from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
+
+    registry = await workspace_model_registry(
+        session,
+        workspace_id=workspace.id,
+        base_registry=_registry(),
+    )
+    model = registry.get_or_none(model_id)
     if model is None:
         raise NotFoundError("model not found")
     manifest: ModelManifest = model.manifest
@@ -212,133 +184,6 @@ async def get_model_manifest(model_id: str) -> ManifestRead:
         execution_mode=str(manifest.execution_mode),
         supports_cancel=manifest.supports_cancel,
         capability_specs={
-            str(capability): spec.model_dump(mode="json")
-            for capability, spec in manifest.capability_specs.items()
+            str(capability): spec for capability, spec in manifest.capability_specs.items()
         },
-    )
-
-
-@router.post(
-    "/projects/{project_id}/generations",
-    response_model=GenerationCreateResponse,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_selected_workspace)],
-)
-async def create_generation(
-    project_id: UUID,
-    body: GenerationCreateBody,
-    user: CurrentUser,
-    session: SessionDep,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-) -> GenerationCreateResponse:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
-    try:
-        capability = Capability(body.capability)
-    except ValueError as exc:
-        raise ValidationAppError(
-            f"unknown capability: {body.capability}",
-            details={"code": "UNKNOWN_CAPABILITY"},
-        ) from exc
-    service = GenerationService(session, CapabilityRouter(registry=_registry()))
-    run = await service.create_generation(
-        project=project,
-        actor=user,
-        capability=capability,
-        model_id=body.model_id,
-        slot=body.slot,
-        input_data=body.input,
-        options=body.options,
-        native_options=body.native_options,
-        idempotency_key=idempotency_key,
-    )
-    await service.enqueue(run)
-    await session.commit()
-    snapshot = dict(run.input_snapshot or {})
-    generation = snapshot.get("generation") or {}
-    resolved_model = None
-    if isinstance(generation, dict):
-        resolved_model = (
-            str(generation["requested_model"]) if generation.get("requested_model") else None
-        )
-    return GenerationCreateResponse(
-        operation_id=run.id,
-        status=run.status,
-        requested_capability=body.capability,
-        requested_model=resolved_model,
-    )
-
-
-@router.get(
-    "/projects/{project_id}/generations/{operation_id}",
-    response_model=GenerationOperationRead,
-    dependencies=[Depends(require_selected_workspace)],
-)
-async def get_generation(
-    project_id: UUID,
-    operation_id: UUID,
-    user: CurrentUser,
-    session: SessionDep,
-) -> GenerationOperationRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
-    service = GenerationService(session, CapabilityRouter(registry=_registry()))
-    run = await service.get_generation(project=project, operation_id=operation_id)
-    return await _read_operation(session, run)
-
-
-@router.post(
-    "/projects/{project_id}/generations/{operation_id}/cancel",
-    response_model=GenerationOperationRead,
-    dependencies=[Depends(require_selected_workspace)],
-)
-async def cancel_generation(
-    project_id: UUID,
-    operation_id: UUID,
-    user: CurrentUser,
-    session: SessionDep,
-    _: CsrfDep,
-) -> GenerationOperationRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
-    service = GenerationService(session, CapabilityRouter(registry=_registry()))
-    run = await service.cancel_generation(project=project, operation_id=operation_id)
-    response = await _read_operation(session, run)
-    await session.commit()
-    return response
-
-
-async def _read_operation(session: Any, run: Any) -> GenerationOperationRead:
-    from app.execution.models import ProviderOperation
-
-    op = await session.scalar(
-        select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
-    )
-    snapshot = dict(run.input_snapshot or {})
-    generation = snapshot.get("generation") or {}
-    requested_capability = (
-        str(generation.get("capability") or "") if isinstance(generation, dict) else ""
-    )
-    requested_model = None
-    if isinstance(generation, dict):
-        requested_model = (
-            str(generation["requested_model"]) if generation.get("requested_model") else None
-        )
-    provider_op = ProviderOperationRead(
-        provider_operation_id=op.id if op is not None else None,
-        provider=op.actual_provider if op is not None else None,
-        model=op.actual_model if op is not None else None,
-        remote_task_id=op.provider_operation_id if op is not None else None,
-    )
-    return GenerationOperationRead(
-        operation_id=run.id,
-        status=run.status,
-        requested_capability=requested_capability,
-        requested_model=requested_model,
-        error_code=run.error_code,
-        result_artifact_id=run.result_artifact_id,
-        provider_operation=provider_op,
     )

@@ -1,8 +1,21 @@
+import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SceneStoryboardWall } from "../../src/features/scenes/SceneStoryboardWall";
+
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({
+    to,
+    params,
+    children,
+  }: {
+    to: string;
+    params: { projectId: string };
+    children: ReactNode;
+  }) => <a href={to.replace("$projectId", params.projectId)}>{children}</a>,
+}));
 
 function json(body: unknown, status = 200) {
   return Promise.resolve(
@@ -55,6 +68,21 @@ function mockBackend() {
         },
       ]);
     }
+    if (url.endsWith("/workspace") && method === "GET") {
+      const count = url.includes("scene-1") ? 2 : 1;
+      return json({
+        shots: Array.from({ length: count }, (_, index) => ({
+          id: "shot-" + index,
+          shot_number: index + 1,
+          shot_type: "wide",
+          visual_description: "Test shot",
+          dialogue: "",
+          duration_seconds: "3",
+          formal_keyframe_artifact_id: url.includes("scene-1") && index === 0 ? "frame-1" : null,
+          formal_video_artifact_id: null,
+        })),
+      });
+    }
     if (url.includes("/copy") && method === "POST") {
       return json({ id: "scene-3" }, 201);
     }
@@ -96,15 +124,15 @@ describe("SceneStoryboardWall", () => {
     );
 
     expect(screen.getByTestId("scene-wall-loading")).toHaveTextContent("正在读取场景");
-    expect(
-      screen.queryByText("暂无场景。导入剧本后会在这里生成故事板墙。"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("先写下你的故事")).not.toBeInTheDocument();
 
     resolveFetch?.(await json([]));
-    expect(
-      await screen.findByText("暂无场景。导入剧本后会在这里生成故事板墙。"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("先写下你的故事")).toBeInTheDocument();
     expect(screen.queryByTestId("scene-wall-loading")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "去写剧本" })).toHaveAttribute(
+      "href",
+      "/projects/project-1/script",
+    );
   });
 
   it("copies a scene on demand", async () => {

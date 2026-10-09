@@ -1,7 +1,7 @@
 # DOMAIN_VOCABULARY — 术语唯一解
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Date: 2026-09-15 / Base: dev 5ea45d6 / Alembic head: 20260910_0066
+Updated: 2026-10-08；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 
 本文件是 DramaForge 的**唯一词典**。任何模块、PR、Review、文档只能使用这里的词。
 
@@ -34,14 +34,37 @@ Date: 2026-09-15 / Base: dev 5ea45d6 / Alembic head: 20260910_0066
 | **AssetVersionReference** | Shot/Production 对某个 AssetVersion 的显式身份引用——**唯一身份引用源**，不存在 Character/CharacterReference 兼容层 | `assets/models.py::AssetVersionReference` |
 | **Candidate** | 生产出来但未被用户选定的结果。**没有 Candidate 表**：候选直接从 NodeRun + Artifact 派生 | `production/formal_selection.py::list_formal_candidates` |
 | **Formal** | 用户显式确认后的正式结果。Keyframe 与 Video 各记录一个正式 Artifact 引用 | `production/formal_selection.py::set_formal_keyframe` / `set_formal_video` / `require_formal_keyframe`；列为 `Shot.formal_keyframe_artifact_id`、`Shot.formal_video_artifact_id` |
-| **Experiment** | 隔离的 Shot 实验分支与采纳；**复用同一图引擎，不是第二条生产链** | `production/models.py::ExperimentBranch`、`production/models.py::ProductionExperiment`、`production/models.py::ShotExperiment`、`production/experiment_service.py` |
+| **Experiment** | 隔离的 Shot 实验分支与采纳；**复用同一图引擎，不是第二条生产链** | `production/models.py::ExperimentBranch`、`production/experiment_service.py` |
 | **Review** | 对生产结果的标注与决策；只读生产事实、只写评审事实 | `delivery/models.py::ReviewAnnotation`、`production/service.py` |
 | **Repair** | 有证据的显式修复计划，绝不静默重跑 | `production/repair_service.py` |
 | **EditSession** | 剪辑会话及其 timeline 版本（成片领域） | `editing/models.py::EditSession`、`editing/timeline_builder.py` |
 | **FinalFilm** | 绑定 timeline 版本渲染出的成片交付（MP4 + SRT）。**不是独立持久化实体**，是 `final-film-v1` ProductionGraph 的渲染结果读模型 | `production/final_film.py`（`FinalFilmRead`、`queue_final_film_render`）、`production/timeline_renderer.py`、`production/timeline_subtitles.py` |
+| **OpenCut** | 剪辑时间线的开放清单/交换格式能力：把 EditSession timeline 投影为可检视清单，**不是第二条剪辑主链或独立 Runtime** | `api/v1/opencut.py`、`editing` 相关投影 |
 | **Export** | 对外导出记录与条目 | `delivery/models.py::Export`、`delivery/models.py::ExportItem` |
+| **Delivery** | 交付域：人工审片决定、导出与交付读模型（Review/Delivery）。**不是独立主链终点之外的第二产品路径**；Final Film 经 Export 完成交付 | `delivery/models.py`（`ReviewAnnotation`、`HumanReviewDecision`、`Export`、`ExportItem`） |
+| **Resonance** | 前端表现层的受控视觉例外（共鸣舞台），**不是产品实体或第二主链**；仅允许在既定局部范围内偏离全局 Visual System | 见 [frontend/design/README.md](../frontend/design/README.md) §5.5 |
 
 ---
+
+### 界面入口与导航
+
+界面入口与制作导航使用下列显示名称，不改变产品实体或业务路由：
+
+| 显示名称 | 含义 / 既有地址 | 前端代码锚点 |
+|---|---|---|
+| 我的项目 | 全局唯一项目列表 `/`；创建、查找、切换当前空间项目 | `routes/index.tsx` |
+| 进入工作台 | 卡片唯一主动作 `/projects/:id`；按本项目导航偏好恢复，不推断业务进度 | `routes/projects.$projectId.tsx` |
+| 项目导航 | 项目顶栏的侧栏/抽屉开关 | `components/workstation/ProjectWorkspaceShell.tsx` |
+| 项目总览 | `/projects/:id/production` | `components/workstation/projectNavigation.ts` |
+| 故事剧本 | `/projects/:id/script` | 同上 |
+| 角色与素材 | `/projects/:id/assets` | 同上 |
+| 分镜制作 | `/projects/:id/scenes` 及具体场景；生成关键帧/视频仍是独立业务操作 | 同上 |
+| 审片确认 | `/projects/:id/review` | 同上 |
+| 剪辑成片 | `/projects/:id/edit` | 同上 |
+| 最近打开 | 当前空间中匹配单个记忆项目 ID 的筛选；不是多条历史记录 | `lib/navigationPreferences.ts` |
+
+本地项目路径、服务器 `workspace_state.last_view` 均为导航偏好；Project `stage` 是业务事实，
+不得拼接成导航地址。模型就绪提示复用目录与工作空间默认绑定，不声明实际生成成功。
 
 ## 二、Creative Layer
 
@@ -114,6 +137,7 @@ explicit user value > accepted proposal > project override > pack default
 | **Artifact** | 不可变产物及其血缘 | `execution/models.py::Artifact`、`execution/artifact_lineage.py` |
 | **Outbox** | 事务性事件外发与死信 | `events/`、`workers/dispatcher.py` |
 | **WorkbenchExecutionPlan** | 冻结的执行计划：模型身份、引用编译、阶段与节点契约在提交前被显式冻结 | `production/execution_plan.py::WorkbenchExecutionPlan` |
+| **VoiceExecutionSpec** | 冻结的配音引擎、音色、语速与实现版本；与媒体/文本模型槽分开，失败不自动换引擎 | `assets/voice.py`、`providers/voice_config.py`、`providers/voice_runtime.py` |
 | **ShotHumanLock** | Shot 级人工锁，防并发执行冲突 | `execution/shot_locks.py` |
 | **Production Planner** | Production Runtime 内部逻辑角色：由 CreativeIntent + 现有 Artifact + Formal 状态 + ModelCapability + 修改范围推导**最小** ProductionGraph。它不负责创意 `[部分落地：`production/execution_plan.py` 冻结阶段契约；完整最小重算规划器尚未独立成形]` | `production/execution_plan.py`、`production/workbench_execution.py` |
 
@@ -130,6 +154,12 @@ explicit user value > accepted proposal > project override > pack default
 | **ProviderConnection** | 用户 BYOK 连接及其修订 | `providers/models.py::ProviderConnection`、`connection_service.py` |
 | **EffectiveProviderRequest** | CreativeIntent + ModelCapability 编译后的最终 Provider 请求 | `providers/` compiler/runtime（`unified-v1`） |
 | **ArtifactReferenceToken** | 提供给 Provider 的临时引用令牌（不泄露凭据） | `providers/models.py::ArtifactReferenceToken`、`reference_delivery.py` |
+| **InputContractSpec** | 一个模型 operation 的输入槽、基数、素材元数据与参数约束；实际素材须唯一匹配合同 | `providers/manifest.py`、`capability_resolver.py` |
+| **ProductCapabilityPolicy** | 当前编译调用显式传入的产品开放子集；不能由供应商声明或 LLM 自行放宽 | `providers/capability_resolver.py` |
+| **ProviderAvailabilityEvidence / ProviderModelAvailability** | 前者是具体模型、连接/凭证 revision 的不可变证据；后者是独立当前投影；不等于静态支持或质量认证 | `providers/availability_models.py`、`availability_projection.py` |
+| **BindingModelId** | `binding:<UUID>`，模型方案精确指向一条连接的媒体 Binding；不是显示名或供应商默认模型 | `providers/model_resolution.py` |
+| **ConnectionTextModelId** | `litellm/<connection-UUID>/<remote-id>`，连接身份与 wire model 分离，不覆盖部署逻辑 alias | `providers/litellm_gateway/workspace_registry.py` |
+| **ResolvedGenerationPlan** | 技术能力匹配的只读结果；不等于生产命令、用户授权或 WorkbenchExecutionPlan | `providers/capability_resolver.py` |
 
 ---
 
@@ -162,6 +192,6 @@ explicit user value > accepted proposal > project override > pack default
 
 | 词 | 现状 | 处置 |
 |---|---|---|
-| `Experiment`（`ExperimentBranch` / `ProductionExperiment` / `ShotExperiment`） | 三个类名并存，语义分层合理但命名易混 | KEEP，但必须在文档中固定为"Experiment = 隔离的 Shot 分支" |
+| `Experiment`（`ExperimentBranch`） | 唯一当前实验分支；`ProductionExperiment` / `ShotExperiment` 为历史持久记录 | 旧 ORM 留存数据，不再拥有运行时创建、上下文或采用入口 |
 | `Node` 与 `GraphNode` | `Node` 是概念，`GraphNode` 是持久化实例 | KEEP，成对使用 |
 | `Workflow` | 仅存在于 `director/workflows/`，指"镜头生产模板目录" | RENAME/MERGE，见映射文档 |

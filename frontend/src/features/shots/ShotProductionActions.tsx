@@ -1,11 +1,24 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
+import { Button, Disclosure, Field, Select } from "../../components/ui";
+
 import { queryKeys } from "../../lib/queryKeys";
-import { ApiError } from "../../lib/api";
+import { ApiError, getExecutionModelPreflight, listModels } from "../../lib/api";
+import {
+  capabilityGapReason,
+  capabilityGapSeverityLabel,
+  executionModelLabel,
+  referenceDeliveryLabel,
+} from "../../lib/executionPlanLabels";
 import { getSelectedWorkspaceId } from "../../lib/navigationPreferences";
+import { executionModelBlockerLabel } from "../../lib/modelResolutionLabels";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
-import { activeStageStatus, stageOutcomeUnknown } from "../production/sceneRunState";
+import {
+  activeStageStatus,
+  stageOutcomeUnknown,
+  stageQueueEstimate,
+} from "../production/sceneRunState";
 import { fetchDirectorCapabilities } from "../director/api";
 import {
   delegateShotExecutionToDirector,
@@ -21,6 +34,14 @@ import {
   type ShotExecutionReference,
   type ShotLite,
 } from "./api";
+import {
+  NEXT_ACTION_BLOCKER_LABEL,
+  VIDEO_MODE_LABEL,
+  defaultVideoMode,
+  shotNextAction,
+  type ShotVideoMode,
+} from "./shotNextAction";
+import { isConfirmableShotCandidate, type ShotCandidate } from "./shotCandidates";
 import {
   clearProductionOperation,
   productionOperationScope,
@@ -39,12 +60,22 @@ type ShotProductionActionsProps = {
   trace?: unknown[];
   onExecuted?: (result: ShotExecutionRead) => void | Promise<void>;
   onDirectorDelegated?: () => void;
+  onOpenDetails?: () => void;
+  /** Saves the selected Shot design; the primary action when it is dirty. */
+  onSave?: () => void;
+  saving?: boolean;
+  /** Parsed candidates of this Shot; drive the "检查候选" primary action. */
+  candidates?: ShotCandidate[];
+  onReviewCandidates?: () => void;
+  /** Open model settings in a drawer without leaving the canvas. */
+  onOpenModelSettings?: () => void;
 };
 
 type ActionFeedback = {
   kind: "success" | "error" | "plan";
   stage: ShotExecutionStage;
   message: string;
+  nodeRunId?: string;
 };
 
 type PrepareOutcome = {
@@ -55,6 +86,12 @@ type PrepareOutcome = {
 
 const STAGE_LABEL: Record<ShotExecutionStage, string> = {
   image_keyframe: "关键帧",
+  video: "视频",
+};
+
+/** Creator-facing stage nouns: a keyframe is "画面" on the shot surface. */
+const STAGE_NOUN: Record<ShotExecutionStage, string> = {
+  image_keyframe: "画面",
   video: "视频",
 };
 
@@ -140,18 +177,73 @@ export function ShotProductionActions({
   trace = [],
   onExecuted,
   onDirectorDelegated,
+  onOpenDetails,
+  onSave,
+  saving = false,
+  candidates = [],
+  onReviewCandidates,
+  onOpenModelSettings,
 }: ShotProductionActionsProps) {
   const queryClient = useQueryClient();
   const delegationDecisionIds = useRef(new Map<string, string>());
+  const lastFrameCount = references.filter(
+    (reference) => reference.purpose === "last_frame",
+  ).length;
+  // The mode follows saved facts until the creator picks one explicitly.
+  const [explicitMode, setExplicitMode] = useState<ShotVideoMode | null>(null);
+  const videoMode =
+    explicitMode ??
+    defaultVideoMode({
+      hasFormalKeyframe: Boolean(shot.formal_keyframe_artifact_id),
+      lastFrameCount,
+    });
+  const pendingCandidates = (stage: ShotExecutionStage) =>
+    candidates.filter(
+      (candidate) =>
+        candidate.stage === stage &&
+        isConfirmableShotCandidate(candidate) &&
+        candidate.reviewDecision !== "rejected",
+    ).length;
+  const referenceVideoCount = references.filter((reference) =>
+    [
+      "identity",
+      "clothing",
+      "pose",
+      "style",
+      "scene_layout",
+      "scene_lighting",
+      "generic_reference",
+      "action",
+      "camera_language",
+      "audio_rhythm",
+    ].includes(reference.purpose),
+  ).length;
   // Deployment-level engine facts. A failed read must not hide the manual path:
   // manual generation never depends on the Director runtime.
   const capabilities = useQuery({
     queryKey: queryKeys.director.capabilities(projectId),
     queryFn: () => fetchDirectorCapabilities(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
     retry: false,
   });
   const directorCapabilities = capabilities.data ?? null;
+  // Display names for execution models come from the backend catalogue; the raw
+  // `provider/model` id is contract data and never rendered on this surface.
+  const models = useQuery({
+    queryKey: queryKeys.model.catalog(),
+    queryFn: () => listModels(),
+    enabled: Boolean(projectId),
+    retry: false,
+  });
+  const modelPreflight = useQuery({
+    queryKey:
+      videoMode === "first_frame"
+        ? queryKeys.model.executionPreflight(projectId)
+        : [...queryKeys.model.executionPreflight(projectId), videoMode],
+    queryFn: () => getExecutionModelPreflight(projectId, videoMode),
+    enabled: Boolean(projectId),
+    retry: false,
+  });
   // Only an explicit `runtime_turns_available === false` closes the AUTO entry
   // point. A failed, in-flight or malformed read must not disable it: the server
   // re-validates every submission anyway, and a read model must never remove a
@@ -169,6 +261,7 @@ export function ShotProductionActions({
     setDisplayedPlan(null);
     setPendingApproximation(null);
     setPlanFailure(null);
+    setExplicitMode(null);
   }, [shot.id]);
 
   /**
@@ -193,7 +286,12 @@ export function ShotProductionActions({
           if (TERMINAL_EXECUTION_STATUSES.has(receipt.status)) {
             clearProductionOperation(scope);
           }
-          setFeedback({ kind: "success", stage, message: receipt.status });
+          setFeedback({
+            kind: "success",
+            stage,
+            message: receipt.status,
+            nodeRunId: receipt.node_run_id,
+          });
         })
         .catch(() => {
           // Recovery stays best effort; the action buttons surface real errors.
@@ -217,11 +315,22 @@ export function ShotProductionActions({
       // Creative semantics are reconstructed from saved server facts. The
       // browser sends no draft/canonical duplicate.
       semantic_intent: {},
-      mode_id: STAGE_MODE[stage],
+      mode_id: stage === "video" ? videoMode : STAGE_MODE[stage],
       requested_model_id: null,
       requested_binding_id: null,
       accept_approximations: false,
-      references: references.map((reference) => ({ ...reference })),
+      references: (stage !== "video"
+        ? references
+        : videoMode === "text_to_video"
+          ? []
+          : videoMode === "last_frame" || videoMode === "first_last_frame"
+            ? references.filter((reference) => reference.purpose === "last_frame")
+            : videoMode === "omni_reference"
+              ? references.filter(
+                  (reference) => !["first_frame", "last_frame"].includes(reference.purpose),
+                )
+              : references
+      ).map((reference) => ({ ...reference })),
       expected_shot_version: shot.version,
     };
   }
@@ -295,7 +404,12 @@ export function ShotProductionActions({
           productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
         );
       }
-      setFeedback({ kind: "success", stage, message: execution.status });
+      setFeedback({
+        kind: "success",
+        stage,
+        message: execution.status,
+        nodeRunId: execution.node_run_id,
+      });
       await refreshAfterExecution(execution);
     },
     onError: (error, stage) => {
@@ -367,7 +481,12 @@ export function ShotProductionActions({
           ),
         );
       }
-      setFeedback({ kind: "success", stage: prepared.input.stage, message: execution.status });
+      setFeedback({
+        kind: "success",
+        stage: prepared.input.stage,
+        message: execution.status,
+        nodeRunId: execution.node_run_id,
+      });
       await refreshAfterExecution(execution);
     },
     onError: (error) => {
@@ -437,192 +556,350 @@ export function ShotProductionActions({
   const videoStatus = activeStageStatus(trace, "video");
   const keyframeOutcomeUnknown = stageOutcomeUnknown(trace, "image_keyframe");
   const videoOutcomeUnknown = stageOutcomeUnknown(trace, "video");
+  const keyframeQueue = stageQueueEstimate(trace, "image_keyframe");
+  const videoQueue = stageQueueEstimate(trace, "video");
   const delivery = displayedPlan ? planDelivery(displayedPlan) : planFailure;
   const plannedReferences = displayedPlan?.plan.planned_references ?? [];
-  const resolvedModel = displayedPlan?.plan.resolved_model?.resolved_model_id ?? "未解析";
+  // The stored id stays a contract value; the surface shows the catalogue's
+  // display name and keeps the id in the collapsed diagnostics block.
+  const planModel = executionModelLabel(
+    displayedPlan?.plan.resolved_model?.resolved_model_id,
+    Array.isArray(models.data) ? models.data : undefined,
+  );
+  const preflightStage = (stage: ShotExecutionStage) =>
+    (Array.isArray(modelPreflight.data?.stages)
+      ? modelPreflight.data.stages.find((item) => item.stage === stage)
+      : null) ?? null;
+  const keyframePreflight = preflightStage("image_keyframe");
+  const videoPreflight = preflightStage("video");
+  const preflightBlocks = (stage: ShotExecutionStage) => {
+    if (modelPreflight.isPending || modelPreflight.isError) return true;
+    return preflightStage(stage)?.ready !== true;
+  };
 
   const buttonLabel = (stage: ShotExecutionStage, serverStatus: string | null) => {
-    const label = STAGE_LABEL[stage];
-    if (stage === "image_keyframe" && keyframeOutcomeUnknown) return `${label}提交结果待对账`;
-    if (stage === "video" && videoOutcomeUnknown) return `${label}提交结果待对账`;
-    if (activeStage === stage) return `${label}请求提交中…`;
-    if (serverStatus === "queued") return `${label}已排队`;
+    const label = STAGE_NOUN[stage];
+    if (stage === "image_keyframe" && keyframeOutcomeUnknown) return `${label}状态待同步`;
+    if (stage === "video" && videoOutcomeUnknown) return `${label}状态待同步`;
+    if (activeStage === stage) return "正在提交…";
+    if (serverStatus === "queued") return `${label}排队中…`;
     if (serverStatus === "cancel_requested") return `${label}取消中…`;
     if (serverStatus === "running") return `${label}生成中…`;
-    return `生成${label}`;
+    return stage === "image_keyframe"
+      ? shot.formal_keyframe_artifact_id
+        ? "重新生成画面"
+        : "生成画面"
+      : shot.formal_video_artifact_id
+        ? "重新生成视频"
+        : "生成视频";
   };
+
+  const busy =
+    produce.isPending ||
+    delegate.isPending ||
+    confirmApproximation.isPending ||
+    Boolean(pendingApproximation);
+  const keyframeDisabled =
+    busy ||
+    Boolean(keyframeStatus) ||
+    keyframeOutcomeUnknown ||
+    !referencesReady ||
+    dirty ||
+    preflightBlocks("image_keyframe");
+  const videoDisabled =
+    busy ||
+    Boolean(videoStatus) ||
+    videoOutcomeUnknown ||
+    (videoMode !== "text_to_video" && !referencesReady) ||
+    dirty ||
+    (videoMode === "first_frame" && !shot.formal_keyframe_artifact_id) ||
+    (videoMode === "first_last_frame" && !shot.formal_keyframe_artifact_id) ||
+    ((videoMode === "last_frame" || videoMode === "first_last_frame") && lastFrameCount !== 1) ||
+    (videoMode === "omni_reference" && referenceVideoCount === 0) ||
+    preflightBlocks("video");
+
+  const next = shotNextAction({
+    dirty,
+    hasFormalKeyframe: Boolean(shot.formal_keyframe_artifact_id),
+    hasFormalVideo: Boolean(shot.formal_video_artifact_id),
+    pendingKeyframeCandidates: pendingCandidates("image_keyframe"),
+    pendingVideoCandidates: pendingCandidates("video"),
+    keyframeStatus,
+    videoStatus,
+    keyframeUnknown: keyframeOutcomeUnknown,
+    videoUnknown: videoOutcomeUnknown,
+    referencesReady,
+    videoMode,
+    lastFrameCount,
+    referenceCount: referenceVideoCount,
+    keyframeReady: !preflightBlocks("image_keyframe"),
+    videoReady: !preflightBlocks("video"),
+    keyframeBlocker: modelPreflight.isError
+      ? "PREFLIGHT_UNAVAILABLE"
+      : (keyframePreflight?.reason ?? null),
+    videoBlocker: modelPreflight.isError
+      ? "PREFLIGHT_UNAVAILABLE"
+      : (videoPreflight?.reason ?? null),
+  });
+  const focusStage: ShotExecutionStage =
+    next.kind === "generate_video" ||
+    next.kind === "complete" ||
+    ("stage" in next && next.stage === "video")
+      ? "video"
+      : "image_keyframe";
+  const focusPreflight = focusStage === "video" ? videoPreflight : keyframePreflight;
+  const modelText = modelPreflight.isPending
+    ? "正在确认…"
+    : modelPreflight.isError
+      ? "无法确认"
+      : focusPreflight?.ready && focusPreflight.resolved_model_id
+        ? `${
+            focusPreflight.contract_display_name ??
+            executionModelLabel(
+              focusPreflight.resolved_model_id,
+              Array.isArray(models.data) ? models.data : undefined,
+            ).label
+          }${focusPreflight.model_revision ? ` · ${focusPreflight.model_revision}` : ""}`
+        : "未选择";
+  const inputText =
+    focusStage === "video"
+      ? VIDEO_MODE_LABEL[videoMode]
+      : references.length
+        ? `文字描述 + ${references.length} 个参考`
+        : "文字描述";
+  const settingsHref = `/settings/models?returnTo=${encodeURIComponent(
+    `/projects/${projectId}/scenes/${shot.scene_id}?shotId=${shot.id}`,
+  )}`;
+
+  const primary = (() => {
+    switch (next.kind) {
+      case "save":
+        return {
+          label: saving ? "正在保存…" : "保存镜头",
+          testId: "shot-primary-save",
+          disabled: saving || !onSave,
+          run: () => onSave?.(),
+        };
+      case "review_candidate":
+        return {
+          label: "检查候选",
+          testId: "shot-primary-review",
+          disabled: !onReviewCandidates,
+          run: () => onReviewCandidates?.(),
+        };
+      case "generate_keyframe":
+        return {
+          label: buttonLabel("image_keyframe", keyframeStatus),
+          testId: "generate-keyframe",
+          disabled: keyframeDisabled,
+          run: () => produce.mutate("image_keyframe"),
+        };
+      case "generate_video":
+        return {
+          label: buttonLabel("video", videoStatus),
+          testId: "generate-video",
+          disabled: videoDisabled,
+          run: () => produce.mutate("video"),
+        };
+      case "running":
+        return {
+          label: buttonLabel(next.stage, next.status),
+          testId: "shot-primary-running",
+          disabled: true,
+          run: () => undefined,
+        };
+      case "unknown":
+        return {
+          label: "状态待同步",
+          testId: "shot-primary-unknown",
+          disabled: true,
+          run: () => undefined,
+        };
+      case "complete":
+        return {
+          label: "已完成",
+          testId: "shot-primary-complete",
+          disabled: true,
+          run: () => undefined,
+        };
+      case "blocked":
+        return {
+          label: next.stage === "video" ? "生成视频" : "生成画面",
+          testId: next.stage === "video" ? "generate-video" : "generate-keyframe",
+          disabled: true,
+          run: () => undefined,
+        };
+    }
+  })();
+  const blockedReason =
+    next.kind === "blocked"
+      ? (NEXT_ACTION_BLOCKER_LABEL[next.reason] ??
+        (next.reason === "PREFLIGHT_UNAVAILABLE"
+          ? "无法确认模型，暂不生成"
+          : executionModelBlockerLabel(next.reason)))
+      : null;
+  const blockedByModel = next.kind === "blocked" && /^(MODEL_|PROVIDER_)/.test(next.reason);
+  // Secondary generation stays reachable without competing with the primary.
+  const showKeyframeSecondary =
+    primary.testId !== "generate-keyframe" && !keyframeDisabled && next.kind !== "save";
+  const showVideoSecondary =
+    primary.testId !== "generate-video" && !videoDisabled && next.kind !== "save";
 
   return (
     <section
-      className="qc-shot-production-actions"
+      className="df-shot-generate"
       data-testid="shot-production-actions"
       data-shot-id={shot.id}
+      data-next-action={next.kind}
     >
-      <header>
-        <div>
-          <span className="director-stage-kicker">当前镜头</span>
-          <strong>#{shot.shot_number} 生成</strong>
+      <dl
+        className="df-shot-facts"
+        data-testid="shot-production-preflight"
+        data-active-stage={focusStage}
+      >
+        <div data-testid="production-stage-indicator">
+          <dt>阶段</dt>
+          <dd data-testid={`stage-indicator-${focusStage}`}>
+            {focusStage === "video" ? "视频生成 (图生视频)" : "画面打样 (文生图)"}
+          </dd>
         </div>
-      </header>
-
-      <dl className="qc-shot-production-lineage">
-        <dt>正式关键帧</dt>
-        <dd>{shot.formal_keyframe_artifact_id ? "已选择" : "未选择"}</dd>
-        <dt>正式视频</dt>
-        <dd>{shot.formal_video_artifact_id ? "已选择" : "未选择"}</dd>
+        <div data-testid={`production-preflight-${focusStage}`}>
+          <dt>{focusStage === "video" ? "视频模型" : "生图模型"}</dt>
+          <dd title={focusPreflight?.resolved_model_id ?? undefined}>{modelText}</dd>
+        </div>
+        <div>
+          <dt>{focusStage === "video" ? "视频输入" : "画面输入"}</dt>
+          <dd>{inputText}</dd>
+        </div>
+        {focusStage === "video" && Boolean(shot.formal_keyframe_artifact_id) && (
+          <div data-testid="production-preflight-source-frame">
+            <dt>基准画面</dt>
+            <dd>已绑定正式关键帧</dd>
+          </div>
+        )}
       </dl>
 
-      <div className="qc-shot-production-buttons">
-        <button
-          type="button"
-          data-testid="generate-keyframe"
-          onClick={() => produce.mutate("image_keyframe")}
-          disabled={
-            produce.isPending ||
-            delegate.isPending ||
-            confirmApproximation.isPending ||
-            Boolean(pendingApproximation) ||
-            Boolean(keyframeStatus) ||
-            keyframeOutcomeUnknown ||
-            !referencesReady ||
-            dirty
-          }
-        >
-          {buttonLabel("image_keyframe", keyframeStatus)}
-        </button>
-        <button
-          type="button"
-          data-testid="generate-video"
-          onClick={() => produce.mutate("video")}
-          disabled={
-            produce.isPending ||
-            delegate.isPending ||
-            confirmApproximation.isPending ||
-            Boolean(pendingApproximation) ||
-            Boolean(videoStatus) ||
-            videoOutcomeUnknown ||
-            !referencesReady ||
-            dirty
-          }
-        >
-          {buttonLabel("video", videoStatus)}
-        </button>
-      </div>
-
-      <div className="qc-shot-production-buttons">
-        <button
-          type="button"
-          className="secondary"
-          data-testid="delegate-keyframe-to-director"
-          onClick={() => delegate.mutate("image_keyframe")}
-          disabled={
-            produce.isPending ||
-            delegate.isPending ||
-            confirmApproximation.isPending ||
-            Boolean(pendingApproximation) ||
-            Boolean(keyframeStatus) ||
-            keyframeOutcomeUnknown ||
-            directorDelegateBlocked ||
-            !referencesReady ||
-            dirty
-          }
-        >
-          导演执行关键帧（AUTO）
-        </button>
-        <button
-          type="button"
-          className="secondary"
-          data-testid="delegate-video-to-director"
-          onClick={() => delegate.mutate("video")}
-          disabled={
-            produce.isPending ||
-            delegate.isPending ||
-            confirmApproximation.isPending ||
-            Boolean(pendingApproximation) ||
-            Boolean(videoStatus) ||
-            videoOutcomeUnknown ||
-            directorDelegateBlocked ||
-            !referencesReady ||
-            dirty
-          }
-        >
-          导演执行视频（AUTO）
-        </button>
-      </div>
-
-      {directorDelegateBlocked && (
-        <p
-          className="qc-shot-production-hint"
-          data-testid="shot-production-director-blocked"
-          role="status"
-        >
-          {directorCapabilities?.blocker_message}
+      <Button
+        tone="primary"
+        className="df-shot-primary"
+        data-testid={primary.testId}
+        disabled={primary.disabled}
+        onClick={primary.run}
+      >
+        {primary.label}
+      </Button>
+      {blockedReason && (
+        <p className="df-shot-hint" data-testid="shot-primary-blocked" role="status">
+          {blockedReason}
+          {blockedByModel && (
+            <a
+              href={settingsHref}
+              role="button"
+              onClick={(e) => {
+                if (onOpenModelSettings) {
+                  e.preventDefault();
+                  onOpenModelSettings();
+                }
+              }}
+            >
+              去设置模型
+            </a>
+          )}
         </p>
       )}
 
-      <p className="qc-shot-production-hint">
-        视频只使用后端确认的正式关键帧；未选择时由后端拒绝，不会自动改用其他图片。
-      </p>
-      {!referencesReady && (
-        <p className="qc-shot-production-hint" role="status">
-          正在解析当前镜头的资产引用；解析完成前不会提交生产请求。
-        </p>
+      {(showKeyframeSecondary || showVideoSecondary) && (
+        <div className="df-shot-secondary">
+          {showKeyframeSecondary && (
+            <Button
+              tone="ghost"
+              data-testid="secondary-generate-keyframe"
+              onClick={() => produce.mutate("image_keyframe")}
+            >
+              {buttonLabel("image_keyframe", keyframeStatus)}
+            </Button>
+          )}
+          {showVideoSecondary && (
+            <Button
+              tone="ghost"
+              data-testid="secondary-generate-video"
+              onClick={() => produce.mutate("video")}
+            >
+              {buttonLabel("video", videoStatus)}
+            </Button>
+          )}
+        </div>
       )}
-      {(keyframeStatus || videoStatus) && (
-        <p className="qc-shot-production-hint" data-testid="shot-production-running" role="status">
-          服务端任务仍在执行；页面会自动同步，当前阶段不会重复提交。
+
+      {(keyframeQueue || videoQueue) && (
+        <p className="df-shot-hint" data-testid="shot-production-queue" role="status">
+          {(
+            [
+              keyframeQueue ? (["画面", keyframeQueue] as const) : null,
+              videoQueue ? (["视频", videoQueue] as const) : null,
+            ].filter(Boolean) as Array<readonly [string, NonNullable<typeof keyframeQueue>]>
+          )
+            .map(([label, queue]) => {
+              const wait =
+                queue.estimatedWaitSeconds === null
+                  ? ""
+                  : `，约 ${Math.max(1, Math.ceil(queue.estimatedWaitSeconds / 60))} 分钟`;
+              return `${label}排队第 ${queue.position} 位${wait}`;
+            })
+            .join("；")}
         </p>
       )}
       {(keyframeOutcomeUnknown || videoOutcomeUnknown) && (
         <p
-          className="qc-shot-production-hint"
+          className="df-shot-hint warn"
           data-testid="shot-production-outcome-unknown"
           role="status"
         >
-          服务端未能确认上一次提交是否已被 Provider 接受，该阶段已暂停提交。请先按原操作键对账，
-          确认结果前不要创建新的生成请求。
+          上次提交结果未知，已暂停这一步以免重复计费。请先核对供应商任务。
+          {onOpenDetails && (
+            <Button tone="ghost" onClick={onOpenDetails}>
+              查看记录
+            </Button>
+          )}
         </p>
       )}
-      {dirty && (
-        <p className="qc-shot-production-hint" data-testid="shot-production-unsaved" role="status">
-          请先保存镜头设计，再生成关键帧或视频。
+      {directorDelegateBlocked && (
+        <p className="df-shot-hint" data-testid="shot-production-director-blocked" role="status">
+          {directorCapabilities?.blocker_message}
         </p>
       )}
 
       {delivery && (
         <section
-          className="qc-shot-production-plan"
+          className="df-shot-plan"
           data-testid="shot-execution-plan-preview"
           data-delivery={delivery}
         >
-          <strong>模型适配：{delivery}</strong>
+          <strong>模型适配：{referenceDeliveryLabel(delivery)}</strong>
           {displayedPlan && (
             <>
-              <p data-testid="shot-execution-plan-model">模型：{resolvedModel}</p>
+              <p data-testid="shot-execution-plan-model">执行模型：{planModel.label}</p>
               <p data-testid="shot-execution-plan-references">
-                引用 exact {plannedReferences.filter((row) => row.delivery === "exact").length} ·
-                approximate
-                {plannedReferences.filter((row) => row.delivery === "approximate").length} ·
-                unsupported
-                {plannedReferences.filter((row) => row.delivery === "unsupported").length}
+                引用：完全支持 {plannedReferences.filter((row) => row.delivery === "exact").length}{" "}
+                · 近似 {plannedReferences.filter((row) => row.delivery === "approximate").length} ·
+                不支持 {plannedReferences.filter((row) => row.delivery === "unsupported").length}
               </p>
-              {(displayedPlan.plan.capability_gaps ?? []).map((gap, index) => (
-                <p key={`${gap.severity}-${index}`} className="qc-shot-production-hint">
-                  {gap.severity}：{gap.reason}
-                  {(gap.controls ?? []).length ? `（${(gap.controls ?? []).join("、")}）` : ""}
-                </p>
-              ))}
+              {(displayedPlan.plan.capability_gaps ?? []).map((gap, index) => {
+                const gapReason = capabilityGapReason(gap.reason);
+                return (
+                  <p key={`${gap.severity}-${index}`} className="df-shot-hint">
+                    {capabilityGapSeverityLabel(gap.severity)}：{gapReason.label}
+                    {(gap.controls ?? []).length ? `（${(gap.controls ?? []).join("、")}）` : ""}
+                  </p>
+                );
+              })}
               {(displayedPlan.plan.pending_suggestions ?? []).length > 0 && (
                 <div
-                  className="qc-shot-production-hint"
+                  className="df-shot-hint"
                   data-testid="shot-execution-plan-suggestions"
                   role="note"
                 >
-                  <p>
-                    <strong>建议（尚未生效）：</strong>
-                    以下内容来自项目创作档案或模板推荐，本次执行不会使用它们，也不作为 Provider
-                    硬参数下发。
-                  </p>
+                  <p>以下建议本次不会使用：</p>
                   <ul>
                     {(displayedPlan.plan.pending_suggestions ?? []).map((suggestion) => (
                       <li key={suggestion.key} data-testid={`plan-suggestion-${suggestion.key}`}>
@@ -632,21 +909,27 @@ export function ShotProductionActions({
                   </ul>
                 </div>
               )}
+              <details
+                className="editing-diagnostics"
+                data-testid="shot-execution-plan-diagnostics"
+              >
+                <summary>诊断详情</summary>
+                <small>
+                  适配 {delivery} · 模型 {planModel.raw || "无"}
+                  {(displayedPlan.plan.capability_gaps ?? [])
+                    .map(
+                      (gap) =>
+                        ` · ${gap.severity} ${gap.capability ?? ""}${gap.reason ? ` ${gap.reason}` : ""}`,
+                    )
+                    .join("")}
+                </small>
+              </details>
             </>
           )}
           {pendingApproximation && (
-            <div className="qc-shot-production-buttons">
-              <button
-                type="button"
-                data-testid="confirm-shot-execution-approximation"
-                disabled={confirmApproximation.isPending}
-                onClick={() => confirmApproximation.mutate(pendingApproximation)}
-              >
-                {confirmApproximation.isPending ? "正在重新校验…" : "确认近似适配并执行"}
-              </button>
-              <button
-                type="button"
-                className="secondary"
+            <div className="df-shot-secondary">
+              <Button
+                tone="ghost"
                 data-testid="cancel-shot-execution-approximation"
                 disabled={confirmApproximation.isPending}
                 onClick={() => {
@@ -655,7 +938,15 @@ export function ShotProductionActions({
                 }}
               >
                 取消
-              </button>
+              </Button>
+              <Button
+                tone="primary"
+                data-testid="confirm-shot-execution-approximation"
+                disabled={confirmApproximation.isPending}
+                onClick={() => confirmApproximation.mutate(pendingApproximation)}
+              >
+                {confirmApproximation.isPending ? "正在重新校验…" : "确认近似适配并执行"}
+              </Button>
             </div>
           )}
         </section>
@@ -663,26 +954,103 @@ export function ShotProductionActions({
 
       {feedback?.kind === "success" && (
         <p
-          className="qc-shot-production-status"
+          className="df-shot-hint ok"
           data-testid="shot-production-status"
           data-status={feedback.message}
           role="status"
         >
           {feedback.message === "director_queued" ? (
-            <>{STAGE_LABEL[feedback.stage]}已授权给导演执行；正在切换到导演状态。</>
+            <>{STAGE_NOUN[feedback.stage]}已交给导演执行。</>
           ) : (
             <>
-              {STAGE_LABEL[feedback.stage]}请求已提交，服务器状态：
-              {serverStatusLabel(feedback.message)}
+              {STAGE_NOUN[feedback.stage]}已提交：{serverStatusLabel(feedback.message)}
+              。完成后在候选中检查。
             </>
           )}
         </p>
       )}
       {feedback?.kind === "error" && (
-        <p className="qc-shot-production-error" data-testid="shot-production-error" role="alert">
-          {STAGE_LABEL[feedback.stage]}生成失败：{feedback.message}
+        <p className="df-shot-hint err" data-testid="shot-production-error" role="alert">
+          {/MODEL_BINDING_MISSING/.test(feedback.message) ? (
+            <>
+              还没有可用的{STAGE_NOUN[feedback.stage]}模型，本次没有提交。
+              <a
+                href={settingsHref}
+                role="button"
+                onClick={(e) => {
+                  if (onOpenModelSettings) {
+                    e.preventDefault();
+                    onOpenModelSettings();
+                  }
+                }}
+              >
+                去设置模型
+              </a>
+            </>
+          ) : (
+            <>
+              {STAGE_NOUN[feedback.stage]}生成失败：{feedback.message}
+            </>
+          )}
         </p>
       )}
+
+      <Disclosure title="更多设置" testId="shot-generate-more">
+        <Field>
+          视频方式
+          <Select
+            aria-label="视频方式"
+            value={videoMode}
+            disabled={Boolean(videoStatus) || videoOutcomeUnknown || produce.isPending}
+            onChange={(event) => setExplicitMode(event.target.value as ShotVideoMode)}
+          >
+            {(Object.keys(VIDEO_MODE_LABEL) as ShotVideoMode[]).map((mode) => (
+              <option key={mode} value={mode}>
+                {VIDEO_MODE_LABEL[mode]}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <p className="df-shot-hint">
+          {videoMode === "text_to_video"
+            ? "只用镜头文字生成视频，需要支持文生视频的模型。"
+            : videoMode === "last_frame"
+              ? `使用一条尾帧参考（当前 ${lastFrameCount} 条）。`
+              : videoMode === "first_last_frame"
+                ? `正式画面作首帧，加一条尾帧参考（当前 ${lastFrameCount} 条）。`
+                : videoMode === "omni_reference"
+                  ? `使用镜头的参考素材（当前 ${referenceVideoCount} 条）。`
+                  : "视频从正式画面开始，不会自动改用其他图片。"}
+        </p>
+        <div className="df-shot-secondary">
+          <Button
+            tone="ghost"
+            data-testid="delegate-keyframe-to-director"
+            onClick={() => delegate.mutate("image_keyframe")}
+            disabled={keyframeDisabled || directorDelegateBlocked}
+          >
+            让导演执行画面
+          </Button>
+          <Button
+            tone="ghost"
+            data-testid="delegate-video-to-director"
+            onClick={() => delegate.mutate("video")}
+            disabled={
+              busy ||
+              Boolean(videoStatus) ||
+              videoOutcomeUnknown ||
+              directorDelegateBlocked ||
+              videoMode !== "first_frame" ||
+              !referencesReady ||
+              dirty ||
+              !shot.formal_keyframe_artifact_id ||
+              preflightBlocks("video")
+            }
+          >
+            让导演执行视频
+          </Button>
+        </div>
+      </Disclosure>
     </section>
   );
 }

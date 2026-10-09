@@ -134,6 +134,43 @@ async def test_fully_verified_candidate_is_eligible() -> None:
 
 
 @pytest.mark.asyncio
+async def test_new_input_contract_supplies_reference_role_eligibility() -> None:
+    binding, entry = _pair()
+    entry.capability_manifest_json = {
+        "operations": {
+            VIDEO_GENERATE: {
+                "operation": VIDEO_GENERATE,
+                "capabilities": ["video.i2v.first_frame"],
+                "reference_constraints": {},
+                "input_contracts": {
+                    "formal": {"input_slots": {"first_frame": {"minimum": 1, "maximum": 1}}}
+                },
+            }
+        }
+    }
+    evaluation = await evaluate_candidate(
+        object(),
+        binding=binding,
+        connection=_connection(),
+        catalog_entry=entry,
+        operation=VIDEO_GENERATE,
+        required_capabilities=frozenset({"video.i2v.first_frame"}),
+        reference_roles=frozenset({"first_frame"}),
+    )
+    assert evaluation.eligible is True
+
+    unsupported = await evaluate_candidate(
+        object(),
+        binding=binding,
+        connection=_connection(),
+        catalog_entry=entry,
+        operation=VIDEO_GENERATE,
+        reference_roles=frozenset({"reference_video"}),
+    )
+    assert any(issue.detail == "reference role reference_video" for issue in unsupported.issues)
+
+
+@pytest.mark.asyncio
 async def test_unverified_model_is_ineligible_with_code() -> None:
     binding, entry = _pair()
     evaluation = await evaluate_candidate(
@@ -145,7 +182,33 @@ async def test_unverified_model_is_ineligible_with_code() -> None:
     )
     assert evaluation.eligible is False
     codes = {issue.code for issue in evaluation.issues}
-    assert {"MODEL_NOT_ACCOUNT_VERIFIED", "MODEL_QUALITY_GATE_MISSING"} <= codes
+    assert "MODEL_NOT_ACCOUNT_VERIFIED" in codes
+    # Quality certification is evidence, not an admission gate: it is reported on
+    # the evaluation and never appears as a blocking issue.
+    assert "MODEL_QUALITY_GATE_MISSING" not in codes
+    assert evaluation.certified is False
+    assert evaluation.evidence["quality_gated"] is False
+
+
+@pytest.mark.asyncio
+async def test_uncertified_but_verified_model_is_eligible() -> None:
+    """An account-verified binding runs before a human quality acceptance.
+
+    The gate that refuses execution is account verification; the quality gate is
+    certification the surfaces display (`certified`), so a missing one must not
+    make the candidate ineligible.
+    """
+    binding, entry = _pair()
+    evaluation = await evaluate_candidate(
+        object(),
+        binding=_binding(entry=entry, account_verified=True, quality_gated=False),
+        connection=_connection(),
+        catalog_entry=entry,
+        operation=VIDEO_GENERATE,
+    )
+    assert evaluation.issues == []
+    assert evaluation.eligible is True
+    assert evaluation.certified is False
 
 
 @pytest.mark.asyncio
@@ -176,8 +239,7 @@ async def test_required_capability_missing_is_ineligible() -> None:
     )
     assert evaluation.eligible is False
     assert any(
-        issue.code == "CAPABILITY_REQUIRED_MISSING"
-        and issue.detail == "video.i2v.last_frame"
+        issue.code == "CAPABILITY_REQUIRED_MISSING" and issue.detail == "video.i2v.last_frame"
         for issue in evaluation.issues
     )
 
@@ -195,8 +257,7 @@ async def test_reference_role_above_constraint_is_ineligible() -> None:
     )
     assert evaluation.eligible is False
     assert any(
-        issue.code == "CAPABILITY_REQUIRED_MISSING"
-        and "last_frame" in issue.detail
+        issue.code == "CAPABILITY_REQUIRED_MISSING" and "last_frame" in issue.detail
         for issue in evaluation.issues
     )
 
@@ -266,7 +327,7 @@ async def test_manifest_hash_mismatch_is_ineligible() -> None:
 @pytest.mark.asyncio
 async def test_lifecycle_and_catalog_mismatch_are_ineligible() -> None:
     entry = _agnes_video_entry()
-    entry.lifecycle = "deprecated"
+    entry.lifecycle = "retired"
     binding = _binding(entry=entry)
     evaluation = await evaluate_candidate(
         object(),
@@ -278,6 +339,17 @@ async def test_lifecycle_and_catalog_mismatch_are_ineligible() -> None:
     assert evaluation.eligible is False
     codes = {issue.code for issue in evaluation.issues}
     assert "MODEL_LIFECYCLE_INACTIVE" in codes
+
+    entry.lifecycle = "deprecated"
+    still_supported = await evaluate_candidate(
+        object(),
+        binding=binding,
+        connection=_connection(),
+        catalog_entry=entry,
+        operation=VIDEO_GENERATE,
+    )
+    assert still_supported.eligible is False
+    assert any(issue.code == "MODEL_LIFECYCLE_INACTIVE" for issue in still_supported.issues)
 
     ark_entry = ModelCatalogEntry(
         id=uuid4(),

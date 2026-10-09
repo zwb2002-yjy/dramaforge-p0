@@ -18,11 +18,6 @@ from app.providers import registry as registry_module
 from app.providers.connection_service import ProviderConnectionService
 from app.providers.models import ProviderCapabilityEvidence, ProviderModelBinding
 from app.providers.registry import ProviderPlugin, get_plugin, list_plugins, register_plugin
-from app.providers.workspace_credentials import (
-    configured_byok_keyring,
-    settings_for_workspace_provider,
-)
-from app.security.credentials import store_credential
 from app.shared.base import Base
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
@@ -43,7 +38,15 @@ _FAKE_IMAGE_MANIFEST = {
     "display_name": "Fake Image",
     "lifecycle": "active",
     "catalog_source": "official_static",
+    "implementation_status": "contract_tested",
     "documented_at": "2026-08-10",
+    "evidence": {
+        "synthetic_contract": {
+            "source_type": "contract_fixture",
+            "source_url": "https://example.invalid/synthetic-contract-fixture",
+            "checked_at": "2026-08-10",
+        }
+    },
     "operations": {
         "image.generate": {
             "operation": "image.generate",
@@ -68,8 +71,6 @@ def test_agnes_plugin_is_implemented() -> None:
     plugin = get_plugin("agnes", "agnes_cn_v1")
     assert plugin.implemented is True
     assert plugin.default_base_url == "https://api.agnes-ai.cn"
-    assert plugin.model_contracts[("image", "keyframe")] == "agnes-image-2.1-flash"
-    assert plugin.model_contracts[("video", "video")] == "agnes-video-v2.0"
     assert plugin.capability_purposes == {"image_i2i": "keyframe", "video_i2v": "video"}
 
 
@@ -79,8 +80,6 @@ def test_ark_plugin_is_implemented() -> None:
     plugin = get_plugin("volcengine", "ark_cn_v1")
     assert plugin.implemented is True
     assert plugin.default_base_url == "https://ark.cn-beijing.volces.com/api/v3"
-    assert plugin.model_contracts[("image", "keyframe")] == "doubao-seedream-4-0-250828"
-    assert plugin.model_contracts[("video", "video")] == "doubao-seedance-2-0-260128"
     # The implemented plugin must build a real Ark protocol client.
     client = plugin.build_client(Settings())
     assert isinstance(client, ArkHubClient)
@@ -94,8 +93,6 @@ def test_minimax_plugin_is_implemented() -> None:
     plugin = get_plugin("minimax", "minimax_cn_v1")
     assert plugin.implemented is True
     assert plugin.default_base_url == "https://api.minimaxi.com"
-    assert plugin.model_contracts[("image", "keyframe")] == "image-01"
-    assert plugin.model_contracts[("video", "video")] == "MiniMax-H3"
     assert plugin.capability_purposes == {"image_i2i": "keyframe", "video_i2v": "video"}
     assert plugin.image_i2i_probe_transport == "public_url"
     assert isinstance(plugin.build_client(Settings()), MiniMaxHubClient)
@@ -169,10 +166,6 @@ def _fake_plugin() -> ProviderPlugin:
         implemented=True,
         settings_prefix="agnes",
         credential_provider_key="agnes",
-        model_contracts={
-            ("image", "keyframe"): "fake-img-model",
-            ("video", "video"): "fake-vid-model",
-        },
         capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
         paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
         model_list_path="/v1/models",
@@ -224,8 +217,8 @@ async def test_plugin_extension_needs_no_service_branch(
     _byok_env(monkeypatch)
     from datetime import date
 
+    from app.providers.catalog_loader import hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import hash_manifest
 
     user, workspace = await _seed_owner(session)
     service = ProviderConnectionService(session)
@@ -285,44 +278,55 @@ async def test_plugin_extension_needs_no_service_branch(
             enabled=True,
         )
 
-    with pytest.raises(ValidationAppError) as pricing_error:
+    documented = {**_FAKE_IMAGE_MANIFEST, "model_id": "fake-documented-model"}
+    documented["implementation_status"] = "documented"
+    session.add(
+        ModelCatalogEntry(
+            provider_type=FAKE_PROVIDER,
+            protocol_profile=FAKE_PROFILE,
+            model_id="fake-documented-model",
+            model_revision="v1",
+            display_name="Documented only",
+            media_kind="image",
+            lifecycle="active",
+            catalog_source="official_static",
+            capability_manifest_json=documented,
+            option_schema_json={},
+            contract_manifest_hash=hash_manifest(documented),
+        )
+    )
+    await session.flush()
+    with pytest.raises(ValidationAppError) as blocked:
+        await service.create_model_binding(
+            workspace_id=workspace.id,
+            connection_id=connection.id,
+            actor=user,
+            media_type="image",
+            model_id="fake-documented-model",
+            purpose="keyframe",
+            enabled=True,
+        )
+    assert blocked.value.details["code"] == "MODEL_CONTRACT_NOT_TESTED"
+
+    # Workspace pricing is not an authorization surface. Paid probes remain
+    # unavailable until a dedicated explicit authorization contract exists.
+    with pytest.raises(ValidationAppError) as denied:
         await service.probe(
             workspace_id=workspace.id,
             connection_id=connection.id,
             actor=user,
             capability="image_t2i",
             model_binding_id=binding.id,
-            paid_request_confirmed=True,
         )
-    assert pricing_error.value.details["code"] == "PROBE_PRICING_CURRENCY_REQUIRED"
-    binding.pricing_snapshot_json = {
-        "unit_amount": "0.25",
-        "currency": "USD",
-        "billing_unit": "per_generated_image",
-    }
-
-    evidence = await service.probe(
-        workspace_id=workspace.id,
-        connection_id=connection.id,
-        actor=user,
-        capability="image_t2i",
-        model_binding_id=binding.id,
-        paid_request_confirmed=True,
-    )
-    assert evidence.status == "passed"
-    assert evidence.provider_request_id == "fake-img-1"
-    assert evidence.currency == "USD"
+    assert denied.value.details["code"] == "PAID_PROBE_AUTHORIZATION_UNAVAILABLE"
     assert (
         await session.scalar(
             select(ProviderCapabilityEvidence.id).where(
                 ProviderCapabilityEvidence.connection_id == connection.id
             )
         )
-        is not None
-    )
-    refreshed = await session.get(ProviderModelBinding, binding.id)
-    assert refreshed is not None
-    assert refreshed.account_verified is False  # image_t2i has no purpose mapping
+    ) is None
+    assert binding.account_verified is False
 
 
 @pytest.mark.asyncio
@@ -333,8 +337,8 @@ async def test_auth_models_verifies_only_bindings_listed_by_provider(
 ) -> None:
     from datetime import date
 
+    from app.providers.catalog_loader import hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import hash_manifest
 
     _byok_env(monkeypatch)
     user, workspace = await _seed_owner(session)
@@ -385,7 +389,12 @@ async def test_auth_models_verifies_only_bindings_listed_by_provider(
 
         @staticmethod
         def json() -> dict[str, object]:
-            return {"data": [{"id": "fake-img-listed"}]}
+            return {
+                "data": [
+                    {"id": "fake-img-listed"},
+                    {"id": "fake-img-new-compatible"},
+                ]
+            }
 
     class _ModelsClient:
         async def __aenter__(self) -> _ModelsClient:
@@ -409,32 +418,39 @@ async def test_auth_models_verifies_only_bindings_listed_by_provider(
     )
 
     assert evidence.status == "passed"
+    assert evidence.discovered_model_ids == ["fake-img-listed", "fake-img-new-compatible"]
     assert connection.verification_status == "verified"
     assert bindings[0].account_verified is True
     assert bindings[1].account_verified is False
+    dynamic = await service.create_model_binding(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        actor=user,
+        media_type="image",
+        model_id="fake-img-new-compatible",
+        purpose="keyframe",
+        enabled=True,
+        capability_contract_id=bindings[0].catalog_entry_id,
+    )
+    assert dynamic.model_id == "fake-img-new-compatible"
+    assert dynamic.invoke_model_value == "fake-img-new-compatible"
+    assert dynamic.catalog_entry_id == bindings[0].catalog_entry_id
+    assert dynamic.account_verified is True
 
 
 @pytest.mark.asyncio
-async def test_binding_scoped_probe_only_advances_probed_binding(
+async def test_binding_scoped_evidence_projection_only_advances_exact_binding(
     session: AsyncSession,
     fake_registration: ProviderPlugin,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Review gate: a binding-scoped probe proves exactly one model. A sibling
-    binding on the same connection/purpose must stay unverified."""
-    import base64
-    import hashlib
+    """A scoped evidence projection must never certify a sibling model."""
     from datetime import date
 
-    from app.access.models import Project
-    from app.execution.models import Artifact
+    from app.providers.catalog_loader import hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.catalog_seed_data import hash_manifest
 
     _byok_env(monkeypatch)
-    png_bytes = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-    )
     user, workspace = await _seed_owner(session)
     service = ProviderConnectionService(session)
     connection = await service.create_connection(
@@ -475,11 +491,6 @@ async def test_binding_scoped_probe_only_advances_probed_binding(
         purpose="keyframe",
         enabled=True,
     )
-    binding_a.pricing_snapshot_json = {
-        "unit_amount": "0",
-        "currency": "CNY",
-        "billing_unit": "per_generated_image",
-    }
     binding_b = await service.create_model_binding(
         workspace_id=workspace.id,
         connection_id=connection.id,
@@ -489,41 +500,15 @@ async def test_binding_scoped_probe_only_advances_probed_binding(
         purpose="keyframe",
         enabled=True,
     )
-    project = Project(workspace_id=workspace.id, name="P", aspect_ratio="9:16", budget_limit=0)
-    session.add(project)
-    await session.flush()
-    artifact = Artifact(
-        project_id=project.id,
-        artifact_type="image",
-        storage_state="available",
-        object_key=f"projects/{project.id}/ref.png",
-        content_hash=hashlib.sha256(png_bytes).hexdigest(),
-        mime_type="image/png",
-        byte_size=len(png_bytes),
-    )
-    session.add(artifact)
-    await session.flush()
-
-    class _FakeStore:
-        async def get_bytes(self, *, object_key: str) -> bytes:
-            return png_bytes
-
-    monkeypatch.setattr("app.providers.connection_service.get_object_store", lambda: _FakeStore())
-
-    evidence = await service.probe(
-        workspace_id=workspace.id,
+    # Projection scope is independently testable while paid probe dispatch is
+    # unavailable. It must never certify a sibling binding on the connection.
+    await service._mark_capability_verified(
         connection_id=connection.id,
-        actor=user,
         capability="image_i2i",
+        actor=user,
         model_binding_id=binding_a.id,
-        reference_artifact_id=artifact.id,
-        paid_request_confirmed=True,
     )
-    assert evidence.status == "passed"
-    assert evidence.model_binding_id == binding_a.id
-    assert evidence.capability_manifest_hash == binding_a.capability_manifest_hash
-    assert evidence.credential_revision == connection.credential_revision
-    assert evidence.currency == "CNY"
+    await session.flush()
 
     refreshed_a = await session.get(ProviderModelBinding, binding_a.id)
     refreshed_b = await session.get(ProviderModelBinding, binding_b.id)
@@ -596,49 +581,3 @@ def test_minimax_settings_defaults() -> None:
         update={"minimax_enabled": True, "minimax_api_key": "minimax-secret"}
     )
     assert enabled.minimax_configured() is True
-
-
-@pytest.mark.asyncio
-async def test_volcengine_workspace_credential_branch(
-    session: AsyncSession,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _byok_env(monkeypatch)
-    user, workspace = await _seed_owner(session)
-    await store_credential(
-        session,
-        workspace_id=workspace.id,
-        provider="volcengine",
-        plaintext="ark-secret",
-        keyring=configured_byok_keyring(),
-    )
-    cfg = await settings_for_workspace_provider(
-        session,
-        workspace_id=workspace.id,
-        provider="volcengine",
-    )
-    assert cfg.volcengine_enabled is True
-    assert cfg.volcengine_api_key == "ark-secret"
-
-
-@pytest.mark.asyncio
-async def test_minimax_workspace_credential_branch(
-    session: AsyncSession,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _byok_env(monkeypatch)
-    user, workspace = await _seed_owner(session)
-    await store_credential(
-        session,
-        workspace_id=workspace.id,
-        provider="minimax",
-        plaintext="minimax-secret",
-        keyring=configured_byok_keyring(),
-    )
-    cfg = await settings_for_workspace_provider(
-        session,
-        workspace_id=workspace.id,
-        provider="minimax",
-    )
-    assert cfg.minimax_enabled is True
-    assert cfg.minimax_api_key == "minimax-secret"

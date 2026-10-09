@@ -36,6 +36,8 @@ const CANDIDATES = [
     artifact_type: "image",
     mime_type: "image/png",
     storage_state: "available",
+    review_allowed: true,
+    review_decision: "approved",
   },
   {
     artifact_id: "artifact-video",
@@ -46,6 +48,8 @@ const CANDIDATES = [
     artifact_type: "video",
     mime_type: "video/mp4",
     storage_state: "stored",
+    review_allowed: true,
+    review_decision: "approved",
   },
   {
     id: "experiment-branch-1",
@@ -83,7 +87,7 @@ function renderTray(onPreviewCandidate = vi.fn()) {
 describe("ShotCandidateTray", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("collapses to a Takes line without rendering candidate cards", () => {
+  it("collapses to a single candidate count bar that reopens the tray", () => {
     const onToggleExpanded = vi.fn();
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -100,10 +104,11 @@ describe("ShotCandidateTray", () => {
       </QueryClientProvider>,
     );
 
-    expect(screen.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "false");
-    expect(screen.getByTestId("shot-candidate-tray")).toHaveTextContent("Takes · 2");
+    const bar = screen.getByTestId("shot-candidate-tray");
+    expect(bar).toHaveAttribute("data-expanded", "false");
+    expect(bar).toHaveTextContent("候选2");
     expect(screen.queryByTestId("shot-candidate-artifact-keyframe")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("shot-candidate-tray"));
+    fireEvent.click(bar);
     expect(onToggleExpanded).toHaveBeenCalledTimes(1);
   });
 
@@ -162,7 +167,7 @@ describe("ShotCandidateTray", () => {
     fireEvent.click(screen.getByTestId("shot-candidate-confirm-artifact-keyframe"));
     await screen.findByTestId("shot-candidate-success");
     fireEvent.click(screen.getByTestId("shot-candidate-confirm-artifact-video"));
-    await screen.findByText(/已确认 artifact-video/);
+    await screen.findByText(/已设为正式视频/);
 
     expect(calls.find((call) => call.url.endsWith("/formal-keyframe"))).toMatchObject({
       method: "POST",
@@ -200,4 +205,22 @@ describe("ShotCandidateTray", () => {
       "false",
     );
   });
+});
+
+it("shows every completed candidate, including the fifth and sixth", () => {
+  const client = new QueryClient();
+  render(
+    <QueryClientProvider client={client}>
+      <ShotCandidateTray
+        projectId={SHOT.project_id}
+        shot={SHOT}
+        candidates={Array.from({ length: 6 }, (_, i) => ({
+          ...CANDIDATES[0],
+          artifact_id: "candidate-" + i,
+        }))}
+      />
+    </QueryClientProvider>,
+  );
+  for (let i = 0; i < 6; i++)
+    expect(screen.getByTestId("shot-candidate-candidate-" + i)).toBeInTheDocument();
 });

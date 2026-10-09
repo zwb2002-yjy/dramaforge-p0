@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from types import SimpleNamespace
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -16,8 +16,8 @@ from app.access.models import Project
 from app.assets.models import Episode, Scene, Shot
 from app.execution.experiment_nodes import queue_branch_nodes
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
+from app.production.run_control import ProductionRunControl
 from app.providers import registry as registry_module
-from app.providers.generation_service import GenerationService
 from app.providers.registry import ProviderPlugin, register_plugin
 from app.providers.runtime import CancelResult, PollResult, ProviderResumeToken, SubmissionResult
 from app.runtime.scheduler import NodeRunScheduler, WorkerRuntime
@@ -184,10 +184,14 @@ async def test_cancel_restart_never_recreates_remote_task(
         await session.commit()
         if outcome == "queued_cancel":
             run = await session.get(NodeRun, run_ids[1])
-            service = GenerationService(session, SimpleNamespace())
-            await service.cancel_generation(project=project, operation_id=run.id)
+            service = ProductionRunControl(session)
+            await service.request_cancel(project=project, run_id=run.id)
             await session.commit()
-            await service.cancel_generation(project=project, operation_id=run.id)
+            await service.request_cancel(project=project, run_id=run.id)
+            # A second request still owns its FOR UPDATE lock until it finishes.
+            locked_delivery = await jobs.execute_node_run({}, str(run.id))
+            assert locked_delivery["status"] == "already_claimed"
+            await session.commit()
             result = await jobs.execute_node_run({}, str(run.id))
             assert result["status"] == "cancelled" and run.status == "cancelled"
             assert calls == {"create": 0, "poll": 0, "cancel": 0}
@@ -219,7 +223,7 @@ async def test_cancel_restart_never_recreates_remote_task(
                     raise httpx.ReadTimeout("controlled download timeout")
 
                 monkeypatch.setattr(
-                    "app.execution.product_path._download_provider_media", fail_download
+                    "app.execution.media_io._download_provider_media", fail_download
                 )
             if outcome == "missing_media":
                 import app.config as config
@@ -262,34 +266,6 @@ async def test_cancel_restart_never_recreates_remote_task(
         )
         frozen = dict(op.selection_plan["execution_identity"])
         assert calls["create"] == 1
-        if outcome == "submit_unknown":
-            assert op.status == "submission_started" and op.provider_operation_id is None
-            from datetime import UTC, datetime, timedelta
-
-            # A fresh submission may belong to another live Worker. Do not
-            # mark it unknown until the configured 30-minute job bound expires.
-            await jobs.recover_interrupted_provider_jobs({})
-            await session.refresh(run)
-            assert run.status == "running"
-            op.created_at = datetime.now(UTC) - timedelta(minutes=31)
-            await session.commit()
-            await jobs.recover_interrupted_provider_jobs({})
-            await session.refresh(op)
-            await session.refresh(run)
-            assert run.status == "failed"
-            assert op.status == "unknown_submission"
-            assert run.error_code == "PROVIDER_SUBMISSION_UNKNOWN"
-            assert calls == {"create": 1, "poll": 0, "cancel": 0}
-            return
-        assert op.provider_operation_id == remote_id
-        await GenerationService(session, SimpleNamespace()).cancel_generation(
-            project=project, operation_id=run.id
-        )
-        await session.commit()
-        # Changing the mutable binding cannot change a recovery's frozen identity.
-        binding.enabled = False
-        connection.enabled = False
-        await session.commit()
         enqueued = []
 
         async def enqueue(self, node_run_id):
@@ -297,20 +273,72 @@ async def test_cancel_restart_never_recreates_remote_task(
             return "isolated-enqueue"
 
         monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", enqueue)
+        if outcome == "submit_unknown":
+            assert op.status == "submission_started" and op.provider_operation_id is None
+            # A fresh submission may belong to another live Worker. Do not
+            # mark it unknown until the 31-minute safety floor expires.
+            await jobs.recover_interrupted_provider_jobs({})
+            await session.refresh(run)
+            assert run.status == "running"
+            old = datetime.now(UTC) - timedelta(minutes=32)
+            run.started_at = op.created_at = old
+            await session.commit()
+            # The real submission also persists submitted_at. A fresh Provider
+            # activity timestamp must still protect the attempt independently.
+            await jobs.recover_interrupted_provider_jobs({})
+            await session.refresh(run)
+            assert run.status == "running"
+            assert run.id not in enqueued
+            assert op.submitted_at is not None and op.last_polled_at is None
+            op.submitted_at = old
+            await session.commit()
+            await jobs.recover_interrupted_provider_jobs({})
+            await session.refresh(op)
+            await session.refresh(run)
+            assert run.status == "failed"
+            assert op.status == "unknown_submission"
+            assert run.error_code == "PROVIDER_SUBMISSION_UNKNOWN"
+            await jobs.recover_interrupted_provider_jobs({})
+            assert run.id not in enqueued
+            assert calls == {"create": 1, "poll": 0, "cancel": 0}
+            return
+        assert op.provider_operation_id == remote_id
+        await ProductionRunControl(session).request_cancel(project=project, run_id=run.id)
+        await session.commit()
+        # Changing the mutable binding cannot change a recovery's frozen identity.
+        binding.enabled = False
+        connection.enabled = False
+        await session.commit()
+        snapshot_before = dict(run.input_snapshot)
+        # The interrupted attempt is fresh: neither startup nor a periodic tick
+        # may bypass its lease, even when cancellation has been requested.
+        await jobs.recover_interrupted_provider_jobs({})
+        assert run.id not in enqueued
+        old = datetime.now(UTC) - timedelta(minutes=32)
+        run.started_at = old
+        op.created_at = op.submitted_at = op.last_polled_at = old
+        await session.commit()
         await jobs.recover_interrupted_provider_jobs({})
         assert run.id in enqueued
-        # Cancellation on a recovery-queued row must not erase its remote task.
+        # Recovery preserves cancellation and the original dispatch identity.
         await session.refresh(run)
-        assert run.status == "queued" and run.cancellation_requested_at is not None
-        await GenerationService(session, SimpleNamespace()).cancel_generation(
+        assert run.status == "cancel_requested" and run.cancellation_requested_at is not None
+        assert run.input_snapshot == snapshot_before
+        await ProductionRunControl(session).request_cancel(
             project=project,
-            operation_id=run.id,
+            run_id=run.id,
         )
         assert run.status == "cancel_requested"
         await session.commit()
         if outcome == "cancel_ack_lost":
             with pytest.raises(asyncio.CancelledError):
                 await jobs.execute_node_run({}, str(run.id))
+            await session.refresh(run)
+            await session.refresh(op)
+            old = datetime.now(UTC) - timedelta(minutes=32)
+            run.started_at = old
+            op.last_polled_at = old
+            await session.commit()
             await jobs.recover_interrupted_provider_jobs({})
         result = await jobs.execute_node_run({}, str(run.id))
         await session.rollback()
@@ -575,7 +603,7 @@ async def test_concurrent_cancel_consumers_send_at_most_one_remote_request(
 ):
     from datetime import UTC, datetime
 
-    from app.execution.product_path import _request_remote_cancellation_once
+    from app.execution.provider_execution import _request_remote_cancellation_once
     from test_phase5_restart_recovery_pg import _seed_graph_and_run
 
     session = pg_session

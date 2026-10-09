@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import AsyncGenerator
+from copy import deepcopy
 from datetime import date
 from uuid import uuid4
 
@@ -11,14 +12,15 @@ import pytest
 from app.access.models import Project, User, Workspace
 from app.assets.models import Episode, Scene
 from app.execution.models import NodeRun, ProviderOperation
+from app.production.reference_intents import ShotReferenceIntent
 from app.production.workbench_execution import (
     WorkbenchExecutionError,
     WorkbenchExecutionInput,
     WorkbenchExecutionService,
 )
 from app.providers.capabilities import Capability
+from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.models import ProviderConnection, ProviderModelBinding
 from app.shared.base import Base
 from app.shared.security import hash_password
@@ -56,7 +58,7 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
     )
     session.add(project)
     await session.flush()
-    manifest = next(item for item in SEED_MANIFESTS if item["model_id"] == "agnes-video-v2.0")
+    manifest = next(item for item in CATALOG_MODELS if item["model_id"] == "agnes-video-v2.0")
     entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
@@ -76,8 +78,11 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
     from app.security.models import EncryptedProviderCredential
 
     credential = EncryptedProviderCredential(
-        workspace_id=workspace.id, provider="agnes", revision_no=1,
-        ciphertext="isolated-test-ciphertext", key_version="test",
+        workspace_id=workspace.id,
+        provider="agnes",
+        revision_no=1,
+        ciphertext="isolated-test-ciphertext",
+        key_version="test",
     )
     session.add(credential)
     await session.flush()
@@ -158,7 +163,7 @@ async def _seed_image_shot(
     from app.assets.models import Shot
     from app.execution.models import Artifact
 
-    manifest = next(item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash")
+    manifest = next(item for item in CATALOG_MODELS if item["model_id"] == "agnes-image-2.1-flash")
     entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
@@ -397,7 +402,7 @@ async def test_reference_identity_is_hydrated_and_frozen_in_node_run_snapshot(
     # The shared seed only needs one additional image binding to exercise the
     # keyframe path; no provider call is made by WorkbenchExecutionService.
     image_manifest = next(
-        item for item in SEED_MANIFESTS if item["model_id"] == "agnes-image-2.1-flash"
+        item for item in CATALOG_MODELS if item["model_id"] == "agnes-image-2.1-flash"
     )
     image_entry = ModelCatalogEntry(
         provider_type="agnes",
@@ -799,6 +804,173 @@ async def test_video_plan_fails_closed_without_formal_keyframe(session: AsyncSes
 
 
 @pytest.mark.asyncio
+async def test_text_video_plan_needs_no_formal_keyframe(session: AsyncSession) -> None:
+    from app.assets.models import Shot
+
+    project, binding, user = await _seed(session)
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert entry is not None
+    contract = dict(
+        next(item for item in CATALOG_MODELS if item["model_id"] == "@contract/sglang-h3-t2v-v1")
+    )
+    contract["provider_type"] = "agnes"
+    contract["protocol_profile"] = "agnes_cn_v1"
+    contract["model_id"] = "agnes-video-v2.0"
+    entry.capability_manifest_json = contract
+    entry.contract_manifest_hash = hash_manifest(contract)
+    binding.capability_manifest_hash = entry.contract_manifest_hash
+    scene = await _seed_scene(session, project)
+    shot = Shot(
+        project_id=project.id,
+        scene_id=scene.id,
+        shot_number=3,
+        version=1,
+        visual_description="A text-only video shot",
+        video_prompt="character walks into frame",
+    )
+    session.add(shot)
+    await session.flush()
+    plan = await WorkbenchExecutionService(session, user_id=user.id).build_plan(
+        project=project,
+        execution_input=_input(
+            shot_id=shot.id,
+            requested_binding_id=binding.id,
+            mode_id="text_to_video",
+        ),
+    )
+    assert plan.capability == Capability.VIDEO_TEXT_TO_VIDEO
+    assert plan.planned_references == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["last_frame", "first_last_frame"])
+async def test_fl2va_plan_keeps_tail_and_formal_first_roles_distinct(
+    session: AsyncSession,
+    mode: str,
+) -> None:
+    from app.production.reference_intents import ShotReferenceIntent
+
+    project, binding, user = await _seed(session)
+    shot, artifact = await _seed_video_shot(session, project=project, user=user)
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert entry is not None
+    contract = dict(
+        next(item for item in CATALOG_MODELS if item["model_id"] == "@contract/sglang-h3-fl2va-v1")
+    )
+    contract.update(
+        provider_type="agnes", protocol_profile="agnes_cn_v1", model_id="agnes-video-v2.0"
+    )
+    entry.capability_manifest_json = contract
+    entry.contract_manifest_hash = hash_manifest(contract)
+    binding.capability_manifest_hash = entry.contract_manifest_hash
+    await session.flush()
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(
+        project=project,
+        execution_input=_input(
+            shot_id=shot.id,
+            requested_binding_id=binding.id,
+            mode_id=mode,
+            references=[ShotReferenceIntent(purpose="last_frame", artifact_id=artifact.id)],
+        ),
+    )
+    roles = [reference.role for reference in plan.planned_references]
+    assert roles == (["last_frame"] if mode == "last_frame" else ["first_frame", "last_frame"])
+    assert plan.capability == (
+        Capability.VIDEO_LAST_FRAME_TO_VIDEO
+        if mode == "last_frame"
+        else Capability.VIDEO_FIRST_LAST_FRAME
+    )
+
+
+@pytest.mark.asyncio
+async def test_ref2va_plan_validates_saved_media_without_formal_keyframe(
+    session: AsyncSession,
+) -> None:
+    from decimal import Decimal
+
+    from app.assets.models import Shot
+    from app.execution.models import Artifact
+    from app.production.reference_intents import ShotReferenceIntent
+
+    project, binding, user = await _seed(session)
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert entry is not None
+    contract = dict(
+        next(
+            item
+            for item in CATALOG_MODELS
+            if item["model_id"] == "@contract/sglang-h3-ref2va-v1" and item["lifecycle"] == "active"
+        )
+    )
+    contract.update(
+        provider_type="agnes", protocol_profile="agnes_cn_v1", model_id="agnes-video-v2.0"
+    )
+    entry.capability_manifest_json = contract
+    entry.contract_manifest_hash = hash_manifest(contract)
+    binding.capability_manifest_hash = entry.contract_manifest_hash
+    scene = await _seed_scene(session, project)
+    shot = Shot(
+        project_id=project.id,
+        scene_id=scene.id,
+        shot_number=3,
+        version=1,
+        visual_description="Reference shot",
+        video_prompt="character walks into frame",
+    )
+    artifact = Artifact(
+        project_id=project.id,
+        artifact_type="video",
+        storage_state="available",
+        object_key=f"obj/{uuid4().hex}",
+        content_hash="f" * 64,
+        mime_type="video/mp4",
+        byte_size=1,
+        duration_seconds=Decimal("5"),
+    )
+    session.add_all([shot, artifact])
+    await session.flush()
+    execution_input = _input(
+        shot_id=shot.id,
+        requested_binding_id=binding.id,
+        mode_id="omni_reference",
+        references=[ShotReferenceIntent(purpose="action", artifact_id=artifact.id)],
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(project=project, execution_input=execution_input)
+    assert plan.capability == Capability.VIDEO_REFERENCE_TO_VIDEO
+    assert [ref.role for ref in plan.planned_references] == ["reference_video"]
+    from app.providers.execution_preflight import resolve_execution_model_preflight
+
+    # Preflight uses the same exact binding, not a static name for its remote ID.
+    from app.providers.models import ProjectProviderBinding
+
+    session.add(
+        ProjectProviderBinding(
+            project_id=project.id,
+            workspace_id=project.workspace_id,
+            purpose="video",
+            model_binding_id=binding.id,
+            updated_by=user.id,
+        )
+    )
+    await session.flush()
+    preflight = await resolve_execution_model_preflight(
+        session,
+        project=project,
+        video_mode="omni_reference",
+    )
+    video = next(stage for stage in preflight.stages if stage.stage == "video")
+    assert video.ready is True
+    assert video.contract_display_name == entry.display_name
+    assert video.model_revision == entry.model_revision
+    artifact.duration_seconds = Decimal("16")
+    await session.flush()
+    with pytest.raises(WorkbenchExecutionError, match="duration must"):
+        await service.build_plan(project=project, execution_input=execution_input)
+
+
+@pytest.mark.asyncio
 async def test_video_plan_injects_formal_keyframe_reference(session: AsyncSession) -> None:
     project, binding, user = await _seed(session)
     shot, artifact = await _seed_video_shot(session, project=project, user=user)
@@ -810,6 +982,64 @@ async def test_video_plan_injects_formal_keyframe_reference(session: AsyncSessio
     first_frame = [r for r in plan.planned_references if r.purpose == "first_frame"]
     assert len(first_frame) == 1
     assert first_frame[0].artifact_id == artifact.id
+
+
+@pytest.mark.asyncio
+async def test_new_contract_auto_matches_formal_and_rejects_reference_conflict(
+    session: AsyncSession,
+) -> None:
+    from app.execution.models import Artifact
+
+    project, binding, user = await _seed(session)
+    shot, formal = await _seed_video_shot(session, project=project, user=user)
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    assert entry is not None
+    manifest = deepcopy(entry.capability_manifest_json)
+    manifest["operations"]["video.generate"]["input_contracts"] = {
+        "formal_frame": {
+            "input_slots": {"first_frame": {"minimum": 1, "maximum": 1}},
+            "minimum_total_references": 1,
+        },
+        "reference_video": {
+            "input_slots": {"reference_video": {"maximum": 3}},
+            "minimum_total_references": 1,
+        },
+    }
+    entry.capability_manifest_json = manifest
+    entry.contract_manifest_hash = hash_manifest(manifest)
+    binding.capability_manifest_hash = entry.contract_manifest_hash
+    await session.flush()
+
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(
+        project=project,
+        execution_input=_input(shot_id=shot.id, requested_binding_id=binding.id),
+    )
+    assert plan.mode_id == "formal_frame"
+    assert plan.resolved_model.mode_id == "formal_frame"
+    assert [ref.artifact_id for ref in plan.planned_references] == [formal.id]
+
+    reference_video = Artifact(
+        project_id=project.id,
+        artifact_type="video",
+        storage_state="available",
+        object_key=f"obj/{uuid4().hex}",
+        content_hash="c" * 64,
+        mime_type="video/mp4",
+        byte_size=10,
+    )
+    session.add(reference_video)
+    await session.flush()
+    with pytest.raises(WorkbenchExecutionError, match="Formal 首帧") as error:
+        await service.build_plan(
+            project=project,
+            execution_input=_input(
+                shot_id=shot.id,
+                requested_binding_id=binding.id,
+                references=[ShotReferenceIntent(purpose="action", artifact_id=reference_video.id)],
+            ),
+        )
+    assert error.value.details["code"] == "MODEL_INPUT_COMBINATION_UNSUPPORTED"
 
 
 @pytest.mark.asyncio
@@ -889,9 +1119,7 @@ async def test_frozen_effective_creative_content_enters_plan_and_run(
     assert plan.semantic_intent["continuity_context"]["story_entry_state"] == (
         "explicit wardrobe change to red in this scene"
     )
-    assert plan.semantic_intent["creative_value_sources"]["camera_motion"] == (
-        "user_confirmed"
-    )
+    assert plan.semantic_intent["creative_value_sources"]["camera_motion"] == ("user_confirmed")
 
     run = await service.create_and_dispatch(
         project=project,
@@ -899,8 +1127,9 @@ async def test_frozen_effective_creative_content_enters_plan_and_run(
     )
     frozen_plan = run.input_snapshot["workbench_plan"]
     assert frozen_plan["prompt"] == plan.prompt
-    assert frozen_plan["semantic_intent"]["continuity_context"] == (
-        plan.semantic_intent["continuity_context"]
+    assert (
+        frozen_plan["semantic_intent"]["continuity_context"]
+        == (plan.semantic_intent["continuity_context"])
     )
 
     # Resume reads the NodeRun's frozen plan, not mutable Scene/Shot state.
@@ -926,21 +1155,289 @@ async def test_frozen_effective_creative_content_enters_plan_and_run(
 
 
 @pytest.mark.asyncio
+async def test_scene_frozen_capabilities_are_inherited_by_shots(
+    session: AsyncSession,
+) -> None:
+    """Scene scope is the shared configuration; Shots inherit it at plan time.
+
+    The Owner configures the Scene once.  No Shot carries a copied selection;
+    the plan resolves Project + Scene + Shot and freezes that single effective
+    intent into the run snapshot.
+    """
+
+    from app.director.creative_capabilities.creative_compiler import (
+        CreativeCapabilityCompiler,
+    )
+    from app.director.creative_capabilities.freeze import freeze_scene_capabilities
+    from app.director.creative_capabilities.packs_library import STYLE_PACKS
+    from app.director.creative_capabilities.skill_library import BASELINE_SKILLS
+
+    project, binding, user = await _seed(session)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    base_prompt = "documentary wide shot of the water town at dawn"
+    shot.video_prompt = base_prompt
+    shot.director_state = {}
+    scene = await session.get(Scene, shot.scene_id)
+    assert scene is not None
+    scene.design_state = {}
+
+    style = next(item for item in STYLE_PACKS if item.style_key == "documentary_natural_v1")
+    skill = next(item for item in BASELINE_SKILLS if item.skill_key == "emotional-performance-v1")
+    intent = CreativeCapabilityCompiler().compile(style=style, skill_stack=[skill])
+    scene_freeze = await freeze_scene_capabilities(
+        session,
+        project_id=project.id,
+        scene_id=scene.id,
+        intent=intent,
+        actor_id=user.id,
+    )
+    await session.flush()
+
+    # The configuration lives on the Scene only.  The Shot keeps no copied
+    # capability state, so inheritance cannot be mistaken for an override.
+    assert scene_freeze.design_state["creative_capabilities"]["effective_intent"]
+    assert "creative_capabilities" not in (shot.director_state or {})
+
+    execution_input = _input(
+        shot_id=shot.id,
+        requested_binding_id=binding.id,
+        prompt=base_prompt,
+        expected_shot_version=shot.version,
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(project=project, execution_input=execution_input)
+    effective = plan.semantic_intent["effective_creative_intent"]
+    assert skill.strategy in plan.prompt
+    # The Scene's style pack content — not a Shot copy — is what the plan
+    # resolves into the effective intent.
+    assert effective["lighting"] == style.lighting
+    assert effective["production_design"] == style.production_design
+    assert (
+        plan.semantic_intent["creative_snapshot_hashes"]["scene"]
+        == (scene_freeze.design_state["creative_capabilities"]["compiled_hash"])
+    )
+
+    run = await service.create_and_dispatch(
+        project=project,
+        execution_input=execution_input,
+    )
+    frozen_plan = run.input_snapshot["workbench_plan"]
+    assert frozen_plan["prompt"] == plan.prompt
+    assert frozen_plan["semantic_intent"]["skill_guidance"][0]["skill_key"] == (
+        "emotional-performance-v1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_regenerated_candidate_gets_its_own_review_run(session: AsyncSession) -> None:
+    """A new media candidate must be admitted by a review of that candidate.
+
+    The review gate binds a decision to the exact upstream Artifact.  When a
+    Shot is regenerated, reusing the review run that judged the previous
+    candidate leaves the new candidate with no admissible evidence: the review
+    page reports missing evidence and Formal can never be reached.
+    """
+
+    project, video_binding, user = await _seed(session)
+    shot, _keyframe_seed, binding = await _seed_image_shot(
+        session,
+        project=project,
+        user=user,
+        connection_id=video_binding.connection_id,
+    )
+    from app.execution.models import Artifact, GraphNode
+
+    command = _input(
+        project_id=project.id,
+        shot_id=shot.id,
+        stage="image_keyframe",
+        requested_binding_id=binding.id,
+        mode_id="text_to_image",
+        expected_shot_version=shot.version,
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+
+    def _review_runs():
+        return (
+            select(NodeRun)
+            .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+            .where(GraphNode.node_key == "identity_review")
+            .order_by(NodeRun.attempt_no)
+        )
+
+    first_media = await service.create_and_dispatch(
+        project=project,
+        execution_input=command,
+        idempotency_key_override="regen:keyframe:one",
+    )
+    await session.commit()
+    first_review = (await session.execute(_review_runs())).scalars().first()
+    assert first_review is not None, "the first dispatch must queue a review run"
+    # The first candidate's review is finished and its evidence is stored, which
+    # is exactly the state a reviewer leaves behind before regenerating.
+    evidence = Artifact(
+        project_id=project.id,
+        artifact_type="probe",
+        storage_state="available",
+        object_key="projects/test/reviews/identity/probe.json",
+        content_hash="identity-evidence-hash",
+        mime_type="application/json",
+        byte_size=128,
+        produced_by_run_id=first_review.id,
+    )
+    session.add(evidence)
+    await session.flush()
+    first_review.status = "completed"
+    first_review.result_artifact_id = evidence.id
+    await session.commit()
+
+    # Regeneration: a new keyframe attempt for the same Shot.
+    second_media = await service.create_and_dispatch(
+        project=project,
+        execution_input=command,
+        idempotency_key_override="regen:keyframe:two",
+    )
+    await session.commit()
+    assert second_media.id != first_media.id
+
+    reviews = (await session.execute(_review_runs())).scalars().all()
+    assert len(reviews) == 2, "a new candidate needs a review of that candidate"
+    newest = reviews[-1]
+    assert newest.id != first_review.id
+    assert newest.status == "queued", "the new review must actually run for the new candidate"
+    assert newest.input_snapshot["upstream_node_run_id"] == str(second_media.id)
+    assert newest.parent_run_id == first_review.id
+
+
+@pytest.mark.asyncio
+async def test_ensure_stage_review_run_serves_a_candidate_without_evidence(
+    session: AsyncSession,
+) -> None:
+    """A candidate that exists without evidence can obtain its review.
+
+    A graph published before the gate existed, or a candidate whose tail review
+    was consumed by an earlier attempt, would otherwise dead-end the review page:
+    no evidence means no decision can ever be recorded.
+    """
+
+    from app.execution.models import Artifact, GraphNode
+    from app.production.workbench_execution import ensure_stage_review_run
+
+    project, video_binding, user = await _seed(session)
+    shot, _keyframe_seed, binding = await _seed_image_shot(
+        session,
+        project=project,
+        user=user,
+        connection_id=video_binding.connection_id,
+    )
+    command = _input(
+        project_id=project.id,
+        shot_id=shot.id,
+        stage="image_keyframe",
+        requested_binding_id=binding.id,
+        mode_id="text_to_image",
+        expected_shot_version=shot.version,
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    media_run = await service.create_and_dispatch(
+        project=project,
+        execution_input=command,
+        idempotency_key_override="evidence:keyframe:one",
+    )
+    await session.commit()
+
+    candidate = Artifact(
+        project_id=project.id,
+        artifact_type="image",
+        storage_state="available",
+        object_key="projects/test/keyframes/candidate.png",
+        content_hash="candidate-hash",
+        mime_type="image/png",
+        byte_size=2048,
+        produced_by_run_id=media_run.id,
+    )
+    session.add(candidate)
+    await session.flush()
+
+    review_run = await ensure_stage_review_run(
+        session,
+        project=project,
+        shot=shot,
+        artifact_id=candidate.id,
+        stage="image_keyframe",
+        created_by=user.id,
+    )
+    await session.commit()
+
+    assert review_run.status == "queued"
+    assert review_run.input_snapshot["upstream_node_run_id"] == str(media_run.id)
+
+    # Asking again is the same review, not a second run for one candidate.
+    same = await ensure_stage_review_run(
+        session,
+        project=project,
+        shot=shot,
+        artifact_id=candidate.id,
+        stage="image_keyframe",
+        created_by=user.id,
+    )
+    await session.commit()
+    assert same.id == review_run.id
+    review_nodes = await session.execute(
+        select(NodeRun)
+        .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+        .where(GraphNode.node_key == "identity_review")
+    )
+    assert len(review_nodes.scalars().all()) == 1
+
+    # An artifact without an admitted producer is refused, not silently bound.
+    orphan = Artifact(
+        project_id=project.id,
+        artifact_type="image",
+        storage_state="available",
+        object_key="projects/test/keyframes/orphan.png",
+        content_hash="orphan-hash",
+        mime_type="image/png",
+        byte_size=1024,
+    )
+    session.add(orphan)
+    await session.flush()
+    with pytest.raises(WorkbenchExecutionError) as mismatch:
+        await ensure_stage_review_run(
+            session,
+            project=project,
+            shot=shot,
+            artifact_id=orphan.id,
+            stage="image_keyframe",
+            created_by=user.id,
+        )
+    assert mismatch.value.details["code"] == "ARTIFACT_PRODUCER_MISSING"
+
+
+@pytest.mark.asyncio
 async def test_command_replay_is_frozen_and_new_keys_allocate_attempts(session, monkeypatch):
     from app.shared.errors import ConflictError
 
     project, binding, user = await _seed(session)
     shot, _artifact = await _seed_video_shot(session, project=project, user=user)
     service = WorkbenchExecutionService(session, user_id=user.id)
-    command = _input(project_id=project.id, shot_id=shot.id,
-                     requested_binding_id=binding.id, expected_shot_version=shot.version)
+    command = _input(
+        project_id=project.id,
+        shot_id=shot.id,
+        requested_binding_id=binding.id,
+        expected_shot_version=shot.version,
+    )
     first = await service.create_and_dispatch(
-        project=project, execution_input=command, idempotency_key_override="command:one",
+        project=project,
+        execution_input=command,
+        idempotency_key_override="command:one",
     )
     await session.commit()
     first_id, first_hash = first.id, first.input_hash
     second = await service.create_and_dispatch(
-        project=project, execution_input=command, idempotency_key_override="command:two",
+        project=project,
+        execution_input=command,
+        idempotency_key_override="command:two",
     )
     assert second.attempt_no == first.attempt_no + 1
     assert second.parent_run_id == first.id
@@ -954,12 +1451,15 @@ async def test_command_replay_is_frozen_and_new_keys_allocate_attempts(session, 
     shot.version += 1
     await session.commit()
     replay = await service.create_and_dispatch(
-        project=project, execution_input=command, idempotency_key_override="command:one",
+        project=project,
+        execution_input=command,
+        idempotency_key_override="command:one",
     )
     assert replay.id == first_id and replay.input_hash == first_hash
     with pytest.raises(ConflictError) as conflict:
         await service.create_and_dispatch(
-            project=project, execution_input=command.model_copy(update={"prompt": "changed"}),
+            project=project,
+            execution_input=command.model_copy(update={"prompt": "changed"}),
             idempotency_key_override="command:one",
         )
     assert conflict.value.details["code"] == "EXECUTION_COMMAND_REUSED"
@@ -1155,3 +1655,74 @@ async def test_keyframe_dispatch_queues_the_review_that_the_formal_gate_requires
     )
     await session.commit()
     assert updated.formal_keyframe_artifact_id == keyframe.id
+
+
+@pytest.mark.asyncio
+async def test_project_creative_snapshot_is_inherited_and_shot_override_wins(
+    session: AsyncSession,
+) -> None:
+    from app.access.models import ProjectCreativeProfile
+    from app.director.creative_capabilities.creative_compiler import CreativeCapabilityCompiler
+    from app.director.creative_capabilities.freeze import serialize_compiled_creative_intent
+    from app.director.creative_capabilities.packs_library import STYLE_PACKS
+    from sqlalchemy import func
+
+    project, binding, user = await _seed(session)
+    shot, _ = await _seed_video_shot(session, project=project, user=user)
+    style = STYLE_PACKS[0]
+    frozen = serialize_compiled_creative_intent(CreativeCapabilityCompiler().compile(style=style))
+    profile = ProjectCreativeProfile(
+        project_id=project.id,
+        start_type="FREE",
+        director_autonomy="ASSIST",
+        selected_style_ids=[style.style_key],
+        strategy_snapshot={"creative_capabilities": frozen},
+        version=1,
+    )
+    session.add(profile)
+    shot.video_prompt = "A traveller arrives at the station"
+    await session.flush()
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(
+        project=project,
+        execution_input=_input(
+            shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+        ),
+    )
+    assert style.lighting in plan.prompt
+    assert plan.semantic_intent["creative_snapshot_hashes"]["project"] == frozen["compiled_hash"]
+    assert not any(item.key == f"style:{style.style_key}" for item in plan.pending_suggestions)
+    scene = await session.get(Scene, shot.scene_id)
+    assert scene is not None
+    scene.design_state = {
+        "creative_capabilities": serialize_compiled_creative_intent(
+            CreativeCapabilityCompiler().compile(user_intent={"lighting": "Soft morning light"})
+        )
+    }
+    await session.flush()
+    scene_plan = await service.build_plan(
+        project=project,
+        execution_input=_input(
+            shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+        ),
+    )
+    assert (
+        scene_plan.semantic_intent["effective_creative_intent"]["lighting"] == "Soft morning light"
+    )
+    assert "Soft morning light" in scene_plan.prompt
+    assert style.lighting not in scene_plan.prompt
+    shot.director_state = {
+        "creative_capabilities": serialize_compiled_creative_intent(
+            CreativeCapabilityCompiler().compile(user_intent={"lighting": "Only candlelight"})
+        )
+    }
+    await session.flush()
+    changed = await service.build_plan(
+        project=project,
+        execution_input=_input(
+            shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+        ),
+    )
+    assert changed.semantic_intent["effective_creative_intent"]["lighting"] == "Only candlelight"
+    assert style.lighting not in changed.prompt
+    assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0

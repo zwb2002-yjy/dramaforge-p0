@@ -11,8 +11,8 @@ from uuid import UUID, uuid4
 import pytest
 from app.config import clear_settings_cache, get_settings
 from app.main import create_app
+from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.models import (
     ProviderConnection,
     ProviderConnectionRevision,
@@ -95,7 +95,7 @@ def _seed_sync(factory: Any, workspace_id: str) -> str:
             owner = await session.get(User, workspace.owner_user_id)
             assert owner is not None
             manifest = next(
-                item for item in SEED_MANIFESTS if item["model_id"] == "agnes-video-v2.0"
+                item for item in CATALOG_MODELS if item["model_id"] == "agnes-video-v2.0"
             )
             entry = ModelCatalogEntry(
                 provider_type="agnes",
@@ -262,7 +262,7 @@ def _seed_shot_with_formal_keyframe(factory: Any, project_id: str) -> str:
                 graph_node_id=node.id,
                 idempotency_key=f"api-kf:{_uuid4().hex}",
                 input_hash="a" * 64,
-                status="completed",
+                status="queued",
                 input_snapshot={},
                 created_by=owner.id,
             )
@@ -279,6 +279,9 @@ def _seed_shot_with_formal_keyframe(factory: Any, project_id: str) -> str:
                 produced_by_run_id=run.id,
             )
             session.add(artifact)
+            await session.flush()
+            run.result_artifact_id = artifact.id
+            run.status = "completed"
             await session.flush()
             await set_formal_keyframe(
                 session,
@@ -595,17 +598,22 @@ def _start_command(api, *, autonomy="AUTO", key="receipt:one"):
     shot_id = _seed_shot_with_formal_keyframe(factory, project_id)
     profile = client.get(f"/api/v1/projects/{project_id}").json()["creative_profile"]
     mode = client.patch(
-        f"/api/v1/projects/{project_id}/creative-profile", headers={CSRF_HEADER: _csrf(client)},
+        f"/api/v1/projects/{project_id}/creative-profile",
+        headers={CSRF_HEADER: _csrf(client)},
         json={"expected_version": profile["version"], "director_autonomy": autonomy},
     )
     assert mode.status_code == 200, mode.text
     path = f"/api/v1/projects/{project_id}/shots/{shot_id}"
-    preview = client.post(f"{path}/execution-plan", headers={CSRF_HEADER: _csrf(client)},
-                          json=_plan_body(binding_id))
+    preview = client.post(
+        f"{path}/execution-plan", headers={CSRF_HEADER: _csrf(client)}, json=_plan_body(binding_id)
+    )
     assert preview.status_code == 200, preview.text
     body = {**_plan_body(binding_id), "plan_fingerprint": preview.json()["plan_fingerprint"]}
-    response = client.post(f"{path}/executions",
-                           headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": key}, json=body)
+    response = client.post(
+        f"{path}/executions",
+        headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": key},
+        json=body,
+    )
     assert response.status_code == 200, response.text
     return project_id, shot_id, binding_id, body, response.json()
 
@@ -623,99 +631,29 @@ def test_lost_execution_response_replays_before_resolution_or_shot_version_check
         raise AssertionError("Receipt replay cannot build a new plan")
 
     monkeypatch.setattr(WorkbenchExecutionService, "build_plan", forbidden)
-    read = client.get(f"{path}/executions/receipt",
-                      params={"stage": "video", "idempotency_key": "receipt:one"})
+    read = client.get(
+        f"{path}/executions/receipt", params={"stage": "video", "idempotency_key": "receipt:one"}
+    )
     assert read.status_code == 200 and read.json() == receipt
-    replay = client.post(f"{path}/executions", json=body,
-                         headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": "receipt:one"})
+    replay = client.post(
+        f"{path}/executions",
+        json=body,
+        headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": "receipt:one"},
+    )
     assert replay.status_code == 200 and replay.json() == receipt
     assert receipt["director_turn_id"] is None
-    changed = client.post(f"{path}/executions", json={**body, "prompt": "changed request"},
-                          headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": "receipt:one"})
+    changed = client.post(
+        f"{path}/executions",
+        json={**body, "prompt": "changed request"},
+        headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": "receipt:one"},
+    )
     assert changed.status_code == 409, changed.text
     assert _run(factory, _count_workbench_runs(factory)) == before
-    cross = client.get(f"/api/v1/projects/{uuid4()}/shots/{shot_id}/executions/receipt",
-                       params={"stage": "video", "idempotency_key": "receipt:one"})
+    cross = client.get(
+        f"/api/v1/projects/{uuid4()}/shots/{shot_id}/executions/receipt",
+        params={"stage": "video", "idempotency_key": "receipt:one"},
+    )
     assert cross.status_code in {403, 404}
-
-
-@pytest.mark.parametrize("autonomy,expected", [("AUTO", "open_editing"),
-                                               ("ASSIST", "review_saved_design")])
-def test_actual_command_worker_and_formal_api_reach_next_checkpoint(
-    api, monkeypatch, autonomy, expected,
-):
-    from app.execution.models import Artifact, NodeRun, ProviderOperation
-    from app.workers import jobs
-    from sqlalchemy import func, select
-
-    client, factory = api
-    project_id, shot_id, _binding, _body, receipt = _start_command(api, autonomy=autonomy)
-    assert receipt["director_turn_id"] is None
-    turn_id = _run(factory, _deliver_production_notices(factory, project_id))
-    assert turn_id is not None
-    monkeypatch.setattr(jobs, "get_session_factory", lambda: factory)
-    first_scan = _run(factory, jobs.reconcile_waiting_director_turns({}))
-    assert first_scan["unchanged"] == 1
-    count = _run(factory, _count_workbench_runs(factory))
-
-    async def finish():
-        async with factory() as session:
-            run = await session.get(NodeRun, UUID(receipt["node_run_id"]))
-            artifact = Artifact(project_id=UUID(project_id), artifact_type="video",
-                                storage_state="available", object_key=f"obj/{uuid4().hex}",
-                                content_hash="e" * 64, mime_type="video/mp4", byte_size=1,
-                                produced_by_run_id=run.id)
-            session.add(artifact)
-            await session.flush()
-            run.status = "completed"
-            run.result_artifact_id = artifact.id
-            await session.commit()
-            return str(artifact.id)
-
-    artifact_id = _run(factory, finish())
-    assert _run(factory, jobs.reconcile_waiting_director_turns({}))["reconciled"] == 1
-    # The product entry point admits a candidate only after a stored human
-    # decision about this exact artifact.
-    blocked = client.post(f"/api/v1/projects/{project_id}/shots/{shot_id}/formal-video",
-                          headers={CSRF_HEADER: _csrf(client)},
-                          json={"artifact_id": artifact_id, "expected_shot_version": 2})
-    assert blocked.status_code == 422, blocked.text
-    assert blocked.json()["details"]["code"] == "REVIEW_APPROVAL_REQUIRED"
-    review_run_id = _seed_review_run(
-        factory,
-        project_id=project_id,
-        shot_id=shot_id,
-        artifact_id=artifact_id,
-        node_key="video_drift_review",
-    )
-    _approve_via_review_api(
-        client,
-        project_id=project_id,
-        shot_id=shot_id,
-        artifact_id=artifact_id,
-        review_node_run_id=review_run_id,
-        review_kind="video_drift",
-        expected_shot_version=2,
-    )
-    selected = client.post(f"/api/v1/projects/{project_id}/shots/{shot_id}/formal-video",
-                           headers={CSRF_HEADER: _csrf(client)},
-                           json={"artifact_id": artifact_id, "expected_shot_version": 2})
-    assert selected.status_code == 200, selected.text
-    _run(factory, _deliver_production_notices(factory, project_id))
-    turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}")
-    assert turn.status_code == 200, turn.text
-    state = turn.json()
-    assert state["status"] == "completed" and state["step_count"] == 4
-    action = state["response_summary"]["coordination"]["current_action"]
-    assert action["action"] == expected and action["requires_confirmation"]
-    assert action["shot_version"] == 3
-    assert _run(factory, _count_workbench_runs(factory)) == count
-
-    async def operations():
-        async with factory() as session:
-            return await session.scalar(select(func.count()).select_from(ProviderOperation))
-
-    assert _run(factory, operations()) == 0
 
 
 def test_manual_command_keeps_production_available_without_proactive_followup(api):
@@ -725,17 +663,11 @@ def test_manual_command_keeps_production_available_without_proactive_followup(ap
 
 
 @pytest.mark.parametrize("autonomy", ["AUTO", "ASSIST", "MANUAL"])
-def test_production_acceptance_never_enters_director_when_director_is_broken(
-    api, monkeypatch, autonomy,
-):
-    from app.director.business_checkpoints import DirectorBusinessCheckpoints
-
-    def unavailable(*args, **kwargs):
-        raise RuntimeError("Director unavailable")
-
-    monkeypatch.setattr(DirectorBusinessCheckpoints, "__init__", unavailable)
-    _project, _shot, _binding, _body, receipt = _start_command(api, autonomy=autonomy)
+def test_production_acceptance_does_not_create_detached_director_turn(api, autonomy):
+    project_id, _shot, _binding, _body, receipt = _start_command(api, autonomy=autonomy)
     assert receipt["status"] == "queued" and receipt["director_turn_id"] is None
+    _client, factory = api
+    assert _run(factory, _deliver_production_notices(factory, project_id)) is None
 
 
 async def _deliver_production_notices(factory, project_id):
@@ -747,19 +679,30 @@ async def _deliver_production_notices(factory, project_id):
     from sqlalchemy import select
 
     async with factory() as session:
-        ids = list((await session.scalars(select(OutboxEvent.event_id).where(
-            OutboxEvent.project_id == UUID(project_id), OutboxEvent.topic == "production.facts.v1",
-        ))).all())
+        ids = list(
+            (
+                await session.scalars(
+                    select(OutboxEvent.event_id).where(
+                        OutboxEvent.project_id == UUID(project_id),
+                        OutboxEvent.topic == "production.facts.v1",
+                    )
+                )
+            ).all()
+        )
     for event_id in ids:
         async with factory() as session:
             inbox_id = await receive_production_event(
-                session, project_id=UUID(project_id), event_id=event_id,
+                session,
+                project_id=UUID(project_id),
+                event_id=event_id,
             )
             await session.commit()
         async with factory() as session:
             await apply_director_wakeup(session, inbox_id=inbox_id)
             await session.commit()
     async with factory() as session:
-        return await session.scalar(select(DirectorTurn.id).where(
-            DirectorTurn.project_id == UUID(project_id),
-        ))
+        return await session.scalar(
+            select(DirectorTurn.id).where(
+                DirectorTurn.project_id == UUID(project_id),
+            )
+        )

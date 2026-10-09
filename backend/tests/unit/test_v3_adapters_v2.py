@@ -21,7 +21,7 @@ from app.providers.adapters_v2 import (
     submission_status_to_v3,
 )
 from app.providers.capabilities import Capability
-from app.providers.catalog_seed_data import seed_manifests_for
+from app.providers.catalog_loader import active_manifests_for
 from app.providers.contracts import (
     ArtifactRef,
     ExecutionContext,
@@ -67,14 +67,18 @@ def _uuid_of(value: str) -> UUID:
 
 
 def _bridge_for(provider_type: str, media: str) -> ProviderAdapterBridge:
-    seed = seed_manifests_for(provider_type=provider_type)
-    manifest = ModelCapabilityManifest.model_validate(
-        seed[0] if media == "image" else seed[1]
-    )
-    transport_id = "ark-image-v1" if provider_type == "volcengine" and media == "image" else (
-        "ark-video-v1" if provider_type == "volcengine" else (
-            "minimax-cn-v1" if provider_type == "minimax" else (
-            "agnes-image-v1" if media == "image" else "agnes-video-v1"
+    seed = active_manifests_for(provider_type=provider_type)
+    manifest = ModelCapabilityManifest.model_validate(seed[0] if media == "image" else seed[1])
+    transport_id = (
+        "ark-image-v1"
+        if provider_type == "volcengine" and media == "image"
+        else (
+            "ark-video-v1"
+            if provider_type == "volcengine"
+            else (
+                "minimax-cn-v1"
+                if provider_type == "minimax"
+                else ("agnes-image-v1" if media == "image" else "agnes-video-v1")
             )
         )
     )
@@ -115,7 +119,7 @@ class TestTranslationAgnes:
         result = await bridge.translate(
             Capability.VIDEO_IMAGE_TO_VIDEO,
             request,
-            {"first_frame": _frame()},
+            [_reference("first_frame")],
         )
         body = result.native_request
         # Agnes flat body: model/prompt/num_frames/frame_rate/height/width/image
@@ -139,7 +143,7 @@ class TestTranslationArk:
         result = await bridge.translate(
             Capability.VIDEO_IMAGE_TO_VIDEO,
             request,
-            {"first_frame": _frame()},
+            [_reference("first_frame")],
         )
         body = result.native_request
         # Ark content[] body: model + content[{text}, {image_url first_frame}]
@@ -163,14 +167,14 @@ class TestTranslationArk:
             await _bridge_for("agnes", "video").translate(
                 Capability.VIDEO_IMAGE_TO_VIDEO,
                 request,
-                {"first_frame": _frame()},
+                [_reference("first_frame")],
             )
         ).native_request
         ark_body = (
             await _bridge_for("volcengine", "video").translate(
                 Capability.VIDEO_IMAGE_TO_VIDEO,
                 request,
-                {"first_frame": _frame()},
+                [_reference("first_frame")],
             )
         ).native_request
         assert set(agnes_body) != set(ark_body)
@@ -190,7 +194,7 @@ class TestTranslationMiniMax:
         result = await bridge.translate(
             Capability.VIDEO_IMAGE_TO_VIDEO,
             request,
-            {"first_frame": _frame()},
+            [_reference("first_frame")],
         )
 
         assert result.native_request["ratio"] == "adaptive"
@@ -222,7 +226,7 @@ class TestTranslationMiniMax:
             await bridge.translate(
                 Capability.VIDEO_IMAGE_TO_VIDEO,
                 request,
-                {"first_frame": _frame()},
+                [_reference("first_frame")],
             )
 
 
@@ -257,12 +261,12 @@ class TestBridgeRefusesWithoutRuntime:
         bridge = _bridge_for("agnes", "video")
         with pytest.raises(ValueError):
             await bridge.translate(
-                Capability.AUDIO_TTS,
+                Capability.IMAGE_GENERATE,
                 ImageToVideoRequest(
                     prompt="p",
                     image=ArtifactRef(artifact_id="00000000-0000-0000-0000-000000000001"),
                 ),
-                {},
+                [],
             )
 
 
@@ -291,32 +295,28 @@ class _FakeRuntime:
         )
 
     async def poll_video(self, resume: object) -> object:
-        return PollResult(
-            status="succeeded", artifact_uri="https://cdn.example.com/out.mp4"
-        )
+        return PollResult(status="succeeded", artifact_uri="https://cdn.example.com/out.mp4")
 
     async def cancel_video(self, resume: object) -> object:
-        return CancelResult(
-            status="cancelled"
-        )
+        return CancelResult(status="cancelled")
 
     async def fetch_cost(self, resume: object) -> object:
-        return CostResult(
-            amount=1.0, currency="USD"
-        )
+        return CostResult(amount=1.0, currency="USD")
 
 
 def _runtime_bridge(
     provider_type: str, media: str, *, resolver: object | None = None
 ) -> tuple[ProviderAdapterBridge, _FakeRuntime]:
     """Bridge with a wired fake runtime (so create/poll actually execute)."""
-    seed = seed_manifests_for(provider_type=provider_type)
-    manifest = ModelCapabilityManifest.model_validate(
-        seed[0] if media == "image" else seed[1]
-    )
-    transport_id = "ark-image-v1" if provider_type == "volcengine" and media == "image" else (
-        "ark-video-v1" if provider_type == "volcengine" else (
-            "agnes-image-v1" if media == "image" else "agnes-video-v1"
+    seed = active_manifests_for(provider_type=provider_type)
+    manifest = ModelCapabilityManifest.model_validate(seed[0] if media == "image" else seed[1])
+    transport_id = (
+        "ark-image-v1"
+        if provider_type == "volcengine" and media == "image"
+        else (
+            "ark-video-v1"
+            if provider_type == "volcengine"
+            else ("agnes-image-v1" if media == "image" else "agnes-video-v1")
         )
     )
     v3 = to_v3_model_manifest(manifest, transport_profile_id=transport_id)
@@ -370,16 +370,14 @@ class _RecordingVideoCompiler:
             },
             request_schema_version="test-v1",
             reference_artifact_ids=[reference.artifact_id for reference in references],
-            reference_fingerprints=[
-                reference.fingerprint or "" for reference in references
-            ],
+            reference_fingerprints=[reference.fingerprint or "" for reference in references],
         )
 
 
 def _ordered_bridge(
     *, runtime: _FakeRuntime | None = None, resolver: object | None = None
 ) -> tuple[ProviderAdapterBridge, _RecordingVideoCompiler, _FakeRuntime | None]:
-    seed = seed_manifests_for(provider_type="agnes")
+    seed = active_manifests_for(provider_type="agnes")
     manifest = ModelCapabilityManifest.model_validate(seed[1])
     v3 = to_v3_model_manifest(manifest, transport_profile_id="agnes-video-v1")
     compiler = _RecordingVideoCompiler()
@@ -416,7 +414,7 @@ class TestOrderedReferenceTransport:
             for index, artifact_id in enumerate(ids, start=1)
         ]
 
-        await bridge.translate_v2(
+        await bridge.translate(
             Capability.VIDEO_REFERENCE_TO_VIDEO,
             request,
             references,
@@ -469,8 +467,7 @@ class TestOrderedReferenceTransport:
         request = ReferenceToVideoRequest(
             prompt="multi-reference",
             reference_images=[
-                ArtifactRef(artifact_id=str(reference.artifact_id))
-                for reference in resolver_output
+                ArtifactRef(artifact_id=str(reference.artifact_id)) for reference in resolver_output
             ],
         )
         await bridge.create(
@@ -511,7 +508,7 @@ class TestOrderedReferenceTransport:
             ),
         ]
 
-        await bridge.translate_v2(
+        await bridge.translate(
             Capability.VIDEO_REFERENCE_TO_VIDEO,
             request,
             references,
@@ -522,7 +519,7 @@ class TestOrderedReferenceTransport:
             ("reference_video", "v" * 64),
         ]
 
-    async def test_compatibility_image_bridge_rejects_multiple_references(self) -> None:
+    async def test_single_image_contract_rejects_multiple_references(self) -> None:
         bridge = _bridge_for("agnes", "image")
         request = ImageGenerateRequest(
             prompt="multi-reference image",
@@ -533,12 +530,12 @@ class TestOrderedReferenceTransport:
         )
         with pytest.raises(
             ValueError,
-            match="UNSUPPORTED_BY_LEGACY_BRIDGE",
+            match="at most one image reference",
         ):
             await bridge.translate(
                 Capability.IMAGE_GENERATE,
                 request,
-                {"reference_image": _frame()},
+                [_reference("reference_image")],
             )
 
 
@@ -574,7 +571,10 @@ class TestReferenceResolverClosure:
             ExecutionContext(trace_id="t"),
         )
         compiled = runtime.submitted[0]
-        assert compiled.wire_request["content"][1]["image_url"]["url"] == "https://cdn.example.com/f1.png"
+        assert (
+            compiled.wire_request["content"][1]["image_url"]["url"]
+            == "https://cdn.example.com/f1.png"
+        )
 
     async def test_ark_i2i_uses_resolved_url(self) -> None:
         bridge, runtime = _runtime_bridge(
@@ -584,9 +584,7 @@ class TestReferenceResolverClosure:
             Capability.IMAGE_GENERATE,
             ImageGenerateRequest(
                 prompt="p",
-                reference_images=[
-                    ArtifactRef(artifact_id="00000000-0000-0000-0000-000000000001")
-                ],
+                reference_images=[ArtifactRef(artifact_id="00000000-0000-0000-0000-000000000001")],
             ),
             ExecutionContext(trace_id="t"),
         )
@@ -684,3 +682,16 @@ class TestDurableResumeToken:
             ]
 
         return resolver
+
+
+def _reference(role: str) -> ResolvedReference:
+    artifact = _frame()
+    return ResolvedReference(
+        role=role,
+        artifact_id=UUID(artifact.artifact_id),
+        content_url=artifact.signed_url,
+        content_bytes=artifact.content_bytes,
+        mime_type=artifact.mime_type,
+        fingerprint=artifact.sha256,
+        duration_seconds=artifact.duration_seconds,
+    )

@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { routeTree } from "../../src/routeTree.gen";
+import { queryKeys } from "../../src/lib/queryKeys";
 
 function json(body: unknown): Promise<Response> {
   return Promise.resolve(
@@ -14,24 +15,38 @@ function json(body: unknown): Promise<Response> {
   );
 }
 
-function mockFetch(): void {
-  vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+function mockFetch() {
+  return vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
     const url = String(input);
     if (url.endsWith("/health")) return json({ status: "ok", db: "up" });
     if (url.endsWith("/api/v1/auth/me")) {
       return json({ id: "owner-1", display_name: "创作者", email: "owner@example.com" });
     }
     if (url.endsWith("/api/v1/workspaces")) return json([{ id: "workspace-1", name: "空间" }]);
+    if (url.endsWith("/api/v1/workspaces/workspace-1/projects")) {
+      return json([
+        {
+          id: "project-1",
+          workspace_id: "workspace-1",
+          name: "作品",
+          stage: "planning",
+          aspect_ratio: "16:9",
+        },
+      ]);
+    }
+    if (/\/(provider-plugins|provider-connections|model-profiles|projects)$/.test(url))
+      return json([]);
     if (url.includes("/workspace-state")) return json({ state: { last_view: "production" } });
     if (url.includes("/projects/project-1")) return json({ id: "project-1", name: "作品" });
     return json({});
   });
 }
 
-function renderAt(path: string) {
+function renderAt(path: string, prepareClient?: (client: QueryClient) => void) {
   const history = createMemoryHistory({ initialEntries: [path] });
   const router = createRouter({ routeTree, history });
   const queryClient = new QueryClient();
+  prepareClient?.(queryClient);
   render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
@@ -41,6 +56,34 @@ function renderAt(path: string) {
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+it("waits for an expired recovery cache read and reports its failure before redirecting", async () => {
+  window.localStorage.clear();
+  window.sessionStorage.clear();
+  const fetchMock = mockFetch();
+  const baseFetch = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation((input, init) => {
+    if (String(input).endsWith("/workspace-state") && init?.method !== "PATCH") {
+      return new Promise<Response>((resolve) =>
+        setTimeout(
+          () =>
+            resolve(new Response(JSON.stringify({ detail: "restore failed" }), { status: 500 })),
+          100,
+        ),
+      );
+    }
+    return baseFetch(input, init);
+  });
+  const router = renderAt("/projects/project-1", (client) =>
+    client.setQueryData(
+      queryKeys.workspace.state("project-1"),
+      { state: { last_view: "production" } },
+      { updatedAt: Date.now() - 31_000 },
+    ),
+  );
+  expect(await screen.findByText("无法读取上次位置", { exact: true })).toBeInTheDocument();
+  expect(router.state.location.pathname).toBe("/projects/project-1");
+});
 
 /**
  * Regression guard for the permanent L1 entries: leaving a Project route for
@@ -54,8 +97,8 @@ it("keeps the Settings entry reachable from a Project route", async () => {
 
   fireEvent.click(screen.getByRole("link", { name: "设置" }));
 
-  await vi.waitFor(() => expect(router.state.location.pathname).toBe("/settings/account"));
-  expect(await screen.findByTestId("account-settings-page")).toBeInTheDocument();
+  await vi.waitFor(() => expect(router.state.location.pathname).toBe("/settings/models"));
+  expect(await screen.findByTestId("model-settings-page")).toBeInTheDocument();
 });
 
 it("keeps the Project Lobby entry reachable from a Project route", async () => {
@@ -63,7 +106,7 @@ it("keeps the Project Lobby entry reachable from a Project route", async () => {
   const router = renderAt("/projects/project-1/production");
   await screen.findByTestId("professional-workbench");
 
-  fireEvent.click(screen.getByRole("link", { name: "项目" }));
+  fireEvent.click(screen.getByRole("link", { name: "我的项目" }));
 
   await vi.waitFor(() => expect(router.state.location.pathname).toBe("/"));
 });

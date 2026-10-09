@@ -97,6 +97,31 @@ function mockBackend() {
       };
       return json({ ...serverShot });
     }
+    if (url.includes("/execution-models/preflight")) {
+      return json({
+        project_id: "project-1",
+        stages: [
+          {
+            stage: "image_keyframe",
+            ready: true,
+            source: "project_binding",
+            requested_model_id: "agnes/agnes-image-2.1-flash",
+            resolved_model_id: "agnes/agnes-image-2.1-flash",
+            binding_id: "binding-image",
+            reason: null,
+          },
+          {
+            stage: "video",
+            ready: true,
+            source: "project_binding",
+            requested_model_id: "agnes/agnes-video-v2.0",
+            resolved_model_id: "agnes/agnes-video-v2.0",
+            binding_id: "binding-video",
+            reason: null,
+          },
+        ],
+      });
+    }
     return json({});
   });
   return calls;
@@ -116,7 +141,9 @@ describe("SceneWorkspace", () => {
     expect(screen.getByTestId("shot-strip")).toBeInTheDocument();
     expect(screen.getByText("#1")).toBeInTheDocument();
     expect(screen.getByTestId("shot-placeholder")).toHaveTextContent("A turns");
-    expect(screen.getByTestId("no-formal-result")).toHaveTextContent("尚未选择正式结果");
+    expect(screen.getByTestId("no-formal-result")).toHaveTextContent(
+      "还没有画面，在右侧点「生成画面」",
+    );
     expect(screen.getByTestId("scene-stage")).toContainElement(screen.getByTestId("shot-strip"));
     const canvas = screen.getByTestId("cinematic-canvas");
     expect(within(canvas).queryByRole("textbox")).not.toBeInTheDocument();
@@ -127,61 +154,25 @@ describe("SceneWorkspace", () => {
       "/projects/project-1/edit",
     );
 
-    // Canvas-first default: no permanent operation panel. The Context Dock
-    // opens the Context Sheet on demand.
-    expect(screen.getByTestId("context-dock")).toBeInTheDocument();
-    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
-    expect(screen.getByTestId("context-dock-character")).toBeInTheDocument();
-    expect(screen.getByTestId("context-dock-camera")).toBeInTheDocument();
-    expect(screen.getByTestId("context-dock-motion")).toBeInTheDocument();
-    expect(screen.getByTestId("context-dock-look")).toBeInTheDocument();
-    expect(screen.getByTestId("context-dock-generate")).toBeInTheDocument();
-    expect(screen.getByTestId("context-dock-director")).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("context-dock-look"));
-    const sidebar = await screen.findByTestId("director-sidebar");
-    expect(within(sidebar).getByTestId("director-section-design")).toBeInTheDocument();
-    expect(within(sidebar).getByRole("tab", { name: "镜头" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(within(sidebar).getByRole("tab", { name: "参考" })).toBeInTheDocument();
-    expect(within(sidebar).getByRole("tab", { name: "生成" })).toBeInTheDocument();
-    expect(within(sidebar).getByTestId("shot-design-panel")).toHaveAttribute(
-      "data-design-focus",
-      "look",
-    );
-    expect(within(sidebar).queryByTestId("shot-production-trace")).not.toBeInTheDocument();
-    expect(within(sidebar).queryByText(/NodeRun/)).not.toBeInTheDocument();
-    fireEvent.click(within(sidebar).getByRole("tab", { name: "参考" }));
-    expect(within(sidebar).getByTestId("director-section-references")).toBeInTheDocument();
-    expect(within(sidebar).queryByTestId("director-section-design")).not.toBeInTheDocument();
-    fireEvent.click(within(sidebar).getByRole("tab", { name: "生成" }));
-    expect(within(sidebar).getByTestId("director-section-production")).toBeInTheDocument();
-    expect(within(sidebar).queryByTestId("shot-production-trace")).not.toBeInTheDocument();
-    expect(within(sidebar).queryByText(/^v\d+$/)).not.toBeInTheDocument();
-    expect(within(sidebar).queryByText(/NodeRun/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("director-sheet-close"));
-    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
+    // One inspector, organised around the Shot: no tool dock, no tab layers.
+    expect(screen.queryByTestId("context-dock")).not.toBeInTheDocument();
+    const inspector = screen.getByTestId("shot-inspector");
+    expect(inspector).toHaveAttribute("data-shot-id", "shot-1");
+    expect(within(inspector).getByRole("heading", { name: "镜头 1" })).toBeInTheDocument();
+    expect(within(inspector).queryByRole("tab")).not.toBeInTheDocument();
+    expect(within(inspector).getByLabelText("画面描述")).toHaveValue("A turns");
+    expect(within(inspector).getByLabelText("镜头类型")).toBeInTheDocument();
+    expect(within(inspector).getByTestId("shot-production-actions")).toBeInTheDocument();
+    expect(within(inspector).queryByTestId("shot-production-trace")).not.toBeInTheDocument();
+    expect(within(inspector).queryByText(/NodeRun/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId("context-dock-director"));
-    const directorSheet = await screen.findByTestId("director-sidebar");
-    expect(within(directorSheet).getByTestId("shot-design-panel")).toHaveAttribute(
-      "data-design-focus",
-      "all",
-    );
-    expect(within(directorSheet).getByTestId("director-section-suggestion")).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("director-sheet-close"));
-    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("context-dock-details"));
+    fireEvent.click(within(inspector).getByText("详情"));
     const details = await screen.findByTestId("shot-details-sheet");
     expect(details).toHaveAttribute("data-shot-id", "shot-1");
     expect(within(details).getByTestId("shot-production-trace")).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("shot-details-close"));
-    expect(screen.queryByTestId("shot-details-sheet")).not.toBeInTheDocument();
   });
 
-  it("keeps the Context Sheet and Details mutually exclusive without collapsing Takes", async () => {
+  it("shows no candidate tray until there is something to review", async () => {
     mockBackend();
     const queryClient = new QueryClient();
     render(
@@ -190,29 +181,8 @@ describe("SceneWorkspace", () => {
       </QueryClientProvider>,
     );
     await screen.findByText("Studio");
-    expect(screen.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "false");
-
-    fireEvent.click(screen.getByTestId("context-dock-look"));
-    expect(await screen.findByTestId("director-sidebar")).toBeInTheDocument();
-    expect(screen.queryByTestId("shot-details-sheet")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("context-dock-details"));
-    expect(await screen.findByTestId("shot-details-sheet")).toBeInTheDocument();
-    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("context-dock-generate"));
-    expect(await screen.findByTestId("director-sidebar")).toBeInTheDocument();
-    expect(screen.queryByTestId("shot-details-sheet")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("context-dock-takes"));
-    expect(screen.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "true");
-    expect(screen.getByTestId("director-sidebar")).toBeInTheDocument();
-    expect(screen.queryByTestId("shot-details-sheet")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("context-dock-details"));
-    expect(await screen.findByTestId("shot-details-sheet")).toBeInTheDocument();
-    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
-    expect(screen.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "true");
+    expect(screen.queryByTestId("shot-candidate-tray")).not.toBeInTheDocument();
+    expect(screen.getByTestId("shot-inspector")).toBeInTheDocument();
   });
 
   it("saves image/video prompt edits via the design panel", async () => {
@@ -224,18 +194,16 @@ describe("SceneWorkspace", () => {
       </QueryClientProvider>,
     );
     await screen.findByText("Studio");
-    fireEvent.click(screen.getByTestId("context-dock-look"));
     const image = await screen.findByLabelText("图片提示词");
     fireEvent.change(image, { target: { value: "close up, eye level" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存设计" }));
+    // An unsaved design makes saving the one primary action.
+    fireEvent.click(await screen.findByTestId("shot-primary-save"));
     await waitFor(() => {
       expect(calls.some((call) => call.method === "PATCH" && call.url.endsWith("/design"))).toBe(
         true,
       );
     });
-    // Scope to the save confirmation: the design panel also reports the saved
-    // version chip, so a text query for 已保存设计 now matches two elements.
-    expect(await screen.findByTestId("shot-design-message")).toHaveTextContent("已保存设计");
+    expect(await screen.findByTestId("shot-design-message")).toHaveTextContent("已保存。");
   });
 
   it("keeps a draft across sheet close and guards a Shot switch until discard", async () => {
@@ -271,16 +239,10 @@ describe("SceneWorkspace", () => {
       </QueryClientProvider>,
     );
     await screen.findByText("Studio");
-    fireEvent.click(screen.getByTestId("context-dock-look"));
     fireEvent.change(screen.getByLabelText("图片提示词"), {
       target: { value: "A unsaved keyframe" },
     });
     expect(await screen.findByTestId("shot-design-dirty")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("director-sheet-close"));
-    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("context-dock-look"));
-    expect(screen.getByLabelText("图片提示词")).toHaveValue("A unsaved keyframe");
 
     fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
     expect(await screen.findByTestId("unsaved-changes-guard")).toBeInTheDocument();
@@ -337,16 +299,15 @@ describe("SceneWorkspace", () => {
       </QueryClientProvider>,
     );
     await screen.findByText("Studio");
-    fireEvent.click(screen.getByTestId("context-dock-look"));
     fireEvent.change(screen.getByLabelText("图片提示词"), {
       target: { value: "keep after failure" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "保存设计" }));
+    fireEvent.click(await screen.findByTestId("shot-primary-save"));
     expect(await screen.findByText(/保存失败/)).toBeInTheDocument();
     expect(screen.getByLabelText("图片提示词")).toHaveValue("keep after failure");
-    fireEvent.click(screen.getByTestId("director-tab-production"));
-    expect(screen.getByTestId("generate-keyframe")).toBeDisabled();
-    expect(screen.getByTestId("shot-production-unsaved")).toBeInTheDocument();
+    // Generation stays gated behind the unsaved design.
+    expect(screen.getByTestId("shot-primary-save")).toBeInTheDocument();
+    expect(screen.queryByTestId("generate-keyframe")).not.toBeInTheDocument();
   });
 
   it("polls effective active runs to completion and stops at terminal state", async () => {
@@ -514,6 +475,9 @@ describe("SceneWorkspace", () => {
                 stage: "image_keyframe",
                 status: "completed",
                 artifact_type: "image",
+                review_allowed: true,
+                review_decision: "approved",
+                review_blocked_reason: null,
               },
             ],
             "shot-2": [
@@ -523,6 +487,9 @@ describe("SceneWorkspace", () => {
                 stage: "image_keyframe",
                 status: "completed",
                 artifact_type: "image",
+                review_allowed: true,
+                review_decision: "approved",
+                review_blocked_reason: null,
               },
             ],
           },
@@ -561,9 +528,10 @@ describe("SceneWorkspace", () => {
         "image_keyframe:artifact-2",
       );
     });
-    fireEvent.click(screen.getByTestId("context-dock-takes"));
+    // A reviewable candidate makes "检查候选" the primary next step.
+    fireEvent.click(await screen.findByTestId("shot-primary-review"));
     expect(await screen.findByTestId("shot-candidate-artifact-2")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "设为正式关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "设为正式" }));
     await screen.findByTestId("shot-candidate-success");
 
     const confirmation = calls.find((call) => call.url.endsWith("/formal-keyframe"));
@@ -713,6 +681,31 @@ describe("SceneWorkspace", () => {
         ]);
       }
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.includes("/execution-models/preflight")) {
+        return json({
+          project_id: "project-1",
+          stages: [
+            {
+              stage: "image_keyframe",
+              ready: true,
+              source: "project_binding",
+              requested_model_id: "agnes/agnes-image-2.1-flash",
+              resolved_model_id: "agnes/agnes-image-2.1-flash",
+              binding_id: "binding-image",
+              reason: null,
+            },
+            {
+              stage: "video",
+              ready: true,
+              source: "project_binding",
+              requested_model_id: "agnes/agnes-video-v2.0",
+              resolved_model_id: "agnes/agnes-video-v2.0",
+              binding_id: "binding-video",
+              reason: null,
+            },
+          ],
+        });
+      }
       if (url.endsWith("/execution-plan")) {
         return json({ plan: { accepted_approximations: [] }, plan_fingerprint: "a".repeat(64) });
       }
@@ -737,11 +730,10 @@ describe("SceneWorkspace", () => {
       </QueryClientProvider>,
     );
     await screen.findByText("Studio");
-    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("context-dock-character"));
-    await screen.findByText("artifact-a");
-    fireEvent.click(screen.getByTestId("director-tab-production"));
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    expect(await screen.findByText(/本次生成将使用的参考素材/)).toBeInTheDocument();
+    const firstGenerate = await screen.findByTestId("generate-keyframe");
+    await waitFor(() => expect(firstGenerate).toBeEnabled());
+    fireEvent.click(firstGenerate);
     await screen.findByTestId("shot-production-status");
     const firstPlan = calls.find(
       (call) => call.method === "POST" && call.url.endsWith("/execution-plan"),
@@ -753,26 +745,28 @@ describe("SceneWorkspace", () => {
     fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
     expect(screen.getByTestId("cinematic-canvas")).toHaveAttribute("data-shot-id", "shot-2");
     expect(screen.getByTestId("cinematic-canvas")).toHaveTextContent("B looks back");
-    expect(screen.getByTestId("director-sidebar")).toHaveAttribute("data-shot-id", "shot-2");
-    fireEvent.click(screen.getByTestId("director-tab-shot"));
+    const inspector = screen.getByTestId("shot-inspector");
+    expect(inspector).toHaveAttribute("data-shot-id", "shot-2");
     expect(screen.getByLabelText("图片提示词")).toHaveValue("second keyframe");
-    fireEvent.click(screen.getByTestId("director-tab-references"));
-    await screen.findByText("artifact-b");
-    expect(screen.getByTestId("asset-reference-picker")).toHaveAttribute("data-shot-id", "shot-2");
-    fireEvent.click(screen.getByTestId("director-tab-production"));
-    expect(
-      within(screen.getByTestId("director-sidebar")).getByTestId("shot-production-actions"),
-    ).toHaveAttribute("data-shot-id", "shot-2");
-    expect(
-      within(screen.getByTestId("director-sidebar")).queryByTestId("shot-production-trace"),
-    ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("context-dock-details"));
-    expect(screen.getByTestId("shot-details-sheet")).toHaveAttribute("data-shot-id", "shot-2");
+    await waitFor(() =>
+      expect(screen.getByTestId("asset-reference-picker")).toHaveAttribute(
+        "data-shot-id",
+        "shot-2",
+      ),
+    );
+    expect(within(inspector).getByTestId("shot-production-actions")).toHaveAttribute(
+      "data-shot-id",
+      "shot-2",
+    );
+    fireEvent.click(within(inspector).getByText("详情"));
+    expect(await screen.findByTestId("shot-details-sheet")).toHaveAttribute(
+      "data-shot-id",
+      "shot-2",
+    );
     expect(screen.getByTestId("shot-production-trace")).toHaveAttribute("data-shot-id", "shot-2");
-    expect(screen.queryByTestId("director-sidebar")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("shot-details-close"));
-    fireEvent.click(screen.getByTestId("context-dock-generate"));
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    const secondGenerate = screen.getByTestId("generate-keyframe");
+    await waitFor(() => expect(secondGenerate).toBeEnabled());
+    fireEvent.click(secondGenerate);
     await waitFor(() => {
       const plans = calls.filter(
         (call) => call.method === "POST" && call.url.endsWith("/execution-plan"),
@@ -809,7 +803,10 @@ describe("Contextual Director entry", () => {
     );
     expect(await screen.findByRole("button", { name: "主动分析当前镜头" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "生成镜头建议" })).toBeDisabled();
-    expect(calls.every((call) => call.method === "GET")).toBe(true);
+    // Only reads: the reference resolution POST is a read-only resolve.
+    expect(
+      calls.filter((call) => call.method !== "GET" && !call.url.endsWith("/references/resolve")),
+    ).toEqual([]);
   });
   it("does not replace an invalid explicit target with a different shot", async () => {
     const calls = mockBackend();
@@ -824,7 +821,7 @@ describe("Contextual Director entry", () => {
         />
       </QueryClientProvider>,
     );
-    expect(await screen.findByRole("alert")).toHaveTextContent("目标镜头不在此场景");
+    expect(await screen.findByText("目标镜头不在此场景，请重新选择镜头。")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "主动分析当前镜头" })).not.toBeInTheDocument();
     expect(calls.every((call) => call.method === "GET")).toBe(true);
   });
@@ -842,4 +839,114 @@ it("uses route-owned editing navigation instead of reloading a cached HTML route
   await screen.findByText("Studio");
   fireEvent.click(screen.getByTestId("scene-edit-entry"));
   expect(onOpenEditing).toHaveBeenCalledTimes(1);
+});
+
+it("keeps dialogue and voice drafts and guards shot switches without generating", async () => {
+  const calls: Array<{ url: string; method: string; body: unknown }> = [];
+  // The existing character reference picker uses a read-only POST to resolve
+  // saved bindings. This is not a save, execution plan, probe, or generation.
+  const readOnlyResolutionUrls = new Set([
+    "/api/v1/projects/project-1/shots/shot-1/references/resolve",
+    "/api/v1/projects/project-1/shots/shot-2/references/resolve",
+  ]);
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    const body: unknown = init?.body ? JSON.parse(String(init.body)) : undefined;
+    calls.push({ url, method, body });
+    if (url.endsWith("/auth/csrf") && method === "GET") {
+      return json({ csrf_token: "csrf-test" });
+    }
+    if (readOnlyResolutionUrls.has(url) && method === "POST") return json([]);
+    if (url.endsWith("/references") && method === "GET") return json([]);
+    if (url.endsWith("/workspace")) {
+      return json({
+        scene: {
+          id: "scene-1",
+          episode_id: "episode-1",
+          episode_number: 1,
+          scene_number: 1,
+          location_name: "Voice Studio",
+          time_of_day: "day",
+          synopsis: "intro",
+          version: 1,
+          design_state: {},
+        },
+        shots: [SHOT_1, { ...SHOT_2, dialogue: "第二个镜头的对白" }],
+        references: { "shot-1": [], "shot-2": [] },
+        candidates: { "shot-1": [], "shot-2": [] },
+        trace: { "shot-1": [], "shot-2": [] },
+      });
+    }
+    if (url.endsWith("/voice-options")) {
+      return json({
+        engine: "edge-tts",
+        enabled: true,
+        status: "configured",
+        default_voice: "catalog-a",
+        network: true,
+        service_notice: "联网神经配音·Edge（非官方服务，无SLA）；配置未验证。",
+        voices: [
+          { id: "catalog-a", label: "目录声音甲", locale: "zh-CN" },
+          { id: "catalog-b", label: "目录声音乙", locale: "zh-CN" },
+        ],
+      });
+    }
+    return json({});
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <SceneWorkspace projectId="project-1" sceneId="scene-1" />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("Voice Studio");
+  await screen.findByRole("option", { name: "目录声音乙 · zh-CN" });
+  fireEvent.change(screen.getByLabelText("对白／旁白文本"), {
+    target: { value: "尚未保存的对白" },
+  });
+  fireEvent.change(screen.getByLabelText("配音音色"), { target: { value: "voice:catalog-b" } });
+  fireEvent.change(screen.getByLabelText("配音语速"), { target: { value: "-9" } });
+  expect(screen.getByTestId("shot-design-dirty")).toBeInTheDocument();
+  expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("尚未保存的对白");
+  expect(screen.getByLabelText("配音音色")).toHaveValue("voice:catalog-b");
+  expect(screen.getByLabelText("配音语速")).toHaveValue("-9");
+
+  fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
+  expect(await screen.findByTestId("unsaved-changes-guard")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "返回保存" }));
+  expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("尚未保存的对白");
+  expect(screen.getByLabelText("配音音色")).toHaveValue("voice:catalog-b");
+  fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
+  fireEvent.click(await screen.findByRole("button", { name: "放弃并切换" }));
+  await waitFor(() =>
+    expect(screen.getByTestId("cinematic-canvas")).toHaveAttribute("data-shot-id", "shot-2"),
+  );
+  expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("第二个镜头的对白");
+  expect(screen.getByLabelText("配音音色")).toHaveValue("");
+  expect(screen.getByLabelText("配音语速")).toHaveValue("0");
+  expect(calls).toContainEqual({
+    url: "/api/v1/projects/project-1/shots/shot-1/references/resolve",
+    method: "POST",
+    body: {},
+  });
+  const nonReadRequests = calls.filter(
+    (call) =>
+      call.method !== "GET" && !(call.method === "POST" && readOnlyResolutionUrls.has(call.url)),
+  );
+  // Fail with the concrete request list rather than a boolean: no Save,
+  // reference mutation, or production command may hide among allowed reads.
+  expect(nonReadRequests).toEqual([]);
+  for (const call of calls.filter((request) => request.method === "POST")) {
+    expect(call.body).toEqual({});
+  }
+  expect(
+    calls.filter(
+      (call) =>
+        call.method !== "GET" &&
+        ["final-film", "/execution-plan", "/executions", "/probe"].some((path) =>
+          call.url.includes(path),
+        ),
+    ),
+  ).toEqual([]);
 });

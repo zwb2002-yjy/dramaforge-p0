@@ -53,3 +53,22 @@ if (typeof window.localStorage === "undefined") {
     configurable: true,
   });
 }
+
+// jsdom has no layout media-query API. Real breakpoint transitions are covered
+// by web-workbench.spec.ts in Chromium; route unit tests need the browser shape.
+Object.defineProperty(window, "matchMedia", {
+  writable: true,
+  value: (media: string) => {
+    const events = new EventTarget();
+    return {
+      media,
+      matches: window.innerWidth >= Number(media.match(/min-width:\s*(\d+)/)?.[1] ?? Infinity),
+      onchange: null,
+      addListener: (listener: EventListener) => events.addEventListener("change", listener),
+      removeListener: (listener: EventListener) => events.removeEventListener("change", listener),
+      addEventListener: events.addEventListener.bind(events),
+      removeEventListener: events.removeEventListener.bind(events),
+      dispatchEvent: events.dispatchEvent.bind(events),
+    };
+  },
+});

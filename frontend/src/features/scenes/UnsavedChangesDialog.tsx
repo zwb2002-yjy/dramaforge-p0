@@ -1,3 +1,5 @@
+import { useModalDialog } from "../../components/ui/useModalDialog";
+
 type UnsavedChangesDialogProps = {
   title: string;
   detail: string;
@@ -14,13 +16,16 @@ export function UnsavedChangesDialog({
   onReturnToSave,
   onDiscard,
 }: UnsavedChangesDialogProps) {
+  const dialogRef = useModalDialog<HTMLElement>(true, onReturnToSave);
   return (
     <div className="qc-unsaved-backdrop" data-testid="unsaved-changes-guard">
       <section
+        ref={dialogRef}
         className="qc-unsaved-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="unsaved-title"
+        tabIndex={-1}
       >
         <span className="director-stage-kicker">未保存的镜头设计</span>
         <h2 id="unsaved-title">{title}</h2>

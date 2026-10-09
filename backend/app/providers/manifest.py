@@ -9,6 +9,7 @@ change adds a new revision row instead of mutating an existing one.
 
 from __future__ import annotations
 
+import math
 from datetime import date
 from typing import Any, Literal
 
@@ -19,9 +20,23 @@ from app.providers.reference_roles import ROLE_MEDIA_TYPES, canonical_reference_
 
 ManifestVersion = str
 MediaKind = Literal["image", "video", "text", "voice"]
-Lifecycle = Literal["preview", "active", "deprecated", "retired"]
-CatalogSource = Literal["official_static", "account_discovery", "admin_approved"]
+Lifecycle = Literal["preview", "active", "legacy", "deprecated", "retired"]
+CatalogSource = Literal[
+    "official_static",
+    "account_discovery",
+    "admin_approved",
+    "protocol_contract",
+]
 OperationKind = Literal["image.generate", "video.generate"]
+
+
+def has_reproducible_contract_evidence(raw: dict[str, Any]) -> bool:
+    evidence = raw.get("evidence")
+    return isinstance(evidence, dict) and any(
+        isinstance(item, dict)
+        and item.get("source_type") in {"contract_fixture", "quality_evidence"}
+        for item in evidence.values()
+    )
 
 
 class OptionSpec(BaseModel):
@@ -57,6 +72,38 @@ class ExclusiveGroup(BaseModel):
     members: list[list[str]]
 
 
+class ReferenceDurationLimit(BaseModel):
+    minimum_seconds: float = Field(gt=0)
+    maximum_seconds: float = Field(gt=0)
+    total_maximum_seconds: float = Field(gt=0)
+
+
+class ReferenceMediaLimits(BaseModel):
+    maximum_files: int = Field(gt=0)
+    durations: dict[str, ReferenceDurationLimit] = Field(default_factory=dict)
+
+    def validate_metadata(self, references: list[tuple[str, float | None]]) -> None:
+        if len(references) > self.maximum_files:
+            raise ValueError(f"reference count exceeds {self.maximum_files} files in total")
+        totals: dict[str, float] = {}
+        for role, duration in references:
+            limit = self.durations.get(role)
+            if limit is None:
+                continue
+            if duration is None or not math.isfinite(duration):
+                raise ValueError(f"{role} requires verified media duration")
+            if not limit.minimum_seconds <= duration <= limit.maximum_seconds:
+                raise ValueError(
+                    f"{role} duration must be {limit.minimum_seconds:g}-"
+                    f"{limit.maximum_seconds:g} seconds"
+                )
+            totals[role] = totals.get(role, 0) + duration
+            if totals[role] > limit.total_maximum_seconds:
+                raise ValueError(
+                    f"{role} total duration exceeds {limit.total_maximum_seconds:g} seconds"
+                )
+
+
 class OperationManifest(BaseModel):
     """Capability contract for one operation (image.generate / video.generate)."""
 
@@ -65,6 +112,11 @@ class OperationManifest(BaseModel):
     output_constraints: dict[str, JsonValue] = Field(default_factory=dict)
     reference_constraints: dict[str, ReferenceConstraint] = Field(default_factory=dict)
     exclusive_groups: list[ExclusiveGroup] = Field(default_factory=list)
+    reference_media_limits: ReferenceMediaLimits | None = None
+    # New revisions can declare complete, disjoint input contracts. Historical
+    # revisions omit this field and retain their frozen reference constraints.
+    input_contracts: dict[str, InputContractSpec] = Field(default_factory=dict)
+    output_options: dict[str, ParameterSpec] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def canonicalize_reference_constraints(self) -> OperationManifest:
@@ -94,6 +146,22 @@ class OperationManifest(BaseModel):
         }.get(canonical_role)
 
 
+class CapabilityEvidence(BaseModel):
+    """Traceable source for one model identity, option, or input claim."""
+
+    source_type: Literal[
+        "official_model_list",
+        "official_api_doc",
+        "official_example",
+        "official_sdk_schema",
+        "account_probe",
+        "contract_fixture",
+        "quality_evidence",
+    ]
+    source_url: str = Field(min_length=1)
+    checked_at: date
+
+
 class ModelCapabilityManifest(BaseModel):
     """Versioned capability manifest for one concrete model."""
 
@@ -106,11 +174,27 @@ class ModelCapabilityManifest(BaseModel):
     display_name: str
     lifecycle: Lifecycle = "active"
     catalog_source: CatalogSource = "official_static"
+    implementation_status: Literal["discovered", "documented", "contract_tested"] = "discovered"
     documented_at: date
     operations: dict[OperationKind, OperationManifest]
+    # Official abilities outside the current generate operation vocabulary are
+    # recorded here without making them executable in the product.
+    documented_features: list[str] = Field(default_factory=list)
+    evidence: dict[str, CapabilityEvidence] = Field(default_factory=dict)
     option_schema: ModelOptionSchema = Field(
         default_factory=lambda: ModelOptionSchema(namespace="")
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def require_contract_evidence(cls, value: Any) -> Any:
+        if (
+            isinstance(value, dict)
+            and value.get("implementation_status") == "contract_tested"
+            and not has_reproducible_contract_evidence(value)
+        ):
+            raise ValueError("contract-tested manifest lacks reproducible evidence")
+        return value
 
 
 # ---------------------------------------------------------------------------
@@ -128,10 +212,29 @@ class InputSlotSpec(BaseModel):
     forbidden. ``minimum``/``maximum`` bound the number of artifacts accepted."""
 
     required: bool = False
-    minimum: int = 0
-    maximum: int | None = None
+    minimum: int = Field(default=0, ge=0)
+    maximum: int | None = Field(default=None, ge=0)
     media_types: list[str] = Field(default_factory=list)
+    max_bytes: int | None = Field(default=None, ge=1)
+    min_duration_seconds: float | None = Field(default=None, ge=0)
+    max_duration_seconds: float | None = Field(default=None, gt=0)
+    min_width: int | None = Field(default=None, ge=1)
+    max_width: int | None = Field(default=None, ge=1)
+    min_height: int | None = Field(default=None, ge=1)
+    max_height: int | None = Field(default=None, ge=1)
     description: str | None = None
+
+    @model_validator(mode="after")
+    def validate_limits(self) -> InputSlotSpec:
+        if self.maximum is not None and self.maximum < self.minimum:
+            raise ValueError("input slot maximum is below minimum")
+        if (
+            self.min_duration_seconds is not None
+            and self.max_duration_seconds is not None
+            and self.max_duration_seconds < self.min_duration_seconds
+        ):
+            raise ValueError("input slot duration maximum is below minimum")
+        return self
 
 
 def _canonicalize_input_slot_map(
@@ -159,15 +262,18 @@ class ParameterSpec(BaseModel):
     maximum: float | None = None
     min_items: int | None = None
     max_items: int | None = None
-    ui_component: Literal[
-        "switch",
-        "select",
-        "number",
-        "slider",
-        "input",
-        "textarea",
-        "multi_select",
-    ] | None = None
+    ui_component: (
+        Literal[
+            "switch",
+            "select",
+            "number",
+            "slider",
+            "input",
+            "textarea",
+            "multi_select",
+        ]
+        | None
+    ) = None
     deprecated: bool = False
     sensitive: bool = False
 
@@ -192,6 +298,35 @@ class ConstraintSpec(BaseModel):
     conditional: list[ConditionalConstraint] = Field(default_factory=list)
 
 
+class InputContractSpec(BaseModel):
+    """One provider-valid input family, never a user-facing mode selector.
+
+    ``minimum_total_references`` makes optional-slot families disjoint from a
+    text-only contract. The resolver still rejects any ambiguous overlap.
+    """
+
+    input_slots: dict[str, InputSlotSpec] = Field(default_factory=dict)
+    minimum_total_references: int = Field(default=0, ge=0)
+    maximum_total_references: int | None = Field(default=None, ge=0)
+    max_total_duration_seconds: dict[str, float] = Field(default_factory=dict)
+    common_options: dict[str, ParameterSpec] = Field(default_factory=dict)
+    native_options: dict[str, ParameterSpec] = Field(default_factory=dict)
+    constraints: ConstraintSpec = Field(default_factory=ConstraintSpec)
+
+    @model_validator(mode="after")
+    def validate_contract(self) -> InputContractSpec:
+        self.input_slots = _canonicalize_input_slot_map(self.input_slots)
+        if (
+            self.maximum_total_references is not None
+            and self.maximum_total_references < self.minimum_total_references
+        ):
+            raise ValueError("maximum_total_references is below minimum_total_references")
+        for role, limit in self.max_total_duration_seconds.items():
+            if role not in self.input_slots or limit <= 0:
+                raise ValueError(f"invalid aggregate duration limit for {role}")
+        return self
+
+
 class InputModeSpec(BaseModel):
     """Mode-specific input contract inside one capability (MS4-LITE)."""
 
@@ -199,6 +334,9 @@ class InputModeSpec(BaseModel):
     title: str
     description: str | None = None
     input_slots: dict[str, InputSlotSpec] = Field(default_factory=dict)
+    minimum_total_references: int = 0
+    maximum_total_references: int | None = None
+    max_total_duration_seconds: dict[str, float] = Field(default_factory=dict)
     common_options: dict[str, ParameterSpec] = Field(default_factory=dict)
     native_options: dict[str, ParameterSpec] = Field(default_factory=dict)
     constraints: ConstraintSpec = Field(default_factory=ConstraintSpec)
@@ -214,12 +352,17 @@ class CapabilitySpec(BaseModel):
 
     capability: Capability
     input_slots: dict[str, InputSlotSpec] = Field(default_factory=dict)
+    minimum_total_references: int = 0
+    maximum_total_references: int | None = None
+    max_total_duration_seconds: dict[str, float] = Field(default_factory=dict)
     common_options: dict[str, ParameterSpec] = Field(default_factory=dict)
     native_options: dict[str, ParameterSpec] = Field(default_factory=dict)
     constraints: ConstraintSpec = Field(default_factory=ConstraintSpec)
     modes: dict[str, InputModeSpec] = Field(default_factory=dict)
     default_mode: str | None = None
+    auto_match_contract: bool = False
     transport_profile_id: str
+    reference_media_limits: ReferenceMediaLimits | None = None
 
     @model_validator(mode="after")
     def canonicalize_input_slots(self) -> CapabilitySpec:
@@ -229,11 +372,11 @@ class CapabilitySpec(BaseModel):
         return self
 
     def mode_spec(self, mode_id: str | None = None) -> InputModeSpec:
-        """Return the selected mode, or the additive legacy contract."""
+        """Return a declared mode or the single default contract."""
         if not self.modes:
             return InputModeSpec(
-                id=mode_id or "legacy",
-                title="Legacy capability contract",
+                id=mode_id or "default",
+                title="Default capability contract",
                 input_slots=self.input_slots,
                 common_options=self.common_options,
                 native_options=self.native_options,
@@ -337,7 +480,7 @@ def _output_constraint_to_parameter(name: str, value: JsonValue) -> ParameterSpe
         allowed = value.get("allowed")
         if isinstance(allowed, list) and allowed:
             return ParameterSpec(
-                type="integer",
+                type=_PY_TYPE_TO_PARAMETER_TYPE.get(type(allowed[0]), "string"),
                 enum=[item for item in allowed if item is not None],
             )
         return None
@@ -363,6 +506,8 @@ def _v3_capabilities_for(operation: str, declared: set[str]) -> list[Capability]
             capabilities.append(Capability.VIDEO_TEXT_TO_VIDEO)
         if "video.i2v" in declared or "video.i2v.first_frame" in declared:
             capabilities.append(Capability.VIDEO_IMAGE_TO_VIDEO)
+        if "video.i2v.last_frame" in declared:
+            capabilities.append(Capability.VIDEO_LAST_FRAME_TO_VIDEO)
         if "video.keyframes" in declared or (
             "video.i2v.first_frame" in declared and "video.i2v.last_frame" in declared
         ):
@@ -394,6 +539,8 @@ def _mode_id_for_roles(roles: list[str], index: int) -> str:
     role_set = frozenset(roles)
     if role_set == {"first_frame"}:
         return "first_frame"
+    if role_set == {"last_frame"}:
+        return "last_frame"
     if role_set == {"first_frame", "last_frame"}:
         return "first_last_frame"
     if role_set & {"reference_image", "reference_video", "reference_audio"}:
@@ -405,6 +552,7 @@ def _mode_title(mode_id: str) -> str:
     return {
         "text_to_video": "Text to video",
         "first_frame": "First frame",
+        "last_frame": "Last frame",
         "first_last_frame": "First + last frame",
         "omni_reference": "Omni reference",
     }.get(mode_id, mode_id)
@@ -440,6 +588,28 @@ def _modes_from_operation(
     return modes
 
 
+def _contracts_from_operation(
+    op_manifest: OperationManifest,
+    *,
+    common_options: dict[str, ParameterSpec],
+    native_options: dict[str, ParameterSpec],
+) -> dict[str, InputModeSpec]:
+    return {
+        contract_id: InputModeSpec(
+            id=contract_id,
+            title=contract_id.replace("_", " ").title(),
+            input_slots=contract.input_slots,
+            minimum_total_references=contract.minimum_total_references,
+            maximum_total_references=contract.maximum_total_references,
+            max_total_duration_seconds=contract.max_total_duration_seconds,
+            common_options={**common_options, **contract.common_options},
+            native_options={**native_options, **contract.native_options},
+            constraints=contract.constraints,
+        )
+        for contract_id, contract in op_manifest.input_contracts.items()
+    }
+
+
 def _capability_spec_for(
     operation: str,
     op_manifest: OperationManifest,
@@ -447,30 +617,70 @@ def _capability_spec_for(
     option_schema: ModelOptionSchema,
 ) -> CapabilitySpec:
     """Build one V3 CapabilitySpec from an A+B operation manifest."""
+    output_constraints = op_manifest.output_constraints or {}
+    mode_constraints = output_constraints.get("modes")
+    mode_name = {
+        Capability.VIDEO_TEXT_TO_VIDEO: "text_to_video",
+        Capability.VIDEO_IMAGE_TO_VIDEO: "first_frame",
+        Capability.VIDEO_LAST_FRAME_TO_VIDEO: "last_frame",
+        Capability.VIDEO_FIRST_LAST_FRAME: "first_last_frame",
+    }.get(capability)
+    if isinstance(mode_constraints, dict) and mode_name is not None:
+        selected = mode_constraints.get(mode_name)
+        if isinstance(selected, dict):
+            output_constraints = selected
+    mode_roles = {
+        "text_to_video": set(),
+        "first_frame": {"first_frame"},
+        "last_frame": {"last_frame"},
+        "first_last_frame": {"first_frame", "last_frame"},
+    }
     input_slots: dict[str, InputSlotSpec] = {}
     for role, constraint in (op_manifest.reference_constraints or {}).items():
+        if (
+            isinstance(mode_constraints, dict)
+            and mode_name in mode_roles
+            and role not in mode_roles[mode_name]
+        ):
+            continue
         canonical_role = canonical_reference_role(role) or role
         input_slots[canonical_role] = InputSlotSpec(
-            required=constraint.min > 0,
-            minimum=constraint.min,
+            required=constraint.min > 0
+            or (
+                isinstance(mode_constraints, dict)
+                and mode_name in {"first_frame", "last_frame", "first_last_frame"}
+            ),
+            minimum=1
+            if isinstance(mode_constraints, dict)
+            and mode_name in {"first_frame", "last_frame", "first_last_frame"}
+            else constraint.min,
             maximum=constraint.max if constraint.max > 0 else None,
             media_types=[_ROLE_MEDIA_TYPES[canonical_role]]
             if canonical_role in _ROLE_MEDIA_TYPES
             else [],
         )
     common_options: dict[str, ParameterSpec] = {}
-    for name, value in (op_manifest.output_constraints or {}).items():
+    for name, value in output_constraints.items():
         parameter = _output_constraint_to_parameter(name, value)
         if parameter is not None:
             common_options[name] = parameter
+    common_options.update(op_manifest.output_options)
     native_options: dict[str, ParameterSpec] = {}
     for name, spec in (option_schema.options or {}).items():
         native_options[name] = _option_spec_to_parameter(spec)
-    modes = _modes_from_operation(
-        op_manifest,
-        input_slots=input_slots,
-        common_options=common_options,
-        native_options=native_options,
+    modes = (
+        _contracts_from_operation(
+            op_manifest,
+            common_options=common_options,
+            native_options=native_options,
+        )
+        if op_manifest.input_contracts
+        else _modes_from_operation(
+            op_manifest,
+            input_slots=input_slots,
+            common_options=common_options,
+            native_options=native_options,
+        )
     )
     mutually_exclusive: list[list[str]] = []
     if not modes:
@@ -485,7 +695,9 @@ def _capability_spec_for(
         constraints=ConstraintSpec(mutually_exclusive=mutually_exclusive),
         modes=modes,
         default_mode=None,
+        auto_match_contract=bool(op_manifest.input_contracts),
         transport_profile_id="",
+        reference_media_limits=op_manifest.reference_media_limits,
     )
 
 

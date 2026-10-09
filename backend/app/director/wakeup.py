@@ -6,16 +6,13 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.access.models import Project, User
 from app.contracts.director_runtime import ResumeSignal, RuntimeScope
 from app.contracts.domain_events import (
-    ExecutionAccepted,
     ExecutionChanged,
     FormalSelected,
     ProductionEvent,
     ProposalDecided,
 )
-from app.director.business_checkpoints import DirectorBusinessCheckpoints
 from app.director.inbox_models import DirectorInbox, DirectorWakeup
 from app.director.runtime.wakeups import DirectorRuntimeWakeupService
 from app.director.turn_models import DirectorTurn
@@ -102,26 +99,7 @@ async def _update_checkpoint(session: AsyncSession, *, wakeup: DirectorWakeup) -
             "payload": log.payload.get("notice"),
         }
     )
-    project = await session.get(Project, wakeup.project_id)
-    actor = await session.get(User, event.actor_id)
-    if project is None or actor is None:
-        raise NotFoundError("Director event scope missing")
     await _enqueue_runtime_event(session, event=event)
-    checkpoints = DirectorBusinessCheckpoints(session)
-    if isinstance(event.payload, ExecutionAccepted):
-        fact = await ProductionFacts(session).tracking(
-            project_id=project.id,
-            run_id=event.payload.node_run_id,
-        )
-        if fact.shot_id != event.payload.shot_id:
-            raise ValueError("Event shot differs from production scope")
-        await checkpoints.track_fact(project=project, actor=actor, run=fact)
-    if isinstance(event.payload, ProposalDecided):
-        await checkpoints.reconcile_business_fact(
-            project=project, proposal_id=event.payload.proposal_id,
-        )
-    else:
-        await checkpoints.reconcile_business_fact(project=project, shot_id=event.payload.shot_id)
     wakeup.completed_at = datetime.now(UTC)
     await session.flush()
 

@@ -18,8 +18,8 @@ from app.access.models import Project, User, Workspace
 from app.execution.models import GraphNode, NodeRun
 from app.production.models import GraphVersion, ProductionGraph, definition_hash
 from app.providers.capabilities import Capability
+from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.model_resolution import ExecutionModelResolver
@@ -97,7 +97,7 @@ async def test_execution_model_resolution_round_trips_in_node_run_snapshot_pg(
         project_id=project.id,
     )
 
-    manifest = next(item for item in SEED_MANIFESTS if item["model_id"] == "agnes-video-v2.0")
+    manifest = next(item for item in CATALOG_MODELS if item["model_id"] == "agnes-video-v2.0")
     model_id = f"execution-resolution-{suffix}"
     entry = ModelCatalogEntry(
         provider_type="agnes",
@@ -228,4 +228,3 @@ async def test_execution_model_resolution_round_trips_in_node_run_snapshot_pg(
     )
     assert stored_snapshot is not None
     assert stored_snapshot["execution_model_resolution"] == snapshot
-

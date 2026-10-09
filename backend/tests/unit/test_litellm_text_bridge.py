@@ -14,7 +14,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from app.config import Settings
-from app.providers.bootstrap import litellm_text_manifest
+from app.providers.bootstrap import default_text_manifest
 from app.providers.capabilities import Capability
 from app.providers.contracts.common import (
     ExecutionContext,
@@ -80,7 +80,7 @@ async def test_litellm_adapter_builds_chat_contract() -> None:
             },
         )
 
-    manifest = litellm_text_manifest()
+    manifest = default_text_manifest()
     adapter = LiteLLMModelAdapter(
         manifest,
         settings=_gateway_settings(),
@@ -106,7 +106,7 @@ async def test_litellm_adapter_builds_chat_contract() -> None:
 
 
 async def test_litellm_adapter_unconfigured_fails_closed() -> None:
-    manifest = litellm_text_manifest()
+    manifest = default_text_manifest()
     adapter = LiteLLMModelAdapter(
         manifest,
         settings=Settings(app_env="development"),
@@ -131,7 +131,7 @@ async def test_litellm_adapter_single_attempt_on_gateway_503() -> None:
         calls["n"] += 1
         return httpx.Response(503, json={"error": {"message": "upstream down"}})
 
-    manifest = litellm_text_manifest()
+    manifest = default_text_manifest()
     adapter = LiteLLMModelAdapter(
         manifest,
         settings=_gateway_settings(),
@@ -139,7 +139,7 @@ async def test_litellm_adapter_single_attempt_on_gateway_503() -> None:
     )
     result = await adapter.create(
         Capability.TEXT_GENERATE,
-        TextGenerateRequest(prompt="hi"),
+        TextGenerateRequest(messages=[TextMessage(role="user", content="hi")]),
         ExecutionContext(trace_id="t"),
     )
     assert result.status == GenerationStatus.FAILED
@@ -161,12 +161,11 @@ async def test_litellm_adapter_classifies_gateway_errors() -> None:
     ]
 
     for status, body, expected_code in cases:
-        async def handler(
-            request: httpx.Request, status=status, body=body
-        ) -> httpx.Response:
+
+        async def handler(request: httpx.Request, status=status, body=body) -> httpx.Response:
             return httpx.Response(status, json=body)
 
-        manifest = litellm_text_manifest()
+        manifest = default_text_manifest()
         adapter = LiteLLMModelAdapter(
             manifest,
             settings=_gateway_settings(),
@@ -174,7 +173,7 @@ async def test_litellm_adapter_classifies_gateway_errors() -> None:
         )
         result = await adapter.create(
             Capability.TEXT_GENERATE,
-            TextGenerateRequest(prompt="hi"),
+            TextGenerateRequest(messages=[TextMessage(role="user", content="hi")]),
             ExecutionContext(trace_id="t"),
         )
         assert result.status == GenerationStatus.FAILED, status
@@ -190,7 +189,7 @@ async def test_litellm_adapter_read_timeout_returns_submit_unknown() -> None:
         calls["n"] += 1
         raise httpx.ReadTimeout("timed out reading response", request=request)
 
-    manifest = litellm_text_manifest()
+    manifest = default_text_manifest()
     adapter = LiteLLMModelAdapter(
         manifest,
         settings=_gateway_settings(),
@@ -198,7 +197,7 @@ async def test_litellm_adapter_read_timeout_returns_submit_unknown() -> None:
     )
     result = await adapter.create(
         Capability.TEXT_GENERATE,
-        TextGenerateRequest(prompt="hi"),
+        TextGenerateRequest(messages=[TextMessage(role="user", content="hi")]),
         ExecutionContext(trace_id="t"),
     )
     assert result.status == GenerationStatus.SUBMIT_UNKNOWN
@@ -230,7 +229,7 @@ async def test_litellm_adapter_records_allowlisted_metadata() -> None:
             },
         )
 
-    manifest = litellm_text_manifest()
+    manifest = default_text_manifest()
     adapter = LiteLLMModelAdapter(
         manifest,
         settings=_gateway_settings(),
@@ -238,7 +237,7 @@ async def test_litellm_adapter_records_allowlisted_metadata() -> None:
     )
     result = await adapter.create(
         Capability.TEXT_GENERATE,
-        TextGenerateRequest(prompt="hi"),
+        TextGenerateRequest(messages=[TextMessage(role="user", content="hi")]),
         ExecutionContext(trace_id="t"),
     )
     assert result.status == GenerationStatus.SUCCEEDED
@@ -263,7 +262,7 @@ async def test_router_routes_text_generate_through_litellm_model() -> None:
             },
         )
 
-    manifest = litellm_text_manifest()
+    manifest = default_text_manifest()
     adapter = LiteLLMModelAdapter(
         manifest,
         settings=_gateway_settings(),
@@ -298,4 +297,4 @@ async def test_resolver_returns_system_text_model(
         capability=Capability.TEXT_GENERATE,
     )
     assert resolved.source == "system_default"
-    assert resolved.model_id == "litellm/text-llm"
+    assert resolved.model_id == "litellm/script-quality"

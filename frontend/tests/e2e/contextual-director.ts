@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page, type Route } from "@playwright/test";
 
 import { PROJECT_ID, SCENE_ID, SHOT_ID, type ProfessionalMockState } from "./professional-mocks";
 
@@ -6,7 +6,9 @@ import { PROJECT_ID, SCENE_ID, SHOT_ID, type ProfessionalMockState } from "./pro
 export async function installContextualDirectorMock(page: Page, state: ProfessionalMockState) {
   const suggestionPath = `/api/v1/projects/${PROJECT_ID}/director/shots/${SHOT_ID}/suggestion`;
   const turnPath = `/api/v1/projects/${PROJECT_ID}/director/turns/33333333-3333-4333-8333-333333333333`;
+  const decisionPath = `/api/v1/projects/${PROJECT_ID}/director/runtime/turns/33333333-3333-4333-8333-333333333333/decision`;
   let generated = false;
+  let decisionRecorded = false;
   const suggestion = {
     base_shot_version: state.shotVersion,
     suggested_image_prompt: "rainy street, restrained expression, medium close-up",
@@ -63,8 +65,24 @@ export async function installContextualDirectorMock(page: Page, state: Professio
     },
     transport_record_id: "provider-request-e2e",
     transport_status: "succeeded",
+    engine_version: "langgraph:1.2.11:director-runtime-state-v1",
+    state_schema_version: "director-runtime-state-v1",
+    runtime_execution_id: "44444444-4444-4444-8444-444444444444",
+    runtime_revision: decisionRecorded ? 3 : 2,
     request_summary: { task: "shot_director_suggestion", max_steps: 4 },
-    response_summary: { actual_model: suggestion.director_evidence.actual_model },
+    response_summary: {
+      actual_model: suggestion.director_evidence.actual_model,
+      ...(decisionRecorded
+        ? {
+            user_decision: {
+              decision: "accept",
+              accepted_operation_indices: [0],
+              rejected_operation_indices: [],
+              output_hash: suggestion.director_evidence.output_hash,
+            },
+          }
+        : {}),
+    },
     token_usage: suggestion.director_evidence.token_usage,
     reported_cost: suggestion.director_evidence.reported_cost,
     cost_status: suggestion.director_evidence.cost_status,
@@ -79,8 +97,8 @@ export async function installContextualDirectorMock(page: Page, state: Professio
       change_summary: suggestion.change_summary,
     },
     status: "awaiting_user",
-    wait_reason: "proposal_decision",
-    revision: 3,
+    wait_reason: decisionRecorded ? "runtime_decision_pending" : "proposal_decision",
+    revision: decisionRecorded ? 4 : 3,
     proposal_id: null,
     dispatched_command_key: null,
     node_run_ids: [],
@@ -90,7 +108,7 @@ export async function installContextualDirectorMock(page: Page, state: Professio
     created_at: "2026-09-08T00:00:00Z",
     updated_at: "2026-09-08T00:00:00Z",
   });
-  await page.route(`**/api/v1/projects/${PROJECT_ID}/director/turns**`, async (route) => {
+  const handleTurn = async (route: Route) => {
     const request = route.request();
     const url = new URL(request.url());
     if (request.method() === "GET" && url.pathname.endsWith("/director/turns")) {
@@ -101,34 +119,24 @@ export async function installContextualDirectorMock(page: Page, state: Professio
       await route.fulfill({ json: turn() });
       return;
     }
-    if (request.method() === "POST" && url.pathname === `${turnPath}/decision`) {
+    if (request.method() === "POST" && url.pathname === decisionPath) {
       const body = request.postDataJSON();
       state.editing.requests.push({ method: request.method(), path: url.pathname, body });
       expect(body).toEqual({
         expected_revision: 3,
+        expected_runtime_revision: 2,
+        signal_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
         decision: "accept",
         accepted_operation_indices: [0],
       });
-      await route.fulfill({
-        json: {
-          ...turn(),
-          revision: 4,
-          wait_reason: "design_save",
-          response_summary: {
-            actual_model: suggestion.director_evidence.actual_model,
-            user_decision: {
-              decision: "accept",
-              accepted_operation_indices: [0],
-              rejected_operation_indices: [],
-              output_hash: suggestion.director_evidence.output_hash,
-            },
-          },
-        },
-      });
+      decisionRecorded = true;
+      await route.fulfill({ json: turn() });
       return;
     }
     await route.fallback();
-  });
+  };
+  await page.route(`**/api/v1/projects/${PROJECT_ID}/director/turns**`, handleTurn);
+  await page.route(`**/api/v1/projects/${PROJECT_ID}/director/runtime/turns/**`, handleTurn);
   return suggestion;
 }
 
@@ -140,6 +148,8 @@ export async function exerciseContextualDirector(
   const writes = () =>
     state.editing.requests.filter(({ method, path, body }) => {
       if (method === "GET" || path.endsWith("/auth/csrf")) return false;
+      // Resolving the selected shot's saved references is a read-only POST.
+      if (path.endsWith("/references/resolve")) return false;
       if (path === `/api/v1/projects/${PROJECT_ID}/workspace-state`) {
         // Navigation may persist last-view preferences, never creative facts.
         expect(method).toBe("PATCH");
@@ -165,9 +175,8 @@ export async function exerciseContextualDirector(
   await expect(page.getByText("补齐动作因果", { exact: true })).toHaveCount(0);
   await expect(page.getByText(/检测到该镜头包含主角/)).toHaveCount(0);
   const target = `/projects/${PROJECT_ID}/scenes/${SCENE_ID}?shotId=${SHOT_ID}&tool=director`;
-  await expect(page.getByTestId("open-contextual-director")).toHaveAttribute("href", target);
   expect(writes()).toHaveLength(0);
-  await page.getByTestId("open-contextual-director").click();
+  await page.goto(target);
   await expect(page).toHaveURL(new RegExp(`${SCENE_ID}\\?shotId=${SHOT_ID}&tool=director$`));
   await expect(page.getByTestId("shot-design-panel")).toHaveAttribute("data-shot-id", SHOT_ID);
   await expect(page.getByTestId("request-shot-director-suggestion")).toBeVisible();
@@ -198,17 +207,20 @@ export async function exerciseContextualDirector(
   expect(writes()).toHaveLength(2);
   expect(writes()[1]).toEqual({
     method: "POST",
-    path: `/api/v1/projects/${PROJECT_ID}/director/turns/${suggestion.director_evidence.turn_id}/decision`,
+    path: `/api/v1/projects/${PROJECT_ID}/director/runtime/turns/${suggestion.director_evidence.turn_id}/decision`,
     body: {
       expected_revision: 3,
+      expected_runtime_revision: 2,
+      signal_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
       decision: "accept",
       accepted_operation_indices: [0],
     },
   });
   assertServerUnchanged();
 
-  await page.getByTestId("save-shot-design").click();
-  await expect(page.getByText("已保存设计（版本已递增）", { exact: true })).toBeVisible();
+  // Applying a suggestion leaves an unsaved design, so saving is the primary step.
+  await page.getByTestId("shot-primary-save").click();
+  await expect(page.getByTestId("shot-design-message")).toHaveText("已保存。");
   await expect(page.getByTestId("shot-design-dirty")).toHaveCount(0);
   expect(writes()).toHaveLength(3);
   expect(writes()[2]).toEqual({
@@ -234,8 +246,7 @@ export async function exerciseContextualDirector(
   await expect(page.getByLabel("视频提示词", { exact: true })).toHaveValue(
     suggestion.suggested_video_prompt,
   );
-  await expect(page.getByTestId("save-shot-design")).toBeDisabled();
+  await expect(page.getByTestId("shot-design-saved-state")).toBeVisible();
+  await expect(page.getByTestId("shot-primary-save")).toHaveCount(0);
   expect(writes()).toHaveLength(3);
-  await page.goto(`/projects/${PROJECT_ID}/production`);
-  await expect(page.getByTestId("professional-workbench")).toBeVisible();
 }

@@ -1,4 +1,4 @@
-﻿"""Provider Connection, capability evidence, and binding use cases."""
+"""Provider Connection, capability evidence, and binding use cases."""
 
 from __future__ import annotations
 
@@ -11,15 +11,25 @@ from uuid import UUID
 
 import httpx
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
 from app.config import Settings, get_settings
 from app.consistency.identity_policy import identity_evidence_policy_snapshot
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
+from app.providers.availability_projection import (
+    AvailabilityStatus,
+    ModelAvailabilityObservation,
+    record_model_availability,
+)
+from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_service import ModelCatalogService
+from app.providers.manifest import (
+    ModelCapabilityManifest,
+    has_reproducible_contract_evidence,
+)
 from app.providers.models import (
     ProjectProviderBinding,
     ProviderCapabilityEvidence,
@@ -46,6 +56,12 @@ _CAPABILITIES = frozenset(
         "video_poll_download",
     }
 )
+
+
+# No generation probe may dispatch until the API can carry a positive per-call
+# budget and Owner authorization. Plugin metadata cannot turn generation into a
+# read-only operation by accidentally omitting it from paid_capabilities.
+_READ_ONLY_PROBE_CAPABILITIES = frozenset({"auth_models", "video_poll_download"})
 
 
 def _resolve_plugin(provider_type: str, protocol_profile: str) -> ProviderPlugin:
@@ -84,18 +100,6 @@ class ProviderConnectionService:
         secret = api_key.strip()
         if not secret:
             raise ValidationAppError("api_key must not be empty")
-        existing = await self._session.scalar(
-            select(ProviderConnection.id).where(
-                ProviderConnection.workspace_id == workspace_id,
-                ProviderConnection.provider_type == provider_type,
-                ProviderConnection.protocol_profile == protocol_profile,
-            )
-        )
-        if existing is not None:
-            raise ConflictError(
-                f"{plugin.display_name} connection already exists for this Workspace",
-                details={"code": "PROVIDER_CONNECTION_EXISTS"},
-            )
         host = (base_url or plugin.default_base_url).strip().rstrip("/")
         if not host:
             raise ValidationAppError("base_url must not be empty")
@@ -136,47 +140,6 @@ class ProviderConnectionService:
             .scalars()
             .all()
         )
-
-    async def set_binding_pricing(
-        self,
-        *,
-        workspace_id: UUID,
-        connection_id: UUID,
-        model_binding_id: UUID,
-        actor: User,
-        unit_amount: Decimal,
-        currency: str,
-        billing_unit: str,
-        source_note: str,
-    ) -> ProviderModelBinding:
-        await self.get_connection(workspace_id=workspace_id, connection_id=connection_id)
-        binding = await self._session.scalar(
-            select(ProviderModelBinding).where(
-                ProviderModelBinding.id == model_binding_id,
-                ProviderModelBinding.workspace_id == workspace_id,
-                ProviderModelBinding.connection_id == connection_id,
-            )
-        )
-        if binding is None:
-            raise NotFoundError("model binding not found")
-        if unit_amount < 0 or len(currency.strip()) != 3 or not billing_unit.strip():
-            raise ValidationAppError("invalid binding pricing snapshot")
-        binding.pricing_snapshot_json = {
-            "unit_amount": str(unit_amount),
-            "currency": currency.upper(),
-            "billing_unit": billing_unit.strip(),
-            "source": "workspace_owner_verified",
-            "source_note": source_note.strip(),
-            "verified_at": datetime.now(UTC).isoformat(),
-            "verified_by": str(actor.id),
-            "catalog_entry_id": (
-                str(binding.catalog_entry_id) if binding.catalog_entry_id else None
-            ),
-            "capability_manifest_hash": binding.capability_manifest_hash,
-        }
-        binding.updated_by = actor.id
-        await self._session.flush()
-        return binding
 
     async def get_connection(
         self, *, workspace_id: UUID, connection_id: UUID
@@ -296,19 +259,6 @@ class ProviderConnectionService:
                 raise ValidationAppError("protocol_profile must not be empty")
             if profile != connection.protocol_profile:
                 plugin = _resolve_plugin(connection.provider_type, profile)
-                duplicate = await self._session.scalar(
-                    select(ProviderConnection.id).where(
-                        ProviderConnection.workspace_id == workspace_id,
-                        ProviderConnection.provider_type == connection.provider_type,
-                        ProviderConnection.protocol_profile == profile,
-                        ProviderConnection.id != connection.id,
-                    )
-                )
-                if duplicate is not None:
-                    raise ConflictError(
-                        "provider connection already exists for this Workspace",
-                        details={"code": "PROVIDER_CONNECTION_EXISTS"},
-                    )
                 credential = await self._session.scalar(
                     select(EncryptedProviderCredential).where(
                         EncryptedProviderCredential.id == connection.credential_id,
@@ -345,25 +295,12 @@ class ProviderConnectionService:
         """Invalidate evidence whenever the effective account endpoint changes.
 
         A key rotation and a Base URL change can both point at another account.
-        Capability/quality evidence is therefore tied to both, never retained
-        merely because the connection row keeps the same id.
+        Reset current projections, not immutable historical evidence. Old
+        capability/quality rows remain auditable but do not re-enable bindings
+        merely because the mutable connection keeps the same id.
         """
         connection.verification_status = "unverified"
         connection.verified_at = None
-        await self._session.execute(
-            delete(ProviderCapabilityEvidence).where(
-                ProviderCapabilityEvidence.connection_id == connection.id
-            )
-        )
-        await self._session.execute(
-            delete(ProviderQualityEvidence).where(
-                ProviderQualityEvidence.model_binding_id.in_(
-                    select(ProviderModelBinding.id).where(
-                        ProviderModelBinding.connection_id == connection.id
-                    )
-                )
-            )
-        )
         bindings = list(
             (
                 await self._session.execute(
@@ -410,12 +347,24 @@ class ProviderConnectionService:
         await self._session.flush()
         return connection
 
-    async def _connection_settings(self, connection: ProviderConnection) -> Settings:
-        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+    async def _connection_settings(
+        self,
+        connection: ProviderConnection,
+        *,
+        revision: ProviderConnectionRevision | None = None,
+    ) -> Settings:
+        # Snapshot the endpoint and exact credential before any await. A probe
+        # must not mix the old credential with a concurrently rotated endpoint.
+        provider_type = revision.provider_type if revision else connection.provider_type
+        profile = revision.protocol_profile if revision else connection.protocol_profile
+        credential_id = revision.credential_revision_id if revision else connection.credential_id
+        base_url = revision.base_url if revision else connection.base_url
+        enabled = connection.enabled
+        plugin = _resolve_plugin(provider_type, profile)
         secret = await read_credential_by_id(
             self._session,
             workspace_id=connection.workspace_id,
-            credential_id=connection.credential_id,
+            credential_id=credential_id,
             keyring=configured_byok_keyring(),
         )
         if not secret:
@@ -426,9 +375,9 @@ class ProviderConnectionService:
         prefix = plugin.prefix
         return get_settings().model_copy(
             update={
-                f"{prefix}_enabled": connection.enabled,
+                f"{prefix}_enabled": enabled,
                 f"{prefix}_api_key": secret,
-                f"{prefix}_base_url": connection.base_url,
+                f"{prefix}_base_url": base_url,
             }
         )
 
@@ -436,14 +385,19 @@ class ProviderConnectionService:
         self,
         connection: ProviderConnection,
         binding: ProviderModelBinding | None,
+        *,
+        revision: ProviderConnectionRevision | None = None,
     ) -> Settings:
         """Settings whose model fields resolve to the probed binding's
         ``invoke_model_value`` when a binding is given (never Settings defaults
         for a binding-scoped probe)."""
-        cfg = await self._connection_settings(connection)
+        cfg = await self._connection_settings(connection, revision=revision)
         if binding is None:
             return cfg
-        plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+        plugin = _resolve_plugin(
+            revision.provider_type if revision else connection.provider_type,
+            revision.protocol_profile if revision else connection.protocol_profile,
+        )
         model_field = f"{plugin.prefix}_{binding.media_type}_model"
         return cfg.model_copy(update={model_field: binding.invoke_model_value})
 
@@ -487,41 +441,15 @@ class ProviderConnectionService:
             or entry.lifecycle != "active"
             or entry.provider_type != connection.provider_type
             or entry.protocol_profile != connection.protocol_profile
-            or entry.model_id != binding.model_id
             or entry.media_kind != binding.media_type
             or binding.capability_manifest_hash != entry.contract_manifest_hash
+            or binding.invoke_model_value != binding.model_id
         ):
             raise ValidationAppError(
                 "model binding does not reference the active catalog contract",
                 details={"code": "MODEL_BINDING_CONTRACT_INACTIVE"},
             )
         return entry
-
-    @staticmethod
-    def _probe_currency(
-        binding: ProviderModelBinding | None,
-        *,
-        require_pricing: bool = False,
-    ) -> str:
-        if binding is None:
-            return "USD"
-        raw_currency = (binding.pricing_snapshot_json or {}).get("currency")
-        if not isinstance(raw_currency, str) and not require_pricing:
-            return "USD"
-        if not isinstance(raw_currency, str):
-            raise ValidationAppError(
-                "model capability Probe requires a verified Binding pricing currency",
-                details={"code": "PROBE_PRICING_CURRENCY_REQUIRED"},
-            )
-        currency = raw_currency.strip().upper()
-        if len(currency) == 3 and currency.isalpha():
-            return currency
-        if not require_pricing:
-            return "USD"
-        raise ValidationAppError(
-            "model capability Probe has an invalid Binding pricing currency",
-            details={"code": "PROBE_PRICING_CURRENCY_INVALID"},
-        )
 
     async def probe(
         self,
@@ -534,18 +462,9 @@ class ProviderConnectionService:
         reference_artifact_id: UUID | None = None,
         remote_task_id: str | None = None,
         remote_query_kind: str | None = None,
-        paid_request_confirmed: bool = False,
     ) -> ProviderCapabilityEvidence:
         if capability not in _CAPABILITIES:
             raise ValidationAppError("unsupported Provider capability")
-        # Only auth_models is a connection-level probe. Every model capability
-        # probe must name a binding: proving one model must never advance a
-        # sibling binding on the same connection (review gate 5).
-        if capability != "auth_models" and model_binding_id is None:
-            raise ValidationAppError(
-                "model capability Probe requires a model_binding_id",
-                details={"code": "PROBE_BINDING_REQUIRED"},
-            )
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
         )
@@ -555,25 +474,47 @@ class ProviderConnectionService:
                 "provider connection is disabled",
                 details={"code": "PROVIDER_CONNECTION_DISABLED"},
             )
-        if capability in plugin.paid_capabilities and not paid_request_confirmed:
+        if (
+            capability not in _READ_ONLY_PROBE_CAPABILITIES
+            or capability in plugin.paid_capabilities
+        ):
             raise ValidationAppError(
-                "paid Probe requires explicit request confirmation",
-                details={"code": "PAID_REQUEST_CONFIRMATION_REQUIRED"},
+                "generation probes are unavailable: no standalone Owner paid-probe "
+                "authorization contract exists yet",
+                details={"code": "PAID_PROBE_AUTHORIZATION_UNAVAILABLE"},
+            )
+        # Only auth_models is a connection-level probe. Every model capability
+        # probe must name a binding: proving one model must never advance a
+        # sibling binding on the same connection (review gate 5).
+        if capability != "auth_models" and model_binding_id is None:
+            raise ValidationAppError(
+                "model capability Probe requires a model_binding_id",
+                details={"code": "PROBE_BINDING_REQUIRED"},
+            )
+        probe_revision = await self.current_connection_revision(connection=connection)
+        probe_credential_revision = connection.credential_revision
+        if (
+            probe_revision.credential_revision_id != connection.credential_id
+            or probe_revision.base_url != connection.base_url
+            or probe_revision.protocol_profile != connection.protocol_profile
+            or probe_revision.provider_type != connection.provider_type
+        ):
+            raise ValidationAppError(
+                "provider connection changed before the probe; reload its current state",
+                details={"code": "PROVIDER_CONNECTION_REVISION_CHANGED"},
             )
         binding = await self._get_probe_binding(
             workspace_id=workspace_id,
             connection=connection,
             model_binding_id=model_binding_id,
         )
-        probe_currency = self._probe_currency(
-            binding,
-            require_pricing=capability in plugin.paid_capabilities,
-        )
+        probe_currency = "USD"
         recent = await self._session.scalar(
             select(ProviderCapabilityEvidence)
             .where(
                 ProviderCapabilityEvidence.connection_id == connection.id,
                 ProviderCapabilityEvidence.capability == capability,
+                ProviderCapabilityEvidence.credential_revision == probe_credential_revision,
                 ProviderCapabilityEvidence.tested_at > datetime.now(UTC) - timedelta(seconds=30),
             )
             .order_by(ProviderCapabilityEvidence.tested_at.desc())
@@ -583,8 +524,12 @@ class ProviderConnectionService:
                 "probe rate limited; wait before retrying",
                 details={"code": "PROBE_RATE_LIMITED"},
             )
-        cfg = await self._probe_settings(connection, binding)
-        client = plugin.build_client(cfg, host=connection.base_url)
+        cfg = await self._probe_settings(connection, binding, revision=probe_revision)
+        client = (
+            plugin.build_client(cfg, host=probe_revision.base_url)
+            if capability != "auth_models"
+            else None
+        )
         reference_artifact: Artifact | None = None
         reference_bytes: bytes | None = None
         reference_mime = "image/png"
@@ -595,10 +540,7 @@ class ProviderConnectionService:
                 artifact_id=reference_artifact_id,
             )
             reference_mime = reference_artifact.mime_type
-            if (
-                capability == "image_i2i"
-                and plugin.image_i2i_probe_transport == "public_url"
-            ):
+            if capability == "image_i2i" and plugin.image_i2i_probe_transport == "public_url":
                 grant = await issue_artifact_reference(
                     self._session,
                     artifact=reference_artifact,
@@ -622,13 +564,13 @@ class ProviderConnectionService:
                 {
                     "capability": capability,
                     "connection_id": str(connection.id),
-                    "credential_revision": connection.credential_revision,
+                    "credential_revision": probe_credential_revision,
+                    "connection_revision_id": str(probe_revision.id),
                     "reference_artifact_id": (
                         str(reference_artifact_id) if reference_artifact_id else None
                     ),
                     "remote_task_id": remote_task_id,
                     "remote_query_kind": remote_query_kind,
-                    "paid_request_confirmed": paid_request_confirmed,
                     "currency": probe_currency,
                 },
                 sort_keys=True,
@@ -641,15 +583,21 @@ class ProviderConnectionService:
         error_code: str | None = None
         evidence_model_id: str | None = None
         listed_model_ids: set[str] = set()
+        catalog_received = False
         if capability == "auth_models":
             try:
+                models_url = f"{probe_revision.base_url}{plugin.model_list_path}"
+                if plugin.provider_type == "litellm":
+                    from app.providers.litellm_gateway.client import normalize_models_url
+
+                    models_url = normalize_models_url(probe_revision.base_url)
                 async with httpx.AsyncClient(timeout=30.0) as http:
                     response = await http.get(
-                        f"{connection.base_url}{plugin.model_list_path}",
+                        models_url,
                         headers={
                             "Authorization": f"Bearer {getattr(cfg, f'{plugin.prefix}_api_key')}"
                         },
-                )
+                    )
                 http_status = response.status_code
                 status = "passed" if response.status_code < 400 else "failed"
                 if status == "passed":
@@ -657,18 +605,26 @@ class ProviderConnectionService:
                         payload = response.json()
                     except ValueError:
                         payload = None
-                    raw_models = (
-                        payload.get("data") or payload.get("models")
-                        if isinstance(payload, dict)
-                        else None
-                    )
+                    raw_models = payload.get("data") if isinstance(payload, dict) else None
+                    if raw_models is None and isinstance(payload, dict):
+                        raw_models = payload.get("models")
                     if isinstance(raw_models, list):
-                        listed_model_ids = {
+                        model_ids = [
                             str(item.get("id") or item.get("model") or "").strip()
-                            for item in raw_models
                             if isinstance(item, dict)
+                            else ""
+                            for item in raw_models
+                        ]
+                        # Provider responses are untrusted and can be very large.
+                        # Keep deterministic ids that fit the binding identity; a
+                        # bounded list is not a complete catalog for availability.
+                        candidates = sorted(set(model_ids) - {""})[:500]
+                        listed_model_ids = {
+                            model_id for model_id in candidates if len(model_id) <= 160
                         }
-                        listed_model_ids.discard("")
+                        catalog_received = all(model_ids) and len(listed_model_ids) == len(
+                            set(model_ids)
+                        )
                     if not listed_model_ids:
                         status = "failed"
                         error_code = "PROVIDER_MODELS_RESPONSE_INVALID"
@@ -681,6 +637,7 @@ class ProviderConnectionService:
             except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
                 error_code = "PROVIDER_UNAVAILABLE"
         elif capability == "image_t2i":
+            assert client is not None
             evidence_model_id = (
                 binding.invoke_model_value
                 if binding is not None
@@ -695,6 +652,7 @@ class ProviderConnectionService:
             http_status = int(result["http_status"]) if result.get("http_status") else None
             error_code = str(result.get("error_code") or "") or None
         elif capability == "image_i2i":
+            assert client is not None
             evidence_model_id = (
                 binding.invoke_model_value
                 if binding is not None
@@ -736,6 +694,7 @@ class ProviderConnectionService:
                     http_status = int(result["http_status"]) if result.get("http_status") else None
                     error_code = str(result.get("error_code") or "") or None
         elif capability == "video_i2v":
+            assert client is not None
             evidence_model_id = (
                 binding.invoke_model_value
                 if binding is not None
@@ -750,9 +709,7 @@ class ProviderConnectionService:
                     image_mime=reference_mime,
                     reference_artifact_ids=[str(reference_artifact_id)],
                     reference_fingerprints=(
-                        [reference_artifact.content_hash]
-                        if reference_artifact is not None
-                        else []
+                        [reference_artifact.content_hash] if reference_artifact is not None else []
                     ),
                 )
                 result_status = str(result.get("status") or "failed")
@@ -766,6 +723,7 @@ class ProviderConnectionService:
                 http_status = int(result["http_status"]) if result.get("http_status") else None
                 error_code = str(result.get("error_code") or "") or None
         else:
+            assert client is not None
             evidence_model_id = (
                 binding.invoke_model_value
                 if binding is not None
@@ -800,31 +758,176 @@ class ProviderConnectionService:
             currency=probe_currency,
             cost_status="not_reported",
             error_code=error_code,
+            discovered_model_ids=sorted(listed_model_ids),
+            connection_revision_id=probe_revision.id,
             model_binding_id=binding.id if binding is not None else None,
             capability_manifest_hash=(
                 binding.capability_manifest_hash if binding is not None else None
             ),
-            credential_revision=connection.credential_revision,
+            credential_revision=probe_credential_revision,
             created_by=actor.id,
         )
         self._session.add(evidence)
-        if capability == "auth_models" and status == "passed":
-            connection.verification_status = "verified"
-            connection.verified_at = datetime.now(UTC)
-            await self._mark_listed_models_verified(
-                connection_id=connection.id,
-                model_ids=listed_model_ids,
-                actor=actor,
-            )
-        if status in {"passed", "succeeded"}:
-            await self._mark_capability_verified(
-                connection_id=connection.id,
-                capability=capability,
-                actor=actor,
-                model_binding_id=binding.id if binding is not None else None,
+        await self._apply_probe_outcome(
+            evidence=evidence,
+            revision=probe_revision,
+            listed_model_ids=listed_model_ids,
+            actor=actor,
+        )
+        if capability == "auth_models":
+            await self._record_model_list_availability(
+                workspace_id=workspace_id,
+                connection=connection,
+                plugin=plugin,
+                revision=probe_revision,
+                listed_model_ids=listed_model_ids,
+                catalog_received=catalog_received,
+                http_status=http_status,
+                error_code=error_code,
             )
         await self._session.flush()
         return evidence
+
+    async def _record_model_list_availability(
+        self,
+        *,
+        workspace_id: UUID,
+        connection: ProviderConnection,
+        plugin: ProviderPlugin,
+        revision: ProviderConnectionRevision,
+        listed_model_ids: set[str],
+        catalog_received: bool,
+        http_status: int | None,
+        error_code: str | None,
+    ) -> None:
+        """Project an explicit user-run catalog check for each exact bound model."""
+        bindings = await self._session.scalars(
+            select(ProviderModelBinding).where(
+                ProviderModelBinding.workspace_id == workspace_id,
+                ProviderModelBinding.connection_id == connection.id,
+                ProviderModelBinding.invoke_model_value.is_not(None),
+            )
+        )
+        for binding in bindings:
+            remote_model_id = binding.invoke_model_value
+            if remote_model_id is None:
+                continue
+            availability: AvailabilityStatus
+            if http_status == 401:
+                availability = "auth_failed"
+            elif http_status == 403:
+                availability = "forbidden"
+            elif http_status == 404:
+                availability = "not_supported"
+            elif http_status is not None and http_status < 400 and catalog_received:
+                if plugin.availability_list_scope == "none":
+                    availability = "not_supported"
+                elif remote_model_id in listed_model_ids:
+                    availability = "visible"
+                elif plugin.availability_list_scope == "complete":
+                    availability = "not_visible"
+                else:
+                    availability = "not_supported"
+            else:
+                availability = "temporary_error"
+            await record_model_availability(
+                self._session,
+                ModelAvailabilityObservation(
+                    workspace_id=workspace_id,
+                    connection_id=connection.id,
+                    connection_revision_id=revision.id,
+                    credential_revision_id=revision.credential_revision_id,
+                    remote_model_id=remote_model_id,
+                    verifier_kind="model_list",
+                    status=availability,
+                    listed_model_ids=(
+                        tuple(sorted(listed_model_ids))
+                        if http_status is not None
+                        and http_status < 400
+                        and catalog_received
+                        and availability in {"visible", "not_visible", "not_supported"}
+                        else None
+                    ),
+                    error_code=error_code,
+                ),
+            )
+
+    async def _apply_probe_outcome(
+        self,
+        *,
+        evidence: ProviderCapabilityEvidence,
+        revision: ProviderConnectionRevision,
+        listed_model_ids: set[str],
+        actor: User,
+    ) -> None:
+        """Apply only a current revision's conclusive outcome, keeping history.
+
+        Hold the mutable connection lock only after network completion. Refresh
+        the identity-map instance under that lock: checking the old ORM object
+        alone would allow an old request to revoke a newly verified credential.
+        """
+        passed = evidence.status in {"passed", "succeeded"}
+        credential_rejected = evidence.capability == "auth_models" and evidence.http_status in {
+            401,
+            403,
+        }
+        if not passed and not credential_rejected:
+            # Timeouts, network/5xx failures and malformed catalogs are not proof
+            # that the stored credential has been rejected.
+            return
+        current = await self._session.scalar(
+            select(ProviderConnection)
+            .where(
+                ProviderConnection.id == evidence.connection_id,
+                ProviderConnection.workspace_id == evidence.workspace_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if current is None:
+            return
+        current_revision = await self.current_connection_revision(connection=current)
+        if (
+            current_revision.id != revision.id
+            or current.credential_id != revision.credential_revision_id
+            or current.credential_revision != evidence.credential_revision
+            or current.provider_type != revision.provider_type
+            or current.protocol_profile != revision.protocol_profile
+            or current.base_url != revision.base_url
+        ):
+            return
+        if credential_rejected:
+            current.verification_status = "failed"
+            current.verified_at = None
+            current.updated_by = actor.id
+            bindings = await self._session.scalars(
+                select(ProviderModelBinding)
+                .where(ProviderModelBinding.connection_id == current.id)
+                .execution_options(populate_existing=True)
+            )
+            for binding in bindings:
+                binding.account_verified = False
+                binding.updated_by = actor.id
+            # Accepted quality evidence remains true historical quality evidence;
+            # account_verified=False is the execution blocker, not quality_gated.
+            return
+        if not current.enabled:
+            return
+        if evidence.capability == "auth_models":
+            current.verification_status = "verified"
+            current.verified_at = datetime.now(UTC)
+            current.updated_by = actor.id
+            await self._mark_listed_models_verified(
+                connection_id=current.id,
+                model_ids=listed_model_ids,
+                actor=actor,
+            )
+        await self._mark_capability_verified(
+            connection_id=current.id,
+            capability=evidence.capability,
+            actor=actor,
+            model_binding_id=evidence.model_binding_id,
+        )
 
     async def _mark_listed_models_verified(
         self,
@@ -949,6 +1052,7 @@ class ProviderConnectionService:
         model_id: str,
         purpose: str,
         enabled: bool,
+        capability_contract_id: UUID | None = None,
     ) -> ProviderModelBinding:
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
@@ -956,20 +1060,70 @@ class ProviderConnectionService:
         plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
         if (media_type, purpose) not in {("image", "keyframe"), ("video", "video")}:
             raise ValidationAppError("unsupported model binding purpose")
-        # The binding must reference an active catalog entry of the same
-        # provider/profile/media; the single-model contract map is gone.
-        entry = await ModelCatalogService(self._session).active_entry_for(
-            provider_type=plugin.provider_type,
-            protocol_profile=plugin.protocol_profile,
-            model_id=model_id,
+        # The entry is a capability-plugin contract. The discovered remote
+        # model identity is stored separately and may reuse that contract.
+        entry = (
+            await self._session.get(ModelCatalogEntry, capability_contract_id)
+            if capability_contract_id is not None
+            else await ModelCatalogService(self._session).active_entry_for(
+                provider_type=plugin.provider_type,
+                protocol_profile=plugin.protocol_profile,
+                model_id=model_id,
+            )
         )
         if entry is None:
             raise ValidationAppError(
                 "model binding has no active catalog entry",
                 details={"code": "MODEL_NOT_IN_CATALOG"},
             )
-        if entry.media_kind != media_type:
+        if (
+            entry.lifecycle != "active"
+            or entry.provider_type != plugin.provider_type
+            or entry.protocol_profile != plugin.protocol_profile
+            or entry.media_kind != media_type
+        ):
             raise ValidationAppError("model binding media type mismatch")
+        if hash_manifest(entry.capability_manifest_json) != entry.contract_manifest_hash:
+            raise ValidationAppError(
+                "catalog manifest identity mismatch",
+                details={"code": "CATALOG_MANIFEST_HASH_MISMATCH"},
+            )
+        try:
+            manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
+        except ValueError as exc:
+            raise ValidationAppError("catalog manifest is invalid") from exc
+        if manifest.implementation_status != "contract_tested":
+            raise ValidationAppError(
+                "model binding requires a contract-tested manifest",
+                details={"code": "MODEL_CONTRACT_NOT_TESTED"},
+            )
+        if not has_reproducible_contract_evidence(entry.capability_manifest_json):
+            raise ValidationAppError(
+                "model binding lacks reproducible contract evidence",
+                details={"code": "MODEL_CONTRACT_EVIDENCE_MISSING"},
+            )
+        # A model returned by the latest passed catalog read of the current
+        # connection revision is account-visible, exactly as a later catalog
+        # probe would mark it (``_mark_listed_models_verified``). Binding order
+        # therefore never changes the verification result.
+        revision = await self.current_connection_revision(connection=connection)
+        evidence = await self._session.scalar(
+            select(ProviderCapabilityEvidence)
+            .where(
+                ProviderCapabilityEvidence.connection_id == connection.id,
+                ProviderCapabilityEvidence.capability == "auth_models",
+                ProviderCapabilityEvidence.status == "passed",
+                ProviderCapabilityEvidence.connection_revision_id == revision.id,
+                ProviderCapabilityEvidence.credential_revision == connection.credential_revision,
+            )
+            .order_by(ProviderCapabilityEvidence.tested_at.desc())
+        )
+        discovered = bool(evidence and model_id in (evidence.discovered_model_ids or []))
+        if capability_contract_id is not None and entry.model_id != model_id and not discovered:
+            raise ValidationAppError(
+                "model was not returned by the current connection discovery",
+                details={"code": "MODEL_NOT_DISCOVERED"},
+            )
         operation_kind = "image.generate" if media_type == "image" else "video.generate"
         operations = entry.capability_manifest_json.get("operations") or {}
         if operation_kind not in operations:
@@ -980,8 +1134,9 @@ class ProviderConnectionService:
             select(ProviderModelBinding.id).where(
                 ProviderModelBinding.connection_id == connection.id,
                 ProviderModelBinding.media_type == media_type,
-                ProviderModelBinding.catalog_entry_id == entry.id,
+                ProviderModelBinding.model_id == model_id,
                 ProviderModelBinding.purpose == purpose,
+                ProviderModelBinding.catalog_entry_id == entry.id,
             )
         )
         if duplicate is not None:
@@ -998,9 +1153,9 @@ class ProviderConnectionService:
             enabled=enabled,
             documented=True,
             contract_tested=True,
-            # A new binding has no evidence of its own; only a binding-scoped
-            # probe of this exact model advances account_verified.
-            account_verified=False,
+            # A new binding has no evidence of its own beyond the current
+            # revision's catalog read; a later credential rejection wins.
+            account_verified=discovered and connection.verification_status == "verified",
             quality_gated=False,
             catalog_entry_id=entry.id,
             capability_manifest_hash=entry.contract_manifest_hash,
@@ -1286,11 +1441,10 @@ class ProviderConnectionService:
         project: Project,
         purpose: str,
         model_binding_id: UUID,
-        fallback_policy: str,
         actor: User,
         selection_strategy: str = "explicit_binding",
     ) -> ProjectProviderBinding:
-        if purpose not in {"keyframe", "video"} or fallback_policy != "none":
+        if purpose not in {"keyframe", "video"}:
             raise ValidationAppError("unsupported project Provider binding")
         if selection_strategy != "explicit_binding":
             raise ValidationAppError(
@@ -1306,9 +1460,7 @@ class ProviderConnectionService:
         )
         if model is None:
             raise NotFoundError("model binding not found")
-        model_connection = await self._session.get(
-            ProviderConnection, model.connection_id
-        )
+        model_connection = await self._session.get(ProviderConnection, model.connection_id)
         if model_connection is None:
             raise ValidationAppError(
                 "model binding does not reference the active catalog contract",
@@ -1323,13 +1475,10 @@ class ProviderConnectionService:
         # enter the project, then require accepted evidence before formal
         # Workbench execution.
         if not (
-            model.enabled
-            and model.documented
-            and model.contract_tested
-            and model.account_verified
+            model.enabled and model.documented and model.contract_tested and model.account_verified
         ):
             raise ValidationAppError(
-            "model binding is not eligible for Workbench execution",
+                "model binding is not eligible for Workbench execution",
                 details={"code": "MODEL_BINDING_NOT_VERIFIED"},
             )
         binding = await self._session.scalar(
@@ -1345,14 +1494,12 @@ class ProviderConnectionService:
                 purpose=purpose,
                 model_binding_id=model.id,
                 selection_strategy="explicit_binding",
-                fallback_policy="none",
                 updated_by=actor.id,
             )
             self._session.add(binding)
         else:
             binding.model_binding_id = model.id
             binding.selection_strategy = "explicit_binding"
-            binding.fallback_policy = "none"
             binding.updated_by = actor.id
         await self._session.flush()
         return binding

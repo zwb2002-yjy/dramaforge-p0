@@ -27,7 +27,6 @@ NODE_SLOT_MAP: dict[str, tuple[ModelSlot, Capability]] = {
     # validated at execution (spec §10/§43). The snapshot uses i2v as the
     # representative planned capability.
     "video": (ModelSlot.VIDEO_SHOT, Capability.VIDEO_IMAGE_TO_VIDEO),
-    "voice": (ModelSlot.AUDIO_TTS, Capability.AUDIO_TTS),
     "canonical": (ModelSlot.VISUAL_CHARACTER, Capability.IMAGE_GENERATE),
 }
 
@@ -54,12 +53,15 @@ def derive_video_capability(
     """Derive the video capability a shot needs from its inputs (spec §43).
 
     Order is fixed: first+last → ``video.first_last_frame``, else first →
-    ``video.image_to_video``, else references → ``video.reference_to_video``,
+    ``video.image_to_video``, else last → ``video.last_frame_to_video``,
+    else references → ``video.reference_to_video``,
     else ``video.text_to_video``."""
     if first_frame and last_frame:
         return Capability.VIDEO_FIRST_LAST_FRAME
     if first_frame:
         return Capability.VIDEO_IMAGE_TO_VIDEO
+    if last_frame:
+        return Capability.VIDEO_LAST_FRAME_TO_VIDEO
     if references:
         return Capability.VIDEO_REFERENCE_TO_VIDEO
     return Capability.VIDEO_TEXT_TO_VIDEO

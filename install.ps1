@@ -28,9 +28,9 @@ if ($release['DRAMAFORGE_SOURCE_COMMIT'] -notmatch '^[0-9a-f]{40}$') {
 }
 
 if ($Offline) {
-    $imageArchive = Join-Path $root 'images.tar'
+    $imageArchive = Join-Path $root 'images.tar.gz'
     if (-not (Test-Path -LiteralPath $imageArchive -PathType Leaf)) {
-        throw 'images.tar is missing. Use the complete offline release bundle.'
+        throw 'images.tar.gz is missing. Use the complete offline release bundle.'
     }
     docker load --input $imageArchive
     if ($LASTEXITCODE -ne 0) { throw 'Failed to import offline release images.' }

@@ -24,11 +24,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_doc
 
 It installs locked Python/Node dependencies inside disposable quality images,
 starts disposable PostgreSQL and LiteLLM services, and runs the complete
-backend/frontend/API/E2E gate.
+backend/frontend/API/E2E gate. Choose checks proportionate to the change; a
+documentation-only edit uses link, source-consistency and policy checks without
+starting services. Release candidates still require the full gate described in
+[DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 Use a throwaway `.env` and isolated databases in tests. Pull requests should be
 small, explain user-visible behavior, list exact verification commands, and keep
 generated artifacts out unless the active contract explicitly requires them.
+
+Routine Owner-authorized integration targets `dev`, currently in fast-development
+mode. Protected `dev -> main` releases retain the full checks and Owner-only
+approval/merge boundary; see [RELEASE.md](docs/RELEASE.md).
 
 ## Contributions and licensing
 

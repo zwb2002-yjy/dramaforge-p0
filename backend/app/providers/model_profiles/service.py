@@ -79,7 +79,6 @@ def parse_binding_json(raw: object) -> ModelSlotBinding:
             slot=slot,
             model_id=str(raw.get("model_id") or ""),
             native_options=dict(raw.get("native_options") or {}),
-            generation_policy=raw.get("generation_policy"),
             enabled=bool(raw.get("enabled", True)),
         )
     except PydanticValidationError as exc:
@@ -140,10 +139,24 @@ class ProductionModelProfileService:
         registry: ModelRegistry | None = None,
     ) -> None:
         self._session = session
+        self._workspace_dynamic = registry is None
+        self._loaded_workspace_id: UUID | None = None
         if registry is None:
             self._registry = default_model_registry()
         else:
             self._registry = registry
+
+    async def _ensure_workspace_registry(self, workspace_id: UUID) -> None:
+        if not self._workspace_dynamic or self._loaded_workspace_id == workspace_id:
+            return
+        from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
+
+        self._registry = await workspace_model_registry(
+            self._session,
+            workspace_id=workspace_id,
+            base_registry=default_model_registry(),
+        )
+        self._loaded_workspace_id = workspace_id
 
     # ------------------------------------------------------------------
     # Queries
@@ -174,9 +187,7 @@ class ProductionModelProfileService:
             raise profile_not_found()
         return profile
 
-    async def list_workspace_profiles(
-        self, *, workspace_id: UUID
-    ) -> list[ProductionModelProfile]:
+    async def list_workspace_profiles(self, *, workspace_id: UUID) -> list[ProductionModelProfile]:
         rows = list(
             (
                 await self._session.execute(
@@ -193,9 +204,7 @@ class ProductionModelProfileService:
         )
         return rows
 
-    async def get_workspace_default(
-        self, *, workspace_id: UUID
-    ) -> ProductionModelProfile | None:
+    async def get_workspace_default(self, *, workspace_id: UUID) -> ProductionModelProfile | None:
         return cast(
             "ProductionModelProfile | None",
             await self._session.scalar(
@@ -207,9 +216,7 @@ class ProductionModelProfileService:
             ),
         )
 
-    async def get_project_profile(
-        self, *, project_id: UUID
-    ) -> ProductionModelProfile | None:
+    async def get_project_profile(self, *, project_id: UUID) -> ProductionModelProfile | None:
         return cast(
             "ProductionModelProfile | None",
             await self._session.scalar(
@@ -219,15 +226,11 @@ class ProductionModelProfileService:
             ),
         )
 
-    async def get_effective_for_project(
-        self, *, project: Project
-    ) -> ProductionModelProfile | None:
+    async def get_effective_for_project(self, *, project: Project) -> ProductionModelProfile | None:
         """Project profile, else the workspace default (spec §14/§54)."""
         profile = await self.get_project_profile(project_id=project.id)
         if profile is None:
-            profile = await self.get_workspace_default(
-                workspace_id=project.workspace_id
-            )
+            profile = await self.get_workspace_default(workspace_id=project.workspace_id)
         return profile
 
     # ------------------------------------------------------------------
@@ -248,6 +251,7 @@ class ProductionModelProfileService:
         """Create a profile. ``copy_from`` snapshots another profile's bindings
         into this one (spec §54 Snapshot — creating a project copies the
         workspace default rather than live-inheriting)."""
+        await self._ensure_workspace_registry(workspace_id)
         if copy_from is not None:
             source = await self.get(profile_id=copy_from)
             if source.workspace_id != workspace_id:
@@ -292,12 +296,17 @@ class ProductionModelProfileService:
         expected_version: int | None = None,
     ) -> ProductionModelProfile:
         profile = await self._get_for_update(profile_id=profile_id)
+        await self._ensure_workspace_registry(profile.workspace_id)
         if expected_version is not None and profile.version != expected_version:
             raise profile_version_conflict(expected_version, profile.version)
         if name is not None:
             profile.name = name
         if bindings is not None:
-            report = self.validate_bindings(bindings)
+            existing = parse_bindings(profile.bindings)
+            changed = {
+                slot: binding for slot, binding in bindings.items() if existing.get(slot) != binding
+            }
+            report = self.validate_bindings(changed)
             report.raise_if_invalid()
             profile.bindings = bindings_to_json(bindings)
         if is_default is not None and profile.project_id is None:
@@ -325,6 +334,7 @@ class ProductionModelProfileService:
         """Simple-mode batch patch (spec §30/§77/§78): LLM / Image / Video map to
         slot groups. ``bindings`` stays the single source of truth."""
         profile = await self._get_for_update(profile_id=profile_id)
+        await self._ensure_workspace_registry(profile.workspace_id)
         if expected_version is not None and profile.version != expected_version:
             raise profile_version_conflict(expected_version, profile.version)
         bindings = parse_bindings(profile.bindings)
@@ -333,13 +343,20 @@ class ProductionModelProfileService:
             "image": selection.image_model_id,
             "video": selection.video_model_id,
         }
+        changed: dict[ModelSlot, ModelSlotBinding] = {}
         for group, model_id in patches.items():
             if model_id is None:
                 continue
             for slot in SIMPLE_MODE_SLOT_GROUPS[group]:
-                bindings[slot] = ModelSlotBinding(slot=slot, model_id=model_id)
-        report = self.validate_bindings(bindings)
+                current = bindings.get(slot)
+                if current is not None and current.model_id == model_id:
+                    continue
+                changed[slot] = ModelSlotBinding(slot=slot, model_id=model_id)
+        if not changed:
+            return profile
+        report = self.validate_bindings(changed)
         report.raise_if_invalid()
+        bindings.update(changed)
         profile.bindings = bindings_to_json(bindings)
         profile.updated_by = actor_id
         profile.version += 1
@@ -445,10 +462,18 @@ class ProductionModelProfileService:
                         ),
                     )
                 )
-            for option, value in binding.native_options.items():
-                self._validate_native_option(
-                    model, option, value, slot, binding, issues
+            if manifest.metadata.get("inspection_only"):
+                issues.append(
+                    ProfileValidationIssue(
+                        code="MODEL_PROFILE_MODEL_NOT_CONFIGURED",
+                        slot=str(slot),
+                        model_id=binding.model_id,
+                        message="Select a configured model binding",
+                    )
                 )
+                continue
+            for option, value in binding.native_options.items():
+                self._validate_native_option(model, option, value, slot, binding, issues)
         return ProfileValidationReport(issues)
 
     def _validate_native_option(
@@ -488,11 +513,6 @@ class ProductionModelProfileService:
                 )
             )
 
-    async def validate_bindings_api(
-        self, bindings: dict[ModelSlot, ModelSlotBinding]
-    ) -> ProfileValidationReport:
-        return self.validate_bindings(bindings)
-
     # ------------------------------------------------------------------
     # Reads / mapping
     # ------------------------------------------------------------------
@@ -503,6 +523,7 @@ class ProductionModelProfileService:
         workspace_id: UUID,
         bindings: dict[ModelSlot, ModelSlotBinding],
     ) -> dict[str, BindingRead]:
+        await self._ensure_workspace_registry(workspace_id)
         from app.providers.models import ProviderConnection
 
         rows = list(
@@ -532,7 +553,9 @@ class ProductionModelProfileService:
             provider_id = model.manifest.provider_id if model is not None else ""
             display_name = model.manifest.display_name if model is not None else binding.model_id
             is_configured = (
-                litellm_configured if provider_id == "litellm" else provider_id in configured
+                ("litellm" in configured or litellm_configured)
+                if provider_id == "litellm"
+                else provider_id in configured
             )
             result[str(slot)] = BindingRead(
                 slot=str(slot),
@@ -545,9 +568,7 @@ class ProductionModelProfileService:
             )
         return result
 
-    async def profile_read(
-        self, profile: ProductionModelProfile
-    ) -> ProfileRead:
+    async def profile_read(self, profile: ProductionModelProfile) -> ProfileRead:
         bindings = parse_bindings(profile.bindings)
         reads = await self.binding_reads(
             workspace_id=profile.workspace_id,
@@ -565,18 +586,15 @@ class ProductionModelProfileService:
             updated_at=profile.updated_at,
         )
 
-    async def snapshot_for_project(
-        self, *, project: Project
-    ) -> ModelProfileSnapshot:
+    async def snapshot_for_project(self, *, project: Project) -> ModelProfileSnapshot:
         """Resolve the effective profile for a project and freeze its bindings
         into an immutable snapshot (spec §21/§92). The snapshot uses the *current*
         bindings at graph start; a running graph keeps them even if the profile
         changes."""
+        await self._ensure_workspace_registry(project.workspace_id)
         profile = await self.get_effective_for_project(project=project)
         if profile is None:
-            return ModelProfileSnapshot(
-                profile_id=None, profile_version=None, bindings={}
-            )
+            return ModelProfileSnapshot(profile_id=None, profile_version=None, bindings={})
         snapshot: dict[ModelSlot, ResolvedModelBinding] = {}
         for slot, binding in parse_bindings(profile.bindings).items():
             if not binding.enabled:
@@ -598,9 +616,7 @@ class ProductionModelProfileService:
                 capability=supported[0],
                 model_id=binding.model_id,
                 source=(
-                    "project_profile"
-                    if profile.project_id is not None
-                    else "workspace_profile"
+                    "project_profile" if profile.project_id is not None else "workspace_profile"
                 ),
                 profile_id=profile.id,
                 profile_version=profile.version,

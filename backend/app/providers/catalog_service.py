@@ -1,4 +1,7 @@
-"""Read-only model catalog access. Seeds are written by migrations only."""
+"""Read-only application access to the versioned model catalog.
+
+The maintenance-only catalog sync writes revisions outside the application role.
+"""
 
 from __future__ import annotations
 
@@ -68,7 +71,7 @@ class ModelCatalogService:
         protocol_profile: str,
         model_id: str,
     ) -> ModelCatalogEntry | None:
-        """Return the active revision row, or None when none is active."""
+        """Return the latest active revision when no exact contract was requested."""
         return cast(
             ModelCatalogEntry | None,
             await self._session.scalar(
@@ -77,7 +80,10 @@ class ModelCatalogService:
                     ModelCatalogEntry.protocol_profile == protocol_profile,
                     ModelCatalogEntry.model_id == model_id,
                     ModelCatalogEntry.lifecycle == "active",
-                )
+                ).order_by(
+                    ModelCatalogEntry.documented_at.desc().nullslast(),
+                    ModelCatalogEntry.model_revision.desc(),
+                ).limit(1)
             ),
         )
 

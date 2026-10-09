@@ -38,6 +38,8 @@ from app.shared.errors import NotFoundError, ValidationAppError
 if TYPE_CHECKING:
     from app.providers.model_resolution import ExecutionModelResolution
 
+PROVIDER_CONTENT_URI = "provider-content"
+
 
 class ProviderResumeToken(BaseModel):
     """Sanitized resume context. Never carries secrets, raw media, short-lived
@@ -73,6 +75,30 @@ class CompiledImageRequest(BaseModel):
     safe_request_summary: dict[str, JsonValue] = Field(default_factory=dict)
     reference_artifact_ids: list[UUID] = Field(default_factory=list)
     reference_fingerprints: list[str] = Field(default_factory=list)
+
+
+def validate_compiled_submission(
+    request: CompiledImageRequest | CompiledVideoRequest,
+    *,
+    provider_type: str,
+    protocol_profile: str,
+    operation: Literal["image.generate", "video.generate"],
+) -> None:
+    """Check the existing JSON media seam before credentials reach the network.
+
+    This is not payload compilation or model selection. The compiler's chosen
+    wire model must match its envelope, and the envelope must target this runtime.
+    Never repair a mismatch by substituting a configured default or rebuilding
+    the body. Errors intentionally omit payloads and credential values.
+    """
+    if (request.provider_type, request.protocol_profile, request.operation) != (
+        provider_type,
+        protocol_profile,
+        operation,
+    ):
+        raise ValueError("compiled request does not match runtime provider/profile/operation")
+    if not request.model_id.strip() or request.wire_request.get("model") != request.model_id:
+        raise ValueError("compiled wire model does not match request model_id")
 
 
 class SubmissionResult(BaseModel):
@@ -112,9 +138,9 @@ class CostResult(BaseModel):
     amount: float | None = None
     currency: str = "USD"
     units: float = 1.0
-    cost_status: Literal[
-        "reported", "estimated_only", "not_reported", "reconciled"
-    ] = "not_reported"
+    cost_status: Literal["reported", "estimated_only", "not_reported", "reconciled"] = (
+        "not_reported"
+    )
 
     @model_validator(mode="after")
     def infer_reported_amount(self) -> CostResult:
@@ -135,6 +161,10 @@ class ResolvedReference:
     content_url: str | None = None
     mime_type: str = "image/png"
     fingerprint: str | None = None
+    byte_size: int | None = None
+    duration_seconds: float | None = None
+    width: int | None = None
+    height: int | None = None
 
 
 class VideoCompiler(Protocol):
@@ -233,9 +263,7 @@ class ProviderRuntimeResolver:
             binding=binding,
             catalog_entry=entry,
             model_id=(
-                f"{connection.provider_type}/{binding.model_id}"
-                if binding is not None
-                else None
+                f"{connection.provider_type}/{binding.model_id}" if binding is not None else None
             ),
             invoke_model_value=binding.invoke_model_value if binding is not None else None,
             manifest_hash=entry.contract_manifest_hash if entry is not None else None,
@@ -279,7 +307,7 @@ class ProviderRuntimeResolver:
             reasons.append("BINDING_CONNECTION_WORKSPACE_MISMATCH")
         if binding.catalog_entry_id != entry.id:
             reasons.append("BINDING_CATALOG_MISMATCH")
-        if entry.model_id != binding.model_id:
+        if entry.catalog_source != "protocol_contract" and entry.model_id != binding.model_id:
             reasons.append("CATALOG_MODEL_MISMATCH")
         if entry.provider_type != connection.provider_type:
             reasons.append("CATALOG_PROVIDER_MISMATCH")
@@ -293,6 +321,11 @@ class ProviderRuntimeResolver:
             reasons.append("MANIFEST_HASH_MISMATCH")
         if not binding.invoke_model_value:
             reasons.append("INVOKE_MODEL_VALUE_MISSING")
+        elif (
+            entry.catalog_source == "protocol_contract"
+            and binding.invoke_model_value != binding.model_id
+        ):
+            reasons.append("INVOKE_MODEL_IDENTITY_MISMATCH")
         if reasons:
             raise ValidationAppError(
                 "concrete provider model runtime identity is invalid",
@@ -369,9 +402,7 @@ class ProviderRuntimeResolver:
             credential_revision_id=credential_id,
             capability=resolution.capability.value,
             mode_id=resolution.mode_id or "resolved",
-            effective_options=cast(
-                dict[str, JsonValue], resolution.native_options
-            ),
+            effective_options=cast(dict[str, JsonValue], resolution.native_options),
             request_fingerprint="0" * 64,
         )
         return await self.resolve_runtime_for_identity(
@@ -450,11 +481,15 @@ class ProviderRuntimeResolver:
             binding is None
             or entry is None
             or binding.catalog_entry_id != identity.catalog_entry_id
-            or binding.model_id != identity.resolved_model.rsplit("/", 1)[-1]
+            or identity.resolved_model != f"{entry.provider_type}/{binding.model_id}"
             or binding.invoke_model_value != identity.invoke_model_value
             or entry.provider_type != revision.provider_type
             or entry.protocol_profile != revision.protocol_profile
-            or entry.model_id != binding.model_id
+            or (entry.catalog_source != "protocol_contract" and entry.model_id != binding.model_id)
+            or (
+                entry.catalog_source == "protocol_contract"
+                and binding.invoke_model_value != binding.model_id
+            )
             or entry.model_revision != identity.model_revision
             or entry.contract_manifest_hash != identity.manifest_hash
         ):

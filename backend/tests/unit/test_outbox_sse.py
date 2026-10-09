@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
 
 import pytest
 from app.access import models as _a  # noqa: F401
@@ -26,6 +27,19 @@ async def engine_factory():
         await conn.run_sync(Base.metadata.create_all)
     yield engine, factory
     await engine.dispose()
+
+
+def test_outbox_retry_delay_is_exponential_jittered_and_capped() -> None:
+    event_id = UUID(int=5)
+    dispatcher = OutboxDispatcher(
+        AsyncSession(),
+        retry_base_seconds=5,
+        retry_max_seconds=30,
+    )
+
+    assert dispatcher._retry_delay(event_id, 1) == timedelta(seconds=6)
+    assert dispatcher._retry_delay(event_id, 2) == timedelta(seconds=12)
+    assert dispatcher._retry_delay(event_id, 20) == timedelta(seconds=30)
 
 
 @pytest.mark.asyncio
@@ -52,8 +66,12 @@ async def test_outbox_publish_and_dead_letter_then_idempotent_replay_across_inst
         assert len(claimed) == 1
         dl = await dispatcher.fail_leased(claimed[0], error="stream down")
         assert dl is None
+        assert claimed[0].next_attempt_at > datetime.now(UTC)
         await session.commit()
 
+        assert await dispatcher.claim_pending(worker_id="w1", limit=5) == []
+        claimed[0].next_attempt_at = datetime.now(UTC) - timedelta(seconds=1)
+        await session.flush()
         claimed2 = await dispatcher.claim_pending(worker_id="w1", limit=5)
         assert len(claimed2) == 1
         dl = await dispatcher.fail_leased(claimed2[0], error="stream still down")
@@ -83,6 +101,28 @@ async def test_outbox_publish_and_dead_letter_then_idempotent_replay_across_inst
     assert "dramaforge_outbox_dead_letter_total" in metrics
     assert "dramaforge_outbox_published_total" in metrics
     assert "dramaforge_outbox_replay_total" in metrics
+
+
+@pytest.mark.asyncio
+async def test_outbox_pending_metrics_refresh_pending_and_oldest_wait(engine_factory) -> None:
+    _engine, factory = engine_factory
+    async with factory() as session:
+        event = OutboxEvent(
+            event_id=uuid4(),
+            topic="node.completed",
+            schema_version=1,
+            payload={},
+            status=OutboxStatus.PENDING.value,
+            attempt_count=0,
+        )
+        session.add(event)
+        await session.commit()
+        dispatcher = OutboxDispatcher(session)
+        assert await dispatcher.pending_count() == 1
+
+    metrics = metrics_payload().decode("utf-8")
+    assert "dramaforge_outbox_pending 1.0" in metrics
+    assert "dramaforge_outbox_oldest_wait_seconds" in metrics
 
 
 @pytest.mark.asyncio
@@ -150,3 +190,56 @@ async def test_sse_last_event_id_resume() -> None:
     first = await gen.__anext__()
     assert first.id == e2.id
     assert "dramaforge_sse_reconnect_total" in metrics_payload().decode("utf-8")
+
+
+@pytest.mark.asyncio
+async def test_outbox_publish_emits_a_workspace_scoped_sse_envelope(engine_factory) -> None:
+    _engine, factory = engine_factory
+    publisher = StreamPublisher()
+    hub = SseHub()
+    workspace_id = uuid4()
+    async with factory() as session:
+        dispatcher = OutboxDispatcher(session, publisher, sse_hub=hub)
+        event = OutboxEvent(
+            event_id=uuid4(),
+            topic="production.facts.v1",
+            schema_version=1,
+            payload={"project_id": str(uuid4()), "notice": {"kind": "node.completed"}},
+            status=OutboxStatus.PENDING.value,
+            attempt_count=0,
+        )
+        session.add(event)
+        await session.commit()
+        await session.refresh(event)
+
+        claimed = await dispatcher.claim_pending(worker_id="w1", limit=1)
+        await dispatcher.publish_leased(claimed[0], workspace_id=workspace_id)
+
+        published = hub.since(None)
+    assert len(published) == 1
+    assert published[0].event == "production.facts.v1"
+    assert published[0].data["workspace_id"] == str(workspace_id)
+    assert published[0].data["topic"] == "production.facts.v1"
+    assert publisher.messages[0][1]["workspace_id"] == str(workspace_id)
+
+
+def test_redis_sse_bridge_decodes_a_production_fact() -> None:
+    from app.events.sse import RedisSseBridge
+
+    hub = SseHub()
+    bridge = RedisSseBridge.__new__(RedisSseBridge)
+    bridge._hub = hub
+    bridge._publish_stream_message(
+        {
+            "event_id": str(uuid4()),
+            "schema_version": "1",
+            "workspace_id": "workspace-1",
+            "payload": '{"project_id":"project-1","notice":{"kind":"node.completed"}}',
+        }
+    )
+
+    events = hub.since(None)
+    assert len(events) == 1
+    assert events[0].event == "production.facts.v1"
+    assert events[0].data["workspace_id"] == "workspace-1"
+    assert events[0].data["project_id"] == "project-1"

@@ -125,9 +125,11 @@ export function ManifestOptionControls({ spec, values, onChange }: ManifestOptio
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const violations = useMemo(() => constraintViolations(spec, values), [spec, values]);
 
-  const commonKeys = Object.keys(spec.common_options);
-  const nativeKeys = Object.keys(spec.native_options);
-  const inputSlotHints = Object.entries(spec.input_slots);
+  const commonOptions = spec.common_options ?? {};
+  const nativeOptions = spec.native_options ?? {};
+  const commonKeys = Object.keys(commonOptions);
+  const nativeKeys = Object.keys(nativeOptions);
+  const inputSlotHints = Object.entries(spec.input_slots ?? {});
 
   return (
     <div className="manifest-options" data-testid="manifest-options">
@@ -156,7 +158,7 @@ export function ManifestOptionControls({ spec, values, onChange }: ManifestOptio
       )}
 
       {commonKeys.map((keyName) => {
-        const parameter = spec.common_options[keyName];
+        const parameter = commonOptions[keyName];
         const allowed = allowedValuesFor(spec, keyName, parameter, values);
         return (
           <OptionControl
@@ -177,7 +179,7 @@ export function ManifestOptionControls({ spec, values, onChange }: ManifestOptio
         >
           <summary>高级参数</summary>
           {nativeKeys.map((keyName) => {
-            const parameter = spec.native_options[keyName];
+            const parameter = nativeOptions[keyName];
             return (
               <OptionControl
                 key={keyName}

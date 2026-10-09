@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.config import clear_settings_cache, get_settings
@@ -49,6 +49,15 @@ def api() -> Iterator[tuple[TestClient, Any]]:
         yield client, factory
     app.dependency_overrides.clear()
     _run(engine.dispose())
+
+
+def _run_create(coro: Any) -> Any:
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def _csrf(client: TestClient) -> str:
@@ -95,6 +104,7 @@ def test_model_slots_api(api: tuple[TestClient, Any]) -> None:
     assert "planning.script" in ids
     assert "visual.keyframe" in ids
     assert "video.shot" in ids
+    assert "audio.tts" not in ids
     script = next(s for s in slots.json() if s["id"] == "planning.script")
     assert script["capabilities"] == ["text.generate"]
 
@@ -106,7 +116,7 @@ def test_workspace_profile_crud_and_simple_mode(api: tuple[TestClient, Any]) -> 
         f"/api/v1/workspaces/{workspace_id}/model-profiles",
         json={
             "name": "默认方案",
-            "bindings": {"visual.keyframe": {"model_id": "agnes/agnes-image-2.1-flash"}},
+            "bindings": {"planning.script": {"model_id": "litellm/script-quality"}},
             "is_default": True,
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -114,14 +124,13 @@ def test_workspace_profile_crud_and_simple_mode(api: tuple[TestClient, Any]) -> 
     assert created.status_code == 201, created.text
     profile = created.json()
     assert profile["version"] == 1
-    assert profile["bindings"]["visual.keyframe"]["model_id"] == "agnes/agnes-image-2.1-flash"
+    assert profile["bindings"]["planning.script"]["model_id"] == "litellm/script-quality"
 
     # simple mode batch patch (LLM / Image / Video → slot groups)
     simple = client.post(
         f"/api/v1/workspaces/{workspace_id}/model-profiles/{profile['id']}/simple-mode",
         json={
-            "llm_model_id": "litellm/text-llm",
-            "image_model_id": "agnes/agnes-image-2.1-flash",
+            "llm_model_id": "litellm/script-quality",
             "expected_version": 1,
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -129,8 +138,8 @@ def test_workspace_profile_crud_and_simple_mode(api: tuple[TestClient, Any]) -> 
     assert simple.status_code == 200, simple.text
     updated = simple.json()
     assert updated["version"] == 2
-    assert updated["bindings"]["planning.brief"]["model_id"] == "litellm/text-llm"
-    assert updated["bindings"]["visual.keyframe"]["model_id"] == "agnes/agnes-image-2.1-flash"
+    assert updated["bindings"]["planning.brief"]["model_id"] == "litellm/script-quality"
+    assert updated["bindings"]["planning.script"]["model_id"] == "litellm/script-quality"
 
     # version conflict
     conflict = client.put(
@@ -140,6 +149,24 @@ def test_workspace_profile_crud_and_simple_mode(api: tuple[TestClient, Any]) -> 
     )
     assert conflict.status_code == 409, conflict.text
     assert conflict.json()["details"]["code"] == "MODEL_PROFILE_VERSION_CONFLICT"
+
+
+def test_workspace_profile_path_must_match_selected_workspace(
+    api: tuple[TestClient, Any],
+) -> None:
+    client, _ = api
+    workspace_id = _register(client)
+    other = client.post(
+        "/api/v1/workspaces",
+        json={"name": "Other workspace"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert other.status_code == 201, other.text
+    response = client.get(
+        f"/api/v1/workspaces/{other.json()['id']}/model-profiles",
+        headers={"X-Workspace-Id": workspace_id},
+    )
+    assert response.status_code == 404, response.text
 
 
 def test_workspace_profile_validation_rejects_capability_mismatch(
@@ -152,9 +179,7 @@ def test_workspace_profile_validation_rejects_capability_mismatch(
         f"/api/v1/workspaces/{workspace_id}/model-profiles",
         json={
             "name": "错误方案",
-            "bindings": {
-                "planning.script": {"model_id": "agnes/agnes-video-v2.0"}
-            },
+            "bindings": {"planning.script": {"model_id": "agnes/agnes-video-v2.0"}},
         },
         headers={CSRF_HEADER: _csrf(client)},
     )
@@ -163,16 +188,16 @@ def test_workspace_profile_validation_rejects_capability_mismatch(
 
 
 def test_effective_bindings_and_generation_slot_resolution(
-    api: tuple[TestClient, Any], monkeypatch: pytest.MonkeyPatch
+    api: tuple[TestClient, Any],
 ) -> None:
-    client, _ = api
+    client, factory = api
     workspace_id = _register(client)
     project_id = _create_project(client, workspace_id)
     client.post(
         f"/api/v1/workspaces/{workspace_id}/model-profiles",
         json={
             "name": "默认方案",
-            "bindings": {"visual.keyframe": {"model_id": "agnes/agnes-image-2.1-flash"}},
+            "bindings": {"planning.script": {"model_id": "litellm/script-quality"}},
             "is_default": True,
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -180,27 +205,277 @@ def test_effective_bindings_and_generation_slot_resolution(
 
     effective = client.get(f"/api/v1/projects/{project_id}/model-bindings/effective")
     assert effective.status_code == 200, effective.text
-    keyframe = next(b for b in effective.json() if b["slot"] == "visual.keyframe")
-    assert keyframe["model_id"] == "agnes/agnes-image-2.1-flash"
+    keyframe = next(b for b in effective.json() if b["slot"] == "planning.script")
+    assert keyframe["model_id"] == "litellm/script-quality"
     assert keyframe["source"] == "workspace_profile"
 
-    # Standalone image.generate without model_id resolves the visual.keyframe
-    # slot. Patch the Arq enqueue (no Redis in CI unit job) like the generation
-    # API tests do.
-    async def fake_enqueue(self: object, node_run_id: Any) -> str:
-        return f"fake-{node_run_id}"
-
-    monkeypatch.setattr(
-        "app.providers.generation_service.NodeRunScheduler.enqueue_node_run_only",
-        fake_enqueue,
+    # A logical profile selection is not yet an executable provider binding.
+    # The production preflight uses the concrete resolver and reports that
+    # difference before the first paid action is attempted.
+    preflight = client.get(f"/api/v1/projects/{project_id}/execution-models/preflight")
+    assert preflight.status_code == 200, preflight.text
+    keyframe_execution = next(
+        stage for stage in preflight.json()["stages"] if stage["stage"] == "image_keyframe"
     )
-    gen = client.post(
-        f"/api/v1/projects/{project_id}/generations",
-        json={"capability": "image.generate", "input": {"prompt": "雨夜"}},
+    assert keyframe_execution["ready"] is False
+    assert keyframe_execution["requested_model_id"] is None
+    assert keyframe_execution["resolved_model_id"] is None
+    assert keyframe_execution["reason"] == "MODEL_BINDING_MISSING"
+
+    # Standalone image.generate without model_id resolves the visual.keyframe
+
+
+def test_execution_preflight_requires_immutable_connection_revision(
+    api: tuple[TestClient, Any],
+) -> None:
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _create_project(client, workspace_id)
+
+    async def _seed_without_revision() -> None:
+        from app.access.models import Project, User
+        from app.providers.models import ProviderConnectionRevision
+        from model_infra_fixture import seed_model_infra
+        from sqlalchemy import delete, select
+
+        async with factory() as session:
+            user = (await session.execute(select(User).limit(1))).scalar_one()
+            project = await session.get(Project, UUID(project_id))
+            assert project is not None
+            await seed_model_infra(session, project=project, user=user)
+            await session.execute(delete(ProviderConnectionRevision))
+            await session.commit()
+
+    _run_create(_seed_without_revision())
+    response = client.get(f"/api/v1/projects/{project_id}/execution-models/preflight")
+    assert response.status_code == 200, response.text
+    assert response.json()["ready"] is False
+    assert {stage["reason"] for stage in response.json()["stages"]} == {
+        "PROVIDER_CONNECTION_REVISION_MISSING"
+    }
+
+
+def test_effective_preview_retains_saved_workspace_media_and_text_identities(
+    api: tuple[TestClient, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import httpx
+    from app.access.models import Project, User
+    from app.providers.connection_service import ProviderConnectionService
+    from app.providers.models import ProviderModelBinding
+    from cryptography.fernet import Fernet
+    from model_infra_fixture import seed_model_infra
+    from sqlalchemy import select
+
+    monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
+    monkeypatch.setenv("BYOK_KEYRING", f"v1:{Fernet.generate_key().decode('ascii')}")
+    clear_settings_cache()
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _create_project(client, workspace_id)
+    requests: list[str] = []
+
+    async def catalog(_client: httpx.AsyncClient, url: str, **kwargs: Any) -> httpx.Response:
+        requests.append(url)
+        return httpx.Response(200, json={"data": [{"id": "preview-chat"}]})
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", catalog)
+
+    async def seed() -> dict[str, dict[str, str]]:
+        async with factory() as session:
+            user = (await session.scalars(select(User))).one()
+            project = await session.get(Project, UUID(project_id))
+            assert project is not None
+            await seed_model_infra(session, project=project, user=user)
+            media = list(await session.scalars(select(ProviderModelBinding)))
+            bindings = {
+                "video.shot" if item.media_type == "video" else "visual.keyframe": {
+                    "model_id": f"binding:{item.id}"
+                }
+                for item in media
+            }
+            service = ProviderConnectionService(session)
+            connection = await service.create_connection(
+                workspace_id=project.workspace_id,
+                actor=user,
+                display_name="Preview text",
+                api_key="test-only-key",
+                enabled=True,
+                provider_type="litellm",
+                protocol_profile="openai_chat_v1",
+                base_url="https://preview.example.test/v1",
+            )
+            await service.probe(
+                workspace_id=project.workspace_id,
+                connection_id=connection.id,
+                actor=user,
+                capability="auth_models",
+            )
+            bindings["planning.script"] = {
+                "model_id": f"litellm/{connection.id}/preview-chat"
+            }
+            await session.commit()
+            return bindings
+
+    bindings = _run_create(seed())
+    saved = client.put(
+        f"/api/v1/projects/{project_id}/model-profile",
+        json={"bindings": bindings, "expected_version": 1},
         headers={CSRF_HEADER: _csrf(client)},
     )
-    assert gen.status_code == 201, gen.text
-    assert gen.json()["requested_model"] == "agnes/agnes-image-2.1-flash"
+    assert saved.status_code == 200, saved.text
+    request_count = len(requests)
+    response = client.get(f"/api/v1/projects/{project_id}/model-bindings/effective")
+    assert response.status_code == 200, response.text
+    effective = {item["slot"]: item for item in response.json()}
+    assert effective.keys() == bindings.keys()
+    for slot, binding in bindings.items():
+        assert effective[slot]["model_id"] == binding["model_id"]
+        assert effective[slot]["source"] == "project_profile"
+        assert effective[slot]["profile_id"] == saved.json()["id"]
+        assert effective[slot]["profile_version"] == saved.json()["version"]
+    assert len(requests) == request_count  # Preview never probes a Provider.
+
+
+def test_text_video_preflight_rejects_an_i2v_only_binding(api: tuple[TestClient, Any]) -> None:
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _create_project(client, workspace_id)
+
+    async def _seed_i2v() -> None:
+        from app.access.models import Project, User
+        from model_infra_fixture import seed_model_infra
+        from sqlalchemy import select
+
+        async with factory() as session:
+            user = (await session.execute(select(User).limit(1))).scalar_one()
+            project = await session.get(Project, UUID(project_id))
+            assert project is not None
+            await seed_model_infra(session, project=project, user=user)
+            await session.commit()
+
+    _run_create(_seed_i2v())
+    response = client.get(
+        f"/api/v1/projects/{project_id}/execution-models/preflight?video_mode=text_to_video"
+    )
+    assert response.status_code == 200
+    video = next(stage for stage in response.json()["stages"] if stage["stage"] == "video")
+    assert video["ready"] is False
+    assert video["reason"] == "MODEL_CAPABILITY_UNSUPPORTED"
+
+
+def test_batch_preview_and_todo_fail_closed_before_dispatch(
+    api: tuple[TestClient, Any],
+) -> None:
+    client, factory = api
+    workspace_id = _register(client)
+    project_id = _create_project(client, workspace_id)
+
+    async def _seed_shot() -> tuple[str, str, str]:
+        from app.assets.models import Episode, Scene, Shot
+        from app.execution.models import Artifact
+
+        async with factory() as session:
+            episode = Episode(
+                project_id=UUID(project_id), episode_number=1, title="E1", synopsis=""
+            )
+            session.add(episode)
+            await session.flush()
+            scene = Scene(
+                episode_id=episode.id,
+                scene_number=1,
+                location_name="Studio",
+                time_of_day="day",
+                synopsis="",
+            )
+            session.add(scene)
+            await session.flush()
+            shot = Shot(
+                project_id=UUID(project_id),
+                scene_id=scene.id,
+                shot_number=1,
+                visual_description="Lead enters the room",
+                image_prompt="cinematic entrance",
+            )
+            keyframe = Artifact(
+                project_id=UUID(project_id),
+                artifact_type="image",
+                storage_state="available",
+                object_key=f"test/{project_id}/formal-keyframe.png",
+                content_hash="b" * 64,
+                mime_type="image/png",
+            )
+            session.add_all([shot, keyframe])
+            await session.flush()
+            finished = Shot(
+                project_id=UUID(project_id),
+                scene_id=scene.id,
+                shot_number=2,
+                visual_description="Lead sits down",
+                image_prompt="quiet close-up",
+                formal_keyframe_artifact_id=keyframe.id,
+            )
+            session.add(finished)
+            await session.commit()
+            return str(scene.id), str(shot.id), str(finished.id)
+
+    scene_id, shot_id, finished_id = _run_create(_seed_shot())
+    preview = client.get(
+        f"/api/v1/projects/{project_id}/batch-production/preview",
+        params={"stage": "image_keyframe", "scene_id": scene_id},
+    )
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert (body["ready_count"], body["skipped_count"], body["blocked_count"]) == (0, 1, 1)
+    by_shot = {item["shot_id"]: item for item in body["items"]}
+    assert by_shot[shot_id]["disposition"] == "blocked"
+    assert by_shot[shot_id]["reason"] == "MODEL_BINDING_MISSING"
+    # "补齐" never regenerates a shot that already has the stage's formal output.
+    assert by_shot[finished_id]["disposition"] == "skipped"
+    assert by_shot[finished_id]["reason"] == "ALREADY_FORMAL"
+    assert "max_cost_per_call" not in body and "currency" not in body
+
+    video_preview = client.get(
+        f"/api/v1/projects/{project_id}/batch-production/preview",
+        params={"stage": "video", "scene_id": scene_id},
+    )
+    assert video_preview.status_code == 200, video_preview.text
+    video_items = {item["shot_id"]: item for item in video_preview.json()["items"]}
+    assert video_items[shot_id]["disposition"] == "skipped"
+    assert video_items[shot_id]["reason"] == "FORMAL_KEYFRAME_REQUIRED"
+    assert video_items[finished_id]["disposition"] == "blocked"
+
+    todos = client.get(f"/api/v1/projects/{project_id}/production-todos")
+    assert todos.status_code == 200, todos.text
+    assert todos.json()["counts"]["not_generated"] == 2
+    assert todos.json()["items"][0] == {
+        "shot_id": shot_id,
+        "scene_id": scene_id,
+        "shot_number": 1,
+        "category": "not_generated",
+        "stage": "image_keyframe",
+        "detail": "NO_CANDIDATE",
+        "artifact_id": None,
+    }
+
+
+def test_batch_dispatch_contract_bounds_operation_count_without_money() -> None:
+    from app.api.v1.batch_production import BatchProductionDispatchBody
+    from pydantic import ValidationError
+
+    common = {
+        "stage": "image_keyframe",
+        "preview_fingerprint": "a" * 64,
+        "batch_key": "batch:keyframes",
+        "owner_authorized": True,
+    }
+    with pytest.raises(ValidationError):
+        BatchProductionDispatchBody(**common, max_provider_calls=0)
+    with pytest.raises(ValidationError):
+        BatchProductionDispatchBody(**{**common, "owner_authorized": False}, max_provider_calls=2)
+    accepted = BatchProductionDispatchBody(**common, max_provider_calls=2)
+    assert accepted.max_provider_calls == 2
+    assert "max_cost_per_call" not in BatchProductionDispatchBody.model_fields
+    assert "currency" not in BatchProductionDispatchBody.model_fields
 
 
 def test_project_profile_snapshot_on_first_write(api: tuple[TestClient, Any]) -> None:
@@ -211,7 +486,7 @@ def test_project_profile_snapshot_on_first_write(api: tuple[TestClient, Any]) ->
         f"/api/v1/workspaces/{workspace_id}/model-profiles",
         json={
             "name": "默认方案",
-            "bindings": {"planning.script": {"model_id": "litellm/text-llm"}},
+            "bindings": {"planning.script": {"model_id": "litellm/script-quality"}},
             "is_default": True,
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -225,7 +500,7 @@ def test_project_profile_snapshot_on_first_write(api: tuple[TestClient, Any]) ->
     assert put.status_code == 200, put.text
     profile = put.json()
     assert profile["project_id"] == project_id
-    assert profile["bindings"]["planning.script"]["model_id"] == "litellm/text-llm"
+    assert profile["bindings"]["planning.script"]["model_id"] == "litellm/script-quality"
 
     got = client.get(f"/api/v1/projects/{project_id}/model-profile")
     assert got.status_code == 200, got.text

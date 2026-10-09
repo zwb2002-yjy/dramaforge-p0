@@ -35,7 +35,9 @@ services:
       SESSION_SECRET: quality-session-secret-32-characters
       BYOK_FERNET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       AGNES_ENABLED: "false"
-      TEXT_LLM_ENABLED: "false"
+      # This process must not submit text provider requests.
+      LITELLM_GATEWAY_URL: ""
+      LITELLM_API_KEY: ""
       TEST_PG_ENABLED: "1"
       TEST_PG_HOST: postgres-quality
       TEST_PG_PORT: "5432"

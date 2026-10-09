@@ -1,3 +1,4 @@
+import { Button, Field, Input, Select, PageHeader } from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Link } from "@tanstack/react-router";
@@ -6,19 +7,25 @@ import { useEffect, useRef, useState } from "react";
 import {
   artifactContentUrl,
   createReviewAnnotation,
+  decideReviewAnnotation,
   fetchProjectShots,
   fetchReviewAnnotations,
   type ReviewAnnotationRead,
 } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { fetchShotWorkbench } from "../shots/api";
+import { isConfirmableShotCandidate, parseShotCandidates } from "../shots/shotCandidates";
+import { readRepair } from "./repairApi";
+import { parseReviewTarget, type ReviewTargetSearch } from "./reviewTarget";
 import { HumanReviewDecisionPanel } from "./HumanReviewDecisionPanel";
 import { MediaReviewCanvas, type NormalizedRegion } from "./MediaReviewCanvas";
+import { ReviewEvidenceStrip } from "./ReviewEvidenceStrip";
 import { RepairPlanPanel } from "./RepairPlanPanel";
 import { VideoReviewTimeline, type VideoAnnotation } from "./VideoReviewTimeline";
 
 type ReviewWorkspaceProps = {
   projectId: string;
+  targetSearch?: ReviewTargetSearch;
 };
 
 function asNumber(value: string | null): number | null {
@@ -36,6 +43,12 @@ function imageRegion(annotation: ReviewAnnotationRead): NormalizedRegion | null 
   return { x, y, width, height };
 }
 
+const ANNOTATION_SEVERITY_LABEL: Record<string, string> = {
+  note: "提示",
+  warning: "警告",
+  blocker: "阻断",
+};
+
 function videoAnnotation(annotation: ReviewAnnotationRead): VideoAnnotation | null {
   const start = asNumber(annotation.time_start);
   if (start === null) return null;
@@ -48,33 +61,48 @@ function videoAnnotation(annotation: ReviewAnnotationRead): VideoAnnotation | nu
 }
 
 /** Canonical review surface over the existing Shot/ReviewAnnotation facts. */
-export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
+export function ReviewWorkspace(props: ReviewWorkspaceProps) {
+  return (
+    <ReviewWorkspaceSession
+      key={JSON.stringify([props.projectId, props.targetSearch])}
+      {...props}
+    />
+  );
+}
+
+function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspaceProps) {
+  const explicitTarget = Object.keys(targetSearch).length > 0;
+  const target = parseReviewTarget(targetSearch);
   const queryClient = useQueryClient();
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [repairOpen, setRepairOpen] = useState(false);
+  const [evidenceTime, setEvidenceTime] = useState<number | null>(null);
   const shots = useQuery({
     queryKey: queryKeys.shot.review(projectId),
     queryFn: () => fetchProjectShots(projectId),
-    enabled: projectId !== "demo",
+    enabled: Boolean(projectId),
   });
-  const shotId = selectedShotId ?? shots.data?.[0]?.id ?? null;
+  const shotId = explicitTarget
+    ? (target?.shotId ?? null)
+    : (selectedShotId ?? shots.data?.[0]?.id ?? null);
   const currentShot = useRef(shotId);
   currentShot.current = shotId;
   useEffect(() => {
     setNote("");
     setRepairOpen(false);
+    setEvidenceTime(null);
   }, [shotId]);
 
   const workbench = useQuery({
     queryKey: queryKeys.shot.reviewWorkbench(projectId, shotId),
     queryFn: () => fetchShotWorkbench(projectId, shotId!),
-    enabled: projectId !== "demo" && Boolean(shotId),
+    enabled: Boolean(projectId) && Boolean(shotId),
   });
   const annotations = useQuery({
     queryKey: queryKeys.review.annotations(projectId, shotId),
     queryFn: () => fetchReviewAnnotations(projectId, shotId!),
-    enabled: projectId !== "demo" && Boolean(shotId),
+    enabled: Boolean(projectId) && Boolean(shotId),
   });
   const addAnnotation = useMutation({
     mutationFn: (input: Parameters<typeof createReviewAnnotation>[2] & { shotId: string }) => {
@@ -90,46 +118,114 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
     },
   });
 
+  const decideAnnotation = useMutation({
+    mutationFn: ({ annotationId, status }: { annotationId: string; status: "open" | "resolved" }) =>
+      decideReviewAnnotation(projectId, shotId!, annotationId, status),
+    retry: false,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.review.annotations(projectId, shotId),
+      });
+    },
+  });
+
   const shot = workbench.data?.shot ?? null;
-  const rows = annotations.data ?? [];
+  const repair = useQuery({
+    queryKey: queryKeys.review.targetRepair(projectId, target?.shotId, target?.repairRequestId),
+    queryFn: () => readRepair(projectId, target!.shotId, target!.repairRequestId!),
+    enabled: Boolean(target?.repairRequestId),
+  });
+  const candidateStage = target?.stage === "formal_keyframe" ? "image_keyframe" : "video";
+  const matchesCandidate =
+    target &&
+    parseShotCandidates(workbench.data?.candidates).some(
+      (item) =>
+        item.artifactId === target.artifactId &&
+        item.stage === candidateStage &&
+        isConfirmableShotCandidate(item),
+    );
+  const matchesFormal =
+    target &&
+    (target.stage === "formal_keyframe"
+      ? shot?.formal_keyframe_artifact_id
+      : shot?.formal_video_artifact_id) === target.artifactId;
+  const repairStep = repair.data?.steps.find((step) => step.id === target?.repairStepId);
+  const matchesRepair =
+    !target?.repairRequestId ||
+    (repair.data?.shot_id === target.shotId &&
+      repairStep?.result_artifact_id === target.artifactId &&
+      repairStep.stage ===
+        (candidateStage === "image_keyframe" ? "keyframe_regenerate" : "video_rerun"));
+  const targetValid = Boolean(
+    target && shot?.id === target.shotId && (matchesCandidate || matchesFormal) && matchesRepair,
+  );
+  const keyframeId = explicitTarget
+    ? targetValid && target?.stage === "formal_keyframe"
+      ? target.artifactId
+      : null
+    : shot?.formal_keyframe_artifact_id;
+  const videoId = explicitTarget
+    ? targetValid && target?.stage === "formal_video"
+      ? target.artifactId
+      : null
+    : shot?.formal_video_artifact_id;
+  const rows = (annotations.data ?? []).filter(
+    (row) => !explicitTarget || row.artifact_id === target?.artifactId,
+  );
   const regions = rows
     .filter(
       (annotation) =>
-        annotation.target_kind === "image_region" &&
-        annotation.artifact_id === shot?.formal_keyframe_artifact_id,
+        annotation.target_kind === "image_region" && annotation.artifact_id === keyframeId,
     )
     .map(imageRegion)
     .filter((region): region is NormalizedRegion => region !== null);
   const videoRows = rows
     .filter(
-      (annotation) =>
-        annotation.target_kind === "video_time" &&
-        annotation.artifact_id === shot?.formal_video_artifact_id,
+      (annotation) => annotation.target_kind === "video_time" && annotation.artifact_id === videoId,
     )
     .map(videoAnnotation)
     .filter((annotation): annotation is VideoAnnotation => annotation !== null);
   const durationSeconds = Number(shot?.duration_seconds ?? 0);
 
+  if (
+    explicitTarget &&
+    (!target ||
+      workbench.isError ||
+      repair.isError ||
+      (workbench.isSuccess && (!target.repairRequestId || repair.isSuccess) && !targetValid))
+  ) {
+    return (
+      <div role="alert">
+        无法审查指定结果：目标不存在、不属于当前镜头或与修复步骤不匹配。不会改为显示正式版本。
+      </div>
+    );
+  }
+  if (explicitTarget && !targetValid) return <p role="status">正在核对指定审查结果…</p>;
+
   return (
     <div className="qc-project-page" data-testid="review-workspace">
-      <nav className="qc-local-tabs" aria-label="制作视图">
-        <Link to="/projects/$projectId/production" params={{ projectId }}>
-          生产概览
-        </Link>
-        <Link to="/projects/$projectId/review" params={{ projectId }} aria-current="page">
-          待审内容
-        </Link>
-      </nav>
-      <header className="qc-page-heading">
-        <h1>镜头审片与批注</h1>
-        <span>在关键帧或时间线上标注并填写说明；批注不会改动正式产物。</span>
-      </header>
+      <PageHeader
+        title="审片确认"
+        actions={
+          shot && (
+            <Link
+              className="df-btn"
+              to="/projects/$projectId/scenes/$sceneId"
+              params={{ projectId, sceneId: shot.scene_id }}
+              search={{ shotId: shot.id, tool: undefined }}
+            >
+              返回此镜头选择正式版本
+            </Link>
+          )
+        }
+      />
 
       {shots.isError && <div className="flash err">无法读取镜头：{String(shots.error)}</div>}
-      <label>
+      <Field>
         当前镜头
-        <select
+        <Select
           aria-label="当前镜头"
+          disabled={explicitTarget}
           value={shotId ?? ""}
           onChange={(event) => setSelectedShotId(event.target.value || null)}
         >
@@ -138,122 +234,202 @@ export function ReviewWorkspace({ projectId }: ReviewWorkspaceProps) {
               #{item.shot_number} {item.visual_description || "未命名镜头"}
             </option>
           ))}
-        </select>
-      </label>
-      <label>
-        批注说明
-        <input
-          aria-label="批注说明"
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-          placeholder="说明需要检查的内容"
-        />
-      </label>
-
-      {shot?.formal_keyframe_artifact_id ? (
-        <section>
-          <h2>关键帧</h2>
-          <MediaReviewCanvas
-            imageUrl={artifactContentUrl(projectId, shot.formal_keyframe_artifact_id)}
-            regions={regions}
-            mode="region"
-            onAddRegion={(region) => {
-              if (!shotId || !note.trim() || addAnnotation.isPending) return;
-              addAnnotation.mutate({
-                shotId,
-                note: note.trim(),
-                artifact_id: shot.formal_keyframe_artifact_id,
-                target_kind: "image_region",
-                x: String(region.x),
-                y: String(region.y),
-                width: String(region.width),
-                height: String(region.height),
-              });
-            }}
-          />
-        </section>
-      ) : (
-        <p className="muted">尚未选择正式关键帧，当前没有可供图片批注的正式产物。</p>
-      )}
-
-      <section>
-        <h2>人工判断</h2>
-        <p className="muted">
-          自动检查的结论只是证据；“人工通过”和“设为正式”是两个独立动作，前者不会自动推进正式版本。
+        </Select>
+      </Field>
+      {shots.isPending || (shotId && workbench.isPending) ? (
+        <p role="status" data-testid="review-media-loading">
+          正在读取当前镜头的素材与审查状态…
         </p>
-        {shot?.formal_keyframe_artifact_id ? (
-          <HumanReviewDecisionPanel
-            projectId={projectId}
-            shotId={shot.id}
-            artifactId={shot.formal_keyframe_artifact_id}
-            reviewKind="identity"
-            stage="formal_keyframe"
-            shotVersion={shot.version}
-            title="关键帧身份审查"
-          />
-        ) : (
-          <p className="muted" data-testid="review-keyframe-missing">
-            尚未选择正式关键帧，暂时没有可判断的素材。
-          </p>
-        )}
-        {shot?.formal_video_artifact_id && (
-          <HumanReviewDecisionPanel
-            projectId={projectId}
-            shotId={shot.id}
-            artifactId={shot.formal_video_artifact_id}
-            reviewKind="video_drift"
-            stage="formal_video"
-            shotVersion={shot.version}
-            title="视频漂移审查"
-          />
-        )}
-      </section>
+      ) : shots.isError || workbench.isError ? (
+        <div role="alert">
+          当前镜头素材读取失败，不代表素材缺失。
+          <Button onClick={() => void (shots.isError ? shots.refetch() : workbench.refetch())}>
+            重新读取素材
+          </Button>
+        </div>
+      ) : !shot ? (
+        <p>当前没有可审查的镜头。</p>
+      ) : (
+        <>
+          <Field>
+            批注说明
+            <Input
+              aria-label="批注说明"
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              placeholder="说明需要检查的内容"
+            />
+          </Field>
 
-      <section>
-        <h2>修复</h2>
-        <button
-          type="button"
-          data-testid="review-open-repair"
-          onClick={() => setRepairOpen((open) => !open)}
-          disabled={!shotId}
-        >
-          {repairOpen ? "收起修复计划" : "创建修复计划"}
-        </button>
-        {repairOpen && shotId && (
-          <RepairPlanPanel
-            projectId={projectId}
-            shotId={shotId}
-            onClose={() => setRepairOpen(false)}
-          />
-        )}
-      </section>
+          {shot && keyframeId ? (
+            <section className="review-media">
+              <h2>关键帧</h2>
+              <MediaReviewCanvas
+                imageUrl={artifactContentUrl(projectId, keyframeId)}
+                regions={regions}
+                mode="region"
+                onAddRegion={(region) => {
+                  if (!shotId || !note.trim() || addAnnotation.isPending) return;
+                  addAnnotation.mutate({
+                    shotId,
+                    note: note.trim(),
+                    artifact_id: keyframeId,
+                    target_kind: "image_region",
+                    x: String(region.x),
+                    y: String(region.y),
+                    width: String(region.width),
+                    height: String(region.height),
+                  });
+                }}
+              />
+            </section>
+          ) : !explicitTarget ? (
+            <p className="muted">尚未选择正式关键帧，当前没有可供图片批注的正式产物。</p>
+          ) : null}
 
-      <section>
-        <h2>视频时间线</h2>
-        {shot?.formal_video_artifact_id ? (
-          <VideoReviewTimeline
-            key={`${shot.id}:${shot.formal_video_artifact_id}`}
-            videoUrl={artifactContentUrl(projectId, shot.formal_video_artifact_id)}
-            durationSeconds={durationSeconds}
-            annotations={videoRows}
-            note={note}
-            pending={addAnnotation.isPending}
-            onAddAnnotation={async (startSeconds, endSeconds) => {
-              if (!shotId || !note.trim() || addAnnotation.isPending) return;
-              await addAnnotation.mutateAsync({
-                shotId,
-                artifact_id: shot.formal_video_artifact_id,
-                target_kind: "video_time",
-                note: note.trim(),
-                time_start: String(startSeconds),
-                time_end: endSeconds === null ? null : String(endSeconds),
-              });
-            }}
-          />
-        ) : (
-          <p className="muted">尚未选择正式视频，当前没有可供时间批注的正式产物。</p>
-        )}
-      </section>
+          {(!explicitTarget || videoId) && (
+            <section className="review-media">
+              <h2>视频时间线</h2>
+              {shot && videoId ? (
+                <>
+                  <ReviewEvidenceStrip
+                    projectId={projectId}
+                    shotId={shot.id}
+                    artifactId={videoId}
+                    reviewKind="video_drift"
+                    stage="formal_video"
+                    onSelectTime={setEvidenceTime}
+                  />
+                  <VideoReviewTimeline
+                    key={`${shot.id}:${videoId}`}
+                    videoUrl={artifactContentUrl(projectId, videoId)}
+                    seekToSeconds={evidenceTime}
+                    mediaLabel={explicitTarget ? "指定视频" : "正式视频"}
+                    durationSeconds={durationSeconds}
+                    annotations={videoRows}
+                    note={note}
+                    pending={addAnnotation.isPending}
+                    onAddAnnotation={async (startSeconds, endSeconds) => {
+                      if (!shotId || !note.trim() || addAnnotation.isPending) return;
+                      await addAnnotation.mutateAsync({
+                        shotId,
+                        artifact_id: videoId,
+                        target_kind: "video_time",
+                        note: note.trim(),
+                        time_start: String(startSeconds),
+                        time_end: endSeconds === null ? null : String(endSeconds),
+                      });
+                    }}
+                  />
+                </>
+              ) : (
+                <p className="muted">尚未选择正式视频，当前没有可供时间批注的正式产物。</p>
+              )}
+            </section>
+          )}
+          <section className="review-decisions">
+            <h2>人工判断</h2>
+            <p className="muted">
+              可直接“通过并设为正式”继续流水审片；单独判断保留为高级模式。自动检查结果只作初筛。
+            </p>
+            {shot && keyframeId ? (
+              <HumanReviewDecisionPanel
+                projectId={projectId}
+                shotId={shot.id}
+                artifactId={keyframeId}
+                reviewKind="identity"
+                stage="formal_keyframe"
+                shotVersion={shot.version}
+                title="关键帧身份审查"
+              />
+            ) : !explicitTarget ? (
+              <p className="muted" data-testid="review-keyframe-missing">
+                尚未选择正式关键帧，暂时没有可判断的素材。
+              </p>
+            ) : null}
+            {shot && videoId && (
+              <HumanReviewDecisionPanel
+                projectId={projectId}
+                shotId={shot.id}
+                artifactId={videoId}
+                reviewKind="video_drift"
+                stage="formal_video"
+                shotVersion={shot.version}
+                title="视频漂移审查"
+              />
+            )}
+          </section>
+
+          <section className="review-repair">
+            <h2>修复</h2>
+            <Button
+              type="button"
+              data-testid="review-open-repair"
+              onClick={() => setRepairOpen((open) => !open)}
+              disabled={!shotId}
+            >
+              {repairOpen ? "收起修复计划" : "创建修复计划"}
+            </Button>
+            {repairOpen && shotId && (
+              <RepairPlanPanel
+                projectId={projectId}
+                shotId={shotId}
+                onClose={() => setRepairOpen(false)}
+              />
+            )}
+          </section>
+
+          <section data-testid="review-annotation-list">
+            <h2>批注清单</h2>
+            <p className="muted">解决批注不修改正式版本，也不放行生产。</p>
+            {annotations.isLoading ? (
+              <p className="muted" role="status">
+                正在读取批注…
+              </p>
+            ) : rows.length === 0 ? (
+              <p className="muted" data-testid="review-annotation-empty">
+                当前镜头还没有批注。
+              </p>
+            ) : (
+              <ul className="dense">
+                {rows.map((row) => {
+                  const resolved = row.status === "resolved";
+                  return (
+                    <li key={row.id} data-testid="review-annotation-row">
+                      <div>
+                        <strong>{row.note}</strong>
+                        <small>
+                          {ANNOTATION_SEVERITY_LABEL[row.severity] ?? row.severity} ·{" "}
+                          {resolved ? "已解决" : "待处理"}
+                          {row.target_kind === "video_time" && row.time_start !== null
+                            ? ` · ${row.time_start}s${row.time_end ? `–${row.time_end}s` : ""}`
+                            : ""}
+                        </small>
+                      </div>
+                      <Button
+                        type="button"
+                        data-testid="review-annotation-decision"
+                        disabled={decideAnnotation.isPending}
+                        onClick={() =>
+                          decideAnnotation.mutate({
+                            annotationId: row.id,
+                            status: resolved ? "open" : "resolved",
+                          })
+                        }
+                      >
+                        {resolved ? "重新打开" : "标记为已解决"}
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {decideAnnotation.isError && (
+              <div className="flash err">批注状态更新失败：{String(decideAnnotation.error)}</div>
+            )}
+          </section>
+        </>
+      )}
       {addAnnotation.isError && addAnnotation.variables?.shotId === shotId && (
         <div className="flash err">批注保存失败：{String(addAnnotation.error)}</div>
       )}

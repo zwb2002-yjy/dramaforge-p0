@@ -22,28 +22,12 @@ from app.providers.contracts.common import (
     ProviderCostResult,
     ProviderCreateResult,
     ProviderPollResult,
-    ResolvedArtifact,
 )
 from app.providers.manifest import ModelManifest
 from app.providers.translation import TranslationResult
 
 if TYPE_CHECKING:
     from app.providers.runtime import ResolvedReference
-
-
-class OrderedReferenceAdapter(Protocol):
-    """Optional V2 translation surface for ordered reference transport.
-
-    The original ``ModelAdapter.translate`` mapping remains available for
-    compatibility; Professional/MS3 callers should prefer this list-based path.
-    """
-
-    async def translate_v2(
-        self,
-        capability: Capability,
-        request: Any,
-        resolved_references: list[ResolvedReference],
-    ) -> TranslationResult: ...
 
 
 class ModelAdapter(Protocol):
@@ -61,7 +45,7 @@ class ModelAdapter(Protocol):
         self,
         capability: Capability,
         request: Any,
-        resolved_artifacts: dict[str, ResolvedArtifact],
+        resolved_references: list[ResolvedReference],
     ) -> TranslationResult: ...
 
     async def create(

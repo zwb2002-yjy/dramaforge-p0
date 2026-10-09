@@ -3,13 +3,10 @@ import { useEffect, useState } from "react";
 
 import {
   decideDirectorRuntimeTurn,
-  decideDirectorTurn,
   getDirectorTurn,
   listDirectorTurns,
   recommendShotDesign,
-  refreshDirectorRuntimeTurn,
-  resumeDirectorTurn,
-  stopDirectorTurn,
+  refreshDirectorTurn,
   stopDirectorRuntimeTurn,
   suggestShotDesign,
 } from "./api";
@@ -18,6 +15,7 @@ import type {
   DirectorInvocationEvidence,
   DirectorRecommendation,
   DirectorTurnRead,
+  ModelSlot,
   ShotDirectorSuggestion,
 } from "./suggestion-types";
 import { queryKeys } from "../../lib/queryKeys";
@@ -34,7 +32,15 @@ type ShotDirectorSuggestionPanelProps = {
 
 const EMPTY_TURNS: DirectorTurnRead[] = [];
 const ACTIVE_TURN_STATUSES = new Set(["queued", "thinking", "awaiting_user", "awaiting_execution"]);
-const RECOMMENDATION_CATEGORIES = new Set([
+type RecommendationCategory = DirectorRecommendation["category"];
+type RecommendationOperation = NonNullable<DirectorRecommendation["typed_operations"]>[number];
+/** Panel state always carries both arrays; the wire contract keeps them optional. */
+type PanelRecommendation = DirectorRecommendation & {
+  affected_facts: string[];
+  typed_operations: RecommendationOperation[];
+};
+
+const RECOMMENDATION_CATEGORIES = new Set<RecommendationCategory>([
   "PERFORMANCE",
   "BLOCKING",
   "SHOT_SIZE",
@@ -42,7 +48,7 @@ const RECOMMENDATION_CATEGORIES = new Set([
   "CAMERA_MOTION",
   "PACING",
 ]);
-const RECOMMENDATION_FIELDS = new Set([
+const RECOMMENDATION_FIELDS = new Set<RecommendationOperation["field"]>([
   "framing",
   "camera",
   "action",
@@ -53,6 +59,36 @@ const RECOMMENDATION_FIELDS = new Set([
   "video_reference_risk",
   "performance",
 ]);
+const MODEL_SLOTS = new Set<ModelSlot>([
+  "planning.brief",
+  "planning.script",
+  "planning.storyboard",
+  "visual.character",
+  "visual.storyboard",
+  "visual.keyframe",
+  "visual.image_edit",
+  "video.shot",
+]);
+
+function isRecommendationCategory(value: string): value is RecommendationCategory {
+  return (RECOMMENDATION_CATEGORIES as ReadonlySet<string>).has(value);
+}
+
+function isRecommendationField(value: string): value is RecommendationOperation["field"] {
+  return (RECOMMENDATION_FIELDS as ReadonlySet<string>).has(value);
+}
+
+function isModelSlot(value: string): value is ModelSlot {
+  return (MODEL_SLOTS as ReadonlySet<string>).has(value);
+}
+
+function withRecommendationDefaults(recommendation: DirectorRecommendation): PanelRecommendation {
+  return {
+    ...recommendation,
+    affected_facts: recommendation.affected_facts ?? [],
+    typed_operations: recommendation.typed_operations ?? [],
+  };
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -80,6 +116,7 @@ function evidenceFromTurn(turn: DirectorTurnRead): DirectorInvocationEvidence | 
   if (
     !turn.output_hash ||
     typeof slot !== "string" ||
+    !isModelSlot(slot) ||
     typeof modelId !== "string" ||
     typeof bindingRef !== "string"
   ) {
@@ -125,13 +162,13 @@ function suggestionFromTurn(turn: DirectorTurnRead): ShotDirectorSuggestion | nu
   };
 }
 
-function recommendationFromTurn(turn: DirectorTurnRead): DirectorRecommendation | null {
+function recommendationFromTurn(turn: DirectorTurnRead): PanelRecommendation | null {
   const output = turn.output_snapshot;
   if (
     typeof output.base_shot_version !== "number" ||
     output.scope !== "shot" ||
     typeof output.category !== "string" ||
-    !RECOMMENDATION_CATEGORIES.has(output.category) ||
+    !isRecommendationCategory(output.category) ||
     typeof output.current_state !== "string" ||
     typeof output.suggested_change !== "string" ||
     typeof output.reason !== "string" ||
@@ -154,18 +191,16 @@ function recommendationFromTurn(turn: DirectorTurnRead): DirectorRecommendation 
     affected_facts: output.affected_facts.filter(
       (value): value is string => typeof value === "string",
     ),
-    typed_operations: output.typed_operations.filter(
-      (value): value is DirectorRecommendation["typed_operations"][number] => {
-        const operation = objectValue(value);
-        return (
-          operation?.op === "update_director_state" &&
-          typeof operation.field === "string" &&
-          RECOMMENDATION_FIELDS.has(operation.field) &&
-          typeof operation.value === "object" &&
-          operation.value !== null
-        );
-      },
-    ),
+    typed_operations: output.typed_operations.filter((value): value is RecommendationOperation => {
+      const operation = objectValue(value);
+      return (
+        operation?.op === "update_director_state" &&
+        typeof operation.field === "string" &&
+        isRecommendationField(operation.field) &&
+        typeof operation.value === "object" &&
+        operation.value !== null
+      );
+    }),
     director_evidence: evidenceFromTurn(turn),
   };
 }
@@ -194,7 +229,7 @@ export function ShotDirectorSuggestionPanel({
   const [proposal, setProposal] = useState<ShotDirectorSuggestion | null>(null);
   const [applied, setApplied] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [recommendation, setRecommendation] = useState<DirectorRecommendation | null>(null);
+  const [recommendation, setRecommendation] = useState<PanelRecommendation | null>(null);
   const [selectedOps, setSelectedOps] = useState<Record<number, boolean>>({});
   const [dismissedTurnIds, setDismissedTurnIds] = useState<Set<string>>(() => new Set());
 
@@ -310,8 +345,11 @@ export function ShotDirectorSuggestionPanel({
       });
     },
     onSuccess: (result) => {
-      setRecommendation(result);
-      setSelectedOps(Object.fromEntries(result.typed_operations.map((_, index) => [index, true])));
+      const normalized = withRecommendationDefaults(result);
+      setRecommendation(normalized);
+      setSelectedOps(
+        Object.fromEntries(normalized.typed_operations.map((_, index) => [index, true])),
+      );
       setMessage(null);
       void refreshTurns();
     },
@@ -330,16 +368,13 @@ export function ShotDirectorSuggestionPanel({
     if (["stale", "cancelled", "failed"].includes(current.status)) {
       throw new Error(`该导演轮次已${current.status}，不能再应用。`);
     }
-    return current.runtime_execution_id
-      ? decideDirectorRuntimeTurn(projectId, current, {
-          decision,
-          accepted_operation_indices: acceptedOperationIndices,
-        })
-      : decideDirectorTurn(projectId, turnId, {
-          expected_revision: current.revision,
-          decision,
-          accepted_operation_indices: acceptedOperationIndices,
-        });
+    if (!current.runtime_execution_id) {
+      throw new Error("导演轮次缺少 LangGraph 运行时身份，不能继续旧协调路径。");
+    }
+    return decideDirectorRuntimeTurn(projectId, current, {
+      decision,
+      accepted_operation_indices: acceptedOperationIndices,
+    });
   }
 
   const proposalDecision = useMutation({
@@ -412,25 +447,15 @@ export function ShotDirectorSuggestionPanel({
       action,
     }: {
       turn: DirectorTurnRead;
-      action: "stop" | "resume";
+      action: "stop" | "refresh";
     }): Promise<void> => {
       if (action === "stop") {
-        if (turn.runtime_execution_id) {
-          await stopDirectorRuntimeTurn(projectId, turn);
-        } else {
-          await stopDirectorTurn(projectId, turn.id, turn.revision);
+        if (!turn.runtime_execution_id) {
+          throw new Error("导演轮次缺少 LangGraph 运行时身份，不能停止旧协调路径。");
         }
+        await stopDirectorRuntimeTurn(projectId, turn);
       } else {
-        if (turn.runtime_execution_id) {
-          await refreshDirectorRuntimeTurn(projectId, turn);
-        } else {
-          await resumeDirectorTurn(
-            projectId,
-            turn.id,
-            turn.revision,
-            `ui-resume:${turn.id}:${globalThis.crypto.randomUUID()}`,
-          );
-        }
+        await refreshDirectorTurn(projectId, turn);
       }
     },
     onSuccess: () => void refreshTurns(),
@@ -459,7 +484,7 @@ export function ShotDirectorSuggestionPanel({
     >
       <header>
         <div>
-          <span className="director-stage-kicker">Director suggestion</span>
+          <span className="director-stage-kicker">导演建议</span>
           <strong>导演分析与建议</strong>
         </div>
         <span className="qc-shot-production-version">v{shot.version}</span>
@@ -475,7 +500,7 @@ export function ShotDirectorSuggestionPanel({
           request.submittedAt >= proactive.submittedAt ? request.isError : proactive.isError
         }
         onStop={(turn) => turnControl.mutate({ turn, action: "stop" })}
-        onResume={(turn) => turnControl.mutate({ turn, action: "resume" })}
+        onRefresh={(turn) => turnControl.mutate({ turn, action: "refresh" })}
       />
 
       <button

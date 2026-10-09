@@ -1,0 +1,39 @@
+{
+  "controls": [
+    "src/routes/index.tsx",
+    "src/routes/settings-page.tsx",
+    "src/routes/production-page.tsx",
+    "src/routes/design-preview-page.tsx",
+    "src/components/provider/ModelProfileSettings.tsx",
+    "src/components/provider/ProviderList.tsx",
+    "src/components/provider/AddProviderDialog.tsx",
+    "src/components/provider/ProviderDetails.tsx",
+    "src/features/project/ProjectActions.tsx",
+    "src/components/provider/ModelPicker.tsx",
+    "src/features/project/CreateProjectForm.tsx",
+    "src/features/production/CreativeCapabilitiesPanel.tsx",
+    "src/features/production/BatchFillActions.tsx",
+    "src/features/script/ScriptWorkspace.tsx",
+    "src/features/assets/AssetCardsPanel.tsx",
+    "src/features/review/ReviewWorkspace.tsx",
+    "src/features/shots/ShotInspector.tsx",
+    "src/features/shots/ShotDesignPanel.tsx",
+    "src/features/shots/ShotProductionActions.tsx"
+  ],
+  "pageHeaders": [
+    "src/routes/index.tsx",
+    "src/routes/settings-page.tsx",
+    "src/routes/production-page.tsx",
+    "src/features/script/ScriptWorkspace.tsx",
+    "src/features/assets/AssetCardsPanel.tsx",
+    "src/features/review/ReviewWorkspace.tsx",
+    "src/features/scenes/SceneStoryboardWall.tsx",
+    "src/features/editing/EditingWorkspace.tsx"
+  ],
+  "layoutStyles": [
+    "src/styles/index.css",
+    "src/components/workstation/navigation-shell.css",
+    "src/components/workstation/project-shell.css",
+    "src/components/workstation/project-shell-visual.css"
+  ]
+}
