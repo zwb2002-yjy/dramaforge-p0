@@ -144,6 +144,19 @@ evidence, never an approval.
 - `PATCH …/edit-sessions/{session_id}/timeline` requires
   `expected_session_version`, locks the row, and returns 409 without mutation
   when the loaded version is stale.
+- `POST …/edit-sessions/{session_id}/preview-plan` accepts the same editable
+  timeline and `expected_session_version`. It only reads project-owned Formal
+  references and returns the export's millisecond trim/duration/subtitle map,
+  selected existing voice identity, clip volume and unsupported effects.
+  It does not Save, prepare a tail, queue a NodeRun or create a Provider operation.
+  Stale baselines and invalid media use the existing validation errors.
+  `audio_volume` defaults to 1 when absent; Save, preview and render validate
+  its finite 0–1 range and a boolean `muted`. Source video audio is replaced by
+  selected/default voice or silence, as in Final Film rendering.
+- Authenticated Artifact content supports single HTTP byte ranges (206 and
+  `Content-Range`) for native seek; invalid ranges return 416. Project ownership
+  is checked before delivery. The current ObjectStore still reads whole bytes
+  internally; range delivery does not establish bounded-memory streaming.
 - `GET …/creative-capabilities/catalog` projects Genre, Style, Shot Language,
   Quality Policy, Skills, and staged strategies from the backend registries;
   the same registries validate Freeze requests.
@@ -242,7 +255,7 @@ Editing 继续使用既有 EditSession timeline 和乐观版本。预览和导�
 
 | 对象 | 用户是否需要该能力 | 当前处置与权威替代 |
 |---|---|---|
-| video-frames / 视频采样证据 | 需要，人工审片需比较时间上的变化 | KEEP + DESIGN；接口暂保留，下节是完整消费设计，尚未实现 |
+| video-frames / 视频采样证据 | 需要，人工审片需比较时间上的变化 | 已由相邻镜头对照消费首/末帧；下节仍含待完成的深入审片目标 |
 | 项目 dispatch / NodeRun enqueue HTTP | 需要生成/修复/恢复，不需要控制队列 | 退役这两个 HTTP helper；保留内部 scheduler 与 Worker 调用，使用既有 executions/receipt、repairs、maintenance recovery |
 | worker/tick、provider-reference token、status/metrics | Worker、Provider、运维需要，不是创作页面 | 保留；不为了制造消费者而增加前端按钮 |
 | TEXT_LLM_* 与旧文本凭证写面 | 需要文本模型，不需要旧凭证入口 | 当前文本 HTTP adapter 消费部署配置或空间连接；沿用 ProviderConnection 与模型选择，不恢复旧环境变量/写面；来源隔离缺口见 MODEL_PROVIDER |

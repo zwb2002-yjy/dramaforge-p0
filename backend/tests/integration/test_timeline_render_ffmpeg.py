@@ -105,6 +105,49 @@ def _dialogue_wav(seconds: float, frequency: float, *, sample_rate: int = 22050)
 
 
 @pytest.mark.asyncio
+async def test_clip_voice_volume_is_applied_to_real_export(tmp_path, monkeypatch, record_property):
+    monkeypatch.setattr(
+        renderer,
+        "get_settings",
+        lambda: get_settings().model_copy(update={"app_env": "development"}),
+    )
+    video = (Path(__file__).resolve().parents[3] / "fixtures/playback/red-tone.mp4").read_bytes()
+    clip = TimelineRenderClip(
+        clip_id="trimmed",
+        video_artifact_id="video",
+        video_bytes=video,
+        audio_bytes=_dialogue_wav(1.2, 440),
+        audio_artifact_id="voice",
+        subtitle_text="裁切字幕",
+        source_in_seconds=0.1,
+        source_out_seconds=0.7,
+        duration_seconds=0.3,
+    )
+    volumes = []
+    for volume in (1.0, 0.25):
+        result = await renderer.render_timeline(
+            [replace(clip, audio_volume=volume)], lineage=f"volume:{volume}"
+        )
+        output = tmp_path / f"volume-{volume}.mp4"
+        output.write_bytes(result.data)
+        assert await _decode_whole_file(output) == ""
+        assert abs(float(result.ffprobe["format"]["duration"]) - 0.3) < 0.1
+        assert result.summary["timeline_time_map"][0] == {
+            "clip_id": "trimmed",
+            "start_ms": 0,
+            "end_ms": 300,
+            "source_in_ms": 100,
+            "source_out_ms": 700,
+            "duration_ms": 300,
+            "overlap_ms": 0,
+        }
+        assert b"00:00:00,000 --> 00:00:00,300" in result.subtitle_data
+        volumes.append(await _mean_volume_db(output))
+    assert 10 < volumes[0] - volumes[1] < 14
+    record_property("clip_volume_dbfs", json.dumps(volumes))
+
+
+@pytest.mark.asyncio
 async def test_real_ffmpeg_uses_final_subtitle_clock_for_trim_crossfade_and_music(
     tmp_path, monkeypatch, record_property
 ):

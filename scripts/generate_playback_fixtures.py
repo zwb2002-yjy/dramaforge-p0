@@ -9,10 +9,7 @@ from pathlib import Path
 from PIL import Image
 
 
-def main() -> None:
-    target = Path(__file__).resolve().parents[1] / "fixtures" / "playback"
-    target.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (160, 90), (40, 90, 140)).save(target / "blue-frame.png")
+def make_video(target: Path, color: str, frequency: int) -> None:
     subprocess.run(
         [
             "ffmpeg",
@@ -24,11 +21,11 @@ def main() -> None:
             "-f",
             "lavfi",
             "-i",
-            "color=c=red:s=160x90:r=12",
+            f"color=c={color}:s=160x90:r=12",
             "-f",
             "lavfi",
             "-i",
-            "sine=frequency=440:sample_rate=22050",
+            f"sine=frequency={frequency}:sample_rate=22050",
             "-t",
             "0.8",
             "-c:v",
@@ -43,7 +40,35 @@ def main() -> None:
             "+faststart",
             "-metadata",
             "creation_time=2026-10-09T00:00:00Z",
-            str(target / "red-tone.mp4"),
+            str(target / f"{color}-tone.mp4"),
+        ],
+        check=True,
+    )
+
+
+def main() -> None:
+    target = Path(__file__).resolve().parents[1] / "fixtures" / "playback"
+    target.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (160, 90), (40, 90, 140)).save(target / "blue-frame.png")
+    make_video(target, "red", 440)
+    make_video(target, "blue", 660)
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=22050",
+            "-t",
+            "1.2",
+            "-c:a",
+            "pcm_s16le",
+            str(target / "tone.wav"),
         ],
         check=True,
     )

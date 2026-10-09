@@ -159,12 +159,15 @@ export function useTimelineDraft(
     edit((draft) => ({ ...draft, metadata: { ...draft.metadata, [key]: value } }));
   }
   function moveClip(index: number, offset: -1 | 1) {
+    reorderClip(index, index + offset);
+  }
+  function reorderClip(index: number, target: number) {
     edit((draft) => {
-      const target = index + offset;
       if (index < 0 || index >= draft.clips.length || target < 0 || target >= draft.clips.length)
         return draft;
       const clips = draft.clips.map((clip) => ({ ...clip }));
-      [clips[index], clips[target]] = [clips[target], clips[index]];
+      const [moved] = clips.splice(index, 1);
+      clips.splice(target, 0, moved);
       return {
         ...draft,
         clips: clips.map((clip, order) =>
@@ -222,6 +225,7 @@ export function useTimelineDraft(
     updateClipField,
     updateTimelineMetadata,
     moveClip,
+    reorderClip,
     applySuggestion,
   };
 }

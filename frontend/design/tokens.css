@@ -6,6 +6,9 @@
    ============================================================ */
 
 :root {
+  --df-timeline-min-width: 560px;
+  --df-timeline-label-width: 64px;
+  --df-timeline-pixels-per-second: 160px;
   /* ---- Color: Core Palette ---- */
   --df-obsidian: #111315;
   --df-ink: #1b1e22;

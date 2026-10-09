@@ -30,6 +30,10 @@ type EditingClip = {
   subtitle: string;
   audio_id: string | null;
   transition: Record<string, unknown> | null;
+  source_in_seconds?: number | string;
+  source_out_seconds?: number | string | null;
+  audio_volume?: number;
+  muted?: boolean;
 };
 
 type EditingTimeline = {

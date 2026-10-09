@@ -1,5 +1,14 @@
-import { PageHeader, Disclosure } from "../../components/ui";
-import { EditingSourcePreview } from "./EditingSourcePreview";
+import {
+  PageHeader,
+  Disclosure,
+  Button,
+  Checkbox,
+  Field,
+  Input,
+  Select,
+  Textarea,
+} from "../../components/ui";
+import { EditingPreviewWorkspace } from "./EditingPreviewWorkspace";
 import { AudioArtifactPicker } from "./AudioArtifactPicker";
 import { FinalFilmPlayback } from "./FinalFilmPlayback";
 import "./editing-recovery.css";
@@ -354,11 +363,20 @@ export function EditingWorkspace({
         {persistedSession.data && draft && baseline && (
           <>
             <div className="editing-cut-layout">
-              <EditingSourcePreview
+              <EditingPreviewWorkspace
+                key={`${projectId}:${sessionId}`}
                 projectId={projectId}
-                clips={draft.clips}
+                sessionId={sessionId!}
+                baselineVersion={timeline.baselineVersion!}
+                draft={draft}
+                dirty={dirty}
                 selectedIndex={clipIndex}
                 onSelectClip={selectClip}
+                onReorder={(from, to) => {
+                  timeline.reorderClip(from, to);
+                  setFeedback(null);
+                  setExported(null);
+                }}
               />
               <div className="editing-cut-controls">
                 <Disclosure title="版本与来源">
@@ -420,17 +438,17 @@ export function EditingWorkspace({
                       建议只形成待审核
                       Proposal，不会应用到时间线；应用后的时间线仍由下方手动编辑和显式保存控制。
                     </p>
-                    <button
+                    <Button
                       type="button"
                       data-testid="request-proactive-editing-suggestion"
                       onClick={submitProactiveSuggestion}
                       disabled={suggestionPending || !isSessionVersion(currentSessionVersion)}
                     >
                       {suggestionPending ? "正在分析…" : "主动分析剪辑节奏"}
-                    </button>
-                    <label htmlFor="editing-director-suggestion-instruction">
+                    </Button>
+                    <Field htmlFor="editing-director-suggestion-instruction">
                       导演要求
-                      <textarea
+                      <Textarea
                         id="editing-director-suggestion-instruction"
                         data-testid="editing-director-suggestion-instruction"
                         aria-label="剪辑导演要求"
@@ -439,8 +457,8 @@ export function EditingWorkspace({
                         placeholder="例如：让前两个镜头之间多留一点停顿"
                         disabled={suggestionPending}
                       />
-                    </label>
-                    <button
+                    </Field>
+                    <Button
                       type="button"
                       data-testid="request-editing-director-suggestion"
                       onClick={submitSuggestion}
@@ -451,7 +469,7 @@ export function EditingWorkspace({
                       }
                     >
                       {suggestionPending ? "正在请求建议…" : "请求剪辑建议"}
-                    </button>
+                    </Button>
 
                     {suggestionPending && (
                       <p
@@ -472,14 +490,14 @@ export function EditingWorkspace({
                       </p>
                     )}
 
-                    <button
+                    <Button
                       type="button"
                       data-testid="request-repair-routing"
                       onClick={submitRepairRouting}
                       disabled={repairPending || !isSessionVersion(currentSessionVersion)}
                     >
                       {repairPending ? "正在判定…" : "判断是否需要生产 Repair"}
-                    </button>
+                    </Button>
                     {repairError && (
                       <p
                         className="editing-repair-routing-error"
@@ -580,8 +598,8 @@ export function EditingWorkspace({
                                     data-testid="editing-suggestion-operation"
                                     data-operation={operation.operation}
                                   >
-                                    <label>
-                                      <input
+                                    <Field>
+                                      <Checkbox
                                         type="checkbox"
                                         data-testid={`editing-suggestion-op-select-${index}`}
                                         aria-label={`采用第 ${index + 1} 条剪辑操作`}
@@ -595,7 +613,7 @@ export function EditingWorkspace({
                                         }
                                       />
                                       采用
-                                    </label>
+                                    </Field>
                                     <strong>{operation.operation}</strong>
                                     {operation.operation === "reorder_clips" ? (
                                       <span>顺序：{operation.clip_ids.join(" → ")}</span>
@@ -616,7 +634,7 @@ export function EditingWorkspace({
                             </ol>
                           )}
                           <div className="editing-suggestion-apply-actions">
-                            <button
+                            <Button
                               type="button"
                               data-testid="editing-suggestion-apply-all"
                               onClick={() => applySuggestionToDraft(null)}
@@ -627,8 +645,8 @@ export function EditingWorkspace({
                               }
                             >
                               全部采用到草稿
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
                               data-testid="editing-suggestion-apply-selected"
                               onClick={() =>
@@ -645,15 +663,15 @@ export function EditingWorkspace({
                               }
                             >
                               采用所选到草稿
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
                               data-testid="editing-suggestion-reject"
                               onClick={rejectSuggestion}
                               disabled={suggestionIsStale || rejectionPending}
                             >
                               拒绝建议
-                            </button>
+                            </Button>
                           </div>
                         </section>
 
@@ -699,9 +717,7 @@ export function EditingWorkspace({
                 <section className="editing-session-editor" data-testid="edit-session-editor">
                   <header>
                     <h2>时间线草稿</h2>
-                    <p className="muted">
-                      在上方片段轨选择镜头，下方调整当前片段。保存后才能交付。
-                    </p>
+                    <p className="muted">在轨道选择片段，在检查器调整当前片段。保存后才能交付。</p>
                     {dirty && (
                       <span data-testid="edit-session-dirty" role="status">
                         有未保存修改
@@ -721,7 +737,7 @@ export function EditingWorkspace({
                           data-selected={clipIndex === index ? "true" : "false"}
                         >
                           <div className="editing-clip-summary">
-                            <button
+                            <Button
                               type="button"
                               className="editing-clip-focus"
                               aria-pressed={clipIndex === index}
@@ -732,7 +748,7 @@ export function EditingWorkspace({
                                 {index + 1}.{" "}
                                 {clipLabel(shotNumberById, clipValue(clip, "shot_id"), index)}
                               </strong>
-                            </button>
+                            </Button>
                             <small>
                               {clipValue(clip, "artifact_id") ? "正式素材已绑定" : "未绑定正式素材"}
                             </small>
@@ -750,9 +766,9 @@ export function EditingWorkspace({
                               </small>
                             </details>
                           </div>
-                          <label>
+                          <Field>
                             时长（秒）
-                            <input
+                            <Input
                               type="number"
                               min="0"
                               step="0.001"
@@ -760,10 +776,10 @@ export function EditingWorkspace({
                               value={clipDuration(clip)}
                               onChange={(event) => updateClipDuration(index, event.target.value)}
                             />
-                          </label>
-                          <label>
+                          </Field>
+                          <Field>
                             入点（秒）
-                            <input
+                            <Input
                               type="number"
                               min="0"
                               step="0.001"
@@ -774,10 +790,43 @@ export function EditingWorkspace({
                                 updateClipField(index, "source_in_seconds", event.target.value)
                               }
                             />
-                          </label>
-                          <label>
+                          </Field>
+                          <Field>
+                            出点（秒）
+                            <Input
+                              type="number"
+                              min="0"
+                              step="0.001"
+                              aria-label={`镜头 ${index + 1} 出点`}
+                              data-testid={`clip-source-out-${index}`}
+                              value={editableValue(clip, "source_out_seconds")}
+                              onChange={(event) =>
+                                updateClipField(
+                                  index,
+                                  "source_out_seconds",
+                                  event.target.value === "" ? null : event.target.value,
+                                )
+                              }
+                            />
+                          </Field>
+                          <Field>
+                            配音音量
+                            <Input
+                              type="number"
+                              min="0"
+                              max="1"
+                              step="0.01"
+                              aria-label={`镜头 ${index + 1} 配音音量`}
+                              data-testid={`clip-audio-volume-${index}`}
+                              value={editableValue(clip, "audio_volume", "1")}
+                              onChange={(event) =>
+                                updateClipField(index, "audio_volume", Number(event.target.value))
+                              }
+                            />
+                          </Field>
+                          <Field>
                             字幕文本
-                            <textarea
+                            <Textarea
                               rows={2}
                               data-testid={`clip-subtitle-${index}`}
                               aria-label={`镜头 ${index + 1} 字幕`}
@@ -786,7 +835,7 @@ export function EditingWorkspace({
                                 updateClipField(index, "subtitle", event.target.value)
                               }
                             />
-                          </label>
+                          </Field>
                           <AudioArtifactPicker
                             key={`${projectId}:${sessionId}:${String(clip.id ?? index)}:audio`}
                             projectId={projectId}
@@ -801,9 +850,9 @@ export function EditingWorkspace({
                               updateClipField(index, "muted", muted);
                             }}
                           />
-                          <label>
+                          <Field>
                             转场
-                            <select
+                            <Select
                               data-testid={`clip-transition-${index}`}
                               aria-label={`镜头 ${index + 1} 转场`}
                               value={transitionKind(clip)}
@@ -819,25 +868,25 @@ export function EditingWorkspace({
                             >
                               <option value="cut">直接切换</option>
                               <option value="crossfade">交叉淡化</option>
-                            </select>
-                          </label>
+                            </Select>
+                          </Field>
                           <div className="editing-session-clip-actions">
-                            <button
+                            <Button
                               type="button"
                               data-testid={`move-clip-up-${index}`}
                               onClick={() => moveClip(index, -1)}
                               disabled={index === 0}
                             >
                               上移
-                            </button>
-                            <button
+                            </Button>
+                            <Button
                               type="button"
                               data-testid={`move-clip-down-${index}`}
                               onClick={() => moveClip(index, 1)}
                               disabled={index === draft.clips.length - 1}
                             >
                               下移
-                            </button>
+                            </Button>
                           </div>
                         </li>
                       ))}
@@ -856,9 +905,9 @@ export function EditingWorkspace({
                           updateTimelineMetadata("music_artifact_id", artifactId)
                         }
                       />
-                      <label>
+                      <Field>
                         音乐音量
-                        <input
+                        <Input
                           type="number"
                           min="0"
                           max="1"
@@ -873,27 +922,27 @@ export function EditingWorkspace({
                             updateTimelineMetadata("music_volume", event.target.value)
                           }
                         />
-                      </label>
+                      </Field>
                     </div>
                   </Disclosure>
                   <div className="editing-session-actions">
-                    <button
+                    <Button
                       type="button"
                       data-testid="save-edit-timeline"
                       onClick={submitSave}
                       disabled={!dirty || save.isPending}
                     >
                       {save.isPending ? "保存中…" : "保存时间线"}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
                       data-testid="export-edit-session"
                       onClick={() => exportMutation.mutate()}
                       disabled={exportMutation.isPending}
                     >
                       {exportMutation.isPending ? "正在导出…" : "导出时间线"}
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
                       data-testid="export-final-film"
                       onClick={() => void runFinalFilmExport()}
@@ -906,7 +955,7 @@ export function EditingWorkspace({
                           : finalFilmPending === "render"
                             ? "正在生成成片…"
                             : "导出成片 MP4"}
-                    </button>
+                    </Button>
                   </div>
                   {dirty && (
                     <p
@@ -922,9 +971,9 @@ export function EditingWorkspace({
             <section aria-label="历史成片与导出状态">
               <h2>成片历史</h2>
               <p>这些是已经生成的成片；查看不会重新生成。</p>
-              <button type="button" onClick={() => void filmHistory.refetch()}>
+              <Button type="button" onClick={() => void filmHistory.refetch()}>
                 刷新成片历史
-              </button>
+              </Button>
               {filmHistory.isLoading && <p role="status">正在读取成片历史…</p>}
               {filmHistory.isError && <p role="alert">无法读取成片历史，请稍后重试。</p>}
               {filmHistory.data?.length === 0 && <p>此会话还没有成片导出记录。</p>}
@@ -934,14 +983,14 @@ export function EditingWorkspace({
                     时间线 v{job.timeline_version} · {nodeRunStatusLabel(job.status)}
                     {job.error_summary && <p role="status">{job.error_summary}</p>}
                     {job.result && (
-                      <button
+                      <Button
                         type="button"
                         onClick={() => {
                           selectHistoryRun(job.node_run_id);
                         }}
                       >
                         查看成片 · v{job.timeline_version}
-                      </button>
+                      </Button>
                     )}
                   </li>
                 ))}
@@ -1090,14 +1139,14 @@ export function EditingWorkspace({
         </p>
       )}
       {!manifest.isError && (
-        <button
+        <Button
           type="button"
           data-testid="create-edit-session"
           onClick={() => create.mutate()}
           disabled={create.isPending || manifest.isLoading || !manifest.data}
         >
           {create.isPending ? "正在创建剪辑会话…" : "创建可编辑剪辑会话"}
-        </button>
+        </Button>
       )}
       {manifest.data && !manifest.isError && (
         <>

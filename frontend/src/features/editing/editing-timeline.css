@@ -1,0 +1,83 @@
+.editing-timeline {
+  display: grid;
+  gap: var(--df-space-3);
+  min-width: 0;
+  margin-block: var(--df-space-4);
+}
+.editing-preview-workspace {
+  min-width: 0;
+}
+.editing-timeline header p {
+  color: var(--df-text-muted);
+  font-size: var(--df-font-size-caption);
+}
+.editing-timeline-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  scrollbar-gutter: stable;
+}
+.editing-time-ruler,
+.editing-timeline-lane {
+  display: flex;
+  align-items: stretch;
+  gap: var(--df-space-1);
+  min-width: var(--df-timeline-min-width);
+}
+.editing-time-ruler {
+  padding-inline-start: calc(var(--df-timeline-label-width) + var(--df-space-1));
+  color: var(--df-text-muted);
+  font-size: var(--df-font-size-caption);
+}
+.editing-time-ruler > div {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.editing-timeline-lane {
+  margin-block: var(--df-space-2);
+}
+.editing-timeline-lane > strong {
+  flex: 0 0 var(--df-timeline-label-width);
+  align-self: center;
+  font-size: var(--df-font-size-caption);
+}
+.editing-timeline-clip.df-btn {
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: var(--df-control-height);
+  height: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-direction: column;
+  white-space: normal;
+  text-align: left;
+}
+.editing-timeline-clip[aria-pressed="true"] {
+  outline: 1px solid var(--df-verdigris);
+  color: var(--df-verdigris);
+}
+.editing-timeline-clip[draggable="true"] {
+  cursor: grab;
+}
+.editing-composition-screen {
+  position: relative;
+  background: var(--df-surface-screen);
+  border-radius: var(--df-radius-container);
+  overflow: hidden;
+}
+.editing-composition-screen video {
+  display: block;
+  width: 100%;
+  max-height: var(--df-edit-preview-height);
+  object-fit: contain;
+}
+.editing-composition-subtitle {
+  position: absolute;
+  inset-inline: var(--df-space-4);
+  bottom: var(--df-space-4);
+  text-align: center;
+  white-space: pre-line;
+  color: var(--df-text-primary);
+  background: var(--df-surface-overlay);
+  padding: var(--df-space-2);
+  font-size: var(--df-font-size-body);
+}

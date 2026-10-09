@@ -1012,6 +1012,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/edit-sessions/{session_id}/preview-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Get Timeline Preview Plan */
+        post: operations["get_timeline_preview_plan_api_v1_projects__project_id__edit_sessions__session_id__preview_plan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/edit-sessions/{session_id}/timeline": {
         parameters: {
             query?: never;
@@ -1138,7 +1155,7 @@ export interface paths {
         };
         /**
          * Get Artifact Content
-         * @description Stream artifact bytes for the owning user's workspace.
+         * @description Deliver authenticated Artifact bytes, including ranges for native media seek.
          */
         get: operations["get_artifact_content_api_v1_projects__project_id__artifacts__artifact_id__content_get"];
         put?: never;
@@ -7770,6 +7787,55 @@ export interface components {
         SuggestionDirectorState: {
             [key: string]: unknown;
         };
+        /** TimelinePreviewClipRead */
+        TimelinePreviewClipRead: {
+            /** Clip Id */
+            clip_id: string;
+            /**
+             * Video Artifact Id
+             * Format: uuid
+             */
+            video_artifact_id: string;
+            /** Start Ms */
+            start_ms: number;
+            /** End Ms */
+            end_ms: number;
+            /** Source In Ms */
+            source_in_ms: number;
+            /** Source Out Ms */
+            source_out_ms: number;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Subtitle Text */
+            subtitle_text: string;
+            /** Audio Artifact Id */
+            audio_artifact_id: string | null;
+            /**
+             * Audio State
+             * @enum {string}
+             */
+            audio_state: "available" | "muted" | "none" | "unavailable";
+            /** Audio Volume */
+            audio_volume: number;
+        };
+        /** TimelinePreviewRead */
+        TimelinePreviewRead: {
+            /**
+             * Edit Session Id
+             * Format: uuid
+             */
+            edit_session_id: string;
+            /** Baseline Version */
+            baseline_version: number;
+            /** Draft Fingerprint */
+            draft_fingerprint: string;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Clips */
+            clips: components["schemas"]["TimelinePreviewClipRead"][];
+            /** Unsupported */
+            unsupported: string[];
+        };
         /**
          * TranslationReport
          * @description Auditable record of what the user requested vs what the model received
@@ -10731,6 +10797,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_timeline_preview_plan_api_v1_projects__project_id__edit_sessions__session_id__preview_plan_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                session_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditTimelineUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimelinePreviewRead"];
                 };
             };
             /** @description Validation Error */
