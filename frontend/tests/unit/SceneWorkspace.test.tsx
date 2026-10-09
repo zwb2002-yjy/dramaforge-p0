@@ -128,6 +128,53 @@ function mockBackend() {
 }
 
 describe("SceneWorkspace", () => {
+  it("does not navigate again while an explicit route Shot is waiting for its workspace snapshot", async () => {
+    let release!: (value: Response) => void;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) =>
+      String(input).endsWith("/workspace")
+        ? new Promise((resolve) => {
+            release = resolve;
+          })
+        : json({}),
+    );
+    const changed = vi.fn();
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <SceneWorkspace
+          projectId="project-1"
+          sceneId="scene-1"
+          initialShotId="shot-1"
+          onSelectedShotChange={changed}
+        />
+      </QueryClientProvider>,
+    );
+    await screen.findByTestId("scene-workspace");
+    expect(changed).not.toHaveBeenCalled();
+    await act(async () =>
+      release(
+        new Response(
+          JSON.stringify({
+            scene: {
+              id: "scene-1",
+              episode_number: 1,
+              scene_number: 1,
+              location_name: "Studio",
+              time_of_day: "day",
+              version: 1,
+            },
+            shots: [SHOT_1],
+            references: {},
+            candidates: {},
+            trace: {},
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    await screen.findByLabelText("画面描述");
+    expect(changed).not.toHaveBeenCalled();
+  });
+
   it("renders the shot strip, placeholder canvas, and design panel", async () => {
     mockBackend();
     const queryClient = new QueryClient();

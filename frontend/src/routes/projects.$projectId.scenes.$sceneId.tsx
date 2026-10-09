@@ -55,6 +55,8 @@ function SceneWorkspacePage() {
           dirtyRef.current = false;
           setHasUnsavedDesign(false);
           void navigate({
+            to: "/projects/$projectId/scenes/$sceneId",
+            params: { projectId, sceneId },
             search: (previous) => ({ ...previous, shotId: selected }),
             replace: true,
           });

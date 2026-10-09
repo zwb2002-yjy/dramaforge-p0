@@ -184,7 +184,9 @@ export function SceneWorkspace({
 
   const selectShot = useCallback(
     (shotId: string) => {
-      if (shotId === selectedShotKey) return;
+      // An explicit route selection already exists before workspace data arrives.
+      // Do not issue another navigation while the router is restoring that Scene.
+      if (shotId === selectedShotId || shotId === selectedShotKey) return;
       if (designDirty) {
         setPendingShotId(shotId);
         return;
@@ -193,7 +195,7 @@ export function SceneWorkspace({
       setPreviewCandidate(null);
       onSelectedShotChange?.(shotId);
     },
-    [designDirty, selectedShotKey, onSelectedShotChange],
+    [designDirty, selectedShotId, selectedShotKey, onSelectedShotChange],
   );
   const selectFromRoute = useRef(selectShot);
   selectFromRoute.current = selectShot;
