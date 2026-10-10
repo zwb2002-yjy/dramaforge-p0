@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReferenceResolutionState } from "../../components/assets/AssetReferencePicker";
 import { Button, Dialog, Drawer } from "../../components/ui";
 import { timeOfDayLabel } from "../../lib/sceneLabels";
-import { ModelConnectionSettingsPage } from "../../routes/settings-page";
+import { ModelConnectionSettings } from "../../components/provider/ModelConnectionSettings";
 import { CinematicCanvas } from "../shots/CinematicCanvas";
 import { ShotCandidateTray } from "../shots/ShotCandidateTray";
 import { ShotInspector, type InspectorFocus } from "../shots/ShotInspector";
@@ -536,7 +536,7 @@ export function SceneWorkspace({
         size="wide"
         testId="scene-model-settings-drawer"
       >
-        <ModelConnectionSettingsPage />
+        <ModelConnectionSettings />
       </Drawer>
       {animaticOpen && (
         <Dialog
