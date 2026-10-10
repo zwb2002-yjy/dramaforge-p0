@@ -28,7 +28,9 @@ async function installMedia(page: Page, withCandidates = false) {
       camera_move: "static",
       status: "draft",
       visual_description: `镜头 ${index + 1}`,
-      duration_seconds: index === 0 ? "3" : "0.5",
+      // Give the decoded-image assertion an observable interval on loaded CI.
+      // The video still exercises the short-source/held-frame cut boundary.
+      duration_seconds: index === 0 ? "3" : index === 1 ? "2" : "0.5",
       dialogue: `对白 ${index + 1}`,
       image_prompt: "frame",
       video_prompt: "motion",
@@ -158,16 +160,19 @@ test("real video, held last frame, image and missing-media playback obey planned
   await expect(animatic).toHaveAttribute("data-shot-id", SHOT_ID);
   await expect.poll(() => video.evaluate((element: HTMLVideoElement) => element.ended)).toBe(true);
   await expect(animatic).toHaveAttribute("data-shot-id", SECOND_SHOT_ID);
+  await animatic.getByTestId("animatic-play-toggle").click();
+  await expect(animatic.getByTestId("animatic-play-toggle")).toHaveText("播放");
   await expect(animatic.getByRole("img")).toBeVisible();
   await expect
     .poll(() =>
       animatic.getByRole("img").evaluate((element: HTMLImageElement) => element.naturalWidth),
     )
     .toBe(160);
+  await animatic.getByTestId("animatic-play-toggle").click();
   await expect(animatic).toHaveAttribute("data-shot-id", "dddddddd-dddd-4ddd-8ddd-dddddddddddd");
   await expect(animatic.getByRole("status")).toContainText("尚无正式视频或正式画面");
   await expect(animatic.getByTestId("animatic-play-toggle")).toHaveText("播放");
-  await expect(animatic.getByRole("progressbar")).toHaveAttribute("value", "4");
+  await expect(animatic.getByRole("progressbar")).toHaveAttribute("value", "5.5");
   await animatic.getByRole("button", { name: "#1", exact: true }).click();
   await animatic.getByTestId("animatic-play-toggle").click();
   const handle = await animatic.getByLabel("动态分镜视频").elementHandle();
