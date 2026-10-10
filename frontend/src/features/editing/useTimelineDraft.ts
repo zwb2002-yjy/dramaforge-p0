@@ -158,6 +158,14 @@ export function useTimelineDraft(
   function updateTimelineMetadata(key: string, value: JsonValue) {
     edit((draft) => ({ ...draft, metadata: { ...draft.metadata, [key]: value } }));
   }
+  function replaceClip(index: number, clip: EditableClip) {
+    edit((draft) => ({
+      ...draft,
+      clips: draft.clips.map((current, i) =>
+        i === index && current.id === clip.id ? { ...clip } : current,
+      ),
+    }));
+  }
   function moveClip(index: number, offset: -1 | 1) {
     reorderClip(index, index + offset);
   }
@@ -223,6 +231,7 @@ export function useTimelineDraft(
     isCurrentSave,
     acceptSaved,
     updateClipField,
+    replaceClip,
     updateTimelineMetadata,
     moveClip,
     reorderClip,

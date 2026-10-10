@@ -372,6 +372,11 @@ export function EditingWorkspace({
                 dirty={dirty}
                 selectedIndex={clipIndex}
                 onSelectClip={selectClip}
+                onUpdateClip={(index, clip) => {
+                  timeline.replaceClip(index, clip);
+                  setFeedback(null);
+                  setExported(null);
+                }}
                 onReorder={(from, to) => {
                   timeline.reorderClip(from, to);
                   setFeedback(null);

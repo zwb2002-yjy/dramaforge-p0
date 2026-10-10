@@ -252,7 +252,7 @@ describe("Frontend Optimization Plan - Acceptance Criteria Verification", () => 
       "data-shot-id",
       SHOT_IMAGE_STAGE.id,
     );
-    fireEvent.click(screen.getByRole("button", { name: "关闭", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: /^关闭$/ }));
     expect(screen.queryByTestId("scene-model-settings-drawer")).not.toBeInTheDocument();
 
     // Verify 场景连播 button is in the scene header and can launch the player modal

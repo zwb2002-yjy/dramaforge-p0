@@ -5,6 +5,7 @@ import { EditingTimeline } from "./EditingTimeline";
 import { EditingCompositionPlayer } from "./EditingCompositionPlayer";
 import { previewEditTimeline, type TimelinePreviewRead } from "./api";
 import type { EditableTimeline } from "./useTimelineDraft";
+import { timelineGeometry } from "./timelineGeometry";
 import { timelineCopy as copy } from "./timelineCopy";
 
 export function EditingPreviewWorkspace({
@@ -16,6 +17,7 @@ export function EditingPreviewWorkspace({
   selectedIndex,
   onSelectClip,
   onReorder,
+  onUpdateClip,
 }: {
   projectId: string;
   sessionId: string;
@@ -25,6 +27,7 @@ export function EditingPreviewWorkspace({
   selectedIndex: number;
   onSelectClip: (index: number) => void;
   onReorder: (from: number, to: number) => void;
+  onUpdateClip?: (index: number, clip: EditableTimeline["clips"][number]) => void;
 }) {
   const [mode, setMode] = useState<"source" | "composition">("source");
   const [loaded, setLoaded] = useState<{ signature: string; plan: TimelinePreviewRead } | null>(
@@ -121,27 +124,20 @@ export function EditingPreviewWorkspace({
       <EditingTimeline
         clips={draft.clips}
         selectedIndex={selectedIndex}
+        plan={plan}
+        onUpdateClip={onUpdateClip}
         onReorder={(from, to) => {
           onReorder(from, to);
           const reordered = [...draft.clips];
           const [moved] = reordered.splice(from, 1);
           reordered.splice(to, 0, moved);
-          seek(
-            reordered
-              .slice(0, to)
-              .reduce((sum, clip) => sum + Number(clip.duration_seconds) * 1000, 0),
-          );
+          seek(timelineGeometry(reordered).items[to]?.startMs ?? 0);
         }}
         playheadMs={playhead}
         onSeek={seek}
         onSelectClip={(index) => {
           onSelectClip(index);
-          seek(
-            plan?.clips[index]?.start_ms ??
-              draft.clips
-                .slice(0, index)
-                .reduce((sum, clip) => sum + Number(clip.duration_seconds) * 1000, 0),
-          );
+          seek(timelineGeometry(draft.clips, plan).items[index]?.startMs ?? 0);
         }}
       />
     </section>

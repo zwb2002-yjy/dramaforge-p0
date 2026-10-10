@@ -9,6 +9,9 @@
   --df-timeline-min-width: 560px;
   --df-timeline-label-width: 64px;
   --df-timeline-pixels-per-second: 160px;
+  --df-timeline-trim-handle-width: 12px;
+  --df-timeline-lane-height: 72px;
+  --df-timeline-ruler-height: 24px;
   /* ---- Color: Core Palette ---- */
   --df-obsidian: #111315;
   --df-ink: #1b1e22;
