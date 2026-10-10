@@ -9,12 +9,14 @@ from app.execution.shot_pipeline import SHOT_NODES
 from app.production.read_service import ProductionReadService
 from app.shared.db import set_rls_context
 from app.shared.errors import NotFoundError
-from sqlalchemy import select, text
+from app.workbench.scene_service import SceneWorkspaceService
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from test_director_turn_lifecycle_pg import _alembic, _async_url, _create_database, _drop_database
 from test_director_turn_lifecycle_pg import pytestmark as pytestmark
 from tests.unit.test_production_bounded_reads import add_run
 from tests.unit.test_scene_workspace_snapshot import _seed
+from tests.unit.test_shot_overview import _seed_hundred_media_candidates
 
 
 @pytest.mark.asyncio
@@ -117,6 +119,60 @@ async def test_bounded_production_reads_on_postgresql():
                 pytest.fail("artifact keyset did not terminate")
             assert len(seen) == len(set(seen))
             assert set(seen) == expected_artifacts
+    finally:
+        await engine.dispose()
+        await _drop_database(dbname)
+
+
+@pytest.mark.asyncio
+async def test_hundred_candidate_scene_read_is_bounded_under_postgresql_rls(record_property):
+    dbname = f"dramaforge_scene_scale_{uuid4().hex[:8]}"
+    await _create_database(dbname)
+    engine = create_async_engine(_async_url(dbname))
+    try:
+        _alembic(dbname)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        async with factory() as session:
+            user, project, scene = await _seed_hundred_media_candidates(session, True)
+            _foreign_user, foreign_project, _, foreign_scene, _ = await _seed(session)
+            user_id, workspace_id, project_id, scene_id = (
+                user.id,
+                project.workspace_id,
+                project.id,
+                scene.id,
+            )
+            foreign_project_id, foreign_scene_id = foreign_project.id, foreign_scene.id
+            await session.commit()
+            session.expunge_all()
+            await session.execute(text("SET LOCAL ROLE dramaforge_app"))
+            await set_rls_context(
+                session, user_id=user_id, workspace_id=workspace_id, project_id=project_id
+            )
+            statements = []
+
+            def record(_connection, _cursor, statement, *_):
+                statements.append(statement.lstrip().split()[0].upper())
+
+            event.listen(engine.sync_engine, "before_cursor_execute", record)
+            workspace = await SceneWorkspaceService(session).get_workspace(
+                project_id=project_id, scene_id=scene_id, actor=user
+            )
+            event.remove(engine.sync_engine, "before_cursor_execute", record)
+            assert len(workspace["shots"]) == 100
+            candidates = [row for items in workspace["candidates"].values() for row in items]
+            assert len(candidates) == 100 and all(row["review_allowed"] for row in candidates)
+            assert all(
+                not shot["formal_keyframe_artifact_id"] and not shot["formal_video_artifact_id"]
+                for shot in workspace["shots"]
+            )
+            assert 0 < len(statements) <= 22
+            assert set(statements) == {"SELECT"}
+            record_property("rls_role", "dramaforge_app")
+            record_property("hundred_candidate_workspace_selects", len(statements))
+            with pytest.raises(NotFoundError):
+                await SceneWorkspaceService(session).get_workspace(
+                    project_id=foreign_project_id, scene_id=foreign_scene_id, actor=user
+                )
     finally:
         await engine.dispose()
         await _drop_database(dbname)

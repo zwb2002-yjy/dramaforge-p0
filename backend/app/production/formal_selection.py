@@ -217,7 +217,18 @@ async def list_formal_candidates(
     # the mutation, not by a transient client guess after returning from the
     # review page.  Enrich the existing candidate projection instead of
     # introducing a second candidate/status table.
-    from app.production.review_gate import evaluate_artifact_admission
+    from app.production.review_gate import evaluate_artifact_admissions
+
+    targets = [
+        (
+            shot_id,
+            UUID(str(candidate["artifact_id"])),
+            "formal_keyframe" if candidate.get("stage") == "image_keyframe" else "formal_video",
+        )
+        for shot_id, candidates in result.items()
+        for candidate in candidates
+    ]
+    admissions = await evaluate_artifact_admissions(session, project_id=project_id, targets=targets)
 
     for shot_id, candidates in result.items():
         hash_counts: dict[tuple[object, object], int] = {}
@@ -228,13 +239,7 @@ async def list_formal_candidates(
             stage = (
                 "formal_keyframe" if candidate.get("stage") == "image_keyframe" else "formal_video"
             )
-            admission = await evaluate_artifact_admission(
-                session,
-                project_id=project_id,
-                shot_id=shot_id,
-                artifact_id=UUID(str(candidate["artifact_id"])),
-                stage=stage,
-            )
+            admission = admissions[(shot_id, UUID(str(candidate["artifact_id"])), stage)]
             requirement = admission.requirements[0]
             candidate.update(
                 {

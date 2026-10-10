@@ -5,15 +5,16 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import pytest
 from app.assets.models import Shot
 from app.delivery.models import HumanReviewDecision
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
-from app.production.review_gate import subject_fingerprint
+from app.production.review_gate import REVIEW_NODE_KEYS, subject_fingerprint
 from app.production.shot_overview import load_shot_overview
 from app.workbench.scene_service import SceneWorkspaceService
 from app.workbench.scene_summary import SceneSummaryService
 from sqlalchemy import event
-from test_scene_workspace_snapshot import _add_node_run, _make_env, _seed
+from tests.unit.test_scene_workspace_snapshot import _add_node_run, _make_env, _seed
 
 
 async def test_newest_media_attempt_wins_and_unknown_is_separate_from_failure():
@@ -74,6 +75,137 @@ async def test_newest_media_attempt_wins_and_unknown_is_separate_from_failure():
         assert (await load_shot_overview(session, project_id=project.id, shots=[shot]))[shot.id][
             "generation_failed"
         ] is True
+    finally:
+        await session.close()
+        await engine.dispose()
+
+
+async def _seed_hundred_media_candidates(session, approved):
+    user, project, _episode, scene, first = await _seed(session)
+    shots = [first]
+    for number in range(2, 101):
+        shot = Shot(
+            project_id=project.id,
+            scene_id=scene.id,
+            shot_number=number,
+            sort_order=number,
+            visual_description="Scale fixture",
+        )
+        session.add(shot)
+        shots.append(shot)
+    await session.flush()
+    for index, shot in enumerate(shots):
+        run = await _add_node_run(
+            session, project_id=project.id, shot_id=shot.id, user=user, status="completed"
+        )
+        media = await session.get(Artifact, run.result_artifact_id)
+        if index % 2:
+            node = await session.get(GraphNode, run.graph_node_id)
+            node.node_key = node.node_type = "video"
+            run.input_snapshot = {
+                "shot_id": str(shot.id),
+                "node_key": "video",
+                "stage": "video",
+            }
+            media.artifact_type, media.mime_type = "video", "video/mp4"
+        if approved:
+            kind = "video_drift" if index % 2 else "identity"
+            proof = Artifact(
+                project_id=project.id,
+                artifact_type="document",
+                mime_type="application/json",
+                storage_state="available",
+                object_key=f"scale/{uuid4().hex}",
+                content_hash=uuid4().hex * 2,
+                byte_size=10,
+            )
+            review_node = GraphNode(
+                graph_version_id=run.graph_version_id,
+                node_key=REVIEW_NODE_KEYS[kind],
+                node_type="video_review" if kind == "video_drift" else "identity_review",
+                display_name="Scale evidence",
+                cacheable=False,
+            )
+            session.add_all([proof, review_node])
+            await session.flush()
+            review_run = NodeRun(
+                project_id=project.id,
+                graph_version_id=run.graph_version_id,
+                graph_node_id=review_node.id,
+                attempt_no=1,
+                idempotency_key=uuid4().hex,
+                input_hash=uuid4().hex * 2,
+                input_snapshot={"shot_id": str(shot.id), "upstream_artifact_id": str(media.id)},
+                status="completed",
+                result_artifact_id=proof.id,
+                output_summary={"status": "needs_human"},
+                created_by=user.id,
+            )
+            session.add(review_run)
+            await session.flush()
+            proof.produced_by_run_id = review_run.id
+            session.add(
+                HumanReviewDecision(
+                    project_id=project.id,
+                    shot_id=shot.id,
+                    artifact_id=media.id,
+                    review_node_run_id=review_run.id,
+                    review_artifact_id=proof.id,
+                    review_kind=kind,
+                    subject_fingerprint=subject_fingerprint(
+                        artifact_id=media.id,
+                        artifact_content_hash=media.content_hash,
+                        review_kind=kind,
+                        review_node_run_id=review_run.id,
+                        review_artifact_id=proof.id,
+                        review_evidence_hash=proof.content_hash,
+                    ),
+                    shot_version_at_decision=1,
+                    decision="approved",
+                    reason="Synthetic query-scale fixture only",
+                    actor_id=user.id,
+                    request_key=uuid4().hex,
+                    request_hash=uuid4().hex * 2,
+                )
+            )
+    await session.flush()
+    return user, project, scene
+
+
+@pytest.mark.parametrize("approved", [False, True])
+async def test_hundred_media_candidates_workspace_uses_bounded_read_queries(
+    approved, record_property
+):
+    engine, session = await _make_env()
+    try:
+        user, project, scene = await _seed_hundred_media_candidates(session, approved)
+        project_id, scene_id = project.id, scene.id
+        session.expunge_all()  # HTTP requests cannot rely on fixture ORM identity caches.
+        statements: list[str] = []
+
+        def record(_connection, _cursor, statement, *_):
+            statements.append(statement.lstrip().split()[0].upper())
+
+        event.listen(engine.sync_engine, "before_cursor_execute", record)
+        workspace = await SceneWorkspaceService(session).get_workspace(
+            project_id=project_id, scene_id=scene_id, actor=user
+        )
+        event.remove(engine.sync_engine, "before_cursor_execute", record)
+        assert len(workspace["shots"]) == 100
+        rows = [row for candidates in workspace["candidates"].values() for row in candidates]
+        assert len(rows) == 100
+        assert all(
+            row["review_allowed"] is approved
+            and row["review_blocked_reason"] == (None if approved else "REVIEW_DECISION_MISSING")
+            for row in rows
+        )
+        assert all(
+            facts["pending_review"] is (not approved) for facts in workspace["overview"].values()
+        )
+        assert 0 < len(statements) <= 22, f"Scene workspace ran {len(statements)} SELECTs"
+        record_property("workspace_select_count", len(statements))
+        record_property("synthetic_scale_fixture_approved", approved)
+        assert set(statements) == {"SELECT"}
     finally:
         await session.close()
         await engine.dispose()
