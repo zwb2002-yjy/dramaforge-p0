@@ -202,8 +202,15 @@ async def preview_compile(
                 spec.mode_spec(intent.mode_id)
             except ValueError:
                 errors.append("MODE_UNSUPPORTED")
-        elif intent.mode_id not in {None, "default", "explicit_binding"}:
-            errors.append("MODE_UNSUPPORTED")
+        else:
+            # Legacy catalogs expose slots without named modes. Workbench still
+            # freezes its image/first-frame stage name; validate that name here
+            # while the reference and compiler checks retain the actual contract.
+            workbench_mode = (
+                "text_to_image" if isinstance(intent, ImageGenerationIntent) else "first_frame"
+            )
+            if intent.mode_id not in {None, "default", "explicit_binding", workbench_mode}:
+                errors.append("MODE_UNSUPPORTED")
     if not invoke_model_value.strip():
         errors.append("MODEL_IDENTITY_MISSING")
     normalized = (
