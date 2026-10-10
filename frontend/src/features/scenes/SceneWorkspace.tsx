@@ -1,8 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ReferenceResolutionState } from "../../components/assets/AssetReferencePicker";
+import { Button, Dialog, Drawer } from "../../components/ui";
 import { timeOfDayLabel } from "../../lib/sceneLabels";
+import { ModelConnectionSettingsPage } from "../../routes/settings-page";
 import { CinematicCanvas } from "../shots/CinematicCanvas";
 import { ShotCandidateTray } from "../shots/ShotCandidateTray";
 import { ShotInspector, type InspectorFocus } from "../shots/ShotInspector";
@@ -14,6 +16,7 @@ import type { ShotDesignDraft } from "../shots/ShotDesignPanel";
 import { hasActiveSceneRuns, SCENE_ACTIVE_REFETCH_MS } from "../production/sceneRunState";
 import { fetchSceneWorkspace, type SceneWorkspaceRead } from "./api";
 import { queryKeys } from "../../lib/queryKeys";
+import { SceneAnimaticPreview } from "./SceneAnimaticPreview";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 import { ResonanceStage } from "../resonance/ResonanceStage";
 import { BatchFillActions } from "../production";
@@ -111,6 +114,9 @@ export function SceneWorkspace({
   const [designDrafts, setDesignDrafts] = useState<Record<string, ShotDesignDraft>>({});
   const [suggestionDraft, setSuggestionDraft] = useState<ShotDesignDraft | null>(null);
   const [pendingShotId, setPendingShotId] = useState<string | null>(null);
+  const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
+  const [animaticOpen, setAnimaticOpen] = useState(false);
+  const queryClient = useQueryClient();
   const workspace = useQuery({
     queryKey: queryKeys.scene.workspace(projectId, sceneId),
     queryFn: () => fetchSceneWorkspace(projectId, sceneId),
@@ -120,6 +126,25 @@ export function SceneWorkspace({
         ? SCENE_ACTIVE_REFETCH_MS
         : false,
   });
+
+  const handleCloseModelSettings = useCallback(async () => {
+    setModelSettingsOpen(false);
+    await Promise.all([
+      workspace.refetch(),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.model.executionPreflight(projectId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.model.catalog(),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.model.projectProfile(projectId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.model.effectiveBindings(projectId),
+      }),
+    ]);
+  }, [projectId, queryClient, workspace]);
 
   useEffect(() => {
     setSelectedShotId(initialShotId ?? null);
@@ -133,6 +158,8 @@ export function SceneWorkspace({
     setDesignDrafts({});
     setSuggestionDraft(null);
     setPendingShotId(null);
+    setModelSettingsOpen(false);
+    setAnimaticOpen(false);
     // Scope changes reset drafts; navigating within the same Scene must not.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, sceneId]);
@@ -334,6 +361,13 @@ export function SceneWorkspace({
         </div>
         <div className="qc-scene-header-actions">
           <span className="df-num">{shots.length} 个镜头</span>
+          <Button
+            tone="ghost"
+            data-testid="scene-animatic-play-btn"
+            onClick={() => setAnimaticOpen(true)}
+          >
+            场景连播
+          </Button>
           <BatchFillActions projectId={projectId} sceneId={sceneId} />
           <a
             className="qc-overview-primary"
@@ -410,6 +444,7 @@ export function SceneWorkspace({
               projectId={projectId}
               shot={selected}
               candidates={candidates}
+              references={selectedReferences}
               selectedCandidate={previewCandidate}
               expanded={trayExpanded}
               onToggleExpanded={() => setTrayExpanded((value) => !value)}
@@ -464,6 +499,7 @@ export function SceneWorkspace({
           onDesignSaved={handleDesignSaved}
           intentSeed={intentSeed?.shotId === selectedShotKey ? intentSeed : null}
           focusRequest={focusRequest}
+          onOpenModelSettings={() => setModelSettingsOpen(true)}
         />
       </div>
       {pendingShotId !== null && (
@@ -491,6 +527,34 @@ export function SceneWorkspace({
             setPendingShotId(null);
           }}
         />
+      )}
+      <Drawer
+        open={modelSettingsOpen}
+        onClose={handleCloseModelSettings}
+        title="模型与服务设置"
+        kicker="分镜工作台 · 快速配置"
+        size="wide"
+        testId="scene-model-settings-drawer"
+      >
+        <ModelConnectionSettingsPage />
+      </Drawer>
+      {animaticOpen && (
+        <Dialog
+          title={`场景连播 · ${data?.scene.location_name ?? "预览"}`}
+          size="wide"
+          onClose={() => setAnimaticOpen(false)}
+          testId="scene-animatic-player-dialog"
+        >
+          <SceneAnimaticPreview
+            projectId={projectId}
+            shots={shots}
+            candidates={data?.candidates}
+            onSelectShot={(shotId) => {
+              selectShot(shotId);
+              setAnimaticOpen(false);
+            }}
+          />
+        </Dialog>
       )}
     </div>
   );

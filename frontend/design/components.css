@@ -1308,6 +1308,76 @@ body {
   font-size: var(--df-font-size-caption);
 }
 
+/* Modal drawer: sliding overlay recipe from the right edge */
+.df-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--df-z-modal);
+  display: flex;
+  justify-content: flex-end;
+  background: var(--df-backdrop);
+  animation: df-fade-in var(--df-duration-base) var(--df-ease);
+}
+.df-drawer {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(var(--df-operation-sheet-width, 36rem), 100vw);
+  height: 100vh;
+  border-left: 1px solid var(--df-surface-tier-overlay-border);
+  background: var(--df-surface-tier-overlay-bg);
+  box-shadow: var(--df-surface-tier-overlay-shadow);
+  animation: df-slide-in-right var(--df-duration-base) var(--df-ease);
+}
+.df-drawer.wide {
+  width: min(48rem, 100vw);
+}
+.df-drawer:focus {
+  outline: none;
+}
+.df-drawer-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--df-space-4);
+  padding: var(--df-space-5) var(--df-space-6) var(--df-space-3);
+  border-bottom: 1px solid var(--df-border-subtle);
+}
+.df-drawer-header h2 {
+  margin: 0;
+  font-size: var(--df-text-lg);
+  font-weight: var(--df-weight-semibold);
+}
+.df-drawer-header .kicker {
+  margin: 0 0 var(--df-space-1);
+}
+.df-drawer-close {
+  display: inline-grid;
+  place-items: center;
+  width: var(--df-space-8);
+  height: var(--df-space-8);
+  border: 0;
+  border-radius: var(--df-radius-control);
+  background: transparent;
+  color: var(--df-text-muted);
+  cursor: pointer;
+}
+.df-drawer-close:hover {
+  background: var(--df-control-background);
+  color: var(--df-text-primary);
+}
+.df-drawer-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--df-space-4) var(--df-space-6) var(--df-space-5);
+}
+.df-drawer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--df-space-3);
+  padding: var(--df-space-4) var(--df-space-6);
+  border-top: 1px solid var(--df-border-subtle);
+}
+
 /* Quiet status: a dot plus a short word, never a coloured banner. */
 .df-status {
   display: inline-flex;
@@ -1349,6 +1419,14 @@ body {
   from {
     opacity: 0;
     transform: translateY(6px);
+  }
+}
+@keyframes df-slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
   }
 }
 @media (prefers-reduced-motion: reduce) {

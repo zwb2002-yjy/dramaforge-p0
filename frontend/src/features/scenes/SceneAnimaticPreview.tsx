@@ -20,10 +20,12 @@ export function SceneAnimaticPreview({
   projectId,
   shots,
   candidates,
+  onSelectShot,
 }: {
   projectId: string;
   shots: ShotLite[];
   candidates?: SceneWorkspaceRead["candidates"];
+  onSelectShot?: (shotId: string) => void;
 }) {
   const ordered = useMemo(
     () => [...shots].sort((a, b) => a.sort_order - b.sort_order || a.shot_number - b.shot_number),
@@ -311,6 +313,9 @@ export function SceneAnimaticPreview({
       )}
       <progress aria-label="动态分镜播放头" value={Math.min(total, passed + elapsed)} max={total} />
       <div className="scene-animatic-controls">
+        {onSelectShot && (
+          <Button onClick={() => onSelectShot(shot.id)}>定位至镜头 #{shot.shot_number}</Button>
+        )}
         <Button
           onClick={playOrPause}
           disabled={unavailableSelection}

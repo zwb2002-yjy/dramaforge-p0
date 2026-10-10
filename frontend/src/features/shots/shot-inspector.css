@@ -374,3 +374,40 @@
 .df-shot-plan-details > p + p {
   margin-top: var(--df-space-2);
 }
+
+/* ---- Continuity Overlay ---- */
+.df-continuity-overlay {
+  margin-top: var(--df-space-2);
+  padding: var(--df-space-3);
+  border: 1px solid var(--df-border-subtle);
+  border-radius: var(--df-radius-control);
+  background: var(--df-surface-1);
+  display: grid;
+  gap: var(--df-space-2);
+}
+.df-continuity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--df-font-size-caption);
+  font-weight: var(--df-weight-semibold);
+}
+.df-continuity-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--df-space-2);
+}
+.df-continuity-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--df-space-1);
+  font-size: var(--df-font-size-meta);
+  color: var(--df-text-muted);
+}
+.df-continuity-card img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--df-radius-control);
+  border: 1px solid var(--df-border-subtle);
+}
