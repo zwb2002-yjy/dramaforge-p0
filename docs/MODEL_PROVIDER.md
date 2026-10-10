@@ -36,6 +36,9 @@ Connection/Credential revision、严格 Compiler 和 ExecutionIdentitySnapshot�
 模型能力查询、无副作用编译预览与生成快照已由 production/model_inspection.py 的只读service及
 api/v1/model_inspection.py 提供。预览复用原compiler，使用占位reference且不证明账号/传输就绪；
 不写NodeRun/ProviderOperation或调用Provider。Agent ToolRegistry与自主工具循环仍未实现。
+无命名输入模式的目录仍按槽位和原 Compiler 校验；编译预览接受既有工作台关键帧的
+`text_to_image` 与视频的 `first_frame` 阶段名。跨媒体阶段名和未知模式仍会阻止预览，
+有命名合同的模型只接受实际声明的合同 ID。
 
 ## 分层
 

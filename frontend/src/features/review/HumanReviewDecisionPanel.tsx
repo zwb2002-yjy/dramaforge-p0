@@ -23,6 +23,8 @@ type ReviewDecisionPanelProps = {
   /** Server Shot version this page is looking at (optimistic lock). */
   shotVersion: number;
   title: string;
+  showFormalAction?: boolean;
+  onChanged?: () => void | Promise<void>;
 };
 
 /**
@@ -49,6 +51,8 @@ function ReviewDecisionSession({
   stage,
   shotVersion,
   title,
+  showFormalAction = true,
+  onChanged,
 }: ReviewDecisionPanelProps) {
   const queryClient = useQueryClient();
   const [reason, setReason] = useState("");
@@ -98,6 +102,7 @@ function ReviewDecisionSession({
       await queryClient.invalidateQueries({
         queryKey: queryKeys.shot.reviewWorkbench(projectId, shotId),
       });
+      await onChanged?.();
     },
     onError: (error: unknown) => {
       setFeedback(`记录决定失败：${error instanceof Error ? error.message : String(error)}`);
@@ -160,6 +165,7 @@ function ReviewDecisionSession({
         queryClient.invalidateQueries({ queryKey: queryKeys.shot.list(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.scene.summaries(projectId) }),
       ]);
+      await onChanged?.();
     },
     onError: (error: unknown) => {
       setFeedback(
@@ -177,6 +183,7 @@ function ReviewDecisionSession({
       await queryClient.invalidateQueries({
         queryKey: queryKeys.review.summary(projectId, shotId, artifactId, reviewKind, stage),
       });
+      await onChanged?.();
     },
     onError: (error: unknown) => {
       setFeedback(`生成审查证据失败：${error instanceof Error ? error.message : String(error)}`);
@@ -232,7 +239,7 @@ function ReviewDecisionSession({
         />
       </label>
       <div className="qc-unsaved-actions">
-        {(stage === "formal_keyframe" || stage === "formal_video") && (
+        {showFormalAction && (stage === "formal_keyframe" || stage === "formal_video") && (
           <button
             type="button"
             data-testid={`review-approve-and-formal-${reviewKind}`}
@@ -303,8 +310,10 @@ function ReviewDecisionSession({
         </p>
       )}
       <p className="muted">
-        “通过并设为正式”用于连续审片；下方单独通过 /
-        拒绝保留为高级模式。自动检查只是初筛，不能替代人工判断。
+        {showFormalAction
+          ? "“通过并设为正式”用于连续审片；单独通过/拒绝保留为高级模式。"
+          : "通过仅记录人工判断；返回候选后仍须显式设为正式。"}
+        自动检查只是初筛，不能替代人工判断。
       </p>
     </section>
   );

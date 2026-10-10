@@ -52,6 +52,7 @@ const BINDING = {
   resolution_mode: "current_formal",
   label: "@林墨",
   stage: "both",
+  sort_order: 0,
   version: 1,
   created_at: "2026-09-18T00:00:00Z",
   updated_at: "2026-09-18T00:00:00Z",
@@ -116,6 +117,10 @@ describe("AssetReferencePicker recycled assets and empty resolution", () => {
   it("keeps a binding valid while it still resolves to concrete material", async () => {
     mockApi([
       {
+        binding_id: BINDING_ID,
+        stage: "both",
+        mime_type: "image/png",
+        fingerprint: "a".repeat(64),
         purpose: "identity",
         role: "identity",
         artifact_id: "55555555-5555-4555-8555-555555555555",
@@ -135,4 +140,81 @@ describe("AssetReferencePicker recycled assets and empty resolution", () => {
     expect(screen.queryByTestId(`reference-binding-invalid-${BINDING_ID}`)).not.toBeInTheDocument();
     expect(screen.queryByTestId("reference-binding-invalid-hint")).not.toBeInTheDocument();
   });
+});
+
+it("persists a new binding after existing reference slots instead of reusing sort_order zero", async () => {
+  const calls: Array<{ method: string; url: string; body?: Record<string, unknown> }> = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    calls.push({
+      method,
+      url,
+      body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined,
+    });
+    if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+    if (url.endsWith(`/projects/${PROJECT_ID}/assets`)) return json(ASSETS);
+    if (url.includes("/references/resolve")) return json([]);
+    if (url.endsWith(`/shots/${SHOT_ID}/references`)) {
+      if (method === "POST") return json({ ...BINDING, id: "new-binding", sort_order: 8 }, 201);
+      return json([{ ...BINDING, sort_order: 7 }]);
+    }
+    return json([]);
+  });
+  renderPicker();
+  fireEvent.click(await screen.findByRole("button", { name: "添加" }));
+  fireEvent.change(await screen.findByLabelText("选择资产"), { target: { value: ACTIVE_ASSET } });
+  fireEvent.click(screen.getByRole("button", { name: "添加引用" }));
+  await waitFor(() => {
+    const post = calls.find((call) => call.method === "POST" && call.url.endsWith("/references"));
+    expect(post?.body?.sort_order).toBe(8);
+    expect(post?.body?.asset_id).toBe(ACTIVE_ASSET);
+  });
+});
+
+it("updates a persistent @alias through the existing versioned binding API", async () => {
+  const calls: Array<{ method: string; url: string; body: unknown }> = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+    if (url.endsWith(`/projects/${PROJECT_ID}/assets`)) return json(ASSETS);
+    if (url.includes("/references/resolve")) return json([]);
+    if (url.endsWith(`/shots/${SHOT_ID}/references`)) return json([BINDING]);
+    if (method === "PATCH" && url.endsWith(`/references/${BINDING_ID}`)) {
+      calls.push({ method, url, body: JSON.parse(String(init?.body)) });
+      return json({ ...BINDING, label: "@林墨_正面", version: 2 });
+    }
+    return json([]);
+  });
+  renderPicker();
+  fireEvent.click(await screen.findByRole("button", { name: "编辑引用 @林墨" }));
+  fireEvent.change(screen.getByLabelText(`引用标签 ${BINDING_ID}`), {
+    target: { value: "@林墨_正面" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: `保存引用 ${BINDING_ID}` }));
+  await waitFor(() => expect(calls).toHaveLength(1));
+  expect(calls[0].body).toMatchObject({ expected_version: 1, label: "@林墨_正面" });
+});
+
+it("refuses an invalid @alias before sending any binding write", async () => {
+  const calls: string[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    if (method === "PATCH") calls.push(url);
+    if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+    if (url.endsWith(`/projects/${PROJECT_ID}/assets`)) return json(ASSETS);
+    if (url.includes("/references/resolve")) return json([]);
+    if (url.endsWith(`/shots/${SHOT_ID}/references`)) return json([BINDING]);
+    return json([]);
+  });
+  renderPicker();
+  fireEvent.click(await screen.findByRole("button", { name: "编辑引用 @林墨" }));
+  fireEvent.change(screen.getByLabelText(`引用标签 ${BINDING_ID}`), {
+    target: { value: "林墨（无@）" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: `保存引用 ${BINDING_ID}` }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("引用标签必须以 @ 开头");
+  expect(calls).toEqual([]);
 });

@@ -1,5 +1,10 @@
 {
   "controls": [
+    "src/features/editing/EditingWorkspace.tsx",
+    "src/features/editing/EditingPreviewWorkspace.tsx",
+    "src/features/editing/EditingTimeline.tsx",
+    "src/features/editing/EditingCompositionPlayer.tsx",
+    "src/components/assets/AssetMentionInput.tsx",
     "src/routes/index.tsx",
     "src/routes/settings-page.tsx",
     "src/routes/production-page.tsx",

@@ -203,12 +203,7 @@ export function fetchAssetVersions(
 
 export type ShotBindingRead = components["schemas"]["app__api__v1__references__BindingRead"];
 export type ShotExecutionReference = components["schemas"]["ShotReferenceIntent"];
-export type ResolvedShotReference = components["schemas"]["ResolvedReferenceRead"] & {
-  /** Optional server lineage fields retained for forward-compatible responses. */
-  binding_id?: string | null;
-  mime_type?: string;
-  fingerprint?: string | null;
-};
+export type ResolvedShotReference = components["schemas"]["ResolvedReferenceRead"];
 
 export function fetchShotReferences(projectId: string, shotId: string): Promise<ShotBindingRead[]> {
   return apiGetList<ShotBindingRead>(`/api/v1/projects/${projectId}/shots/${shotId}/references`);
@@ -224,7 +219,8 @@ export async function createShotReference(
     artifact_id?: string | null;
     resolution_mode?: string;
     label?: string;
-    stage?: string;
+    stage?: "image" | "video" | "both";
+    sort_order?: number;
   },
 ): Promise<ShotBindingRead> {
   const csrf = await fetchCsrf();
@@ -239,6 +235,7 @@ export async function createShotReference(
       resolution_mode: input.resolution_mode ?? "current_formal",
       label: input.label ?? "",
       stage: input.stage ?? "both",
+      ...(input.sort_order === undefined ? {} : { sort_order: input.sort_order }),
     },
     csrf,
   );
@@ -254,6 +251,8 @@ export async function updateShotReference(
   bindingId: string,
   input: {
     expected_version: number;
+    stage?: "image" | "video" | "both";
+    sort_order?: number;
     asset_id?: string | null;
     asset_version_id?: string | null;
     resolution_mode?: "current_formal" | "pinned_version" | "direct_artifact";

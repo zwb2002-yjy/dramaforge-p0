@@ -120,7 +120,10 @@ test("manual professional production: Scene Workbench design → candidate previ
   await expect(page.getByTestId("context-dock")).toHaveCount(0);
   await expect(inspector.getByRole("tab")).toHaveCount(0);
   await expect(inspector.getByLabel("画面描述")).toBeVisible();
+  await expect(inspector.getByLabel("镜头类型")).toBeHidden();
+  await inspector.getByTestId("shot-camera-parameters").locator(":scope > summary").click();
   await expect(inspector.getByLabel("镜头类型")).toBeVisible();
+  await inspector.getByTestId("shot-camera-parameters").locator(":scope > summary").click();
   await expect(page.getByTestId("shot-details-sheet")).toHaveCount(0);
   await expect(page.getByTestId("shot-candidate-tray")).toHaveCount(0);
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);

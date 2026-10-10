@@ -1,12 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SceneWorkspace } from "../../src/features/scenes/SceneWorkspace";
-import { SceneAnimaticPlayer } from "../../src/features/scenes/SceneAnimaticPlayer";
+import { SceneAnimaticPreview } from "../../src/features/scenes/SceneAnimaticPreview";
 import { ShotCandidateTray } from "../../src/features/shots/ShotCandidateTray";
 import { ShotProductionActions } from "../../src/features/shots/ShotProductionActions";
 import type { ShotExecutionReference, ShotLite } from "../../src/features/shots/api";
+import type { BindingLite } from "../../src/features/scenes/api";
 
 const PROJECT_ID = "test-project-ac";
 const SCENE_ID = "test-scene-ac";
@@ -82,6 +83,19 @@ const REFERENCES: ShotExecutionReference[] = [
     mime_type: "image/png",
   },
 ];
+const BINDINGS: BindingLite[] = [
+  {
+    id: "reference-binding",
+    purpose: "identity",
+    label: "主角",
+    asset_id: "asset-character",
+    asset_version_id: "asset-version",
+    artifact_id: "artifact-char-ref-1",
+    resolution_mode: "current_formal",
+    stage: "image_keyframe",
+    version: 1,
+  },
+];
 
 function json(body: unknown, status = 200) {
   return Promise.resolve(
@@ -92,7 +106,7 @@ function json(body: unknown, status = 200) {
   );
 }
 
-function mockWorkspaceApi() {
+function mockWorkspaceApi(modelReady = true) {
   return vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -113,7 +127,7 @@ function mockWorkspaceApi() {
           design_state: {},
         },
         shots: [SHOT_IMAGE_STAGE, SHOT_VIDEO_STAGE, SHOT_COMPLETED],
-        references: { [SHOT_IMAGE_STAGE.id]: REFERENCES, [SHOT_VIDEO_STAGE.id]: REFERENCES },
+        references: { [SHOT_IMAGE_STAGE.id]: BINDINGS, [SHOT_VIDEO_STAGE.id]: BINDINGS },
         candidates: {
           [SHOT_IMAGE_STAGE.id]: [],
           [SHOT_VIDEO_STAGE.id]: [
@@ -141,13 +155,13 @@ function mockWorkspaceApi() {
         stages: [
           {
             stage: "image_keyframe",
-            ready: true,
+            ready: modelReady,
             source: "project_binding",
             requested_model_id: "agnes/agnes-image-2.1-flash",
             resolved_model_id: "agnes/agnes-image-2.1-flash",
             contract_display_name: "Agnes 图像生成",
             binding_id: "binding-img",
-            reason: null,
+            reason: modelReady ? null : "MODEL_BINDING_MISSING",
           },
           {
             stage: "video",
@@ -198,10 +212,17 @@ function mockWorkspaceApi() {
 }
 
 describe("Frontend Optimization Plan - Acceptance Criteria Verification", () => {
-  afterEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   it("AC 1: Immersive Model Settings Drawer opens without leaving canvas", async () => {
-    mockWorkspaceApi();
+    mockWorkspaceApi(false);
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
@@ -224,6 +245,14 @@ describe("Frontend Optimization Plan - Acceptance Criteria Verification", () => 
     expect(inspector).toBeInTheDocument();
 
     // The drawer is not rendered until opened
+    expect(screen.queryByTestId("scene-model-settings-drawer")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "去设置模型" }));
+    expect(await screen.findByTestId("scene-model-settings-drawer")).toBeInTheDocument();
+    expect(screen.getByTestId("cinematic-canvas")).toHaveAttribute(
+      "data-shot-id",
+      SHOT_IMAGE_STAGE.id,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^关闭$/ }));
     expect(screen.queryByTestId("scene-model-settings-drawer")).not.toBeInTheDocument();
 
     // Verify 场景连播 button is in the scene header and can launch the player modal
@@ -255,7 +284,7 @@ describe("Frontend Optimization Plan - Acceptance Criteria Verification", () => 
         "image_keyframe",
       ),
     );
-    expect(screen.getByTestId("production-stage-indicator")).toHaveTextContent("画面打样 (文生图)");
+    expect(screen.getByTestId("production-stage-indicator")).toHaveTextContent("画面打样");
     expect(screen.getByTestId("production-preflight-image_keyframe")).toHaveTextContent("生图模型");
     expect(screen.getByTestId("generate-keyframe")).toBeInTheDocument();
 
@@ -273,7 +302,7 @@ describe("Frontend Optimization Plan - Acceptance Criteria Verification", () => 
       ),
     );
     expect(screen.getByTestId("production-stage-indicator")).toHaveTextContent(
-      "视频生成 (图生视频)",
+      "视频生成 (正式画面作为首帧)",
     );
     expect(screen.getByTestId("production-preflight-video")).toHaveTextContent("视频模型");
     expect(screen.getByTestId("production-preflight-source-frame")).toHaveTextContent(
@@ -345,29 +374,28 @@ describe("Frontend Optimization Plan - Acceptance Criteria Verification", () => 
     });
 
     // 1. Animatic Player: launches continuous sequence preview
-    const closeAnimatic = vi.fn();
     render(
-      <SceneAnimaticPlayer
+      <SceneAnimaticPreview
         projectId={PROJECT_ID}
-        sceneName="雨夜车站"
         shots={[SHOT_IMAGE_STAGE, SHOT_VIDEO_STAGE, SHOT_COMPLETED]}
-        onClose={closeAnimatic}
       />,
     );
 
-    expect(screen.getByTestId("scene-animatic-player-dialog")).toBeInTheDocument();
-    expect(screen.getByTestId("animatic-screen")).toBeInTheDocument();
-    expect(screen.getByTestId("animatic-subtitle")).toHaveTextContent("这雨不会停了。");
-    expect(screen.getByTestId("animatic-shot-badge")).toHaveTextContent("#1 · 特写");
+    expect(screen.getByTestId("scene-animatic")).toHaveAttribute(
+      "data-shot-id",
+      SHOT_IMAGE_STAGE.id,
+    );
+    expect(screen.getByText("对白参考：这雨不会停了。")).toBeInTheDocument();
+    expect(screen.getByTestId("animatic-play-toggle")).toHaveTextContent("播放");
 
     // Stepper to next shot
-    fireEvent.click(screen.getByTestId("animatic-next-btn"));
-    expect(screen.getByTestId("animatic-shot-badge")).toHaveTextContent("#2 · 中景 · 关键帧");
+    fireEvent.click(screen.getByRole("button", { name: "下一镜" }));
+    expect(screen.getByAltText("镜头 2 正式画面")).toBeInTheDocument();
 
     // Stepper to shot 3 (which has video)
-    fireEvent.click(screen.getByTestId("animatic-next-btn"));
-    expect(screen.getByTestId("animatic-shot-badge")).toHaveTextContent("#3 · 远景 · 正式视频");
-    expect(screen.getByTestId("animatic-video-player")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "下一镜" }));
+    expect(screen.getByTestId("scene-animatic")).toHaveAttribute("data-shot-id", SHOT_COMPLETED.id);
+    expect(screen.getByLabelText<HTMLVideoElement>("动态分镜视频").muted).toBe(true);
 
     // 2. Continuity Overlay: in ShotCandidateTray, allows toggling character reference baseline
     const candidates = [

@@ -22,6 +22,18 @@ Migration authority: [DATA_MODEL.md](DATA_MODEL.md)
 
 ## Route ownership
 
+素材引用仍使用 `ShotReferenceBinding` 的 CRUD 与 `references/resolve`。
+解析结果明确返回 `binding_id`、`stage`、Artifact ID、真实 MIME 和内容指纹；前端不从名字或
+展示标签猜测绑定身份。`@标签` 在同一 Shot 内唯一，非法/重复标签分别返回
+`REFERENCE_LABEL_INVALID` / `REFERENCE_LABEL_CONFLICT`，更新继续要求 `expected_version`。
+`execution-plan` 根据保存的绑定顺序和 AssetVersionReference 顺序编译编号，将原始提示词
+保存在 `semantic_intent.source_prompt`，标签到 Artifact/版本/编号映射保存在
+`semantic_intent.prompt_reference_map`。未解析标签拒绝预检；顺序、标签及绑定版本变化影响计划指纹。
+已接受 NodeRun 的 Worker 继续消费冻结提示词及完整 Artifact 列表，不再解析可变资产名称或当前版本。
+预检按所选能力及输入合同校验项目比例；固定/枚举输出比例冲突返回
+`MODEL_OUTPUT_ASPECT_RATIO_UNSUPPORTED`，不会创建 NodeRun 或调用 Provider。提交继续重验同一合同，
+不通过改写比例或替换模型修复冲突。
+
 `DELETE /api/v1/projects/{project_id}?expected_version=N` requires Owner workspace access
 and CSRF. Stale versions and active NodeRun/Director work return 409. Success returns 204,
 hides the project from lists and denies subsequent workbench access. Historical execution,
@@ -129,12 +141,33 @@ evidence, never an approval.
 - Asset status is `draft | active | recycled`; AssetVersion status is
   `candidate | formal | historical | rejected`. Ordinary Asset creation makes
   v1 Formal and stores it in `current_version_id`; `archived` is rejected.
+- Scene summaries include `pending_review_count`, `generating_count`,
+  `failed_count` and `unknown_count`, counting Shots with each independent fact.
+  Workspace `overview` exposes the corresponding typed flags by Shot ID.
+  `risk_count` counts Shots with a failed/blocked latest media attempt or an
+  unknown Provider outcome. This read projection replaces the old raw
+  Shot.status risk heuristic; it does not write lifecycle state or imply Formal.
+  Superseded attempts and decisions follow the same ordering and fingerprint
+  rules as the workbench. `SceneSummaryService` lives in `app/workbench/scene_summary.py`.
 - Asset create/update accepts top-level `tags`. `asset_tags` and
   `asset_tag_links` are the only tag query source; `metadata.tags` has no
   runtime meaning.
 - `PATCH …/edit-sessions/{session_id}/timeline` requires
   `expected_session_version`, locks the row, and returns 409 without mutation
   when the loaded version is stale.
+- `POST …/edit-sessions/{session_id}/preview-plan` accepts the same editable
+  timeline and `expected_session_version`. It only reads project-owned Formal
+  references and returns the export's millisecond trim/duration/subtitle map,
+  selected existing voice identity, clip volume and unsupported effects.
+  It does not Save, prepare a tail, queue a NodeRun or create a Provider operation.
+  Stale baselines and invalid media use the existing validation errors.
+  `audio_volume` defaults to 1 when absent; Save, preview and render validate
+  its finite 0–1 range and a boolean `muted`. Source video audio is replaced by
+  selected/default voice or silence, as in Final Film rendering.
+- Authenticated Artifact content supports single HTTP byte ranges (206 and
+  `Content-Range`) for native seek; invalid ranges return 416. Project ownership
+  is checked before delivery. The current ObjectStore still reads whole bytes
+  internally; range delivery does not establish bounded-memory streaming.
 - `GET …/creative-capabilities/catalog` projects Genre, Style, Shot Language,
   Quality Policy, Skills, and staged strategies from the backend registries;
   the same registries validate Freeze requests.
@@ -233,7 +266,7 @@ Editing 继续使用既有 EditSession timeline 和乐观版本。预览和导�
 
 | 对象 | 用户是否需要该能力 | 当前处置与权威替代 |
 |---|---|---|
-| video-frames / 视频采样证据 | 需要，人工审片需比较时间上的变化 | KEEP + DESIGN；接口暂保留，下节是完整消费设计，尚未实现 |
+| video-frames / 视频采样证据 | 需要，人工审片需比较时间上的变化 | 已由相邻镜头对照消费首/末帧；下节仍含待完成的深入审片目标 |
 | 项目 dispatch / NodeRun enqueue HTTP | 需要生成/修复/恢复，不需要控制队列 | 退役这两个 HTTP helper；保留内部 scheduler 与 Worker 调用，使用既有 executions/receipt、repairs、maintenance recovery |
 | worker/tick、provider-reference token、status/metrics | Worker、Provider、运维需要，不是创作页面 | 保留；不为了制造消费者而增加前端按钮 |
 | TEXT_LLM_* 与旧文本凭证写面 | 需要文本模型，不需要旧凭证入口 | 当前文本 HTTP adapter 消费部署配置或空间连接；沿用 ProviderConnection 与模型选择，不恢复旧环境变量/写面；来源隔离缺口见 MODEL_PROVIDER |

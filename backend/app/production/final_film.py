@@ -13,7 +13,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,6 +25,7 @@ from app.assets.models import Shot
 from app.config import get_settings
 from app.delivery.models import Export, ExportItem
 from app.editing.models import EditSession
+from app.editing.timeline_rules import clip_audio_volume
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.branches import branch_priority
 from app.execution.experiment_nodes import queue_branch_nodes
@@ -132,6 +133,7 @@ class _TimelineRef:
     audio_id: UUID | None
     transition_kind: str | None
     transition_duration_seconds: float
+    audio_volume: float
     raw_clip: dict[str, Any]
 
 
@@ -196,6 +198,7 @@ async def _load_timeline_refs(
     project_id: UUID,
     edit_session_id: UUID,
     expected_timeline_version: int | None,
+    draft_timeline: dict[str, Any] | None = None,
 ) -> tuple[EditSession, list[_TimelineRef]]:
     row = await session.scalar(
         select(EditSession).where(
@@ -214,7 +217,7 @@ async def _load_timeline_refs(
                 "actual": row.version,
             },
         )
-    raw_clips = (row.timeline or {}).get("clips")
+    raw_clips = (draft_timeline if draft_timeline is not None else row.timeline or {}).get("clips")
     if not isinstance(raw_clips, list):
         raise ValidationAppError(
             "edit session timeline clips must be a list",
@@ -321,6 +324,7 @@ async def _load_timeline_refs(
                     details={"code": "INVALID_TIMELINE_AUDIO_ID", "clip_id": clip_id},
                 ) from exc
         transition_kind, transition_duration = _transition(raw.get("transition"))
+        audio_volume = clip_audio_volume(raw)
         subtitle = raw.get("subtitle") if isinstance(raw.get("subtitle"), str) else None
         subtitle_enabled = raw.get("subtitle_enabled")
         if subtitle_enabled is not None and not isinstance(subtitle_enabled, bool):
@@ -343,6 +347,7 @@ async def _load_timeline_refs(
                 audio_id=audio_id,
                 transition_kind=transition_kind,
                 transition_duration_seconds=transition_duration,
+                audio_volume=audio_volume,
                 raw_clip=raw,
             )
         )
@@ -359,8 +364,6 @@ async def _formal_shots_for_refs(
     shots: list[Shot] = []
     seen: set[UUID] = set()
     for ref in refs:
-        if ref.shot_id in seen:
-            continue
         shot = await session.get(Shot, ref.shot_id)
         if shot is None or shot.project_id != project_id:
             raise ValidationAppError(
@@ -379,8 +382,9 @@ async def _formal_shots_for_refs(
                     else None,
                 },
             )
-        seen.add(ref.shot_id)
-        shots.append(shot)
+        if ref.shot_id not in seen:
+            seen.add(ref.shot_id)
+            shots.append(shot)
     return shots
 
 
@@ -664,6 +668,7 @@ def _snapshot_refs(snapshot: dict[str, object]) -> list[_TimelineRef]:
                 else None,
                 transition_kind=transition_kind,
                 transition_duration_seconds=transition_duration,
+                audio_volume=clip_audio_volume(raw),
                 raw_clip=raw,
             )
         )
@@ -931,6 +936,167 @@ async def _assert_delivery_reviews(
                 "review_kind": admission.review_kind,
             },
         )
+
+
+class TimelinePreviewClipRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    clip_id: str
+    video_artifact_id: UUID
+    start_ms: int
+    end_ms: int
+    source_in_ms: int
+    source_out_ms: int
+    duration_ms: int
+    subtitle_text: str
+    audio_artifact_id: UUID | None
+    audio_state: Literal["available", "muted", "none", "unavailable"]
+    audio_volume: float
+
+
+class TimelinePreviewRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    edit_session_id: UUID
+    baseline_version: int
+    draft_fingerprint: str
+    duration_ms: int
+    clips: list[TimelinePreviewClipRead]
+    unsupported: list[str]
+
+
+async def preview_timeline(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    edit_session_id: UUID,
+    expected_timeline_version: int,
+    draft_timeline: dict[str, Any],
+) -> TimelinePreviewRead:
+    """Read-only draft instructions using the exact export reference and timing rules."""
+    from app.production.timeline_renderer import TimelineRenderClip
+    from app.production.timeline_subtitles import (
+        TimelineTimingError,
+        build_timeline_subtitles,
+        normalize_subtitle_text,
+    )
+
+    row, refs = await _load_timeline_refs(
+        session,
+        project_id=project_id,
+        edit_session_id=edit_session_id,
+        expected_timeline_version=expected_timeline_version,
+        draft_timeline=draft_timeline,
+    )
+    shots = {
+        shot.id: shot
+        for shot in await _formal_shots_for_refs(session, project_id=project_id, refs=refs)
+    }
+    instructions: list[TimelineRenderClip] = []
+    audio_states: list[Literal["available", "muted", "none", "unavailable"]] = []
+    unsupported: list[str] = []
+    for index, ref in enumerate(refs):
+        if index > 0 and ref.transition_kind == "crossfade":
+            unsupported.append("crossfade")
+        audio_id = ref.audio_id
+        audio_state: Literal["available", "muted", "none", "unavailable"] = "none"
+        if bool(ref.raw_clip.get("muted")):
+            audio_state = "muted"
+            audio_id = None
+        else:
+            if audio_id is None:
+                try:
+                    composite, _artifact = await _latest_formal_composite(
+                        session, project_id=project_id, ref=ref, shot=shots[ref.shot_id]
+                    )
+                    media = (composite.input_snapshot or {}).get("media_inputs")
+                    voice = media.get("voice") if isinstance(media, dict) else None
+                    if isinstance(voice, dict) and voice.get("artifact_id"):
+                        audio_id = UUID(str(voice["artifact_id"]))
+                except ValidationAppError as exc:
+                    if exc.details.get("code") != "FORMAL_COMPOSITE_MISSING":
+                        raise
+                    if shots[ref.shot_id].dialogue:
+                        audio_state = "unavailable"
+            if audio_id is not None:
+                artifact = await session.get(Artifact, audio_id)
+                if (
+                    artifact is None
+                    or artifact.project_id != project_id
+                    or artifact.artifact_type != "audio"
+                    or artifact.storage_state != "available"
+                    or artifact.deleted_at is not None
+                ):
+                    raise ValidationAppError(
+                        "Timeline preview audio is not available in this project",
+                        details={"code": "TIMELINE_AUDIO_SCOPE", "clip_id": ref.clip_id},
+                    )
+                audio_state = "available"
+        if audio_state == "unavailable":
+            unsupported.append("voice_unavailable")
+        audio_states.append(audio_state)
+        instructions.append(
+            TimelineRenderClip(
+                clip_id=ref.clip_id,
+                video_artifact_id=str(ref.artifact_id),
+                video_bytes=b"",
+                audio_bytes=None,
+                subtitle_text=""
+                if ref.subtitle_enabled is False
+                else ref.subtitle
+                if ref.subtitle is not None
+                else shots[ref.shot_id].dialogue,
+                source_in_seconds=ref.source_in_seconds,
+                source_out_seconds=_number(
+                    ref.raw_clip.get("source_out_seconds", ref.raw_clip.get("trim_end_seconds")),
+                    default=None,
+                    code="INVALID_TIMELINE_SOURCE_OUT",
+                ),
+                duration_seconds=ref.duration_seconds,
+                transition_kind=ref.transition_kind,
+                transition_duration_seconds=ref.transition_duration_seconds,
+                audio_artifact_id=str(audio_id) if audio_id is not None else None,
+                audio_volume=ref.audio_volume,
+            )
+        )
+    metadata = draft_timeline.get("metadata") or {}
+    if isinstance(metadata, dict) and metadata.get("music_artifact_id"):
+        unsupported.append("background_music")
+    try:
+        timing = build_timeline_subtitles(instructions)
+    except TimelineTimingError as exc:
+        raise ValidationAppError(str(exc), details={"code": "INVALID_TIMELINE_TIMING"}) from exc
+    clips = [
+        TimelinePreviewClipRead(
+            clip_id=clip.clip_id,
+            video_artifact_id=UUID(clip.video_artifact_id),
+            start_ms=clock.start_ms,
+            end_ms=clock.end_ms,
+            source_in_ms=clock.source_in_ms,
+            source_out_ms=clock.source_out_ms,
+            duration_ms=clock.duration_ms,
+            subtitle_text=normalize_subtitle_text(clip.subtitle_text),
+            audio_artifact_id=UUID(clip.audio_artifact_id) if clip.audio_artifact_id else None,
+            audio_state=audio_state,
+            audio_volume=clip.audio_volume,
+        )
+        for clip, clock, audio_state in zip(instructions, timing.clips, audio_states, strict=True)
+    ]
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {"draft": draft_timeline, "clips": [clip.model_dump(mode="json") for clip in clips]},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    return TimelinePreviewRead(
+        edit_session_id=row.id,
+        baseline_version=row.version,
+        draft_fingerprint=fingerprint,
+        duration_ms=timing.duration_ms,
+        clips=clips,
+        unsupported=sorted(set(unsupported)),
+    )
 
 
 async def queue_final_film_render(
@@ -1338,6 +1504,7 @@ async def execute_final_film_node_run(
                     transition_kind=ref.transition_kind,
                     transition_duration_seconds=ref.transition_duration_seconds,
                     audio_artifact_id=str(selected_audio_id) if selected_audio_id else None,
+                    audio_volume=ref.audio_volume,
                 )
             )
             formal_lineage.append(

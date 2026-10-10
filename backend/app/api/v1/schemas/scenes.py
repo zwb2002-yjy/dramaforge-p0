@@ -29,6 +29,10 @@ class SceneSummaryRead(BaseModel):
     formal_keyframe_count: int
     formal_video_count: int
     risk_count: int
+    pending_review_count: int
+    generating_count: int
+    failed_count: int
+    unknown_count: int
     representative_artifact: ArtifactSummaryRead | None
 
 
@@ -66,6 +70,13 @@ class SceneOperationPreviewRead(BaseModel):
     affected: dict[str, object]
 
 
+class ShotOverviewRead(BaseModel):
+    pending_review: bool
+    generating: bool
+    generation_failed: bool
+    outcome_unknown: bool
+
+
 class SceneWorkspaceRead(BaseModel):
     """Scene-scoped workspace snapshot.
 
@@ -79,3 +90,4 @@ class SceneWorkspaceRead(BaseModel):
     references: dict[str, list[BindingRead]]
     candidates: dict[str, list[object]]
     trace: dict[str, list[object]]
+    overview: dict[str, ShotOverviewRead]

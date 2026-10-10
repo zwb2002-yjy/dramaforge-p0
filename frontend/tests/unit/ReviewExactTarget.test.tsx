@@ -198,3 +198,19 @@ it("shows a read error, not an empty-material claim, when workbench fails", asyn
   expect(screen.queryByTestId("review-keyframe-missing")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "重新读取素材" })).toBeEnabled();
 });
+
+it("opens a shot-only review link at the chosen shot without claiming an exact Artifact", async () => {
+  const { writes } = mockApi();
+  show({ shotId: "s1" });
+  const player = await screen.findByLabelText("正式视频审片播放器");
+  expect(player).toHaveAttribute("src", "/api/v1/projects/p1/artifacts/formal-A/content");
+  expect(screen.getByLabelText("当前镜头")).toHaveValue("s1");
+  expect(writes).toEqual([]);
+});
+
+it("refuses a foreign shot-only link rather than displaying the first shot", async () => {
+  mockApi();
+  show({ shotId: "foreign" });
+  expect(await screen.findByRole("alert")).toHaveTextContent("不在当前项目");
+  expect(screen.queryByLabelText("正式视频审片播放器")).not.toBeInTheDocument();
+});

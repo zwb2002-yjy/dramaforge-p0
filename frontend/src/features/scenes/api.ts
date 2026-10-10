@@ -7,6 +7,7 @@ export type { ShotLite } from "../shots/api";
 
 export type SceneSummary = components["schemas"]["SceneSummaryRead"];
 export type SceneWorkspaceRead = components["schemas"]["SceneWorkspaceRead"];
+export type ShotOverviewRead = components["schemas"]["ShotOverviewRead"];
 export type BindingLite = components["schemas"]["app__api__v1__schemas__workbench__BindingRead"];
 
 export function fetchScenes(projectId: string): Promise<SceneSummary[]> {

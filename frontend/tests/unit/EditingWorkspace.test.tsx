@@ -1319,3 +1319,26 @@ it("saves chosen audio Artifacts and an explicit mute only through timeline Save
     ],
   });
 });
+
+it("selects the same clip in the visual timeline, source preview and inspector without saving", async () => {
+  const writes: string[] = [];
+  mockEditingFetch((input, init) => {
+    const url = String(input);
+    if ((init?.method ?? "GET") !== "GET") writes.push(url);
+    if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+    return json({});
+  });
+  renderPersistedSession();
+  await screen.findByTestId("editing-visual-track");
+  expect(screen.getByTestId("editing-track-clip-0")).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByTestId("editing-track-clip-1"));
+  expect(screen.getByTestId("editing-track-clip-1")).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByTestId("editing-clip-focus-1")).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getAllByTestId("edit-session-clip")[1]).toHaveAttribute("data-selected", "true");
+  expect(screen.getByLabelText("片段 2 原始视频预览")).toHaveAttribute(
+    "src",
+    `/api/v1/projects/${PROJECT_ID}/artifacts/artifact-formal-2/content`,
+  );
+  expect(screen.getByTestId("save-edit-timeline")).toBeDisabled();
+  expect(writes).toEqual([]);
+});

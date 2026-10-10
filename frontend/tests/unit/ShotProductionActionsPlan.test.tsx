@@ -64,7 +64,7 @@ const PREVIEW = {
   },
 };
 
-function mockApi() {
+function mockApi(preview: typeof PREVIEW = PREVIEW) {
   vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = String(input);
     if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
@@ -107,7 +107,7 @@ function mockApi() {
         ],
       });
     }
-    if (url.includes("/execution-plan") && init?.method === "POST") return json(PREVIEW);
+    if (url.includes("/execution-plan") && init?.method === "POST") return json(preview);
     return json({});
   });
 }
@@ -171,4 +171,25 @@ describe("ShotProductionActions plan preview vocabulary", () => {
     expect(diagnostics).toHaveTextContent("does not declare input slot");
     expect(diagnostics).not.toHaveAttribute("open");
   });
+});
+
+it("keeps exact adaptation details accessible but collapsed by default", async () => {
+  mockApi({
+    ...PREVIEW,
+    plan: {
+      ...PREVIEW.plan,
+      planned_references: PREVIEW.plan.planned_references.slice(0, 1),
+      capability_gaps: [],
+    },
+  });
+  renderActions();
+  const generate = await screen.findByRole("button", { name: "重新生成画面" });
+  await waitFor(() => expect(generate).toBeEnabled());
+  fireEvent.click(generate);
+  const details = await screen.findByTestId("shot-exact-plan-details");
+  expect(details).not.toHaveAttribute("open");
+  expect(screen.getByTestId("shot-execution-plan-model")).toHaveTextContent(
+    "执行模型：Agnes Image Flash",
+  );
+  expect(screen.getByTestId("shot-execution-plan-references")).toHaveTextContent("完全支持 1");
 });

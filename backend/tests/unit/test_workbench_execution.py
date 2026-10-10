@@ -984,6 +984,36 @@ async def test_video_plan_injects_formal_keyframe_reference(session: AsyncSessio
     assert first_frame[0].artifact_id == artifact.id
 
 
+@pytest.mark.parametrize("stage", ["image_keyframe", "video"])
+async def test_preview_rejects_project_ratio_outside_model_contract_before_dispatch(
+    session: AsyncSession, stage: str
+) -> None:
+    project, video_binding, user = await _seed(session)
+    if stage == "image_keyframe":
+        shot, _artifact, binding = await _seed_image_shot(
+            session, project=project, user=user, connection_id=video_binding.connection_id
+        )
+    else:
+        shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+        binding = video_binding
+    project.aspect_ratio = "16:9"
+    await session.flush()
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    command = _input(shot_id=shot.id, stage=stage, requested_binding_id=binding.id)
+    existing_runs = list((await session.scalars(select(NodeRun.id))).all())
+    with pytest.raises(WorkbenchExecutionError, match="aspect ratio 16:9") as error:
+        await service.build_plan(project=project, execution_input=command)
+    assert error.value.details == {
+        "code": "MODEL_OUTPUT_ASPECT_RATIO_UNSUPPORTED",
+        "aspect_ratio": "16:9",
+        "supported": ["9:16"],
+    }
+    with pytest.raises(WorkbenchExecutionError, match="aspect ratio 16:9"):
+        await service.create_and_dispatch(project=project, execution_input=command)
+    assert list((await session.scalars(select(NodeRun.id))).all()) == existing_runs
+    assert list((await session.scalars(select(ProviderOperation))).all()) == []
+
+
 @pytest.mark.asyncio
 async def test_new_contract_auto_matches_formal_and_rejects_reference_conflict(
     session: AsyncSession,

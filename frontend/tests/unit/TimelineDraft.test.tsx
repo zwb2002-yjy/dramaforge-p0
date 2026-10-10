@@ -29,6 +29,30 @@ function mount() {
 }
 
 describe("Timeline draft lifecycle", () => {
+  it("updates a cropped clip atomically and rejects a moved clip's stale track index", () => {
+    const { result } = mount();
+    const original = result.current.draft!.clips[0];
+    act(() =>
+      result.current.replaceClip(0, {
+        ...original,
+        source_in_seconds: 1,
+        source_out_seconds: 3,
+        duration_seconds: 2,
+      }),
+    );
+    expect(result.current.draft!.clips[0]).toMatchObject({
+      id: "c1",
+      shot_id: "shot1",
+      source_in_seconds: 1,
+      source_out_seconds: 3,
+      duration_seconds: 2,
+    });
+    expect(result.current.baseline!.clips[0].duration_seconds).toBe(3);
+    expect(result.current.dirty).toBe(true);
+    act(() => result.current.reorderClip(0, 1));
+    act(() => result.current.replaceClip(0, { ...original, duration_seconds: 99 }));
+    expect(result.current.draft!.clips[0]).toMatchObject({ id: "c2", duration_seconds: 4 });
+  });
   it("refreshes a clean draft, but preserves dirty content and its baseline version", () => {
     const { result, rerender } = mount();
     rerender({ persisted: session("s1", 2) });

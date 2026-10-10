@@ -20,6 +20,7 @@ import {
   stageQueueEstimate,
 } from "../production/sceneRunState";
 import { fetchDirectorCapabilities } from "../director/api";
+import { fetchShotReferences } from "../assets/api";
 import {
   delegateShotExecutionToDirector,
   fetchShotExecutionReceipt,
@@ -50,6 +51,7 @@ import {
 } from "./productionOperationStore";
 
 type ShotProductionActionsProps = {
+  promptReferencesReady?: { image_keyframe: boolean; video: boolean };
   projectId: string;
   shot: ShotLite;
   references?: ShotExecutionReference[];
@@ -173,6 +175,7 @@ export function ShotProductionActions({
   shot,
   references = [],
   referencesReady = true,
+  promptReferencesReady = { image_keyframe: true, video: true },
   dirty = false,
   trace = [],
   onExecuted,
@@ -185,8 +188,21 @@ export function ShotProductionActions({
   onOpenModelSettings,
 }: ShotProductionActionsProps) {
   const queryClient = useQueryClient();
+  const savedBindings = useQuery({
+    queryKey: queryKeys.asset.shotReferences(projectId, shot.id),
+    queryFn: () => fetchShotReferences(projectId, shot.id),
+  });
   const delegationDecisionIds = useRef(new Map<string, string>());
-  const lastFrameCount = references.filter(
+  const forStage = (stage: "image" | "video") =>
+    references.filter((reference) => {
+      const row = (Array.isArray(savedBindings.data) ? savedBindings.data : []).find(
+        (binding) => binding.id === reference.binding_id,
+      );
+      return !row || row.stage === "both" || row.stage === stage;
+    });
+  const imageReferences = forStage("image");
+  const videoReferences = forStage("video");
+  const lastFrameCount = videoReferences.filter(
     (reference) => reference.purpose === "last_frame",
   ).length;
   // The mode follows saved facts until the creator picks one explicitly.
@@ -204,7 +220,7 @@ export function ShotProductionActions({
         isConfirmableShotCandidate(candidate) &&
         candidate.reviewDecision !== "rejected",
     ).length;
-  const referenceVideoCount = references.filter((reference) =>
+  const referenceVideoCount = videoReferences.filter((reference) =>
     [
       "identity",
       "clothing",
@@ -320,20 +336,42 @@ export function ShotProductionActions({
       requested_binding_id: null,
       accept_approximations: false,
       references: (stage !== "video"
-        ? references
+        ? imageReferences
         : videoMode === "text_to_video"
           ? []
           : videoMode === "last_frame" || videoMode === "first_last_frame"
-            ? references.filter((reference) => reference.purpose === "last_frame")
+            ? videoReferences.filter((reference) => reference.purpose === "last_frame")
             : videoMode === "omni_reference"
-              ? references.filter(
+              ? videoReferences.filter(
                   (reference) => !["first_frame", "last_frame"].includes(reference.purpose),
                 )
-              : references
-      ).map((reference) => ({ ...reference })),
+              : videoReferences
+      )
+        .filter((reference) => {
+          const row = (Array.isArray(savedBindings.data) ? savedBindings.data : []).find(
+            (binding) => binding.id === reference.binding_id,
+          );
+          return (
+            !row || row.stage === "both" || row.stage === (stage === "video" ? "video" : "image")
+          );
+        })
+        .map((reference) => ({ ...reference })),
       expected_shot_version: shot.version,
     };
   }
+
+  const inspectPlan = useMutation({
+    retry: false,
+    mutationFn: (stage: ShotExecutionStage) => {
+      if (dirty || !referencesReady || !promptReferencesReady[stage])
+        throw new Error("请先保存镜头并处理未解析的素材引用。");
+      return previewShotExecution(projectId, shot.id, executionInput(stage));
+    },
+    onSuccess: (plan) => setDisplayedPlan(plan),
+  });
+  useEffect(() => {
+    setDisplayedPlan(null);
+  }, [shot.version, dirty, references, videoMode, savedBindings.data, modelPreflight.data]);
 
   async function refreshAfterExecution(result: ShotExecutionRead): Promise<void> {
     await Promise.all([
@@ -595,6 +633,7 @@ export function ShotProductionActions({
   };
 
   const busy =
+    inspectPlan.isPending ||
     produce.isPending ||
     delegate.isPending ||
     confirmApproximation.isPending ||
@@ -604,6 +643,7 @@ export function ShotProductionActions({
     Boolean(keyframeStatus) ||
     keyframeOutcomeUnknown ||
     !referencesReady ||
+    !promptReferencesReady.image_keyframe ||
     dirty ||
     preflightBlocks("image_keyframe");
   const videoDisabled =
@@ -611,6 +651,7 @@ export function ShotProductionActions({
     Boolean(videoStatus) ||
     videoOutcomeUnknown ||
     (videoMode !== "text_to_video" && !referencesReady) ||
+    !promptReferencesReady.video ||
     dirty ||
     (videoMode === "first_frame" && !shot.formal_keyframe_artifact_id) ||
     (videoMode === "first_last_frame" && !shot.formal_keyframe_artifact_id) ||
@@ -628,7 +669,15 @@ export function ShotProductionActions({
     videoStatus,
     keyframeUnknown: keyframeOutcomeUnknown,
     videoUnknown: videoOutcomeUnknown,
-    referencesReady,
+    referencesReady:
+      referencesReady &&
+      promptReferencesReady[
+        shot.formal_keyframe_artifact_id ||
+        videoMode === "text_to_video" ||
+        videoMode === "last_frame"
+          ? "video"
+          : "image_keyframe"
+      ],
     videoMode,
     lastFrameCount,
     referenceCount: referenceVideoCount,
@@ -760,7 +809,7 @@ export function ShotProductionActions({
         <div data-testid="production-stage-indicator">
           <dt>阶段</dt>
           <dd data-testid={`stage-indicator-${focusStage}`}>
-            {focusStage === "video" ? "视频生成 (图生视频)" : "画面打样 (文生图)"}
+            {focusStage === "video" ? `视频生成 (${VIDEO_MODE_LABEL[videoMode]})` : "画面打样"}
           </dd>
         </div>
         <div data-testid={`production-preflight-${focusStage}`}>
@@ -771,12 +820,14 @@ export function ShotProductionActions({
           <dt>{focusStage === "video" ? "视频输入" : "画面输入"}</dt>
           <dd>{inputText}</dd>
         </div>
-        {focusStage === "video" && Boolean(shot.formal_keyframe_artifact_id) && (
-          <div data-testid="production-preflight-source-frame">
-            <dt>基准画面</dt>
-            <dd>已绑定正式关键帧</dd>
-          </div>
-        )}
+        {focusStage === "video" &&
+          (videoMode === "first_frame" || videoMode === "first_last_frame") &&
+          Boolean(shot.formal_keyframe_artifact_id) && (
+            <div data-testid="production-preflight-source-frame">
+              <dt>基准画面</dt>
+              <dd>已绑定正式关键帧</dd>
+            </div>
+          )}
       </dl>
 
       <Button
@@ -805,6 +856,19 @@ export function ShotProductionActions({
               去设置模型
             </a>
           )}
+        </p>
+      )}
+      <Button
+        tone="ghost"
+        data-testid="inspect-shot-plan"
+        disabled={busy || dirty || !referencesReady || !promptReferencesReady[focusStage]}
+        onClick={() => inspectPlan.mutate(focusStage)}
+      >
+        {inspectPlan.isPending ? "正在核对输入…" : "查看生成预检"}
+      </Button>
+      {inspectPlan.isError && (
+        <p className="df-shot-hint err" role="alert">
+          预检未通过：{errorMessage(inspectPlan.error)}
         </p>
       )}
 
@@ -878,12 +942,52 @@ export function ShotProductionActions({
           <strong>模型适配：{referenceDeliveryLabel(delivery)}</strong>
           {displayedPlan && (
             <>
-              <p data-testid="shot-execution-plan-model">执行模型：{planModel.label}</p>
-              <p data-testid="shot-execution-plan-references">
-                引用：完全支持 {plannedReferences.filter((row) => row.delivery === "exact").length}{" "}
-                · 近似 {plannedReferences.filter((row) => row.delivery === "approximate").length} ·
-                不支持 {plannedReferences.filter((row) => row.delivery === "unsupported").length}
+              <p data-testid="shot-execution-plan-prompt">
+                最终提示词：{displayedPlan.plan.prompt}
               </p>
+              {Array.isArray(displayedPlan.plan.semantic_intent?.prompt_reference_map) && (
+                <ul data-testid="shot-prompt-reference-map">
+                  {displayedPlan.plan.semantic_intent.prompt_reference_map.map((row, index) => {
+                    if (
+                      !row ||
+                      typeof row !== "object" ||
+                      Array.isArray(row) ||
+                      typeof row.label !== "string" ||
+                      typeof row.notation !== "string"
+                    )
+                      return null;
+                    return (
+                      <li key={index}>
+                        {row.label} → {row.notation}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {delivery === "exact" ? (
+                <details className="df-shot-plan-details" data-testid="shot-exact-plan-details">
+                  <summary>查看本次模型与参考</summary>
+                  <p data-testid="shot-execution-plan-model">执行模型：{planModel.label}</p>
+                  <p data-testid="shot-execution-plan-references">
+                    引用：完全支持{" "}
+                    {plannedReferences.filter((row) => row.delivery === "exact").length} · 近似{" "}
+                    {plannedReferences.filter((row) => row.delivery === "approximate").length} ·
+                    不支持{" "}
+                    {plannedReferences.filter((row) => row.delivery === "unsupported").length}
+                  </p>
+                </details>
+              ) : (
+                <>
+                  <p data-testid="shot-execution-plan-model">执行模型：{planModel.label}</p>
+                  <p data-testid="shot-execution-plan-references">
+                    引用：完全支持{" "}
+                    {plannedReferences.filter((row) => row.delivery === "exact").length} · 近似{" "}
+                    {plannedReferences.filter((row) => row.delivery === "approximate").length} ·
+                    不支持{" "}
+                    {plannedReferences.filter((row) => row.delivery === "unsupported").length}
+                  </p>
+                </>
+              )}
               {(displayedPlan.plan.capability_gaps ?? []).map((gap, index) => {
                 const gapReason = capabilityGapReason(gap.reason);
                 return (
