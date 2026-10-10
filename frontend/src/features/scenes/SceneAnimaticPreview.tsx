@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { Button } from "../../components/ui";
+import { Button, Select } from "../../components/ui";
 import { artifactContentUrl } from "../../lib/api";
-import type { ShotLite } from "./api";
+import {
+  isConfirmableShotCandidate,
+  parseShotCandidates,
+  shotCandidateKey,
+} from "../shots/shotCandidates";
+import type { SceneWorkspaceRead, ShotLite } from "./api";
 import "./scene-animatic.css";
 
 /** Client-only playback of server-selected media. Never creates a production run or Formal. */
@@ -14,9 +19,11 @@ function plannedSeconds(shot: ShotLite): number {
 export function SceneAnimaticPreview({
   projectId,
   shots,
+  candidates,
 }: {
   projectId: string;
   shots: ShotLite[];
+  candidates?: SceneWorkspaceRead["candidates"];
 }) {
   const ordered = useMemo(
     () => [...shots].sort((a, b) => a.sort_order - b.sort_order || a.shot_number - b.shot_number),
@@ -38,11 +45,39 @@ export function SceneAnimaticPreview({
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [videoEnded, setVideoEnded] = useState(false);
   const [muted, setMuted] = useState(true);
+  const [selections, setSelections] = useState<Record<string, string>>({});
   const videoRef = useRef<HTMLVideoElement>(null);
   const shot = ordered[index] ?? null;
   const duration = shot ? plannedSeconds(shot) : 0;
-  const videoId = shot?.formal_video_artifact_id ?? null;
-  const frameId = shot?.formal_keyframe_artifact_id ?? null;
+  const availableCandidates = useMemo(
+    () =>
+      parseShotCandidates(shot ? candidates?.[shot.id] : []).filter(
+        (candidate) =>
+          isConfirmableShotCandidate(candidate) &&
+          candidate.artifactId !== shot?.formal_video_artifact_id &&
+          candidate.artifactId !== shot?.formal_keyframe_artifact_id,
+      ),
+    [candidates, shot],
+  );
+  const selectionKey = `${projectId}:${shot?.id ?? ""}`;
+  const selection = selections[selectionKey] ?? "formal";
+  const selectedCandidate = availableCandidates.find(
+    (candidate) => `candidate/${shotCandidateKey(candidate)}` === selection,
+  );
+  const unavailableSelection = selection.startsWith("candidate/") && !selectedCandidate;
+  const videoId =
+    selection === "formal"
+      ? (shot?.formal_video_artifact_id ?? null)
+      : selectedCandidate?.artifactType === "video"
+        ? selectedCandidate.artifactId
+        : null;
+  const frameId =
+    selection === "formal"
+      ? (shot?.formal_keyframe_artifact_id ?? null)
+      : selectedCandidate?.artifactType === "image"
+        ? selectedCandidate.artifactId
+        : null;
+  const sourceLabel = selectedCandidate ? "候选" : "正式";
   const kind = videoId ? "video" : frameId ? "image" : "missing";
   const total = ordered.reduce((sum, item) => sum + plannedSeconds(item), 0);
   const passed = ordered.slice(0, index).reduce((sum, item) => sum + plannedSeconds(item), 0);
@@ -65,8 +100,17 @@ export function SceneAnimaticPreview({
     setMediaError(null);
     setVideoEnded(false);
     setMuted(true);
+    setSelections({});
     if (videoRef.current) videoRef.current.currentTime = 0;
   }, [projectId, mediaIdentity]);
+
+  useEffect(() => {
+    if (unavailableSelection) {
+      setPlaying(false);
+      videoRef.current?.pause();
+      setMediaError("所选候选已不可用，请重新选择预览素材。");
+    }
+  }, [unavailableSelection]);
 
   useEffect(() => {
     if (!playing || (kind === "video" && !videoEnded) || mediaError || !shot) return;
@@ -98,7 +142,7 @@ export function SceneAnimaticPreview({
       live = false;
       video.pause();
     };
-  }, [playing, index, kind, videoEnded]);
+  }, [playing, index, kind, videoEnded, videoId]);
   useEffect(() => {
     if (!playing || kind !== "video" || videoEnded) return;
     let frame = 0;
@@ -110,7 +154,7 @@ export function SceneAnimaticPreview({
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [playing, kind, videoEnded, duration, goNext]);
+  }, [playing, kind, videoEnded, duration, goNext, videoId]);
   useEffect(() => {
     const pauseHidden = () => {
       if (document.hidden) {
@@ -147,6 +191,15 @@ export function SceneAnimaticPreview({
       className="scene-animatic"
       data-testid="scene-animatic"
       data-shot-id={shot.id}
+      data-media-source={
+        selectedCandidate
+          ? "candidate"
+          : unavailableSelection
+            ? "unavailable"
+            : kind === "missing"
+              ? "missing"
+              : "formal"
+      }
       aria-label="动态分镜预览"
     >
       <header>
@@ -157,6 +210,49 @@ export function SceneAnimaticPreview({
           只读预览 · 正式素材优先 · {muted ? "静音" : "使用原视频声音（若有）"} · 不代表剪辑成片
         </p>
       </header>
+      <label className="scene-animatic-source">
+        镜头 {shot.shot_number} 预览素材
+        <Select
+          aria-label={`镜头 ${shot.shot_number} 预览素材`}
+          value={selection}
+          onChange={(event) => {
+            const nextSelection = event.currentTarget.value;
+            videoRef.current?.pause();
+            if (videoRef.current) videoRef.current.currentTime = 0;
+            setPlaying(false);
+            setElapsed(0);
+            setVideoEnded(false);
+            setMediaError(null);
+            setSelections((current) => ({ ...current, [selectionKey]: nextSelection }));
+          }}
+        >
+          <option value="formal">正式素材优先</option>
+          <option value="placeholder">仅显示占位</option>
+          {unavailableSelection && (
+            <option value={selection} disabled>
+              所选候选已不可用
+            </option>
+          )}
+          {availableCandidates.map((candidate, position) => (
+            <option
+              key={shotCandidateKey(candidate)}
+              value={`candidate/${shotCandidateKey(candidate)}`}
+            >
+              候选{candidate.artifactType === "image" ? "画面" : "视频"} {position + 1}
+              {candidate.reviewDecision === "rejected"
+                ? "（已拒绝）"
+                : candidate.reviewDecision === "approved"
+                  ? "（审核通过）"
+                  : "（待审）"}
+            </option>
+          ))}
+        </Select>
+      </label>
+      {selectedCandidate && (
+        <p role="status">
+          候选{kind === "video" ? "视频" : "画面"} · 仅本地预览 · 尚未改变正式素材
+        </p>
+      )}
       <div className="scene-animatic-media">
         {kind === "video" ? (
           <video
@@ -183,22 +279,26 @@ export function SceneAnimaticPreview({
             }}
             onError={() => {
               setPlaying(false);
-              setMediaError("正式视频读取失败，不能视为没有素材。");
+              setMediaError(`${sourceLabel}视频读取失败，不能视为没有素材。`);
             }}
           />
         ) : kind === "image" ? (
           <img
             key={frameId}
             src={artifactContentUrl(projectId, frameId!)}
-            alt={"镜头 " + shot.shot_number + " 正式画面"}
+            alt={"镜头 " + shot.shot_number + " " + sourceLabel + "画面"}
             onError={() => {
               setPlaying(false);
-              setMediaError("正式画面读取失败，不能视为没有素材。");
+              setMediaError(`${sourceLabel}画面读取失败，不能视为没有素材。`);
             }}
           />
         ) : (
           <p className="scene-animatic-missing" role="status">
-            镜头 {shot.shot_number} 尚无正式视频或正式画面（按计划时长显示占位）。
+            {unavailableSelection
+              ? "所选候选无法用于预览，请重新选择。"
+              : selection === "placeholder"
+                ? `镜头 ${shot.shot_number} 当前按计划时长显示占位。`
+                : `镜头 ${shot.shot_number} 尚无正式视频或正式画面（按计划时长显示占位，可选择已有候选）。`}
           </p>
         )}
       </div>
@@ -211,7 +311,11 @@ export function SceneAnimaticPreview({
       )}
       <progress aria-label="动态分镜播放头" value={Math.min(total, passed + elapsed)} max={total} />
       <div className="scene-animatic-controls">
-        <Button onClick={playOrPause} data-testid="animatic-play-toggle">
+        <Button
+          onClick={playOrPause}
+          disabled={unavailableSelection}
+          data-testid="animatic-play-toggle"
+        >
           {playing ? "暂停" : "播放"}
         </Button>
         <Button onClick={goNext} disabled={index >= ordered.length - 1}>

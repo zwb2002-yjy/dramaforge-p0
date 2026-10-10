@@ -14,7 +14,7 @@ const videoFile = fileURLToPath(
 const imageFile = fileURLToPath(
   new URL("../../../fixtures/playback/blue-frame.png", import.meta.url),
 );
-async function installMedia(page: Page) {
+async function installMedia(page: Page, withCandidates = false) {
   const state = await installProfessionalMock(page);
   const shots = [SHOT_ID, SECOND_SHOT_ID, "dddddddd-dddd-4ddd-8ddd-dddddddddddd"].map(
     (id, index) => ({
@@ -71,7 +71,27 @@ async function installMedia(page: Page) {
           scene,
           shots,
           references: {},
-          candidates: {},
+          candidates: withCandidates
+            ? {
+                [SHOT_ID]: [
+                  {
+                    artifact_id: "preview-candidate-frame",
+                    artifact_type: "image",
+                    stage: "image_keyframe",
+                    status: "completed",
+                    storage_state: "available",
+                  },
+                  {
+                    artifact_id: "preview-candidate-video",
+                    artifact_type: "video",
+                    stage: "video",
+                    status: "completed",
+                    storage_state: "available",
+                    review_decision: "rejected",
+                  },
+                ],
+              }
+            : {},
           trace: {},
           overview: Object.fromEntries(
             shots.map((shot) => [
@@ -194,6 +214,54 @@ test("continuity comparison reads the preceding video's sampled last frame and l
       (request) =>
         request.method !== "GET" &&
         /\/(executions|formal-keyframe|formal-video|export)$/.test(request.path),
+    ),
+  ).toEqual([]);
+});
+
+test("native candidate selection pauses Formal playback and never changes the adoption facts", async ({
+  page,
+}) => {
+  const state = await installMedia(page, true);
+  await page.goto(`/projects/${PROJECT_ID}/scenes`);
+  await page.getByRole("button", { name: "播放动态分镜", exact: true }).click();
+  const animatic = page.getByTestId("scene-animatic");
+  const oldVideo = await animatic.getByLabel("动态分镜视频").elementHandle();
+  await animatic.getByTestId("animatic-play-toggle").click();
+  await expect
+    .poll(() => oldVideo!.evaluate((v: HTMLVideoElement) => v.currentTime))
+    .toBeGreaterThan(0.1);
+  await animatic
+    .getByLabel("镜头 1 预览素材")
+    .selectOption("candidate/image_keyframe:preview-candidate-frame");
+  await expect.poll(() => oldVideo!.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
+  await expect(animatic).toHaveAttribute("data-media-source", "candidate");
+  await expect(animatic.getByRole("progressbar")).toHaveAttribute("value", "0");
+  await expect(animatic.getByRole("status")).toContainText("仅本地预览");
+  await expect
+    .poll(() => animatic.getByRole("img").evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBe(160);
+  await animatic
+    .getByLabel("镜头 1 预览素材")
+    .selectOption("candidate/video:preview-candidate-video");
+  const candidate = animatic.getByLabel("动态分镜视频");
+  await expect(candidate).toHaveAttribute("src", /preview-candidate-video\/content/);
+  await animatic.getByTestId("animatic-play-toggle").click();
+  await expect
+    .poll(() => candidate.evaluate((v: HTMLVideoElement) => v.currentTime))
+    .toBeGreaterThan(0.1);
+  expect(await candidate.evaluate((v: HTMLVideoElement) => v.muted)).toBe(true);
+  await animatic.getByLabel("镜头 1 预览素材").selectOption("formal");
+  await expect(animatic.getByLabel("动态分镜视频")).toHaveAttribute(
+    "src",
+    /playback-video\/content/,
+  );
+  await expect(page.locator(".scene-media-note")).toContainText("正式画面 2/3");
+  await expect(page.locator(".scene-media-note")).toContainText("正式视频 1/3");
+  expect(
+    state.editing.requests.filter(
+      (r) =>
+        r.method !== "GET" &&
+        /\/(executions|formal-keyframe|formal-video|review-decisions|prepare|render)$/.test(r.path),
     ),
   ).toEqual([]);
 });

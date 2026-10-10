@@ -21,6 +21,11 @@
   background: var(--df-surface-screen);
   border-radius: var(--df-radius-control);
 }
+.scene-animatic-source {
+  display: grid;
+  gap: var(--df-space-2);
+  max-width: 32rem;
+}
 .scene-animatic-media img,
 .scene-animatic-media video {
   width: 100%;

@@ -107,3 +107,96 @@ it("keeps a failed Formal video load separate from a missing asset and never dis
   expect(screen.getByRole("alert")).toHaveTextContent("正式视频读取失败");
   expect(writes).not.toHaveBeenCalled();
 });
+
+const previewCandidates = {
+  "shot-1": [
+    {
+      artifact_id: "candidate-frame",
+      artifact_type: "image",
+      stage: "image_keyframe",
+      status: "completed",
+      storage_state: "available",
+      review_decision: null,
+    },
+    {
+      artifact_id: "failed-frame",
+      artifact_type: "image",
+      stage: "image_keyframe",
+      status: "failed",
+      storage_state: "available",
+    },
+    {
+      id: "experiment",
+      branch_type: "experiment",
+      artifact_id: "branch-frame",
+      artifact_type: "image",
+      stage: "image_keyframe",
+      status: "completed",
+    },
+  ],
+};
+
+it("previews an unreviewed candidate without adopting it or loading another writer", () => {
+  const writes = vi.spyOn(globalThis, "fetch");
+  const shot = makeShot(1, "missing");
+  render(<SceneAnimaticPreview projectId="p1" shots={[shot]} candidates={previewCandidates} />);
+  const picker = screen.getByLabelText("镜头 1 预览素材");
+  expect(screen.queryByRole("option", { name: /候选画面 2/ })).not.toBeInTheDocument();
+  fireEvent.change(picker, { target: { value: "candidate/image_keyframe:candidate-frame" } });
+  expect(screen.getByAltText("镜头 1 候选画面")).toHaveAttribute(
+    "src",
+    "/api/v1/projects/p1/artifacts/candidate-frame/content",
+  );
+  expect(screen.getByTestId("scene-animatic")).toHaveAttribute("data-media-source", "candidate");
+  expect(screen.getByRole("status")).toHaveTextContent("仅本地预览");
+  expect(shot.formal_keyframe_artifact_id).toBeNull();
+  expect(writes).not.toHaveBeenCalled();
+});
+
+it("pauses the old Formal video when switching to a candidate and preserves Formal priority", () => {
+  const shot = makeShot(1, "video");
+  render(<SceneAnimaticPreview projectId="p1" shots={[shot]} candidates={previewCandidates} />);
+  const oldVideo = screen.getByLabelText<HTMLVideoElement>("动态分镜视频");
+  fireEvent.click(screen.getByTestId("animatic-play-toggle"));
+  fireEvent.change(screen.getByLabelText("镜头 1 预览素材"), {
+    target: { value: "candidate/image_keyframe:candidate-frame" },
+  });
+  expect(oldVideo.pause).toHaveBeenCalled();
+  expect(screen.getByTestId("animatic-play-toggle")).toHaveTextContent("播放");
+  expect(screen.getByRole("progressbar")).toHaveAttribute("value", "0");
+  expect(shot.formal_video_artifact_id).toBe("video-1");
+  fireEvent.change(screen.getByLabelText("镜头 1 预览素材"), { target: { value: "formal" } });
+  expect(screen.getByLabelText("动态分镜视频")).toHaveAttribute(
+    "src",
+    "/api/v1/projects/p1/artifacts/video-1/content",
+  );
+});
+
+it("blocks a withdrawn candidate instead of silently replacing it with Formal", () => {
+  const shot = makeShot(1, "video");
+  const { rerender } = render(
+    <SceneAnimaticPreview projectId="p1" shots={[shot]} candidates={previewCandidates} />,
+  );
+  fireEvent.change(screen.getByLabelText("镜头 1 预览素材"), {
+    target: { value: "candidate/image_keyframe:candidate-frame" },
+  });
+  rerender(<SceneAnimaticPreview projectId="p1" shots={[shot]} candidates={{}} />);
+  expect(screen.getByRole("alert")).toHaveTextContent("所选候选已不可用");
+  expect(screen.getByTestId("animatic-play-toggle")).toBeDisabled();
+  expect(screen.queryByLabelText("动态分镜视频")).not.toBeInTheDocument();
+  expect(shot.formal_video_artifact_id).toBe("video-1");
+});
+
+it("does not carry a local candidate choice into another project", () => {
+  const shots = [makeShot(1, "missing")];
+  const { rerender } = render(
+    <SceneAnimaticPreview projectId="p1" shots={shots} candidates={previewCandidates} />,
+  );
+  fireEvent.change(screen.getByLabelText("镜头 1 预览素材"), {
+    target: { value: "candidate/image_keyframe:candidate-frame" },
+  });
+  rerender(<SceneAnimaticPreview projectId="p2" shots={shots} candidates={previewCandidates} />);
+  expect(screen.getByLabelText("镜头 1 预览素材")).toHaveValue("formal");
+  expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  expect(screen.getByTestId("scene-animatic")).toHaveAttribute("data-media-source", "missing");
+});

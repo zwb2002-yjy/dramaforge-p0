@@ -74,7 +74,13 @@ export function SceneMediaGallery({
           >
             {animaticOpen ? "关闭动态分镜" : "播放动态分镜"}
           </Button>
-          {animaticOpen && <SceneAnimaticPreview projectId={projectId} shots={shots} />}
+          {animaticOpen && (
+            <SceneAnimaticPreview
+              projectId={projectId}
+              shots={shots}
+              candidates={workspace.data?.candidates}
+            />
+          )}
           {displayedShots.length === 0 ? (
             <p role="status">本场景没有符合当前筛选的镜头。</p>
           ) : (
