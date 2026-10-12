@@ -12,13 +12,15 @@ from app.providers.capability_sources import (
     lifecycle_warnings,
     official_sources,
 )
-from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
+from app.providers.catalog_loader import ModelCatalogLoader, hash_manifest
+from app.providers.catalog_publication import effective_publication_lifecycle
 from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
 from app.providers.manifest import (
     CapabilitySpec,
     InputModeSpec,
     ModelCapabilityManifest,
     ModelManifest,
+    to_v3_model_manifest,
 )
 from app.providers.registry import ModelRegistry
 from app.shared.errors import NotFoundError
@@ -110,7 +112,11 @@ def inspect_manifest(
                 },
             }
         ),
-        catalog_lifecycle=catalog.lifecycle if catalog else "unknown",
+        catalog_lifecycle=effective_publication_lifecycle(
+            catalog.provider_type, catalog.protocol_profile, catalog.model_id, catalog.lifecycle
+        )
+        if catalog
+        else "unknown",
         capabilities={str(k): _public_spec(v) for k, v in manifest.capability_specs.items()},
         controls=controls,
         official_sources=official_sources(manifest.id),
@@ -123,10 +129,17 @@ def inspect_catalog_model(
     model_id: str, *, registry: ModelRegistry | None = None
 ) -> ModelCapabilityReport:
     """Inspect a selected model; unknown IDs never fall back to another model."""
-    catalog_row = next(
-        (row for row in CATALOG_MODELS if f"{row['provider_type']}/{row['model_id']}" == model_id),
-        None,
+    matching = [
+        item
+        for item in ModelCatalogLoader().load()
+        if f"{item.identity[0]}/{item.identity[2]}" == model_id
+    ]
+    chosen = (
+        max(matching, key=lambda item: (item.publication_lifecycle == "active", item.identity[3]))
+        if matching
+        else None
     )
+    catalog_row = chosen.as_dict() if chosen is not None else None
     catalog = ModelCapabilityManifest.model_validate(catalog_row) if catalog_row else None
     if registry is None:
         registry, _ = build_v3_registry()
@@ -135,6 +148,22 @@ def inspect_catalog_model(
         if model_id in {f"litellm/{alias}" for alias in get_settings().litellm_logical_models}:
             return inspect_manifest(litellm_logical_manifest(model_id.removeprefix("litellm/")))
     selected = registry.get_or_none(model_id)
+    if selected is None and catalog is not None:
+        # Inspection of a frozen retired contract must remain possible. This
+        # pure conversion neither registers a Runtime nor admits a new Create.
+        from app.providers.bootstrap import transport_profile_id_for
+
+        return inspect_manifest(
+            to_v3_model_manifest(
+                catalog,
+                transport_profile_id=transport_profile_id_for(
+                    catalog.provider_type, catalog.protocol_profile, catalog.media_kind
+                )
+                or "inspection-only",
+            ),
+            catalog=catalog,
+            catalog_hash=chosen.manifest_hash if chosen else None,
+        )
     if selected is None:
         raise NotFoundError("model not found")
     return inspect_manifest(

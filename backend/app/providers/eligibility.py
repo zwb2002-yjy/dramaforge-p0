@@ -23,6 +23,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.catalog_publication import effective_publication_lifecycle
 from app.providers.models import ProviderConnection, ProviderModelBinding
 
 # Capability names referenced by requirements/preferences.
@@ -133,8 +134,14 @@ async def evaluate_candidate(
     if catalog_entry is None:
         _issues_add(issues, "MODEL_NOT_IN_CATALOG")
     else:
-        if catalog_entry.lifecycle != "active":
-            _issues_add(issues, "MODEL_LIFECYCLE_INACTIVE", catalog_entry.lifecycle)
+        lifecycle = effective_publication_lifecycle(
+            catalog_entry.provider_type, catalog_entry.protocol_profile,
+            catalog_entry.model_id, catalog_entry.lifecycle,
+        )
+        if lifecycle != "active":
+            _issues_add(issues, "MODEL_LIFECYCLE_INACTIVE", lifecycle)
+        if catalog_entry.catalog_source == "protocol_contract":
+            _issues_add(issues, "DYNAMIC_MODEL_CAPABILITY_UNVERIFIED")
         if (
             catalog_entry.provider_type != connection.provider_type
             or catalog_entry.protocol_profile != connection.protocol_profile

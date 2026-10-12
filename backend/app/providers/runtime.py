@@ -31,12 +31,12 @@ from app.providers.models import (
     ProviderConnectionRevision,
     ProviderModelBinding,
 )
-from app.providers.registry import ProviderPlugin
 from app.security.models import EncryptedProviderCredential
 from app.shared.errors import NotFoundError, ValidationAppError
 
 if TYPE_CHECKING:
     from app.providers.model_resolution import ExecutionModelResolution
+    from app.providers.registry import ProviderPlugin
 
 PROVIDER_CONTENT_URI = "provider-content"
 
@@ -51,6 +51,47 @@ class ProviderResumeToken(BaseModel):
     remote_secondary_id: str | None = None
     query_kind: str | None = None
     opaque_state: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+def require_resume_token_identity(
+    token: ProviderResumeToken,
+    *,
+    remote_task_id: str | None,
+    provider_type: str,
+    protocol_profile: str | None,
+    remote_secondary_id: str | None,
+) -> None:
+    """Validate persisted remote identity before constructing or calling a Runtime."""
+    if (
+        not remote_task_id
+        or token.remote_task_id != remote_task_id
+        or token.provider_type != provider_type
+        or token.protocol_profile != protocol_profile
+        or token.remote_secondary_id != remote_secondary_id
+    ):
+        raise ValidationAppError(
+            "恢复令牌与已提交任务身份不一致，必须人工核对",
+            details={"code": "RESUME_TOKEN_IDENTITY_MISMATCH"},
+        )
+
+
+def require_operation_identity(identity: ExecutionIdentitySnapshot, operation: Any) -> None:
+    """Audit and recovery share the exact persisted input/model identity check."""
+    for actual, expected in (
+        (operation.connection_id, identity.connection_id),
+        (operation.provider_connection_revision_id, identity.connection_revision_id),
+        (operation.credential_revision_id, identity.credential_revision_id),
+        (operation.model_binding_id, identity.provider_model_binding_id),
+        (operation.catalog_entry_id, identity.catalog_entry_id),
+        (operation.capability_manifest_hash, identity.manifest_hash),
+        (operation.actual_model, identity.invoke_model_value),
+        (operation.request_fingerprint, identity.request_fingerprint),
+    ):
+        if actual != expected:
+            raise ValidationAppError(
+                "已提交任务与冻结执行身份不一致，必须人工核对",
+                details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+            )
 
 
 class CompiledVideoRequest(BaseModel):
@@ -426,21 +467,7 @@ class ProviderRuntimeResolver:
         and credential pointer are never used to build the runtime.
         """
         if operation is not None:
-            if operation.connection_id != identity.connection_id:
-                raise ValidationAppError(
-                    "operation and execution identity connection mismatch",
-                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
-                )
-            if operation.provider_connection_revision_id != identity.connection_revision_id:
-                raise ValidationAppError(
-                    "operation and execution identity revision mismatch",
-                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
-                )
-            if operation.actual_model != identity.invoke_model_value:
-                raise ValidationAppError(
-                    "operation and execution identity model mismatch",
-                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
-                )
+            require_operation_identity(identity, operation)
 
         revision = await self._session.scalar(
             select(ProviderConnectionRevision)
@@ -567,6 +594,26 @@ class ProviderRuntimeResolver:
         settings: Any = None,
     ) -> ProviderRuntime:
         """Rebuild only the runtime for an existing frozen operation."""
+        from app.providers.execution_contract import execution_contract_gaps
+
+        gaps = execution_contract_gaps(identity.execution_contract)
+        if gaps:
+            raise ValidationAppError(
+                "历史任务的执行合同无法精确核验，请人工核对后恢复",
+                details={"code": gaps[0], "gaps": list(gaps)},
+            )
+        if (
+            operation is not None
+            and identity.execution_contract is not None
+            and (
+                identity.execution_contract.provider_type != operation.actual_provider
+                or identity.execution_contract.protocol_profile != operation.protocol_profile
+            )
+        ):
+            raise ValidationAppError(
+                "frozen execution contract does not match operation protocol",
+                details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+            )
         resolved = await self.resolve_runtime_for_identity(
             identity=identity,
             workspace_id=workspace_id,
@@ -574,24 +621,3 @@ class ProviderRuntimeResolver:
             settings=settings,
         )
         return resolved.runtime
-
-    async def resume_runtime(
-        self,
-        *,
-        plugin: ProviderPlugin,
-        connection: ProviderConnection,
-        settings: Any = None,
-    ) -> ProviderRuntime:
-        """Rebuild a runtime for polling/cancel/download from persisted state.
-        Never submits."""
-        if plugin.runtime_factory is None:
-            raise RuntimeError(
-                f"provider plugin {plugin.provider_type}/{plugin.protocol_profile} "
-                "has no unified runtime"
-            )
-        runtime = plugin.runtime_factory(
-            connection=connection,
-            settings=settings,
-            host=connection.base_url,
-        )
-        return cast(ProviderRuntime, runtime)

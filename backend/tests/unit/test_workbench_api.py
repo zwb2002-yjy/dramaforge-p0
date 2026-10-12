@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 import pytest
 from app.config import clear_settings_cache, get_settings
 from app.main import create_app
-from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
+from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.models import (
     ProviderConnection,
@@ -23,6 +23,7 @@ from app.shared.db import get_session
 from app.shared.security import CSRF_HEADER
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from tests.unit.model_infra_fixture import unit_video_manifest
 
 
 @pytest.fixture()
@@ -94,13 +95,11 @@ def _seed_sync(factory: Any, workspace_id: str) -> str:
             assert workspace is not None
             owner = await session.get(User, workspace.owner_user_id)
             assert owner is not None
-            manifest = next(
-                item for item in CATALOG_MODELS if item["model_id"] == "agnes-video-v2.0"
-            )
+            manifest = unit_video_manifest()
             entry = ModelCatalogEntry(
                 provider_type="agnes",
                 protocol_profile="agnes_cn_v1",
-                model_id="agnes-video-v2.0",
+                model_id="unit-agnes-video",
                 model_revision="v1",
                 display_name="Agnes Video",
                 media_kind="video",
@@ -142,7 +141,7 @@ def _seed_sync(factory: Any, workspace_id: str) -> str:
                 workspace_id=workspace.id,
                 connection_id=connection.id,
                 media_type="video",
-                model_id="agnes-video-v2.0",
+                model_id="unit-agnes-video",
                 purpose="video",
                 enabled=True,
                 documented=True,
@@ -152,8 +151,8 @@ def _seed_sync(factory: Any, workspace_id: str) -> str:
                 catalog_entry_id=entry.id,
                 capability_manifest_hash=entry.contract_manifest_hash,
                 remote_resource_kind="model",
-                remote_resource_id="agnes-video-v2.0",
-                invoke_model_value="agnes-video-v2.0",
+                remote_resource_id="unit-agnes-video",
+                invoke_model_value="unit-agnes-video",
                 created_by=owner.id,
                 updated_by=owner.id,
             )

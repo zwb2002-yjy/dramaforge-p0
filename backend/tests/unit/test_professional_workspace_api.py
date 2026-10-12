@@ -129,9 +129,7 @@ def test_experiment_stage_selects_the_model_purpose(client: TestClient) -> None:
     )
     assert keyframe.status_code == 201, keyframe.text
     assert keyframe.json()["parameters"]["target_node_key"] == "keyframe"
-    assert keyframe.json()["parameters"]["prompt_override"] == (
-        "low angle, cold backlight"
-    )
+    assert keyframe.json()["parameters"]["prompt_override"] == ("low angle, cold backlight")
 
     # No binding exists in this workspace, so start fails closed and names the
     # stage it resolved instead of blaming the stage the client did not send.
@@ -153,7 +151,7 @@ def test_experiment_stage_selects_the_model_purpose(client: TestClient) -> None:
             "idempotency_key": "stage-video-1",
             "name": "Video model experiment",
             "source_shot_id": shot_id,
-            "selected_model": "agnes/agnes-video-v2.0",
+            "selected_model": "agnes/unit-agnes-video",
             "parameters": {"target_node_key": "video"},
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -181,7 +179,7 @@ def test_experiment_stage_selects_the_model_purpose(client: TestClient) -> None:
             "idempotency_key": "stage-invalid-1",
             "name": "Invalid stage",
             "source_shot_id": shot_id,
-            "selected_model": "agnes/agnes-video-v2.0",
+            "selected_model": "agnes/unit-agnes-video",
             "parameters": {"target_node_key": "keyframes"},
         },
         headers={CSRF_HEADER: _csrf(client)},

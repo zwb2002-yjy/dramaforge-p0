@@ -1,0 +1,16 @@
+[
+  {
+    "event_id": "agnes-video-v20-official-retirement-20261013",
+    "provider_type": "agnes",
+    "protocol_profile": "agnes_cn_v1",
+    "model_id": "agnes-video-v2.0",
+    "lifecycle": "retired",
+    "reviewed_at": "2026-10-12T16:18:57Z",
+    "reviewed_by": "Codex under Owner implementation request",
+    "reason": "Official exact-model documentation marks Video V2.0 as offline; block new Create, preserve frozen history.",
+    "source_url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-video-v20",
+    "source_locator": "Page title / navigation heading",
+    "captured_content_sha256": "560183a0686d5744e7bb0b5441d02ec8ab689543cdc5697a6ce3f275aca3dc2c",
+    "reviewed_statement": "Agnes Video V2.0（已下线）"
+  }
+]

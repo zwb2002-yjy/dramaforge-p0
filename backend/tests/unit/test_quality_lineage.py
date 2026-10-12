@@ -14,7 +14,7 @@ from app.consistency.identity_policy import identity_evidence_policy_snapshot
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun, ProviderOperation
 from app.production import models as _pm  # noqa: F401
 from app.production.service import GraphService
-from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
+from app.providers.catalog_loader import ModelCatalogLoader, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.connection_service import ProviderConnectionService
 from app.providers.models import ProviderConnection, ProviderModelBinding
@@ -167,7 +167,9 @@ async def _seed_binding(
     media_type: str = "image",
     purpose: str = "keyframe",
 ) -> tuple[ProviderConnection, ProviderModelBinding]:
-    manifest = next(m for m in CATALOG_MODELS if m["model_id"] == model_id)
+    manifest = next(
+        item.as_dict() for item in ModelCatalogLoader().load() if item.identity[2] == model_id
+    )
     entry = await session.scalar(
         select(ModelCatalogEntry).where(
             ModelCatalogEntry.provider_type == "agnes",

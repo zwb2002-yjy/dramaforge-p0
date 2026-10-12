@@ -99,6 +99,16 @@ fingerprint 与允许新建的 Provider 操作数（`max_provider_calls`）；�
 - 迁移 20260908_0057–0060 提供恢复函数/授权：可恢复导演轮次、事实对账、
   Formal 检查点、cancellation-requested Provider 工作。
 - 真实远端任务重启恢复：同一远端任务恢复时零额外 create。
+- 新媒体提交在既有 ExecutionIdentitySnapshot 上冻结精确执行实现指纹与产品策略内容/
+  Hash；指纹固定协议/Runtime 所属源码、媒体物化代码、锁定依赖和 Python 版本。
+  恢复缺少该合同、实现版本失配或策略快照损坏时阻断并要求人工核对，不能用当前
+  Connection 或最新 Handler 推导历史事实。原请求和旧 Manifest Hash 保留不变。
+- `unknown_submission` 不能自动重发；恢复不重新执行当前 Create 资格门。新 Create
+  在提交标记写入前再次检查已冻结绑定的启用/生命周期与连接/凭据修订正向可见性。
+- `scripts/audit_provider_recovery.py --workspace-id <UUID>`（或维护 Owner 显式
+  `--all-workspaces`）提供当前唯一执行系统的只读身份预检。使用 PostgreSQL READ ONLY
+  事务、固定游标分批列出机读阻塞原因；不解密凭据、不创建 Runtime、不 poll、
+  不写 NodeRun/Outbox/ProviderOperation。通过身份预检不代表网络或远端状态已验证。
 - 常驻 dispatcher 在启动时及随后每 60 秒扫描可恢复 Provider 任务；一次最多 50 行、
   20 秒内部截止，按 NodeRun UUID keyset 游标分页并在尾部回绕。
   扫描与 Outbox 分发是同一进程中独立的后台任务，不占用 heavy 媒体执行槽；

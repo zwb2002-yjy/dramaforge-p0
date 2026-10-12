@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from app.providers.catalog_publication import effective_publication_lifecycle
 from app.providers.manifest import (
     ModelCapabilityManifest,
     has_reproducible_contract_evidence,
@@ -114,6 +115,12 @@ class ModelCatalogLoader:
                 manifest.protocol_profile,
                 manifest.model_id,
                 manifest.model_revision,
+            )
+            publication_lifecycle = effective_publication_lifecycle(
+                manifest.provider_type,
+                manifest.protocol_profile,
+                manifest.model_id,
+                publication_lifecycle,
             )
             if identity in seen:
                 raise ValueError(f"duplicate model catalog identity {identity}: {path}")

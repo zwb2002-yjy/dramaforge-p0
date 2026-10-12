@@ -21,7 +21,7 @@ from app.providers.adapters_v2 import (
     submission_status_to_v3,
 )
 from app.providers.capabilities import Capability
-from app.providers.catalog_loader import active_manifests_for
+from app.providers.catalog_loader import ModelCatalogLoader, active_manifests_for
 from app.providers.contracts import (
     ArtifactRef,
     ExecutionContext,
@@ -68,7 +68,14 @@ def _uuid_of(value: str) -> UUID:
 
 def _bridge_for(provider_type: str, media: str) -> ProviderAdapterBridge:
     seed = active_manifests_for(provider_type=provider_type)
-    manifest = ModelCapabilityManifest.model_validate(seed[0] if media == "image" else seed[1])
+    raw = seed[0] if media == "image" else seed[1]
+    if provider_type == "agnes" and media == "video":
+        raw = next(
+            item.as_dict()
+            for item in ModelCatalogLoader().load()
+            if item.identity[2] == "agnes-video-v2.0"
+        )
+    manifest = ModelCapabilityManifest.model_validate(raw)
     transport_id = (
         "ark-image-v1"
         if provider_type == "volcengine" and media == "image"
@@ -309,7 +316,14 @@ def _runtime_bridge(
 ) -> tuple[ProviderAdapterBridge, _FakeRuntime]:
     """Bridge with a wired fake runtime (so create/poll actually execute)."""
     seed = active_manifests_for(provider_type=provider_type)
-    manifest = ModelCapabilityManifest.model_validate(seed[0] if media == "image" else seed[1])
+    raw = seed[0] if media == "image" else seed[1]
+    if provider_type == "agnes" and media == "video":
+        raw = next(
+            item.as_dict()
+            for item in ModelCatalogLoader().load()
+            if item.identity[2] == "agnes-video-v2.0"
+        )
+    manifest = ModelCapabilityManifest.model_validate(raw)
     transport_id = (
         "ark-image-v1"
         if provider_type == "volcengine" and media == "image"

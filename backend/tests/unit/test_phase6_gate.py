@@ -105,15 +105,16 @@ async def _seed_model_infra(session: AsyncSession, *, project: Project, user: Us
         ProviderConnectionRevision,
         ProviderModelBinding,
     )
+    from tests.unit.model_infra_fixture import unit_video_manifest
 
-    video_manifest = next(item for item in CATALOG_MODELS if item["model_id"] == "agnes-video-v2.0")
+    video_manifest = unit_video_manifest()
     image_manifest = next(
         item for item in CATALOG_MODELS if item["model_id"] == "agnes-image-2.1-flash"
     )
     entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
-        model_id="agnes-video-v2.0",
+        model_id="unit-agnes-video",
         model_revision="v1",
         display_name="Agnes Video",
         media_kind="video",
@@ -156,7 +157,7 @@ async def _seed_model_infra(session: AsyncSession, *, project: Project, user: Us
         workspace_id=project.workspace_id,
         connection_id=connection.id,
         media_type="video",
-        model_id="agnes-video-v2.0",
+        model_id="unit-agnes-video",
         purpose="video",
         enabled=True,
         documented=True,
@@ -166,8 +167,8 @@ async def _seed_model_infra(session: AsyncSession, *, project: Project, user: Us
         catalog_entry_id=entry.id,
         capability_manifest_hash=entry.contract_manifest_hash,
         remote_resource_kind="model",
-        remote_resource_id="agnes-video-v2.0",
-        invoke_model_value="agnes-video-v2.0",
+        remote_resource_id="unit-agnes-video",
+        invoke_model_value="unit-agnes-video",
         created_by=user.id,
         updated_by=user.id,
     )
@@ -220,7 +221,7 @@ async def _seed_model_infra(session: AsyncSession, *, project: Project, user: Us
             bindings={
                 "video.shot": {
                     "slot": "video.shot",
-                    "model_id": "agnes-video-v2.0",
+                    "model_id": "unit-agnes-video",
                     "native_options": {},
                     "enabled": True,
                 },
@@ -276,7 +277,10 @@ async def test_phase6_gate_drift_repair_keeps_old_formal_in_history(session: Asy
         request_key="gate6-repair",
     )
     preview = await repair.build_step_plan(
-        project=project, user=user, shot_id=shot.id, repair_id=request.id,
+        project=project,
+        user=user,
+        shot_id=shot.id,
+        repair_id=request.id,
     )
     assert preview.step_ordinal == 1
     _, _, keyframe_run = await repair.execute_step(
@@ -300,10 +304,9 @@ async def test_phase6_gate_drift_repair_keeps_old_formal_in_history(session: Asy
         run=keyframe_run,
     )
     repair_id = request.id
-    assert (
-        keyframe_run.input_snapshot["workbench_plan"]["semantic_intent"]["repair_request_id"]
-        == str(repair_id)
-    )
+    assert keyframe_run.input_snapshot["workbench_plan"]["semantic_intent"][
+        "repair_request_id"
+    ] == str(repair_id)
     # 5) continue the same repair, not a second workflow bypassing its review gate.
     preview = await repair.build_step_plan(
         project=project,

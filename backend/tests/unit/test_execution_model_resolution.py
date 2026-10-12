@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 from app.access.models import Project, User, Workspace
 from app.providers.capabilities import Capability
-from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
+from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.model_profiles.slots import ModelSlot
@@ -20,6 +20,7 @@ from app.shared.base import Base
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from tests.unit.model_infra_fixture import unit_video_manifest
 
 
 @pytest.fixture
@@ -61,11 +62,11 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
     )
     session.add(credential)
     await session.flush()
-    manifest = next(item for item in CATALOG_MODELS if item["model_id"] == "agnes-video-v2.0")
+    manifest = unit_video_manifest()
     entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
-        model_id="agnes-video-v2.0",
+        model_id="unit-agnes-video",
         model_revision="v1",
         display_name="Agnes Video",
         media_kind="video",
@@ -97,7 +98,7 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
         workspace_id=workspace.id,
         connection_id=connection.id,
         media_type="video",
-        model_id="agnes-video-v2.0",
+        model_id="unit-agnes-video",
         purpose="video",
         enabled=True,
         documented=True,
@@ -107,8 +108,8 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
         catalog_entry_id=entry.id,
         capability_manifest_hash=entry.contract_manifest_hash,
         remote_resource_kind="model",
-        remote_resource_id="agnes-video-v2.0",
-        invoke_model_value="agnes-video-v2.0",
+        remote_resource_id="unit-agnes-video",
+        invoke_model_value="unit-agnes-video",
         created_by=user.id,
         updated_by=user.id,
     )
@@ -193,7 +194,7 @@ async def test_explicit_binding_freezes_concrete_identity(session: AsyncSession)
     assert result.status == "RESOLVED"
     assert result.source == "request_override"
     assert result.provider_model_binding_id == binding.id
-    assert result.resolved_model_id == "agnes/agnes-video-v2.0"
+    assert result.resolved_model_id == "agnes/unit-agnes-video"
     assert result.manifest_hash == binding.capability_manifest_hash
     assert result.credential_revision_id is None
 
@@ -240,7 +241,7 @@ async def test_project_slot_beats_workspace_slot(session: AsyncSession) -> None:
                 name="project",
                 version=1,
                 is_default=False,
-                bindings=_bindings(ModelSlot.VIDEO_SHOT, "agnes/agnes-video-v2.0"),
+                bindings=_bindings(ModelSlot.VIDEO_SHOT, "agnes/unit-agnes-video"),
                 created_by=user.id,
                 updated_by=user.id,
             ),
@@ -264,7 +265,7 @@ async def test_project_slot_absent_inherits_workspace_slot(session: AsyncSession
                 name="workspace",
                 version=1,
                 is_default=True,
-                bindings=_bindings(ModelSlot.VIDEO_SHOT, "agnes/agnes-video-v2.0"),
+                bindings=_bindings(ModelSlot.VIDEO_SHOT, "agnes/unit-agnes-video"),
                 created_by=user.id,
                 updated_by=user.id,
             ),
@@ -328,7 +329,7 @@ async def test_unavailable_profile_model_does_not_run_legacy_binding(session: As
                 purpose="video",
                 model_binding_id=binding.id,
                 selection_strategy="explicit_binding",
-                    updated_by=user.id,
+                updated_by=user.id,
             ),
         ]
     )

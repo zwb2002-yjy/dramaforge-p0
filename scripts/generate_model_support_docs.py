@@ -109,15 +109,17 @@ def _support_state(
         return (
             "workspace-specific",
             "no"
-            if lifecycle not in {"active", "legacy", "deprecated"}
+            if lifecycle != "active"
             or manifest.implementation_status != "contract_tested"
+            or manifest.catalog_source == "protocol_contract"
             else "requires verified Binding",
             "workspace-specific",
         )
     verified = any(item["enabled"] and item["account_verified"] for item in bindings)
     executable = (
-        lifecycle in {"active", "legacy", "deprecated"}
+        lifecycle == "active"
         and manifest.implementation_status == "contract_tested"
+        and manifest.catalog_source != "protocol_contract"
         and verified
     )
     certified = executable and any(

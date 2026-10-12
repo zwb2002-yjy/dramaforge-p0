@@ -3,6 +3,14 @@
 Status: current（入口见 [CURRENT.md](CURRENT.md)）；
 Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/0005-provider-plugin-driven-configuration.md)。
 
+新 Create 在提交标记前锁定并重新读取当前 Binding/Connection/Catalog 资格，必须匹配
+最新连接和凭据修订以及该修订下的正向模型可见性证据。旧排队计划在轮换后失效；已提交
+任务仍按原身份恢复。仅有 `@contract/...` 协议 Fixture 和 `/models` 可见性的动态模型
+返回 `DYNAMIC_MODEL_CAPABILITY_UNVERIFIED`，在精确能力确认机制完成前不开放新 Create。
+退役审查记录位于 `catalog_publication_events.json`，只降低唯一 Catalog 的发布资格，不
+改写旧能力 JSON/Hash。Agnes Video V2.0 已按官方页面下线声明阻断新 Create；历史身份
+和素材保留。无法匹配已冻结 Handler 的历史任务必须人工核对，不自动重发。
+
 ## 当前唯一模型执行系统
 
 项目尚未发布。模型执行统一为文件 Catalog/Manifest、具体 ProviderModelBinding、
@@ -19,6 +27,9 @@ Connection/Credential revision、严格 Compiler 和 ExecutionIdentitySnapshot�
 - 媒体通过工作台预览和显式确认，工作台冻结 WorkbenchExecutionPlan，实验图在排队前冻结相同 ExecutionModelResolution；Worker 缺少计划
   与已冻结执行身份时拒绝执行，不能转去重新选模型或单独生成。
 - ProductCapabilityPolicy 是编译时的显式产品开放子集，不引入另一套策略存储。
+- 实际提交在执行身份内保存产品策略快照及精确协议/实现指纹；属于原执行的冻结
+  证据，不建立第二套 Policy、Handler 或 Runtime。历史身份没有这些事实时只报告
+  阻塞，不能自动补造。当前策略与可见性重新检查只用于新 Create。
 - ProviderAvailabilityEvidence 为模型、连接和凭证修订的追加证据，Availability 是其
   当前投影；静态合同、目录列表、账号执行验证和人工质量认证必须分别表述。
 

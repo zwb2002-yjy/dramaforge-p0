@@ -27,7 +27,7 @@ from app.execution.run_state import (
     ExecuteNodeResult,
     _commit_terminal_failure,
 )
-from app.providers.runtime import PROVIDER_CONTENT_URI
+from app.providers.runtime import PROVIDER_CONTENT_URI, require_resume_token_identity
 from app.shared.db import set_node_run_rls_context
 from app.shared.errors import (
     ProviderTaskCancelledError,
@@ -168,16 +168,11 @@ async def _execute_unified_media_node_run(
     ``unknown_submission`` for manual reconciliation instead of a duplicate POST.
     """
     from datetime import UTC, datetime
-    from typing import Any
 
     from app.production.execution_plan import WorkbenchExecutionPlan
     from app.providers.execution_identity import (
         ExecutionIdentitySnapshot,
     )
-    from app.providers.models import (
-        ProviderConnection,
-    )
-    from app.providers.registry import get_plugin
     from app.providers.runtime import (
         CompiledImageRequest,
         PollResult,
@@ -186,7 +181,6 @@ async def _execute_unified_media_node_run(
         ProviderRuntimeResolver,
         SubmissionResult,
     )
-    from app.providers.workspace_credentials import runtime_connection_settings
     from app.shared.errors import ProviderRateLimitedError
 
     now = datetime.now(UTC)
@@ -206,7 +200,6 @@ async def _execute_unified_media_node_run(
         .limit(1)
     )
     frozen_identity: ExecutionIdentitySnapshot | None = None
-    connection: Any = None
     operation_identity = (
         op.selection_plan.get("execution_identity")
         if op is not None and isinstance(op.selection_plan, dict)
@@ -278,6 +271,11 @@ async def _execute_unified_media_node_run(
 
     resubmit = bool(op is not None and op.status == "rejected" and not op.provider_operation_id)
     if op is not None and not resubmit:
+        if op.status == "unknown_submission":
+            raise ValidationAppError(
+                "提交结果未知，必须人工核对，不能自动重发",
+                details={"code": "PROVIDER_SUBMISSION_UNKNOWN"},
+            )
         # A crash between the submission_started commit and the remote-id write
         # leaves an op with no remote id. Its outcome is unknown; escalate to
         # manual reconciliation instead of risking a duplicate POST.
@@ -296,29 +294,31 @@ async def _execute_unified_media_node_run(
                 error_summary=op.error_summary,
             )
             raise ValidationAppError("PROVIDER_SUBMISSION_UNKNOWN")
+        if frozen_identity is None:
+            raise ValidationAppError(
+                "历史任务缺少已冻结的执行身份，必须人工核对，不能使用当前连接恢复",
+                details={"code": "EXECUTION_IDENTITY_MISSING"},
+            )
+        try:
+            resume = ProviderResumeToken.model_validate(op.resume_token)
+        except ValueError as exc:
+            raise ValidationAppError(
+                "已提交任务缺少有效恢复令牌", details={"code": "RESUME_TOKEN_UNAVAILABLE"}
+            ) from exc
+        require_resume_token_identity(
+            resume,
+            remote_task_id=op.provider_operation_id,
+            provider_type=op.actual_provider,
+            protocol_profile=op.protocol_profile,
+            remote_secondary_id=op.remote_secondary_id,
+        )
         # Resume only. Never create a second remote task. Rebuild the runtime
         # exclusively from the persisted execution identity.
-        if frozen_identity is not None:
-            runtime = await ProviderRuntimeResolver(session).resume_runtime_for_identity(
-                identity=frozen_identity,
-                workspace_id=project.workspace_id,
-                operation=op,
-            )
-        else:
-            connection = (
-                await session.get(ProviderConnection, op.connection_id)
-                if op.connection_id is not None
-                else None
-            )
-            if connection is None:
-                raise ValidationAppError("unified operation connection is missing")
-            plugin = get_plugin(connection.provider_type, connection.protocol_profile)
-            cfg = await runtime_connection_settings(session, connection=connection)
-            runtime = await ProviderRuntimeResolver(session).resume_runtime(
-                plugin=plugin, connection=connection, settings=cfg
-            )
-        if op.resume_token is not None:
-            resume = ProviderResumeToken.model_validate(op.resume_token)
+        runtime = await ProviderRuntimeResolver(session).resume_runtime_for_identity(
+            identity=frozen_identity,
+            workspace_id=project.workspace_id,
+            operation=op,
+        )
         remote = str(op.provider_operation_id or "")
         create_status = "resumed"
         initial_status = "running"
@@ -459,6 +459,13 @@ async def _execute_unified_media_node_run(
         raise ValidationAppError("unified runtime was not resolved")
     if resume is None:
         raise ValidationAppError("unified operation has no resume token")
+    require_resume_token_identity(
+        resume,
+        remote_task_id=op.provider_operation_id,
+        provider_type=op.actual_provider,
+        protocol_profile=op.protocol_profile,
+        remote_secondary_id=op.remote_secondary_id,
+    )
 
     # Poll loop (resume token driven). Synchronous image submissions already
     # carry the result URL and skip polling entirely.

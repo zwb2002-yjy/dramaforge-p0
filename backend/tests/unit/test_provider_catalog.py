@@ -332,10 +332,7 @@ async def test_catalog_service_is_read_only_and_resolves_active_entries(
         protocol_profile="agnes_cn_v1",
         model_id="agnes-video-v2.0",
     )
-    assert active is not None
-    assert active.contract_manifest_hash == hash_manifest(
-        [m for m in CATALOG_MODELS if m["model_id"] == "agnes-video-v2.0"][0]
-    )
+    assert active is None  # Exact-model official retirement removes new admission.
     ref2va = await service.active_entry_for(
         provider_type="openai_compatible_media",
         protocol_profile="openai_media_v1",
@@ -388,7 +385,7 @@ def test_single_authority_head_seeds_exact_current_explicit_contracts() -> None:
     seeded = json.loads(module._CURRENT_CONTRACTS)
     current = {
         _identity(manifest): manifest
-        for manifest in CATALOG_MODELS
+        for manifest in (item.as_dict() for item in ModelCatalogLoader().load())
         if "current_contract" in manifest.get("evidence", {})
     }
     assert {_identity(manifest): manifest for manifest in seeded} == current
