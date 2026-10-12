@@ -26,6 +26,26 @@ Connection/Credential revision、严格 Compiler 和 ExecutionIdentitySnapshot�
 不再按旧 hash 白名单补足状态。preview 只可用于离线检查，不能注册为可执行绑定。
 当前离线测试不证明任何实际账号或作品质量。
 
+### 离线能力基线审计
+
+`scripts/audit_model_capabilities.py` 复用唯一 Catalog Loader，冻结精确型号/协议/修订、
+原文件与 Manifest Hash，枚举操作、参数、输入、限制和未结构化的功能声明，并核对
+同一修订的 Fixture。首批统计为 Agnes、MiniMax、Volcengine；其他协议合同另列上下文。
+目录 URL、官方事实、Compiler 测试、产品开放与账号可用分别报告。现有来源缺少审核
+覆盖时，审计状态为 `unknown`，不改变既有合同或自动禁用当前 Binding。
+
+在 backend 质量容器的锁定环境中，以 `/workspace` 为工作目录运行：
+
+```sh
+PYTHONPATH=/workspace/backend uv run --project backend python scripts/audit_model_capabilities.py --output-dir /workspace/tmp/model-audit/new-check
+```
+
+可用 `--observations <JSON>` 附加人工核验的源码/数据库/官方资料记录，用
+`--compare <前次审计JSON>` 检测同一修订 Hash 被修改。观察记录不提升能力证据等级。
+该命令不联网、不访问数据库、不调用 Provider、不修改目录或运行状态；输出仅允许
+位于 `tmp/` 的新目录，拒绝覆盖旧报告。一次性基线和误删审计不进入当前权威文档树。
+它不代替官方来源审核、只读历史恢复预检或发布质量 Gate。
+
 ## Model Capability / Prompt Compiler 详细指南
 
 [逐模型能力与编译指南](architecture/MODEL_CAPABILITY_PROMPT_COMPILER.md) 维护当前
