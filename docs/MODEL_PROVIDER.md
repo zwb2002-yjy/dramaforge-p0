@@ -14,6 +14,25 @@ Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/
 
 ## 当前唯一模型执行系统
 
+来源登记、不可变来源快照和追加检查记录集中在
+`backend/app/providers/model_sources/` 的三个 JSON 文件。来源目录只保存 URL、精确适用
+范围及证据元数据，不能定义能力或替代 Manifest。当前导入的二十份哈希核验捕获均为
+`unreviewed`，型号/API/地区适用性尚未复核；HTTP 200、SDK 示例和 Compiler Fixture
+不会自动赋予字段官方支持。
+
+新合同的证据关联通过 `source_evidence.resolve_field_evidence` 解析：显式字段 override
+优先，其次最近能力/输入组，最后操作组。字段必须有自身声明状态，父组不能把未知字段
+升级为支持。`covers` 使用 JSON pointer；`reviewed_manifest_subtree_hash` 包含能力值、
+支持状态和条件/派生/强制规则，排除来源及审核元数据。新增字段或修改值会使旧审核
+失效；参数名及字面 JSON 中同名的 `checked_at/source_url` 仍属于能力语义。
+
+维护命令 `scripts/model_source_evidence.py` 提供 `lint`、`register --record-json`、
+`snapshot --record-json --body` 和 `check --record-json`，可用 `--root` 指定离线副本。
+捕获快照必须提交实际哈希一致的正文；重复身份不同内容被拒绝，检查仅追加，旧时间戳
+原样保留。命令不联网、不解密、不写 Manifest、不开放模型；并发写入直接拒绝。
+来源后续修订采用新快照/检查 ID，旧引用继续解析。生产调用只读取 Manifest 能力，
+不从 URL 内容或检查记录动态推断参数。
+
 项目尚未发布。模型执行统一为文件 Catalog/Manifest、具体 ProviderModelBinding、
 Connection/Credential revision、严格 Compiler 和 ExecutionIdentitySnapshot。
 未接入生产的 Global/Dynamic 第二套能力表、Policy/Protocol/Handler 表与 Cutover 预检

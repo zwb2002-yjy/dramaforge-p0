@@ -5322,16 +5322,17 @@ export interface components {
         OfficialSource: {
             /** Url */
             url: string;
-            /**
-             * Checked At
-             * Format: date
-             */
-            checked_at: string;
+            /** Checked At */
+            checked_at?: string | null;
             /**
              * Status
-             * @default documented_claim
+             * @default source_registered_unreviewed
              */
             status: string;
+            /** Source Id */
+            source_id?: string | null;
+            /** Source Snapshot Ref */
+            source_snapshot_ref?: string | null;
         };
         /** OpenCutClip */
         OpenCutClip: {

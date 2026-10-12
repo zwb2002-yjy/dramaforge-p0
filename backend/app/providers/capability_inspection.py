@@ -119,7 +119,9 @@ def inspect_manifest(
         else "unknown",
         capabilities={str(k): _public_spec(v) for k, v in manifest.capability_specs.items()},
         controls=controls,
-        official_sources=official_sources(manifest.id),
+        official_sources=official_sources(
+            manifest.id, protocol_profile=catalog.protocol_profile if catalog else None
+        ),
         lifecycle_warnings=lifecycle_warnings(manifest.id),
         limitations=limitations,
     )

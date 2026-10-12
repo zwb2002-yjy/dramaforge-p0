@@ -1,0 +1,185 @@
+{
+  "schema_version": "1",
+  "checks": [
+    {
+      "check_id": "e45b9c6bbfe915bf0c18fa180642cca69860e5da58b0cc641550ea7083d9a45f:baseline-capture",
+      "source_snapshot_ref": "e45b9c6bbfe915bf0c18fa180642cca69860e5da58b0cc641550ea7083d9a45f:b8d7c9cbc2acc9934918a3df0fc20ace46845f15112de62caa7d4e79296a13db",
+      "checked_at": "2026-10-12T10:45:17.5940089Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "b8d7c9cbc2acc9934918a3df0fc20ace46845f15112de62caa7d4e79296a13db",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "3fdb54d2597664c20669861ba1d0d5e6c0335a4f3e00978865285250f8fb4950:baseline-capture",
+      "source_snapshot_ref": "3fdb54d2597664c20669861ba1d0d5e6c0335a4f3e00978865285250f8fb4950:db3d894886979a4cba985e9c386f66212fd651a57a1f3c32ed318b607e27b8d9",
+      "checked_at": "2026-10-12T10:45:17.5940040Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "db3d894886979a4cba985e9c386f66212fd651a57a1f3c32ed318b607e27b8d9",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "cfbb45bca73d714e3d1a241368f70a14c1ddd6ff02ac9125e9c17e54fee20848:baseline-capture",
+      "source_snapshot_ref": "cfbb45bca73d714e3d1a241368f70a14c1ddd6ff02ac9125e9c17e54fee20848:560183a0686d5744e7bb0b5441d02ec8ab689543cdc5697a6ce3f275aca3dc2c",
+      "checked_at": "2026-10-12T10:45:17.5939941Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "560183a0686d5744e7bb0b5441d02ec8ab689543cdc5697a6ce3f275aca3dc2c",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "9fb251a30ef0c1a162116b16628dcffc38608bb1895016f33564207f02eb4bc5:baseline-capture",
+      "source_snapshot_ref": "9fb251a30ef0c1a162116b16628dcffc38608bb1895016f33564207f02eb4bc5:05efd448bd5d3cd0a7b7b7c43d38566b41427fc204c6ebcd322512c3c7a977fd",
+      "checked_at": "2026-10-12T10:45:17.5940053Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "05efd448bd5d3cd0a7b7b7c43d38566b41427fc204c6ebcd322512c3c7a977fd",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "e4014369c9aca452b87ccd68f21d0b076c45ab0ea4de4c69fa0859c41e1a380b:baseline-capture",
+      "source_snapshot_ref": "e4014369c9aca452b87ccd68f21d0b076c45ab0ea4de4c69fa0859c41e1a380b:4a68cb7701d0646b0f2b01045f719a31de13e30ef7feaf9cfb8da8625fb861ca",
+      "checked_at": "2026-10-12T10:45:19.1023677Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "4a68cb7701d0646b0f2b01045f719a31de13e30ef7feaf9cfb8da8625fb861ca",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "524d3f2684c8ab950106e62a93f8c981805323d55075dab00eafe801551d5747:baseline-capture",
+      "source_snapshot_ref": "524d3f2684c8ab950106e62a93f8c981805323d55075dab00eafe801551d5747:0778adc93ca448e0fe44cc1c0064c82c487a17dfa95c0db71d04c480b870e920",
+      "checked_at": "2026-10-12T10:45:19.1035587Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "0778adc93ca448e0fe44cc1c0064c82c487a17dfa95c0db71d04c480b870e920",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "e7b697cfe939cf0e478ee5fc1d2744ab821a6d08a2bfa2db69531de8bc9986ce:baseline-capture",
+      "source_snapshot_ref": "e7b697cfe939cf0e478ee5fc1d2744ab821a6d08a2bfa2db69531de8bc9986ce:0e8bb3299b9f58f8fe76fa7f4c52db2036f8b67ed6f8c7a67c9674b445dba175",
+      "checked_at": "2026-10-12T10:45:19.1920987Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "0e8bb3299b9f58f8fe76fa7f4c52db2036f8b67ed6f8c7a67c9674b445dba175",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "822fe94cf8f7228bcfdc2eb5e624b3b67a01f3915383c6137a879d9a64cd4957:baseline-capture",
+      "source_snapshot_ref": "822fe94cf8f7228bcfdc2eb5e624b3b67a01f3915383c6137a879d9a64cd4957:fccb76df972ffda02a2489e8ba3b6d9d96c394a000f280bcb338b526824eee15",
+      "checked_at": "2026-10-12T10:45:19.2589718Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "fccb76df972ffda02a2489e8ba3b6d9d96c394a000f280bcb338b526824eee15",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "285e7b8a6a0342cdba33a520c46f3651f947d1afddc986032518f1da212d3810:baseline-capture",
+      "source_snapshot_ref": "285e7b8a6a0342cdba33a520c46f3651f947d1afddc986032518f1da212d3810:a48a4b262f90ba669e66165acc81c381ca4bf4dc5c609aeb6c2add24f8cdcf94",
+      "checked_at": "2026-10-12T10:45:20.2388633Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "a48a4b262f90ba669e66165acc81c381ca4bf4dc5c609aeb6c2add24f8cdcf94",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "7892d0e1969229a7a33dc58fb70c8087ba724be2c4558592b8e094819c8dca6f:baseline-capture",
+      "source_snapshot_ref": "7892d0e1969229a7a33dc58fb70c8087ba724be2c4558592b8e094819c8dca6f:f3c5a0e7283cc919537346631e2ea7432501b8b03faf41fb4c14f2e1febc72d7",
+      "checked_at": "2026-10-12T10:45:20.3396799Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "f3c5a0e7283cc919537346631e2ea7432501b8b03faf41fb4c14f2e1febc72d7",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "b2dd7decb55f39042b6f7fe8dc148531db4ec03af6f2f1fb324141e54e40d3c1:baseline-capture",
+      "source_snapshot_ref": "b2dd7decb55f39042b6f7fe8dc148531db4ec03af6f2f1fb324141e54e40d3c1:5e1f6d3aba12c2094cec8db8d3b5c7d7fe81d80d7f60d5db6f63624dd8c902f1",
+      "checked_at": "2026-10-12T10:45:20.4427740Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "5e1f6d3aba12c2094cec8db8d3b5c7d7fe81d80d7f60d5db6f63624dd8c902f1",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "daa7edcfe694f7a3fc2ee2a5e4d4404205e260a275fc17daea0d5b39017863b2:baseline-capture",
+      "source_snapshot_ref": "daa7edcfe694f7a3fc2ee2a5e4d4404205e260a275fc17daea0d5b39017863b2:4b77a0b77d8ba8c31531ade0f13ed492466c86585aea87a4c47fa1521f29608e",
+      "checked_at": "2026-10-12T10:45:20.5063679Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "4b77a0b77d8ba8c31531ade0f13ed492466c86585aea87a4c47fa1521f29608e",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "d3af0f2d3fed67ed52513e375abf003525ba1c2acce0de0a2a0bd81d05d35412:baseline-capture",
+      "source_snapshot_ref": "d3af0f2d3fed67ed52513e375abf003525ba1c2acce0de0a2a0bd81d05d35412:0eaff437d35498b1d66f48ba5aca96209e4eb8bafc429eafd4f369b7415a48ad",
+      "checked_at": "2026-10-12T10:45:20.8279870Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "0eaff437d35498b1d66f48ba5aca96209e4eb8bafc429eafd4f369b7415a48ad",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9:baseline-capture",
+      "source_snapshot_ref": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9:5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392",
+      "checked_at": "2026-10-12T10:45:20.9417844Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "3eae5991171dedc94b3d69db463cd464cdeebebac729e0dea5ba24a7ad0892e5:baseline-capture",
+      "source_snapshot_ref": "3eae5991171dedc94b3d69db463cd464cdeebebac729e0dea5ba24a7ad0892e5:349ac86eb9ebaf64778402203dc6d083bb71e5087a7e003d049661e444647079",
+      "checked_at": "2026-10-12T10:45:21.0622806Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "349ac86eb9ebaf64778402203dc6d083bb71e5087a7e003d049661e444647079",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "d7152a6775213564ff6e7366d611601d5712faff5d137da4f1f388f18c27d229:baseline-capture",
+      "source_snapshot_ref": "d7152a6775213564ff6e7366d611601d5712faff5d137da4f1f388f18c27d229:be99644672f8acffc423b83637d40ce32879e5beb243afe7aa10fd36f5adf222",
+      "checked_at": "2026-10-12T10:45:21.8664584Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "be99644672f8acffc423b83637d40ce32879e5beb243afe7aa10fd36f5adf222",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "53a8200a8f1043fa766e9ef1d4a0ccce9aa3127143b6d3214d920c5931a15c6e:baseline-capture",
+      "source_snapshot_ref": "53a8200a8f1043fa766e9ef1d4a0ccce9aa3127143b6d3214d920c5931a15c6e:c811c5487537d5d42d52c5ed09b916e06a05d3d01b850e6481b3a0f108747c6a",
+      "checked_at": "2026-10-12T10:45:21.9165672Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "c811c5487537d5d42d52c5ed09b916e06a05d3d01b850e6481b3a0f108747c6a",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "c7abd6c0fd91273b3cabb11be8afa4ae5e9a1d1c2ea16e250ef5defbde48d330:baseline-capture",
+      "source_snapshot_ref": "c7abd6c0fd91273b3cabb11be8afa4ae5e9a1d1c2ea16e250ef5defbde48d330:d6ecf05731de4c81634bb011e89227c0e6a7369c6734830ef23ea65a7edd30b5",
+      "checked_at": "2026-10-12T10:45:22.2986539Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "d6ecf05731de4c81634bb011e89227c0e6a7369c6734830ef23ea65a7edd30b5",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "d672f7147e2b89bffe88200e5ab881d76a8eb1d93509d6c4195a3f88225ae3c6:baseline-capture",
+      "source_snapshot_ref": "d672f7147e2b89bffe88200e5ab881d76a8eb1d93509d6c4195a3f88225ae3c6:75fb24cc0660c1fe6d70317713a04de9b2fb69f9f16a0cd22a313ffa999e959c",
+      "checked_at": "2026-10-12T10:45:22.3287096Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "75fb24cc0660c1fe6d70317713a04de9b2fb69f9f16a0cd22a313ffa999e959c",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    },
+    {
+      "check_id": "b311b417853bf5f9e5649a1c0b2503b61e80e77d0c86c236a5ed5ed1dbc8e5bb:baseline-capture",
+      "source_snapshot_ref": "b311b417853bf5f9e5649a1c0b2503b61e80e77d0c86c236a5ed5ed1dbc8e5bb:e4641f5f514d5dfedba58187761c520ecf7eb42f478154fb759c64185735fc22",
+      "checked_at": "2026-10-12T10:45:23.6022731Z",
+      "result": "captured_unreviewed",
+      "observed_content_sha256": "e4641f5f514d5dfedba58187761c520ecf7eb42f478154fb759c64185735fc22",
+      "note": "No capability support or compiler certification is inferred.",
+      "http_status": 200
+    }
+  ]
+}
