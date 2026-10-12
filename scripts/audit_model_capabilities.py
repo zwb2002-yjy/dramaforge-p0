@@ -12,10 +12,12 @@ import argparse
 import ast
 import hashlib
 import json
+import re
 import subprocess
 from collections import Counter
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +65,216 @@ def declared_path(payload: Any, path: str) -> bool:
     return True
 
 
+def pointer_value(payload: Any, path: str) -> Any:
+    if not declared_path(payload, path):
+        raise ValueError(f"undeclared JSON pointer: {path}")
+    for token in path.lstrip("/").split("/"):
+        token = token.replace("~1", "/").replace("~0", "~")
+        payload = payload[token] if isinstance(payload, dict) else payload[int(token)]
+    return payload
+
+
+class _DocumentText(HTMLParser):
+    """Static text extraction; embedded scripts are data, never executed."""
+
+    ignored = frozenset({"script", "style", "nav", "header", "footer", "noscript"})
+    void = frozenset({"br", "hr", "img", "input", "link", "meta", "source", "wbr"})
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.stack: list[tuple[str, bool]] = []
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag not in self.void:
+            self.stack.append((tag, tag in self.ignored))
+
+    def handle_endtag(self, tag: str) -> None:
+        for index in range(len(self.stack) - 1, -1, -1):
+            if self.stack[index][0] == tag:
+                del self.stack[index:]
+                break
+
+    def handle_data(self, data: str) -> None:
+        if not any(ignored for _, ignored in self.stack) and data.strip():
+            self.parts.append(data.strip())
+
+
+def extract_document(body: str) -> tuple[str, str, dict[str, Any]]:
+    """Decode a cached document payload without evaluating JavaScript."""
+    for match in re.finditer(r"window\._ROUTER_DATA\s*=\s*", body):
+        try:
+            router, _ = json.JSONDecoder().raw_decode(body[match.end() :])
+        except ValueError:
+            continue
+        if not isinstance(router, dict) or not isinstance(router.get("loaderData"), dict):
+            continue
+        for page in router["loaderData"].values():
+            doc = page.get("curDoc") if isinstance(page, dict) else None
+            if not isinstance(doc, dict):
+                continue
+            markdown = doc.get("MDContent")
+            if isinstance(markdown, str) and markdown.strip():
+                return (
+                    "router_markdown",
+                    markdown,
+                    {
+                        "document_id": doc.get("DocumentID"),
+                        "document_code": doc.get("DocumentCode"),
+                        "library_code": doc.get("LibraryCode"),
+                        "language": doc.get("Language"),
+                        "title": doc.get("Title"),
+                        "updated_at": doc.get("UpdatedTime"),
+                    },
+                )
+    if not re.search(r"<(?:html|!doctype|body|script)\b", body, re.IGNORECASE):
+        return "plain_text", body.strip(), {}
+    parser = _DocumentText()
+    parser.feed(body)
+    return "html_text", "\n".join(parser.parts), {}
+
+
+def inspect_cached_sources(
+    checks: list[dict[str, Any]], bodies: Path
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    records: list[dict[str, Any]] = []
+    texts: dict[str, str] = {}
+    for check in checks:
+        candidate = check["candidate_id"]
+        if not re.fullmatch(r"[0-9a-f]{64}", candidate):
+            raise ValueError("invalid cached source candidate id")
+        expected_id = hashlib.sha256(check["url"].encode()).hexdigest()
+        if candidate != expected_id:
+            raise ValueError("cached source id does not match URL")
+        record = {
+            "candidate_id": candidate,
+            "url": check["url"],
+            "checked_at": check.get("checked_at"),
+            "response_body_sha256": check.get("body_sha256"),
+            "extraction_status": "source_unavailable",
+            "review_status": "unreviewed",
+            "extracted_text_sha256": None,
+        }
+        path = bodies / f"{candidate}.html"
+        if not path.resolve().is_relative_to(bodies.resolve()):
+            raise ValueError("cached source path escapes the supplied body directory")
+        if not path.is_file():
+            records.append(record)
+            continue
+        if path.stat().st_size > 10 * 1024 * 1024:
+            raise ValueError("cached source exceeds the 10 MiB extraction bound")
+        raw = path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != check.get("body_sha256"):
+            raise ValueError("cached response body hash mismatch")
+        body = raw.decode("utf-8-sig")
+        kind, text, locator = extract_document(body)
+        record.update(
+            extraction_status="extracted_unreviewed" if text else "extraction_pending",
+            extraction_format=kind,
+            extracted_characters=len(text),
+            locator=locator,
+            extracted_text_sha256=hashlib.sha256(text.encode()).hexdigest() if text else None,
+        )
+        if text:
+            texts[candidate] = text
+        records.append(record)
+    return records, texts
+
+
+def atomic_facts(value: Any, path: str = "") -> Iterator[tuple[str, Any]]:
+    """An enum is one claim value; its members are not separate coverage units."""
+    if isinstance(value, dict) and value:
+        for key, child in sorted(value.items()):
+            yield from atomic_facts(child, f"{path}/{key.replace('~', '~0').replace('/', '~1')}")
+    else:
+        yield path or "/", value
+
+
+def normalize_observations(
+    observations: dict[str, Any], cached_sources: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Keep document assertions separate from exact-contract evidence status."""
+    normalized = json.loads(json.dumps(observations))
+    by_candidate = {record["candidate_id"]: record for record in cached_sources}
+    source_refs = {
+        source["id"]: source.get("source_candidate_ref")
+        for source in normalized.get("source_observations", [])
+    }
+    groups = []
+    for original in normalized.get("identified_official_claims", []):
+        group = dict(original)
+        group["source_text_status"] = group.pop("claim_status", "unknown")
+        group["applicability_status"] = group.get("applicability_status", "unknown")
+        # Phase 0 has no reviewed manifest evidence resolver. An observation,
+        # even with a retained mapping, never grants executable support.
+        group["contract_evidence_status"] = "unknown"
+        group["implementation_verification"] = "not_verified_per_capability"
+        group.pop("implementation", None)
+        group["mapping_candidates"] = group.pop("schema_mapping", [])
+        group["submitted_note"] = group.pop("blocker", None)
+        group["blocker_codes"] = ["manifest_evidence_group_missing"]
+        if group["applicability_status"] != "verified":
+            group["blocker_codes"].append("source_applicability_unknown")
+        cached = by_candidate.get(source_refs.get(group.get("source_ref")))
+        group["source_extraction_status"] = cached["extraction_status"] if cached else "not_checked"
+        if group["source_extraction_status"] != "extracted_unreviewed":
+            group["blocker_codes"].append("source_text_not_extracted")
+        if cached and cached["extraction_status"] == "extracted_unreviewed":
+            group["source_locator"] = cached.get("locator", {})
+            group["extracted_text_sha256"] = cached["extracted_text_sha256"]
+        groups.append(group)
+    normalized["identified_official_claims"] = groups
+    return normalized
+
+
+def identified_claims(
+    observations: dict[str, Any], inventory: list[dict[str, Any]], repo: Path
+) -> list[dict[str, Any]]:
+    entries = {tuple(item["identity"]): item for item in inventory}
+    result = []
+    seen: set[str] = set()
+    for group in observations.get("identified_official_claims", []):
+        if group["id"] in seen:
+            raise ValueError("duplicate identified claim group id")
+        seen.add(group["id"])
+        entry = entries.get(tuple(group["identity"]))
+        raw = json.loads((repo / entry["path"]).read_text(encoding="utf-8")) if entry else {}
+        typed = ModelCapabilityManifest.model_validate(raw).model_dump(mode="json") if entry else {}
+        for value_path, value in atomic_facts(group.get("value")):
+            pointers = group.get("mapping_by_value_path", {}).get(value_path, [])
+            if isinstance(pointers, str):
+                pointers = [pointers]
+            matched = bool(pointers) and all(
+                declared_path(typed, pointer)
+                and declared_path(raw, pointer)
+                and hash_manifest({"value": pointer_value(raw, pointer)})
+                == hash_manifest({"value": value})
+                for pointer in pointers
+            )
+            source_fact_status = group.get("source_fact_statuses", {}).get(value_path, "unknown")
+            result.append(
+                {
+                    "id": f"{group['id']}{value_path}",
+                    "group_id": group["id"],
+                    "identity": group["identity"],
+                    "in_initial_scope": bool(entry and entry["in_initial_scope"]),
+                    "value_path": value_path,
+                    "value": value,
+                    "source_ref": group.get("source_ref"),
+                    "source_text_status": source_fact_status,
+                    "source_group_assertion": group["source_text_status"],
+                    "applicability_status": group["applicability_status"],
+                    "contract_evidence_status": group["contract_evidence_status"],
+                    "schema_mapping": pointers,
+                    "schema_mapping_status": "exact_value" if matched else "missing_or_mismatched",
+                    "implementation_verification": "not_verified_per_capability",
+                    "source_extraction_status": group["source_extraction_status"],
+                    "blocker_codes": group["blocker_codes"],
+                }
+            )
+    return result
+
+
 def annotation_urls(path: Path) -> dict[str, str]:
     """Read the existing advisory URL map without importing application state."""
     constants: dict[str, Any] = {}
@@ -93,7 +305,14 @@ def annotation_urls(path: Path) -> dict[str, str]:
     return constants.get("_SOURCES", {})
 
 
-def build_audit(repo: Path, *, source_sha: str, checked_at: str) -> dict[str, Any]:
+def build_audit(
+    repo: Path,
+    *,
+    source_sha: str,
+    checked_at: str,
+    observations: dict[str, Any] | None = None,
+    cached_sources: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     catalog = repo / "backend/app/providers/model_catalog"
     fixture_root = repo / "fixtures/providers/contracts"
     fixtures: dict[tuple[str, ...], list[dict[str, Any]]] = {}
@@ -104,7 +323,7 @@ def build_audit(repo: Path, *, source_sha: str, checked_at: str) -> dict[str, An
     annotations = annotation_urls(repo / "backend/app/providers/capability_sources.py")
     inventory: list[dict[str, Any]] = []
     sources: dict[str, dict[str, Any]] = {}
-    claims: list[dict[str, Any]] = []
+    declarations_by_field: list[dict[str, Any]] = []
     for loaded in ModelCatalogLoader(catalog).load():
         raw = loaded.as_dict()
         typed = ModelCapabilityManifest.model_validate(raw).model_dump(
@@ -208,7 +427,7 @@ def build_audit(repo: Path, *, source_sha: str, checked_at: str) -> dict[str, An
                 ("/maximum", "/maximum_total_references", "/max_bytes")
             ):
                 blockers.append("unknown_unlimited_not_distinguished")
-            claims.append(
+            declarations_by_field.append(
                 {
                     "identity": list(key),
                     "in_initial_scope": in_scope,
@@ -219,20 +438,23 @@ def build_audit(repo: Path, *, source_sha: str, checked_at: str) -> dict[str, An
                     "claim_status": "unknown",
                     "evidence_resolution": "missing_reviewed_group",
                     "source_snapshot_ref": None,
-                    "implementation": raw["implementation_status"],
-                    "compiler_fixture": item["exact_fixture_paths"],
+                    "model_declaration_ref": list(key),
+                    "implementation_verification": "not_verified_per_capability",
                     "product_open": item["product_open"],
                     "blocker": blockers,
                 }
             )
     scoped = [item for item in inventory if item["in_initial_scope"]]
+    scoped_fields = [item for item in declarations_by_field if item["in_initial_scope"]]
+    normalized = normalize_observations(observations or {}, cached_sources or [])
+    claims = identified_claims(normalized, inventory, repo)
     scoped_claims = [item for item in claims if item["in_initial_scope"]]
     active = [item for item in scoped if item["publication_lifecycle"] == "active"]
     frozen = [
         {"identity": item["identity"], "manifest_hash": item["manifest_hash"]} for item in inventory
     ]
     return {
-        "audit_schema_version": 1,
+        "audit_schema_version": 2,
         "source_sha": source_sha,
         "checked_at": checked_at,
         "inventory_sha256": hash_manifest({"inventory": frozen}),
@@ -253,18 +475,46 @@ def build_audit(repo: Path, *, source_sha: str, checked_at: str) -> dict[str, An
             },
             "claim_classification": {
                 "total": len(scoped_claims),
-                "counts": dict(Counter(i["claim_status"] for i in scoped_claims)),
+                "outside_frozen_inventory": [
+                    i["id"]
+                    for i in claims
+                    if tuple(i["identity"]) not in {tuple(entry["identity"]) for entry in inventory}
+                ],
+                "unit": "identified_official_fact; enums are one value",
+                "source_text_counts": dict(Counter(i["source_text_status"] for i in scoped_claims)),
+                "exact_contract_evidence_counts": dict(
+                    Counter(i["contract_evidence_status"] for i in scoped_claims)
+                ),
             },
             "structured_mapping": {
                 "total": len(scoped_claims),
-                "structured": sum(i["representation"] == "structured" for i in scoped_claims),
-                "legacy_json": sum(i["representation"] == "legacy_json" for i in scoped_claims),
+                "mapped_exact_value": sum(
+                    i["schema_mapping_status"] == "exact_value" for i in scoped_claims
+                ),
+                "missing_or_mismatched": sum(
+                    i["schema_mapping_status"] != "exact_value" for i in scoped_claims
+                ),
+                "ratio": sum(i["schema_mapping_status"] == "exact_value" for i in scoped_claims)
+                / len(scoped_claims)
+                if scoped_claims
+                else None,
+                "status": "measured_from_identified_facts"
+                if scoped_claims
+                else "no_identified_official_facts",
+            },
+            "catalog_field_retention": {
+                "total_raw_leaves": len(scoped_fields),
+                "retained_by_typed_reader": sum(
+                    i["representation"] == "structured" for i in scoped_fields
+                ),
+                "legacy_json": sum(i["representation"] == "legacy_json" for i in scoped_fields),
                 "string_features": sum(
-                    i["representation"] == "string_feature" for i in scoped_claims
+                    i["representation"] == "string_feature" for i in scoped_fields
                 ),
                 "unmapped_schema_fields": sum(
-                    i["representation"] == "unmapped_schema_field" for i in scoped_claims
+                    i["representation"] == "unmapped_schema_field" for i in scoped_fields
                 ),
+                "status": "field_retention_only_not_capability_coverage",
             },
             "official_evidence": {
                 "reviewed_supported_claims": 0,
@@ -280,7 +530,10 @@ def build_audit(repo: Path, *, source_sha: str, checked_at: str) -> dict[str, An
             "product_open": {"verified_contracts": None, "status": "not_verified"},
         },
         "inventory": inventory,
-        "claims": claims,
+        "catalog_declarations": declarations_by_field,
+        "official_claims": claims,
+        "manual_observations": normalized,
+        "cached_sources": cached_sources or [],
         "source_candidates": list(sources.values()),
         "limitations": [
             (
@@ -340,12 +593,40 @@ def coverage_markdown(report: dict[str, Any]) -> str:
             f"- [{source['url']}]({source['url']}): "
             f"{len(source['associations'])} 个显式目录关联；未自动抓取/审核。"
         )
+    lines.extend(
+        [
+            "",
+            "## 已识别官方事实与映射",
+            "",
+            "来源原文陈述、精确合同适用性、合同证据与实施验证分别记录。",
+            "",
+            "| Fact | 原文 | 适用性 | 合同证据 | 映射 |",
+            "|---|---|---|---|---|",
+        ]
+    )
+    for claim in report["official_claims"]:
+        lines.append(
+            f"| {claim['id']} | {claim['source_text_status']} | "
+            f"{claim['applicability_status']} | {claim['contract_evidence_status']} | "
+            f"{claim['schema_mapping_status']} |"
+        )
+    lines.extend(["", "## 缓存来源正文（不授予能力支持）", ""])
+    for source in report["cached_sources"]:
+        lines.append(
+            f"- {source['candidate_id']}: {source['extraction_status']}; "
+            f"{source.get('extracted_characters', 0)} characters; "
+            f"text hash={source['extracted_text_sha256']}"
+        )
     lines.extend(["", "## 局限", "", *[f"- {item}" for item in report["limitations"]], ""])
     return "\n".join(lines)
 
 
 def write_reports(
-    repo: Path, output: Path, report: dict[str, Any], observations: dict[str, Any]
+    repo: Path,
+    output: Path,
+    report: dict[str, Any],
+    *,
+    extracted_texts: dict[str, str] | None = None,
 ) -> None:
     repo, output = repo.resolve(), output.resolve()
     if not output.is_relative_to(repo / "tmp"):
@@ -354,14 +635,11 @@ def write_reports(
         )
     if any((output / name).exists() for name in REPORT_NAMES):
         raise ValueError("frozen report already exists; choose a new evidence directory")
-    output.mkdir(parents=True, exist_ok=True)
-    # Observations remain attributed external evidence. They never grant a claim
-    # support status or change any computed metric/manifest in the audit.
-    report = {**report, "manual_observations": observations}
-    (output / REPORT_NAMES[0]).write_text(
-        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
-    (output / REPORT_NAMES[1]).write_text(coverage_markdown(report), encoding="utf-8")
+    observations = report["manual_observations"]
+    contents = {
+        REPORT_NAMES[0]: json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        REPORT_NAMES[1]: coverage_markdown(report),
+    }
     for name, section in ((REPORT_NAMES[2], "invariants"), (REPORT_NAMES[3], "baseline")):
         payload = observations.get(
             section, {"status": "not_verified", "reason": "No reviewed observations supplied."}
@@ -392,7 +670,19 @@ def write_reports(
                     )
         else:
             content += "```json\n" + json.dumps(payload, ensure_ascii=False, indent=2) + "\n```\n"
-        (output / name).write_text(content + "\n", encoding="utf-8")
+        contents[name] = content + "\n"
+    for candidate, text in (extracted_texts or {}).items():
+        if not re.fullmatch(r"[0-9a-f]{64}", candidate):
+            raise ValueError("invalid extracted source id")
+        contents[f"source-texts/{candidate}.md"] = text
+    # Render/validate before creating the destination: bad observations must
+    # not leave a partial frozen report that cannot be rerun.
+    output.mkdir(parents=True, exist_ok=True)
+    for name, content in contents.items():
+        target = output / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("x", encoding="utf-8") as file:
+            file.write(content)
 
 
 def main() -> int:
@@ -400,6 +690,8 @@ def main() -> int:
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--observations", type=Path)
+    parser.add_argument("--source-checks", type=Path)
+    parser.add_argument("--source-bodies", type=Path)
     parser.add_argument("--compare", type=Path)
     args = parser.parse_args()
     sha = subprocess.run(
@@ -408,7 +700,25 @@ def main() -> int:
         capture_output=True,
         text=True,
     ).stdout.strip()
-    report = build_audit(args.repo_root, source_sha=sha, checked_at=datetime.now(UTC).isoformat())
+    if bool(args.source_checks) != bool(args.source_bodies):
+        parser.error("--source-checks and --source-bodies must be provided together")
+    observations = (
+        json.loads(args.observations.read_text(encoding="utf-8-sig")) if args.observations else {}
+    )
+    cached, extracted_texts = (
+        inspect_cached_sources(
+            json.loads(args.source_checks.read_text(encoding="utf-8-sig")), args.source_bodies
+        )
+        if args.source_checks
+        else ([], {})
+    )
+    report = build_audit(
+        args.repo_root,
+        source_sha=sha,
+        checked_at=datetime.now(UTC).isoformat(),
+        observations=observations,
+        cached_sources=cached,
+    )
     report["source_worktree_status"] = subprocess.run(
         ["git", "-C", str(args.repo_root), "status", "--porcelain=v1"],
         check=True,
@@ -418,10 +728,7 @@ def main() -> int:
     if args.compare:
         previous = json.loads(args.compare.read_text(encoding="utf-8"))
         report["inventory_diff"] = compare_inventory(previous, report)
-    observations = (
-        json.loads(args.observations.read_text(encoding="utf-8-sig")) if args.observations else {}
-    )
-    write_reports(args.repo_root, args.output_dir, report, observations)
+    write_reports(args.repo_root, args.output_dir, report, extracted_texts=extracted_texts)
     print(
         json.dumps(
             {
