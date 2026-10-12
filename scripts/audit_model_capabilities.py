@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from app.providers.catalog_loader import ModelCatalogLoader, hash_manifest
+from app.providers.manifest import ModelCapabilityManifest
 
 INITIAL_PROVIDERS = frozenset({"agnes", "minimax", "volcengine"})
 IDENTITY_FIELDS = ("provider_type", "protocol_profile", "model_id", "model_revision")
@@ -47,6 +48,19 @@ def leaves(value: Any, path: str) -> Iterator[tuple[str, Any]]:
     else:
         # Empty declarations and explicit nulls must not disappear from audits.
         yield path, value
+
+
+def declared_path(payload: Any, path: str) -> bool:
+    """Only fields retained by the typed reader qualify as schema mappings."""
+    for token in path.lstrip("/").split("/"):
+        token = token.replace("~1", "/").replace("~0", "~")
+        if isinstance(payload, dict) and token in payload:
+            payload = payload[token]
+        elif isinstance(payload, list) and token.isdigit() and int(token) < len(payload):
+            payload = payload[int(token)]
+        else:
+            return False
+    return True
 
 
 def annotation_urls(path: Path) -> dict[str, str]:
@@ -93,6 +107,9 @@ def build_audit(repo: Path, *, source_sha: str, checked_at: str) -> dict[str, An
     claims: list[dict[str, Any]] = []
     for loaded in ModelCatalogLoader(catalog).load():
         raw = loaded.as_dict()
+        typed = ModelCapabilityManifest.model_validate(raw).model_dump(
+            mode="json", exclude_unset=True
+        )
         key = loaded.identity
         exact_fixtures = fixtures.get(key, [])
         valid_fixtures = [
@@ -170,10 +187,17 @@ def build_audit(repo: Path, *, source_sha: str, checked_at: str) -> dict[str, An
         if raw.get("documented_features"):
             semantic["documented_features"] = raw["documented_features"]
         for claim_path, value in leaves(semantic, ""):
-            legacy = "/output_constraints/" in claim_path
+            legacy = "output_constraints" in claim_path.split("/")
             feature = claim_path.startswith("/documented_features/")
+            mapped = declared_path(typed, claim_path)
             representation = (
-                "string_feature" if feature else "legacy_json" if legacy else "structured"
+                "string_feature"
+                if feature
+                else "legacy_json"
+                if legacy
+                else "unmapped_schema_field"
+                if not mapped
+                else "structured"
             )
             blockers = ["official_evidence_gap"]
             if loaded.publication_lifecycle != "active":
@@ -190,7 +214,7 @@ def build_audit(repo: Path, *, source_sha: str, checked_at: str) -> dict[str, An
                     "in_initial_scope": in_scope,
                     "claim_path": claim_path,
                     "value": value,
-                    "schema_path": None if feature else claim_path,
+                    "schema_path": claim_path if mapped and not feature else None,
                     "representation": representation,
                     "claim_status": "unknown",
                     "evidence_resolution": "missing_reviewed_group",
@@ -237,6 +261,9 @@ def build_audit(repo: Path, *, source_sha: str, checked_at: str) -> dict[str, An
                 "legacy_json": sum(i["representation"] == "legacy_json" for i in scoped_claims),
                 "string_features": sum(
                     i["representation"] == "string_feature" for i in scoped_claims
+                ),
+                "unmapped_schema_fields": sum(
+                    i["representation"] == "unmapped_schema_field" for i in scoped_claims
                 ),
             },
             "official_evidence": {

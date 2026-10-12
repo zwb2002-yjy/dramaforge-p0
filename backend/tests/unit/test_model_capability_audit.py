@@ -118,6 +118,32 @@ def test_fixture_for_another_revision_is_not_counted(repository):
     assert report(repository)["inventory"][0]["fixture_status"] == "missing_or_ambiguous"
 
 
+def test_empty_legacy_container_is_not_counted_as_typed(repository):
+    first = report(repository)
+    path = repository / first["inventory"][0]["path"]
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["operations"]["image.generate"]["output_constraints"] = {}
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    result = report(repository)
+    empty = next(c for c in result["claims"] if c["claim_path"].endswith("/output_constraints"))
+    assert empty["representation"] == "legacy_json"
+    assert result["metrics"]["structured_mapping"]["legacy_json"] == 1
+
+
+def test_ignored_raw_field_does_not_claim_a_schema_mapping(repository):
+    first = report(repository)
+    path = repository / first["inventory"][0]["path"]
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["operations"]["image.generate"]["future_capability"] = {"enabled": True}
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    item = next(
+        c for c in report(repository)["claims"] if "/future_capability/" in c["claim_path"]
+    )
+    assert item["representation"] == "unmapped_schema_field"
+    assert item["schema_path"] is None
+    assert "typed_contract_mapping_pending" in item["blocker"]
+
+
 def test_output_is_local_evidence_and_cannot_overwrite_frozen_reports(repository):
     result = report(repository)
     original = deepcopy(result)
