@@ -42,7 +42,7 @@ def test_audit_does_not_promote_fixtures_or_official_urls(repository):
     assert result["metrics"]["compiler_contracts"]["passed_by_this_audit"] is None
     assert result["metrics"]["official_evidence"]["reviewed_supported_claims"] == 0
     assert result["official_claims"] == []
-    assert result["metrics"]["structured_mapping"]["ratio"] is None
+    assert result["metrics"]["declared_value_mapping"]["overall_ratio"] is None
     assert {c["claim_status"] for c in result["catalog_declarations"]} == {"unknown"}
     assert all(c["source_snapshot_ref"] is None for c in result["catalog_declarations"])
     assert "implementation" not in result["catalog_declarations"][0]
@@ -221,11 +221,12 @@ def test_document_assertion_does_not_become_cn_contract_support(repository):
 
 def test_official_unmapped_facts_enter_denominator_and_enum_is_one_fact(repository):
     result = report(repository, observations=_observations(repository))
-    mapping = result["metrics"]["structured_mapping"]
+    mapping = result["metrics"]["declared_value_mapping"]
     assert mapping["total"] == 3
     assert mapping["mapped_exact_value"] == 1
-    assert mapping["missing_or_mismatched"] == 2
-    assert mapping["ratio"] == pytest.approx(1 / 3)
+    assert mapping["value_mismatch"] == 1
+    assert mapping["not_assessed"] == 1
+    assert mapping["overall_ratio"] is None
     assert result["metrics"]["catalog_field_retention"]["total_raw_leaves"] > 3
     assert not any("namespace" in claim["id"] for claim in result["official_claims"])
 
@@ -247,7 +248,7 @@ def test_value_mismatch_does_not_count_as_mapped(repository):
     observations = _observations(repository)
     observations["identified_official_claims"][0]["value"]["size"] = "4K"
     result = report(repository, observations=observations)
-    assert result["metrics"]["structured_mapping"]["mapped_exact_value"] == 0
+    assert result["metrics"]["declared_value_mapping"]["mapped_exact_value"] == 0
     assert result["metrics"]["official_evidence"]["reviewed_supported_claims"] == 0
 
 
@@ -309,3 +310,52 @@ def test_bad_observations_do_not_leave_partial_frozen_output(repository):
     with pytest.raises(KeyError):
         audit.write_reports(repository, output, result)
     assert not output.exists()
+
+
+def test_unassessed_mapping_is_not_reported_as_missing_or_zero_coverage(repository):
+    observations = _observations(repository)
+    observations["identified_official_claims"][0].pop("mapping_by_value_path")
+    result = report(repository, observations=observations)
+    mapping = result["metrics"]["declared_value_mapping"]
+    assert mapping["not_assessed"] == 3
+    assert mapping["explicitly_missing"] == mapping["value_mismatch"] == 0
+    assert mapping["overall_ratio"] is None
+
+
+def test_source_annotation_is_outside_capability_denominator(repository):
+    observations = _observations(repository)
+    group = deepcopy(observations["identified_official_claims"][0])
+    group.update(
+        id="guide-note",
+        record_kind="source_annotation",
+        value={"guide_name": "another-version", "applicability": "unknown"},
+    )
+    observations["identified_official_claims"].append(group)
+    result = report(repository, observations=observations)
+    assert len(result["source_annotations"]) == 1
+    assert result["metrics"]["claim_classification"]["total"] == 3
+
+
+def test_cache_extraction_supersedes_old_unavailable_note(repository):
+    observations = _observations(repository)
+    observations["baseline"] = {"来源与时间范围": "web reader only returned JavaScript shell"}
+    observations["source_observations"] = [{"id": "official-doc", "source_candidate_ref": "a" * 64}]
+    group = observations["identified_official_claims"][0]
+    group.update(locator="web returned JavaScript shell", blocker="source_unavailable")
+    cached = [
+        {
+            "candidate_id": "a" * 64,
+            "extraction_status": "extracted_unreviewed",
+            "extracted_text_sha256": "b" * 64,
+            "locator": {"document_id": 123},
+        }
+    ]
+    result = report(repository, observations=observations, cached_sources=cached)
+    current = result["manual_observations"]["identified_official_claims"][0]
+    assert current["source_extraction_status"] == "extracted_unreviewed"
+    assert "source_unavailable" not in str(current)
+    assert "JavaScript shell" not in str(result["manual_observations"]["baseline"])
+    assert (
+        result["manual_observations"]["historical_source_observations"][0]["note"]
+        == "source_unavailable"
+    )

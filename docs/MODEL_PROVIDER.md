@@ -33,8 +33,10 @@ Connection/Credential revision、严格 Compiler 和 ExecutionIdentitySnapshot�
 同一修订的 Fixture。首批统计为 Agnes、MiniMax、Volcengine；其他协议合同另列上下文。
 目录声明、官方事实、Compiler 测试、产品开放与账号可用分别报告。型号级
 `contract_tested` 与 Fixture 关联不能认证每条能力，逐能力实施验证缺证据时保持未核验。
-Catalog 字段保留数量仅说明读取结果；结构化映射的分母是明确识别的官方事实，未映射
-字段进入分母，枚举值按一项事实统计。现有来源缺少审核
+Catalog 字段保留数量仅说明读取结果；声明值映射的分母是明确识别的官方能力事实，
+SourceAnnotation 不进入能力分母，枚举值按一项事实统计。未评估、明确缺失和值失配
+分别计数；未录入逐事实映射审核时不报告 0% 覆盖。路径和值吻合不认证完整 typed 合同
+或 Compiler 实施。现有来源缺少审核
 覆盖时，审计状态为 `unknown`，不改变既有合同或自动禁用当前 Binding。
 
 在 backend 质量容器的锁定环境中，以 `/workspace` 为工作目录运行：

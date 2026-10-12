@@ -201,6 +201,7 @@ def normalize_observations(
         for source in normalized.get("source_observations", [])
     }
     groups = []
+    superseded = []
     for original in normalized.get("identified_official_claims", []):
         group = dict(original)
         group["source_text_status"] = group.pop("claim_status", "unknown")
@@ -211,7 +212,7 @@ def normalize_observations(
         group["implementation_verification"] = "not_verified_per_capability"
         group.pop("implementation", None)
         group["mapping_candidates"] = group.pop("schema_mapping", [])
-        group["submitted_note"] = group.pop("blocker", None)
+        submitted_note = group.pop("blocker", None)
         group["blocker_codes"] = ["manifest_evidence_group_missing"]
         if group["applicability_status"] != "verified":
             group["blocker_codes"].append("source_applicability_unknown")
@@ -220,10 +221,34 @@ def normalize_observations(
         if group["source_extraction_status"] != "extracted_unreviewed":
             group["blocker_codes"].append("source_text_not_extracted")
         if cached and cached["extraction_status"] == "extracted_unreviewed":
+            superseded.append(
+                {
+                    "group_id": group["id"],
+                    "locator": group.get("locator"),
+                    "note": submitted_note,
+                    "status": "historical_input_source_availability_superseded",
+                    "current_extraction_status": cached["extraction_status"],
+                }
+            )
+            group["locator"] = "hash-verified cached document; capability applicability unreviewed"
             group["source_locator"] = cached.get("locator", {})
             group["extracted_text_sha256"] = cached["extracted_text_sha256"]
+        else:
+            group["submitted_note"] = submitted_note
         groups.append(group)
     normalized["identified_official_claims"] = groups
+    normalized["historical_source_observations"] = superseded
+    baseline = normalized.get("baseline")
+    if isinstance(baseline, dict) and cached_sources:
+        old_source_note = baseline.pop("来源与时间范围", None)
+        normalized["historical_source_baseline_note"] = old_source_note
+        baseline["当前来源正文状态"] = {
+            "states": dict(Counter(item["extraction_status"] for item in cached_sources)),
+            "review_status": "unreviewed; extraction is not capability evidence",
+            "historical_input_note": (
+                "Earlier web-reader observations are superseded by hash-verified cache extraction."
+            ),
+        }
     return normalized
 
 
@@ -237,10 +262,13 @@ def identified_claims(
         if group["id"] in seen:
             raise ValueError("duplicate identified claim group id")
         seen.add(group["id"])
+        if group.get("record_kind") == "source_annotation":
+            continue
         entry = entries.get(tuple(group["identity"]))
         raw = json.loads((repo / entry["path"]).read_text(encoding="utf-8")) if entry else {}
         typed = ModelCapabilityManifest.model_validate(raw).model_dump(mode="json") if entry else {}
         for value_path, value in atomic_facts(group.get("value")):
+            mapping_assessed = value_path in group.get("mapping_by_value_path", {})
             pointers = group.get("mapping_by_value_path", {}).get(value_path, [])
             if isinstance(pointers, str):
                 pointers = [pointers]
@@ -266,7 +294,15 @@ def identified_claims(
                     "applicability_status": group["applicability_status"],
                     "contract_evidence_status": group["contract_evidence_status"],
                     "schema_mapping": pointers,
-                    "schema_mapping_status": "exact_value" if matched else "missing_or_mismatched",
+                    "schema_mapping_status": (
+                        "not_assessed"
+                        if not mapping_assessed
+                        else "exact_value"
+                        if matched
+                        else "missing"
+                        if not pointers
+                        else "value_mismatch"
+                    ),
                     "implementation_verification": "not_verified_per_capability",
                     "source_extraction_status": group["source_extraction_status"],
                     "blocker_codes": group["blocker_codes"],
@@ -486,21 +522,28 @@ def build_audit(
                     Counter(i["contract_evidence_status"] for i in scoped_claims)
                 ),
             },
-            "structured_mapping": {
+            "declared_value_mapping": {
                 "total": len(scoped_claims),
                 "mapped_exact_value": sum(
                     i["schema_mapping_status"] == "exact_value" for i in scoped_claims
                 ),
-                "missing_or_mismatched": sum(
-                    i["schema_mapping_status"] != "exact_value" for i in scoped_claims
+                "explicitly_missing": sum(
+                    i["schema_mapping_status"] == "missing" for i in scoped_claims
                 ),
-                "ratio": sum(i["schema_mapping_status"] == "exact_value" for i in scoped_claims)
-                / len(scoped_claims)
-                if scoped_claims
-                else None,
-                "status": "measured_from_identified_facts"
-                if scoped_claims
-                else "no_identified_official_facts",
+                "value_mismatch": sum(
+                    i["schema_mapping_status"] == "value_mismatch" for i in scoped_claims
+                ),
+                "not_assessed": sum(
+                    i["schema_mapping_status"] == "not_assessed" for i in scoped_claims
+                ),
+                "overall_ratio": (
+                    sum(i["schema_mapping_status"] == "exact_value" for i in scoped_claims)
+                    / len(scoped_claims)
+                    if scoped_claims
+                    and not any(i["schema_mapping_status"] == "not_assessed" for i in scoped_claims)
+                    else None
+                ),
+                "status": "explicit_value_mapping_only_not_typed_contract_or_compiler_coverage",
             },
             "catalog_field_retention": {
                 "total_raw_leaves": len(scoped_fields),
@@ -533,6 +576,11 @@ def build_audit(
         "catalog_declarations": declarations_by_field,
         "official_claims": claims,
         "manual_observations": normalized,
+        "source_annotations": [
+            group
+            for group in normalized.get("identified_official_claims", [])
+            if group.get("record_kind") == "source_annotation"
+        ],
         "cached_sources": cached_sources or [],
         "source_candidates": list(sources.values()),
         "limitations": [
