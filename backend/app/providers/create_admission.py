@@ -10,7 +10,10 @@ from app.providers.availability_models import (
     ProviderModelAvailability,
 )
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.catalog_publication import effective_publication_lifecycle
+from app.providers.catalog_publication import (
+    effective_publication_lifecycle,
+    lock_catalog_publication,
+)
 from app.providers.execution_identity import ExecutionIdentitySnapshot
 from app.providers.models import (
     ProviderConnection,
@@ -25,6 +28,7 @@ async def require_frozen_create_admission(
     identity: ExecutionIdentitySnapshot,
 ) -> None:
     """This is a Create gate only. Historical resume must not call it."""
+    await lock_catalog_publication(session, shared=True)
     # The compiler may already have loaded these rows. Reload and hold their
     # current permission through the durable submission marker commit.
     connection = await session.scalar(
@@ -42,7 +46,6 @@ async def require_frozen_create_admission(
     entry = await session.scalar(
         select(ModelCatalogEntry)
         .where(ModelCatalogEntry.id == identity.catalog_entry_id)
-        .with_for_update()
         .execution_options(populate_existing=True)
     )
     if connection is None or binding is None or entry is None:

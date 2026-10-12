@@ -52,6 +52,9 @@ def implementation_fingerprint(provider_type: str, protocol_profile: str) -> str
     plugin = get_plugin(provider_type, protocol_profile)
     root = Path(__file__).resolve().parents[2]
     paths = {
+        Path(__file__),
+        Path(__file__).with_name("execution_identity.py"),
+        Path(__file__).with_name("manifest.py"),
         Path(__file__).with_name("runtime.py"),
         Path(__file__).with_name("transport.py"),
         Path(__file__).with_name("transport_registry.py"),

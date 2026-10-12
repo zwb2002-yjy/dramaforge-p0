@@ -3,7 +3,8 @@
 Status: current（入口见 [CURRENT.md](CURRENT.md)）；
 Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/0005-provider-plugin-driven-configuration.md)。
 
-新 Create 在提交标记前锁定并重新读取当前 Binding/Connection/Catalog 资格，必须匹配
+新 Create 在提交标记前锁定并重新读取当前 Binding/Connection 资格，Catalog 与维护同步
+共用事务协调锁，运行角色保持 Catalog 只读权限。准入必须匹配
 最新连接和凭据修订以及该修订下的正向模型可见性证据。旧排队计划在轮换后失效；已提交
 任务仍按原身份恢复。仅有 `@contract/...` 协议 Fixture 和 `/models` 可见性的动态模型
 返回 `DYNAMIC_MODEL_CAPABILITY_UNVERIFIED`，在精确能力确认机制完成前不开放新 Create。

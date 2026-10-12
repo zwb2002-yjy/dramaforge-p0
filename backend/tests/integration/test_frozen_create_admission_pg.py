@@ -10,8 +10,9 @@ from app.providers.models import (
     ProviderConnectionRevision,
     ProviderModelBinding,
 )
+from app.shared.db import set_rls_context
 from app.shared.errors import ValidationAppError
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from test_phase5_restart_recovery_pg import (
     _FAKE_MANIFEST,
@@ -25,7 +26,9 @@ from test_phase5_restart_recovery_pg import pg_session as pg_session
 from test_phase5_restart_recovery_pg import pytestmark as pytestmark
 
 
-@pytest.mark.parametrize("target", [ProviderConnection, ProviderModelBinding])
+@pytest.mark.parametrize(
+    "target", [ProviderConnection, ProviderModelBinding, None, "catalog_retirement"]
+)
 async def test_second_session_disable_overrides_compilers_cached_permission(
     pg_session, monkeypatch, target
 ):
@@ -67,6 +70,86 @@ async def test_second_session_disable_overrides_compilers_cached_permission(
         request_fingerprint="a" * 64,
     )
     assert binding.enabled and connection.enabled
+    if target == "catalog_retirement":
+        import asyncio
+        import json
+        from pathlib import Path
+
+        from app.providers.catalog_loader import LoadedCatalogManifest
+        from app.providers.catalog_models import ModelCatalogEntry
+        from app.providers.catalog_sync import sync_model_catalog
+
+        entry = await pg_session.get(ModelCatalogEntry, binding.catalog_entry_id)
+        retired = LoadedCatalogManifest(
+            identity=(
+                entry.provider_type,
+                entry.protocol_profile,
+                entry.model_id,
+                entry.model_revision,
+            ),
+            manifest_hash=entry.contract_manifest_hash,
+            publication_lifecycle="retired",
+            source_path=Path(__file__),
+            _canonical_json=json.dumps(entry.capability_manifest_json),
+        )
+        await require_frozen_create_admission(pg_session, identity)
+        factory = async_sessionmaker(pg_session.bind, expire_on_commit=False)
+        started = asyncio.Event()
+        owner = {}
+
+        async def publish_retirement():
+            async with factory() as maintenance:
+                owner["pid"] = await maintenance.scalar(text("SELECT pg_backend_pid()"))
+                started.set()
+                result = await sync_model_catalog(maintenance, manifests=(retired,), apply=True)
+                await maintenance.commit()
+                return result
+
+        publisher = asyncio.create_task(publish_retirement())
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+            waiting = False
+            for _ in range(40):
+                waiting = bool(
+                    await pg_session.scalar(
+                        text(
+                            "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid=:pid "
+                            "AND locktype='advisory' AND NOT granted)"
+                        ),
+                        owner,
+                    )
+                )
+                if waiting:
+                    break
+                await asyncio.sleep(0.01)
+            assert waiting and not publisher.done()
+            # The durable submission-marker transaction releases the shared
+            # lock. No Provider submission is made by this test.
+            await pg_session.commit()
+            result = await asyncio.wait_for(publisher, timeout=5)
+            assert result.lifecycle_updated == (retired.identity,)
+            with pytest.raises(ValidationAppError) as blocked:
+                await require_frozen_create_admission(pg_session, identity)
+            assert blocked.value.details["code"] == "MODEL_CREATE_NOT_ALLOWED"
+        finally:
+            await pg_session.rollback()
+            if not publisher.done():
+                publisher.cancel()
+            await asyncio.gather(publisher, return_exceptions=True)
+        return
+    if target is None:
+        await set_rls_context(
+            pg_session, user_id=user.id, workspace_id=workspace_id, project_id=project_id
+        )
+        await pg_session.execute(text("SET LOCAL ROLE dramaforge_app"))
+        assert not await pg_session.scalar(
+            text(
+                "SELECT has_table_privilege(current_user, "
+                "'provider_model_catalog_entries', 'UPDATE')"
+            )
+        )
+        await require_frozen_create_admission(pg_session, identity)
+        return
     factory = async_sessionmaker(pg_session.bind, expire_on_commit=False)
     row_id = connection.id if target is ProviderConnection else binding.id
     async with factory() as other:

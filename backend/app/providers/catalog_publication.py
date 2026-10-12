@@ -13,6 +13,17 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+_PUBLICATION_LOCK = 0x4472616D61436174
+
+
+async def lock_catalog_publication(session: AsyncSession, *, shared: bool) -> None:
+    """Coordinate Create with the maintenance writer without granting Catalog UPDATE."""
+    if session.get_bind().dialect.name == "postgresql":
+        function = "pg_advisory_xact_lock_shared" if shared else "pg_advisory_xact_lock"
+        await session.execute(text(f"SELECT {function}(:key)"), {"key": _PUBLICATION_LOCK})
 
 
 class CatalogPublicationEvent(BaseModel):
