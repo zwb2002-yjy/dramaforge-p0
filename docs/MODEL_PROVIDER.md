@@ -33,6 +33,13 @@ Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/
 来源后续修订采用新快照/检查 ID，旧引用继续解析。生产调用只读取 Manifest 能力，
 不从 URL 内容或检查记录动态推断参数。
 
+Catalog 的版本入口 `read_catalog_manifest` 读取冻结 V1 与类型化 V2。V2 显式区分
+bounded / unknown / unlimited，支持未实现的编辑、延长与分层操作、逐素材和聚合限制、
+声明式组合/派生规则。它通过同一 CapabilityResolver 校验实际输入和字段级证据，
+最终选项再次检查组合约束；匹配成功不注册 Compiler 或开放 Create。V2 暂为候选，
+Loader 拒绝未经实施发布的 Active。V2 Hash 排除生命周期和文档日期；V1 原算法、
+JSON、Fixture 与历史执行语义冻结不变。
+
 项目尚未发布。模型执行统一为文件 Catalog/Manifest、具体 ProviderModelBinding、
 Connection/Credential revision、严格 Compiler 和 ExecutionIdentitySnapshot。
 未接入生产的 Global/Dynamic 第二套能力表、Policy/Protocol/Handler 表与 Cutover 预检
