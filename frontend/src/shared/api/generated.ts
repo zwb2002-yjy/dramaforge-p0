@@ -3220,6 +3220,27 @@ export interface components {
             /** Approximate Strategy Id */
             approximate_strategy_id?: string | null;
         };
+        /** CapabilityBound */
+        CapabilityBound: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "bounded" | "unlimited" | "unknown";
+            /** Value */
+            value?: number | null;
+            /**
+             * Claim Status
+             * @default unknown
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /**
+             * Inclusive
+             * @default true
+             */
+            inclusive: boolean;
+        };
         /**
          * CapabilityCatalogBody
          * @description The resolvable creative capability catalog (read-only).
@@ -4260,6 +4281,38 @@ export interface components {
             /** Total Shots */
             total_shots: number;
         };
+        /** EvidenceOverride */
+        EvidenceOverride: {
+            /**
+             * Claim Status
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /** Source Snapshot Ref */
+            source_snapshot_ref: string;
+            evidence_review: components["schemas"]["EvidenceReview"];
+            /**
+             * Issue
+             * @default
+             */
+            issue: string;
+        };
+        /** EvidenceReview */
+        EvidenceReview: {
+            /** Covers */
+            covers: string;
+            /** Reviewed Subtree Hash */
+            reviewed_subtree_hash: string;
+            /** Reviewed By */
+            reviewed_by: string;
+            /**
+             * Review Kind
+             * @enum {string}
+             */
+            review_kind: "human" | "authorized_agent" | "synthetic_test";
+            /** Locator */
+            locator: string;
+        };
         /** ExecutionBody */
         ExecutionBody: {
             /**
@@ -4999,6 +5052,22 @@ export interface components {
             description?: string | null;
         };
         JsonValue: unknown;
+        /** KnowledgeFieldRead */
+        KnowledgeFieldRead: {
+            /** Path */
+            path: string;
+            /**
+             * Claim Status
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /** Source Snapshot Ref */
+            source_snapshot_ref: string | null;
+            /** Evidence Resolution */
+            evidence_resolution: string;
+            /** Blocker */
+            blocker: string | null;
+        };
         /** LifecycleWarning */
         LifecycleWarning: {
             /**
@@ -5195,6 +5264,9 @@ export interface components {
             lifecycle_warnings?: components["schemas"]["LifecycleWarning"][];
             /** Limitations */
             limitations?: string[];
+            knowledge?: components["schemas"]["ModelKnowledgeRead"] | null;
+            /** New Create Blocker */
+            new_create_blocker?: string | null;
         };
         /** ModelCapabilitySummary */
         ModelCapabilitySummary: {
@@ -5216,6 +5288,57 @@ export interface components {
             limits?: {
                 [key: string]: number;
             };
+        };
+        /** ModelKnowledgeRead */
+        ModelKnowledgeRead: {
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: "2";
+            /** Model Revision */
+            model_revision: string;
+            /** Manifest Hash */
+            manifest_hash: string;
+            /** Lifecycle */
+            lifecycle: string;
+            /** Operations */
+            operations: {
+                [key: string]: components["schemas"]["TypedOperation"];
+            };
+            /** Fields */
+            fields: components["schemas"]["KnowledgeFieldRead"][];
+            /** Claim Counts */
+            claim_counts: {
+                [key: string]: number;
+            };
+            /** Official Supported Fields */
+            official_supported_fields: number;
+            /** Unknown Bounds */
+            unknown_bounds: number;
+            /** Sources */
+            sources?: components["schemas"]["OfficialSource"][];
+            /**
+             * Implementation Status
+             * @default not_implemented
+             * @constant
+             */
+            implementation_status: "not_implemented";
+            /**
+             * Product Open
+             * @default false
+             * @constant
+             */
+            product_open: false;
+            /**
+             * Account Status
+             * @default not_checked
+             * @constant
+             */
+            account_status: "not_checked";
+            /** Blockers */
+            blockers?: string[];
         };
         /** ModelQueryRead */
         ModelQueryRead: {
@@ -5248,6 +5371,8 @@ export interface components {
             configured: boolean;
             /** Available */
             available: boolean;
+            /** Availability Reason */
+            availability_reason?: string | null;
             /** Capabilities */
             capabilities: string[];
             /**
@@ -5322,16 +5447,17 @@ export interface components {
         OfficialSource: {
             /** Url */
             url: string;
-            /**
-             * Checked At
-             * Format: date
-             */
-            checked_at: string;
+            /** Checked At */
+            checked_at?: string | null;
             /**
              * Status
-             * @default documented_claim
+             * @default source_registered_unreviewed
              */
             status: string;
+            /** Source Id */
+            source_id?: string | null;
+            /** Source Snapshot Ref */
+            source_snapshot_ref?: string | null;
         };
         /** OpenCutClip */
         OpenCutClip: {
@@ -6253,6 +6379,9 @@ export interface components {
                 [key: string]: unknown;
             };
             capability_summary: components["schemas"]["ModelCapabilitySummary"];
+            knowledge?: components["schemas"]["ModelKnowledgeRead"] | null;
+            /** New Create Blocker */
+            new_create_blocker?: string | null;
         };
         /** ProviderPluginRead */
         ProviderPluginRead: {
@@ -7779,6 +7908,257 @@ export interface components {
             dropped_options?: string[];
             /** Warnings */
             warnings?: string[];
+        };
+        /** TypedConstraint */
+        TypedConstraint: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "requires" | "requires_any" | "exclusion" | "conditional" | "derived" | "forced" | "sum_limit";
+            /**
+             * Claim Status
+             * @default unknown
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /** When */
+            when?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * When Present
+             * @default []
+             */
+            when_present: string[];
+            /**
+             * Require
+             * @default []
+             */
+            require: string[];
+            /**
+             * Forbid
+             * @default []
+             */
+            forbid: string[];
+            /** Allowed */
+            allowed?: {
+                [key: string]: components["schemas"]["JsonValue"][];
+            };
+            /** Target */
+            target?: string | null;
+            value?: components["schemas"]["JsonValue"];
+            /** Derivation */
+            derivation?: ("reference_count" | "reference_duration_sum") | null;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Sum Fields
+             * @default []
+             */
+            sum_fields: string[];
+        };
+        /** TypedInputContract */
+        TypedInputContract: {
+            /**
+             * Claim Status
+             * @default unknown
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /** Input Slots */
+            input_slots?: {
+                [key: string]: components["schemas"]["TypedInputSlot"];
+            };
+            /** Output Options */
+            output_options?: {
+                [key: string]: components["schemas"]["TypedParameter"];
+            };
+            minimum_total_references?: components["schemas"]["CapabilityBound"];
+            maximum_total_references?: components["schemas"]["CapabilityBound"];
+            /** Max Total Duration Seconds */
+            max_total_duration_seconds?: {
+                [key: string]: components["schemas"]["CapabilityBound"];
+            };
+            /** Min Total Duration Seconds */
+            min_total_duration_seconds?: {
+                [key: string]: components["schemas"]["CapabilityBound"];
+            };
+            maximum_total_bytes?: components["schemas"]["CapabilityBound"];
+            /** Max Total Bytes By Role */
+            max_total_bytes_by_role?: {
+                [key: string]: components["schemas"]["CapabilityBound"];
+            };
+            /**
+             * Constraints
+             * @default []
+             */
+            constraints: components["schemas"]["TypedConstraint"][];
+            /** Evidence Group Ref */
+            evidence_group_ref?: string | null;
+            evidence_review?: components["schemas"]["EvidenceReview"] | null;
+        };
+        /** TypedInputSlot */
+        TypedInputSlot: {
+            /**
+             * Claim Status
+             * @default unknown
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /**
+             * Required
+             * @default false
+             */
+            required: boolean;
+            minimum?: components["schemas"]["CapabilityBound"];
+            maximum?: components["schemas"]["CapabilityBound"];
+            /**
+             * Media Types
+             * @default []
+             */
+            media_types: string[];
+            /**
+             * Codecs
+             * @default []
+             */
+            codecs: string[];
+            /**
+             * Aspect Ratios
+             * @default []
+             */
+            aspect_ratios: string[];
+            /**
+             * Ordering
+             * @default unknown
+             * @enum {string}
+             */
+            ordering: "preserve" | "unknown";
+            /** Wire Field */
+            wire_field?: string | null;
+            /**
+             * Delivery Formats
+             * @default []
+             */
+            delivery_formats: string[];
+            /** Wire Attributes */
+            wire_attributes?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Wire Options */
+            wire_options?: {
+                [key: string]: components["schemas"]["TypedParameter"];
+            };
+            max_bytes?: components["schemas"]["CapabilityBound"];
+            min_duration_seconds?: components["schemas"]["CapabilityBound"];
+            max_duration_seconds?: components["schemas"]["CapabilityBound"];
+            min_width?: components["schemas"]["CapabilityBound"];
+            max_width?: components["schemas"]["CapabilityBound"];
+            min_height?: components["schemas"]["CapabilityBound"];
+            max_height?: components["schemas"]["CapabilityBound"];
+            min_fps?: components["schemas"]["CapabilityBound"];
+            max_fps?: components["schemas"]["CapabilityBound"];
+            min_pixels?: components["schemas"]["CapabilityBound"];
+            max_pixels?: components["schemas"]["CapabilityBound"];
+            min_aspect_ratio?: components["schemas"]["CapabilityBound"];
+            max_aspect_ratio?: components["schemas"]["CapabilityBound"];
+            /** Evidence Group Ref */
+            evidence_group_ref?: string | null;
+            evidence_review?: components["schemas"]["EvidenceReview"] | null;
+        };
+        /** TypedOperation */
+        TypedOperation: {
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "image.generate" | "image.edit" | "image.extend" | "image.layer_decomposition" | "image.interactive_edit" | "video.generate" | "video.edit" | "video.extend";
+            /**
+             * Claim Status
+             * @default unknown
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /** Input Contracts */
+            input_contracts?: {
+                [key: string]: components["schemas"]["TypedInputContract"];
+            };
+            /** Output Options */
+            output_options?: {
+                [key: string]: components["schemas"]["TypedParameter"];
+            };
+            /**
+             * Constraints
+             * @default []
+             */
+            constraints: components["schemas"]["TypedConstraint"][];
+            maximum_request_bytes?: components["schemas"]["CapabilityBound"];
+            /** Protocol Facts */
+            protocol_facts?: {
+                [key: string]: components["schemas"]["TypedParameter"];
+            };
+            prompt_spec?: components["schemas"]["TypedParameter"] | null;
+            /** Evidence Group Ref */
+            evidence_group_ref?: string | null;
+            evidence_review?: components["schemas"]["EvidenceReview"] | null;
+            /** Evidence Overrides */
+            evidence_overrides?: {
+                [key: string]: components["schemas"]["EvidenceOverride"];
+            };
+        };
+        /** TypedParameter */
+        TypedParameter: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "string" | "integer" | "number" | "boolean" | "array" | "object";
+            /**
+             * Claim Status
+             * @default unknown
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /**
+             * Control
+             * @default unknown
+             * @enum {string}
+             */
+            control: "native" | "derived" | "prompt_only" | "unsupported" | "unknown";
+            /** Required */
+            required?: boolean | null;
+            /** Wire Name */
+            wire_name?: string | null;
+            /** Multiple Of */
+            multiple_of?: number | null;
+            /**
+             * Enum
+             * @default []
+             */
+            enum: components["schemas"]["JsonValue"][];
+            minimum?: components["schemas"]["CapabilityBound"];
+            maximum?: components["schemas"]["CapabilityBound"];
+            min_items?: components["schemas"]["CapabilityBound"];
+            max_items?: components["schemas"]["CapabilityBound"];
+            min_length?: components["schemas"]["CapabilityBound"];
+            max_length?: components["schemas"]["CapabilityBound"];
+            /** Dimension Bounds */
+            dimension_bounds?: {
+                [key: string]: components["schemas"]["CapabilityBound"];
+            };
+            default?: components["schemas"]["JsonValue"];
+            /**
+             * Default Status
+             * @default unknown
+             * @enum {string}
+             */
+            default_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /** Evidence Group Ref */
+            evidence_group_ref?: string | null;
+            evidence_review?: components["schemas"]["EvidenceReview"] | null;
         };
         /** UpstreamDependencyRead */
         UpstreamDependencyRead: {

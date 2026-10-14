@@ -13,9 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from app.providers.catalog_publication import effective_publication_lifecycle
 from app.providers.manifest import (
-    ModelCapabilityManifest,
     has_reproducible_contract_evidence,
+    read_catalog_manifest,
 )
 
 CatalogIdentity = tuple[str, str, str, str]
@@ -23,7 +24,14 @@ CatalogIdentity = tuple[str, str, str, str]
 
 def hash_manifest(manifest_dict: dict[str, Any]) -> str:
     """Stable sha256 over the canonical JSON of a manifest dict."""
-    raw = json.dumps(manifest_dict, sort_keys=True, separators=(",", ":"), default=str)
+    content = manifest_dict
+    if manifest_dict.get("schema_version") == "2":
+        content = {
+            key: value
+            for key, value in manifest_dict.items()
+            if key not in {"lifecycle", "documented_at"}
+        }
+    raw = json.dumps(content, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -79,14 +87,14 @@ class ModelCatalogLoader:
                 raise ValueError(f"invalid model catalog file {path}: {exc}") from exc
             if not isinstance(raw, dict):
                 raise ValueError(f"model catalog file must contain an object: {path}")
-            if "implementation_status" not in raw:
+            if raw.get("schema_version", "1") == "1" and "implementation_status" not in raw:
                 raise ValueError(f"model manifest must declare implementation status: {path}")
             if raw.get("implementation_status") == "contract_tested" and not (
                 has_reproducible_contract_evidence(raw)
             ):
                 raise ValueError(f"contract-tested manifest lacks reproducible evidence: {path}")
             try:
-                manifest = ModelCapabilityManifest.model_validate(raw)
+                manifest = read_catalog_manifest(raw)
             except ValueError as exc:
                 raise ValueError(f"invalid model manifest {path}: {exc}") from exc
             relative_parts = path.relative_to(self._root).parts
@@ -100,7 +108,10 @@ class ModelCatalogLoader:
                 if publication_lifecycle not in {"preview", "legacy", "deprecated", "retired"}:
                     raise ValueError(f"unknown catalog publication directory: {path}")
                 if publication_lifecycle == "preview" and (
-                    manifest.lifecycle != "preview" or "implementation_status" not in raw
+                    manifest.lifecycle != "preview"
+                    or (
+                        raw.get("schema_version", "1") == "1" and "implementation_status" not in raw
+                    )
                 ):
                     raise ValueError(
                         f"preview manifest must declare preview and implementation status: {path}"
@@ -109,11 +120,19 @@ class ModelCatalogLoader:
                 publication_lifecycle = manifest.lifecycle
             else:
                 raise ValueError(f"invalid model catalog path: {path}")
+            if raw.get("schema_version") == "2" and publication_lifecycle == "active":
+                raise ValueError("typed revision requires explicit implementation publication")
             identity = (
                 manifest.provider_type,
                 manifest.protocol_profile,
                 manifest.model_id,
                 manifest.model_revision,
+            )
+            publication_lifecycle = effective_publication_lifecycle(
+                manifest.provider_type,
+                manifest.protocol_profile,
+                manifest.model_id,
+                publication_lifecycle,
             )
             if identity in seen:
                 raise ValueError(f"duplicate model catalog identity {identity}: {path}")
@@ -127,7 +146,7 @@ class ModelCatalogLoader:
             loaded.append(
                 LoadedCatalogManifest(
                     identity=identity,
-                    manifest_hash=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+                    manifest_hash=hash_manifest(raw),
                     publication_lifecycle=publication_lifecycle,
                     source_path=path,
                     _canonical_json=canonical,
@@ -137,7 +156,9 @@ class ModelCatalogLoader:
 
 
 CATALOG_MODELS: list[dict[str, Any]] = [
-    item.as_dict() for item in ModelCatalogLoader().load() if item.publication_lifecycle == "active"
+    item.as_dict()
+    for item in ModelCatalogLoader().load()
+    if item.publication_lifecycle == "active" and item.as_dict().get("schema_version", "1") == "1"
 ]
 
 

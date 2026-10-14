@@ -1,0 +1,525 @@
+{
+  "schema_version": "1",
+  "snapshots": [
+    {
+      "source_snapshot_id": "e45b9c6bbfe915bf0c18fa180642cca69860e5da58b0cc641550ea7083d9a45f:b8d7c9cbc2acc9934918a3df0fc20ace46845f15112de62caa7d4e79296a13db",
+      "source_id": "e45b9c6bbfe915bf0c18fa180642cca69860e5da58b0cc641550ea7083d9a45f",
+      "capture_status": "captured",
+      "content_sha256": "b8d7c9cbc2acc9934918a3df0fc20ace46845f15112de62caa7d4e79296a13db",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "3fdb54d2597664c20669861ba1d0d5e6c0335a4f3e00978865285250f8fb4950:db3d894886979a4cba985e9c386f66212fd651a57a1f3c32ed318b607e27b8d9",
+      "source_id": "3fdb54d2597664c20669861ba1d0d5e6c0335a4f3e00978865285250f8fb4950",
+      "capture_status": "captured",
+      "content_sha256": "db3d894886979a4cba985e9c386f66212fd651a57a1f3c32ed318b607e27b8d9",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "cfbb45bca73d714e3d1a241368f70a14c1ddd6ff02ac9125e9c17e54fee20848:560183a0686d5744e7bb0b5441d02ec8ab689543cdc5697a6ce3f275aca3dc2c",
+      "source_id": "cfbb45bca73d714e3d1a241368f70a14c1ddd6ff02ac9125e9c17e54fee20848",
+      "capture_status": "captured",
+      "content_sha256": "560183a0686d5744e7bb0b5441d02ec8ab689543cdc5697a6ce3f275aca3dc2c",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "9fb251a30ef0c1a162116b16628dcffc38608bb1895016f33564207f02eb4bc5:05efd448bd5d3cd0a7b7b7c43d38566b41427fc204c6ebcd322512c3c7a977fd",
+      "source_id": "9fb251a30ef0c1a162116b16628dcffc38608bb1895016f33564207f02eb4bc5",
+      "capture_status": "captured",
+      "content_sha256": "05efd448bd5d3cd0a7b7b7c43d38566b41427fc204c6ebcd322512c3c7a977fd",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "e4014369c9aca452b87ccd68f21d0b076c45ab0ea4de4c69fa0859c41e1a380b:4a68cb7701d0646b0f2b01045f719a31de13e30ef7feaf9cfb8da8625fb861ca",
+      "source_id": "e4014369c9aca452b87ccd68f21d0b076c45ab0ea4de4c69fa0859c41e1a380b",
+      "capture_status": "captured",
+      "content_sha256": "4a68cb7701d0646b0f2b01045f719a31de13e30ef7feaf9cfb8da8625fb861ca",
+      "locator": "{\"document_id\": 1350667, \"document_code\": \"model-deprecation-notice\", \"library_code\": \"ark\", \"language\": \"zh\", \"title\": \"模型下线公告\", \"updated_at\": \"2026-10-09T09:49:07Z\"}",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "524d3f2684c8ab950106e62a93f8c981805323d55075dab00eafe801551d5747:0778adc93ca448e0fe44cc1c0064c82c487a17dfa95c0db71d04c480b870e920",
+      "source_id": "524d3f2684c8ab950106e62a93f8c981805323d55075dab00eafe801551d5747",
+      "capture_status": "captured",
+      "content_sha256": "0778adc93ca448e0fe44cc1c0064c82c487a17dfa95c0db71d04c480b870e920",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "e7b697cfe939cf0e478ee5fc1d2744ab821a6d08a2bfa2db69531de8bc9986ce:0e8bb3299b9f58f8fe76fa7f4c52db2036f8b67ed6f8c7a67c9674b445dba175",
+      "source_id": "e7b697cfe939cf0e478ee5fc1d2744ab821a6d08a2bfa2db69531de8bc9986ce",
+      "capture_status": "captured",
+      "content_sha256": "0e8bb3299b9f58f8fe76fa7f4c52db2036f8b67ed6f8c7a67c9674b445dba175",
+      "locator": "{\"document_id\": 1520757, \"document_code\": \"create-video-generation-task-api\", \"library_code\": \"ark\", \"language\": \"zh\", \"title\": \"创建视频生成任务\", \"updated_at\": \"2026-10-08T09:09:03Z\"}",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "822fe94cf8f7228bcfdc2eb5e624b3b67a01f3915383c6137a879d9a64cd4957:fccb76df972ffda02a2489e8ba3b6d9d96c394a000f280bcb338b526824eee15",
+      "source_id": "822fe94cf8f7228bcfdc2eb5e624b3b67a01f3915383c6137a879d9a64cd4957",
+      "capture_status": "captured",
+      "content_sha256": "fccb76df972ffda02a2489e8ba3b6d9d96c394a000f280bcb338b526824eee15",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "285e7b8a6a0342cdba33a520c46f3651f947d1afddc986032518f1da212d3810:a48a4b262f90ba669e66165acc81c381ca4bf4dc5c609aeb6c2add24f8cdcf94",
+      "source_id": "285e7b8a6a0342cdba33a520c46f3651f947d1afddc986032518f1da212d3810",
+      "capture_status": "captured",
+      "content_sha256": "a48a4b262f90ba669e66165acc81c381ca4bf4dc5c609aeb6c2add24f8cdcf94",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "7892d0e1969229a7a33dc58fb70c8087ba724be2c4558592b8e094819c8dca6f:f3c5a0e7283cc919537346631e2ea7432501b8b03faf41fb4c14f2e1febc72d7",
+      "source_id": "7892d0e1969229a7a33dc58fb70c8087ba724be2c4558592b8e094819c8dca6f",
+      "capture_status": "captured",
+      "content_sha256": "f3c5a0e7283cc919537346631e2ea7432501b8b03faf41fb4c14f2e1febc72d7",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "b2dd7decb55f39042b6f7fe8dc148531db4ec03af6f2f1fb324141e54e40d3c1:5e1f6d3aba12c2094cec8db8d3b5c7d7fe81d80d7f60d5db6f63624dd8c902f1",
+      "source_id": "b2dd7decb55f39042b6f7fe8dc148531db4ec03af6f2f1fb324141e54e40d3c1",
+      "capture_status": "captured",
+      "content_sha256": "5e1f6d3aba12c2094cec8db8d3b5c7d7fe81d80d7f60d5db6f63624dd8c902f1",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "daa7edcfe694f7a3fc2ee2a5e4d4404205e260a275fc17daea0d5b39017863b2:4b77a0b77d8ba8c31531ade0f13ed492466c86585aea87a4c47fa1521f29608e",
+      "source_id": "daa7edcfe694f7a3fc2ee2a5e4d4404205e260a275fc17daea0d5b39017863b2",
+      "capture_status": "captured",
+      "content_sha256": "4b77a0b77d8ba8c31531ade0f13ed492466c86585aea87a4c47fa1521f29608e",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "d3af0f2d3fed67ed52513e375abf003525ba1c2acce0de0a2a0bd81d05d35412:0eaff437d35498b1d66f48ba5aca96209e4eb8bafc429eafd4f369b7415a48ad",
+      "source_id": "d3af0f2d3fed67ed52513e375abf003525ba1c2acce0de0a2a0bd81d05d35412",
+      "capture_status": "captured",
+      "content_sha256": "0eaff437d35498b1d66f48ba5aca96209e4eb8bafc429eafd4f369b7415a48ad",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9:5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392",
+      "source_id": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9",
+      "capture_status": "captured",
+      "content_sha256": "5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392",
+      "locator": "{\"document_id\": 1541523, \"document_code\": \"image-generation-api\", \"library_code\": \"ark\", \"language\": \"zh\", \"title\": \"图片生成 API\", \"updated_at\": \"2026-10-10T14:39:45Z\"}",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "3eae5991171dedc94b3d69db463cd464cdeebebac729e0dea5ba24a7ad0892e5:349ac86eb9ebaf64778402203dc6d083bb71e5087a7e003d049661e444647079",
+      "source_id": "3eae5991171dedc94b3d69db463cd464cdeebebac729e0dea5ba24a7ad0892e5",
+      "capture_status": "captured",
+      "content_sha256": "349ac86eb9ebaf64778402203dc6d083bb71e5087a7e003d049661e444647079",
+      "locator": "{\"document_id\": 1330310, \"document_code\": \"model-list\", \"library_code\": \"ark\", \"language\": \"zh\", \"title\": \"模型列表\", \"updated_at\": \"2026-10-09T09:49:07Z\"}",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "d7152a6775213564ff6e7366d611601d5712faff5d137da4f1f388f18c27d229:be99644672f8acffc423b83637d40ce32879e5beb243afe7aa10fd36f5adf222",
+      "source_id": "d7152a6775213564ff6e7366d611601d5712faff5d137da4f1f388f18c27d229",
+      "capture_status": "captured",
+      "content_sha256": "be99644672f8acffc423b83637d40ce32879e5beb243afe7aa10fd36f5adf222",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "53a8200a8f1043fa766e9ef1d4a0ccce9aa3127143b6d3214d920c5931a15c6e:c811c5487537d5d42d52c5ed09b916e06a05d3d01b850e6481b3a0f108747c6a",
+      "source_id": "53a8200a8f1043fa766e9ef1d4a0ccce9aa3127143b6d3214d920c5931a15c6e",
+      "capture_status": "captured",
+      "content_sha256": "c811c5487537d5d42d52c5ed09b916e06a05d3d01b850e6481b3a0f108747c6a",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "c7abd6c0fd91273b3cabb11be8afa4ae5e9a1d1c2ea16e250ef5defbde48d330:d6ecf05731de4c81634bb011e89227c0e6a7369c6734830ef23ea65a7edd30b5",
+      "source_id": "c7abd6c0fd91273b3cabb11be8afa4ae5e9a1d1c2ea16e250ef5defbde48d330",
+      "capture_status": "captured",
+      "content_sha256": "d6ecf05731de4c81634bb011e89227c0e6a7369c6734830ef23ea65a7edd30b5",
+      "locator": "{\"document_id\": 2607689, \"document_code\": \"seedance-2-5-prompt-guide\", \"library_code\": \"ark\", \"language\": \"zh\", \"title\": \"Doubao Seedance 2.5 提示词指南\", \"updated_at\": \"2026-10-09T03:10:59Z\"}",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "d672f7147e2b89bffe88200e5ab881d76a8eb1d93509d6c4195a3f88225ae3c6:75fb24cc0660c1fe6d70317713a04de9b2fb69f9f16a0cd22a313ffa999e959c",
+      "source_id": "d672f7147e2b89bffe88200e5ab881d76a8eb1d93509d6c4195a3f88225ae3c6",
+      "capture_status": "captured",
+      "content_sha256": "75fb24cc0660c1fe6d70317713a04de9b2fb69f9f16a0cd22a313ffa999e959c",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "b311b417853bf5f9e5649a1c0b2503b61e80e77d0c86c236a5ed5ed1dbc8e5bb:e4641f5f514d5dfedba58187761c520ecf7eb42f478154fb759c64185735fc22",
+      "source_id": "b311b417853bf5f9e5649a1c0b2503b61e80e77d0c86c236a5ed5ed1dbc8e5bb",
+      "capture_status": "captured",
+      "content_sha256": "e4641f5f514d5dfedba58187761c520ecf7eb42f478154fb759c64185735fc22",
+      "locator": "\"Captured source body\"",
+      "review_status": "unreviewed",
+      "reviewed_scopes": [],
+      "evidence_summary": "Hash-verified baseline capture only; model/API/region applicability and capability subtree have not been reviewed."
+    },
+    {
+      "source_snapshot_id": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9:5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392:knowledge-review-20261013",
+      "source_id": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9",
+      "capture_status": "captured",
+      "content_sha256": "5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392",
+      "locator": "Request parameter, input limitation, and exact model sections",
+      "review_status": "reviewed",
+      "reviewed_scopes": [
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-4-0-250828",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-4-5-251128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-lite-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-pro-260628",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-flash-260915",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        }
+      ],
+      "evidence_summary": "Authorized agent review of the named model/API scope and declared known facts. Unknown fields remain unknown; no account or Compiler qualification. Exact regional API applicability retained."
+    },
+    {
+      "source_snapshot_id": "e7b697cfe939cf0e478ee5fc1d2744ab821a6d08a2bfa2db69531de8bc9986ce:0e8bb3299b9f58f8fe76fa7f4c52db2036f8b67ed6f8c7a67c9674b445dba175:knowledge-review-20261013",
+      "source_id": "e7b697cfe939cf0e478ee5fc1d2744ab821a6d08a2bfa2db69531de8bc9986ce",
+      "capture_status": "captured",
+      "content_sha256": "0e8bb3299b9f58f8fe76fa7f4c52db2036f8b67ed6f8c7a67c9674b445dba175",
+      "locator": "Request parameter, input limitation, and exact model sections",
+      "review_status": "reviewed",
+      "reviewed_scopes": [
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-1-0-pro-250528",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-fast-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-mini-260615",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-5-260628",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        }
+      ],
+      "evidence_summary": "Authorized agent review of the named model/API scope and declared known facts. Unknown fields remain unknown; no account or Compiler qualification. Exact regional API applicability retained."
+    },
+    {
+      "source_snapshot_id": "3eae5991171dedc94b3d69db463cd464cdeebebac729e0dea5ba24a7ad0892e5:349ac86eb9ebaf64778402203dc6d083bb71e5087a7e003d049661e444647079:knowledge-review-20261013",
+      "source_id": "3eae5991171dedc94b3d69db463cd464cdeebebac729e0dea5ba24a7ad0892e5",
+      "capture_status": "captured",
+      "content_sha256": "349ac86eb9ebaf64778402203dc6d083bb71e5087a7e003d049661e444647079",
+      "locator": "Request parameter, input limitation, and exact model sections",
+      "review_status": "reviewed",
+      "reviewed_scopes": [
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-4-0-250828",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-4-5-251128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-lite-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-pro-260628",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-flash-260915",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-1-0-pro-250528",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-fast-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-mini-260615",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-5-260628",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        }
+      ],
+      "evidence_summary": "Authorized agent review of the named model/API scope and declared known facts. Unknown fields remain unknown; no account or Compiler qualification. Exact regional API applicability retained."
+    },
+    {
+      "source_snapshot_id": "b2dd7decb55f39042b6f7fe8dc148531db4ec03af6f2f1fb324141e54e40d3c1:5e1f6d3aba12c2094cec8db8d3b5c7d7fe81d80d7f60d5db6f63624dd8c902f1:knowledge-review-20261013",
+      "source_id": "b2dd7decb55f39042b6f7fe8dc148531db4ec03af6f2f1fb324141e54e40d3c1",
+      "capture_status": "captured",
+      "content_sha256": "5e1f6d3aba12c2094cec8db8d3b5c7d7fe81d80d7f60d5db6f63624dd8c902f1",
+      "locator": "Request parameter, input limitation, and exact model sections",
+      "review_status": "reviewed",
+      "reviewed_scopes": [
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "MiniMax-H3",
+          "api_version": "v2",
+          "region": "CN"
+        },
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "MiniMax-H3-Max",
+          "api_version": "v2",
+          "region": "CN"
+        }
+      ],
+      "evidence_summary": "Authorized agent review of the named model/API scope and declared known facts. Unknown fields remain unknown; no account or Compiler qualification. Exact regional API applicability retained."
+    },
+    {
+      "source_snapshot_id": "285e7b8a6a0342cdba33a520c46f3651f947d1afddc986032518f1da212d3810:a48a4b262f90ba669e66165acc81c381ca4bf4dc5c609aeb6c2add24f8cdcf94:knowledge-review-20261013",
+      "source_id": "285e7b8a6a0342cdba33a520c46f3651f947d1afddc986032518f1da212d3810",
+      "capture_status": "captured",
+      "content_sha256": "a48a4b262f90ba669e66165acc81c381ca4bf4dc5c609aeb6c2add24f8cdcf94",
+      "locator": "Request parameter, input limitation, and exact model sections",
+      "review_status": "reviewed",
+      "reviewed_scopes": [
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "image-01",
+          "api_version": "v1",
+          "region": "CN"
+        }
+      ],
+      "evidence_summary": "Authorized agent review of the named model/API scope and declared known facts. Unknown fields remain unknown; no account or Compiler qualification. Exact regional API applicability retained."
+    },
+    {
+      "source_snapshot_id": "e45b9c6bbfe915bf0c18fa180642cca69860e5da58b0cc641550ea7083d9a45f:b8d7c9cbc2acc9934918a3df0fc20ace46845f15112de62caa7d4e79296a13db:knowledge-review-20261013",
+      "source_id": "e45b9c6bbfe915bf0c18fa180642cca69860e5da58b0cc641550ea7083d9a45f",
+      "capture_status": "captured",
+      "content_sha256": "b8d7c9cbc2acc9934918a3df0fc20ace46845f15112de62caa7d4e79296a13db",
+      "locator": "Request parameter, input limitation, and exact model sections",
+      "review_status": "reviewed",
+      "reviewed_scopes": [
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-image-2.1-flash",
+          "api_version": "v1",
+          "region": "CN"
+        }
+      ],
+      "evidence_summary": "Authorized agent review of the named model/API scope and declared known facts. Unknown fields remain unknown; no account or Compiler qualification. Exact regional API applicability retained."
+    },
+    {
+      "source_snapshot_id": "cfbb45bca73d714e3d1a241368f70a14c1ddd6ff02ac9125e9c17e54fee20848:560183a0686d5744e7bb0b5441d02ec8ab689543cdc5697a6ce3f275aca3dc2c:knowledge-review-20261013",
+      "source_id": "cfbb45bca73d714e3d1a241368f70a14c1ddd6ff02ac9125e9c17e54fee20848",
+      "capture_status": "captured",
+      "content_sha256": "560183a0686d5744e7bb0b5441d02ec8ab689543cdc5697a6ce3f275aca3dc2c",
+      "locator": "Request parameter, input limitation, and exact model sections",
+      "review_status": "reviewed",
+      "reviewed_scopes": [
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-video-v2.0",
+          "api_version": "v1",
+          "region": "CN"
+        }
+      ],
+      "evidence_summary": "Authorized agent review of the named model/API scope and declared known facts. Unknown fields remain unknown; no account or Compiler qualification. Exact regional API applicability retained."
+    },
+    {
+      "source_snapshot_id": "04bb5fb311745d4da48772032b42e6f520caacfa1b43f7be28a43320747d6e38:445284962ea2ce18272646ad172b97324c2eb1c8a2a75f703cb6bb71386b06d2:knowledge-review-20261013",
+      "source_id": "04bb5fb311745d4da48772032b42e6f520caacfa1b43f7be28a43320747d6e38",
+      "capture_status": "captured",
+      "content_sha256": "445284962ea2ce18272646ad172b97324c2eb1c8a2a75f703cb6bb71386b06d2",
+      "locator": "Request parameter, input limitation, and exact model sections",
+      "review_status": "reviewed",
+      "reviewed_scopes": [
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-image-2.5-flash",
+          "api_version": "v1",
+          "region": "CN"
+        }
+      ],
+      "evidence_summary": "Authorized agent review of the named model/API scope and declared known facts. Unknown fields remain unknown; no account or Compiler qualification. Exact regional API applicability retained."
+    },
+    {
+      "source_snapshot_id": "48229922d30cf2460937a72ef08480375273e4b2fbe331f4462d3b4d0646badd:388893ce1813a6b277faeca5b095d966854fc06442d853e21f148da2487da14e:knowledge-review-20261013",
+      "source_id": "48229922d30cf2460937a72ef08480375273e4b2fbe331f4462d3b4d0646badd",
+      "capture_status": "captured",
+      "content_sha256": "388893ce1813a6b277faeca5b095d966854fc06442d853e21f148da2487da14e",
+      "locator": "Request parameter, input limitation, and exact model sections",
+      "review_status": "reviewed",
+      "reviewed_scopes": [
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-video-2.5",
+          "api_version": "v1",
+          "region": "CN"
+        }
+      ],
+      "evidence_summary": "Authorized agent review of the named model/API scope and declared known facts. Unknown fields remain unknown; no account or Compiler qualification. Exact regional API applicability retained."
+    },
+    {
+      "source_snapshot_id": "5c9e2659238d3c31c18b88cb751ec6e76c87b08a49008200a6a4b64f1c212cba:ee34ed3a89c96ec202475843e6fad8babb1a5639144e5e7713dfe34b15550aed:knowledge-review-20261013",
+      "source_id": "5c9e2659238d3c31c18b88cb751ec6e76c87b08a49008200a6a4b64f1c212cba",
+      "capture_status": "captured",
+      "content_sha256": "ee34ed3a89c96ec202475843e6fad8babb1a5639144e5e7713dfe34b15550aed",
+      "locator": "Request parameter, input limitation, and exact model sections",
+      "review_status": "reviewed",
+      "reviewed_scopes": [
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-video-2.5-flash",
+          "api_version": "v1",
+          "region": "CN"
+        }
+      ],
+      "evidence_summary": "Authorized agent review of the named model/API scope and declared known facts. Unknown fields remain unknown; no account or Compiler qualification. Exact regional API applicability retained."
+    }
+  ]
+}

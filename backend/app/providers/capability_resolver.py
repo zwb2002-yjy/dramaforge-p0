@@ -14,6 +14,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.providers.capability_manifest_v2 import TypedModelCapabilityManifest
 from app.providers.errors import ProviderError
 from app.providers.intents import ImageGenerationIntent, VideoGenerationIntentV1
 from app.providers.manifest import (
@@ -25,6 +26,7 @@ from app.providers.manifest import (
     ParameterSpec,
 )
 from app.providers.reference_roles import canonical_reference_role
+from app.providers.source_evidence import SourceEvidenceStore
 from app.providers.validator import validate_parameter
 
 
@@ -39,6 +41,8 @@ class ReferenceMetadata(BaseModel):
     duration_seconds: float | None = Field(default=None, ge=0)
     width: int | None = Field(default=None, ge=1)
     height: int | None = Field(default=None, ge=1)
+    fps: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    codec: str | None = None
 
 
 class ProductCapabilityPolicy(BaseModel):
@@ -62,6 +66,7 @@ class ResolvedGenerationPlan(BaseModel):
     reference_ids: tuple[UUID, ...]
     reference_roles: tuple[str, ...]
     effective_options: dict[str, Any]
+    transformations: tuple[str, ...] = ()
 
 
 class CapabilityResolutionError(ValueError):
@@ -77,8 +82,7 @@ def _requested_inputs(
     if isinstance(intent, ImageGenerationIntent):
         try:
             references = [
-                (artifact_id, "reference_image")
-                for artifact_id in intent.selected_reference_ids()
+                (artifact_id, "reference_image") for artifact_id in intent.selected_reference_ids()
             ]
         except ValueError as exc:
             raise CapabilityResolutionError("IMAGE_REFERENCE_INVALID", str(exc)) from exc
@@ -217,16 +221,32 @@ class CapabilityResolver:
     def resolve(
         self,
         *,
-        manifest: ModelCapabilityManifest,
+        manifest: ModelCapabilityManifest | TypedModelCapabilityManifest,
         intent: ImageGenerationIntent | VideoGenerationIntentV1,
         reference_metadata: list[ReferenceMetadata],
         policy: ProductCapabilityPolicy,
+        evidence_store: SourceEvidenceStore | None = None,
     ) -> ResolvedGenerationPlan:
         if not intent.prompt.strip():
             raise CapabilityResolutionError("PROMPT_REQUIRED", "prompt is required")
         if manifest.lifecycle == "retired":
             raise CapabilityResolutionError("MODEL_RETIRED", "model is retired")
         operation_name = intent.operation
+        selected, options = _requested_inputs(intent)
+        references = _metadata_for(selected, reference_metadata)
+        if isinstance(manifest, TypedModelCapabilityManifest):
+            from app.providers.typed_contract_validation import resolve_typed_contract
+
+            return resolve_typed_contract(
+                manifest=manifest,
+                operation_name=operation_name,
+                selected=selected,
+                references=references,
+                options=options,
+                policy=policy,
+                evidence_store=evidence_store,
+                prompt=intent.prompt,
+            )
         operation = manifest.operations.get(operation_name)
         if operation is None:
             raise CapabilityResolutionError("OPERATION_UNSUPPORTED", operation_name)
@@ -234,8 +254,6 @@ class CapabilityResolver:
             raise CapabilityResolutionError(
                 "INPUT_CONTRACT_NOT_DECLARED", "model revision has no input contracts"
             )
-        selected, options = _requested_inputs(intent)
-        references = _metadata_for(selected, reference_metadata)
         matches: list[tuple[str, dict[str, Any]]] = []
         reasons: dict[str, str] = {}
         for contract_id, contract in operation.input_contracts.items():

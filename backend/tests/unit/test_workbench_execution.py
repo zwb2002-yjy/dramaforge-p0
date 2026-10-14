@@ -26,6 +26,7 @@ from app.shared.base import Base
 from app.shared.security import hash_password
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from tests.unit.model_infra_fixture import unit_video_manifest
 
 
 @pytest.fixture
@@ -58,11 +59,11 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
     )
     session.add(project)
     await session.flush()
-    manifest = next(item for item in CATALOG_MODELS if item["model_id"] == "agnes-video-v2.0")
+    manifest = unit_video_manifest()
     entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
-        model_id="agnes-video-v2.0",
+        model_id="unit-agnes-video",
         model_revision=f"test-{uuid4().hex[:8]}",
         display_name="Agnes Video",
         media_kind="video",
@@ -117,7 +118,7 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
         workspace_id=workspace.id,
         connection_id=connection.id,
         media_type="video",
-        model_id="agnes-video-v2.0",
+        model_id="unit-agnes-video",
         purpose="video",
         enabled=True,
         documented=True,
@@ -127,8 +128,8 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
         catalog_entry_id=entry.id,
         capability_manifest_hash=entry.contract_manifest_hash,
         remote_resource_kind="model",
-        remote_resource_id="agnes-video-v2.0",
-        invoke_model_value="agnes-video-v2.0",
+        remote_resource_id="unit-agnes-video",
+        invoke_model_value="unit-agnes-video",
         created_by=user.id,
         updated_by=user.id,
     )
@@ -815,7 +816,7 @@ async def test_text_video_plan_needs_no_formal_keyframe(session: AsyncSession) -
     )
     contract["provider_type"] = "agnes"
     contract["protocol_profile"] = "agnes_cn_v1"
-    contract["model_id"] = "agnes-video-v2.0"
+    contract["model_id"] = "unit-agnes-video"
     entry.capability_manifest_json = contract
     entry.contract_manifest_hash = hash_manifest(contract)
     binding.capability_manifest_hash = entry.contract_manifest_hash
@@ -858,7 +859,7 @@ async def test_fl2va_plan_keeps_tail_and_formal_first_roles_distinct(
         next(item for item in CATALOG_MODELS if item["model_id"] == "@contract/sglang-h3-fl2va-v1")
     )
     contract.update(
-        provider_type="agnes", protocol_profile="agnes_cn_v1", model_id="agnes-video-v2.0"
+        provider_type="agnes", protocol_profile="agnes_cn_v1", model_id="unit-agnes-video"
     )
     entry.capability_manifest_json = contract
     entry.contract_manifest_hash = hash_manifest(contract)
@@ -904,7 +905,7 @@ async def test_ref2va_plan_validates_saved_media_without_formal_keyframe(
         )
     )
     contract.update(
-        provider_type="agnes", protocol_profile="agnes_cn_v1", model_id="agnes-video-v2.0"
+        provider_type="agnes", protocol_profile="agnes_cn_v1", model_id="unit-agnes-video"
     )
     entry.capability_manifest_json = contract
     entry.contract_manifest_hash = hash_manifest(contract)

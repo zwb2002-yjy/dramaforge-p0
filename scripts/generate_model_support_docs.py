@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Any
 
 from app.providers.catalog_loader import ModelCatalogLoader
+from app.providers.catalog_publication import catalog_new_create_blocker
+from app.providers.capability_manifest_v2 import TypedModelCapabilityManifest
+from app.providers.manifest import read_catalog_manifest
 from app.providers.manifest import ModelCapabilityManifest, OperationManifest, ParameterSpec
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -104,26 +107,28 @@ def _support_state(
     manifest: ModelCapabilityManifest,
     lifecycle: str,
     bindings: list[dict[str, Any]] | None,
+    *, new_create_blocker: str | None = None,
 ) -> tuple[str, str, str]:
     if bindings is None:
         return (
             "workspace-specific",
             "no"
-            if lifecycle not in {"active", "legacy", "deprecated"}
+            if lifecycle != "active"
+            or new_create_blocker is not None
             or manifest.implementation_status != "contract_tested"
+            or manifest.catalog_source == "protocol_contract"
             else "requires verified Binding",
             "workspace-specific",
         )
     verified = any(item["enabled"] and item["account_verified"] for item in bindings)
     executable = (
-        lifecycle in {"active", "legacy", "deprecated"}
+        lifecycle == "active"
+        and new_create_blocker is None
         and manifest.implementation_status == "contract_tested"
+        and manifest.catalog_source != "protocol_contract"
         and verified
     )
-    certified = executable and any(
-        item["enabled"] and item["account_verified"] and item["quality_gated"]
-        for item in bindings
-    )
+    certified = any(item["quality_gated"] for item in bindings)
     return (
         "verified" if verified else "unverified",
         "yes" if executable else "no",
@@ -146,7 +151,19 @@ def render_model_support(*, binding_snapshot: Path | None = None) -> str:
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for item in sorted(ModelCatalogLoader().load(), key=lambda value: value.identity):
-        manifest = ModelCapabilityManifest.model_validate(item.as_dict())
+        manifest = read_catalog_manifest(item.as_dict())
+        if isinstance(manifest, TypedModelCapabilityManifest):
+            operation = next(iter(manifest.operations.values()))
+            refs = []
+            for contract in operation.input_contracts.values():
+                for role, slot in contract.input_slots.items():
+                    refs.append(f"{role} ≤ {slot.maximum.value}" if slot.maximum.kind == "bounded"
+                                else f"{role} ({slot.maximum.kind})")
+            cells = (manifest.provider_type, f"`{manifest.model_id}` / `{manifest.model_revision}`",
+                item.publication_lifecycle, manifest.media_kind, ", ".join(sorted(set(refs))) or "unknown",
+                "typed candidate", "see Manifest", "not checked", "no (not implemented)", "not checked")
+            rows.append("| " + " | ".join(str(cell).replace("|", "\\|") for cell in cells) + " |")
+            continue
         operation = next(iter(manifest.operations.values()), None)
         refs = _references(operation) if operation is not None else "not documented"
         duration = _option(operation, "duration_seconds") if operation is not None else "—"
@@ -157,11 +174,18 @@ def render_model_support(*, binding_snapshot: Path | None = None) -> str:
         )
         if resolution == "—" and operation is not None:
             resolution = _option(operation, "aspect_ratio")
+        blocker = catalog_new_create_blocker(
+            *item.identity, item.manifest_hash, lifecycle=item.publication_lifecycle,
+            catalog_source=manifest.catalog_source,
+        )
         account, executable, certified = _support_state(
             manifest,
             item.publication_lifecycle,
             statuses.get(item.identity) if binding_snapshot is not None else None,
+            new_create_blocker=blocker,
         )
+        if blocker:
+            executable = f"no ({blocker})"
         cells = (
             manifest.provider_type,
             f"`{manifest.model_id}` / `{manifest.model_revision}`",

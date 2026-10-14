@@ -603,11 +603,13 @@ async def test_binding_created_after_catalog_read_inherits_its_account_visibilit
     from app.providers.catalog_models import ModelCatalogEntry
 
     actor, workspace, service, connection, _ = await _seed(session)
+    from tests.unit.model_infra_fixture import unit_video_manifest
+
     manifests = [
         item
         for item in CATALOG_MODELS
         if item["provider_type"] == "agnes" and not str(item["model_id"]).startswith("@")
-    ][:2]
+    ][:1] + [unit_video_manifest()]
     for manifest in manifests:
         session.add(
             ModelCatalogEntry(

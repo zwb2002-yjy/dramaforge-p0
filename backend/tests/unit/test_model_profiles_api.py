@@ -179,7 +179,7 @@ def test_workspace_profile_validation_rejects_capability_mismatch(
         f"/api/v1/workspaces/{workspace_id}/model-profiles",
         json={
             "name": "错误方案",
-            "bindings": {"planning.script": {"model_id": "agnes/agnes-video-v2.0"}},
+            "bindings": {"planning.script": {"model_id": "minimax/MiniMax-H3"}},
         },
         headers={CSRF_HEADER: _csrf(client)},
     )

@@ -20,6 +20,7 @@ from app.shared.security import CSRF_HEADER
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from tests.unit.model_infra_fixture import unit_video_manifest
 
 
 @pytest.fixture
@@ -60,8 +61,12 @@ def _csrf(client: TestClient) -> str:
     return str(client.get("/api/v1/auth/csrf").json()["csrf_token"])
 
 
-def _seed_catalog(factory: Any, model_id: str = "agnes-video-v2.0") -> None:
-    manifest = next(m for m in CATALOG_MODELS if m["model_id"] == model_id)
+def _seed_catalog(factory: Any, model_id: str = "unit-agnes-video") -> None:
+    manifest = (
+        unit_video_manifest()
+        if model_id == "unit-agnes-video"
+        else next(m for m in CATALOG_MODELS if m["model_id"] == model_id)
+    )
 
     async def _insert() -> None:
         async with factory() as session:
@@ -132,14 +137,14 @@ def test_model_candidates_api_lists_unverified_binding_as_ineligible(
         f"/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/model-bindings",
         json={
             "media_type": "video",
-            "model_id": "agnes-video-v2.0",
+            "model_id": "unit-agnes-video",
             "purpose": "video",
             "enabled": True,
         },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert binding.status_code == 201, binding.text
-    assert binding.json()["invoke_model_value"] == "agnes-video-v2.0"
+    assert binding.json()["invoke_model_value"] == "unit-agnes-video"
     assert binding.json()["account_verified"] is False
 
     project = client.post(
@@ -162,7 +167,7 @@ def test_model_candidates_api_lists_unverified_binding_as_ineligible(
     candidates = response.json()
     assert len(candidates) == 1
     candidate = candidates[0]
-    assert candidate["model_id"] == "agnes-video-v2.0"
+    assert candidate["model_id"] == "unit-agnes-video"
     assert candidate["purpose"] == "video"
     assert candidate["eligible"] is False
     codes = {issue["code"] for issue in candidate["issues"]}

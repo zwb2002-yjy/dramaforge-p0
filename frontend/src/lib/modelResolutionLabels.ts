@@ -5,7 +5,17 @@ const MODEL_SOURCE_LABELS: Record<string, string> = {
   request_override: "本次请求显式指定",
 };
 
+export const MODEL_CONTRACT_BLOCKER_LABELS: Record<string, string> = {
+  MODEL_OFFICIAL_EVIDENCE_GAP: "官方证据尚未覆盖当前合同的全部执行字段",
+  MODEL_LIFECYCLE_INACTIVE: "当前修订未开放新建请求",
+  DYNAMIC_MODEL_CAPABILITY_UNVERIFIED: "远端模型的精确能力尚未确认",
+  MODEL_CONTRACT_NOT_TESTED: "候选能力尚未接入执行",
+  CATALOG_MANIFEST_HASH_MISMATCH: "合同内容不一致，需要维护核对",
+  MODEL_CONTRACT_SCHEMA_UNSUPPORTED: "该合同版本尚未支持执行",
+};
+
 const MODEL_BLOCKER_LABELS: Record<string, string> = {
+  ...MODEL_CONTRACT_BLOCKER_LABELS,
   MODEL_BINDING_MISSING: "尚未选择可执行的供应商模型绑定",
   MODEL_BINDING_UNAVAILABLE: "已选模型绑定当前不可用",
   MODEL_ACCOUNT_NOT_VERIFIED: "模型所属连接尚未完成认证",

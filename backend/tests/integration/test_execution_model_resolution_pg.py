@@ -18,7 +18,7 @@ from app.access.models import Project, User, Workspace
 from app.execution.models import GraphNode, NodeRun
 from app.production.models import GraphVersion, ProductionGraph, definition_hash
 from app.providers.capabilities import Capability
-from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
+from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.model_profiles.slots import ModelSlot
@@ -29,6 +29,7 @@ from app.shared.db import set_rls_context
 from pg_support import available, database_url
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from tests.unit.model_infra_fixture import unit_video_manifest
 
 
 def _postgres_is_available() -> bool:
@@ -97,7 +98,7 @@ async def test_execution_model_resolution_round_trips_in_node_run_snapshot_pg(
         project_id=project.id,
     )
 
-    manifest = next(item for item in CATALOG_MODELS if item["model_id"] == "agnes-video-v2.0")
+    manifest = unit_video_manifest()
     model_id = f"execution-resolution-{suffix}"
     entry = ModelCatalogEntry(
         provider_type="agnes",

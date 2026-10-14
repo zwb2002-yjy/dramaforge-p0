@@ -1,0 +1,585 @@
+{
+  "schema_version": "2",
+  "manifest_version": "2026-10-13",
+  "provider_type": "volcengine",
+  "protocol_profile": "ark_cn_v1",
+  "api_version": "v3",
+  "region": "cn-beijing",
+  "model_id": "doubao-seedream-5-0-flash-260915",
+  "model_revision": "knowledge-2026-10-13-r1",
+  "refines_revision": "2026-09-28-candidate",
+  "media_kind": "image",
+  "display_name": "doubao-seedream-5-0-flash-260915",
+  "lifecycle": "preview",
+  "catalog_source": "official_static",
+  "documented_at": "2026-10-13",
+  "operations": {
+    "image.generate": {
+      "operation": "image.generate",
+      "claim_status": "documented_supported",
+      "input_contracts": {
+        "text": {
+          "claim_status": "documented_supported",
+          "input_slots": {},
+          "minimum_total_references": {
+            "kind": "bounded",
+            "value": 0,
+            "claim_status": "documented_supported"
+          },
+          "maximum_total_references": {
+            "kind": "bounded",
+            "value": 0,
+            "claim_status": "documented_supported"
+          }
+        },
+        "reference": {
+          "claim_status": "documented_supported",
+          "input_slots": {
+            "reference_image": {
+              "claim_status": "documented_supported",
+              "required": true,
+              "minimum": {
+                "kind": "bounded",
+                "value": 1,
+                "claim_status": "documented_supported"
+              },
+              "maximum": {
+                "kind": "bounded",
+                "value": 10,
+                "claim_status": "documented_supported"
+              },
+              "media_types": [
+                "image/jpeg",
+                "image/png",
+                "image/webp",
+                "image/bmp",
+                "image/tiff",
+                "image/gif",
+                "image/heic",
+                "image/heif"
+              ],
+              "ordering": "preserve",
+              "max_bytes": {
+                "kind": "bounded",
+                "value": 30000000,
+                "claim_status": "documented_supported"
+              },
+              "min_width": {
+                "kind": "bounded",
+                "value": 15,
+                "claim_status": "documented_supported"
+              },
+              "min_height": {
+                "kind": "bounded",
+                "value": 15,
+                "claim_status": "documented_supported"
+              },
+              "min_pixels": {
+                "kind": "bounded",
+                "value": 196,
+                "claim_status": "documented_supported"
+              },
+              "max_pixels": {
+                "kind": "bounded",
+                "value": 36000000,
+                "claim_status": "documented_supported"
+              },
+              "min_aspect_ratio": {
+                "kind": "bounded",
+                "value": 0.0625,
+                "claim_status": "documented_supported"
+              },
+              "max_aspect_ratio": {
+                "kind": "bounded",
+                "value": 16,
+                "claim_status": "documented_supported"
+              },
+              "wire_field": "image",
+              "delivery_formats": [
+                "public_https",
+                "data_uri"
+              ]
+            }
+          },
+          "minimum_total_references": {
+            "kind": "bounded",
+            "value": 1,
+            "claim_status": "documented_supported"
+          },
+          "maximum_total_references": {
+            "kind": "bounded",
+            "value": 10,
+            "claim_status": "documented_supported"
+          }
+        }
+      },
+      "output_options": {
+        "size": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "1K",
+            "1.5K",
+            "2K"
+          ],
+          "dimension_bounds": {
+            "min_pixels": {
+              "kind": "bounded",
+              "value": 921600,
+              "claim_status": "documented_supported"
+            },
+            "max_pixels": {
+              "kind": "bounded",
+              "value": 4624220,
+              "claim_status": "documented_supported"
+            },
+            "min_aspect_ratio": {
+              "kind": "bounded",
+              "value": 0.0625,
+              "claim_status": "documented_supported"
+            },
+            "max_aspect_ratio": {
+              "kind": "bounded",
+              "value": 16,
+              "claim_status": "documented_supported"
+            }
+          }
+        },
+        "response_format": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "url",
+            "b64_json"
+          ],
+          "default": "url",
+          "default_status": "documented_supported"
+        },
+        "watermark": {
+          "type": "boolean",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "default": true,
+          "default_status": "documented_supported"
+        },
+        "sequential_image_generation": {
+          "type": "string",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        },
+        "stream": {
+          "type": "boolean",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        },
+        "seed": {
+          "type": "integer",
+          "claim_status": "unknown",
+          "control": "unknown",
+          "required": false
+        },
+        "optimize_prompt_options": {
+          "type": "object",
+          "claim_status": "unknown",
+          "control": "unknown",
+          "required": false
+        },
+        "output_format": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "jpeg",
+            "png"
+          ]
+        },
+        "background": {
+          "type": "string",
+          "claim_status": "unknown",
+          "control": "unknown",
+          "required": false,
+          "enum": [
+            "opaque",
+            "transparent"
+          ]
+        }
+      },
+      "protocol_facts": {
+        "transparent_background_rules": {
+          "type": "object",
+          "claim_status": "unknown",
+          "control": "unsupported",
+          "required": false,
+          "default": {
+            "single_reference": true,
+            "output_format": "png"
+          },
+          "default_status": "unknown"
+        }
+      },
+      "evidence_group_ref": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9:5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392:knowledge-review-20261013",
+      "evidence_review": {
+        "covers": "/operations/image.generate",
+        "reviewed_subtree_hash": "21d5164898bd4be7139be72c39ccf754b2e77680345b80408979210852888a6e",
+        "reviewed_by": "Codex authorized task reviewer",
+        "review_kind": "authorized_agent",
+        "locator": "Exact model and request parameters; unknown limits explicitly retained"
+      }
+    },
+    "image.edit": {
+      "operation": "image.edit",
+      "claim_status": "documented_supported",
+      "input_contracts": {
+        "reference": {
+          "claim_status": "documented_supported",
+          "input_slots": {
+            "reference_image": {
+              "claim_status": "documented_supported",
+              "required": true,
+              "minimum": {
+                "kind": "bounded",
+                "value": 1,
+                "claim_status": "documented_supported"
+              },
+              "maximum": {
+                "kind": "bounded",
+                "value": 10,
+                "claim_status": "documented_supported"
+              },
+              "media_types": [
+                "image/jpeg",
+                "image/png",
+                "image/webp",
+                "image/bmp",
+                "image/tiff",
+                "image/gif",
+                "image/heic",
+                "image/heif"
+              ],
+              "ordering": "preserve",
+              "max_bytes": {
+                "kind": "bounded",
+                "value": 30000000,
+                "claim_status": "documented_supported"
+              },
+              "min_width": {
+                "kind": "bounded",
+                "value": 15,
+                "claim_status": "documented_supported"
+              },
+              "min_height": {
+                "kind": "bounded",
+                "value": 15,
+                "claim_status": "documented_supported"
+              },
+              "min_pixels": {
+                "kind": "bounded",
+                "value": 196,
+                "claim_status": "documented_supported"
+              },
+              "max_pixels": {
+                "kind": "bounded",
+                "value": 36000000,
+                "claim_status": "documented_supported"
+              },
+              "min_aspect_ratio": {
+                "kind": "bounded",
+                "value": 0.0625,
+                "claim_status": "documented_supported"
+              },
+              "max_aspect_ratio": {
+                "kind": "bounded",
+                "value": 16,
+                "claim_status": "documented_supported"
+              },
+              "wire_field": "image",
+              "delivery_formats": [
+                "public_https",
+                "data_uri"
+              ]
+            }
+          },
+          "minimum_total_references": {
+            "kind": "bounded",
+            "value": 1,
+            "claim_status": "documented_supported"
+          },
+          "maximum_total_references": {
+            "kind": "bounded",
+            "value": 10,
+            "claim_status": "documented_supported"
+          }
+        }
+      },
+      "output_options": {
+        "size": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "1K",
+            "1.5K",
+            "2K"
+          ],
+          "dimension_bounds": {
+            "min_pixels": {
+              "kind": "bounded",
+              "value": 921600,
+              "claim_status": "documented_supported"
+            },
+            "max_pixels": {
+              "kind": "bounded",
+              "value": 4624220,
+              "claim_status": "documented_supported"
+            },
+            "min_aspect_ratio": {
+              "kind": "bounded",
+              "value": 0.0625,
+              "claim_status": "documented_supported"
+            },
+            "max_aspect_ratio": {
+              "kind": "bounded",
+              "value": 16,
+              "claim_status": "documented_supported"
+            }
+          }
+        },
+        "response_format": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "url",
+            "b64_json"
+          ],
+          "default": "url",
+          "default_status": "documented_supported"
+        },
+        "watermark": {
+          "type": "boolean",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "default": true,
+          "default_status": "documented_supported"
+        },
+        "sequential_image_generation": {
+          "type": "string",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        },
+        "stream": {
+          "type": "boolean",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        },
+        "seed": {
+          "type": "integer",
+          "claim_status": "unknown",
+          "control": "unknown",
+          "required": false
+        },
+        "optimize_prompt_options": {
+          "type": "object",
+          "claim_status": "unknown",
+          "control": "unknown",
+          "required": false
+        },
+        "output_format": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "jpeg",
+            "png"
+          ]
+        },
+        "background": {
+          "type": "string",
+          "claim_status": "unknown",
+          "control": "unknown",
+          "required": false,
+          "enum": [
+            "opaque",
+            "transparent"
+          ]
+        }
+      },
+      "protocol_facts": {
+        "transparent_background_rules": {
+          "type": "object",
+          "claim_status": "unknown",
+          "control": "unsupported",
+          "required": false,
+          "default": {
+            "single_reference": true,
+            "output_format": "png"
+          },
+          "default_status": "unknown"
+        }
+      },
+      "evidence_group_ref": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9:5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392:knowledge-review-20261013",
+      "evidence_review": {
+        "covers": "/operations/image.edit",
+        "reviewed_subtree_hash": "13fa54bc8052ff79300fc4cae34cedd20fa88ff9dcf4f08ff17fe836732e53c2",
+        "reviewed_by": "Codex authorized task reviewer",
+        "review_kind": "authorized_agent",
+        "locator": "Exact model and request parameters; unknown limits explicitly retained"
+      }
+    },
+    "image.layer_decomposition": {
+      "operation": "image.layer_decomposition",
+      "claim_status": "documented_supported",
+      "input_contracts": {
+        "source": {
+          "claim_status": "documented_supported",
+          "input_slots": {
+            "source_image": {
+              "claim_status": "documented_supported",
+              "required": true,
+              "minimum": {
+                "kind": "bounded",
+                "value": 1,
+                "claim_status": "documented_supported"
+              },
+              "maximum": {
+                "kind": "bounded",
+                "value": 1,
+                "claim_status": "documented_supported"
+              },
+              "media_types": [
+                "image/png",
+                "image/jpeg"
+              ],
+              "ordering": "preserve",
+              "max_bytes": {
+                "kind": "bounded",
+                "value": 30000000,
+                "claim_status": "documented_supported"
+              },
+              "min_pixels": {
+                "kind": "bounded",
+                "value": 262144,
+                "claim_status": "documented_supported"
+              },
+              "max_pixels": {
+                "kind": "bounded",
+                "value": 36000000,
+                "claim_status": "documented_supported"
+              },
+              "min_aspect_ratio": {
+                "kind": "bounded",
+                "value": 0.0625,
+                "claim_status": "documented_supported"
+              },
+              "max_aspect_ratio": {
+                "kind": "bounded",
+                "value": 16,
+                "claim_status": "documented_supported"
+              },
+              "wire_field": "image"
+            }
+          },
+          "minimum_total_references": {
+            "kind": "bounded",
+            "value": 1,
+            "claim_status": "documented_supported"
+          },
+          "maximum_total_references": {
+            "kind": "bounded",
+            "value": 1,
+            "claim_status": "documented_supported"
+          }
+        }
+      },
+      "output_options": {
+        "size": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "1K",
+            "1.5K",
+            "2K",
+            "auto"
+          ]
+        },
+        "layer_decomposition": {
+          "type": "boolean",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            true
+          ]
+        }
+      },
+      "protocol_facts": {
+        "maximum_layers": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "unsupported",
+          "required": false,
+          "default": 16,
+          "default_status": "documented_supported"
+        },
+        "layer_format": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "unsupported",
+          "required": false,
+          "default": "png",
+          "default_status": "documented_supported"
+        },
+        "base_format": {
+          "type": "array",
+          "claim_status": "documented_supported",
+          "control": "unsupported",
+          "required": false,
+          "default": [
+            "png",
+            "jpeg"
+          ],
+          "default_status": "documented_supported"
+        }
+      },
+      "evidence_group_ref": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9:5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392:knowledge-review-20261013",
+      "evidence_review": {
+        "covers": "/operations/image.layer_decomposition",
+        "reviewed_subtree_hash": "ed36f9e2944ad456db6b03269db3626f8aba79e919ec117d68ac98ff6b111ec2",
+        "reviewed_by": "Codex authorized task reviewer",
+        "review_kind": "authorized_agent",
+        "locator": "Exact model and request parameters; unknown limits explicitly retained"
+      }
+    },
+    "image.interactive_edit": {
+      "operation": "image.interactive_edit",
+      "claim_status": "documented_supported",
+      "input_contracts": {},
+      "output_options": {},
+      "protocol_facts": {},
+      "evidence_group_ref": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9:5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392:knowledge-review-20261013",
+      "evidence_review": {
+        "covers": "/operations/image.interactive_edit",
+        "reviewed_subtree_hash": "10420cedd8cf134c8b3d83e01b08e39ecc65da224bf337fe05e8df2e4f0dbac5",
+        "reviewed_by": "Codex authorized task reviewer",
+        "review_kind": "authorized_agent",
+        "locator": "Exact model and request parameters; unknown limits explicitly retained"
+      }
+    }
+  }
+}

@@ -43,6 +43,7 @@ class ModelRead(BaseModel):
     enabled: bool
     configured: bool
     available: bool
+    availability_reason: str | None = None
     capabilities: list[str]
     # ``workspace``: a model behind one of this workspace's provider connections
     # (a media binding or a discovered text alias). ``installed``: process-level
@@ -142,7 +143,9 @@ async def list_models(
                 if model.manifest.provider_id == "litellm"
                 else bool(model.manifest.metadata.get("binding_id"))
                 and bool(model.manifest.metadata.get("account_verified"))
+                and not model.manifest.metadata.get("new_create_blocker")
             ),
+            availability_reason=model.manifest.metadata.get("new_create_blocker"),
             capabilities=sorted(str(cap) for cap in model.manifest.capability_specs),
             source=(
                 "workspace"

@@ -264,6 +264,31 @@ async def _seed_binding(
     )
     session.add(binding)
     await session.flush()
+    from app.providers.availability_projection import (
+        ModelAvailabilityObservation,
+        record_model_availability,
+    )
+
+    revision = await session.scalar(
+        select(ProviderConnectionRevision)
+        .where(ProviderConnectionRevision.connection_id == connection.id)
+        .order_by(ProviderConnectionRevision.revision_no.desc())
+        .limit(1)
+    )
+    assert revision is not None
+    await record_model_availability(
+        session,
+        ModelAvailabilityObservation(
+            workspace_id=workspace_id,
+            connection_id=connection.id,
+            connection_revision_id=revision.id,
+            credential_revision_id=revision.credential_revision_id,
+            remote_model_id=model_id,
+            verifier_kind="controlled_model_list",
+            status="visible",
+            listed_model_ids=(model_id,),
+        ),
+    )
     if project_binding:
         session.add(
             ProjectProviderBinding(

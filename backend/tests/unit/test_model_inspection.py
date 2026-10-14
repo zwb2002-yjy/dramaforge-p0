@@ -176,7 +176,7 @@ async def test_query_current_media_binding_and_text_slot_are_distinct(
     report = await service.get_model_capabilities(project_id=project.id, stage="video")
     assert report.selection == "current_binding"
     assert report.binding_id == binding.id
-    assert report.report.model_id == "agnes/agnes-video-v2.0"
+    assert report.report.model_id == "agnes/unit-agnes-video"
     text = await service.get_model_capabilities(
         project_id=project.id,
         slot=ModelSlot.PLANNING_SCRIPT,

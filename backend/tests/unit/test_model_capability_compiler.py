@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 from app.providers.adapters_v2 import BridgeComponents, ProviderAdapterBridge
 from app.providers.capabilities import Capability
-from app.providers.catalog_loader import CATALOG_MODELS
+from app.providers.catalog_loader import CATALOG_MODELS, ModelCatalogLoader
 from app.providers.contracts.common import ArtifactRef
 from app.providers.contracts.image import ImageEditRequest
 from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
@@ -329,7 +329,11 @@ def test_agnes_video_rejects_untransmitted_controls(field: str, value: object) -
     )
 
     manifest = ModelCapabilityManifest.model_validate(
-        next(row for row in CATALOG_MODELS if row["model_id"] == "agnes-video-v2.0")
+        next(
+            item.as_dict()
+            for item in ModelCatalogLoader().load()
+            if item.identity[2] == "agnes-video-v2.0"
+        )
     )
     intent = VideoGenerationIntentV1(
         prompt="test",
