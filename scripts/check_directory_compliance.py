@@ -34,7 +34,6 @@ ALLOWED_ROOT = {
     "docker-compose.yml",
     "docker-compose.build.yml",
     "docker-compose.dev.yml",
-    "docker-compose.gpu.yml",
     "docker-compose.offline.yml",
     "docker-compose.quality.yml",
     "install.ps1",

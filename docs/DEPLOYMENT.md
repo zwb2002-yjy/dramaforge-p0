@@ -4,12 +4,14 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 
 ## Supported deployment shape
 
-The default `docker-compose.yml` is the release topology. It uses versioned
-release images, publishes only the unprivileged Nginx gateway on
+The default `docker-compose.yml` is the current `dramaforge-dev` topology. Local
+images are built from current source through `docker-compose.build.yml`; future
+release bundles supply immutable image references. It publishes only the unprivileged Nginx gateway on
 `127.0.0.1:8080`, and contains no source `build` instructions. PostgreSQL,
 Redis, MinIO, LiteLLM, the API, dispatcher and workers remain on the Compose
-network. A user host needs Docker Compose v2; it does not need Python, Node.js,
-or a compiler.
+network. A packaged-release host needs Docker Compose v2; it does not need
+Python, Node.js, or a compiler. The source-development setup below invokes
+`scripts/init_env.py` and therefore needs Python for that step.
 
 This topology is intended to behave the same with Docker Compose v2 on Linux,
 Windows Docker Desktop and macOS Docker Desktop. The authoritative CI quality
@@ -17,7 +19,19 @@ gate builds and tests the same containers used for the release path; a release
 claim still requires the release candidate's Docker smoke test and evidence on
 each claimed host.
 
-## First start
+## Current development start
+
+Generate a unique local environment, set the exact source commit, and build the current images:
+
+```text
+python scripts/init_env.py
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+The project is unreleased. Retain old instance volumes separately; current startup does not
+reuse another worktree, old image tags or queued provider tasks.
+
+## Future packaged release start
 
 Download and extract the complete online bundle from one GitHub Release. On
 Windows PowerShell run:
@@ -36,6 +50,9 @@ chmod +x install.sh
 The installer verifies `release.env`, pulls the immutable release images,
 generates unique secrets by running `app.install_env` inside the backend image,
 and starts the stack with `--no-build`. It never invokes a host package manager.
+Initialization also generates a separate `DIRECTOR_CHECKPOINT_PASSWORD` and
+its local `DIRECTOR_CHECKPOINT_DATABASE_URL`; the release workflow supplies
+the checkpoint password explicitly when validating and smoke-testing Compose.
 
 Open `http://localhost:8080`. A clean instance lets the first person create the
 Owner account. Public registration is closed after that bootstrap unless an
@@ -47,10 +64,17 @@ image identities in `.env`. It preserves database credentials,
 before an upgrade; replacing the Fernet key makes saved Provider credentials
 unreadable.
 
+PostgreSQL connections use `DATABASE_SSL=false` for the local Compose network.
+Set it to `true` when the database endpoint requires TLS; the setting is passed
+to the API, dispatcher and Workers and is not encoded in application code.
+
 ## Complete offline install
 
 Use the architecture-specific offline release bundle, not the online bundle.
-It contains `images.tar` with the complete runtime image set. After extracting:
+It contains `images.tar.gz` with the complete runtime image set. Extract it into
+a directory and run the installer from that same directory (the archive holds the
+installer, `release.env`, the Compose files and the image archive at its top
+level):
 
 ```text
 .\install.ps1 -Offline
@@ -62,7 +86,7 @@ or:
 ./install.sh --offline
 ```
 
-The installer imports `images.tar` and layers `docker-compose.offline.yml`,
+The installer imports `images.tar.gz` and layers `docker-compose.offline.yml`,
 whose `pull_policy: never` contract covers every service. Offline installation
 means no registry access during installation. Cloud media Providers still need
 network access and user credentials; this release does not claim that the full
@@ -103,6 +127,29 @@ checked from service status and worker logs: `worker-default` consumes
 (Director turns, event intake and wakeup replay), and `worker-heavy` consumes
 `dramaforge:heavy`. Recoverable work is republished by the resident
 `dispatcher` and by the Director worker's startup recovery.
+Provider reconciliation runs in an independent dispatcher loop, not a heavy-queue cron job;
+media execution still uses the existing queue. Apply migrations through the
+candidate head (see [DATA_MODEL.md](DATA_MODEL.md); confirm with `alembic heads`) before
+updating the dispatcher and media workers. This rollout is not implied by a source-only push.
+
+The current unreleased schema has a one-way cleanup head (see [DATA_MODEL.md](DATA_MODEL.md)).
+Use a fresh development database and retain old environment volumes separately. Do not translate
+old queued requests, relabel old image identities, or stamp past unapplied migrations.
+
+PostgreSQL, Redis, MinIO and the LiteLLM database use `restart: unless-stopped` plus bounded
+startup health periods. The API, dispatcher and every Worker wait for PostgreSQL health and
+the completed database bootstrap, then also restart unless explicitly stopped. The frontend
+waits for API health. This ordering prevents a surviving gateway from presenting an API that
+started before its DNS/database dependencies recovered after a Docker restart.
+
+Director health uses `python -m app.workers.healthcheck` rather than importing
+all WorkerSettings/jobs for the Arq CLI. It checks the configured queue's nonempty
+Redis heartbeat plus a positive TTL of at most 3,601,000ms (not Redis PING), with
+no retries and a 3-second total probe deadline; Docker's timeout remains 5 seconds.
+Arq's existing 3600-second refresh / 3601-second expiry window is unchanged. This
+is **queue-level liveness, not per-process readiness**: another worker on the same
+queue can maintain the heartbeat. Check worker logs and actual job progress when
+diagnosing an individual process.
 
 Named volumes `postgres_data`, `minio_data`, and `litellm_db_data` contain
 persistent state. `docker compose down` preserves them; do not use `--volumes`
@@ -113,14 +160,10 @@ entrypoint is `scripts/p0_backup_restore.py` (see
 
 ## Director runtime engine
 
-`DIRECTOR_RUNTIME_ENGINE` selects the engine for **newly started** Director
-turns and defaults to `legacy`. It is passed to both the API (which starts
-turns) and `worker-director` (which executes them); the `langgraph` value also
-requires `DIRECTOR_CHECKPOINT_DATABASE_URL`, which only `worker-director`
-receives, plus the private `director_runtime_checkpoints` schema created by
-migration `20260910_0066` (role `dramaforge_director_checkpoint`, provisioned by
-`database-bootstrap`). Selecting one engine never runs the other, and the manual
-production path must still complete with the director worker stopped.
+`DIRECTOR_RUNTIME_ENGINE` only accepts `langgraph`. Both API and worker-director receive
+`DIRECTOR_CHECKPOINT_DATABASE_URL`; the dedicated checkpoint password is required and
+`database-bootstrap` provisions the private schema role. Worker startup verifies the store.
+Manual production remains available independently of the Director worker.
 
 ## AIOS/AISphere handoff boundary
 

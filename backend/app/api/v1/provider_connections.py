@@ -9,6 +9,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field, SecretStr
+from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import (
@@ -18,9 +19,23 @@ from app.api.deps import (
     SessionDep,
     require_selected_workspace,
 )
+from app.providers.capability_summary import ModelCapabilitySummary, summarize_model_capability
+from app.providers.catalog_loader import ModelCatalogLoader
+from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.catalog_publication import (
+    catalog_new_create_blocker,
+    effective_publication_lifecycle,
+)
 from app.providers.catalog_service import ModelCatalogService
 from app.providers.connection_service import ProviderConnectionService
+from app.providers.knowledge_projection import (
+    ModelKnowledgeRead,
+    knowledge_for_model,
+    project_model_knowledge,
+)
+from app.providers.manifest import ModelCapabilityManifest, read_catalog_manifest
 from app.providers.models import (
+    ProjectProviderBinding,
     ProviderCapabilityEvidence,
     ProviderConnection,
     ProviderModelBinding,
@@ -40,9 +55,13 @@ class ProviderPluginModelRead(BaseModel):
     media_type: str
     model_revision: str
     lifecycle: str
+    implementation_status: str
     catalog_source: str
     capabilities: list[str]
     option_schema: dict[str, object]
+    capability_summary: ModelCapabilitySummary
+    knowledge: ModelKnowledgeRead | None = None
+    new_create_blocker: str | None = None
 
 
 class ProviderPluginRead(BaseModel):
@@ -50,6 +69,9 @@ class ProviderPluginRead(BaseModel):
     protocol_profile: str
     display_name: str
     default_base_url: str
+    # ``text`` plugins expose discovered chat models directly; ``media`` plugins
+    # need a catalog contract match and a model binding before execution.
+    kind: Literal["media", "text"]
     implemented: bool
     paid_capabilities: list[str]
     capabilities: list[str]
@@ -66,9 +88,25 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
     capability probes, and model binding choices without hard-coded supplier
     names or model ids.
     """
-    entries = await ModelCatalogService(session).list_entries(lifecycle="active")
+    entries = await ModelCatalogService(session).list_entries()
     by_plugin: dict[tuple[str, str], list[ProviderPluginModelRead]] = {}
+    knowledge_catalog = ModelCatalogLoader().load()
+    knowledge_cache: dict[tuple[str, str, str], ModelKnowledgeRead | None] = {}
     for entry in entries:
+        manifest = read_catalog_manifest(entry.capability_manifest_json)
+        key = (entry.provider_type, entry.protocol_profile, entry.model_id)
+        if key not in knowledge_cache:
+            knowledge_cache[key] = knowledge_for_model(*key, catalog=knowledge_catalog)
+        blocker = catalog_new_create_blocker(
+            entry.provider_type,
+            entry.protocol_profile,
+            entry.model_id,
+            entry.model_revision,
+            entry.contract_manifest_hash,
+            schema_version=entry.capability_manifest_json.get("schema_version", "1"),
+            lifecycle=entry.lifecycle,
+            catalog_source=entry.catalog_source,
+        )
         operations = entry.capability_manifest_json.get("operations") or {}
         capabilities = sorted(
             {
@@ -86,10 +124,20 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
                 display_name=entry.display_name,
                 media_type=entry.media_kind,
                 model_revision=entry.model_revision,
-                lifecycle=entry.lifecycle,
+                lifecycle=effective_publication_lifecycle(
+                    entry.provider_type, entry.protocol_profile, entry.model_id, entry.lifecycle
+                ),
+                implementation_status=manifest.implementation_status
+                if isinstance(manifest, ModelCapabilityManifest)
+                else "not_implemented",
                 catalog_source=entry.catalog_source,
                 capabilities=capabilities,
                 option_schema=dict(entry.option_schema_json or {}),
+                capability_summary=summarize_model_capability(manifest, new_create_blocker=blocker),
+                new_create_blocker=blocker,
+                knowledge=knowledge_cache[key]
+                if isinstance(manifest, ModelCapabilityManifest)
+                else project_model_knowledge(entry.capability_manifest_json),
             )
         )
     result: list[ProviderPluginRead] = []
@@ -101,6 +149,7 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
                 protocol_profile=plugin.protocol_profile,
                 display_name=plugin.display_name,
                 default_base_url=plugin.default_base_url,
+                kind="text" if plugin.provider_type == "litellm" else "media",
                 implemented=plugin.implemented,
                 paid_capabilities=sorted(plugin.paid_capabilities),
                 capabilities=sorted(
@@ -146,6 +195,7 @@ class ConnectionRead(BaseModel):
     credential_key_version: str | None
     verification_status: str
     verified_at: datetime | None
+    connection_revision_id: UUID
 
 
 class ProbeRequest(BaseModel):
@@ -160,7 +210,6 @@ class ProbeRequest(BaseModel):
     reference_artifact_id: UUID | None = None
     remote_task_id: str | None = None
     remote_query_kind: Literal["video_id", "task_id"] | None = None
-    paid_request_confirmed: bool = False
 
 
 class ProbeRead(BaseModel):
@@ -176,12 +225,15 @@ class ProbeRead(BaseModel):
     request_fingerprint: str
     tested_at: datetime
     error_code: str | None
+    discovered_model_ids: list[str]
+    connection_revision_id: UUID | None
 
 
 class ModelBindingCreate(BaseModel):
     media_type: Literal["image", "video"]
     model_id: str = Field(min_length=1, max_length=160)
     purpose: Literal["keyframe", "video"]
+    capability_contract_id: UUID | None = None
     enabled: bool = True
 
 
@@ -206,7 +258,6 @@ class ModelBindingRead(BaseModel):
 class ProjectBindingWrite(BaseModel):
     model_binding_id: UUID
     selection_strategy: Literal["explicit_binding"] = "explicit_binding"
-    fallback_policy: Literal["none"] = "none"
 
 
 class ProjectBindingRead(BaseModel):
@@ -215,7 +266,20 @@ class ProjectBindingRead(BaseModel):
     purpose: str
     model_binding_id: UUID
     selection_strategy: str
-    fallback_policy: str
+
+
+class ProjectBindingDetailRead(ProjectBindingRead):
+    """Project binding plus the model identity it currently points at.
+
+    The settings surface has to answer "which model serves this purpose?"; without
+    the read model the page could only print a raw binding id, and a refresh lost
+    the answer entirely (decision 2026-09-19: add a read-only project binding API).
+    """
+
+    model_id: str | None = None
+    display_name: str | None = None
+    provider_type: str | None = None
+    model_binding_enabled: bool | None = None
 
 
 class QualityEvidenceWrite(BaseModel):
@@ -238,6 +302,11 @@ class QualityEvidenceRead(BaseModel):
 async def _connection_read(
     service: ProviderConnectionService, connection: ProviderConnection
 ) -> ConnectionRead:
+    # Report the stored credential, not an assumption: a connection can exist
+    # without one (created before a key was saved, or after its credential row was
+    # removed), and claiming "已保存" then is a state lie the Owner cannot detect.
+    credential_version = await service.credential_version(connection)
+    revision = await service.current_connection_revision(connection=connection)
     return ConnectionRead(
         id=connection.id,
         workspace_id=connection.workspace_id,
@@ -246,10 +315,11 @@ async def _connection_read(
         base_url=connection.base_url,
         protocol_profile=connection.protocol_profile,
         enabled=connection.enabled,
-        credential_configured=True,
-        credential_key_version=await service.credential_version(connection),
+        credential_configured=credential_version is not None,
+        credential_key_version=credential_version,
         verification_status=connection.verification_status,
         verified_at=connection.verified_at,
+        connection_revision_id=revision.id,
     )
 
 
@@ -267,6 +337,8 @@ def _probe_read(evidence: ProviderCapabilityEvidence) -> ProbeRead:
         request_fingerprint=evidence.request_fingerprint,
         tested_at=evidence.tested_at,
         error_code=evidence.error_code,
+        discovered_model_ids=list(evidence.discovered_model_ids or []),
+        connection_revision_id=evidence.connection_revision_id,
     )
 
 
@@ -330,8 +402,11 @@ async def create_connection(
         protocol_profile=body.protocol_profile,
         base_url=body.base_url,
     )
+    # Workspace RLS settings are transaction-local; serialize all scoped reads
+    # before commit so a successful write cannot turn into a false 422 response.
+    response = await _connection_read(service, connection)
     await session.commit()
-    return await _connection_read(service, connection)
+    return response
 
 
 @router.get(
@@ -395,8 +470,9 @@ async def patch_connection(
         enabled=body.enabled,
         base_url=body.base_url,
     )
+    response = await _connection_read(service, connection)
     await session.commit()
-    return await _connection_read(service, connection)
+    return response
 
 
 @router.put(
@@ -421,8 +497,9 @@ async def put_connection_credential(
         actor=user,
         api_key=body.api_key.get_secret_value(),
     )
+    response = await _connection_read(service, connection)
     await session.commit()
-    return await _connection_read(service, connection)
+    return response
 
 
 @router.post(
@@ -449,7 +526,6 @@ async def run_probe(
         reference_artifact_id=body.reference_artifact_id,
         remote_task_id=body.remote_task_id,
         remote_query_kind=body.remote_query_kind,
-        paid_request_confirmed=body.paid_request_confirmed,
     )
     await session.commit()
     return _probe_read(evidence)
@@ -497,6 +573,7 @@ async def create_model_binding(
         media_type=body.media_type,
         model_id=body.model_id,
         purpose=body.purpose,
+        capability_contract_id=body.capability_contract_id,
         enabled=body.enabled,
     )
     await session.commit()
@@ -553,6 +630,62 @@ async def record_quality_evidence(
     return _quality_read(evidence)
 
 
+@router.get(
+    "/projects/{project_id}/provider-bindings",
+    response_model=list[ProjectBindingDetailRead],
+    dependencies=[Depends(require_selected_workspace)],
+)
+async def list_project_bindings(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> list[ProjectBindingDetailRead]:
+    """Read-only view of the project's Provider bindings (one row per purpose)."""
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    rows = (
+        (
+            await session.execute(
+                select(ProjectProviderBinding)
+                .where(ProjectProviderBinding.project_id == project.id)
+                .order_by(ProjectProviderBinding.purpose)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    details: list[ProjectBindingDetailRead] = []
+    for row in rows:
+        model = await session.get(ProviderModelBinding, row.model_binding_id)
+        entry = (
+            await session.get(ModelCatalogEntry, model.catalog_entry_id)
+            if model is not None and model.catalog_entry_id is not None
+            else None
+        )
+        connection = (
+            await session.get(ProviderConnection, model.connection_id)
+            if model is not None
+            else None
+        )
+        details.append(
+            ProjectBindingDetailRead(
+                id=row.id,
+                project_id=row.project_id,
+                purpose=row.purpose,
+                model_binding_id=row.model_binding_id,
+                selection_strategy=row.selection_strategy,
+                model_id=model.model_id if model is not None else None,
+                display_name=(
+                    entry.display_name
+                    if entry is not None
+                    else (model.model_id if model is not None else None)
+                ),
+                provider_type=connection.provider_type if connection is not None else None,
+                model_binding_enabled=model.enabled if model is not None else None,
+            )
+        )
+    return details
+
+
 @router.put(
     "/projects/{project_id}/provider-bindings/{purpose}",
     response_model=ProjectBindingRead,
@@ -571,7 +704,6 @@ async def put_project_binding(
         project=project,
         purpose=purpose,
         model_binding_id=body.model_binding_id,
-        fallback_policy=body.fallback_policy,
         actor=user,
         selection_strategy=body.selection_strategy,
     )
@@ -582,5 +714,4 @@ async def put_project_binding(
         purpose=binding.purpose,
         model_binding_id=binding.model_binding_id,
         selection_strategy=binding.selection_strategy,
-        fallback_policy=binding.fallback_policy,
     )

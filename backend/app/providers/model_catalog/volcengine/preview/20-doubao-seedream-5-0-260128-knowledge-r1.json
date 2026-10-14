@@ -1,0 +1,460 @@
+{
+  "schema_version": "2",
+  "manifest_version": "2026-10-13",
+  "provider_type": "volcengine",
+  "protocol_profile": "ark_cn_v1",
+  "api_version": "v3",
+  "region": "cn-beijing",
+  "model_id": "doubao-seedream-5-0-260128",
+  "model_revision": "knowledge-2026-10-13-r1",
+  "refines_revision": "2026-09-28-candidate",
+  "media_kind": "image",
+  "display_name": "doubao-seedream-5-0-260128",
+  "lifecycle": "preview",
+  "catalog_source": "official_static",
+  "documented_at": "2026-10-13",
+  "operations": {
+    "image.generate": {
+      "operation": "image.generate",
+      "claim_status": "documented_supported",
+      "input_contracts": {
+        "text": {
+          "claim_status": "documented_supported",
+          "input_slots": {},
+          "minimum_total_references": {
+            "kind": "bounded",
+            "value": 0,
+            "claim_status": "documented_supported"
+          },
+          "maximum_total_references": {
+            "kind": "bounded",
+            "value": 0,
+            "claim_status": "documented_supported"
+          }
+        },
+        "reference": {
+          "claim_status": "documented_supported",
+          "input_slots": {
+            "reference_image": {
+              "claim_status": "documented_supported",
+              "required": true,
+              "minimum": {
+                "kind": "bounded",
+                "value": 1,
+                "claim_status": "documented_supported"
+              },
+              "maximum": {
+                "kind": "bounded",
+                "value": 14,
+                "claim_status": "documented_supported"
+              },
+              "media_types": [
+                "image/jpeg",
+                "image/png",
+                "image/webp",
+                "image/bmp",
+                "image/tiff",
+                "image/gif",
+                "image/heic",
+                "image/heif"
+              ],
+              "ordering": "preserve",
+              "max_bytes": {
+                "kind": "bounded",
+                "value": 30000000,
+                "claim_status": "documented_supported"
+              },
+              "min_width": {
+                "kind": "bounded",
+                "value": 15,
+                "claim_status": "documented_supported"
+              },
+              "min_height": {
+                "kind": "bounded",
+                "value": 15,
+                "claim_status": "documented_supported"
+              },
+              "min_pixels": {
+                "kind": "bounded",
+                "value": 196,
+                "claim_status": "documented_supported"
+              },
+              "max_pixels": {
+                "kind": "bounded",
+                "value": 36000000,
+                "claim_status": "documented_supported"
+              },
+              "min_aspect_ratio": {
+                "kind": "bounded",
+                "value": 0.0625,
+                "claim_status": "documented_supported"
+              },
+              "max_aspect_ratio": {
+                "kind": "bounded",
+                "value": 16,
+                "claim_status": "documented_supported"
+              },
+              "wire_field": "image",
+              "delivery_formats": [
+                "public_https",
+                "data_uri"
+              ]
+            }
+          },
+          "minimum_total_references": {
+            "kind": "bounded",
+            "value": 1,
+            "claim_status": "documented_supported"
+          },
+          "maximum_total_references": {
+            "kind": "bounded",
+            "value": 14,
+            "claim_status": "documented_supported"
+          }
+        }
+      },
+      "output_options": {
+        "size": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "2K",
+            "3K",
+            "4K"
+          ],
+          "dimension_bounds": {
+            "min_pixels": {
+              "kind": "bounded",
+              "value": 3686400,
+              "claim_status": "documented_supported"
+            },
+            "max_pixels": {
+              "kind": "bounded",
+              "value": 16777216,
+              "claim_status": "documented_supported"
+            },
+            "min_aspect_ratio": {
+              "kind": "bounded",
+              "value": 0.0625,
+              "claim_status": "documented_supported"
+            },
+            "max_aspect_ratio": {
+              "kind": "bounded",
+              "value": 16,
+              "claim_status": "documented_supported"
+            }
+          }
+        },
+        "response_format": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "url",
+            "b64_json"
+          ],
+          "default": "url",
+          "default_status": "documented_supported"
+        },
+        "watermark": {
+          "type": "boolean",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "default": true,
+          "default_status": "documented_supported"
+        },
+        "sequential_image_generation": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "auto",
+            "disabled"
+          ]
+        },
+        "stream": {
+          "type": "boolean",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false
+        },
+        "seed": {
+          "type": "integer",
+          "claim_status": "unknown",
+          "control": "unknown",
+          "required": false
+        },
+        "max_images": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "wire_name": "sequential_image_generation_options.max_images",
+          "minimum": {
+            "kind": "bounded",
+            "value": 1,
+            "claim_status": "documented_supported"
+          },
+          "maximum": {
+            "kind": "bounded",
+            "value": 15,
+            "claim_status": "documented_supported"
+          }
+        },
+        "optimize_prompt_options": {
+          "type": "object",
+          "claim_status": "unknown",
+          "control": "unknown",
+          "required": false
+        },
+        "output_format": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "jpeg",
+            "png"
+          ]
+        }
+      },
+      "protocol_facts": {
+        "input_output_image_cap": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "unsupported",
+          "required": false,
+          "default": 15,
+          "default_status": "documented_supported"
+        }
+      },
+      "evidence_group_ref": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9:5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392:knowledge-review-20261013",
+      "evidence_review": {
+        "covers": "/operations/image.generate",
+        "reviewed_subtree_hash": "b7e55d2a0abb0e91e9e9e623da59be053d6430e3367ef9144fac0784b0607c66",
+        "reviewed_by": "Codex authorized task reviewer",
+        "review_kind": "authorized_agent",
+        "locator": "Exact model and request parameters; unknown limits explicitly retained"
+      }
+    },
+    "image.edit": {
+      "operation": "image.edit",
+      "claim_status": "documented_supported",
+      "input_contracts": {
+        "reference": {
+          "claim_status": "documented_supported",
+          "input_slots": {
+            "reference_image": {
+              "claim_status": "documented_supported",
+              "required": true,
+              "minimum": {
+                "kind": "bounded",
+                "value": 1,
+                "claim_status": "documented_supported"
+              },
+              "maximum": {
+                "kind": "bounded",
+                "value": 14,
+                "claim_status": "documented_supported"
+              },
+              "media_types": [
+                "image/jpeg",
+                "image/png",
+                "image/webp",
+                "image/bmp",
+                "image/tiff",
+                "image/gif",
+                "image/heic",
+                "image/heif"
+              ],
+              "ordering": "preserve",
+              "max_bytes": {
+                "kind": "bounded",
+                "value": 30000000,
+                "claim_status": "documented_supported"
+              },
+              "min_width": {
+                "kind": "bounded",
+                "value": 15,
+                "claim_status": "documented_supported"
+              },
+              "min_height": {
+                "kind": "bounded",
+                "value": 15,
+                "claim_status": "documented_supported"
+              },
+              "min_pixels": {
+                "kind": "bounded",
+                "value": 196,
+                "claim_status": "documented_supported"
+              },
+              "max_pixels": {
+                "kind": "bounded",
+                "value": 36000000,
+                "claim_status": "documented_supported"
+              },
+              "min_aspect_ratio": {
+                "kind": "bounded",
+                "value": 0.0625,
+                "claim_status": "documented_supported"
+              },
+              "max_aspect_ratio": {
+                "kind": "bounded",
+                "value": 16,
+                "claim_status": "documented_supported"
+              },
+              "wire_field": "image",
+              "delivery_formats": [
+                "public_https",
+                "data_uri"
+              ]
+            }
+          },
+          "minimum_total_references": {
+            "kind": "bounded",
+            "value": 1,
+            "claim_status": "documented_supported"
+          },
+          "maximum_total_references": {
+            "kind": "bounded",
+            "value": 14,
+            "claim_status": "documented_supported"
+          }
+        }
+      },
+      "output_options": {
+        "size": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "2K",
+            "3K",
+            "4K"
+          ],
+          "dimension_bounds": {
+            "min_pixels": {
+              "kind": "bounded",
+              "value": 3686400,
+              "claim_status": "documented_supported"
+            },
+            "max_pixels": {
+              "kind": "bounded",
+              "value": 16777216,
+              "claim_status": "documented_supported"
+            },
+            "min_aspect_ratio": {
+              "kind": "bounded",
+              "value": 0.0625,
+              "claim_status": "documented_supported"
+            },
+            "max_aspect_ratio": {
+              "kind": "bounded",
+              "value": 16,
+              "claim_status": "documented_supported"
+            }
+          }
+        },
+        "response_format": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "url",
+            "b64_json"
+          ],
+          "default": "url",
+          "default_status": "documented_supported"
+        },
+        "watermark": {
+          "type": "boolean",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "default": true,
+          "default_status": "documented_supported"
+        },
+        "sequential_image_generation": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "auto",
+            "disabled"
+          ]
+        },
+        "stream": {
+          "type": "boolean",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false
+        },
+        "seed": {
+          "type": "integer",
+          "claim_status": "unknown",
+          "control": "unknown",
+          "required": false
+        },
+        "max_images": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "wire_name": "sequential_image_generation_options.max_images",
+          "minimum": {
+            "kind": "bounded",
+            "value": 1,
+            "claim_status": "documented_supported"
+          },
+          "maximum": {
+            "kind": "bounded",
+            "value": 15,
+            "claim_status": "documented_supported"
+          }
+        },
+        "optimize_prompt_options": {
+          "type": "object",
+          "claim_status": "unknown",
+          "control": "unknown",
+          "required": false
+        },
+        "output_format": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "jpeg",
+            "png"
+          ]
+        }
+      },
+      "protocol_facts": {
+        "input_output_image_cap": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "unsupported",
+          "required": false,
+          "default": 15,
+          "default_status": "documented_supported"
+        }
+      },
+      "evidence_group_ref": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9:5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392:knowledge-review-20261013",
+      "evidence_review": {
+        "covers": "/operations/image.edit",
+        "reviewed_subtree_hash": "7c81b71b93592c108a81c69704154a69876e511fe0ad13c0825033595fe2cc8e",
+        "reviewed_by": "Codex authorized task reviewer",
+        "review_kind": "authorized_agent",
+        "locator": "Exact model and request parameters; unknown limits explicitly retained"
+      }
+    }
+  }
+}

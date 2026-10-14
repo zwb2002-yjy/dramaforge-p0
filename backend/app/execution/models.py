@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -248,6 +249,19 @@ class NodeRun(Base):
         UniqueConstraint("project_id", "idempotency_key", name="uq_node_runs_idempotency"),
         UniqueConstraint(
             "graph_node_id", "attempt_no", name="node_runs_graph_node_id_attempt_no_key"
+        ),
+        CheckConstraint(
+            "(CAST(status AS TEXT) <> 'cached') OR reused_from_run_id IS NOT NULL",
+            name="ck_node_runs_cached_reused",
+        ),
+        CheckConstraint(
+            "(CAST(status AS TEXT) NOT IN ('completed', 'cached', 'completed_after_cancel')) "
+            "OR result_artifact_id IS NOT NULL",
+            name="ck_node_runs_completed_artifact",
+        ),
+        CheckConstraint(
+            "(CAST(status AS TEXT) <> 'cached') OR (provider_cost = 0 AND platform_cost = 0)",
+            name="ck_node_runs_cached_zero_cost",
         ),
     )
 

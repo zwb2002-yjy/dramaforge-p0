@@ -150,7 +150,7 @@ class WorkbenchExecutionPlan(BaseModel):
     )
     project_id: UUID
     shot_id: UUID
-    shot_experiment_id: UUID | None = None
+    experiment_branch_id: UUID | None = None
     stage: PlanStage
     prompt: str = Field(min_length=1)
     semantic_intent: dict[str, JsonValue] = Field(default_factory=dict)
@@ -180,9 +180,7 @@ class WorkbenchExecutionPlan(BaseModel):
         if self.plan_fingerprint is not None:
             return self
         payload = self.model_dump(mode="json", exclude={"plan_fingerprint"})
-        return self.model_copy(
-            update={"plan_fingerprint": fingerprint_plan(payload)}
-        )
+        return self.model_copy(update={"plan_fingerprint": fingerprint_plan(payload)})
 
     @property
     def reference_counts(self) -> dict[str, int]:

@@ -1,6 +1,6 @@
 services:
   migrate: &backend-build
-    image: dramaforge-backend:local
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -27,7 +27,7 @@ services:
     <<: *backend-build
 
   frontend:
-    image: dramaforge-frontend:local
+    image: ${DRAMAFORGE_FRONTEND_IMAGE:-dramaforge-frontend:dev}
     build:
       context: ./frontend
       dockerfile: Dockerfile

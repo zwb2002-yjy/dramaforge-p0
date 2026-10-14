@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TextMessage(BaseModel):
@@ -16,25 +16,13 @@ class TextMessage(BaseModel):
 
 
 class TextGenerateRequest(BaseModel):
-    """Text generation (``text.generate``). ``prompt`` is the legacy shorthand;
-    structured callers use ``messages`` + ``response_format`` (spec §67–§68).
-    The provider-specific JSON/function-call differences stay inside the
-    adapter — never branch on a provider here."""
+    """Text generation has one message-list contract for every caller."""
 
-    prompt: str | None = None
-    messages: list[TextMessage] | None = None
+    model_config = ConfigDict(extra="forbid")
+
+    messages: list[TextMessage] = Field(min_length=1)
     temperature: float | None = None
     max_tokens: int | None = None
-    system: str | None = None
     tools: list[dict[str, Any]] | None = None
     response_format: dict[str, Any] | None = None
-    native_options: dict[str, Any] = Field(default_factory=dict)
-
-
-class TTSRequest(BaseModel):
-    """Text-to-speech (``audio.tts``)."""
-
-    text: str
-    voice: str | None = None
-    language: str | None = None
     native_options: dict[str, Any] = Field(default_factory=dict)

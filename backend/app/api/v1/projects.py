@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
@@ -15,14 +15,14 @@ from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.api.v1 import workbench as _workbench
 from app.director.runtime.control import DirectorRuntimeControlService
+from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
+from app.execution.models import NodeRun
 from app.shared.db import set_rls_context
 from app.shared.enums import ProjectStage
 from app.shared.errors import ConflictError, NotFoundError
 
-router = APIRouter(
-    tags=["projects"], dependencies=[Depends(require_selected_workspace)]
-)
+router = APIRouter(tags=["projects"], dependencies=[Depends(require_selected_workspace)])
 
 router.include_router(_workbench.router)
 
@@ -36,6 +36,8 @@ class ProjectCreate(BaseModel):
     template_key: str | None = Field(default=None, max_length=80)
     template_version: str | None = Field(default=None, max_length=40)
     director_autonomy: Literal["AUTO", "ASSIST", "MANUAL"] = "ASSIST"
+    genre_key: str | None = Field(default=None, max_length=80)
+    style_key: str | None = Field(default=None, max_length=80)
 
 
 class ProjectCreativeProfileRead(BaseModel):
@@ -121,9 +123,7 @@ async def _profile_for_project(
     project_id: UUID,
 ) -> ProjectCreativeProfile:
     profile = await session.scalar(
-        select(ProjectCreativeProfile).where(
-            ProjectCreativeProfile.project_id == project_id
-        )
+        select(ProjectCreativeProfile).where(ProjectCreativeProfile.project_id == project_id)
     )
     if profile is None:
         raise NotFoundError("project creative profile not found")
@@ -147,6 +147,8 @@ async def create_project(
         template_key=body.template_key,
         template_version=body.template_version,
         director_autonomy=body.director_autonomy,
+        genre_key=body.genre_key,
+        style_key=body.style_key,
     )
     await session.commit()
     # ``SET LOCAL`` RLS context is cleared by commit.  Re-apply the new
@@ -191,11 +193,52 @@ async def get_project(
     user: CurrentUser,
     session: SessionDep,
 ) -> ProjectRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     profile = await _profile_for_project(session, project.id)
     return _project_read(project, profile)
+
+
+@router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+    expected_version: int = Query(ge=1),
+) -> Response:
+    project = await ProjectService(session).lock_project_for_deletion(
+        project_id=project_id,
+        actor=user,
+        expected_version=expected_version,
+    )
+    active_run = await session.scalar(
+        select(NodeRun.id)
+        .where(
+            NodeRun.project_id == project_id,
+            NodeRun.status.in_(("queued", "running", "cancel_requested")),
+        )
+        .limit(1)
+    )
+    active_turn = await session.scalar(
+        select(DirectorTurn.id)
+        .where(
+            DirectorTurn.project_id == project_id,
+            DirectorTurn.status.in_(("queued", "thinking", "awaiting_user", "awaiting_execution")),
+        )
+        .limit(1)
+    )
+    if active_run is not None or active_turn is not None:
+        raise ConflictError(
+            "项目仍有生成或导演任务未结束，请先完成或取消任务后再删除。",
+            details={"code": "PROJECT_ACTIVE_WORK"},
+        )
+    # Keep production and provider history under their original immutable IDs.
+    project.deleted_at = datetime.now(UTC)
+    project.provider_dispatch_frozen = True
+    project.version += 1
+    project.updated_at = project.deleted_at
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.patch(
@@ -209,9 +252,7 @@ async def update_project_creative_profile(
     session: SessionDep,
     _csrf: CsrfDep,
 ) -> ProjectCreativeProfileRead:
-    await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     profile = await session.scalar(
         select(ProjectCreativeProfile)
         .where(ProjectCreativeProfile.project_id == project_id)

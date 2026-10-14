@@ -73,6 +73,182 @@ def _csrf(client: TestClient) -> str:
     return str(client.get("/api/v1/auth/csrf").json()["csrf_token"])
 
 
+def test_draft_preview_shares_export_clock_without_saving_or_creating(api) -> None:
+    client, factory = api
+    _register(client)
+    project_id = _create_project(client, name="Draft playback")
+    _run(factory, _seed_formal_facts(factory, project_id))
+
+    async def make_available() -> None:
+        async with factory() as db:
+            for artifact in (
+                await db.scalars(select(Artifact).where(Artifact.project_id == UUID(project_id)))
+            ).all():
+                artifact.storage_state = "available"
+            await db.commit()
+
+    _run(factory, make_available())
+    created = client.post(
+        f"/api/v1/projects/{project_id}/edit-sessions",
+        json={},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert created.status_code == 201, created.text
+    original = created.json()
+    session_id = original["id"]
+    clip = {
+        **original["timeline"]["clips"][0],
+        "source_in_seconds": 0.4,
+        "source_out_seconds": 1.6,
+        "duration_seconds": 0.6,
+        "subtitle": " 第一行\n\n第二行 ",
+        "muted": True,
+        "audio_volume": 0.25,
+    }
+    timeline = {"clips": [clip], "metadata": {}}
+    before = _run(factory, _formal_snapshot(factory, project_id))
+    path = f"/api/v1/projects/{project_id}/edit-sessions/{session_id}"
+    preview = client.post(
+        path + "/preview-plan",
+        json={"timeline": timeline, "expected_session_version": 1},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert preview.status_code == 200, preview.text
+    plan = preview.json()
+    assert plan["duration_ms"] == 600
+    assert plan["clips"][0] == {
+        "clip_id": clip["id"],
+        "video_artifact_id": clip["artifact_id"],
+        "start_ms": 0,
+        "end_ms": 600,
+        "source_in_ms": 400,
+        "source_out_ms": 1600,
+        "duration_ms": 600,
+        "subtitle_text": "第一行\n第二行",
+        "audio_artifact_id": None,
+        "audio_state": "muted",
+        "audio_volume": 0.25,
+    }
+    assert plan["unsupported"] == []
+    assert client.get(path).json() == original
+    assert _run(factory, _formal_snapshot(factory, project_id)) == before
+    saved = client.patch(
+        path + "/timeline",
+        json={"timeline": timeline, "expected_session_version": 1},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["timeline"] == timeline
+    stale = client.post(
+        path + "/preview-plan",
+        json={"timeline": timeline, "expected_session_version": 1},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert stale.status_code == 422
+    assert stale.json()["details"]["code"] == "TIMELINE_VERSION_MISMATCH"
+    timeline["clips"][0]["audio_volume"] = 1.01
+    invalid = client.patch(
+        path + "/timeline",
+        json={"timeline": timeline, "expected_session_version": 2},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["details"]["code"] == "INVALID_TIMELINE_AUDIO_VOLUME"
+    assert client.get(path).json()["version"] == 2
+
+
+def test_preview_marks_unavailable_voice_crossfade_and_music_without_preparing(api) -> None:
+    client, factory = api
+    _register(client)
+    project_id = _create_project(client, name="Unsupported preview")
+    _run(factory, _seed_formal_facts(factory, project_id))
+
+    async def make_available() -> None:
+        async with factory() as db:
+            for artifact in (
+                await db.scalars(select(Artifact).where(Artifact.project_id == UUID(project_id)))
+            ).all():
+                artifact.storage_state = "available"
+            await db.commit()
+
+    _run(factory, make_available())
+    created = client.post(
+        f"/api/v1/projects/{project_id}/edit-sessions",
+        json={},
+        headers={CSRF_HEADER: _csrf(client)},
+    ).json()
+    first = {**created["timeline"]["clips"][0], "duration_seconds": 1, "order": 1}
+    second = {
+        **first,
+        "id": "copy",
+        "order": 2,
+        "transition": {"kind": "crossfade", "duration_seconds": 0.25},
+    }
+    before = _run(factory, _formal_snapshot(factory, project_id))
+    response = client.post(
+        f"/api/v1/projects/{project_id}/edit-sessions/{created['id']}/preview-plan",
+        json={
+            "timeline": {"clips": [first, second], "metadata": {"music_artifact_id": str(uuid4())}},
+            "expected_session_version": 1,
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["duration_ms"] == 1750
+    assert set(response.json()["unsupported"]) == {
+        "crossfade",
+        "background_music",
+        "voice_unavailable",
+    }
+    assert _run(factory, _formal_snapshot(factory, project_id)) == before
+
+
+def test_artifact_byte_ranges_are_scoped_and_support_native_seeking(api) -> None:
+    from app.storage.minio_store import get_object_store
+
+    client, factory = api
+    _register(client)
+    project_id = _create_project(client, name="Media ranges")
+    _run(factory, _seed_formal_facts(factory, project_id))
+
+    async def store_content() -> str:
+        async with factory() as db:
+            artifact = await db.scalar(
+                select(Artifact).where(
+                    Artifact.project_id == UUID(project_id), Artifact.artifact_type == "video"
+                )
+            )
+            assert artifact is not None
+            await get_object_store().put_bytes(
+                object_key=artifact.object_key, data=b"0123456789", mime_type="video/mp4"
+            )
+            return str(artifact.id)
+
+    artifact_id = _run(factory, store_content())
+    path = f"/api/v1/projects/{project_id}/artifacts/{artifact_id}/content"
+    complete = client.get(path)
+    assert complete.status_code == 200 and complete.content == b"0123456789"
+    for header, content, expected_range in [
+        ("bytes=2-4", b"234", "bytes 2-4/10"),
+        ("bytes=7-", b"789", "bytes 7-9/10"),
+        ("bytes=-3", b"789", "bytes 7-9/10"),
+    ]:
+        response = client.get(path, headers={"Range": header})
+        assert response.status_code == 206
+        assert response.content == content
+        assert response.headers["Content-Range"] == expected_range
+    for invalid in ["bytes=20-", "bytes=4-2", "bytes=-0", "bytes=0-1,4-5"]:
+        response = client.get(path, headers={"Range": invalid})
+        assert response.status_code == 416
+        assert response.headers["Content-Range"] == "bytes */10"
+    assert client.get(path, headers={"Range": "bytes=2-4", "If-Range": '"old"'}).status_code == 200
+    foreign_id = _create_project(client, name="Another project")
+    assert (
+        client.get(path.replace(project_id, foreign_id), headers={"Range": "bytes=2-4"}).status_code
+        == 404
+    )
+
+
 def _register(client: TestClient) -> str:
     registered = client.post(
         "/api/v1/auth/register",
@@ -187,7 +363,7 @@ async def _seed_formal_facts(factory: async_sessionmaker[AsyncSession], project_
             graph_node_id=node.id,
             idempotency_key=f"editing-api:{uuid4().hex}",
             input_hash="a" * 64,
-            status="completed",
+            status="queued",
             input_snapshot={"shot_id": str(shot.id), "stage": "video"},
             output_summary={"source": "editing-api-test"},
             result_artifact_id=None,
@@ -209,6 +385,7 @@ async def _seed_formal_facts(factory: async_sessionmaker[AsyncSession], project_
         session.add(artifact)
         await session.flush()
         run.result_artifact_id = artifact.id
+        run.status = "completed"
         shot.formal_video_artifact_id = artifact.id
         operation = ProviderOperation(
             node_run_id=run.id,
@@ -342,12 +519,25 @@ def test_editing_http_lifecycle_preserves_formal_facts(
     }
     saved = client.patch(
         f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/timeline",
-        json={"timeline": edited_timeline},
+        json={"timeline": edited_timeline, "expected_session_version": 1},
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert saved.status_code == 200, saved.text
     assert saved.json()["timeline"] == edited_timeline
     assert saved.json()["production_lineage"] == created_body["production_lineage"]
+    stale = client.patch(
+        f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/timeline",
+        json={
+            "timeline": {"clips": [], "metadata": {"stale": True}},
+            "expected_session_version": 1,
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["details"] == {
+        "expected_session_version": 1,
+        "actual_session_version": 2,
+    }
     stale_turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}")
     assert stale_turn.status_code == 200, stale_turn.text
     assert stale_turn.json()["status"] == "stale"
@@ -383,7 +573,7 @@ def test_editing_http_rejects_lineage_and_missing_csrf(
 
     no_csrf = client.patch(
         f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/timeline",
-        json={"timeline": {"clips": [], "metadata": {}}},
+        json={"timeline": {"clips": [], "metadata": {}}, "expected_session_version": 1},
     )
     assert no_csrf.status_code == 403, no_csrf.text
 
@@ -391,6 +581,7 @@ def test_editing_http_rejects_lineage_and_missing_csrf(
         f"/api/v1/projects/{project_id}/edit-sessions/{session_id}/timeline",
         json={
             "timeline": {"clips": [], "metadata": {}},
+            "expected_session_version": 1,
             "production_lineage": {"tamper": True},
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -404,7 +595,8 @@ def test_editing_http_rejects_lineage_and_missing_csrf(
                 "clips": [],
                 "metadata": {},
                 "production_lineage": {"tamper": True},
-            }
+            },
+            "expected_session_version": 1,
         },
         headers={CSRF_HEADER: _csrf(client)},
     )
@@ -548,39 +740,9 @@ def test_editing_director_suggestion_http_returns_exact_persisted_identity(
     turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}").json()
     assert turn["status"] == "awaiting_user"
 
-    async def deliver_decision_notice():
-        from app.access.models import Project, User, Workspace
-        from app.director.business_checkpoints import DirectorBusinessCheckpoints
-
-        async with factory() as session:
-            project = await session.get(Project, UUID(project_id))
-            assert project is not None
-            workspace = await session.get(Workspace, project.workspace_id)
-            assert workspace is not None
-            actor = await session.get(User, workspace.owner_user_id)
-            assert actor is not None
-            await DirectorBusinessCheckpoints(session).reconcile_business_fact(
-                project=project, proposal_id=proposal_id,
-            )
-            await session.commit()
-
-    _run(factory, deliver_decision_notice())
-    turn = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn_id}").json()
-    assert turn["status"] == "completed" and turn["wait_reason"] == "proposal_rejected"
-
-    async def refused_context():
-        from app.director.turn_service import DirectorTurnService
-        from app.shared.errors import ConflictError
-
-        async with factory() as session:
-            with pytest.raises(ConflictError) as refused:
-                await DirectorTurnService(session).assert_context_not_rejected(
-                    project_id=UUID(project_id),
-                    context_hash="d" * 64,
-                )
-            assert refused.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
-
-    _run(factory, refused_context())
+    # Runtime progression is handled by the Director worker from the persisted
+    # ProposalDecided event; this HTTP test only proves the editing decision is
+    # durable and does not mutate the EditSession or Formal facts.
 
     reopened = client.get(f"/api/v1/projects/{project_id}/edit-sessions/{session_id}")
     assert reopened.status_code == 200, reopened.text

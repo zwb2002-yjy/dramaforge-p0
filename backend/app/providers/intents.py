@@ -11,12 +11,9 @@ from __future__ import annotations
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.providers.reference_roles import ReferenceRoleValue
-
-# Backward-compatible type alias; canonical ownership lives in reference_roles.
-ReferenceRole = ReferenceRoleValue
 
 
 class VideoOutputIntent(BaseModel):
@@ -49,13 +46,11 @@ class VideoPreferences(BaseModel):
     preferred_capabilities: set[str] = Field(default_factory=set)
     camera_motion: Literal["static", "subtle", "dynamic"] | None = None
     quality_tier: Literal["draft", "standard", "high"] | None = None
-    allowed_output_substitutions: list[AllowedOutputSubstitution] = Field(
-        default_factory=list
-    )
+    allowed_output_substitutions: list[AllowedOutputSubstitution] = Field(default_factory=list)
 
 
 class ModelSelectionIntent(BaseModel):
-    mode: Literal["project_default", "explicit_binding", "auto"]
+    mode: Literal["explicit_binding"]
     model_binding_id: UUID | None = None
 
 
@@ -72,16 +67,30 @@ class VideoGenerationIntentV1(BaseModel):
 
 
 class ImageGenerationIntent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     operation: Literal["image.generate"] = "image.generate"
     purpose: Literal["keyframe"] = "keyframe"
     prompt: str
     size: str | None = None
     aspect_ratio: Literal["9:16", "16:9", "1:1"] | None = None
     seed: int | None = None
-    reference_artifact_id: UUID | None = None
+    reference_artifact_ids: list[UUID] = Field(default_factory=list)
     reference_fingerprint: str | None = None
     reference_mime: str | None = None
     requirements: VideoRequirements = Field(default_factory=VideoRequirements)
     preferences: VideoPreferences = Field(default_factory=VideoPreferences)
     mode_id: str | None = None
     selection: ModelSelectionIntent
+
+    def selected_reference_ids(self) -> list[UUID]:
+        selected = list(self.reference_artifact_ids)
+        if len(selected) != len(set(selected)):
+            raise ValueError("image intent repeats a reference artifact")
+        return selected
+
+    def single_reference_id(self) -> UUID | None:
+        selected = self.selected_reference_ids()
+        if len(selected) > 1:
+            raise ValueError("selected protocol contract accepts at most one image reference")
+        return selected[0] if selected else None

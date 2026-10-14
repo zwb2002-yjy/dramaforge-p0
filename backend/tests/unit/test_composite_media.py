@@ -204,7 +204,7 @@ async def _add_source_media(
         attempt_no=attempt_no,
         idempotency_key=f"{key}:{attempt_no}:{uuid4()}",
         input_hash=key * 16,
-        status="completed",
+        status="queued",
         input_snapshot={"shot_id": str(shot_id), "node_key": key},
         created_by=user_id,
     )
@@ -232,6 +232,7 @@ async def _add_source_media(
     session.add(artifact)
     await session.flush()
     source_run.result_artifact_id = artifact.id
+    source_run.status = "completed"
     await session.flush()
     return SourceMedia(run=source_run, artifact=artifact, data=data)
 
@@ -293,6 +294,49 @@ async def test_composite_runs_locally_with_complete_media_lineage(
     assert artifact.mime_type == "video/mp4"
     assert await fixture.store.get_bytes(object_key=artifact.object_key) == expected_bytes
     assert result.provider_operation_id is None
+
+
+@pytest.mark.asyncio
+async def test_formal_composite_pins_video_instead_of_latest_repair_candidate(
+    session: AsyncSession,
+) -> None:
+    fixture = await _make_composite_fixture(session)
+    formal_video = fixture.sources["video"]
+    video_node = await session.get(GraphNode, formal_video.run.graph_node_id)
+    assert video_node is not None
+    repair_candidate = await _add_source_media(
+        session,
+        store=fixture.store,
+        project_id=fixture.composite_run.project_id,
+        graph_version_id=fixture.composite_run.graph_version_id,
+        node=video_node,
+        user_id=fixture.composite_run.created_by,
+        shot_id=UUID(str(fixture.composite_run.input_snapshot["shot_id"])),
+        key="video",
+        data=b"\x00\x00\x00\x18ftypmp42repair-candidate",
+        attempt_no=2,
+    )
+    fixture.composite_run.input_snapshot = {
+        **fixture.composite_run.input_snapshot,
+        "execution_branch": "formal",
+        "formal_video_artifact_id": str(formal_video.artifact.id),
+    }
+    await session.flush()
+
+    result = await execute_media_node_run(
+        session,
+        node_run_id=fixture.composite_run.id,
+        store=fixture.store,
+    )
+
+    run = await session.get(NodeRun, result.node_run_id)
+    assert run is not None
+    assert run.input_snapshot["media_inputs"]["video"]["artifact_id"] == str(
+        formal_video.artifact.id
+    )
+    assert run.input_snapshot["media_inputs"]["video"]["artifact_id"] != str(
+        repair_candidate.artifact.id
+    )
 
 
 def test_deterministic_composite_bytes_bind_source_and_output_run_lineage() -> None:

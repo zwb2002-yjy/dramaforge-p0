@@ -120,7 +120,7 @@ async def _candidate_lineage(
     return artifact, run, node
 
 
-async def list_formal_candidates(
+async def list_candidate_facts(
     session: AsyncSession,
     *,
     project_id: UUID,
@@ -201,6 +201,58 @@ async def list_formal_candidates(
                 "created_at": artifact.created_at,
             }
         )
+
+    return result
+
+
+async def list_formal_candidates(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    shot_ids: list[UUID],
+) -> dict[UUID, list[dict[str, object]]]:
+    """Candidate facts enriched with the exact server Formal admission."""
+    result = await list_candidate_facts(session, project_id=project_id, shot_ids=shot_ids)
+    # Formal controls must be driven by the same server admission fact used by
+    # the mutation, not by a transient client guess after returning from the
+    # review page.  Enrich the existing candidate projection instead of
+    # introducing a second candidate/status table.
+    from app.production.review_gate import evaluate_artifact_admissions
+
+    targets = [
+        (
+            shot_id,
+            UUID(str(candidate["artifact_id"])),
+            "formal_keyframe" if candidate.get("stage") == "image_keyframe" else "formal_video",
+        )
+        for shot_id, candidates in result.items()
+        for candidate in candidates
+    ]
+    admissions = await evaluate_artifact_admissions(session, project_id=project_id, targets=targets)
+
+    for shot_id, candidates in result.items():
+        hash_counts: dict[tuple[object, object], int] = {}
+        for candidate in candidates:
+            identity = (candidate.get("stage"), candidate.get("content_hash"))
+            hash_counts[identity] = hash_counts.get(identity, 0) + 1
+        for candidate in candidates:
+            stage = (
+                "formal_keyframe" if candidate.get("stage") == "image_keyframe" else "formal_video"
+            )
+            admission = admissions[(shot_id, UUID(str(candidate["artifact_id"])), stage)]
+            requirement = admission.requirements[0]
+            candidate.update(
+                {
+                    "review_allowed": admission.allowed,
+                    "review_decision": requirement.decision,
+                    "review_blocked_reason": requirement.blocked_reason,
+                    "review_node_run_id": requirement.review_node_run_id,
+                    "duplicate_content": hash_counts.get(
+                        (candidate.get("stage"), candidate.get("content_hash")), 0
+                    )
+                    > 1,
+                }
+            )
     return result
 
 
@@ -273,9 +325,7 @@ async def set_formal_keyframe(
 ) -> Shot:
     """Validate and set ``Shot.formal_keyframe_artifact_id`` (03 §38)."""
     shot = await session.scalar(
-        select(Shot)
-        .where(Shot.id == shot_id, Shot.project_id == project_id)
-        .with_for_update()
+        select(Shot).where(Shot.id == shot_id, Shot.project_id == project_id).with_for_update()
     )
     if shot is None:
         raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
@@ -353,9 +403,7 @@ async def set_formal_video(
 ) -> Shot:
     """Validate and set ``Shot.formal_video_artifact_id`` (03 §39)."""
     shot = await session.scalar(
-        select(Shot)
-        .where(Shot.id == shot_id, Shot.project_id == project_id)
-        .with_for_update()
+        select(Shot).where(Shot.id == shot_id, Shot.project_id == project_id).with_for_update()
     )
     if shot is None:
         raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})

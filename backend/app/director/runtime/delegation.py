@@ -12,7 +12,7 @@ from app.access.models import Project, User
 from app.config import Settings
 from app.contracts.production_commands import ExecutionBody
 from app.director.assistant_models import DirectorThread
-from app.director.proposal_models import DirectorProposal, DirectorProposalItem
+from app.director.proposal_creation import ProposalItemDraft, create_proposal
 from app.director.runtime.models import DirectorRuntimeWakeup
 from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.turn_models import DirectorTurn
@@ -40,11 +40,6 @@ class DirectorRuntimeDelegationService:
         authorization_expires_at: datetime,
         max_steps: int,
     ) -> tuple[DirectorTurn, DirectorRuntimeWakeup]:
-        if self._settings.director_runtime_engine != "langgraph":
-            raise ConflictError(
-                "The durable Director runtime is not enabled for new turns",
-                details={"code": "DIRECTOR_RUNTIME_NOT_ENABLED", "manual_ok": True},
-            )
         if authorization_expires_at.tzinfo is None:
             raise ValidationAppError("Director authorization expiry must include a timezone")
         normalized_expiry = authorization_expires_at.astimezone(UTC)
@@ -84,10 +79,12 @@ class DirectorRuntimeDelegationService:
                 details={"code": "ACCEPTED_APPROXIMATIONS_MISMATCH"},
             )
         request_key = f"director-delegation:{decision_id}"
-        existing = await self._session.scalar(select(DirectorTurn).where(
-            DirectorTurn.project_id == project.id,
-            DirectorTurn.request_key == request_key,
-        ))
+        existing = await self._session.scalar(
+            select(DirectorTurn).where(
+                DirectorTurn.project_id == project.id,
+                DirectorTurn.request_key == request_key,
+            )
+        )
         if existing is not None:
             if existing.proposal_id is None:
                 raise ConflictError(
@@ -95,7 +92,8 @@ class DirectorRuntimeDelegationService:
                     details={"code": "DIRECTOR_RUNTIME_REQUEST_CONFLICT"},
                 )
             return await DirectorRuntimeStartService(
-                self._session, settings=self._settings,
+                self._session,
+                settings=self._settings,
             ).accept(
                 project=project,
                 actor=actor,
@@ -105,11 +103,13 @@ class DirectorRuntimeDelegationService:
                 max_steps=max_steps,
             )
 
-        thread = await self._session.scalar(select(DirectorThread).where(
-            DirectorThread.project_id == project.id,
-            DirectorThread.scope_type == "shot",
-            DirectorThread.scope_entity_id == shot_id,
-        ))
+        thread = await self._session.scalar(
+            select(DirectorThread).where(
+                DirectorThread.project_id == project.id,
+                DirectorThread.scope_type == "shot",
+                DirectorThread.scope_entity_id == shot_id,
+            )
+        )
         if thread is None:
             thread = DirectorThread(
                 project_id=project.id,
@@ -120,39 +120,34 @@ class DirectorRuntimeDelegationService:
             )
             self._session.add(thread)
             await self._session.flush()
-        proposal = DirectorProposal(
-            project_id=project.id,
-            thread_id=thread.id,
+        proposal, _items = await create_proposal(
+            self._session,
+            thread=thread,
             scope_type="shot",
             scope_entity_id=shot_id,
-            status="applied",
             created_by=actor.id,
-            decided_at=now,
+            applied_at=now,
+            items=[
+                ProposalItemDraft(
+                    command="production.request_stage_execution",
+                    payload={
+                        "shot_id": str(shot_id),
+                        "stage": execution.stage,
+                        "authorization_ref": str(authorization_id),
+                        "plan_fingerprint": execution.plan_fingerprint,
+                    },
+                    expected_target_version=execution.expected_shot_version,
+                    rationale="User explicitly delegated this frozen production plan.",
+                    benefit="Director runtime can coordinate one accepted execution.",
+                    cost="One authorized provider execution.",
+                    risk="The grant expires and cannot be reused for another plan.",
+                    impact=f"shot:{shot_id}:{execution.stage}",
+                )
+            ],
         )
-        self._session.add(proposal)
-        await self._session.flush()
-        self._session.add(DirectorProposalItem(
-            proposal_id=proposal.id,
-            project_id=project.id,
-            command="production.request_stage_execution",
-            payload={
-                "shot_id": str(shot_id),
-                "stage": execution.stage,
-                "authorization_ref": str(authorization_id),
-                "plan_fingerprint": execution.plan_fingerprint,
-            },
-            expected_target_version=execution.expected_shot_version,
-            rationale="User explicitly delegated this frozen production plan.",
-            benefit="Director runtime can coordinate one accepted execution.",
-            cost="One authorized provider execution.",
-            risk="The grant expires and cannot be reused for another plan.",
-            impact=f"shot:{shot_id}:{execution.stage}",
-            status="accepted",
-            decided_at=now,
-        ))
-        await self._session.flush()
         return await DirectorRuntimeStartService(
-            self._session, settings=self._settings,
+            self._session,
+            settings=self._settings,
         ).accept(
             project=project,
             actor=actor,

@@ -9,15 +9,18 @@ surface and fails if a Kling/Flux label leaks into the model identity.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from app.providers.adapters_v2 import BridgeComponents, ProviderAdapterBridge
 from app.providers.bootstrap import build_v3_registry
 from app.providers.capabilities import Capability
-from app.providers.catalog_seed_data import seed_manifests_for
+from app.providers.catalog_loader import ModelCatalogLoader
 from app.providers.contracts import ArtifactRef, ImageToVideoRequest, ResolvedArtifact
 from app.providers.manifest import (
     ModelCapabilityManifest,
     to_v3_model_manifest,
 )
+from app.providers.runtime import ResolvedReference
 
 
 def _frame() -> ResolvedArtifact:
@@ -33,11 +36,10 @@ class TestAgnesIdentity:
         model_registry, _ = build_v3_registry()
         models = model_registry.list_models()
         agnes_models = [m for m in models if m.manifest.provider_id == "agnes"]
-        assert len(agnes_models) == 2
+        assert len(agnes_models) == 1
         # model id = <provider_id>/<actual-model>, never a downstream family label
         assert {m.manifest.id for m in agnes_models} == {
             "agnes/agnes-image-2.1-flash",
-            "agnes/agnes-video-v2.0",
         }
         # model_family is a separate optional axis; not set for native models
         assert all(m.manifest.model_family is None for m in agnes_models)
@@ -45,8 +47,13 @@ class TestAgnesIdentity:
         assert all(m.manifest.provider_id not in {"kling", "flux"} for m in models)
 
     async def test_compiled_request_carries_agnes_identity(self) -> None:
-        seed = seed_manifests_for(provider_type="agnes")
-        manifest = ModelCapabilityManifest.model_validate(seed[1])
+        manifest = ModelCapabilityManifest.model_validate(
+            next(
+                item.as_dict()
+                for item in ModelCatalogLoader().load()
+                if item.identity[2] == "agnes-video-v2.0"
+            )
+        )
         v3 = to_v3_model_manifest(manifest, transport_profile_id="agnes-video-v1")
         from app.providers.agnes import AgnesVideoCompiler
 
@@ -67,7 +74,16 @@ class TestAgnesIdentity:
         result = await bridge.translate(
             Capability.VIDEO_IMAGE_TO_VIDEO,
             request,
-            {"first_frame": _frame()},
+            [
+                ResolvedReference(
+                    role="first_frame",
+                    artifact_id=UUID(_frame().artifact_id),
+                    content_url=_frame().signed_url,
+                    content_bytes=_frame().content_bytes,
+                    mime_type=_frame().mime_type,
+                    fingerprint=_frame().sha256,
+                )
+            ],
         )
         # the wire model field is the actual model id, not a flux/kling label
         assert result.native_request["model"] == "agnes-video-v2.0"

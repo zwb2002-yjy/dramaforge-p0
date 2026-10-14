@@ -1,13 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { Button, Input, Select } from "../ui";
 import { fetchProjectAssets } from "../../lib/api";
+import "./asset-reference-picker.css";
+import { AssetReferenceThumbnail } from "./AssetReferenceThumbnail";
+import { purposeLabel } from "./referenceLabels";
 import { queryKeys } from "../../lib/queryKeys";
 import {
   createShotReference,
   deleteShotReference,
+  fetchAssetCard,
   fetchShotReferences,
   resolveShotReferences,
+  roleLabel,
+  updateShotReference,
   type ShotBindingRead,
   type ResolvedReferenceRead,
   type ShotExecutionReference,
@@ -20,6 +28,7 @@ export type AssetReferencePickerProps = {
   /** Concrete, backend-recognised references for the selected Shot. */
   onReferencesChange?: (references: ShotExecutionReference[]) => void;
   onResolutionStateChange?: (state: ReferenceResolutionState) => void;
+  onLabelChanged?: (before: string, after: string) => void;
 };
 
 export type ReferenceResolutionState = "loading" | "ready" | "error";
@@ -39,6 +48,30 @@ const PURPOSES = [
   "generic_reference",
 ] as const;
 
+const RESOLUTION_MODE_LABELS: Record<string, string> = {
+  current_formal: "跟随当前正式版本",
+  pinned_version: "固定到指定版本",
+  direct_artifact: "直接使用该素材",
+};
+
+const ASSET_KIND_LABELS: Record<string, string> = {
+  character: "角色",
+  scene: "场景",
+  prop: "道具",
+  video: "视频",
+  audio: "音频",
+  image: "图片",
+  subtitle: "字幕",
+};
+
+function resolutionModeLabel(value: string): string {
+  return RESOLUTION_MODE_LABELS[value] ?? "跟随当前正式版本";
+}
+
+function assetKindLabel(value: string): string {
+  return ASSET_KIND_LABELS[value] ?? "素材";
+}
+
 /**
  * Phase 2 shot reference picker: shows the shot's business-purpose bindings,
  * lets the user bind an Asset (current_formal), and exposes the resolved
@@ -51,21 +84,31 @@ export function AssetReferencePicker({
   purpose = "identity",
   onReferencesChange,
   onResolutionStateChange,
+  onLabelChanged,
 }: AssetReferencePickerProps) {
   const queryClient = useQueryClient();
   const [selectedAssetId, setSelectedAssetId] = useState("");
   const [selectedPurpose, setSelectedPurpose] = useState<string>(purpose);
   const [resolvedReferences, setResolvedReferences] = useState<ResolvedReferenceRead[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editAssetId, setEditAssetId] = useState("");
+  const [editLabel, setEditLabel] = useState("");
+  const [editStage, setEditStage] = useState<"image" | "video" | "both">("both");
+  const [editOrder, setEditOrder] = useState("0");
+  const [editPurpose, setEditPurpose] = useState<string>(purpose);
+  const [editMode, setEditMode] = useState<"current_formal" | "pinned_version">("current_formal");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const assets = useQuery({
     queryKey: queryKeys.asset.picker(projectId),
     queryFn: () => fetchProjectAssets(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
   });
   const bindings = useQuery({
     queryKey: queryKeys.asset.shotReferences(projectId, shotId),
     queryFn: () => fetchShotReferences(projectId, shotId),
-    enabled: Boolean(shotId) && shotId !== "demo",
+    enabled: Boolean(shotId),
   });
 
   // Resolution is a POST in the existing API because it is a server-side
@@ -75,7 +118,7 @@ export function AssetReferencePicker({
   const resolution = useQuery({
     queryKey: queryKeys.asset.referenceResolution(projectId, shotId),
     queryFn: () => resolveShotReferences(projectId, shotId),
-    enabled: Boolean(projectId) && Boolean(shotId) && shotId !== "demo",
+    enabled: Boolean(projectId) && Boolean(shotId),
   });
 
   const resolutionQueryKey = queryKeys.asset.referenceResolution(projectId, shotId);
@@ -102,8 +145,13 @@ export function AssetReferencePicker({
         asset_id: selectedAssetId || null,
         resolution_mode: "current_formal",
         label: selectedAssetId ? labelFor(selectedAssetId) : "",
+        // Persist the chosen reference order instead of trusting a later
+        // browser-only sort. Existing ties retain their stable created_at/id order.
+        sort_order: rows.reduce((max, binding) => Math.max(max, binding.sort_order), -1) + 1,
       }),
     onSuccess: async () => {
+      setAdding(false);
+      setSelectedAssetId("");
       // Do not leave the old concrete artifacts attached while the binding
       // list is being refreshed.  The next resolution response repopulates
       // the context from the server truth.
@@ -112,6 +160,60 @@ export function AssetReferencePicker({
       await invalidate();
     },
   });
+
+  const update = useMutation({
+    mutationFn: async (binding: ShotBindingRead) => {
+      const assetId = editAssetId || binding.asset_id;
+      if (!assetId) throw new Error("请先选择参考素材。");
+      const order = Number(editOrder);
+      if (!Number.isInteger(order) || order < 0) throw new Error("引用顺序必须是非负整数。");
+      const label = editLabel.trim();
+      if (!/^@[\p{L}\p{N}_-]+$/u.test(label)) {
+        throw new Error("引用标签必须以 @ 开头，仅使用文字、数字、下划线或短横线。");
+      }
+      if (rows.some((item) => item.id !== binding.id && item.label === label)) {
+        throw new Error("该镜头已有相同引用标签，请换一个名称。");
+      }
+      let assetVersionId: string | null = null;
+      if (editMode === "pinned_version") {
+        const card = await fetchAssetCard(projectId, assetId);
+        assetVersionId = card.current_version_id;
+        if (!assetVersionId) {
+          throw new Error("该资产还没有正式版本，无法固定到当前版本。");
+        }
+      }
+      return updateShotReference(projectId, binding.id, {
+        expected_version: binding.version,
+        stage: editStage,
+        sort_order: order,
+        asset_id: assetId,
+        asset_version_id: assetVersionId,
+        resolution_mode: editMode,
+        purpose: editPurpose,
+        label,
+      });
+    },
+    onSuccess: async (saved, binding) => {
+      if (saved.label !== binding.label) onLabelChanged?.(binding.label, saved.label);
+      setEditingId(null);
+      setEditError(null);
+      await queryClient.cancelQueries({ queryKey: resolutionQueryKey });
+      clearResolvedReferences();
+      await invalidate();
+    },
+    onError: (cause: Error) => setEditError(cause.message),
+  });
+
+  function startEditing(binding: ShotBindingRead) {
+    setEditingId(binding.id);
+    setEditAssetId(binding.asset_id ?? "");
+    setEditLabel(binding.label || "@参考");
+    setEditStage(binding.stage === "image" || binding.stage === "video" ? binding.stage : "both");
+    setEditOrder(String(binding.sort_order));
+    setEditPurpose(binding.purpose);
+    setEditMode(binding.resolution_mode === "pinned_version" ? "pinned_version" : "current_formal");
+    setEditError(null);
+  }
 
   const remove = useMutation({
     mutationFn: (bindingId: string) => deleteShotReference(projectId, bindingId),
@@ -127,7 +229,11 @@ export function AssetReferencePicker({
     },
   });
 
-  const assetOptions = Array.isArray(assets.data) ? assets.data : [];
+  // A recycled asset is retired from production, so it is neither offered here
+  // nor accepted by the server when a binding is created/updated. Existing
+  // bindings that still point at one stay readable (labelled below).
+  const allAssets = Array.isArray(assets.data) ? assets.data : [];
+  const assetOptions = allAssets.filter((asset) => asset.status !== "recycled");
   const rows = useMemo(() => (Array.isArray(bindings.data) ? bindings.data : []), [bindings.data]);
 
   useEffect(() => {
@@ -157,119 +263,257 @@ export function AssetReferencePicker({
     if (!Array.isArray(resolution.data)) return;
     const next = resolution.data as ResolvedReferenceRead[];
     setResolvedReferences(next);
-    onReferencesChange?.(next.map((reference) => toExecutionReference(reference, rows)));
+    onReferencesChange?.(next.map(toExecutionReference));
   }, [onReferencesChange, resolution.data, rows]);
 
   const resolved = resolvedReferences;
+  // A binding that produced no resolved reference does not reach generation even
+  // though it is stored: after a version change without usable material, or for a
+  // recycled asset, resolution is empty. Surface that instead of showing nothing.
+  const resolvedBindingIds = new Set(
+    resolved.map((reference) => reference.binding_id).filter((id): id is string => Boolean(id)),
+  );
+  const invalidBindings = rows.filter(
+    (binding) => resolution.isSuccess && !resolvedBindingIds.has(binding.id),
+  );
 
   function labelFor(assetId: string): string {
-    return `@${assetOptions.find((asset) => asset.id === assetId)?.name ?? assetId.slice(0, 8)}`;
+    const asset = allAssets.find((item) => item.id === assetId);
+    if (!asset) return "@已移除素材";
+    return asset.status === "recycled" ? `@${asset.name}（已回收）` : `@${asset.name}`;
   }
 
-  const bindingLabels = rows.map((binding) => binding.label);
-
   return (
-    <div className="qc-reference-picker" data-testid="asset-reference-picker" data-shot-id={shotId}>
-      <header>
-        <strong>镜头资产引用</strong>
-        <span>保存业务目的，不保存 provider role；@文本仅供人类阅读。</span>
-      </header>
-
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (selectedAssetId) create.mutate();
-        }}
-      >
-        <select
-          aria-label="选择资产"
-          value={selectedAssetId}
-          onChange={(event) => setSelectedAssetId(event.target.value)}
-        >
-          <option value="">选择资产…</option>
-          {assetOptions.map((asset) => (
-            <option key={asset.id} value={asset.id}>
-              {asset.name}（{asset.kind}）
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="引用目的"
-          value={selectedPurpose}
-          onChange={(event) => setSelectedPurpose(event.target.value)}
-        >
-          {PURPOSES.map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
-          ))}
-        </select>
-        <button type="submit" disabled={!selectedAssetId || create.isPending}>
-          添加引用
-        </button>
-        <button
-          type="button"
-          onClick={() => void resolution.refetch()}
-          disabled={resolution.isFetching}
-        >
-          解析引用
-        </button>
-      </form>
-
-      <ul className="qc-binding-list" data-testid="binding-list">
-        {rows.map((binding) => (
-          <li key={binding.id}>
-            <span>
-              {binding.label || "（无标签）"} · {binding.purpose} · {binding.resolution_mode}
-            </span>
-            {binding.asset_id && <code>{binding.asset_id}</code>}
-            <button
-              type="button"
-              aria-label={`删除引用 ${binding.label || binding.id}`}
-              onClick={() => remove.mutate(binding.id)}
-              disabled={remove.isPending}
-            >
-              删除引用
-            </button>
-          </li>
-        ))}
+    <div className="df-refs" data-testid="asset-reference-picker" data-shot-id={shotId}>
+      <ul className="df-ref-chips" data-testid="binding-list" aria-label="角色与参考">
+        {rows.map((binding) => {
+          const invalid = resolution.isSuccess && !resolvedBindingIds.has(binding.id);
+          const image = resolvedReferences.find(
+            (reference) =>
+              reference.binding_id === binding.id && reference.mime_type?.startsWith("image/"),
+          );
+          return (
+            <li key={binding.id} className={invalid ? "invalid" : undefined}>
+              <button
+                type="button"
+                className="df-ref-chip"
+                aria-label={`编辑引用 ${binding.label || binding.id}`}
+                aria-expanded={editingId === binding.id}
+                onClick={() =>
+                  editingId === binding.id ? setEditingId(null) : startEditing(binding)
+                }
+                title={`${purposeLabel(binding.purpose)} · ${resolutionModeLabel(binding.resolution_mode)}`}
+              >
+                <AssetReferenceThumbnail
+                  projectId={projectId}
+                  artifactId={image?.artifact_id}
+                  label={binding.label || "未命名"}
+                />
+                <span>{binding.label || "未命名"}</span>
+                <small>{purposeLabel(binding.purpose)}</small>
+              </button>
+              {invalid && (
+                <span
+                  className="df-status err"
+                  data-testid={`reference-binding-invalid-${binding.id}`}
+                >
+                  已失效：解析不到素材
+                </span>
+              )}
+            </li>
+          );
+        })}
+        <li>
+          <button
+            type="button"
+            className="df-ref-add"
+            aria-expanded={adding}
+            onClick={() => setAdding((value) => !value)}
+          >
+            <Plus size={14} aria-hidden="true" />
+            {rows.length ? "添加" : "添加角色或参考"}
+          </button>
+        </li>
       </ul>
 
-      {resolution.isSuccess && (
-        <div className="qc-resolved-references" data-testid="resolved-references">
-          <h4>解析结果（冻结为 artifact_id）</h4>
-          <ul>
-            {resolved.map((item, index) => (
-              <li key={`${item.artifact_id}-${index}`}>
-                <span>
-                  {item.purpose} / {item.role} / {item.source}
-                </span>
-                <code>{item.artifact_id}</code>
-              </li>
+      {adding && (
+        <form
+          className="df-ref-editor"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (selectedAssetId) create.mutate();
+          }}
+        >
+          <Select
+            aria-label="选择资产"
+            value={selectedAssetId}
+            onChange={(event) => setSelectedAssetId(event.target.value)}
+          >
+            <option value="">选择素材…</option>
+            {assetOptions.map((asset) => (
+              <option key={asset.id} value={asset.id}>
+                {asset.name}（{assetKindLabel(asset.kind)}）
+              </option>
             ))}
-          </ul>
-          {resolved.length === 0 && <p className="muted">当前无已解析引用。</p>}
-        </div>
+          </Select>
+          <Select
+            aria-label="引用目的"
+            value={selectedPurpose}
+            onChange={(event) => setSelectedPurpose(event.target.value)}
+          >
+            {PURPOSES.map((item) => (
+              <option key={item} value={item}>
+                {purposeLabel(item)}
+              </option>
+            ))}
+          </Select>
+          <Button type="submit" disabled={!selectedAssetId || create.isPending}>
+            添加引用
+          </Button>
+          {!assetOptions.length && assets.isSuccess && (
+            <p className="df-ref-note">素材库还没有可用素材，先在「角色与素材」中添加。</p>
+          )}
+        </form>
       )}
 
-      {resolution.isError && (
-        <p className="qc-reference-picker-error" role="alert">
-          引用解析失败：
-          {resolution.error instanceof Error ? resolution.error.message : String(resolution.error)}
+      {rows.map((binding) =>
+        editingId === binding.id ? (
+          <div
+            key={binding.id}
+            className="df-ref-editor"
+            data-testid={`binding-editor-${binding.id}`}
+          >
+            <Input
+              aria-label={`引用标签 ${binding.id}`}
+              value={editLabel}
+              onChange={(event) => setEditLabel(event.target.value)}
+              placeholder="@角色名"
+            />
+            <Select
+              aria-label={`引用作用域 ${binding.id}`}
+              value={editStage}
+              onChange={(event) => setEditStage(event.target.value as "image" | "video" | "both")}
+            >
+              <option value="image">仅图片提示词</option>
+              <option value="video">仅视频提示词</option>
+              <option value="both">图片与视频</option>
+            </Select>
+            <Input
+              type="number"
+              min={0}
+              step={1}
+              aria-label={`引用顺序 ${binding.id}`}
+              value={editOrder}
+              onChange={(event) => setEditOrder(event.target.value)}
+            />
+            <Select
+              aria-label={`参考素材 ${binding.id}`}
+              value={editAssetId}
+              onChange={(event) => setEditAssetId(event.target.value)}
+            >
+              <option value="">选择素材…</option>
+              {assetOptions.map((asset) => (
+                <option key={asset.id} value={asset.id}>
+                  {asset.name}（{assetKindLabel(asset.kind)}）
+                </option>
+              ))}
+            </Select>
+            <Select
+              aria-label={`参考用途 ${binding.id}`}
+              value={editPurpose}
+              onChange={(event) => setEditPurpose(event.target.value)}
+            >
+              {PURPOSES.map((item) => (
+                <option key={item} value={item}>
+                  {purposeLabel(item)}
+                </option>
+              ))}
+            </Select>
+            <Select
+              aria-label={`参考方式 ${binding.id}`}
+              value={editMode}
+              onChange={(event) =>
+                setEditMode(
+                  event.target.value === "pinned_version" ? "pinned_version" : "current_formal",
+                )
+              }
+            >
+              <option value="current_formal">跟随正式版本</option>
+              <option value="pinned_version">固定到当前版本</option>
+            </Select>
+            <div className="df-ref-editor-actions">
+              <Button
+                tone="ghost"
+                className="danger"
+                aria-label={`删除引用 ${binding.label || binding.id}`}
+                onClick={() => {
+                  setEditingId(null);
+                  remove.mutate(binding.id);
+                }}
+                disabled={remove.isPending}
+              >
+                删除
+              </Button>
+              <Button
+                tone="ghost"
+                aria-label={`取消编辑 ${binding.id}`}
+                onClick={() => {
+                  setEditingId(null);
+                  setEditError(null);
+                }}
+              >
+                取消
+              </Button>
+              <Button
+                aria-label={`保存引用 ${binding.id}`}
+                onClick={() => update.mutate(binding)}
+                disabled={update.isPending}
+              >
+                保存
+              </Button>
+            </div>
+          </div>
+        ) : null,
+      )}
+
+      {editError && (
+        <p className="df-ref-note err" role="alert">
+          引用修改失败：{editError}
         </p>
       )}
-
-      {bindingLabels.length === 0 && <p className="muted">尚未绑定资产引用。</p>}
+      {invalidBindings.length > 0 && (
+        <p className="df-ref-note" data-testid="reference-binding-invalid-hint">
+          已失效的引用不会进入生成，请更换素材或重新选定版本。
+        </p>
+      )}
+      {resolution.isSuccess && rows.length > 0 && (
+        <p className="df-ref-note" data-testid="resolved-references">
+          {resolved.length
+            ? `本次生成将使用的参考素材：${resolved
+                .map(
+                  (item) =>
+                    `${purposeLabel(item.purpose)}${item.role ? `（${roleLabel(item.role)}）` : ""}`,
+                )
+                .join("、")}`
+            : "已绑定的参考当前解析不到内容：素材换版后没有可用素材，或素材已被回收。"}
+        </p>
+      )}
+      {resolution.isError && (
+        <p className="df-ref-note err" role="alert">
+          引用解析失败：
+          {resolution.error instanceof Error ? resolution.error.message : String(resolution.error)}
+          <Button tone="ghost" onClick={() => void resolution.refetch()}>
+            重试
+          </Button>
+        </p>
+      )}
     </div>
   );
 }
 
 /** Convert the server's resolved reference (including concrete artifact id)
  * into the exact WorkbenchExecutionInput shape. */
-function toExecutionReference(
-  reference: ResolvedReferenceRead,
-  bindings: ShotBindingRead[],
-): ShotExecutionReference {
+function toExecutionReference(reference: ResolvedReferenceRead): ShotExecutionReference {
   const resolutionMode =
     reference.source === "pinned_version"
       ? "pinned_version"
@@ -277,7 +521,7 @@ function toExecutionReference(
         ? "direct_artifact"
         : "current_formal";
   return {
-    binding_id: reference.binding_id ?? bindingIdForResolvedReference(reference, bindings),
+    binding_id: reference.binding_id,
     purpose: reference.purpose,
     asset_version_id: reference.asset_version_id ?? null,
     artifact_id: reference.artifact_id,
@@ -285,27 +529,4 @@ function toExecutionReference(
     mime_type: reference.mime_type || "image/png",
     fingerprint: reference.fingerprint ?? null,
   };
-}
-
-function bindingIdForResolvedReference(
-  reference: ResolvedReferenceRead,
-  bindings: ShotBindingRead[],
-): string | null {
-  const matching = bindings.find((binding) => {
-    if (binding.purpose !== reference.purpose) return false;
-    if (reference.source === "direct_artifact") {
-      return (
-        binding.resolution_mode === "direct_artifact" &&
-        binding.artifact_id === reference.artifact_id
-      );
-    }
-    if (reference.source === "pinned_version") {
-      return (
-        binding.resolution_mode === "pinned_version" &&
-        binding.asset_version_id === reference.asset_version_id
-      );
-    }
-    return binding.resolution_mode === "current_formal" && binding.asset_id === reference.asset_id;
-  });
-  return matching?.id ?? null;
 }

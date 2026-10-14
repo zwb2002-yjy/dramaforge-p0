@@ -15,27 +15,30 @@ def _metadata() -> None:
 def test_retired_models_are_not_registered() -> None:
     _metadata()
     tables = set(Base.metadata.tables)
-    assert not {
-        "creative_briefs",
-        "creative_brief_revisions",
-        "creation_plans",
-        "planning_authorizations",
-        "agent_runs",
-        "materialization_operations",
-        "director_workflow_runs",
-        "creative_artifact_versions",
-        "budget_authorizations",
-        "approval_records",
-        "change_proposals",
-        "impact_reports",
-        "workflow_step_runs",
-        "director_issues",
-        "production_batches",
-        "production_batch_shots",
-        "budget_reservations",
-        "characters",
-        "character_references",
-    } & tables
+    assert (
+        not {
+            "creative_briefs",
+            "creative_brief_revisions",
+            "creation_plans",
+            "planning_authorizations",
+            "agent_runs",
+            "materialization_operations",
+            "director_workflow_runs",
+            "creative_artifact_versions",
+            "budget_authorizations",
+            "approval_records",
+            "change_proposals",
+            "impact_reports",
+            "workflow_step_runs",
+            "director_issues",
+            "production_batches",
+            "production_batch_shots",
+            "budget_reservations",
+            "characters",
+            "character_references",
+        }
+        & tables
+    )
 
 
 def test_canonical_schema_registers_required_tables() -> None:
@@ -94,11 +97,6 @@ def test_postgresql_document_and_fixed_width_types_match_migrations() -> None:
         ("shot_change_proposals", "replacement_payload"),
         ("shot_change_proposals", "affected_node_keys"),
         ("shot_change_proposals", "reusable_artifact_ids"),
-        ("shot_experiments", "director_state"),
-        ("shot_experiments", "prompts"),
-        ("shot_experiments", "references"),
-        ("shot_experiments", "model_overrides"),
-        ("shot_experiments", "comparison"),
         ("shot_reference_bindings", "metadata"),
     }
     for table_name, column_name in jsonb_columns:
@@ -182,8 +180,6 @@ def test_canonical_foreign_keys_and_indexes_remain_named() -> None:
         "uq_provider_operations_remote",
     }
     actual_indexes = {
-        index.name
-        for table in Base.metadata.tables.values()
-        for index in table.indexes
+        index.name for table in Base.metadata.tables.values() for index in table.indexes
     }
     assert expected_indexes <= actual_indexes

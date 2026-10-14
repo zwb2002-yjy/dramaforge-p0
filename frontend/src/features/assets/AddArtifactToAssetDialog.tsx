@@ -1,8 +1,9 @@
 import { useMutation } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
+import { useModalDialog } from "../../components/ui/useModalDialog";
 import {
-  ASSET_KIND_ROLES,
+  assetKindsForArtifactType,
   createAssetFromArtifact,
   createShotReference,
   roleLabel,
@@ -18,12 +19,22 @@ type AddArtifactToAssetDialogProps = {
   defaultName: string;
   /** Asset kind proposed from the artifact type. */
   defaultKind: string;
+  /** Media type of the Artifact, which bounds the kinds it may become. */
+  artifactType?: string | null;
   /** Human-readable provenance shown before the explicit confirmation. */
   sourceLabel: string;
   /** Shot that may be bound to the new asset version afterwards. */
   shotId?: string | null;
   onCreated?: (asset: AssetRead) => void | Promise<void>;
   onClose: () => void;
+};
+
+const KIND_LABELS: Record<string, string> = {
+  character: "角色",
+  scene: "场景",
+  video: "视频",
+  audio: "音频",
+  subtitle: "字幕",
 };
 
 /**
@@ -37,15 +48,22 @@ export function AddArtifactToAssetDialog({
   artifactId,
   defaultName,
   defaultKind,
+  artifactType,
   sourceLabel,
   shotId,
   onCreated,
   onClose,
 }: AddArtifactToAssetDialogProps) {
+  // Only kinds this Artifact may actually become: the server refuses the rest,
+  // and a late refusal after an explicit confirmation is a dead end.
+  const allowedKinds = assetKindsForArtifactType(artifactType);
+  const initialKind = allowedKinds.includes(defaultKind)
+    ? defaultKind
+    : (allowedKinds[0] ?? defaultKind);
   const [name, setName] = useState(defaultName);
-  const [kind, setKind] = useState(defaultKind);
+  const [kind, setKind] = useState(initialKind);
   const [referenceRole, setReferenceRole] = useState(
-    rolesForAssetKind(defaultKind)[0] ?? "primary",
+    rolesForAssetKind(initialKind)[0] ?? "primary",
   );
   const [description, setDescription] = useState("");
   const [created, setCreated] = useState<AssetRead | null>(null);
@@ -54,6 +72,7 @@ export function AddArtifactToAssetDialog({
   // One explicit operation keeps one request key across retries; a second,
   // deliberate creation must start a new operation (and a new key).
   const requestKey = useRef(`asset-from-artifact:${globalThis.crypto.randomUUID()}`);
+  const dialogRef = useModalDialog<HTMLElement>(true, onClose);
 
   const createMut = useMutation({
     mutationFn: async () =>
@@ -87,7 +106,16 @@ export function AddArtifactToAssetDialog({
       // browser must not invent one; choosing "current formal" stays a separate
       // action the user can take later from the asset panel.
       return createShotReference(projectId, shotId, {
-        purpose: referenceRole,
+        purpose:
+          kind === "video"
+            ? "action"
+            : kind === "audio"
+              ? "audio_rhythm"
+              : kind === "scene"
+                ? "scene_layout"
+                : kind === "character"
+                  ? "identity"
+                  : "generic_reference",
         asset_id: asset.id,
         artifact_id: artifactId,
         resolution_mode: "direct_artifact",
@@ -106,10 +134,12 @@ export function AddArtifactToAssetDialog({
   return (
     <div className="qc-unsaved-backdrop" data-testid="add-artifact-to-asset-dialog">
       <section
+        ref={dialogRef}
         className="qc-unsaved-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="add-asset-title"
+        tabIndex={-1}
       >
         <span className="director-stage-kicker">显式动作</span>
         <h2 id="add-asset-title">将生成结果加入资产</h2>
@@ -161,9 +191,9 @@ export function AddArtifactToAssetDialog({
                 }}
                 disabled={createMut.isPending}
               >
-                {Object.keys(ASSET_KIND_ROLES).map((option) => (
+                {allowedKinds.map((option) => (
                   <option key={option} value={option}>
-                    {option === "character" ? "角色" : "场景"}
+                    {KIND_LABELS[option] ?? option}
                   </option>
                 ))}
               </select>

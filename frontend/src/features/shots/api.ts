@@ -4,6 +4,8 @@ import { ApiError, apiGet, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 
 export type ShotLite = components["schemas"]["ShotLiteRead"];
+export type VoiceOptionsRead = components["schemas"]["VoiceOptionsRead"];
+export type ShotVoiceSettings = components["schemas"]["ShotVoiceSettings"];
 export type ShotExecutionReference = components["schemas"]["ShotReferenceIntent"];
 export type ShotDesignRead = components["schemas"]["ShotDesignRead"];
 export type ShotExecutionStage = components["schemas"]["ExecutionPlanBody"]["stage"];
@@ -29,6 +31,38 @@ export type PreparedShotExecution = {
   preview: ShotExecutionPlanRead;
   idempotencyKey: string;
 };
+
+/** Reads local voice configuration only; never probes or invokes the voice provider. */
+export async function fetchVoiceOptions(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<VoiceOptionsRead> {
+  const data = await apiGet<VoiceOptionsRead>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/voice-options`,
+    undefined,
+    signal,
+  );
+  if (
+    !data ||
+    typeof data.engine !== "string" ||
+    typeof data.enabled !== "boolean" ||
+    !["configured", "disabled", "invalid"].includes(data.status) ||
+    typeof data.default_voice !== "string" ||
+    typeof data.network !== "boolean" ||
+    typeof data.service_notice !== "string" ||
+    !Array.isArray(data.voices) ||
+    data.voices.some(
+      (voice) =>
+        !voice ||
+        typeof voice.id !== "string" ||
+        typeof voice.label !== "string" ||
+        typeof voice.locale !== "string",
+    )
+  ) {
+    throw new ApiError("配音选项响应不完整，不能据此更换当前音色。", 502, "INVALID_RESPONSE_SHAPE");
+  }
+  return data;
+}
 
 export function fetchShotWorkbench(
   projectId: string,

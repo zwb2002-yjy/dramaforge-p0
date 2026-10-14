@@ -11,7 +11,6 @@ from pydantic import BaseModel, ConfigDict
 
 from app.config import Settings
 
-DIRECTOR_BLOCKER_ENGINE_NOT_ENABLED = "DIRECTOR_RUNTIME_NOT_ENABLED"
 DIRECTOR_BLOCKER_CHECKPOINT_NOT_CONFIGURED = "DIRECTOR_CHECKPOINT_NOT_CONFIGURED"
 
 
@@ -33,18 +32,6 @@ class DirectorCapabilitiesRead(BaseModel):
 def build_director_capabilities(settings: Settings) -> DirectorCapabilitiesRead:
     """Describe the effective engine and why a new runtime turn may be blocked."""
     engine = settings.director_runtime_engine
-    if engine != "langgraph":
-        return DirectorCapabilitiesRead(
-            effective_engine=engine,
-            runtime_turns_available=False,
-            blocker_code=DIRECTOR_BLOCKER_ENGINE_NOT_ENABLED,
-            blocker_message=(
-                f"当前部署的导演引擎为 {engine}；自动（AUTO）导演轮次需要经过验证的 "
-                "langgraph 引擎。手动与人工路径不受影响。"
-            ),
-            manual_production_available=True,
-            checkpoint_configured=False,
-        )
     checkpoint_configured = bool(settings.director_checkpoint_database_url.strip())
     if not checkpoint_configured:
         # Starting a turn without the checkpoint store would fail after the
@@ -72,7 +59,6 @@ def build_director_capabilities(settings: Settings) -> DirectorCapabilitiesRead:
 
 __all__ = [
     "DIRECTOR_BLOCKER_CHECKPOINT_NOT_CONFIGURED",
-    "DIRECTOR_BLOCKER_ENGINE_NOT_ENABLED",
     "DirectorCapabilitiesRead",
     "build_director_capabilities",
 ]

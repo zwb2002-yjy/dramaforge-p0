@@ -1,25 +1,18 @@
 import { expect, test } from "@playwright/test";
-
 import { exerciseContextualDirector, installContextualDirectorMock } from "./contextual-director";
 import { PROJECT_ID, installProfessionalMock } from "./professional-mocks";
 
-test("director assistant: contextual proposal, explicit design save, canvas and board save", async ({
+test("director assistant keeps proposal, explicit save and persisted design in the scene workspace", async ({
   page,
 }) => {
   const state = await installProfessionalMock(page);
   const suggestion = await installContextualDirectorMock(page, state);
   await page.goto(`/projects/${PROJECT_ID}/production`);
-  await expect(page.getByTestId("professional-workbench")).toBeVisible();
+  await expect(page.getByTestId("production-monitor")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "场景与镜头" })).toHaveCount(0);
   await exerciseContextualDirector(page, state, suggestion);
-
-  // Canvas editing remains a separate, explicit write after the design save.
-  await page.getByRole("textbox", { name: "镜头导演语义" }).fill("主角停顿后转向镜头");
-  await page.getByRole("button", { name: "保存画布版本" }).click();
-  await expect(page.getByRole("status")).toContainText("画布版本已保存");
-  expect(state.revisions).toHaveLength(1);
+  // The single design save is authoritative; no parallel canvas/board revision is created.
+  expect(state.revisions).toHaveLength(0);
   expect(state.proposals).toHaveLength(0);
-
-  await page.getByRole("button", { name: "导演台" }).click();
-  await page.getByRole("button", { name: "保存导演台版本" }).click();
-  await expect.poll(() => state.board?.mode).toBe("2d");
+  expect(state.directorState).toEqual(suggestion.suggested_director_state);
 });

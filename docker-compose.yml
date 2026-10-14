@@ -1,3 +1,5 @@
+name: dramaforge-dev
+
 x-dramaforge-release:
   version: ${DRAMAFORGE_VERSION:-0.1.0}
 
@@ -15,6 +17,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -23,6 +27,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 5s
+    restart: unless-stopped
 
   minio:
     # MinIO publishes only to quay.io; the Docker Hub `minio/minio` repository was
@@ -39,6 +45,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
+    restart: unless-stopped
 
   # LiteLLM Proxy (fix spec §4.1/§6/§11). Official BerriAI image, pinned. The
   # Proxy is DramaForge's unified LLM scheduler: it owns Router load-balancing /
@@ -58,6 +66,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
+    restart: unless-stopped
 
   litellm:
     image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.96.0}
@@ -75,10 +85,6 @@ services:
       LITELLM_SCRIPT_FAST_API_BASE: ${LITELLM_SCRIPT_FAST_API_BASE:-}
       LITELLM_SCRIPT_FAST_API_KEY: ${LITELLM_SCRIPT_FAST_API_KEY:-}
       LITELLM_SCRIPT_FAST_MOCK_RESPONSE: ${LITELLM_SCRIPT_FAST_MOCK_RESPONSE:-}
-      LITELLM_LEGACY_TEXT_MODEL: ${LITELLM_LEGACY_TEXT_MODEL:-openai/legacy-text-deployment}
-      LITELLM_LEGACY_TEXT_API_BASE: ${LITELLM_LEGACY_TEXT_API_BASE:-}
-      LITELLM_LEGACY_TEXT_API_KEY: ${LITELLM_LEGACY_TEXT_API_KEY:-}
-      LITELLM_LEGACY_TEXT_MOCK_RESPONSE: ${LITELLM_LEGACY_TEXT_MOCK_RESPONSE:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
@@ -97,7 +103,7 @@ services:
     restart: unless-stopped
 
   migrate:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
@@ -117,12 +123,14 @@ services:
       - ALL
 
   api:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
-      DIRECTOR_RUNTIME_ENGINE: ${DIRECTOR_RUNTIME_ENGINE:-legacy}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
+      DIRECTOR_RUNTIME_ENGINE: langgraph
+      DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -158,20 +166,18 @@ services:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
-      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
-      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
-      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
-      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
-      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
-      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
-      TTS_VOICE: ${TTS_VOICE:-zh}
+      TTS_ENGINE: ${TTS_ENGINE:-edge-tts}
+      TTS_VOICE: ${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
+      TTS_PROXY: ${TTS_PROXY:-}
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
       minio:
@@ -189,7 +195,7 @@ services:
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
 
   frontend:
-    image: ${DRAMAFORGE_FRONTEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-frontend:v0.1.0}
+    image: ${DRAMAFORGE_FRONTEND_IMAGE:-dramaforge-frontend:dev}
     ports:
       - "${DRAMAFORGE_BIND_ADDRESS:-127.0.0.1}:${DRAMAFORGE_PORT:-8080}:8080"
     depends_on:
@@ -222,7 +228,7 @@ services:
       POSTGRES_APP_USER: ${POSTGRES_APP_USER:-dramaforge_app}
       POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}
       DIRECTOR_CHECKPOINT_USER: ${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}
-      DIRECTOR_CHECKPOINT_PASSWORD: ${DIRECTOR_CHECKPOINT_PASSWORD:-}
+      DIRECTOR_CHECKPOINT_PASSWORD: ${DIRECTOR_CHECKPOINT_PASSWORD:?Run python scripts/init_env.py first}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -241,7 +247,7 @@ services:
 
   maintenance:
     profiles: ["maintenance"]
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     working_dir: /workspace
     volumes:
       - ./:/workspace:ro
@@ -270,11 +276,12 @@ services:
     entrypoint: ["python", "/workspace/scripts/p0_backup_restore.py"]
 
   dispatcher:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -289,6 +296,8 @@ services:
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     security_opt:
@@ -304,11 +313,12 @@ services:
     command: ["python", "-m", "app.workers.dispatcher"]
 
   worker-default:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -318,7 +328,6 @@ services:
       BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
       BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
       BYOK_KEYRING: ${BYOK_KEYRING:-}
-      WORKER_KIND: default
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}
       AGNES_BASE_URL: ${AGNES_BASE_URL:-https://api.agnes-ai.cn/v1}
@@ -341,20 +350,18 @@ services:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
-      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
-      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
-      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
-      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
-      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
-      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
-      TTS_VOICE: ${TTS_VOICE:-zh}
+      TTS_ENGINE: ${TTS_ENGINE:-edge-tts}
+      TTS_VOICE: ${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
+      TTS_PROXY: ${TTS_PROXY:-}
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     security_opt:
@@ -375,22 +382,28 @@ services:
     restart: unless-stopped
 
   worker-director:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
-      DIRECTOR_RUNTIME_ENGINE: ${DIRECTOR_RUNTIME_ENGINE:-legacy}
-      DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:-disabled}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
+      DIRECTOR_RUNTIME_ENGINE: langgraph
+      DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
       DIRECTOR_QUEUE_NAME: ${DIRECTOR_QUEUE_NAME:-dramaforge:director}
       SESSION_SECRET: ${SESSION_SECRET:?Run python scripts/init_env.py first}
+      WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
       BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
       AGNES_ENABLED: "false"
-      TEXT_LLM_ENABLED: "false"
+      # This process must not submit text provider requests.
+      LITELLM_GATEWAY_URL: ""
+      LITELLM_API_KEY: ""
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     security_opt:
@@ -399,18 +412,19 @@ services:
       - ALL
     command: ["arq", "app.workers.director.WorkerSettings"]
     healthcheck:
-      test: ["CMD", "arq", "app.workers.director.WorkerSettings", "--check"]
+      test: ["CMD", "python", "-m", "app.workers.healthcheck"]
       interval: 15s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
   worker-heavy:
-    image: ${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/dramaforge-backend:v0.1.0}
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
+      DATABASE_SSL: ${DATABASE_SSL:-false}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -420,7 +434,6 @@ services:
       BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
       BYOK_PRIMARY_KEY_VERSION: ${BYOK_PRIMARY_KEY_VERSION:-local-v1}
       BYOK_KEYRING: ${BYOK_KEYRING:-}
-      WORKER_KIND: heavy
       ARQ_HEAVY_MAX_JOBS: ${ARQ_HEAVY_MAX_JOBS:-4}
       AGNES_ENABLED: ${AGNES_ENABLED:-false}
       AGNES_API_KEY: ${AGNES_API_KEY:-}
@@ -444,20 +457,18 @@ services:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
-      TEXT_LLM_ENABLED: ${TEXT_LLM_ENABLED:-false}
-      TEXT_LLM_API_KEY: ${TEXT_LLM_API_KEY:-}
-      TEXT_LLM_BASE_URL: ${TEXT_LLM_BASE_URL:-}
-      TEXT_LLM_MODEL: ${TEXT_LLM_MODEL:-deepseek-v4-flash}
-      TEXT_LLM_API_STYLE: ${TEXT_LLM_API_STYLE:-anthropic}
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
       TTS_ENABLED: ${TTS_ENABLED:-false}
-      TTS_ENGINE: ${TTS_ENGINE:-espeak-ng}
-      TTS_VOICE: ${TTS_VOICE:-zh}
+      TTS_ENGINE: ${TTS_ENGINE:-edge-tts}
+      TTS_VOICE: ${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
+      TTS_PROXY: ${TTS_PROXY:-}
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     security_opt:

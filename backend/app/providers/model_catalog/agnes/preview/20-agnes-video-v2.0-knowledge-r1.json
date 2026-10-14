@@ -1,0 +1,32 @@
+{
+  "schema_version": "2",
+  "manifest_version": "2026-10-13",
+  "provider_type": "agnes",
+  "protocol_profile": "agnes_cn_v1",
+  "api_version": "v1",
+  "region": "CN",
+  "model_id": "agnes-video-v2.0",
+  "model_revision": "knowledge-2026-10-13-r1",
+  "refines_revision": "v2",
+  "media_kind": "video",
+  "display_name": "Agnes Video V2.0",
+  "lifecycle": "preview",
+  "catalog_source": "official_static",
+  "documented_at": "2026-10-13",
+  "operations": {
+    "video.generate": {
+      "operation": "video.generate",
+      "claim_status": "unknown",
+      "input_contracts": {},
+      "output_options": {},
+      "evidence_group_ref": "cfbb45bca73d714e3d1a241368f70a14c1ddd6ff02ac9125e9c17e54fee20848:560183a0686d5744e7bb0b5441d02ec8ab689543cdc5697a6ce3f275aca3dc2c:knowledge-review-20261013",
+      "evidence_review": {
+        "covers": "/operations/video.generate",
+        "reviewed_subtree_hash": "818ec4527fe18fc2322d9045252f86cc9dbd3fe203e2dcba8f569eb8024e8497",
+        "reviewed_by": "Codex authorized task reviewer",
+        "review_kind": "authorized_agent",
+        "locator": "Exact model and request parameters; unknown limits explicitly retained"
+      }
+    }
+  }
+}

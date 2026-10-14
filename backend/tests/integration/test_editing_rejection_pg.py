@@ -7,6 +7,7 @@ from app.director.assistant_models import DirectorThread
 from app.director.inbox import receive_production_event
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.turn_models import DirectorTurn
+from app.director.turn_service import DirectorTurnService
 from app.director.wakeup import process_director_wakeup
 from app.editing.models import EditSession
 from app.events.models import OutboxEvent
@@ -107,12 +108,17 @@ async def test_editing_rejection_survives_restart_and_replays_without_mutation(p
             reader, user_id=user.id, workspace_id=workspace_id, project_id=project_id
         )
         persisted = await reader.get(DirectorTurn, turn.id)
-        assert persisted.status == "completed" and persisted.wait_reason == "proposal_rejected"
+        assert persisted.status == "awaiting_user"
+        persisted = await DirectorTurnService(reader).recover_interrupted(
+            project_id=project_id, turn_id=turn.id,
+        )
+        assert persisted.status == "stale" and persisted.wait_reason == "runtime_binding_missing"
         assert (await reader.get(DirectorProposalItem, item.id)).status == "rejected"
         assert (await reader.get(EditSession, edit.id)).version == 1
         assert await reader.scalar(select(func.count()).select_from(NodeRun)) == 0
         assert await reader.scalar(select(func.count()).select_from(ProviderOperation)) == 0
         revision = persisted.revision
+        await reader.commit()
     replay = await reject_editing_suggestion(
         project_id=project_id,
         session_id=edit.id,

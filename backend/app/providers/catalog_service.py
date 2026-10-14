@@ -1,4 +1,7 @@
-"""Read-only model catalog access. Seeds are written by migrations only."""
+"""Read-only application access to the versioned model catalog.
+
+The maintenance-only catalog sync writes revisions outside the application role.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.catalog_publication import effective_publication_lifecycle
 
 
 class ModelCatalogService:
@@ -32,15 +36,23 @@ class ModelCatalogService:
             stmt = stmt.where(ModelCatalogEntry.protocol_profile == protocol_profile)
         if media_kind is not None:
             stmt = stmt.where(ModelCatalogEntry.media_kind == media_kind)
-        if lifecycle is not None:
-            stmt = stmt.where(ModelCatalogEntry.lifecycle == lifecycle)
         stmt = stmt.order_by(
             ModelCatalogEntry.provider_type,
             ModelCatalogEntry.protocol_profile,
             ModelCatalogEntry.model_id,
             ModelCatalogEntry.model_revision,
         )
-        return list((await self._session.execute(stmt)).scalars().all())
+        rows = list((await self._session.execute(stmt)).scalars().all())
+        if lifecycle is None:
+            return rows
+        return [
+            row
+            for row in rows
+            if effective_publication_lifecycle(
+                row.provider_type, row.protocol_profile, row.model_id, row.lifecycle
+            )
+            == lifecycle
+        ]
 
     async def entry_for_model(
         self,
@@ -68,16 +80,27 @@ class ModelCatalogService:
         protocol_profile: str,
         model_id: str,
     ) -> ModelCatalogEntry | None:
-        """Return the active revision row, or None when none is active."""
+        """Return the latest active revision when no exact contract was requested."""
+        if (
+            effective_publication_lifecycle(provider_type, protocol_profile, model_id, "active")
+            != "active"
+        ):
+            return None
         return cast(
             ModelCatalogEntry | None,
             await self._session.scalar(
-                select(ModelCatalogEntry).where(
+                select(ModelCatalogEntry)
+                .where(
                     ModelCatalogEntry.provider_type == provider_type,
                     ModelCatalogEntry.protocol_profile == protocol_profile,
                     ModelCatalogEntry.model_id == model_id,
                     ModelCatalogEntry.lifecycle == "active",
                 )
+                .order_by(
+                    ModelCatalogEntry.documented_at.desc().nullslast(),
+                    ModelCatalogEntry.model_revision.desc(),
+                )
+                .limit(1)
             ),
         )
 

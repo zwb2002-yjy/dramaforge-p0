@@ -18,12 +18,12 @@ from app.director.workflows.reference_capability import (
     max_subject_references_from_catalog_manifest,
     visible_subject_count_from_snapshot,
 )
-from app.providers.catalog_seed_data import seed_manifests_for
+from app.providers.catalog_loader import active_manifests_for
 from app.providers.manifest import ModelCapabilityManifest
 
 
 def _agnes_operations() -> dict[str, object]:
-    for m in seed_manifests_for(provider_type="agnes"):
+    for m in active_manifests_for(provider_type="agnes"):
         if m.get("media_kind") == "image":
             manifest = ModelCapabilityManifest.model_validate(m)
             return manifest.operations
@@ -88,9 +88,7 @@ def test_visible_subject_count_ignores_malformed_snapshot() -> None:
 
 def test_catalog_manifest_without_image_operation_fails_closed() -> None:
     assert max_subject_references_from_catalog_manifest({}) == 0
-    assert max_subject_references_from_catalog_manifest(
-        {"video.generate": {}}
-    ) == 0
+    assert max_subject_references_from_catalog_manifest({"video.generate": {}}) == 0
 
 
 def test_approximate_only_via_explicit_registered_strategy() -> None:

@@ -1,0 +1,108 @@
+.production-flow {
+  display: grid;
+  gap: var(--df-space-4);
+  padding-block: var(--df-space-4);
+}
+.production-flow h2,
+.production-flow h3,
+.production-flow p {
+  margin: 0;
+}
+.production-flow h2 {
+  font-size: var(--df-text-lg);
+}
+.production-flow h3 {
+  font-size: var(--df-text-md);
+}
+.production-flow > header p,
+.production-flow-note,
+.production-flow-status,
+.production-flow-blocker {
+  font-size: var(--df-text-sm);
+  color: var(--df-text-secondary);
+}
+.production-flow > header p {
+  margin-top: var(--df-space-2);
+}
+.production-flow-workspaces,
+.production-flow-status,
+.production-flow-actions,
+.production-flow-stages > li > header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--df-space-2);
+}
+.production-flow-workspaces a,
+.production-flow-actions a {
+  padding-block: var(--df-space-2);
+  color: var(--df-verdigris);
+  font-size: var(--df-text-sm);
+}
+.production-flow-workspaces {
+  gap: var(--df-space-5);
+}
+.production-flow-stages {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--df-form-field-min)), 1fr));
+  gap: var(--df-space-3);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.production-flow-stages > li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--df-space-3);
+  min-width: 0;
+  padding: var(--df-space-4);
+  border: 1px solid var(--df-border-subtle);
+  border-radius: var(--df-radius-container);
+  background: var(--df-surface-tier-raised-bg);
+  overflow-wrap: anywhere;
+}
+.production-flow-index {
+  color: var(--df-text-muted);
+  font-size: var(--df-text-xs);
+}
+.production-flow-actions {
+  margin-top: auto;
+  justify-content: space-between;
+}
+.production-flow-blocker {
+  color: var(--df-danger);
+}
+
+/* The visible journey is navigation, not a second execution graph. */
+.production-flow-workspaces {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--df-space-2);
+}
+.production-flow-workspaces a {
+  display: grid;
+  gap: var(--df-space-2);
+  padding: var(--df-space-4);
+  border-block-start: 1px solid var(--df-border-subtle);
+  color: var(--df-text-primary);
+  border-radius: var(--df-radius-control);
+}
+.production-flow-workspaces a:hover {
+  background: var(--df-surface-2);
+}
+.production-flow-workspaces small {
+  color: var(--df-text-muted);
+  font-size: var(--df-text-sm);
+}
+.production-journey-index {
+  color: var(--df-verdigris);
+  font-size: var(--df-text-sm);
+}
+.production-flow-note {
+  margin-block-start: var(--df-space-4);
+}
+@media (max-width: 900px) {
+  .production-flow-workspaces {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

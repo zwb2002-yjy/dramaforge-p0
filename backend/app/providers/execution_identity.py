@@ -14,6 +14,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.providers.execution_contract import ExecutionContractSnapshot
+
 _SECRET_KEY_FRAGMENTS: Final[tuple[str, ...]] = (
     "secret",
     "password",
@@ -25,6 +27,12 @@ _SECRET_KEY_FRAGMENTS: Final[tuple[str, ...]] = (
     "bearer",
     "download_url",
     "grant",
+    "remote_task_id",
+    "remotetaskid",
+    "provider_operation_id",
+    "provideroperationid",
+    "resume_token",
+    "resumetoken",
 )
 
 
@@ -34,8 +42,7 @@ def _validate_safe_evidence(value: JsonValue, *, path: str = "evidence") -> None
             normalized = str(key).casefold().replace("-", "_")
             if any(fragment in normalized for fragment in _SECRET_KEY_FRAGMENTS):
                 raise ValueError(
-                    "execution identity contains forbidden evidence key: "
-                    f"{path}.{key}"
+                    f"execution identity contains forbidden evidence key: {path}.{key}"
                 )
             _validate_safe_evidence(child, path=f"{path}.{key}")
     elif isinstance(value, list):
@@ -86,6 +93,8 @@ class ExecutionIdentitySnapshot(BaseModel):
         max_length=64,
         pattern=r"^[0-9a-fA-F]{64}$",
     )
+    # Absent on historical identities. Reading never invents the missing facts.
+    execution_contract: ExecutionContractSnapshot | None = None
 
     def model_copy(
         self,
@@ -115,11 +124,11 @@ class ExecutionIdentitySnapshot(BaseModel):
                 self.connection_revision_id,
             )
         elif self.provider_connection_revision_id != self.connection_revision_id:
-            raise ValueError(
-                "connection revision identity has conflicting field values"
-            )
+            raise ValueError("connection revision identity has conflicting field values")
         _validate_safe_evidence(self.effective_options, path="effective_options")
         _validate_safe_evidence(self.translation_report, path="translation_report")
+        if self.execution_contract is not None:
+            _validate_safe_evidence(self.execution_contract.product_policy, path="product_policy")
         return self
 
 

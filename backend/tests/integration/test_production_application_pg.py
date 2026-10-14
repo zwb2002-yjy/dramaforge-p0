@@ -46,19 +46,25 @@ async def test_application_duplicate_acceptance_needs_no_director(monkeypatch):
             shot, _artifact = await _seed_video_shot(session, project=project, user=actor)
             await session.commit()
             command = _input(
-                project_id=project.id, shot_id=shot.id,
-                requested_binding_id=binding.id, expected_shot_version=shot.version,
+                project_id=project.id,
+                shot_id=shot.id,
+                requested_binding_id=binding.id,
+                expected_shot_version=shot.version,
             )
             plan = await WorkbenchExecutionService(session, user_id=actor.id).build_plan(
-                project=project, execution_input=command,
+                project=project,
+                execution_input=command,
             )
             body = ExecutionBody(
-                **command.model_dump(exclude={"project_id", "shot_id", "shot_experiment_id"}),
+                **command.model_dump(exclude={"project_id", "shot_id", "experiment_branch_id"}),
                 plan_fingerprint=plan.plan_fingerprint,
                 accepted_approximations=plan.accepted_approximations,
             )
             project_id, workspace_id, actor_id, shot_id = (
-                project.id, project.workspace_id, actor.id, shot.id,
+                project.id,
+                project.workspace_id,
+                actor.id,
+                shot.id,
             )
         original_lock = WorkbenchExecutionService.lock_command_scope
         arrived = 0
@@ -78,12 +84,18 @@ async def test_application_duplicate_acceptance_needs_no_director(monkeypatch):
             async with factory() as session:
                 await session.execute(text("SET LOCAL ROLE dramaforge_app"))
                 await set_rls_context(
-                    session, user_id=actor_id, workspace_id=workspace_id, project_id=project_id,
+                    session,
+                    user_id=actor_id,
+                    workspace_id=workspace_id,
+                    project_id=project_id,
                 )
                 actor = await session.get(User, actor_id)
                 receipt = await ProductionCommands(session).submit_user_execution(
-                    actor=actor, project_id=project_id, shot_id=shot_id,
-                    body=payload, command_key="d1-same-command",
+                    actor=actor,
+                    project_id=project_id,
+                    shot_id=shot_id,
+                    body=payload,
+                    command_key="d1-same-command",
                 )
                 await session.commit()
                 return receipt
@@ -91,36 +103,63 @@ async def test_application_duplicate_acceptance_needs_no_director(monkeypatch):
         receipts = await asyncio.gather(submit(body), submit(body))
         assert receipts[0] == receipts[1]
         async with factory() as session:
-            notices = list((await session.scalars(select(OutboxEvent).where(
-                OutboxEvent.topic == "production.facts.v1",
-            ))).all())
+            notices = list(
+                (
+                    await session.scalars(
+                        select(OutboxEvent).where(
+                            OutboxEvent.topic == "production.facts.v1",
+                        )
+                    )
+                ).all()
+            )
             assert len(notices) == 1
             assert notices[0].payload["notice"]["node_run_id"] == str(receipts[0].node_run_id)
             baseline_runs = set((await session.scalars(select(NodeRun.id))).all())
             actor = await session.get(User, actor_id)
             rolled_back = await ProductionCommands(session).submit_user_execution(
-                actor=actor, project_id=project_id, shot_id=shot_id,
-                body=body, command_key="rollback-before-commit",
+                actor=actor,
+                project_id=project_id,
+                shot_id=shot_id,
+                body=body,
+                command_key="rollback-before-commit",
             )
             assert rolled_back.node_run_id not in baseline_runs
             await session.rollback()
         async with factory() as session:
             assert set((await session.scalars(select(NodeRun.id))).all()) == baseline_runs
-            assert await session.scalar(select(func.count()).select_from(OutboxEvent).where(
-                OutboxEvent.topic == "production.facts.v1",
-            )) == 1
-            assert await session.scalar(select(func.count()).select_from(EventLog).where(
-                EventLog.event_type == "execution_accepted",
-            )) == 1
+            assert (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(OutboxEvent)
+                    .where(
+                        OutboxEvent.topic == "production.facts.v1",
+                    )
+                )
+                == 1
+            )
+            assert (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(EventLog)
+                    .where(
+                        EventLog.event_type == "execution_accepted",
+                    )
+                )
+                == 1
+            )
         with pytest.raises(ConflictError) as conflict:
             await submit(body.model_copy(update={"prompt": "different input"}))
         assert conflict.value.details["code"] == "EXECUTION_COMMAND_REUSED"
         async with factory() as session:
             assert await session.scalar(select(func.count()).select_from(DirectorTurn)) == 0
             assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0
-            session.add(ProjectCreativeProfile(
-                project_id=project_id, start_type="FREE", director_autonomy="AUTO",
-            ))
+            session.add(
+                ProjectCreativeProfile(
+                    project_id=project_id,
+                    start_type="FREE",
+                    director_autonomy="AUTO",
+                )
+            )
             await session.commit()
         async with factory() as session:
             actor = await session.get(User, actor_id)
@@ -128,50 +167,80 @@ async def test_application_duplicate_acceptance_needs_no_director(monkeypatch):
             decision_id = uuid4()
             expiry = datetime.now(UTC) + timedelta(hours=1)
             approved = await grants.approve_user_action(
-                actor=actor, project_id=project_id, shot_id=shot_id,
-                decision_id=decision_id, body=body, expires_at=expiry,
+                actor=actor,
+                project_id=project_id,
+                shot_id=shot_id,
+                decision_id=decision_id,
+                body=body,
+                expires_at=expiry,
             )
-            assert await grants.approve_user_action(
-                actor=actor, project_id=project_id, shot_id=shot_id,
-                decision_id=decision_id, body=body, expires_at=expiry,
-            ) == approved
+            assert (
+                await grants.approve_user_action(
+                    actor=actor,
+                    project_id=project_id,
+                    shot_id=shot_id,
+                    decision_id=decision_id,
+                    body=body,
+                    expires_at=expiry,
+                )
+                == approved
+            )
             with pytest.raises(ConflictError) as changed_decision:
                 await grants.approve_user_action(
-                    actor=actor, project_id=project_id, shot_id=shot_id,
-                    decision_id=decision_id, body=body.model_copy(update={"prompt": "changed"}),
+                    actor=actor,
+                    project_id=project_id,
+                    shot_id=shot_id,
+                    decision_id=decision_id,
+                    body=body.model_copy(update={"prompt": "changed"}),
                     expires_at=expiry,
                 )
             assert changed_decision.value.details["code"] == "PRODUCTION_DECISION_REUSED"
             revoked = await grants.approve_user_action(
-                actor=actor, project_id=project_id, shot_id=shot_id,
+                actor=actor,
+                project_id=project_id,
+                shot_id=shot_id,
                 decision_id=uuid4(),
-                body=body, expires_at=datetime.now(UTC) + timedelta(hours=1),
+                body=body,
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
             )
             mode_pending = await grants.approve_user_action(
-                actor=actor, project_id=project_id, shot_id=shot_id,
-                decision_id=uuid4(), body=body, expires_at=expiry,
+                actor=actor,
+                project_id=project_id,
+                shot_id=shot_id,
+                decision_id=uuid4(),
+                body=body,
+                expires_at=expiry,
             )
             await session.commit()
         submitting_pids = {}
+
         async def submit_grant(grant_id):
             async with factory() as session:
                 submitting_pids[grant_id] = await session.scalar(text("SELECT pg_backend_pid()"))
                 await session.execute(text("SET LOCAL ROLE dramaforge_app"))
                 await set_rls_context(
-                    session, user_id=actor_id, workspace_id=workspace_id, project_id=project_id,
+                    session,
+                    user_id=actor_id,
+                    workspace_id=workspace_id,
+                    project_id=project_id,
                 )
                 actor = await session.get(User, actor_id)
                 result = await ProductionAuthorizations(session).submit(
-                    actor=actor, project_id=project_id, authorization_id=grant_id,
+                    actor=actor,
+                    project_id=project_id,
+                    authorization_id=grant_id,
                 )
                 await session.commit()
                 return result
+
         accepted = await asyncio.gather(submit_grant(approved), submit_grant(approved))
         assert accepted[0] == accepted[1]
         async with factory() as session:
             actor = await session.get(User, actor_id)
             await ProductionAuthorizations(session).revoke(
-                actor=actor, project_id=project_id, authorization_id=revoked,
+                actor=actor,
+                project_id=project_id,
+                authorization_id=revoked,
             )
             # Hold the revocation transaction open and prove submission is
             # waiting on its PostgreSQL lock before allowing revoke to commit.
@@ -183,7 +252,8 @@ async def test_application_duplicate_acceptance_needs_no_director(monkeypatch):
                         pid = submitting_pids.get(revoked)
                         if pid is not None:
                             blockers = await observer.scalar(
-                                text("SELECT pg_blocking_pids(:pid)"), {"pid": pid},
+                                text("SELECT pg_blocking_pids(:pid)"),
+                                {"pid": pid},
                             )
                             if blockers:
                                 break
@@ -201,9 +271,13 @@ async def test_application_duplicate_acceptance_needs_no_director(monkeypatch):
             await submit_grant(revoked)
         assert denied.value.details["code"] == "PRODUCTION_AUTHORIZATION_INVALID"
         async with factory() as session:
-            await session.execute(update(ProjectCreativeProfile).where(
-                ProjectCreativeProfile.project_id == project_id,
-            ).values(director_autonomy="MANUAL", version=2))
+            await session.execute(
+                update(ProjectCreativeProfile)
+                .where(
+                    ProjectCreativeProfile.project_id == project_id,
+                )
+                .values(director_autonomy="MANUAL", version=2)
+            )
             await session.commit()
         with pytest.raises(ConflictError) as manual:
             await submit_grant(mode_pending)
@@ -211,9 +285,13 @@ async def test_application_duplicate_acceptance_needs_no_director(monkeypatch):
         assert await submit_grant(approved) == accepted[0]
         # Switching back to AUTO cannot reactivate a grant from an older profile.
         async with factory() as session:
-            await session.execute(update(ProjectCreativeProfile).where(
-                ProjectCreativeProfile.project_id == project_id,
-            ).values(director_autonomy="AUTO", version=3))
+            await session.execute(
+                update(ProjectCreativeProfile)
+                .where(
+                    ProjectCreativeProfile.project_id == project_id,
+                )
+                .values(director_autonomy="AUTO", version=3)
+            )
             await session.commit()
         with pytest.raises(ConflictError):
             await submit_grant(mode_pending)
@@ -231,8 +309,11 @@ async def test_application_duplicate_acceptance_needs_no_director(monkeypatch):
                 await editor.commit()
             with pytest.raises(ValidationAppError) as stale:
                 await ProductionCommands(stale_session).submit_user_execution(
-                    actor=actor, project_id=project_id, shot_id=shot_id,
-                    body=body, command_key="new-command-after-edit",
+                    actor=actor,
+                    project_id=project_id,
+                    shot_id=shot_id,
+                    body=body,
+                    command_key="new-command-after-edit",
                 )
             assert stale.value.details["code"] == "SHOT_VERSION_MISMATCH"
         # Replaying the already accepted command is still a receipt lookup.
@@ -243,31 +324,39 @@ async def test_application_duplicate_acceptance_needs_no_director(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_authorization_migration_upgrade_downgrade_preserves_production_tables():
+async def test_authorization_tables_survive_a_rejected_downgrade():
     dbname = f"dramaforge_d1_migration_{uuid4().hex[:8]}"
     await _create_database(dbname)
     engine = create_async_engine(_async_url(dbname))
     try:
         _alembic(dbname)
         async with engine.connect() as connection:
-            table = await connection.scalar(text(
-                "SELECT to_regclass('public.production_command_authorizations')"
-            ))
+            table = await connection.scalar(
+                text("SELECT to_regclass('public.production_command_authorizations')")
+            )
             assert table is not None
-            assert await connection.scalar(text(
-                "SELECT relrowsecurity AND relforcerowsecurity FROM pg_class "
-                "WHERE oid = 'production_command_authorizations'::regclass"
-            ))
+            assert await connection.scalar(
+                text(
+                    "SELECT relrowsecurity AND relforcerowsecurity FROM pg_class "
+                    "WHERE oid = 'production_command_authorizations'::regclass"
+                )
+            )
         result = subprocess.run(
             [sys.executable, "-m", "alembic", "downgrade", "20260908_0060"],
-            cwd=BACKEND, env={**os.environ, "DATABASE_URL": _async_url(dbname)},
-            capture_output=True, text=True,
+            cwd=BACKEND,
+            env={**os.environ, "DATABASE_URL": _async_url(dbname)},
+            capture_output=True,
+            text=True,
         )
-        assert result.returncode == 0, result.stderr
+        assert result.returncode != 0
+        assert "irreversible" in result.stderr
         async with engine.connect() as connection:
-            assert await connection.scalar(text(
-                "SELECT to_regclass('public.production_command_authorizations')"
-            )) is None
+            assert (
+                await connection.scalar(
+                    text("SELECT to_regclass('public.production_command_authorizations')")
+                )
+                is not None
+            )
             assert await connection.scalar(text("SELECT to_regclass('public.node_runs')"))
         _alembic(dbname)
     finally:
@@ -286,27 +375,46 @@ async def test_expired_grant_and_cross_project_rls_cannot_create_production():
         async with factory() as session:
             project, binding, actor = await _seed(session)
             shot, _artifact = await _seed_video_shot(session, project=project, user=actor)
-            session.add(ProjectCreativeProfile(
-                project_id=project.id, start_type="FREE", director_autonomy="AUTO",
-            ))
+            session.add(
+                ProjectCreativeProfile(
+                    project_id=project.id,
+                    start_type="FREE",
+                    director_autonomy="AUTO",
+                )
+            )
             other, _binding, other_actor = await _seed(session)
-            session.add(ProjectCreativeProfile(
-                project_id=other.id, start_type="FREE", director_autonomy="AUTO",
-            ))
+            session.add(
+                ProjectCreativeProfile(
+                    project_id=other.id,
+                    start_type="FREE",
+                    director_autonomy="AUTO",
+                )
+            )
             await session.commit()
             body = ExecutionBody(
-                stage="video", prompt="Test expiry before any plan resolution",
-                mode_id="image_to_video", expected_shot_version=shot.version,
-                requested_binding_id=binding.id, plan_fingerprint="a" * 64,
+                stage="video",
+                prompt="Test expiry before any plan resolution",
+                mode_id="image_to_video",
+                expected_shot_version=shot.version,
+                requested_binding_id=binding.id,
+                plan_fingerprint="a" * 64,
             )
             grant_id = await ProductionAuthorizations(session).approve_user_action(
-                actor=actor, project_id=project.id, shot_id=shot.id, decision_id=uuid4(),
-                body=body, expires_at=datetime.now(UTC) + timedelta(hours=1),
+                actor=actor,
+                project_id=project.id,
+                shot_id=shot.id,
+                decision_id=uuid4(),
+                body=body,
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
             )
             await session.commit()
-            await session.execute(update(ProductionCommandAuthorization).where(
-                ProductionCommandAuthorization.id == grant_id,
-            ).values(expires_at=datetime.now(UTC) - timedelta(seconds=1)))
+            await session.execute(
+                update(ProductionCommandAuthorization)
+                .where(
+                    ProductionCommandAuthorization.id == grant_id,
+                )
+                .values(expires_at=datetime.now(UTC) - timedelta(seconds=1))
+            )
             await session.commit()
             owner_scope = (actor.id, project.workspace_id, project.id)
             other_scope = (other_actor.id, other.workspace_id, other.id)
@@ -314,27 +422,43 @@ async def test_expired_grant_and_cross_project_rls_cannot_create_production():
 
         async with factory() as session:
             await session.execute(text("SET LOCAL ROLE dramaforge_app"))
-            await set_rls_context(session, user_id=owner_scope[0], workspace_id=owner_scope[1],
-                                  project_id=owner_scope[2])
+            await set_rls_context(
+                session,
+                user_id=owner_scope[0],
+                workspace_id=owner_scope[1],
+                project_id=owner_scope[2],
+            )
             owner = await session.get(User, owner_scope[0])
             with pytest.raises(ConflictError) as expired:
                 await ProductionAuthorizations(session).submit(
-                    actor=owner, project_id=owner_scope[2], authorization_id=grant_id,
+                    actor=owner,
+                    project_id=owner_scope[2],
+                    authorization_id=grant_id,
                 )
             assert expired.value.details["code"] == "PRODUCTION_AUTHORIZATION_INVALID"
         async with factory() as session:
             await session.execute(text("SET LOCAL ROLE dramaforge_app"))
-            await set_rls_context(session, user_id=other_scope[0], workspace_id=other_scope[1],
-                                  project_id=other_scope[2])
+            await set_rls_context(
+                session,
+                user_id=other_scope[0],
+                workspace_id=other_scope[1],
+                project_id=other_scope[2],
+            )
             assert await session.get(ProductionCommandAuthorization, grant_id) is None
-            modified = await session.execute(update(ProductionCommandAuthorization).where(
-                ProductionCommandAuthorization.id == grant_id,
-            ).values(status="revoked"))
+            modified = await session.execute(
+                update(ProductionCommandAuthorization)
+                .where(
+                    ProductionCommandAuthorization.id == grant_id,
+                )
+                .values(status="revoked")
+            )
             assert modified.rowcount == 0
             other_user = await session.get(User, other_scope[0])
             with pytest.raises(NotFoundError):
                 await ProductionAuthorizations(session).submit(
-                    actor=other_user, project_id=other_scope[2], authorization_id=grant_id,
+                    actor=other_user,
+                    project_id=other_scope[2],
+                    authorization_id=grant_id,
                 )
         async with factory() as session:
             assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0

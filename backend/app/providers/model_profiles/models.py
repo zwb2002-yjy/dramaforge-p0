@@ -16,16 +16,6 @@ from app.providers.capabilities import Capability
 from app.providers.model_profiles.slots import ModelSlot
 
 
-class GenerationPolicy(BaseModel):
-    """Placeholder for P1 fallback policy (spec §87/§88).
-
-    P0 selects only the default model — fallback is owned by
-    ``GenerationPolicy`` / ``ModelSelector`` later, never by the Profile. Kept
-    as a typed field so a future binding can carry it without a migration."""
-
-    name: str = "default"
-
-
 class ModelSlotBinding(BaseModel):
     """One slot→model assignment inside a profile (spec §12).
 
@@ -35,7 +25,6 @@ class ModelSlotBinding(BaseModel):
     slot: ModelSlot
     model_id: str
     native_options: dict[str, Any] = Field(default_factory=dict)
-    generation_policy: GenerationPolicy | None = None
     enabled: bool = True
 
 

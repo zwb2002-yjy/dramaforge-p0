@@ -1,0 +1,365 @@
+import { expect, test, type Page } from "@playwright/test";
+import { installProfessionalMock, PROJECT_ID, WORKSPACE_ID, SCENE_ID } from "./professional-mocks";
+
+async function setup(page: Page) {
+  const state = await installProfessionalMock(page);
+  const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const errors: string[] = [];
+  let loggedIn = true;
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (
+      path.startsWith("/api/") &&
+      !["GET", "HEAD", "OPTIONS"].includes(request.method()) &&
+      !path.endsWith("/workspace-state") &&
+      // Resolving a shot's saved references is a read-only POST.
+      !path.endsWith("/references/resolve")
+    )
+      writes.push({ path, body: request.postDataJSON() });
+  });
+  await page.route("**/api/v1/auth/me", (route) =>
+    route.fulfill(
+      loggedIn
+        ? { json: { id: "owner", display_name: "创作者", email: "owner@example.com" } }
+        : { status: 401, json: { detail: "authentication required" } },
+    ),
+  );
+  await page.route("**/api/v1/auth/bootstrap-status", (route) =>
+    route.fulfill({ json: { owner_initialized: true, registration_available: false } }),
+  );
+  await page.route("**/api/v1/auth/logout", (route) => {
+    loggedIn = false;
+    return route.fulfill({ json: {} });
+  });
+  await page.route("**/api/v1/workspaces", (route) =>
+    route.fulfill({ json: [{ id: WORKSPACE_ID, name: "创作空间" }] }),
+  );
+  await page.route(`**/api/v1/workspaces/${WORKSPACE_ID}/projects`, (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: PROJECT_ID,
+          workspace_id: WORKSPACE_ID,
+          name: "测试作品",
+          stage: "production",
+          aspect_ratio: "9:16",
+          version: 1,
+        },
+      ],
+    }),
+  );
+  return { state, writes, errors };
+}
+
+test("project deletion needs confirmation, cancellation never deletes, and success refreshes the lobby", async ({
+  page,
+}) => {
+  const { errors } = await setup(page);
+  let removed = false;
+  const deletes: string[] = [];
+  await page.route(`**/api/v1/workspaces/${WORKSPACE_ID}/projects`, (route) =>
+    route.fulfill({
+      json: removed
+        ? []
+        : [
+            {
+              id: PROJECT_ID,
+              workspace_id: WORKSPACE_ID,
+              name: "测试作品",
+              aspect_ratio: "9:16",
+              stage: "draft",
+              version: 1,
+            },
+          ],
+    }),
+  );
+  await page.route(
+    new RegExp(`/api/v1/projects/${PROJECT_ID}\\?expected_version=1$`),
+    async (route) => {
+      expect(route.request().method()).toBe("DELETE");
+      deletes.push(route.request().url());
+      removed = true;
+      await route.fulfill({ status: 204 });
+    },
+  );
+  await page.goto("/");
+  const card = page.getByRole("article", { name: "测试作品" });
+  await card.getByLabel("更多操作 测试作品").click();
+  await card.getByRole("button", { name: "删除项目" }).click();
+  const dialog = page.getByTestId("project-delete-dialog");
+  await expect(dialog).toHaveAccessibleName("删除项目「测试作品」？");
+  expect(deletes).toHaveLength(0);
+  await dialog.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(card).toBeVisible();
+  await expect(card.getByLabel("更多操作 测试作品")).toBeFocused();
+  expect(deletes).toHaveLength(0);
+  await card.getByLabel("更多操作 测试作品").click();
+  await card.getByRole("button", { name: "删除项目" }).click();
+  await dialog.getByRole("button", { name: "确认删除", exact: true }).click();
+  await expect(card).toHaveCount(0);
+  await expect(dialog).toHaveCount(0);
+  expect(deletes).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test("create=false is normalized without logging out; only explicit logout changes the session", async ({
+  page,
+}) => {
+  const { writes, errors } = await setup(page);
+  await page.goto("/?create=false");
+  await expect(page).toHaveURL("/");
+  await expect(page.getByRole("list", { name: "项目列表" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "新建项目" })).not.toBeVisible();
+  expect(writes).toEqual([]);
+  await page.goto("/settings/defaults");
+  await expect(page).toHaveURL("/settings/defaults");
+  await expect(page.getByRole("heading", { name: "模型设置", exact: true })).toBeVisible();
+  expect(writes).toEqual([]);
+  await page.goto("/settings/account");
+  await expect(page.getByText("owner@example.com")).toBeVisible();
+  await expect(page.getByTestId("account-maintenance-disclosure")).not.toHaveAttribute("open", "");
+  await page.getByRole("button", { name: "退出登录", exact: true }).click();
+  await expect(page.getByRole("link", { name: "前往登录" })).toBeVisible();
+  await page.getByRole("link", { name: "前往登录" }).click();
+  await expect(page.getByRole("button", { name: "登录", exact: true })).toBeVisible();
+  expect(writes.map((write) => write.path)).toEqual(["/api/v1/auth/logout"]);
+  expect(errors).toEqual([]);
+});
+
+test("director policy follows creation, not project model settings", async ({ page }) => {
+  const { state, writes, errors } = await setup(page);
+  await page.route(`**/api/v1/projects/${PROJECT_ID}/creative-profile`, (route) => {
+    const body = route.request().postDataJSON();
+    state.directorAutonomy = body.director_autonomy;
+    return route.fulfill({
+      json: {
+        id: "profile-professional",
+        project_id: PROJECT_ID,
+        director_autonomy: body.director_autonomy,
+        version: 2,
+      },
+    });
+  });
+  await page.setViewportSize({ width: 760, height: 730 });
+  await page.goto(`/projects/${PROJECT_ID}/production`);
+  const policy = page.getByRole("combobox", { name: "导演参与度" });
+  await expect(policy).toBeInViewport();
+  await policy.selectOption("MANUAL");
+  await expect(policy).toHaveValue("MANUAL");
+  expect(writes).toEqual([
+    {
+      path: `/api/v1/projects/${PROJECT_ID}/creative-profile`,
+      body: { expected_version: 1, director_autonomy: "MANUAL" },
+    },
+  ]);
+  // At this width the project navigation is a drawer opened from 「项目导航」.
+  await page.getByRole("button", { name: "项目导航", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "创作导航" })
+    .getByRole("link", { name: "分镜制作" })
+    .click();
+  await expect(policy).toHaveValue("MANUAL");
+  await page.goto(`/settings/projects/${PROJECT_ID}`);
+  await expect(page.getByTestId("project-settings-page")).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "导演参与度" })).toHaveCount(0);
+  await page.getByRole("link", { name: "设置", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "设置导航" }).getByRole("link")).toHaveCount(2);
+  expect(errors).toEqual([]);
+});
+
+test("workspace management belongs to Projects and no longer contains model configuration", async ({
+  page,
+}) => {
+  const { writes, errors } = await setup(page);
+  await page.goto("/settings/workspaces");
+  await expect(page).toHaveURL(/panel=workspace$/);
+  await expect(page.getByRole("link", { name: "我的项目", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await expect(page.getByRole("heading", { name: "工作空间", level: 1 })).toBeVisible();
+  await expect(page.getByRole("region", { name: "工作空间管理" })).toBeVisible();
+  await expect(page.getByTestId("workspace-model-profile-settings")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "创建空间", exact: true })).toBeVisible();
+  expect(writes).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("project model fields fit a narrow window without overlapping or overflowing", async ({
+  page,
+}) => {
+  const { writes, errors } = await setup(page);
+  const slots = ["planning.brief", "visual.character", "video.shot"];
+  await page.route("**/api/v1/model-slots", (route) =>
+    route.fulfill({
+      json: slots.map((id) => ({
+        id,
+        display_name: id,
+        capabilities: ["image.generate"],
+        p0_scope: true,
+      })),
+    }),
+  );
+  await page.setViewportSize({ width: 600, height: 730 });
+  await page.goto(`/settings/projects/${PROJECT_ID}`);
+  // The settings drawer starts closed at this width.
+  const controls = page.getByTestId("model-profile-settings").locator("select");
+  await expect(controls).toHaveCount(3);
+  await expect(page.getByTestId("model-picker-audio.tts")).toHaveCount(0);
+  const bounds = await controls.evaluateAll((elements) =>
+    elements.map((element) => {
+      const parent = element.closest("label")!.getBoundingClientRect();
+      const box = element.getBoundingClientRect();
+      return {
+        left: box.left,
+        right: box.right,
+        top: box.top,
+        bottom: box.bottom,
+        parentLeft: parent.left,
+        parentRight: parent.right,
+      };
+    }),
+  );
+  for (const box of bounds) {
+    expect(box.left).toBeGreaterThanOrEqual(box.parentLeft);
+    expect(box.right).toBeLessThanOrEqual(box.parentRight);
+    expect(box.right).toBeLessThanOrEqual(600);
+  }
+  for (let i = 0; i < bounds.length; i++)
+    for (let j = i + 1; j < bounds.length; j++) {
+      const a = bounds[i],
+        b = bounds[j];
+      expect(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top).toBe(
+        true,
+      );
+    }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(writes).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("active primary navigation supports double click and keyboard without duplicate controls", async ({
+  page,
+}) => {
+  const { writes, errors } = await setup(page);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
+  const creation = page.getByRole("button", { name: "项目导航", exact: true });
+  await expect(creation).toHaveAttribute("aria-expanded", "true");
+  // Every click toggles: a double click returns to the initial state.
+  await creation.dblclick();
+  await expect(creation).toHaveAttribute("aria-expanded", "true");
+  await creation.click();
+  await expect(creation).toHaveAttribute("aria-expanded", "false");
+  await creation.dblclick();
+  await expect(creation).toHaveAttribute("aria-expanded", "false");
+  await creation.click();
+  await expect(creation).toHaveAttribute("aria-expanded", "true");
+  await creation.focus();
+  await page.keyboard.press("Enter");
+  await expect(creation).toHaveAttribute("aria-expanded", "false");
+  await page.keyboard.press("Enter");
+  await expect(creation).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("button", { name: /^(展开|收起)二级导航$/ })).toHaveCount(0);
+  await expect(page.getByLabel("Owner 账号")).toHaveCount(0);
+  await expect(page).toHaveURL(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
+  expect(writes).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("primary navigation has one selection across the list, project and settings", async ({
+  page,
+}) => {
+  const { writes, errors } = await setup(page);
+  await page.setViewportSize({ width: 600, height: 900 });
+  await page.goto("/");
+  const sidebar = page.locator(".df-primary-sidebar");
+  const nav = page.getByRole("navigation", { name: "一级导航" });
+  const expectSelection = async (label: string) => {
+    await expect(sidebar.locator("a.active")).toHaveCount(1);
+    await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
+    await expect(nav.getByRole("link", { name: label, exact: true })).toHaveClass("active");
+    await expect(page.getByRole("link", { name: "DramaForge 我的项目" })).not.toHaveClass(/active/);
+  };
+  await expectSelection("我的项目");
+  await page.getByRole("link", { name: "DramaForge 我的项目" }).click();
+  await nav.getByRole("link", { name: "我的项目", exact: true }).click();
+  await page.getByRole("button", { name: /进入工作台/ }).click();
+  await expect(page).toHaveURL(`/projects/${PROJECT_ID}/script`);
+  await expectSelection("我的项目");
+  await nav.getByRole("link", { name: "我的项目", exact: true }).click();
+  await expect(page).toHaveURL("/");
+  await expectSelection("我的项目");
+  await nav.getByRole("link", { name: "设置", exact: true }).click();
+  await expectSelection("设置");
+  expect(writes).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("in-page return remains available with the sidebar closed and on direct links", async ({
+  page,
+}) => {
+  const { writes, errors } = await setup(page);
+  await page.setViewportSize({ width: 600, height: 900 });
+  for (const path of ["/?panel=recent", "/?panel=workspace", "/?create=true"]) {
+    await page.goto(path);
+    const back = page
+      .getByTestId("workspace-return")
+      .getByRole("link", { name: "返回我的项目", exact: true });
+    await expect(back).toBeInViewport();
+    await back.click();
+    await expect(page).toHaveURL("/");
+    await expect(page.getByTestId("workspace-return")).toHaveCount(0);
+  }
+  const scenePath = `/projects/${PROJECT_ID}/scenes/${SCENE_ID}`;
+  await page.goto(scenePath);
+  await page.getByTestId("workspace-return").getByRole("link", { name: "返回场景" }).click();
+  await expect(page).toHaveURL(`/projects/${PROJECT_ID}/scenes`);
+  await page.goto(`/settings/account?returnTo=${encodeURIComponent(scenePath)}`);
+  await expect(page.getByRole("link", { name: "设置", exact: true })).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+  const returnToCreation = page
+    .getByTestId("workspace-return")
+    .getByRole("link", { name: "返回工作台" });
+  await expect(returnToCreation).toBeInViewport();
+  await returnToCreation.click();
+  await expect(page).toHaveURL(scenePath);
+  await page.goto("/settings/account");
+  await expect(page.getByRole("link", { name: "设置", exact: true })).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+  await page.getByTestId("workspace-return").getByRole("link", { name: "返回我的项目" }).click();
+  await expect(page).toHaveURL("/");
+  expect(writes).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("return links respect production and model parents instead of relying on browser history", async ({
+  page,
+}) => {
+  const { writes, errors } = await setup(page);
+  for (const [path, label, target] of [
+    [`/projects/${PROJECT_ID}/production`, "返回我的项目", "/"],
+    [`/projects/${PROJECT_ID}/review`, "返回项目总览", `/projects/${PROJECT_ID}/production`],
+    [`/settings/projects/${PROJECT_ID}`, "返回模型设置", "/settings/models"],
+  ]) {
+    await page.goto(path);
+    await page
+      .getByTestId("workspace-return")
+      .getByRole("link", { name: label, exact: true })
+      .click();
+    await expect(page).toHaveURL(target);
+  }
+  await page.goto(`/settings/projects/${PROJECT_ID}`);
+  await expect(page.getByRole("button", { name: "项目导航" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "我的项目", exact: true })).toHaveAttribute(
+    "href",
+    "/",
+  );
+  expect(writes).toEqual([]);
+  expect(errors).toEqual([]);
+});

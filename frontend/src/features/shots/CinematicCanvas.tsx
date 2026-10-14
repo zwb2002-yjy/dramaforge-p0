@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Aperture, CirclePause, TriangleAlert } from "lucide-react";
 
 import { artifactContentUrl } from "../../lib/api";
+import { nodeRunExecutionStatusLabel, nodeRunStatusKind } from "../../lib/runLabels";
 import type { ShotLite } from "./api";
 import { parseShotCandidates, shotCandidateKey, type ShotCandidate } from "./shotCandidates";
 
@@ -22,11 +23,9 @@ type CinematicCanvasProps = {
 
 type TraceState = {
   status: string;
+  errorCode: string | null;
   nodeKey: string | null;
 };
-
-const ACTIVE_STATUSES = new Set(["queued", "pending", "running", "processing", "submitted"]);
-const FAILED_STATUSES = new Set(["failed", "error", "cancelled", "canceled"]);
 
 function traceStateOf(value: unknown): TraceState | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
@@ -34,33 +33,9 @@ function traceStateOf(value: unknown): TraceState | null {
   if (typeof row.status !== "string" || row.status.length === 0) return null;
   return {
     status: row.status,
+    errorCode: typeof row.error_code === "string" ? row.error_code : null,
     nodeKey: typeof row.node_key === "string" ? row.node_key : null,
   };
-}
-
-function stateLabel(status: string): string {
-  switch (status) {
-    case "queued":
-    case "pending":
-      return "执行已排队";
-    case "running":
-    case "processing":
-    case "submitted":
-      return "正在执行";
-    case "failed":
-    case "error":
-      return "执行失败";
-    case "cancelled":
-    case "canceled":
-      return "执行已取消";
-    case "completed":
-    case "cached":
-    case "completed_after_cancel":
-    case "succeeded":
-      return "执行完成，等待结果确认";
-    default:
-      return `执行状态：${status}`;
-  }
 }
 
 function latestTraceState(trace: unknown[]): TraceState | null {
@@ -104,8 +79,9 @@ export function CinematicCanvas({
   const candidate = explicitCandidate ?? (!videoId && !keyframeId ? parsedCandidates[0] : null);
   const latestTrace = latestTraceState(trace);
   const normalizedStatus = latestTrace?.status.toLowerCase() ?? "";
-  const isActive = ACTIVE_STATUSES.has(normalizedStatus);
-  const isFailed = FAILED_STATUSES.has(normalizedStatus);
+  const statusKind = nodeRunStatusKind(normalizedStatus, latestTrace?.errorCode);
+  const isActive = statusKind === "active";
+  const isFailed = statusKind === "failed" || statusKind === "unknown_submission";
 
   const selectCandidate = (next: ShotCandidate) => {
     if (selectedCandidate === undefined && previewCandidate === undefined) {
@@ -122,7 +98,7 @@ export function CinematicCanvas({
       data-preview-candidate={candidate ? shotCandidateKey(candidate) : undefined}
     >
       {!shot ? (
-        <p className="qc-canvas-empty">选择镜头开始导演构图。</p>
+        <p className="qc-canvas-empty">从下方选择一个镜头。</p>
       ) : candidate ? (
         <div
           className="qc-canvas-media"
@@ -130,7 +106,7 @@ export function CinematicCanvas({
           onClick={() => selectCandidate(candidate)}
         >
           <span className="qc-canvas-state">
-            {candidate.stage === "video" ? "视频候选预览" : "关键帧候选预览"}
+            {candidate.stage === "video" ? "视频候选" : "画面候选"}
           </span>
           {candidate.artifactType === "video" ? (
             <video
@@ -146,7 +122,7 @@ export function CinematicCanvas({
               data-testid={`shot-candidate-preview-${candidate.artifactId}`}
             />
           )}
-          <small>未确认候选</small>
+          <small>未确认</small>
         </div>
       ) : videoId ? (
         <div className="qc-canvas-media" data-testid="shot-formal-output">
@@ -160,7 +136,7 @@ export function CinematicCanvas({
         </div>
       ) : keyframeId ? (
         <div className="qc-canvas-media" data-testid="shot-formal-output">
-          <span className="qc-canvas-state">正式关键帧</span>
+          <span className="qc-canvas-state">正式画面</span>
           <img
             src={artifactContentUrl(projectId, keyframeId)}
             alt={`#${shot.shot_number} 关键帧`}
@@ -185,13 +161,13 @@ export function CinematicCanvas({
             data-status={normalizedStatus}
             role="status"
           >
-            {stateLabel(normalizedStatus)}
+            {nodeRunExecutionStatusLabel(normalizedStatus, latestTrace?.errorCode)}
           </p>
         </div>
       ) : (
         <div className="qc-canvas-empty" data-testid="shot-placeholder">
-          <h3>#{shot.shot_number} 导演构图预览</h3>
-          <p>{shot.visual_description || "尚未生成关键帧。"}</p>
+          <h3>镜头 {shot.shot_number}</h3>
+          <p>{shot.visual_description || "还没有画面。"}</p>
           {latestTrace && (
             <p
               className="qc-canvas-hint"
@@ -199,11 +175,11 @@ export function CinematicCanvas({
               data-status={normalizedStatus}
               role="status"
             >
-              {stateLabel(normalizedStatus)}
+              {nodeRunExecutionStatusLabel(normalizedStatus, latestTrace?.errorCode)}
             </p>
           )}
           <p className="qc-canvas-hint" data-testid="no-formal-result">
-            尚未选择正式结果
+            还没有画面，在右侧点「生成画面」
           </p>
         </div>
       )}

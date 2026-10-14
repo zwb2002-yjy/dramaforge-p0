@@ -1,58 +1,51 @@
-# infra/litellm — DramaForge LiteLLM Proxy
+# infra/litellm — DramaForge 文本 Proxy 配置
 
-DramaForge 不安装 `litellm` SDK。官方 LiteLLM Proxy 是独立 Runtime，DramaForge 通过
-HTTP 调用其 OpenAI-compatible 表面（`/v1/chat/completions`）。Proxy 拥有 Router 的
-负载均衡 / retry / fallback / cooldown / cost / virtual keys（fix spec §1/§2）。
+当前模型与凭证权威见 [MODEL_PROVIDER.md](../../docs/MODEL_PROVIDER.md)，部署边界见
+[DEPLOYMENT.md](../../docs/DEPLOYMENT.md)。本目录维护可选的官方 LiteLLM Proxy 配置，
+不是第三个产品 Runtime。DramaForge 不安装 `litellm` SDK，通过 OpenAI-compatible
+Chat HTTP 合同访问 Proxy 或用户明确配置的兼容文本端点；配置外部 URL 不自动经过本地 Proxy。
 
-## 组件
+## 配置与身份
 
 | 文件 | 作用 |
 |---|---|
-| `config.yaml` | 逻辑别名（script-quality / script-fast / legacy-text）+ router_settings + general_settings。Secret 一律 `os.environ/<KEY>` |
-| `compatibility.md` | 已核对的官方版本/行为记录 |
+| `config.yaml` | 默认部署的 `script-quality` / `script-fast` / `legacy-text` 逻辑别名、Router 和 Secret 引用 |
+| `quality-config.yaml` | 隔离集成测试的确定性 `mock_response`，不调用外部 Provider |
+| [compatibility.md](compatibility.md) | 当前项目采用的 HTTP 合同、验证入口与限制 |
 
-## 启动
+Proxy 的上游部署、重试和路由由其配置决定；DramaForge 记录所选逻辑模型和可见响应身份。
+Key 只通过 `os.environ/<KEY>` 引用，不提交真实凭据。应用调用 Key 为 `LITELLM_API_KEY`；
+Proxy 管理 Key 为 `LITELLM_MASTER_KEY`，后者不透传到 API / Worker。
+
+## 启动与检查
+
+从仓库根执行；必须先按部署文档配置已有实例和凭据：
 
 ```bash
-# 完整栈（含 litellm-db + litellm）
-docker compose up -d
-# 只起 LiteLLM
 docker compose up -d litellm-db litellm
+docker compose ps litellm-db litellm
+docker compose logs --tail 100 litellm
 ```
 
-健康检查：
+默认发布拓扑不把 4000 暴露到宿主机。存活检查在服务容器内执行：
 
 ```bash
-curl http://localhost:4000/health/liveliness   # liveness（compose 只探这个）
-curl http://localhost:4000/health/readiness    # readiness
-curl http://localhost:4000/v1/models \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY"
+docker compose exec litellm python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness').status)"
 ```
 
-> 不要高频探 `/health`（可能实际 probe 每个模型并产生成本，fix spec §12/§128-8）。
+`/health/liveliness` 只证明进程存活；目录 `/v1/models` 需认证。不要将存活、发现或
+配置读取当作上游模型能力/账号质量认证；不要把可能对上游产生调用的 `/health` 当免费探测。
 
-## 本地 demo（无真实 Provider Key）
+## 离线协议验证
 
-在 `.env` 给别名设 `mock_response`，Proxy 将直接返回该文本而不调用上游：
+仓库完整质量门启动固定 Proxy 镜像并使用 `quality-config.yaml`，见
+[DEVELOPMENT.md](../../docs/DEVELOPMENT.md) 和
+[test_litellm_real_proxy.py](../../backend/tests/integration/test_litellm_real_proxy.py)。
+此处的 “real proxy” 表示实际 Proxy 进程，模型响应仍为 mock；不证明真实上游可用。
+本目录不提供可绕过测试隔离的真实 Chat 试调用步骤，实际模型调用遵守逐操作预算与授权。
 
-```ini
-LITELLM_MASTER_KEY=sk-dev-change-me
-LITELLM_SCRIPT_QUALITY_MOCK_RESPONSE=你好，这是 mock 的剧本质量模型输出。
-```
+## 产品边界
 
-然后：
-
-```bash
-curl http://localhost:4000/v1/chat/completions \
-  -H "Authorization: Bearer sk-dev-change-me" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"script-quality","messages":[{"role":"user","content":"hi"}]}'
-```
-
-## 生产
-
-- 镜像 pin 到具体版本（`LITELLM_IMAGE=ghcr.io/berriai/litellm:v1.96.0`），禁止 `latest`。
-- Provider Key 放环境/Secret Manager，经 `LITELLM_*_API_BASE` / `LITELLM_*_API_KEY` 注入。
-- DramaForge 使用 dedicated Virtual Key（`LITELLM_API_KEY`），不长期用 Master Key（spec §57）。
-- 媒体（MiniMax/Volcengine Image/Video）等 LiteLLM Fork provider module 完成后再接入
-  （spec §7/§125）；DramaForge 只扩 `ModelBackendBinding.api_mode`。
+图像/视频由 `backend/app/providers/` 的统一 Compiler 与 Provider Runtime 执行，
+不是 LiteLLM 媒体 Fork 的待接入路径。静态文本别名、工作空间文本连接和媒体 Binding
+的来源/修订分别冻结，不以兼容协议或相同名称推断它们是同一个模型。

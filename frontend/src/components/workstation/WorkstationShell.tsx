@@ -1,21 +1,20 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, defaultParseSearch, useRouter, useRouterState } from "@tanstack/react-router";
 import {
   Aperture,
-  ChevronLeft,
+  ArrowLeft,
   Clapperboard,
   FileText,
   Film,
   FolderKanban,
-  Menu,
   Package,
+  CheckCheck,
   Scissors,
   Settings,
-  SlidersHorizontal,
   UserRound,
   Wrench,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import {
   getSelectedWorkspaceId,
@@ -24,13 +23,16 @@ import {
 } from "../../lib/api";
 import { validateSettingsReturnTo, setRememberedProjectId } from "../../lib/navigationPreferences";
 import { queryKeys } from "../../lib/queryKeys";
+import { useModalDialog } from "../ui/useModalDialog";
+import { Button } from "../ui";
+import { ProjectNavigationContext, PROJECT_VIEW_LABELS } from "./projectNavigation";
 import "./navigation-shell.css";
 
 type WorkstationShellProps = {
   children: ReactNode;
 };
 
-type PrimarySection = "projects" | "creation" | "settings";
+type PrimarySection = "projects" | "project" | "settings";
 
 function projectIdFromPath(pathname: string): string | null {
   return (
@@ -42,17 +44,18 @@ function projectIdFromPath(pathname: string): string | null {
 
 function primarySectionFromPath(pathname: string): PrimarySection {
   if (pathname.startsWith("/settings")) return "settings";
-  if (pathname.startsWith("/projects/")) return "creation";
+  if (pathname.startsWith("/projects/")) return "project";
   return "projects";
 }
 
 function creationViewFromPath(pathname: string): string | null {
   const segment = pathname.match(/^\/projects\/[^/]+\/([^/]+)/)?.[1] ?? null;
-  return segment === "review" ? "production" : segment;
+  return segment;
 }
 
 function PrimaryLink({
   active,
+  expanded,
   label,
   to,
   icon: Icon,
@@ -60,21 +63,28 @@ function PrimaryLink({
   search,
 }: {
   active: boolean;
+  expanded?: boolean;
   label: string;
   to: string;
   icon: typeof FolderKanban;
-  onActivate: () => void;
+  onActivate?: () => void;
   search?: Record<string, unknown>;
 }) {
   return (
     <Link
       to={to}
-      search={search}
+      search={search ?? {}}
+      activeOptions={{ exact: true, includeSearch: true }}
+      activeProps={{}}
       className={active ? "active" : undefined}
       aria-current={active ? "page" : undefined}
       aria-label={label}
+      aria-expanded={onActivate ? active && expanded : undefined}
+      aria-controls={onActivate ? "context-navigation" : undefined}
       onClick={(event) => {
-        if (active) {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+          return;
+        if (active && onActivate) {
           event.preventDefault();
           onActivate();
         }
@@ -91,93 +101,214 @@ function ContextLink({
   label,
   to,
   icon: Icon,
+  description,
+  step,
   search,
 }: {
   active: boolean;
   label: string;
   to: string;
   icon?: typeof FileText;
+  description?: string;
+  step?: string;
   search?: Record<string, unknown>;
 }) {
   return (
     <Link
       to={to}
-      search={search}
+      search={search ?? {}}
+      activeOptions={{ exact: true, includeSearch: true }}
+      activeProps={{}}
       className={active ? "active" : undefined}
       aria-current={active ? "page" : undefined}
+      aria-label={label}
     >
-      {Icon && <Icon size={17} aria-hidden="true" />}
-      <span>{label}</span>
+      {step ? (
+        <span className="df-context-step" aria-hidden="true">
+          {step}
+        </span>
+      ) : (
+        Icon && <Icon size={17} aria-hidden="true" />
+      )}
+      <span className="df-context-link-copy">
+        <span>{label}</span>
+        {description && <small>{description}</small>}
+      </span>
     </Link>
   );
 }
 
 export function WorkstationShell({ children }: WorkstationShellProps) {
+  const router = useRouter();
+  const routeStatus = useRouterState({ select: (state) => state.status });
+  const routeLoading = useRouterState({ select: (state) => state.isLoading });
   const queryClient = useQueryClient();
   const location = useRouterState({ select: (state) => state.location });
   const pathname = location.pathname;
   const primary = primarySectionFromPath(pathname);
   const projectId = projectIdFromPath(pathname);
-  const [secondaryOpen, setSecondaryOpen] = useState(
-    () => window.innerWidth >= 720 || primary === "settings",
+  const hasContext = primary !== "projects";
+  const [narrow, setNarrow] = useState(() => window.innerWidth < 1100);
+  const [secondaryOpen, setSecondaryOpen] = useState(() => hasContext && window.innerWidth >= 1100);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const railRef = useRef<HTMLElement>(null);
+  const projectTrigger = useRef<HTMLButtonElement | null>(null);
+  const restoreFocusPending = useRef(false);
+  const openRef = useRef(secondaryOpen);
+  openRef.current = secondaryOpen;
+  const restoreProjectFocus = useCallback(() => {
+    const trigger = projectTrigger.current;
+    if (
+      restoreFocusPending.current &&
+      trigger?.isConnected &&
+      router.state.status === "idle" &&
+      !router.state.isLoading &&
+      !contentRef.current?.inert
+    ) {
+      trigger.focus();
+      if (document.activeElement === trigger) restoreFocusPending.current = false;
+    }
+  }, [router]);
+  const registerProjectTrigger = useCallback(
+    (trigger: HTMLButtonElement | null) => {
+      projectTrigger.current = trigger;
+      if (trigger) requestAnimationFrame(restoreProjectFocus);
+    },
+    [restoreProjectFocus],
   );
+  const closeNavigation = useCallback(() => {
+    if (primary === "project" && openRef.current) restoreFocusPending.current = true;
+    setSecondaryOpen(false);
+    // The content becomes non-inert on commit; restore focus after that commit.
+    requestAnimationFrame(() => {
+      if (primary === "project") restoreProjectFocus();
+      else
+        document
+          .querySelector<HTMLElement>('.df-primary-sidebar [aria-controls="context-navigation"]')
+          ?.focus();
+    });
+  }, [primary, restoreProjectFocus]);
   const previousLocation = useRef(location.href);
   const previousPrimary = useRef(primary);
   useEffect(() => {
-    if (previousPrimary.current !== primary) {
-      setSecondaryOpen(window.innerWidth >= 720 || primary === "settings");
-    } else if (previousLocation.current !== location.href && window.innerWidth < 720) {
+    if (!hasContext) {
       setSecondaryOpen(false);
+    } else if (previousPrimary.current !== primary) {
+      setSecondaryOpen(!narrow);
+    } else if (previousLocation.current !== location.href && window.innerWidth < 1100) {
+      closeNavigation();
     }
     previousPrimary.current = primary;
     previousLocation.current = location.href;
-  }, [location.href, primary]);
+  }, [location.href, primary, hasContext, narrow, closeNavigation]);
 
   useEffect(() => {
-    if (!secondaryOpen) return;
+    if (!secondaryOpen || narrow) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSecondaryOpen(false);
+      if (event.key === "Escape") closeNavigation();
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [secondaryOpen]);
+  }, [secondaryOpen, narrow, closeNavigation]);
 
+  const drawerOpen = hasContext && secondaryOpen && narrow;
+  useEffect(() => {
+    if (drawerOpen) return;
+    const frame = requestAnimationFrame(restoreProjectFocus);
+    return () => cancelAnimationFrame(frame);
+  }, [drawerOpen, location.href, routeStatus, routeLoading, restoreProjectFocus]);
+  const navigationRef = useModalDialog<HTMLElement>(drawerOpen, closeNavigation);
+  useEffect(() => {
+    const wide = window.matchMedia("(min-width: 1100px)");
+    const syncNavigation = () => {
+      setNarrow(!wide.matches);
+      if (!wide.matches && navigationRef.current?.contains(document.activeElement)) {
+        closeNavigation();
+      } else {
+        setSecondaryOpen(hasContext && wide.matches);
+      }
+    };
+    wide.addEventListener("change", syncNavigation);
+    return () => wide.removeEventListener("change", syncNavigation);
+  }, [hasContext, navigationRef, closeNavigation]);
+  useEffect(() => {
+    const surfaces = [contentRef.current, railRef.current];
+    for (const surface of surfaces) if (surface) surface.inert = drawerOpen;
+    return () => {
+      for (const surface of surfaces) if (surface) surface.inert = false;
+    };
+  }, [drawerOpen]);
+  useEffect(() => {
+    if (!drawerOpen) return;
+    // The existing modal hook owns trapping/Escape. Opening an animated sidebar
+    // needs one rendered frame before its initially hidden links can take focus.
+    let focusFrame = 0;
+    const frame = requestAnimationFrame(() => {
+      focusFrame = requestAnimationFrame(() =>
+        navigationRef.current?.querySelector<HTMLElement>("a[href]")?.focus(),
+      );
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      cancelAnimationFrame(focusFrame);
+    };
+  }, [drawerOpen, navigationRef]);
+
+  const [activatedProjectId, setActivatedProjectId] = useState<string | null>(null);
   const projectContext = useQuery({
     queryKey: queryKeys.project.workspaceContext(projectId ?? "none"),
     queryFn: async () => {
       const resolved = await resolveProjectWorkspace(projectId!, getSelectedWorkspaceId());
-      // Establish the header source before child Project routes mount and start
-      // their own business queries.
-      setSelectedWorkspaceId(resolved.workspaceId);
-      setRememberedProjectId(projectId!);
       queryClient.setQueryData(queryKeys.project.detail(projectId!), resolved.project);
       return resolved;
     },
-    enabled: Boolean(projectId && projectId !== "demo"),
+    enabled: Boolean(projectId),
     retry: false,
     staleTime: 60_000,
   });
+  useEffect(() => {
+    if (!projectId || !projectContext.isSuccess) {
+      setActivatedProjectId(null);
+      return;
+    }
+    // A cached context must establish the same header source as a fresh read.
+    // Mount children only after activation, so their first request is scoped.
+    setSelectedWorkspaceId(projectContext.data.workspaceId);
+    setRememberedProjectId(projectId);
+    setActivatedProjectId(projectId);
+  }, [projectId, projectContext.isSuccess, projectContext.data]);
 
   const returnTo = validateSettingsReturnTo(location.search.returnTo);
   const navigationProjectId =
     projectId ?? (returnTo ? projectIdFromPath(returnTo.split(/[?#]/)[0]) : null);
   const projectName =
-    navigationProjectId === "demo"
-      ? "演示项目"
-      : (projectContext.data?.project.name ?? (navigationProjectId ? "当前项目" : null));
+    projectContext.data?.project.name ?? (navigationProjectId ? "当前项目" : null);
   const settingsOrigin = primary === "settings" ? returnTo : location.href;
   const settingsSearch = settingsOrigin ? { returnTo: settingsOrigin } : {};
-  const returnUrl = new URL(
-    returnTo ?? (projectId ? `/projects/${projectId}` : "/?create=false"),
-    window.location.origin,
-  );
-  const returnSearch = Object.fromEntries(returnUrl.searchParams);
-  const creationTarget =
-    primary === "creation" ? pathname : navigationProjectId ? returnUrl.pathname : "/";
+  const returnUrl = new URL(returnTo ?? "/", window.location.origin);
+  const returnSearch = defaultParseSearch(returnUrl.search);
   const creationView = creationViewFromPath(pathname);
-  const needsProjectContext = Boolean(projectId && projectId !== "demo");
+  // Return links use a stable parent (or the validated settings origin), not
+  // browser history, so they also work after a refresh or a direct visit.
+  const backTarget = pathname.startsWith("/settings/projects/")
+    ? { to: "/settings/models", search: settingsSearch, label: "返回模型设置" }
+    : primary === "settings"
+      ? {
+          to: returnUrl.pathname,
+          search: returnSearch,
+          hash: returnUrl.hash.slice(1),
+          label: navigationProjectId ? "返回工作台" : "返回我的项目",
+        }
+      : projectId && /^\/projects\/[^/]+\/scenes\/[^/]+$/.test(pathname)
+        ? { to: `/projects/${projectId}/scenes`, search: {}, label: "返回场景" }
+        : projectId && creationViewFromPath(pathname) === "review" && pathname.endsWith("/review")
+          ? { to: `/projects/${projectId}/production`, search: {}, label: "返回项目总览" }
+          : projectId || location.search.panel || location.search.create
+            ? { to: "/", search: {}, label: "返回我的项目" }
+            : null;
+  const needsProjectContext = Boolean(projectId);
   const projectContent = needsProjectContext ? (
-    projectContext.isPending ? (
+    projectContext.isPending || (!projectContext.isError && activatedProjectId !== projectId) ? (
       <main className="df-page">
         <p className="muted">正在恢复项目工作区…</p>
       </main>
@@ -190,9 +321,10 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
               ? projectContext.error.message
               : "项目可能已被删除，或当前账号已无权访问。"}
           </p>
-          <Link to="/" search={{ create: false }}>
-            返回项目大厅
+          <Link to="/" search={{ create: undefined }}>
+            返回我的项目
           </Link>
+          <Button onClick={() => void projectContext.refetch()}>重试</Button>
         </section>
       </main>
     ) : (
@@ -204,219 +336,175 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
 
   return (
     <div
-      className={`df-global-shell${secondaryOpen ? " secondary-open" : ""}`}
+      className={`df-global-shell${hasContext && secondaryOpen ? " secondary-open" : ""}`}
       data-testid="workstation-shell"
       data-primary-section={primary}
     >
-      <aside className="df-primary-sidebar">
+      <aside className="df-primary-sidebar" ref={railRef}>
         <Link
           to="/"
-          search={{ create: false }}
+          search={{ create: undefined }}
           className="df-primary-brand"
-          aria-label="DramaForge 项目大厅"
+          activeProps={{}}
+          activeOptions={{ exact: true, includeSearch: true }}
+          aria-label="DramaForge 我的项目"
         >
           <Aperture size={23} aria-hidden="true" />
         </Link>
         <nav aria-label="一级导航">
           <PrimaryLink
-            active={primary === "projects"}
-            label="项目"
+            active={primary !== "settings"}
+            label="我的项目"
             to="/"
             icon={FolderKanban}
-            onActivate={() => setSecondaryOpen(true)}
-          />
-          <PrimaryLink
-            active={primary === "creation"}
-            label="创作"
-            to={creationTarget}
-            search={navigationProjectId ? returnSearch : { create: false, panel: "select" }}
-            icon={Clapperboard}
-            onActivate={() => setSecondaryOpen(true)}
           />
           <div className="df-primary-bottom">
-            <button
-              type="button"
-              className="df-secondary-toggle"
-              onClick={() => setSecondaryOpen((open) => !open)}
-              aria-label={secondaryOpen ? "收起二级导航" : "展开二级导航"}
-              aria-expanded={secondaryOpen}
-            >
-              {secondaryOpen ? (
-                <ChevronLeft size={19} aria-hidden="true" />
-              ) : (
-                <Menu size={19} aria-hidden="true" />
-              )}
-            </button>
             <PrimaryLink
-              to="/settings/account"
+              to="/settings/models"
               search={settingsSearch}
               active={primary === "settings"}
+              expanded={secondaryOpen}
               label="设置"
               icon={Settings}
-              onActivate={() => setSecondaryOpen(true)}
+              onActivate={() => setSecondaryOpen((open) => !open)}
             />
-            <span className="df-owner-mark" aria-label="Owner 账号">
-              创
-            </span>
           </div>
         </nav>
       </aside>
 
-      <aside className="df-context-sidebar" aria-label="二级导航">
-        {primary === "projects" && (
-          <>
-            <header>
-              <span>项目</span>
-              <strong>项目大厅</strong>
-            </header>
-            <nav aria-label="项目导航">
-              <Link
-                to="/"
-                search={{ create: false }}
-                aria-current={!location.search.panel ? "page" : undefined}
-              >
-                全部项目
-              </Link>
-              <Link
-                to="/"
-                search={{ create: false, panel: "recent" }}
-                aria-current={location.search.panel === "recent" ? "page" : undefined}
-              >
-                最近打开
-              </Link>
-              <Link
-                to="/"
-                search={{ create: false, panel: "workspace" }}
-                aria-current={location.search.panel === "workspace" ? "page" : undefined}
-              >
-                按工作空间筛选
-              </Link>
-            </nav>
-            <Link className="df-context-primary-action" to="/" search={{ create: true }}>
-              新建项目
-            </Link>
-          </>
-        )}
+      {hasContext && (
+        <aside
+          id={primary === "project" ? "project-navigation" : "context-navigation"}
+          className="df-context-sidebar"
+          aria-label="二级导航"
+          ref={navigationRef}
+          role={drawerOpen ? "dialog" : undefined}
+          aria-modal={drawerOpen || undefined}
+          tabIndex={-1}
+        >
+          {primary === "project" && projectId && (
+            <>
+              <header>
+                <span>当前项目</span>
+                <strong>{projectName}</strong>
+                <Link to="/" search={{ create: undefined }} className="df-project-switcher">
+                  切换项目
+                </Link>
+              </header>
+              <nav aria-label="创作导航">
+                <ContextLink
+                  active={creationView === "production"}
+                  label={PROJECT_VIEW_LABELS.production}
+                  to={`/projects/${projectId}/production`}
+                  icon={Clapperboard}
+                />
+                <ContextLink
+                  active={creationView === "script"}
+                  label={PROJECT_VIEW_LABELS.script}
+                  step="01"
+                  to={`/projects/${projectId}/script`}
+                  icon={FileText}
+                />
+                <ContextLink
+                  active={creationView === "assets"}
+                  label={PROJECT_VIEW_LABELS.assets}
+                  step="02"
+                  to={`/projects/${projectId}/assets`}
+                  icon={Package}
+                />
+                <ContextLink
+                  active={creationView === "scenes"}
+                  label={PROJECT_VIEW_LABELS.scenes}
+                  step="03"
+                  to={`/projects/${projectId}/scenes`}
+                  icon={Film}
+                />
+                <ContextLink
+                  active={creationView === "review"}
+                  label={PROJECT_VIEW_LABELS.review}
+                  step="04"
+                  to={`/projects/${projectId}/review`}
+                  icon={CheckCheck}
+                />
+                <ContextLink
+                  active={creationView === "edit"}
+                  label={PROJECT_VIEW_LABELS.edit}
+                  step="05"
+                  to={`/projects/${projectId}/edit`}
+                  icon={Scissors}
+                />
+              </nav>
+            </>
+          )}
 
-        {primary === "creation" && projectId && (
-          <>
-            <header>
-              <span>当前项目</span>
-              <strong>{projectName}</strong>
-              <Link to="/" search={{ create: false }} className="df-project-switcher">
-                切换项目
-              </Link>
-            </header>
-            <nav aria-label="创作导航">
-              <ContextLink
-                active={creationView === "script"}
-                label="剧本"
-                to={`/projects/${projectId}/script`}
-                icon={FileText}
-              />
-              <ContextLink
-                active={creationView === "assets"}
-                label="资产"
-                to={`/projects/${projectId}/assets`}
-                icon={Package}
-              />
-              <ContextLink
-                active={creationView === "scenes"}
-                label="场景"
-                to={`/projects/${projectId}/scenes`}
-                icon={Film}
-              />
-              <ContextLink
-                active={creationView === "production"}
-                label="制作"
-                to={`/projects/${projectId}/production`}
-                icon={Clapperboard}
-              />
-              <ContextLink
-                active={creationView === "edit"}
-                label="剪辑"
-                to={`/projects/${projectId}/edit`}
-                icon={Scissors}
-              />
-            </nav>
-          </>
-        )}
+          {primary === "settings" && (
+            <>
+              <header>
+                <strong>设置</strong>
+              </header>
+              <nav aria-label="设置导航">
+                <ContextLink
+                  active={
+                    pathname === "/settings/models" || pathname.startsWith("/settings/projects/")
+                  }
+                  label="模型设置"
+                  to="/settings/models"
+                  search={settingsSearch}
+                  icon={Wrench}
+                />
+                <ContextLink
+                  active={pathname === "/settings/account"}
+                  label="账号"
+                  to="/settings/account"
+                  search={settingsSearch}
+                  icon={UserRound}
+                />
+              </nav>
+            </>
+          )}
+        </aside>
+      )}
 
-        {primary === "settings" && (
-          <>
-            <header>
-              <span>全局配置与项目配置</span>
-              <strong>设置</strong>
-              <Link
-                to={returnUrl.pathname}
-                search={returnSearch}
-                hash={returnUrl.hash.slice(1)}
-                className="df-project-switcher"
-                replace
-              >
-                {navigationProjectId ? "返回创作" : "返回项目大厅"}
-              </Link>
-            </header>
-            <nav aria-label="设置导航">
-              <span className="df-nav-scope">全局 · 跨项目配置</span>
-              <ContextLink
-                active={pathname === "/settings/account"}
-                label="账号与实例"
-                to="/settings/account"
-                search={settingsSearch}
-                icon={UserRound}
-              />
-              <ContextLink
-                active={pathname === "/settings/workspaces"}
-                label="工作空间（项目归集）"
-                to="/settings/workspaces"
-                search={settingsSearch}
-                icon={FolderKanban}
-              />
-              <ContextLink
-                active={pathname === "/settings/models"}
-                label="模型连接"
-                to="/settings/models"
-                search={settingsSearch}
-                icon={Wrench}
-              />
-              <ContextLink
-                active={pathname === "/settings/defaults"}
-                label="新项目默认偏好"
-                to="/settings/defaults"
-                search={settingsSearch}
-                icon={SlidersHorizontal}
-              />
-              {navigationProjectId && (
-                <>
-                  <span className="df-nav-scope">仅此项目</span>
-                  <Link
-                    to="/settings/projects/$projectId"
-                    params={{ projectId: navigationProjectId }}
-                    search={settingsSearch}
-                    className={pathname.startsWith("/settings/projects/") ? "active" : undefined}
-                    aria-current={pathname.startsWith("/settings/projects/") ? "page" : undefined}
-                  >
-                    <Clapperboard size={17} aria-hidden="true" />
-                    <span>项目设置</span>
-                  </Link>
-                </>
-              )}
-            </nav>
-          </>
-        )}
-      </aside>
-
-      {secondaryOpen && (
+      {hasContext && secondaryOpen && (
         <button
           type="button"
           className="df-context-scrim"
-          onClick={() => setSecondaryOpen(false)}
+          onClick={closeNavigation}
           aria-label="关闭二级导航"
         />
       )}
 
-      <div className="df-shell-content">{projectContent}</div>
+      <div className="df-shell-content" ref={contentRef}>
+        {backTarget && (
+          <nav className="df-workspace-return" aria-label="页面返回" data-testid="workspace-return">
+            <Link
+              to={backTarget.to}
+              search={backTarget.search}
+              hash={backTarget.hash}
+              activeProps={{}}
+            >
+              <ArrowLeft size={16} aria-hidden="true" />
+              {backTarget.label}
+            </Link>
+          </nav>
+        )}
+        <ProjectNavigationContext.Provider
+          value={
+            primary === "project"
+              ? {
+                  open: secondaryOpen,
+                  toggle: () => {
+                    restoreFocusPending.current = false;
+                    setSecondaryOpen((open) => !open);
+                  },
+                  triggerRef: registerProjectTrigger,
+                }
+              : null
+          }
+        >
+          {projectContent}
+        </ProjectNavigationContext.Provider>
+      </div>
     </div>
   );
 }

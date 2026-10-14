@@ -117,7 +117,7 @@ async def _video_artifact(
         idempotency_key=f"{label}-{uuid4().hex}",
         input_hash=uuid4().hex * 2,
         input_snapshot=snapshot,
-        status="completed",
+        status="queued",
         created_by=created_by,
     )
     session.add(run)
@@ -136,6 +136,7 @@ async def _video_artifact(
     session.add(artifact)
     await session.flush()
     run.result_artifact_id = artifact.id
+    run.status = "completed"
     await session.flush()
     return artifact, run
 

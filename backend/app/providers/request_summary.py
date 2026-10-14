@@ -43,9 +43,7 @@ def validate_no_secrets(value: object, *, path: str = "summary") -> None:
         for key, child in value.items():
             normalized = str(key).casefold().replace("-", "_")
             if any(fragment in normalized for fragment in _SECRET_KEY_FRAGMENTS):
-                raise RequestSummaryError(
-                    f"request summary contains forbidden key: {path}.{key}"
-                )
+                raise RequestSummaryError(f"request summary contains forbidden key: {path}.{key}")
             validate_no_secrets(child, path=f"{path}.{key}")
     elif isinstance(value, list):
         for index, child in enumerate(value):
@@ -86,28 +84,13 @@ def build_request_summary(
 
 
 def normalize_request_summary(summary: Mapping[str, Any]) -> dict[str, JsonValue]:
-    """Coerce an existing request_summary into the canonical four-key shape.
-
-    Existing keys such as ``effective_request`` / ``reference_artifact_ids`` are
-    folded into the canonical keys when the canonical ones are absent.
-    """
+    """Validate one canonical summary; retired keys are never translated."""
     body: dict[str, Any] = dict(summary)
-    if "translation_report" not in body:
-        body["translation_report"] = {}
-    if "effective_request_redacted" not in body:
-        # Keep the legacy ``effective_request`` key for backward compatibility
-        # and add the canonical redacted key (03 §41 requires the canonical key).
-        body["effective_request_redacted"] = body.get("effective_request", {})
-    if "reference_delivery" not in body:
-        delivery: list[dict[str, Any]] = []
-        artifact_ids = body.get("reference_artifact_ids")
-        if isinstance(artifact_ids, list):
-            for item in artifact_ids:
-                delivery.append(
-                    {"role": "reference", "artifact_id": str(item), "status": "delivered"}
-                )
-        body["reference_delivery"] = delivery
-    if "semantic_fingerprint" not in body:
-        body["semantic_fingerprint"] = semantic_fingerprint(body)
+    if "effective_request" in body:
+        raise RequestSummaryError("retired effective_request key is not accepted")
+    body.setdefault("translation_report", {})
+    body.setdefault("effective_request_redacted", {})
+    body.setdefault("reference_delivery", [])
+    body.setdefault("semantic_fingerprint", semantic_fingerprint(body))
     validate_no_secrets(body)
     return body
