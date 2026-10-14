@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date
 
 from app.access.models import Project, User
-from app.providers.catalog_loader import CATALOG_MODELS, ModelCatalogLoader, hash_manifest
+from app.providers.catalog_loader import ModelCatalogLoader, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.models import (
@@ -36,6 +36,19 @@ def unit_video_manifest() -> dict:
     return manifest
 
 
+def unit_image_manifest() -> dict:
+    """Controlled compiler input, not an actual supplier qualification claim."""
+    manifest = next(
+        item.as_dict()
+        for item in ModelCatalogLoader().load()
+        if item.identity[2:] == ("agnes-image-2.1-flash", "v3")
+    )
+    manifest["model_id"] = "unit-agnes-image"
+    manifest["model_revision"] = "v1"
+    manifest["display_name"] = "Controlled unit image"
+    return manifest
+
+
 async def _catalog_entry(
     session: AsyncSession,
     *,
@@ -43,16 +56,12 @@ async def _catalog_entry(
     media_kind: str,
     display_name: str,
 ) -> ModelCatalogEntry:
-    """Return the seeded catalog entry, creating it only when absent.
+    """Use distinct controlled identities on SQLite and migrated PostgreSQL.
 
-    The migration chain already seeds the official agnes catalog on PostgreSQL,
-    so an unconditional insert would violate the catalog's unique key.
+    Never reuse a historical supplier row merely because its model name matches.
     """
-    manifest = (
-        unit_video_manifest()
-        if model_id == "unit-agnes-video"
-        else next(item for item in CATALOG_MODELS if item["model_id"] == model_id)
-    )
+    manifest = unit_video_manifest() if media_kind == "video" else unit_image_manifest()
+    assert manifest["model_id"] == model_id and manifest["model_revision"] == "v1"
     existing = (
         await session.execute(
             select(ModelCatalogEntry).where(
@@ -151,7 +160,7 @@ async def seed_model_infra(session: AsyncSession, *, project: Project, user: Use
     await session.flush()
     image_entry = await _catalog_entry(
         session,
-        model_id="agnes-image-2.1-flash",
+        model_id="unit-agnes-image",
         media_kind="image",
         display_name="Agnes Image",
     )
@@ -160,7 +169,7 @@ async def seed_model_infra(session: AsyncSession, *, project: Project, user: Use
             workspace_id=project.workspace_id,
             connection_id=connection.id,
             media_type="image",
-            model_id="agnes-image-2.1-flash",
+            model_id="unit-agnes-image",
             purpose="keyframe",
             enabled=True,
             documented=True,
@@ -170,8 +179,8 @@ async def seed_model_infra(session: AsyncSession, *, project: Project, user: Use
             catalog_entry_id=image_entry.id,
             capability_manifest_hash=image_entry.contract_manifest_hash,
             remote_resource_kind="model",
-            remote_resource_id="agnes-image-2.1-flash",
-            invoke_model_value="agnes-image-2.1-flash",
+            remote_resource_id="unit-agnes-image",
+            invoke_model_value="unit-agnes-image",
             created_by=user.id,
             updated_by=user.id,
         )
@@ -186,7 +195,7 @@ async def seed_model_infra(session: AsyncSession, *, project: Project, user: Use
         },
         "visual.keyframe": {
             "slot": "visual.keyframe",
-            "model_id": "agnes-image-2.1-flash",
+            "model_id": "unit-agnes-image",
             "native_options": {},
             "enabled": True,
         },
