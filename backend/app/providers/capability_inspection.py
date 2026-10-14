@@ -14,6 +14,11 @@ from app.providers.capability_sources import (
 )
 from app.providers.catalog_loader import ModelCatalogLoader, hash_manifest
 from app.providers.catalog_publication import effective_publication_lifecycle
+from app.providers.knowledge_projection import (
+    ModelKnowledgeRead,
+    knowledge_for_model,
+    project_model_knowledge,
+)
 from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
 from app.providers.manifest import (
     CapabilitySpec,
@@ -41,6 +46,7 @@ class ModelCapabilityReport(BaseModel):
     official_sources: list[OfficialSource] = Field(default_factory=list)
     lifecycle_warnings: list[LifecycleWarning] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
+    knowledge: ModelKnowledgeRead | None = None
 
 
 def _public_spec(spec: CapabilitySpec) -> CapabilitySpec:
@@ -124,6 +130,11 @@ def inspect_manifest(
         ),
         lifecycle_warnings=lifecycle_warnings(manifest.id),
         limitations=limitations,
+        knowledge=knowledge_for_model(
+            catalog.provider_type, catalog.protocol_profile, catalog.model_id
+        )
+        if catalog
+        else None,
     )
 
 
@@ -136,6 +147,8 @@ def inspect_catalog_model(
         for item in ModelCatalogLoader().load()
         if f"{item.identity[0]}/{item.identity[2]}" == model_id
     ]
+    typed = [item for item in matching if item.as_dict().get("schema_version") == "2"]
+    matching = [item for item in matching if item.as_dict().get("schema_version", "1") == "1"]
     chosen = (
         max(matching, key=lambda item: (item.publication_lifecycle == "active", item.identity[3]))
         if matching
@@ -143,6 +156,20 @@ def inspect_catalog_model(
     )
     catalog_row = chosen.as_dict() if chosen is not None else None
     catalog = ModelCapabilityManifest.model_validate(catalog_row) if catalog_row else None
+    if catalog is None and typed:
+        candidate = max(typed, key=lambda item: item.identity[3])
+        raw = candidate.as_dict()
+        return ModelCapabilityReport(
+            model_id=model_id,
+            model_revision=candidate.identity[3],
+            manifest_version=raw["manifest_version"],
+            manifest_hash=candidate.manifest_hash,
+            catalog_lifecycle=candidate.publication_lifecycle,
+            capabilities={},
+            controls={},
+            knowledge=project_model_knowledge(raw),
+            limitations=["Knowledge candidate; no executable Compiler."],
+        )
     if registry is None:
         registry, _ = build_v3_registry()
         from app.config import get_settings

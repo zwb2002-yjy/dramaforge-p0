@@ -81,7 +81,7 @@ def _limit(
     if bound.kind == "unknown":
         raise ValueError(f"{path}: CAPABILITY_BOUND_UNKNOWN")
     _supported(manifest, raw, store, path, bound.claim_status)
-    for key in ("kind", "value"):
+    for key in ("kind", "value", "inclusive"):
         if key in raw_at(raw, path):
             _fact(manifest, raw, store, f"{path}/{key}", bound.claim_status, getattr(bound, key))
     if bound.kind == "unlimited":
@@ -91,7 +91,9 @@ def _limit(
     if value is None or not math.isfinite(value):
         raise ValueError(f"{path}: REFERENCE_METADATA_MISSING")
     assert bound.value is not None
-    if (value < bound.value) if lower else (value > bound.value):
+    if ((value < bound.value) if lower else (value > bound.value)) or (
+        not bound.inclusive and value == bound.value
+    ):
         raise ValueError(f"{path}: CAPABILITY_LIMIT_EXCEEDED")
 
 
@@ -112,9 +114,38 @@ def _parameter(
     for key in ("type", "control", "required"):
         if key in raw_at(raw, path):
             _fact(manifest, raw, store, f"{path}/{key}", spec.claim_status, getattr(spec, key))
+    dimension_value = None
+    if spec.dimension_bounds and isinstance(value, str):
+        import re
+
+        match = re.fullmatch(r"([1-9]\d*)x([1-9]\d*)", value)
+        if match:
+            width, height = (int(term) for term in match.groups())
+            dimension_value = {
+                "min_pixels": width * height,
+                "max_pixels": width * height,
+                "min_aspect_ratio": width / height,
+                "max_aspect_ratio": width / height,
+                "min_width": width,
+                "max_width": width,
+                "min_height": height,
+                "max_height": height,
+            }
+            for key, bound in spec.dimension_bounds.items():
+                if key not in dimension_value:
+                    raise ValueError("DIMENSION_BOUND_UNSUPPORTED")
+                _limit(
+                    bound,
+                    dimension_value[key],
+                    lower=key.startswith("min_"),
+                    path=f"{path}/dimension_bounds/{key}",
+                    manifest=manifest,
+                    raw=raw,
+                    store=store,
+                )
     if spec.enum:
         _fact(manifest, raw, store, f"{path}/enum", spec.claim_status, spec.enum)
-        if value not in spec.enum:
+        if value not in spec.enum and dimension_value is None:
             raise ValueError(f"{path}: PARAMETER_ENUM_MISMATCH")
     if spec.type in {"integer", "number"}:
         for key, lower in (("minimum", True), ("maximum", False)):
@@ -142,6 +173,24 @@ def _parameter(
                 raw=raw,
                 store=store,
             )
+    if spec.type == "string":
+        for key, lower in (("min_length", True), ("max_length", False)):
+            if key in raw_at(raw, path):
+                _limit(
+                    getattr(spec, key),
+                    len(value),
+                    lower=lower,
+                    path=f"{path}/{key}",
+                    manifest=manifest,
+                    raw=raw,
+                    store=store,
+                )
+    if spec.multiple_of is not None:
+        _fact(manifest, raw, store, f"{path}/multiple_of", spec.claim_status, spec.multiple_of)
+        if not isinstance(value, (float, int)) or not math.isclose(
+            value / spec.multiple_of, round(value / spec.multiple_of)
+        ):
+            raise ValueError(f"{path}: PARAMETER_MULTIPLE_MISMATCH")
 
 
 def _rules(
@@ -166,7 +215,19 @@ def _rules(
         values = {**{role: count for role, count in counts.items() if count}, **effective}
         if not all(values.get(key) == value for key, value in rule.when.items()):
             continue
-        if predicates_only and any(values.get(key) is None for key in rule.require):
+        if not all(values.get(key) is not None for key in rule.when_present):
+            continue
+        if (
+            predicates_only
+            and rule.kind == "requires_any"
+            and not any(values.get(key) is not None for key in rule.require)
+        ):
+            raise ValueError(f"{pointer}: REQUIRED_ALTERNATIVE_MISSING")
+        if (
+            predicates_only
+            and rule.kind != "requires_any"
+            and any(values.get(key) is None for key in rule.require)
+        ):
             raise ValueError(f"{pointer}: REQUIRED_VALUE_MISSING")
         if predicates_only and any(values.get(key) is not None for key in rule.forbid):
             raise ValueError(f"{pointer}: MUTUALLY_EXCLUSIVE_INPUT")
@@ -175,6 +236,14 @@ def _rules(
             for key, allowed in rule.allowed.items()
         ):
             raise ValueError(f"{pointer}: CONDITIONAL_VALUE_FORBIDDEN")
+        if predicates_only and rule.kind == "sum_limit":
+            numbers = [values.get(key, 0) for key in rule.sum_fields]
+            assert isinstance(rule.value, (int, float))
+            if (
+                any(not isinstance(value, (int, float)) for value in numbers)
+                or sum(numbers) > rule.value
+            ):
+                raise ValueError(f"{pointer}: COMBINED_COUNT_EXCEEDED")
         if rule.kind not in {"derived", "forced"}:
             continue
         value = rule.value
@@ -287,6 +356,16 @@ def _contract(
                 ("min_height", item.height, True),
                 ("max_height", item.height, False),
             ]
+            pixels = item.width * item.height if item.width and item.height else None
+            ratio = item.width / item.height if item.width and item.height else None
+            for key, value, lower in (
+                ("min_pixels", pixels, True),
+                ("max_pixels", pixels, False),
+                ("min_aspect_ratio", ratio, True),
+                ("max_aspect_ratio", ratio, False),
+            ):
+                if key in raw_at(raw, pointer):
+                    keys.append((key, value, lower))
         if item.mime_type.lower().startswith(("video/", "audio/")):
             keys += [
                 ("min_duration_seconds", item.duration_seconds, True),
@@ -336,11 +415,51 @@ def _contract(
                 raw=raw,
                 store=store,
             )
+    for role, bound in contract.min_total_duration_seconds.items():
+        items = [item for selected_role, item in references if selected_role == role]
+        if items:
+            total = (
+                sum(item.duration_seconds or 0 for item in items)
+                if all(item.duration_seconds is not None for item in items)
+                else None
+            )
+            _limit(
+                bound,
+                total,
+                lower=True,
+                path=f"{path}/min_total_duration_seconds/{role}",
+                manifest=manifest,
+                raw=raw,
+                store=store,
+            )
+    for role, bound in contract.max_total_bytes_by_role.items():
+        items = [item for selected_role, item in references if selected_role == role]
+        if items:
+            total_bytes = (
+                sum(item.byte_size or 0 for item in items)
+                if all(item.byte_size is not None for item in items)
+                else None
+            )
+            _limit(
+                bound,
+                total_bytes,
+                lower=False,
+                path=f"{path}/max_total_bytes_by_role/{role}",
+                manifest=manifest,
+                raw=raw,
+                store=store,
+            )
     declared = {**op.output_options, **contract.output_options}
     effective: dict[str, Any] = {}
     paths = {key: f"{root}/output_options/{key}" for key in op.output_options}
     paths.update({key: f"{path}/output_options/{key}" for key in contract.output_options})
     for name, spec in declared.items():
+        if (
+            spec.claim_status != "documented_supported"
+            and name not in options
+            and not spec.required
+        ):
+            continue
         if spec.required is None:
             raise ValueError(f"{paths[name]}/required: OUTPUT_REQUIREDNESS_UNKNOWN")
         _fact(manifest, raw, store, f"{paths[name]}/required", spec.claim_status, spec.required)
@@ -430,6 +549,7 @@ def resolve_typed_contract(
     options: dict[str, Any],
     policy: ProductCapabilityPolicy,
     evidence_store: SourceEvidenceStore | None,
+    prompt: str,
 ) -> ResolvedGenerationPlan:
     store = evidence_store if evidence_store is not None else load_source_evidence()
     raw = manifest.model_dump(mode="json", exclude_unset=True)
@@ -438,6 +558,19 @@ def resolve_typed_contract(
         raise CapabilityResolutionError("OPERATION_UNSUPPORTED", operation_name)
     if not operation.input_contracts:
         raise CapabilityResolutionError("INPUT_CONTRACT_NOT_DECLARED", operation_name)
+    if operation.prompt_spec is not None:
+        try:
+            _parameter(
+                "prompt",
+                prompt,
+                operation.prompt_spec,
+                f"/operations/{operation_name}/prompt_spec",
+                manifest,
+                raw,
+                store,
+            )
+        except (ValueError, KeyError) as exc:
+            raise CapabilityResolutionError("PROMPT_CONTRACT_UNSUPPORTED", str(exc)) from exc
     matches = []
     reasons = {}
     for name, contract in operation.input_contracts.items():

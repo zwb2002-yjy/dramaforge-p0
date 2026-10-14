@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from app.providers.catalog_loader import ModelCatalogLoader, hash_manifest
-from app.providers.manifest import ModelCapabilityManifest
+from app.providers.manifest import read_catalog_manifest
 
 INITIAL_PROVIDERS = frozenset({"agnes", "minimax", "volcengine"})
 IDENTITY_FIELDS = ("provider_type", "protocol_profile", "model_id", "model_revision")
@@ -266,7 +266,7 @@ def identified_claims(
             continue
         entry = entries.get(tuple(group["identity"]))
         raw = json.loads((repo / entry["path"]).read_text(encoding="utf-8")) if entry else {}
-        typed = ModelCapabilityManifest.model_validate(raw).model_dump(mode="json") if entry else {}
+        typed = read_catalog_manifest(raw).model_dump(mode="json") if entry else {}
         for value_path, value in atomic_facts(group.get("value")):
             mapping_assessed = value_path in group.get("mapping_by_value_path", {})
             pointers = group.get("mapping_by_value_path", {}).get(value_path, [])
@@ -362,7 +362,7 @@ def build_audit(
     declarations_by_field: list[dict[str, Any]] = []
     for loaded in ModelCatalogLoader(catalog).load():
         raw = loaded.as_dict()
-        typed = ModelCapabilityManifest.model_validate(raw).model_dump(
+        typed = read_catalog_manifest(raw).model_dump(
             mode="json", exclude_unset=True
         )
         key = loaded.identity
@@ -426,7 +426,7 @@ def build_audit(
             "file_sha256": hashlib.sha256(loaded.source_path.read_bytes()).hexdigest(),
             "manifest_hash": loaded.manifest_hash,
             "publication_lifecycle": loaded.publication_lifecycle,
-            "implementation_declaration": raw["implementation_status"],
+            "implementation_declaration": raw.get("implementation_status", "not_implemented"),
             "catalog_source": raw.get("catalog_source", "official_static"),
             "in_initial_scope": in_scope,
             "operations": sorted(raw["operations"]),

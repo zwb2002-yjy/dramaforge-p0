@@ -16,9 +16,9 @@ Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/
 
 来源登记、不可变来源快照和追加检查记录集中在
 `backend/app/providers/model_sources/` 的三个 JSON 文件。来源目录只保存 URL、精确适用
-范围及证据元数据，不能定义能力或替代 Manifest。当前导入的二十份哈希核验捕获均为
-`unreviewed`，型号/API/地区适用性尚未复核；HTTP 200、SDK 示例和 Compiler Fixture
-不会自动赋予字段官方支持。
+范围及证据元数据，不能定义能力或替代 Manifest。原二十份捕获保持 `unreviewed`；
+后续审核追加独立快照，十份新审核覆盖精确型号/API/地区及实际声明的字段。
+HTTP 200、SDK 示例和 Compiler Fixture 不会自动赋予字段官方支持。
 
 新合同的证据关联通过 `source_evidence.resolve_field_evidence` 解析：显式字段 override
 优先，其次最近能力/输入组，最后操作组。字段必须有自身声明状态，父组不能把未知字段
@@ -39,6 +39,17 @@ bounded / unknown / unlimited，支持未实现的编辑、延长与分层操作
 最终选项再次检查组合约束；匹配成功不注册 Compiler 或开放 Create。V2 暂为候选，
 Loader 拒绝未经实施发布的 Active。V2 Hash 排除生命周期和文档日期；V1 原算法、
 JSON、Fixture 与历史执行语义冻结不变。
+
+首批二十个型号/合同身份各有一个 V2 候选，覆盖原二十四个修订。`knowledge_projection`
+把操作、参数、逐素材/聚合限制、分组来源、未知/冲突及实施状态投影到现有查询 API，
+当前 Binding 的窄合同和附带的候选知识分别显示版本与 Hash。Candidate 的官方事实
+不提升当前绑定资格，未实施操作不注册 Runtime。编译用的参数与固定输出事实分开：
+例如帧率/产物格式和图层上限只作为协议观察；来源范围未知仍明示阻塞。
+
+`scripts/audit_model_knowledge.py` 可把冻结 Inventory 与显式审核映射对照新候选，
+分别报告身份覆盖、观察分类、结构化映射、来源证据、Compiler 和产品开放；只输出到
+新的 `tmp/` 目录，不联网、不访问数据库、不发布。来源注记和退役事实保留在报告中，
+不进入可执行能力覆盖的分母。检查日志变化不会改写既有修订。
 
 项目尚未发布。模型执行统一为文件 Catalog/Manifest、具体 ProviderModelBinding、
 Connection/Credential revision、严格 Compiler 和 ExecutionIdentitySnapshot。

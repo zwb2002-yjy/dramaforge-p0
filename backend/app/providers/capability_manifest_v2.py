@@ -30,12 +30,13 @@ class CapabilityBound(EvidenceModel):
     kind: Literal["bounded", "unlimited", "unknown"]
     value: StrictInt | StrictFloat | None = None
     claim_status: ClaimStatus = "unknown"
+    inclusive: bool = True
 
     @model_validator(mode="after")
     def validate_bound(self) -> CapabilityBound:
         if self.kind == "bounded":
-            if self.value is None or not math.isfinite(self.value) or self.value < 0:
-                raise ValueError("bounded capability requires a finite nonnegative value")
+            if self.value is None or not math.isfinite(self.value):
+                raise ValueError("bounded capability requires a finite value")
         elif self.value is not None:
             raise ValueError("unknown/unlimited bounds have no numeric value")
         if self.kind == "unknown" and self.claim_status == "documented_supported":
@@ -59,11 +60,17 @@ class TypedParameter(EvidenceModel):
     claim_status: ClaimStatus = "unknown"
     control: Literal["native", "derived", "prompt_only", "unsupported", "unknown"] = "unknown"
     required: bool | None = None
+    wire_name: str | None = None
+    multiple_of: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     enum: tuple[JsonValue, ...] = ()
     minimum: CapabilityBound = Field(default_factory=unknown_bound)
     maximum: CapabilityBound = Field(default_factory=unknown_bound)
     min_items: CapabilityBound = Field(default_factory=unknown_bound)
     max_items: CapabilityBound = Field(default_factory=unknown_bound)
+    min_length: CapabilityBound = Field(default_factory=unknown_bound)
+    max_length: CapabilityBound = Field(default_factory=unknown_bound)
+    # Structured alternative to a named size tier; unknown limits remain explicit.
+    dimension_bounds: dict[str, CapabilityBound] = Field(default_factory=dict)
     default: JsonValue = None
     default_status: ClaimStatus = "unknown"
     evidence_group_ref: str | None = None
@@ -112,6 +119,10 @@ class TypedInputSlot(EvidenceModel):
     codecs: tuple[str, ...] = ()
     aspect_ratios: tuple[str, ...] = ()
     ordering: Literal["preserve", "unknown"] = "unknown"
+    wire_field: str | None = None
+    delivery_formats: tuple[str, ...] = ()
+    wire_attributes: dict[str, JsonValue] = Field(default_factory=dict)
+    wire_options: dict[str, TypedParameter] = Field(default_factory=dict)
     max_bytes: CapabilityBound = Field(default_factory=unknown_bound)
     min_duration_seconds: CapabilityBound = Field(default_factory=unknown_bound)
     max_duration_seconds: CapabilityBound = Field(default_factory=unknown_bound)
@@ -121,11 +132,20 @@ class TypedInputSlot(EvidenceModel):
     max_height: CapabilityBound = Field(default_factory=unknown_bound)
     min_fps: CapabilityBound = Field(default_factory=unknown_bound)
     max_fps: CapabilityBound = Field(default_factory=unknown_bound)
+    min_pixels: CapabilityBound = Field(default_factory=unknown_bound)
+    max_pixels: CapabilityBound = Field(default_factory=unknown_bound)
+    min_aspect_ratio: CapabilityBound = Field(default_factory=unknown_bound)
+    max_aspect_ratio: CapabilityBound = Field(default_factory=unknown_bound)
     evidence_group_ref: str | None = None
     evidence_review: EvidenceReview | None = None
 
     @model_validator(mode="after")
     def validate_slot(self) -> TypedInputSlot:
+        if any(
+            isinstance(value, CapabilityBound) and value.value is not None and value.value < 0
+            for _name, value in self
+        ):
+            raise ValueError("input media bounds cannot be negative")
         if self.maximum.kind == "bounded" and (
             not isinstance(self.maximum.value, int)
             or (
@@ -167,9 +187,12 @@ class TypedInputSlot(EvidenceModel):
 
 
 class TypedConstraint(EvidenceModel):
-    kind: Literal["requires", "exclusion", "conditional", "derived", "forced"]
+    kind: Literal[
+        "requires", "requires_any", "exclusion", "conditional", "derived", "forced", "sum_limit"
+    ]
     claim_status: ClaimStatus = "unknown"
     when: dict[str, JsonValue] = Field(default_factory=dict)
+    when_present: tuple[str, ...] = ()
     require: tuple[str, ...] = ()
     forbid: tuple[str, ...] = ()
     allowed: dict[str, tuple[JsonValue, ...]] = Field(default_factory=dict)
@@ -177,6 +200,7 @@ class TypedConstraint(EvidenceModel):
     value: JsonValue = None
     derivation: Literal["reference_count", "reference_duration_sum"] | None = None
     description: str = ""
+    sum_fields: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def validate_rule(self) -> TypedConstraint:
@@ -184,12 +208,16 @@ class TypedConstraint(EvidenceModel):
             raise ValueError("derived/forced rules require an explicit target")
         if self.kind == "derived" and self.derivation is None:
             raise ValueError("derived rules require a supported derivation")
-        if self.kind == "requires" and not self.require:
+        if self.kind in {"requires", "requires_any"} and not self.require:
             raise ValueError("requires rule is empty")
         if self.kind == "exclusion" and not self.forbid:
             raise ValueError("exclusion rule is empty")
         if self.kind == "conditional" and not (self.allowed or self.require or self.forbid):
             raise ValueError("conditional rule is empty")
+        if self.kind == "sum_limit" and (
+            not self.sum_fields or not isinstance(self.value, (int, float))
+        ):
+            raise ValueError("sum limit requires declared fields and a numeric maximum")
         return self
 
 
@@ -200,13 +228,27 @@ class TypedInputContract(EvidenceModel):
     minimum_total_references: CapabilityBound = Field(default_factory=unknown_bound)
     maximum_total_references: CapabilityBound = Field(default_factory=unknown_bound)
     max_total_duration_seconds: dict[str, CapabilityBound] = Field(default_factory=dict)
+    min_total_duration_seconds: dict[str, CapabilityBound] = Field(default_factory=dict)
     maximum_total_bytes: CapabilityBound = Field(default_factory=unknown_bound)
+    max_total_bytes_by_role: dict[str, CapabilityBound] = Field(default_factory=dict)
     constraints: tuple[TypedConstraint, ...] = ()
     evidence_group_ref: str | None = None
     evidence_review: EvidenceReview | None = None
 
     @model_validator(mode="after")
     def validate_aggregate(self) -> TypedInputContract:
+        if any(
+            bound.value is not None and bound.value < 0
+            for bound in (
+                self.minimum_total_references,
+                self.maximum_total_references,
+                self.maximum_total_bytes,
+                *self.max_total_duration_seconds.values(),
+                *self.min_total_duration_seconds.values(),
+                *self.max_total_bytes_by_role.values(),
+            )
+        ):
+            raise ValueError("input aggregate bounds cannot be negative")
         limit = self.maximum_total_references
         if limit.kind == "bounded" and (
             not isinstance(limit.value, int)
@@ -240,6 +282,11 @@ class TypedOperation(EvidenceModel):
     input_contracts: dict[str, TypedInputContract] = Field(default_factory=dict)
     output_options: dict[str, TypedParameter] = Field(default_factory=dict)
     constraints: tuple[TypedConstraint, ...] = ()
+    maximum_request_bytes: CapabilityBound = Field(default_factory=unknown_bound)
+    # Protocol observations are knowledge; the immutable TransportProfile still
+    # owns execution and decoding. These facts do not create another runtime.
+    protocol_facts: dict[str, TypedParameter] = Field(default_factory=dict)
+    prompt_spec: TypedParameter | None = None
     evidence_group_ref: str | None = None
     evidence_review: EvidenceReview | None = None
     evidence_overrides: dict[str, EvidenceOverride] = Field(default_factory=dict)

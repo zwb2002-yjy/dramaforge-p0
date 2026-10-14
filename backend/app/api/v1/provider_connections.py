@@ -23,7 +23,12 @@ from app.providers.capability_summary import ModelCapabilitySummary, summarize_m
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_service import ModelCatalogService
 from app.providers.connection_service import ProviderConnectionService
-from app.providers.manifest import ModelCapabilityManifest
+from app.providers.knowledge_projection import (
+    ModelKnowledgeRead,
+    knowledge_for_model,
+    project_model_knowledge,
+)
+from app.providers.manifest import ModelCapabilityManifest, read_catalog_manifest
 from app.providers.models import (
     ProjectProviderBinding,
     ProviderCapabilityEvidence,
@@ -50,6 +55,7 @@ class ProviderPluginModelRead(BaseModel):
     capabilities: list[str]
     option_schema: dict[str, object]
     capability_summary: ModelCapabilitySummary
+    knowledge: ModelKnowledgeRead | None = None
 
 
 class ProviderPluginRead(BaseModel):
@@ -79,7 +85,7 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
     entries = await ModelCatalogService(session).list_entries()
     by_plugin: dict[tuple[str, str], list[ProviderPluginModelRead]] = {}
     for entry in entries:
-        manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
+        manifest = read_catalog_manifest(entry.capability_manifest_json)
         operations = entry.capability_manifest_json.get("operations") or {}
         capabilities = sorted(
             {
@@ -98,11 +104,18 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
                 media_type=entry.media_kind,
                 model_revision=entry.model_revision,
                 lifecycle=entry.lifecycle,
-                implementation_status=manifest.implementation_status,
+                implementation_status=manifest.implementation_status
+                if isinstance(manifest, ModelCapabilityManifest)
+                else "not_implemented",
                 catalog_source=entry.catalog_source,
                 capabilities=capabilities,
                 option_schema=dict(entry.option_schema_json or {}),
                 capability_summary=summarize_model_capability(manifest),
+                knowledge=knowledge_for_model(
+                    entry.provider_type, entry.protocol_profile, entry.model_id
+                )
+                if isinstance(manifest, ModelCapabilityManifest)
+                else project_model_knowledge(entry.capability_manifest_json),
             )
         )
     result: list[ProviderPluginRead] = []

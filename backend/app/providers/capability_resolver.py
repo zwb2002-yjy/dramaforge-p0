@@ -245,6 +245,7 @@ class CapabilityResolver:
                 options=options,
                 policy=policy,
                 evidence_store=evidence_store,
+                prompt=intent.prompt,
             )
         operation = manifest.operations.get(operation_name)
         if operation is None:

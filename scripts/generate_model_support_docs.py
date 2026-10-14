@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from app.providers.catalog_loader import ModelCatalogLoader
+from app.providers.capability_manifest_v2 import TypedModelCapabilityManifest
+from app.providers.manifest import read_catalog_manifest
 from app.providers.manifest import ModelCapabilityManifest, OperationManifest, ParameterSpec
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -148,7 +150,19 @@ def render_model_support(*, binding_snapshot: Path | None = None) -> str:
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for item in sorted(ModelCatalogLoader().load(), key=lambda value: value.identity):
-        manifest = ModelCapabilityManifest.model_validate(item.as_dict())
+        manifest = read_catalog_manifest(item.as_dict())
+        if isinstance(manifest, TypedModelCapabilityManifest):
+            operation = next(iter(manifest.operations.values()))
+            refs = []
+            for contract in operation.input_contracts.values():
+                for role, slot in contract.input_slots.items():
+                    refs.append(f"{role} ≤ {slot.maximum.value}" if slot.maximum.kind == "bounded"
+                                else f"{role} ({slot.maximum.kind})")
+            cells = (manifest.provider_type, f"`{manifest.model_id}` / `{manifest.model_revision}`",
+                item.publication_lifecycle, manifest.media_kind, ", ".join(sorted(set(refs))) or "unknown",
+                "typed candidate", "see Manifest", "not checked", "no (not implemented)", "not checked")
+            rows.append("| " + " | ".join(str(cell).replace("|", "\\|") for cell in cells) + " |")
+            continue
         operation = next(iter(manifest.operations.values()), None)
         refs = _references(operation) if operation is not None else "not documented"
         duration = _option(operation, "duration_seconds") if operation is not None else "—"

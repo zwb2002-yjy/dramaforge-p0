@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.providers.capability_manifest_v2 import TypedModelCapabilityManifest
 from app.providers.manifest import ModelCapabilityManifest
 from app.providers.workbench_contract import select_workbench_contract
 
@@ -28,11 +29,34 @@ class ModelCapabilitySummary(BaseModel):
     limits: dict[str, int] = Field(default_factory=dict)
 
 
-def summarize_model_capability(manifest: ModelCapabilityManifest) -> ModelCapabilitySummary:
+def summarize_model_capability(
+    manifest: ModelCapabilityManifest | TypedModelCapabilityManifest,
+) -> ModelCapabilitySummary:
     """Report Provider truth and the current Workbench subset separately."""
     if manifest.media_kind not in {"image", "video"}:
         return ModelCapabilitySummary(
             media_kind=manifest.media_kind, accepts_text_only=False, product_text_only=False
+        )
+    if isinstance(manifest, TypedModelCapabilityManifest):
+        typed_operation = manifest.operations.get(
+            "video.generate" if manifest.media_kind == "video" else "image.generate"
+        )
+        roles = VIDEO_ROLES if manifest.media_kind == "video" else IMAGE_ROLES
+        return ModelCapabilitySummary(
+            media_kind=manifest.media_kind,
+            accepts_text_only=bool(typed_operation and "text" in typed_operation.input_contracts),
+            product_text_only=False,
+            accepts={
+                role: bool(
+                    typed_operation
+                    and any(
+                        role in contract.input_slots
+                        for contract in typed_operation.input_contracts.values()
+                    )
+                )
+                for role in roles
+            },
+            product_open={role: False for role in roles},
         )
     operation = (
         manifest.operations.get("video.generate")
@@ -50,8 +74,7 @@ def summarize_model_capability(manifest: ModelCapabilityManifest) -> ModelCapabi
         accepts_text_only = any(
             contract.minimum_total_references == 0
             and all(
-                not slot.required and slot.minimum == 0
-                for slot in contract.input_slots.values()
+                not slot.required and slot.minimum == 0 for slot in contract.input_slots.values()
             )
             for contract in operation.input_contracts.values()
         )
@@ -96,9 +119,7 @@ def summarize_model_capability(manifest: ModelCapabilityManifest) -> ModelCapabi
     elif manifest.media_kind == "image":
         if operation.input_contracts:
             try:
-                select_workbench_contract(
-                    operation=operation, media_kind="image", references=[]
-                )
+                select_workbench_contract(operation=operation, media_kind="image", references=[])
             except ValueError:
                 product_text_only = False
             else:

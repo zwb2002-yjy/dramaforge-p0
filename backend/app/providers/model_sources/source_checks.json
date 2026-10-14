@@ -180,6 +180,86 @@
       "observed_content_sha256": "e4641f5f514d5dfedba58187761c520ecf7eb42f478154fb759c64185735fc22",
       "note": "No capability support or compiler certification is inferred.",
       "http_status": 200
+    },
+    {
+      "check_id": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9:5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392:knowledge-review-20261013:check",
+      "source_snapshot_ref": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9:5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392:knowledge-review-20261013",
+      "checked_at": "2026-10-13T08:51:13.537534+00:00",
+      "result": "unchanged",
+      "observed_content_sha256": "5e1b7dcde3b67e1d32d703baa54ea915020623bf2c38c1c8ebe82c57462f3392",
+      "note": "Reviewed frozen capture, no regeneration request or automatic publication."
+    },
+    {
+      "check_id": "e7b697cfe939cf0e478ee5fc1d2744ab821a6d08a2bfa2db69531de8bc9986ce:0e8bb3299b9f58f8fe76fa7f4c52db2036f8b67ed6f8c7a67c9674b445dba175:knowledge-review-20261013:check",
+      "source_snapshot_ref": "e7b697cfe939cf0e478ee5fc1d2744ab821a6d08a2bfa2db69531de8bc9986ce:0e8bb3299b9f58f8fe76fa7f4c52db2036f8b67ed6f8c7a67c9674b445dba175:knowledge-review-20261013",
+      "checked_at": "2026-10-13T08:51:13.553858+00:00",
+      "result": "unchanged",
+      "observed_content_sha256": "0e8bb3299b9f58f8fe76fa7f4c52db2036f8b67ed6f8c7a67c9674b445dba175",
+      "note": "Reviewed frozen capture, no regeneration request or automatic publication."
+    },
+    {
+      "check_id": "3eae5991171dedc94b3d69db463cd464cdeebebac729e0dea5ba24a7ad0892e5:349ac86eb9ebaf64778402203dc6d083bb71e5087a7e003d049661e444647079:knowledge-review-20261013:check",
+      "source_snapshot_ref": "3eae5991171dedc94b3d69db463cd464cdeebebac729e0dea5ba24a7ad0892e5:349ac86eb9ebaf64778402203dc6d083bb71e5087a7e003d049661e444647079:knowledge-review-20261013",
+      "checked_at": "2026-10-13T08:51:13.566587+00:00",
+      "result": "unchanged",
+      "observed_content_sha256": "349ac86eb9ebaf64778402203dc6d083bb71e5087a7e003d049661e444647079",
+      "note": "Reviewed frozen capture, no regeneration request or automatic publication."
+    },
+    {
+      "check_id": "b2dd7decb55f39042b6f7fe8dc148531db4ec03af6f2f1fb324141e54e40d3c1:5e1f6d3aba12c2094cec8db8d3b5c7d7fe81d80d7f60d5db6f63624dd8c902f1:knowledge-review-20261013:check",
+      "source_snapshot_ref": "b2dd7decb55f39042b6f7fe8dc148531db4ec03af6f2f1fb324141e54e40d3c1:5e1f6d3aba12c2094cec8db8d3b5c7d7fe81d80d7f60d5db6f63624dd8c902f1:knowledge-review-20261013",
+      "checked_at": "2026-10-13T08:51:13.574362+00:00",
+      "result": "unchanged",
+      "observed_content_sha256": "5e1f6d3aba12c2094cec8db8d3b5c7d7fe81d80d7f60d5db6f63624dd8c902f1",
+      "note": "Reviewed frozen capture, no regeneration request or automatic publication."
+    },
+    {
+      "check_id": "285e7b8a6a0342cdba33a520c46f3651f947d1afddc986032518f1da212d3810:a48a4b262f90ba669e66165acc81c381ca4bf4dc5c609aeb6c2add24f8cdcf94:knowledge-review-20261013:check",
+      "source_snapshot_ref": "285e7b8a6a0342cdba33a520c46f3651f947d1afddc986032518f1da212d3810:a48a4b262f90ba669e66165acc81c381ca4bf4dc5c609aeb6c2add24f8cdcf94:knowledge-review-20261013",
+      "checked_at": "2026-10-13T08:51:13.582271+00:00",
+      "result": "unchanged",
+      "observed_content_sha256": "a48a4b262f90ba669e66165acc81c381ca4bf4dc5c609aeb6c2add24f8cdcf94",
+      "note": "Reviewed frozen capture, no regeneration request or automatic publication."
+    },
+    {
+      "check_id": "e45b9c6bbfe915bf0c18fa180642cca69860e5da58b0cc641550ea7083d9a45f:b8d7c9cbc2acc9934918a3df0fc20ace46845f15112de62caa7d4e79296a13db:knowledge-review-20261013:check",
+      "source_snapshot_ref": "e45b9c6bbfe915bf0c18fa180642cca69860e5da58b0cc641550ea7083d9a45f:b8d7c9cbc2acc9934918a3df0fc20ace46845f15112de62caa7d4e79296a13db:knowledge-review-20261013",
+      "checked_at": "2026-10-13T08:51:13.589235+00:00",
+      "result": "unchanged",
+      "observed_content_sha256": "b8d7c9cbc2acc9934918a3df0fc20ace46845f15112de62caa7d4e79296a13db",
+      "note": "Reviewed frozen capture, no regeneration request or automatic publication."
+    },
+    {
+      "check_id": "cfbb45bca73d714e3d1a241368f70a14c1ddd6ff02ac9125e9c17e54fee20848:560183a0686d5744e7bb0b5441d02ec8ab689543cdc5697a6ce3f275aca3dc2c:knowledge-review-20261013:check",
+      "source_snapshot_ref": "cfbb45bca73d714e3d1a241368f70a14c1ddd6ff02ac9125e9c17e54fee20848:560183a0686d5744e7bb0b5441d02ec8ab689543cdc5697a6ce3f275aca3dc2c:knowledge-review-20261013",
+      "checked_at": "2026-10-13T08:51:13.593998+00:00",
+      "result": "unchanged",
+      "observed_content_sha256": "560183a0686d5744e7bb0b5441d02ec8ab689543cdc5697a6ce3f275aca3dc2c",
+      "note": "Reviewed frozen capture, no regeneration request or automatic publication."
+    },
+    {
+      "check_id": "04bb5fb311745d4da48772032b42e6f520caacfa1b43f7be28a43320747d6e38:445284962ea2ce18272646ad172b97324c2eb1c8a2a75f703cb6bb71386b06d2:knowledge-review-20261013:check",
+      "source_snapshot_ref": "04bb5fb311745d4da48772032b42e6f520caacfa1b43f7be28a43320747d6e38:445284962ea2ce18272646ad172b97324c2eb1c8a2a75f703cb6bb71386b06d2:knowledge-review-20261013",
+      "checked_at": "2026-10-13T08:51:13.601473+00:00",
+      "result": "unchanged",
+      "observed_content_sha256": "445284962ea2ce18272646ad172b97324c2eb1c8a2a75f703cb6bb71386b06d2",
+      "note": "Reviewed frozen capture, no regeneration request or automatic publication."
+    },
+    {
+      "check_id": "48229922d30cf2460937a72ef08480375273e4b2fbe331f4462d3b4d0646badd:388893ce1813a6b277faeca5b095d966854fc06442d853e21f148da2487da14e:knowledge-review-20261013:check",
+      "source_snapshot_ref": "48229922d30cf2460937a72ef08480375273e4b2fbe331f4462d3b4d0646badd:388893ce1813a6b277faeca5b095d966854fc06442d853e21f148da2487da14e:knowledge-review-20261013",
+      "checked_at": "2026-10-13T08:51:13.609978+00:00",
+      "result": "unchanged",
+      "observed_content_sha256": "388893ce1813a6b277faeca5b095d966854fc06442d853e21f148da2487da14e",
+      "note": "Reviewed frozen capture, no regeneration request or automatic publication."
+    },
+    {
+      "check_id": "5c9e2659238d3c31c18b88cb751ec6e76c87b08a49008200a6a4b64f1c212cba:ee34ed3a89c96ec202475843e6fad8babb1a5639144e5e7713dfe34b15550aed:knowledge-review-20261013:check",
+      "source_snapshot_ref": "5c9e2659238d3c31c18b88cb751ec6e76c87b08a49008200a6a4b64f1c212cba:ee34ed3a89c96ec202475843e6fad8babb1a5639144e5e7713dfe34b15550aed:knowledge-review-20261013",
+      "checked_at": "2026-10-13T08:51:13.616027+00:00",
+      "result": "unchanged",
+      "observed_content_sha256": "ee34ed3a89c96ec202475843e6fad8babb1a5639144e5e7713dfe34b15550aed",
+      "note": "Reviewed frozen capture, no regeneration request or automatic publication."
     }
   ]
 }

@@ -11,6 +11,7 @@ from app.providers.source_evidence import (
     SourceRecord,
     SourceScope,
     SourceSnapshot,
+    capability_claim_paths,
     load_source_evidence,
     resolve_field_evidence,
     reviewed_manifest_subtree_hash,
@@ -322,14 +323,21 @@ def test_more_specific_override_wins_independent_of_mapping_order():
     assert _resolve(manifest, store).blocker == "CLAIM_CONFLICTING"
 
 
-def test_packaged_baseline_has_real_capture_hashes_but_no_reviewed_support():
+def test_original_baseline_captures_are_not_rewritten_by_later_reviews():
     store = load_source_evidence()
-    assert len(store.sources) == len(store.snapshots) == len(store.checks) == 20
-    assert len({source.url for source in store.sources}) == 20
-    assert all(snapshot.review_status == "unreviewed" for snapshot in store.snapshots)
+    # The original captures remain unreviewed; new reviewed snapshots append
+    # separate identities rather than rewriting the stage-two evidence.
+    baseline_snapshots = store.snapshots[:20]
+    baseline_checks = store.checks[:20]
+    assert len(baseline_snapshots) == len(baseline_checks) == 20
+    assert len({source.url for source in store.sources}) == len(store.sources)
+    assert all(snapshot.review_status == "unreviewed" for snapshot in baseline_snapshots)
     assert all(snapshot.content_sha256 for snapshot in store.snapshots)
-    assert all(not snapshot.reviewed_scopes for snapshot in store.snapshots)
-    assert all(not scope.is_exact() for source in store.sources for scope in source.applies_to)
+    assert all(not snapshot.reviewed_scopes for snapshot in baseline_snapshots)
+    assert all(
+        check.source_snapshot_ref in {s.source_snapshot_id for s in baseline_snapshots}
+        for check in baseline_checks
+    )
 
 
 def test_unchecked_source_projection_has_null_date_and_does_not_claim_support(monkeypatch):
@@ -383,7 +391,17 @@ def test_constraint_parameter_names_are_never_stripped_as_audit_metadata(rule):
     assert reviewed_manifest_subtree_hash(manifest, OP) != before
 
 
-@pytest.mark.parametrize("mapping", ["common_options", "native_options", "options"])
+@pytest.mark.parametrize(
+    "mapping",
+    [
+        "common_options",
+        "native_options",
+        "options",
+        "protocol_facts",
+        "wire_options",
+        "dimension_bounds",
+    ],
+)
 def test_actual_manifest_parameter_mappings_keep_reserved_parameter_names(mapping):
     manifest, _store = _fixture()
     op = manifest["operations"]["video.generate"]
@@ -391,6 +409,35 @@ def test_actual_manifest_parameter_mappings_keep_reserved_parameter_names(mappin
     digest = reviewed_manifest_subtree_hash(manifest, OP)
     op[mapping]["checked_at"]["default"] = "second"
     assert reviewed_manifest_subtree_hash(manifest, OP) != digest
+
+
+def test_wire_attribute_literals_are_hashed_without_becoming_evidence_overrides():
+    manifest, _store = _fixture()
+    op = manifest["operations"]["video.generate"]
+    op["wire_attributes"] = {
+        "evidence_overrides": {"literal": "first"},
+        "source_url": "wire value",
+    }
+    digest = reviewed_manifest_subtree_hash(manifest, OP)
+    op["wire_attributes"]["evidence_overrides"]["literal"] = "second"
+    assert reviewed_manifest_subtree_hash(manifest, OP) != digest
+
+
+def test_claim_paths_ignore_literals_and_keep_reserved_parameter_names():
+    manifest, _store = _fixture()
+    op = manifest["operations"]["video.generate"]
+    op["protocol_facts"] = {
+        "source_url": {
+            "type": "object",
+            "claim_status": "documented_supported",
+            "default": {"claim_status": "documented_supported", "kind": "unknown"},
+        }
+    }
+    op["wire_attributes"] = {"claim_status": "conflicting", "kind": "unknown"}
+    paths = capability_claim_paths(manifest)
+    assert f"{OP}/protocol_facts/source_url" in paths
+    assert len(paths) == 10
+    assert not any("/default" in path or "/wire_attributes" in path for path in paths)
 
 
 @pytest.mark.parametrize(

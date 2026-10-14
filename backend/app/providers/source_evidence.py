@@ -7,6 +7,7 @@ import json
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -208,6 +209,12 @@ _NAMED_FIELDS = frozenset(
         "modes",
         "capability_specs",
         "reference_constraints",
+        "protocol_facts",
+        "wire_options",
+        "dimension_bounds",
+        "max_total_duration_seconds",
+        "min_total_duration_seconds",
+        "max_total_bytes_by_role",
     }
 )
 _LITERAL_FIELDS = frozenset(
@@ -222,6 +229,7 @@ _LITERAL_FIELDS = frozenset(
         "conditional",
         "derived",
         "forced",
+        "wire_attributes",
     }
 )
 
@@ -296,9 +304,60 @@ def _effective_tree(manifest: dict[str, Any]) -> Any:
 
 def reviewed_manifest_subtree_hash(manifest: dict[str, Any], covers: str) -> str:
     """Hash the effective capability subtree, including exception support states."""
-    subtree = _at(_effective_tree(manifest), _segments(covers))
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return _cached_subtree_hash(canonical, covers)
+
+
+@lru_cache(maxsize=256)
+def _cached_subtree_hash(canonical: str, covers: str) -> str:
+    tree, _ = _cached_evidence_layout(canonical)
+    subtree = _at(tree, _segments(covers))
     content = json.dumps(subtree, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(content.encode()).hexdigest()
+
+
+@lru_cache(maxsize=64)
+def _cached_evidence_layout(
+    canonical: str,
+) -> tuple[Any, dict[tuple[str, ...], tuple[int, dict[str, Any]]]]:
+    # Key every semantic and audit byte. Editing a bound, override or review
+    # creates another key, so a cached review cannot bless changed facts.
+    manifest = json.loads(canonical)
+    return _effective_tree(manifest), _overrides(manifest)
+
+
+def evidence_override_paths(manifest: dict[str, Any]) -> tuple[str, ...]:
+    """Expose the same resolved override targets used by hashing and validation."""
+    return tuple(
+        "/" + "/".join(part.replace("~", "~0").replace("/", "~1") for part in target)
+        for target in sorted(_overrides(manifest))
+    )
+
+
+def capability_claim_paths(manifest: dict[str, Any]) -> tuple[str, ...]:
+    """Locate declared fact groups, excluding literal values and audit metadata."""
+    paths: list[str] = []
+
+    def visit(node: Any, path: tuple[str, ...], *, named: bool = False) -> None:
+        if isinstance(node, list):
+            for index, child in enumerate(node):
+                visit(child, (*path, str(index)))
+            return
+        if not isinstance(node, dict):
+            return
+        if not named and "claim_status" in node:
+            paths.append(
+                "/" + "/".join(part.replace("~", "~0").replace("/", "~1") for part in path)
+            )
+        for key, child in node.items():
+            if not named and (
+                key in _AUDIT_KEYS or key in _LITERAL_FIELDS or key == "evidence_overrides"
+            ):
+                continue
+            visit(child, (*path, key), named=not named and key in _NAMED_FIELDS)
+
+    visit(manifest.get("operations", {}), ("operations",), named=True)
+    return tuple(paths)
 
 
 def _segments(pointer: str) -> list[str]:
@@ -315,12 +374,21 @@ def _segments(pointer: str) -> list[str]:
 def _at(tree: Any, segments: list[str]) -> Any:
     for segment in segments:
         if isinstance(tree, list):
-            if not segment.isdecimal() or (len(segment) > 1 and segment.startswith("0")):
+            if (
+                not segment.isascii()
+                or not segment.isdecimal()
+                or (len(segment) > 1 and segment.startswith("0"))
+            ):
                 raise ValueError("invalid JSON pointer array index")
             tree = tree[int(segment)]
         else:
             tree = tree[segment]
     return tree
+
+
+def read_capability_pointer(manifest: dict[str, Any], pointer: str) -> Any:
+    """Read a declared value using the same strict pointer syntax as evidence."""
+    return _at(manifest, _segments(pointer))
 
 
 @dataclass(frozen=True)
@@ -355,9 +423,11 @@ def resolve_field_evidence(
             continue
         if binding is None and ("evidence_group_ref" in node or "source_snapshot_ref" in node):
             binding, binding_depth = node, depth
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    effective, resolved_overrides = _cached_evidence_layout(canonical)
     override_matches = [
         (len(target), owner, override)
-        for target, (owner, override) in _overrides(manifest).items()
+        for target, (owner, override) in resolved_overrides.items()
         if tuple(parts[: len(target)]) == target
     ]
     if override_matches:
@@ -368,7 +438,6 @@ def resolve_field_evidence(
     reference = binding.get("source_snapshot_ref") or binding.get("evidence_group_ref")
     declared_status: ClaimStatus = "unknown"
     field_status_found = False
-    effective = _effective_tree(manifest)
     for depth in range(len(parts), binding_depth, -1):
         node = _at(effective, parts[:depth])
         if isinstance(node, dict) and "claim_status" in node:
