@@ -46,6 +46,30 @@ def unit_image_manifest() -> dict:
     manifest["model_id"] = "unit-agnes-image"
     manifest["model_revision"] = "v1"
     manifest["display_name"] = "Controlled unit image"
+    # The mock model serves both portrait repair and landscape delivery tests.
+    # Declare those choices through the compiler's implemented input-contract
+    # seam, rather than borrowing the supplier's fixed portrait output contract.
+    operation = manifest["operations"]["image.generate"]
+    operation.pop("output_constraints", None)
+    operation.pop("reference_constraints", None)
+    operation["input_contracts"] = {
+        "single_reference": {
+            "input_slots": {
+                "reference_image": {"minimum": 0, "maximum": 1, "media_types": ["image/*"]}
+            },
+            "common_options": {
+                "size": {"type": "string", "default": "1K", "enum": ["1K"]},
+                "aspect_ratio": {
+                    "type": "string",
+                    "default": "9:16",
+                    "enum": ["9:16", "16:9"],
+                },
+            },
+            "native_options": {
+                "response_format": {"type": "string", "default": "url", "enum": ["url"]}
+            },
+        }
+    }
     return manifest
 
 

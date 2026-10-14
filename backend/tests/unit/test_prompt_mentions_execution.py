@@ -339,7 +339,7 @@ async def test_single_image_manifest_rejects_multi_reference_requests(session):
         await WorkbenchExecutionService(session, user_id=user.id).build_plan(
             project=project, execution_input=command
         )
-    assert "capability gaps" in str(failure.value)
+    assert failure.value.details["code"] == "MODEL_INPUT_COMBINATION_UNSUPPORTED"
     assert await session.scalar(select(func.count()).select_from(NodeRun)) == 0
 
 
