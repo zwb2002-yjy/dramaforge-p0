@@ -379,6 +379,7 @@ class ExecutionModelResolver:
                 status="UNAVAILABLE",
                 reason=blocker,
                 provider_model_binding_id=concrete.binding.id,
+                invoke_model_value=concrete.binding.invoke_model_value,
                 provider_connection_id=concrete.connection.id,
                 catalog_entry_id=entry.id,
                 model_revision=entry.model_revision,

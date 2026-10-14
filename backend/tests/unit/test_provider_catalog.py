@@ -27,7 +27,11 @@ from app.providers.capabilities import Capability
 from app.providers.catalog_loader import CATALOG_MODELS, ModelCatalogLoader, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_service import ModelCatalogService
-from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
+from app.providers.manifest import (
+    ModelCapabilityManifest,
+    read_catalog_manifest,
+    to_v3_model_manifest,
+)
 from app.shared.base import Base
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -229,8 +233,16 @@ def test_packaged_preview_catalog_has_model_evidence_and_no_active_collision() -
     active = {item.identity for item in loaded if item.publication_lifecycle == "active"}
     for item in previews:
         assert item.identity not in active
-        manifest = ModelCapabilityManifest.model_validate(item.as_dict())
+        manifest = read_catalog_manifest(item.as_dict())
         assert manifest.lifecycle == "preview"
+        if not isinstance(manifest, ModelCapabilityManifest):
+            from app.providers.knowledge_projection import project_model_knowledge
+
+            report = project_model_knowledge(item.as_dict())
+            assert report.product_open is False
+            assert report.implementation_status == "not_implemented"
+            assert report.blockers
+            continue
         assert manifest.implementation_status in {"discovered", "documented", "contract_tested"}
         assert manifest.evidence
         assert all(

@@ -200,7 +200,7 @@ async def test_explicit_binding_freezes_concrete_identity(session: AsyncSession)
 
 
 @pytest.mark.asyncio
-async def test_protocol_contract_preserves_discovered_model_id_with_slash(
+async def test_unverified_protocol_is_blocked_without_replacing_discovered_id_with_slash(
     session: AsyncSession,
 ) -> None:
     project, binding, _user = await _seed(session)
@@ -215,8 +215,11 @@ async def test_protocol_contract_preserves_discovered_model_id_with_slash(
 
     result = await _resolve(session, project, requested_binding_id=binding.id)
 
-    assert result.status == "RESOLVED"
-    assert result.resolved_model_id == "agnes/vendor/video-model"
+    assert result.status == "UNAVAILABLE"
+    assert result.reason == "DYNAMIC_MODEL_CAPABILITY_UNVERIFIED"
+    assert result.requested_model_id == "agnes/vendor/video-model"
+    assert result.resolved_model_id is None
+    assert result.provider_model_binding_id == binding.id
     assert result.invoke_model_value == "vendor/video-model"
 
 
