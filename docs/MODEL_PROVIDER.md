@@ -12,6 +12,12 @@ Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/
 改写旧能力 JSON/Hash。Agnes Video V2.0 已按官方页面下线声明阻断新 Create；历史身份
 和素材保留。无法匹配已冻结 Handler 的历史任务必须人工核对，不自动重发。
 
+首批六个既有 Active 官方修订的可执行字段尚缺完整官方审核，已在同一发布事件文件
+登记精确 revision/hash 的 `MODEL_OFFICIAL_EVIDENCE_GAP` 新 Create 限制。该限制由
+候选资格、模型解析和提交前准入共同消费，不改变 lifecycle、Binding 或旧 Manifest。
+只读查询仍显示冻结合同与候选知识，纯 Provider Compiler Fixture 可离线检查；候选
+知识和账号目录成功均不能解除该冻结修订的限制。已提交任务的恢复不读取新准入事件。
+
 ## 当前唯一模型执行系统
 
 来源登记、不可变来源快照和追加检查记录集中在
@@ -86,7 +92,8 @@ Catalog 字段保留数量仅说明读取结果；声明值映射的分母是明
 SourceAnnotation 不进入能力分母，枚举值按一项事实统计。未评估、明确缺失和值失配
 分别计数；未录入逐事实映射审核时不报告 0% 覆盖。路径和值吻合不认证完整 typed 合同
 或 Compiler 实施。现有来源缺少审核
-覆盖时，审计状态为 `unknown`，不改变既有合同或自动禁用当前 Binding。
+覆盖时，审计状态为 `unknown`，不改变既有合同或自动停用当前 Binding。
+发布验收要求的显式新 Create 限制由发布事件投影单独报告，不把限制伪装为型号退役。
 
 在 backend 质量容器的锁定环境中，以 `/workspace` 为工作目录运行：
 

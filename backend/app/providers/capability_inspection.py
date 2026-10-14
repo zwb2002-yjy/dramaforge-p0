@@ -13,7 +13,10 @@ from app.providers.capability_sources import (
     official_sources,
 )
 from app.providers.catalog_loader import ModelCatalogLoader, hash_manifest
-from app.providers.catalog_publication import effective_publication_lifecycle
+from app.providers.catalog_publication import (
+    catalog_new_create_blocker,
+    effective_publication_lifecycle,
+)
 from app.providers.knowledge_projection import (
     ModelKnowledgeRead,
     knowledge_for_model,
@@ -47,6 +50,7 @@ class ModelCapabilityReport(BaseModel):
     lifecycle_warnings: list[LifecycleWarning] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
     knowledge: ModelKnowledgeRead | None = None
+    new_create_blocker: str | None = None
 
 
 def _public_spec(spec: CapabilitySpec) -> CapabilitySpec:
@@ -130,6 +134,17 @@ def inspect_manifest(
         ),
         lifecycle_warnings=lifecycle_warnings(manifest.id),
         limitations=limitations,
+        new_create_blocker=catalog_new_create_blocker(
+            catalog.provider_type,
+            catalog.protocol_profile,
+            catalog.model_id,
+            catalog.model_revision,
+            catalog_hash or "",
+            lifecycle=catalog.lifecycle,
+            catalog_source=catalog.catalog_source,
+        )
+        if catalog
+        else None,
         knowledge=knowledge_for_model(
             catalog.provider_type, catalog.protocol_profile, catalog.model_id
         )

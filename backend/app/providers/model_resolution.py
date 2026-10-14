@@ -360,6 +360,33 @@ class ExecutionModelResolver:
                 mode_id=mode_id,
                 native_options=native_options,
             )
+        from app.providers.catalog_publication import catalog_new_create_blocker
+
+        blocker = catalog_new_create_blocker(
+            entry.provider_type,
+            entry.protocol_profile,
+            entry.model_id,
+            entry.model_revision,
+            entry.contract_manifest_hash,
+            schema_version=entry.capability_manifest_json.get("schema_version", "1"),
+            lifecycle=entry.lifecycle,
+            catalog_source=entry.catalog_source,
+        )
+        if blocker:
+            return ExecutionModelResolution(
+                requested_model_id=requested_model_id,
+                source=source,
+                status="UNAVAILABLE",
+                reason=blocker,
+                provider_model_binding_id=concrete.binding.id,
+                provider_connection_id=concrete.connection.id,
+                catalog_entry_id=entry.id,
+                model_revision=entry.model_revision,
+                manifest_hash=entry.contract_manifest_hash,
+                capability=capability,
+                mode_id=mode_id,
+                native_options=native_options,
+            )
         return ExecutionModelResolution(
             requested_model_id=requested_model_id,
             resolved_model_id=self._model_identity(concrete),

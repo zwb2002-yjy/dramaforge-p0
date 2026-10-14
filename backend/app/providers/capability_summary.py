@@ -31,6 +31,8 @@ class ModelCapabilitySummary(BaseModel):
 
 def summarize_model_capability(
     manifest: ModelCapabilityManifest | TypedModelCapabilityManifest,
+    *,
+    new_create_blocker: str | None = None,
 ) -> ModelCapabilitySummary:
     """Report Provider truth and the current Workbench subset separately."""
     if manifest.media_kind not in {"image", "video"}:
@@ -92,7 +94,11 @@ def summarize_model_capability(
                 accepts[role] = True
                 limits[role] = constraint.max
     product_open = {role: False for role in roles}
-    if manifest.lifecycle != "active" or manifest.implementation_status != "contract_tested":
+    if (
+        new_create_blocker
+        or manifest.lifecycle != "active"
+        or manifest.implementation_status != "contract_tested"
+    ):
         return ModelCapabilitySummary(
             media_kind=manifest.media_kind,
             accepts_text_only=accepts_text_only,

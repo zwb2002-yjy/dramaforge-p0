@@ -21,6 +21,10 @@ from app.api.deps import (
 )
 from app.providers.capability_summary import ModelCapabilitySummary, summarize_model_capability
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.catalog_publication import (
+    catalog_new_create_blocker,
+    effective_publication_lifecycle,
+)
 from app.providers.catalog_service import ModelCatalogService
 from app.providers.connection_service import ProviderConnectionService
 from app.providers.knowledge_projection import (
@@ -56,6 +60,7 @@ class ProviderPluginModelRead(BaseModel):
     option_schema: dict[str, object]
     capability_summary: ModelCapabilitySummary
     knowledge: ModelKnowledgeRead | None = None
+    new_create_blocker: str | None = None
 
 
 class ProviderPluginRead(BaseModel):
@@ -86,6 +91,16 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
     by_plugin: dict[tuple[str, str], list[ProviderPluginModelRead]] = {}
     for entry in entries:
         manifest = read_catalog_manifest(entry.capability_manifest_json)
+        blocker = catalog_new_create_blocker(
+            entry.provider_type,
+            entry.protocol_profile,
+            entry.model_id,
+            entry.model_revision,
+            entry.contract_manifest_hash,
+            schema_version=entry.capability_manifest_json.get("schema_version", "1"),
+            lifecycle=entry.lifecycle,
+            catalog_source=entry.catalog_source,
+        )
         operations = entry.capability_manifest_json.get("operations") or {}
         capabilities = sorted(
             {
@@ -103,14 +118,17 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
                 display_name=entry.display_name,
                 media_type=entry.media_kind,
                 model_revision=entry.model_revision,
-                lifecycle=entry.lifecycle,
+                lifecycle=effective_publication_lifecycle(
+                    entry.provider_type, entry.protocol_profile, entry.model_id, entry.lifecycle
+                ),
                 implementation_status=manifest.implementation_status
                 if isinstance(manifest, ModelCapabilityManifest)
                 else "not_implemented",
                 catalog_source=entry.catalog_source,
                 capabilities=capabilities,
                 option_schema=dict(entry.option_schema_json or {}),
-                capability_summary=summarize_model_capability(manifest),
+                capability_summary=summarize_model_capability(manifest, new_create_blocker=blocker),
+                new_create_blocker=blocker,
                 knowledge=knowledge_for_model(
                     entry.provider_type, entry.protocol_profile, entry.model_id
                 )

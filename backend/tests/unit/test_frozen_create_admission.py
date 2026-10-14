@@ -176,3 +176,43 @@ async def test_reviewed_retirement_blocks_even_when_database_lifecycle_is_stale(
         await require_frozen_create_admission(session, identity)
     assert exc.value.details["code"] == "MODEL_CREATE_NOT_ALLOWED"
     assert entry.lifecycle == "active"
+
+
+async def test_visible_account_and_compiler_fixture_do_not_close_official_field_evidence_gap(
+    session,
+):
+    from app.providers.catalog_loader import ModelCatalogLoader
+
+    identity, connection, binding, projection = await _setup(session)
+    loaded = next(
+        item
+        for item in ModelCatalogLoader().load()
+        if item.identity[2:] == ("doubao-seedance-1-0-pro-250528", "v2")
+    )
+    entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+    entry.provider_type, entry.protocol_profile, entry.model_id, entry.model_revision = (
+        loaded.identity
+    )
+    entry.capability_manifest_json = loaded.as_dict()
+    entry.contract_manifest_hash = binding.capability_manifest_hash = loaded.manifest_hash
+    binding.model_id = binding.invoke_model_value = entry.model_id
+    connection.provider_type, connection.protocol_profile = loaded.identity[:2]
+    projection.remote_model_id = entry.model_id
+    evidence = await session.get(ProviderAvailabilityEvidence, projection.positive_evidence_id)
+    evidence.remote_model_id = entry.model_id
+    evidence.listed_model_ids_json = [entry.model_id]
+    await session.flush()
+    assert binding.account_verified and binding.contract_tested and entry.lifecycle == "active"
+    with pytest.raises(ValidationAppError) as exc:
+        await require_frozen_create_admission(
+            session,
+            identity.model_copy(
+                update={
+                    "model_revision": entry.model_revision,
+                    "manifest_hash": loaded.manifest_hash,
+                    "invoke_model_value": entry.model_id,
+                }
+            ),
+        )
+    assert exc.value.details["code"] == "MODEL_OFFICIAL_EVIDENCE_GAP"
+    assert projection.effective_status == "visible" and entry.lifecycle == "active"

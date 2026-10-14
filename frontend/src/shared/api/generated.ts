@@ -5265,6 +5265,8 @@ export interface components {
             /** Limitations */
             limitations?: string[];
             knowledge?: components["schemas"]["ModelKnowledgeRead"] | null;
+            /** New Create Blocker */
+            new_create_blocker?: string | null;
         };
         /** ModelCapabilitySummary */
         ModelCapabilitySummary: {
@@ -5367,6 +5369,8 @@ export interface components {
             configured: boolean;
             /** Available */
             available: boolean;
+            /** Availability Reason */
+            availability_reason?: string | null;
             /** Capabilities */
             capabilities: string[];
             /**
@@ -6374,6 +6378,8 @@ export interface components {
             };
             capability_summary: components["schemas"]["ModelCapabilitySummary"];
             knowledge?: components["schemas"]["ModelKnowledgeRead"] | null;
+            /** New Create Blocker */
+            new_create_blocker?: string | null;
         };
         /** ProviderPluginRead */
         ProviderPluginRead: {

@@ -12,5 +12,83 @@
     "source_locator": "Page title / navigation heading",
     "captured_content_sha256": "560183a0686d5744e7bb0b5441d02ec8ab689543cdc5697a6ce3f275aca3dc2c",
     "reviewed_statement": "Agnes Video V2.0（已下线）"
+  },
+  {
+    "event_id": "official-field-evidence-gap-dee74a67d40756264a3b",
+    "provider_type": "agnes",
+    "protocol_profile": "agnes_cn_v1",
+    "model_id": "agnes-image-2.1-flash",
+    "model_revision": "v3",
+    "contract_manifest_hash": "dee74a67d40756264a3b872c06704de215aeb484be70a01f4bca5b3077c46625",
+    "audit_inventory_sha256": "4760288ab2fc008388fd0bab3b8bff9d1df58e60f10b9314d478b75013c544a4",
+    "new_create_blocker": "MODEL_OFFICIAL_EVIDENCE_GAP",
+    "reviewed_at": "2026-10-14T03:01:07.271896+00:00",
+    "reviewed_by": "Codex under Owner knowledge-base completion request",
+    "reason": "Frozen V1 has reproducible compiler fixtures but lacks reviewed official provenance for every executable field. Typed Preview facts cannot qualify this old revision. Block only new Create; preserve lifecycle, Binding and submitted-task recovery."
+  },
+  {
+    "event_id": "official-field-evidence-gap-7a5e1e29fdbbb26a1a78",
+    "provider_type": "volcengine",
+    "protocol_profile": "ark_cn_v1",
+    "model_id": "doubao-seedream-4-0-250828",
+    "model_revision": "v3",
+    "contract_manifest_hash": "7a5e1e29fdbbb26a1a78f5aa8a2faf903ca094e89a387d0dbe389cfb5c423372",
+    "audit_inventory_sha256": "4760288ab2fc008388fd0bab3b8bff9d1df58e60f10b9314d478b75013c544a4",
+    "new_create_blocker": "MODEL_OFFICIAL_EVIDENCE_GAP",
+    "reviewed_at": "2026-10-14T03:01:07.273450+00:00",
+    "reviewed_by": "Codex under Owner knowledge-base completion request",
+    "reason": "Frozen V1 has reproducible compiler fixtures but lacks reviewed official provenance for every executable field. Typed Preview facts cannot qualify this old revision. Block only new Create; preserve lifecycle, Binding and submitted-task recovery."
+  },
+  {
+    "event_id": "official-field-evidence-gap-a2dd844b76fb0288b1f8",
+    "provider_type": "volcengine",
+    "protocol_profile": "ark_cn_v1",
+    "model_id": "doubao-seedance-1-0-pro-250528",
+    "model_revision": "v2",
+    "contract_manifest_hash": "a2dd844b76fb0288b1f85d82935f42c0435421e35c6d4c576ad8ea7ab99f6b40",
+    "audit_inventory_sha256": "4760288ab2fc008388fd0bab3b8bff9d1df58e60f10b9314d478b75013c544a4",
+    "new_create_blocker": "MODEL_OFFICIAL_EVIDENCE_GAP",
+    "reviewed_at": "2026-10-14T03:01:07.273450+00:00",
+    "reviewed_by": "Codex under Owner knowledge-base completion request",
+    "reason": "Frozen V1 has reproducible compiler fixtures but lacks reviewed official provenance for every executable field. Typed Preview facts cannot qualify this old revision. Block only new Create; preserve lifecycle, Binding and submitted-task recovery."
+  },
+  {
+    "event_id": "official-field-evidence-gap-e3c3cf3d1761a1d9afab",
+    "provider_type": "volcengine",
+    "protocol_profile": "ark_cn_v1",
+    "model_id": "doubao-seedance-2-0-260128",
+    "model_revision": "v3",
+    "contract_manifest_hash": "e3c3cf3d1761a1d9afaba94fc90537b6ceac4af75e7e8f986781504a27935169",
+    "audit_inventory_sha256": "4760288ab2fc008388fd0bab3b8bff9d1df58e60f10b9314d478b75013c544a4",
+    "new_create_blocker": "MODEL_OFFICIAL_EVIDENCE_GAP",
+    "reviewed_at": "2026-10-14T03:01:07.273450+00:00",
+    "reviewed_by": "Codex under Owner knowledge-base completion request",
+    "reason": "Frozen V1 has reproducible compiler fixtures but lacks reviewed official provenance for every executable field. Typed Preview facts cannot qualify this old revision. Block only new Create; preserve lifecycle, Binding and submitted-task recovery."
+  },
+  {
+    "event_id": "official-field-evidence-gap-82fd2ab4186f236c6cd2",
+    "provider_type": "minimax",
+    "protocol_profile": "minimax_cn_v1",
+    "model_id": "image-01",
+    "model_revision": "v3",
+    "contract_manifest_hash": "82fd2ab4186f236c6cd2a2a81134cc205715d3d72ad43a8a8c187a9331530184",
+    "audit_inventory_sha256": "4760288ab2fc008388fd0bab3b8bff9d1df58e60f10b9314d478b75013c544a4",
+    "new_create_blocker": "MODEL_OFFICIAL_EVIDENCE_GAP",
+    "reviewed_at": "2026-10-14T03:01:07.273450+00:00",
+    "reviewed_by": "Codex under Owner knowledge-base completion request",
+    "reason": "Frozen V1 has reproducible compiler fixtures but lacks reviewed official provenance for every executable field. Typed Preview facts cannot qualify this old revision. Block only new Create; preserve lifecycle, Binding and submitted-task recovery."
+  },
+  {
+    "event_id": "official-field-evidence-gap-d396524de99e0d65868f",
+    "provider_type": "minimax",
+    "protocol_profile": "minimax_cn_v1",
+    "model_id": "MiniMax-H3",
+    "model_revision": "v4",
+    "contract_manifest_hash": "d396524de99e0d65868f8291caaf1acf14c7f5383e15e77a277cf37b7bb4c3a6",
+    "audit_inventory_sha256": "4760288ab2fc008388fd0bab3b8bff9d1df58e60f10b9314d478b75013c544a4",
+    "new_create_blocker": "MODEL_OFFICIAL_EVIDENCE_GAP",
+    "reviewed_at": "2026-10-14T03:01:07.273450+00:00",
+    "reviewed_by": "Codex under Owner knowledge-base completion request",
+    "reason": "Frozen V1 has reproducible compiler fixtures but lacks reviewed official provenance for every executable field. Typed Preview facts cannot qualify this old revision. Block only new Create; preserve lifecycle, Binding and submitted-task recovery."
   }
 ]

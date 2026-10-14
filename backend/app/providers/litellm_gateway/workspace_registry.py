@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.catalog_publication import catalog_new_create_blocker
 from app.providers.litellm_adapter import LiteLLMModelAdapter
 from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
 from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
@@ -107,6 +108,8 @@ async def workspace_model_registry(
         )
     ).all()
     for binding, connection, catalog in bound_media:
+        if catalog.capability_manifest_json.get("schema_version", "1") != "1":
+            continue  # Typed knowledge has no registered executable media adapter.
         if binding.capability_manifest_hash != catalog.contract_manifest_hash:
             continue
         if hash_manifest(catalog.capability_manifest_json) != catalog.contract_manifest_hash:
@@ -125,6 +128,16 @@ async def workspace_model_registry(
                 "binding_id": str(binding.id),
                 "connection_id": str(connection.id),
                 "account_verified": binding.account_verified,
+                "new_create_blocker": catalog_new_create_blocker(
+                    catalog.provider_type,
+                    catalog.protocol_profile,
+                    catalog.model_id,
+                    catalog.model_revision,
+                    catalog.contract_manifest_hash,
+                    schema_version=catalog.capability_manifest_json.get("schema_version", "1"),
+                    lifecycle=catalog.lifecycle,
+                    catalog_source=catalog.catalog_source,
+                ),
             }
         )
         registry.register(manifest)

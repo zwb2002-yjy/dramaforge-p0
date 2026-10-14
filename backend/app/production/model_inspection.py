@@ -181,11 +181,11 @@ class ModelInspectionService:
                 purpose=purpose,
                 mode_id=mode_id,
             )
-            if resolution.status != "RESOLVED":
+            if resolution.catalog_entry_id is None:
                 raise ValidationAppError(
                     "current model binding unavailable",
                     details={
-                        "code": "MODEL_BINDING_UNAVAILABLE",
+                        "code": resolution.reason or "MODEL_BINDING_UNAVAILABLE",
                     },
                 )
             catalog, catalog_hash = await self._catalog(resolution.catalog_entry_id)

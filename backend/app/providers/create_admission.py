@@ -11,6 +11,7 @@ from app.providers.availability_models import (
 )
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_publication import (
+    catalog_new_create_blocker,
     effective_publication_lifecycle,
     lock_catalog_publication,
 )
@@ -63,6 +64,21 @@ async def require_frozen_create_admission(
         raise ValidationAppError(
             "动态模型只有协议合同，缺少精确型号能力确认，暂不允许新建请求",
             details={"code": "DYNAMIC_MODEL_CAPABILITY_UNVERIFIED"},
+        )
+    blocker = catalog_new_create_blocker(
+        entry.provider_type,
+        entry.protocol_profile,
+        entry.model_id,
+        entry.model_revision,
+        entry.contract_manifest_hash,
+        schema_version=entry.capability_manifest_json.get("schema_version", "1"),
+        lifecycle=entry.lifecycle,
+        catalog_source=entry.catalog_source,
+    )
+    if blocker:
+        raise ValidationAppError(
+            "该修订缺少完整的官方字段证据，暂不允许新建请求；历史任务保留原身份",
+            details={"code": blocker},
         )
     current_revision = await session.scalar(
         select(ProviderConnectionRevision)
