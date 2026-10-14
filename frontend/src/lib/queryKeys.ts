@@ -31,6 +31,7 @@ export const queryKeys = {
   },
 
   scene: {
+    workspaceRoot: (projectId: string) => ["scene-workspace", projectId] as const,
     list: (projectId: string) => ["scenes", projectId] as const,
     summaries: (projectId: string) => ["scene-summaries", projectId] as const,
     workspace: (projectId: string, sceneId: string | null | undefined) =>

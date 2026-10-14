@@ -44,7 +44,7 @@ class ShotExecutionTrace(BaseModel):
     estimated_wait_seconds: int | None = None
 
 
-async def _unknown_submission_run_ids(
+async def load_unknown_submission_run_ids(
     session: AsyncSession, *, run_ids: list[UUID]
 ) -> set[UUID]:
     """Run ids whose latest ProviderOperation outcome is unknown."""
@@ -64,12 +64,16 @@ async def _unknown_submission_run_ids(
         return set()
     pairs = {(row.node_run_id, row.attempt_no) for row in latest_attempts}
     latest = (
-        await session.execute(
-            select(ProviderOperation).where(
-                ProviderOperation.node_run_id.in_([pair[0] for pair in pairs])
+        (
+            await session.execute(
+                select(ProviderOperation).where(
+                    ProviderOperation.node_run_id.in_([pair[0] for pair in pairs])
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return {
         operation.node_run_id
         for operation in latest
@@ -101,13 +105,17 @@ async def _load_traces(
     per_shot_limit: int,
 ) -> dict[UUID, list[ShotExecutionTrace]]:
     rows = (
-        await session.execute(
-            select(NodeRun)
-            .where(NodeRun.project_id == project_id)
-            .order_by(NodeRun.created_at.desc())
-            .limit(_SCAN_LIMIT)
+        (
+            await session.execute(
+                select(NodeRun)
+                .where(NodeRun.project_id == project_id)
+                .order_by(NodeRun.created_at.desc(), NodeRun.attempt_no.desc(), NodeRun.id.desc())
+                .limit(_SCAN_LIMIT)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     media_rows = [
         run
         for run in rows
@@ -144,7 +152,7 @@ async def _load_traces(
         if len(selected[shot_id]) >= per_shot_limit:
             continue
         selected[shot_id].append((run, raw))
-    unknown_outcomes = await _unknown_submission_run_ids(
+    unknown_outcomes = await load_unknown_submission_run_ids(
         session,
         run_ids=[run.id for entries in selected.values() for run, _raw in entries],
     )
@@ -164,10 +172,7 @@ async def _load_traces(
                 estimated_wait_seconds=(
                     max(
                         0,
-                        round(
-                            ((queue_position[run.id] - 1) + running_count)
-                            * average_duration
-                        ),
+                        round(((queue_position[run.id] - 1) + running_count) * average_duration),
                     )
                     if run.id in queue_position and average_duration is not None
                     else None

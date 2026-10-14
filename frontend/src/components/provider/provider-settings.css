@@ -348,7 +348,7 @@
 .df-knowledge-input {
   padding: var(--df-space-3);
   border: 1px solid var(--df-border-subtle);
-  border-radius: var(--df-radius-md);
+  border-radius: var(--df-radius-container);
 }
 .df-knowledge-input h6 {
   font-size: var(--df-font-size-body);

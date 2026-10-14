@@ -17,6 +17,26 @@ export type EditingRepairRoutingRequest = components["schemas"]["EditingRepairRo
 export type FinalFilmPrepareRead = components["schemas"]["FinalFilmPrepareRead"];
 export type FinalFilmRead = components["schemas"]["FinalFilmRead"];
 export type FinalFilmJobRead = components["schemas"]["FinalFilmJobRead"];
+export type TimelinePreviewRead = components["schemas"]["TimelinePreviewRead"];
+
+/** Read-only draft compilation; no Save, tail preparation, Provider or Final Film. */
+export async function previewEditTimeline(
+  projectId: string,
+  sessionId: string,
+  timeline: Pick<EditTimelinePayload, "clips" | "metadata">,
+  expectedSessionVersion: number,
+): Promise<TimelinePreviewRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<TimelinePreviewRead>(
+    "POST",
+    editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/preview-plan`),
+    {
+      timeline: { clips: timeline.clips ?? [], metadata: timeline.metadata ?? {} },
+      expected_session_version: expectedSessionVersion,
+    },
+    csrf,
+  );
+}
 
 const editSessionPath = (projectId: string, suffix = "") =>
   `/api/v1/projects/${projectId}/edit-sessions${suffix}`;

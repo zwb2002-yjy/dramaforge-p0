@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
+import { Button } from "../../components/ui";
 import { queryKeys } from "../../lib/queryKeys";
 import { reviewBlockerLabel, reviewMachineStatusLabel } from "./reviewLabels";
 import {
@@ -23,6 +24,8 @@ type ReviewDecisionPanelProps = {
   /** Server Shot version this page is looking at (optimistic lock). */
   shotVersion: number;
   title: string;
+  showFormalAction?: boolean;
+  onChanged?: () => void | Promise<void>;
 };
 
 /**
@@ -49,6 +52,8 @@ function ReviewDecisionSession({
   stage,
   shotVersion,
   title,
+  showFormalAction = true,
+  onChanged,
 }: ReviewDecisionPanelProps) {
   const queryClient = useQueryClient();
   const [reason, setReason] = useState("");
@@ -98,6 +103,7 @@ function ReviewDecisionSession({
       await queryClient.invalidateQueries({
         queryKey: queryKeys.shot.reviewWorkbench(projectId, shotId),
       });
+      await onChanged?.();
     },
     onError: (error: unknown) => {
       setFeedback(`记录决定失败：${error instanceof Error ? error.message : String(error)}`);
@@ -160,6 +166,7 @@ function ReviewDecisionSession({
         queryClient.invalidateQueries({ queryKey: queryKeys.shot.list(projectId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.scene.summaries(projectId) }),
       ]);
+      await onChanged?.();
     },
     onError: (error: unknown) => {
       setFeedback(
@@ -177,6 +184,7 @@ function ReviewDecisionSession({
       await queryClient.invalidateQueries({
         queryKey: queryKeys.review.summary(projectId, shotId, artifactId, reviewKind, stage),
       });
+      await onChanged?.();
     },
     onError: (error: unknown) => {
       setFeedback(`生成审查证据失败：${error instanceof Error ? error.message : String(error)}`);
@@ -232,8 +240,8 @@ function ReviewDecisionSession({
         />
       </label>
       <div className="qc-unsaved-actions">
-        {(stage === "formal_keyframe" || stage === "formal_video") && (
-          <button
+        {showFormalAction && (stage === "formal_keyframe" || stage === "formal_video") && (
+          <Button
             type="button"
             data-testid={`review-approve-and-formal-${reviewKind}`}
             disabled={
@@ -245,7 +253,7 @@ function ReviewDecisionSession({
             onClick={() => approveAndFormal.mutate()}
           >
             {approveAndFormal.isPending ? "正在通过并设置…" : "通过并设为正式"}
-          </button>
+          </Button>
         )}
         <button
           type="button"
@@ -286,14 +294,14 @@ function ReviewDecisionSession({
             当前素材还没有自动检查证据，无法记录人工决定；请先运行对应审查节点。
           </p>
           <div className="qc-unsaved-actions">
-            <button
+            <Button
               type="button"
               data-testid={`review-request-evidence-${reviewKind}`}
               onClick={() => requestEvidence.mutate()}
               disabled={requestEvidence.isPending}
             >
               {requestEvidence.isPending ? "正在提交…" : "生成本候选的审查证据"}
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -303,8 +311,10 @@ function ReviewDecisionSession({
         </p>
       )}
       <p className="muted">
-        “通过并设为正式”用于连续审片；下方单独通过 /
-        拒绝保留为高级模式。自动检查只是初筛，不能替代人工判断。
+        {showFormalAction
+          ? "“通过并设为正式”用于连续审片；单独通过/拒绝保留为高级模式。"
+          : "通过仅记录人工判断；返回候选后仍须显式设为正式。"}
+        自动检查只是初筛，不能替代人工判断。
       </p>
     </section>
   );

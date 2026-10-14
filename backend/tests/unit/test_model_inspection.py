@@ -18,7 +18,10 @@ from tests.unit.test_workbench_execution import (
 __all__ = ["session"]
 
 
-async def test_preview_is_authorized_deterministic_and_read_only(session: AsyncSession) -> None:
+@pytest.mark.parametrize("mode_id", ["explicit_binding", "text_to_image"])
+async def test_preview_is_authorized_deterministic_and_read_only(
+    session: AsyncSession, mode_id: str
+) -> None:
     project, binding, actor = await _seed(session)
     shot, _artifact, image_binding = await _seed_image_shot(
         session,
@@ -41,6 +44,7 @@ async def test_preview_is_authorized_deterministic_and_read_only(session: AsyncS
         shot_id=shot.id,
         requested_binding_id=image_binding.id,
         stage="image_keyframe",
+        mode_id=mode_id,
         expected_shot_version=shot.version,
     )
     first = await service.preview_generation_compile(project_id=project.id, request=request)

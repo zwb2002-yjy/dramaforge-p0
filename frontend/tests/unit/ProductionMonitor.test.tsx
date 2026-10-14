@@ -37,6 +37,10 @@ const scenes = [
     formal_keyframe_count: 1,
     formal_video_count: 1,
     risk_count: 0,
+    pending_review_count: 0,
+    generating_count: 0,
+    failed_count: 0,
+    unknown_count: 0,
     representative_artifact: null,
   },
   {
@@ -53,6 +57,10 @@ const scenes = [
     formal_keyframe_count: 0,
     formal_video_count: 0,
     risk_count: 2,
+    pending_review_count: 0,
+    generating_count: 0,
+    failed_count: 2,
+    unknown_count: 0,
     representative_artifact: null,
   },
 ];

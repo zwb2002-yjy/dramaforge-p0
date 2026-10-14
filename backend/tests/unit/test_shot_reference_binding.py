@@ -146,9 +146,7 @@ def test_binding_create_list_update_and_delete(client: TestClient) -> None:
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert deleted.status_code == 204, deleted.text
-    assert (
-        client.get(f"/api/v1/projects/{project_id}/shots/{shot_id}/references").json() == []
-    )
+    assert client.get(f"/api/v1/projects/{project_id}/shots/{shot_id}/references").json() == []
 
 
 def test_binding_requires_a_source_and_valid_purpose(client: TestClient) -> None:
@@ -177,3 +175,70 @@ def test_binding_requires_a_source_and_valid_purpose(client: TestClient) -> None
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert direct_without_artifact.status_code == 422, direct_without_artifact.text
+
+
+def test_mention_labels_are_unique_and_resolve_to_explicit_binding_identity(
+    client: TestClient,
+) -> None:
+    project_id, shot_id, asset_id = _project_with_shot_and_asset(client)
+    url = f"/api/v1/projects/{project_id}/shots/{shot_id}/references"
+    body = {"purpose": "identity", "asset_id": asset_id, "label": "@林墨", "stage": "image"}
+    created = client.post(url, json=body, headers={CSRF_HEADER: _csrf(client)})
+    assert created.status_code == 201, created.text
+    duplicate = client.post(url, json=body, headers={CSRF_HEADER: _csrf(client)})
+    assert duplicate.status_code == 409, duplicate.text
+    assert duplicate.json()["details"]["code"] == "REFERENCE_LABEL_CONFLICT"
+    invalid = client.post(
+        url, json={**body, "label": "@林 墨"}, headers={CSRF_HEADER: _csrf(client)}
+    )
+    assert invalid.status_code == 422, invalid.text
+    assert invalid.json()["details"]["code"] == "REFERENCE_LABEL_INVALID"
+    assert len(client.get(url).json()) == 1
+
+
+def test_binding_sort_order_is_persisted_and_reorder_is_versioned(client: TestClient) -> None:
+    project_id, shot_id, asset_id = _project_with_shot_and_asset(client)
+    url = f"/api/v1/projects/{project_id}/shots/{shot_id}/references"
+    first = client.post(
+        url,
+        json={
+            "purpose": "identity",
+            "asset_id": asset_id,
+            "label": "@人物",
+            "resolution_mode": "current_formal",
+            "sort_order": 7,
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    second = client.post(
+        url,
+        json={
+            "purpose": "style",
+            "asset_id": asset_id,
+            "label": "@画风",
+            "resolution_mode": "current_formal",
+            "sort_order": 1,
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["sort_order"] == 7
+    assert second.json()["sort_order"] == 1
+    listed = client.get(url)
+    assert listed.status_code == 200, listed.text
+    assert [item["id"] for item in listed.json()] == [second.json()["id"], first.json()["id"]]
+
+    modified = client.patch(
+        f"/api/v1/projects/{project_id}/references/{first.json()['id']}",
+        json={"expected_version": 1, "sort_order": 0},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert modified.status_code == 200, modified.text
+    assert modified.json()["sort_order"] == 0
+    assert modified.json()["version"] == 2
+    reordered = client.get(url)
+    assert [item["id"] for item in reordered.json()] == [
+        first.json()["id"],
+        second.json()["id"],
+    ]

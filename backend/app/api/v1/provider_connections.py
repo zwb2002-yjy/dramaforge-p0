@@ -402,8 +402,11 @@ async def create_connection(
         protocol_profile=body.protocol_profile,
         base_url=body.base_url,
     )
+    # Workspace RLS settings are transaction-local; serialize all scoped reads
+    # before commit so a successful write cannot turn into a false 422 response.
+    response = await _connection_read(service, connection)
     await session.commit()
-    return await _connection_read(service, connection)
+    return response
 
 
 @router.get(
@@ -467,8 +470,9 @@ async def patch_connection(
         enabled=body.enabled,
         base_url=body.base_url,
     )
+    response = await _connection_read(service, connection)
     await session.commit()
-    return await _connection_read(service, connection)
+    return response
 
 
 @router.put(
@@ -493,8 +497,9 @@ async def put_connection_credential(
         actor=user,
         api_key=body.api_key.get_secret_value(),
     )
+    response = await _connection_read(service, connection)
     await session.commit()
-    return await _connection_read(service, connection)
+    return response
 
 
 @router.post(

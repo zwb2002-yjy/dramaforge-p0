@@ -30,6 +30,10 @@ type EditingClip = {
   subtitle: string;
   audio_id: string | null;
   transition: Record<string, unknown> | null;
+  source_in_seconds?: number | string;
+  source_out_seconds?: number | string | null;
+  audio_volume?: number;
+  muted?: boolean;
 };
 
 type EditingTimeline = {
@@ -502,6 +506,10 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
           formal_keyframe_count: 2,
           formal_video_count: 2,
           risk_count: 0,
+          pending_review_count: 0,
+          generating_count: 0,
+          failed_count: 0,
+          unknown_count: 0,
           representative_artifact: null,
         },
       ]);
@@ -570,6 +578,27 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         ],
         references: { [SHOT_ID]: [], [SECOND_SHOT_ID]: [] },
         candidates: { [SHOT_ID]: clone(state.candidates), [SECOND_SHOT_ID]: [] },
+        overview: {
+          [SHOT_ID]: {
+            pending_review: state.candidates.some(
+              (candidate) =>
+                candidate.artifact_id &&
+                candidate.artifact_id !== state.formalKeyframeArtifactId &&
+                candidate.artifact_id !== state.formalVideoArtifactId &&
+                !candidate.review_allowed &&
+                candidate.review_decision !== "rejected",
+            ),
+            generating: false,
+            generation_failed: false,
+            outcome_unknown: false,
+          },
+          [SECOND_SHOT_ID]: {
+            pending_review: false,
+            generating: false,
+            generation_failed: false,
+            outcome_unknown: false,
+          },
+        },
         trace: {
           [SHOT_ID]: [
             {

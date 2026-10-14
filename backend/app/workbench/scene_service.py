@@ -10,15 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.models import User
 from app.access.projects import ProjectService
 from app.assets.models import Asset, AssetVersion, Episode, Scene, Shot
-from app.assets.scene_service import _artifact_summary
 from app.execution.models import Artifact
 from app.production.formal_selection import list_formal_candidates
 from app.production.models import ExperimentBranch, ShotReferenceBinding
+from app.production.shot_overview import load_shot_overview
 from app.production.trace_query import (
     load_scene_execution_traces,
     load_shot_execution_traces,
 )
 from app.shared.errors import NotFoundError
+from app.workbench.scene_summary import _artifact_summary
 
 
 def _shot_dict(shot: Shot) -> dict[str, object]:
@@ -67,27 +68,35 @@ class SceneWorkspaceService:
             raise NotFoundError("scene not found")
         scene, episode_number = scene_row
         shots = (
-            await self._session.execute(
-                select(Shot)
-                .where(Shot.scene_id == scene.id, Shot.project_id == project_id)
-                .order_by(Shot.shot_number, Shot.sort_order)
+            (
+                await self._session.execute(
+                    select(Shot)
+                    .where(Shot.scene_id == scene.id, Shot.project_id == project_id)
+                    .order_by(Shot.shot_number, Shot.sort_order)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         shot_ids = [shot.id for shot in shots]
         shot_dicts = {shot.id: _shot_dict(shot) for shot in shots}
 
         bindings: dict[UUID, list[ShotReferenceBinding]] = {}
         if shot_ids:
             binding_rows = (
-                await self._session.execute(
-                    select(ShotReferenceBinding)
-                    .where(
-                        ShotReferenceBinding.project_id == project_id,
-                        ShotReferenceBinding.shot_id.in_(shot_ids),
+                (
+                    await self._session.execute(
+                        select(ShotReferenceBinding)
+                        .where(
+                            ShotReferenceBinding.project_id == project_id,
+                            ShotReferenceBinding.shot_id.in_(shot_ids),
+                        )
+                        .order_by(ShotReferenceBinding.sort_order)
                     )
-                    .order_by(ShotReferenceBinding.sort_order)
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for binding in binding_rows:
                 bindings.setdefault(binding.shot_id, []).append(binding)
 
@@ -102,15 +111,19 @@ class SceneWorkspaceService:
         )
         if shot_ids:
             exp_rows = (
-                await self._session.execute(
-                    select(ExperimentBranch)
-                    .where(
-                        ExperimentBranch.project_id == project_id,
-                        ExperimentBranch.source_shot_id.in_(shot_ids),
+                (
+                    await self._session.execute(
+                        select(ExperimentBranch)
+                        .where(
+                            ExperimentBranch.project_id == project_id,
+                            ExperimentBranch.source_shot_id.in_(shot_ids),
+                        )
+                        .order_by(ExperimentBranch.created_at.desc())
                     )
-                    .order_by(ExperimentBranch.created_at.desc())
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for branch in exp_rows:
                 if branch.source_shot_id is not None:
                     candidates.setdefault(branch.source_shot_id, []).append(
@@ -124,6 +137,9 @@ class SceneWorkspaceService:
                     )
 
         trace = await self._load_trace(project_id=project_id, shot_ids=shot_ids)
+        overview = await load_shot_overview(
+            self._session, project_id=project_id, shots=list(shots), candidate_admissions=candidates
+        )
 
         return {
             "scene": {
@@ -155,10 +171,9 @@ class SceneWorkspaceService:
                 ]
                 for shot_id in shot_ids
             },
-            "candidates": {
-                str(shot_id): candidates.get(shot_id, []) for shot_id in shot_ids
-            },
+            "candidates": {str(shot_id): candidates.get(shot_id, []) for shot_id in shot_ids},
             "trace": trace,
+            "overview": {str(shot_id): facts for shot_id, facts in overview.items()},
         }
 
     async def _load_trace(
@@ -195,37 +210,47 @@ class ShotWorkbenchService:
         if shot is None:
             raise NotFoundError("shot not found")
         scene = (
-            await self._session.execute(
-                select(Scene).where(Scene.id == shot.scene_id)
-            )
+            await self._session.execute(select(Scene).where(Scene.id == shot.scene_id))
         ).scalar_one_or_none()
         bindings = (
-            await self._session.execute(
-                select(ShotReferenceBinding)
-                .where(
-                    ShotReferenceBinding.project_id == project_id,
-                    ShotReferenceBinding.shot_id == shot.id,
+            (
+                await self._session.execute(
+                    select(ShotReferenceBinding)
+                    .where(
+                        ShotReferenceBinding.project_id == project_id,
+                        ShotReferenceBinding.shot_id == shot.id,
+                    )
+                    .order_by(ShotReferenceBinding.sort_order)
                 )
-                .order_by(ShotReferenceBinding.sort_order)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         branch_candidates = (
-            await self._session.execute(
-                select(ExperimentBranch)
-                .where(
-                    ExperimentBranch.project_id == project_id,
-                    ExperimentBranch.source_shot_id == shot.id,
+            (
+                await self._session.execute(
+                    select(ExperimentBranch)
+                    .where(
+                        ExperimentBranch.project_id == project_id,
+                        ExperimentBranch.source_shot_id == shot.id,
+                    )
+                    .order_by(ExperimentBranch.created_at.desc())
                 )
-                .order_by(ExperimentBranch.created_at.desc())
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         # Keep the shot workbench aligned with the scene workspace: concrete
         # NodeRun -> Artifact candidates are the only exact media targets.
         # Experiment branches remain opaque and are appended below, never
         # substituted for a media candidate.
-        candidates = list((await list_formal_candidates(
-            self._session, project_id=project_id, shot_ids=[shot.id]
-        )).get(shot.id, []))
+        candidates = list(
+            (
+                await list_formal_candidates(
+                    self._session, project_id=project_id, shot_ids=[shot.id]
+                )
+            ).get(shot.id, [])
+        )
         formal_artifact_ids = [
             artifact_id
             for artifact_id in (
@@ -238,10 +263,14 @@ class ShotWorkbenchService:
         artifacts: dict[UUID, Artifact] = {}
         if formal_artifact_ids:
             rows = (
-                await self._session.execute(
-                    select(Artifact).where(Artifact.id.in_(formal_artifact_ids))
+                (
+                    await self._session.execute(
+                        select(Artifact).where(Artifact.id.in_(formal_artifact_ids))
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             artifacts = {artifact.id: artifact for artifact in rows}
 
         shot_trace = [
@@ -332,7 +361,8 @@ class ShotWorkbenchService:
                     else None
                 ),
             },
-            "candidates": candidates + [
+            "candidates": candidates
+            + [
                 {
                     "id": branch.id,
                     "name": branch.name,

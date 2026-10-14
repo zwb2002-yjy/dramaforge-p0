@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.editing.models import EditSession
+from app.editing.timeline_rules import clip_audio_volume
 from app.shared.errors import ConflictError, NotFoundError
 
 
@@ -105,6 +106,9 @@ class EditingAdapter:
                     "actual_session_version": row.version,
                 },
             )
+        for clip in cast(list[object], timeline.get("clips", [])):
+            if isinstance(clip, dict):
+                clip_audio_volume(clip)
         row.timeline = dict(timeline)
         row.version += 1
         row.updated_at = datetime.now(UTC)
