@@ -18,7 +18,10 @@ from tests.unit.test_workbench_execution import (
 __all__ = ["session"]
 
 
-async def test_preview_is_authorized_deterministic_and_read_only(session: AsyncSession) -> None:
+@pytest.mark.parametrize("mode_id", ["explicit_binding", "text_to_image"])
+async def test_preview_is_authorized_deterministic_and_read_only(
+    session: AsyncSession, mode_id: str
+) -> None:
     project, binding, actor = await _seed(session)
     shot, _artifact, image_binding = await _seed_image_shot(
         session,
@@ -41,6 +44,7 @@ async def test_preview_is_authorized_deterministic_and_read_only(session: AsyncS
         shot_id=shot.id,
         requested_binding_id=image_binding.id,
         stage="image_keyframe",
+        mode_id=mode_id,
         expected_shot_version=shot.version,
     )
     first = await service.preview_generation_compile(project_id=project.id, request=request)
@@ -176,7 +180,7 @@ async def test_query_current_media_binding_and_text_slot_are_distinct(
     report = await service.get_model_capabilities(project_id=project.id, stage="video")
     assert report.selection == "current_binding"
     assert report.binding_id == binding.id
-    assert report.report.model_id == "agnes/agnes-video-v2.0"
+    assert report.report.model_id == "agnes/unit-agnes-video"
     text = await service.get_model_capabilities(
         project_id=project.id,
         slot=ModelSlot.PLANNING_SCRIPT,

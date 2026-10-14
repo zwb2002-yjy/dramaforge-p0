@@ -129,9 +129,7 @@ def test_experiment_stage_selects_the_model_purpose(client: TestClient) -> None:
     )
     assert keyframe.status_code == 201, keyframe.text
     assert keyframe.json()["parameters"]["target_node_key"] == "keyframe"
-    assert keyframe.json()["parameters"]["prompt_override"] == (
-        "low angle, cold backlight"
-    )
+    assert keyframe.json()["parameters"]["prompt_override"] == ("low angle, cold backlight")
 
     # No binding exists in this workspace, so start fails closed and names the
     # stage it resolved instead of blaming the stage the client did not send.
@@ -153,7 +151,7 @@ def test_experiment_stage_selects_the_model_purpose(client: TestClient) -> None:
             "idempotency_key": "stage-video-1",
             "name": "Video model experiment",
             "source_shot_id": shot_id,
-            "selected_model": "agnes/agnes-video-v2.0",
+            "selected_model": "agnes/unit-agnes-video",
             "parameters": {"target_node_key": "video"},
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -181,7 +179,7 @@ def test_experiment_stage_selects_the_model_purpose(client: TestClient) -> None:
             "idempotency_key": "stage-invalid-1",
             "name": "Invalid stage",
             "source_shot_id": shot_id,
-            "selected_model": "agnes/agnes-video-v2.0",
+            "selected_model": "agnes/unit-agnes-video",
             "parameters": {"target_node_key": "keyframes"},
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -275,9 +273,17 @@ def test_experiment_annotation_and_opencut_manifest(client: TestClient) -> None:
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert missing_candidate.status_code == 409, missing_candidate.text
+    assert "candidate is not ready" in missing_candidate.json()["detail"]
     experiments = client.get(f"/api/v1/projects/{project_id}/experiments")
     unchanged = next(row for row in experiments.json() if row["id"] == experiment.json()["id"])
     assert unchanged["status"] == "draft"
+    kept = client.post(
+        f"/api/v1/projects/{project_id}/experiments/{experiment.json()['id']}/decision",
+        json={"decision": "kept"},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert kept.status_code == 200, kept.text
+    assert kept.json()["status"] == "active"
     rejected = client.post(
         f"/api/v1/projects/{project_id}/experiments/{experiment.json()['id']}/decision",
         json={"decision": "rejected"},

@@ -158,13 +158,24 @@ export function useTimelineDraft(
   function updateTimelineMetadata(key: string, value: JsonValue) {
     edit((draft) => ({ ...draft, metadata: { ...draft.metadata, [key]: value } }));
   }
+  function replaceClip(index: number, clip: EditableClip) {
+    edit((draft) => ({
+      ...draft,
+      clips: draft.clips.map((current, i) =>
+        i === index && current.id === clip.id ? { ...clip } : current,
+      ),
+    }));
+  }
   function moveClip(index: number, offset: -1 | 1) {
+    reorderClip(index, index + offset);
+  }
+  function reorderClip(index: number, target: number) {
     edit((draft) => {
-      const target = index + offset;
       if (index < 0 || index >= draft.clips.length || target < 0 || target >= draft.clips.length)
         return draft;
       const clips = draft.clips.map((clip) => ({ ...clip }));
-      [clips[index], clips[target]] = [clips[target], clips[index]];
+      const [moved] = clips.splice(index, 1);
+      clips.splice(target, 0, moved);
       return {
         ...draft,
         clips: clips.map((clip, order) =>
@@ -220,8 +231,10 @@ export function useTimelineDraft(
     isCurrentSave,
     acceptSaved,
     updateClipField,
+    replaceClip,
     updateTimelineMetadata,
     moveClip,
+    reorderClip,
     applySuggestion,
   };
 }

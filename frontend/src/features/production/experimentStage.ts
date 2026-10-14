@@ -12,6 +12,8 @@
  * video branch can never offer the keyframe adoption scopes.
  */
 
+import { MODEL_CONTRACT_BLOCKER_LABELS } from "../../lib/modelResolutionLabels";
+
 import { ApiError } from "../../lib/api";
 import type { ModelCandidateOperation } from "./modelCandidatesApi";
 
@@ -59,6 +61,7 @@ export const MODEL_ISSUE_LABEL: Record<string, string> = {
   MANIFEST_HASH_MISMATCH: "模型能力清单与目录不一致",
   CAPABILITY_REQUIRED_MISSING: "该模型缺少本阶段需要的能力",
   REFERENCE_MODE_CONFLICT: "参考图模式冲突",
+  ...MODEL_CONTRACT_BLOCKER_LABELS,
 };
 
 export function modelIssueLabels(codes: string[]): string {

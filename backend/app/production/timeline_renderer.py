@@ -40,6 +40,7 @@ class TimelineRenderClip:
     transition_duration_seconds: float = 0.0
     audio_artifact_id: str | None = None
     source_out_seconds: float | None = None
+    audio_volume: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -129,7 +130,7 @@ async def _render_clip(clip: TimelineRenderClip, *, directory: Path, index: int)
             "-t",
             f"{clip.duration_seconds:.3f}",
             "-af",
-            "apad",
+            f"volume={clip.audio_volume:.6f},apad",
             "-c:v",
             "libx264",
             "-pix_fmt",
@@ -296,6 +297,7 @@ def _test_render(clips: list[TimelineRenderClip], *, lineage: str) -> TimelineRe
         digest.update(clip.video_artifact_id.encode("utf-8"))
         digest.update(clip.video_bytes)
         digest.update(clip.audio_bytes or b"")
+        digest.update(f"{clip.audio_volume:.6f}".encode())
         digest.update(clip.subtitle_text.encode("utf-8"))
         digest.update(f"{clip.source_in_seconds:.3f}:{clip.duration_seconds:.3f}".encode())
     data = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + digest.digest()
@@ -337,6 +339,8 @@ async def render_timeline(
         raise TimelineRenderError("Timeline has no clips")
     if any(clip.source_in_seconds < 0 or clip.duration_seconds <= 0 for clip in clips):
         raise TimelineRenderError("Timeline clip trim/duration is invalid")
+    if any(not 0 <= clip.audio_volume <= 1 for clip in clips):
+        raise TimelineRenderError("Timeline clip audio volume must be between zero and one")
     try:
         time_map = build_timeline_subtitles(clips)
     except TimelineTimingError as exc:

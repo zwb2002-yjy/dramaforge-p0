@@ -27,7 +27,11 @@ from app.providers.capabilities import Capability
 from app.providers.catalog_loader import CATALOG_MODELS, ModelCatalogLoader, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_service import ModelCatalogService
-from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
+from app.providers.manifest import (
+    ModelCapabilityManifest,
+    read_catalog_manifest,
+    to_v3_model_manifest,
+)
 from app.shared.base import Base
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -229,8 +233,16 @@ def test_packaged_preview_catalog_has_model_evidence_and_no_active_collision() -
     active = {item.identity for item in loaded if item.publication_lifecycle == "active"}
     for item in previews:
         assert item.identity not in active
-        manifest = ModelCapabilityManifest.model_validate(item.as_dict())
+        manifest = read_catalog_manifest(item.as_dict())
         assert manifest.lifecycle == "preview"
+        if not isinstance(manifest, ModelCapabilityManifest):
+            from app.providers.knowledge_projection import project_model_knowledge
+
+            report = project_model_knowledge(item.as_dict())
+            assert report.product_open is False
+            assert report.implementation_status == "not_implemented"
+            assert report.blockers
+            continue
         assert manifest.implementation_status in {"discovered", "documented", "contract_tested"}
         assert manifest.evidence
         assert all(
@@ -332,10 +344,7 @@ async def test_catalog_service_is_read_only_and_resolves_active_entries(
         protocol_profile="agnes_cn_v1",
         model_id="agnes-video-v2.0",
     )
-    assert active is not None
-    assert active.contract_manifest_hash == hash_manifest(
-        [m for m in CATALOG_MODELS if m["model_id"] == "agnes-video-v2.0"][0]
-    )
+    assert active is None  # Exact-model official retirement removes new admission.
     ref2va = await service.active_entry_for(
         provider_type="openai_compatible_media",
         protocol_profile="openai_media_v1",
@@ -388,7 +397,7 @@ def test_single_authority_head_seeds_exact_current_explicit_contracts() -> None:
     seeded = json.loads(module._CURRENT_CONTRACTS)
     current = {
         _identity(manifest): manifest
-        for manifest in CATALOG_MODELS
+        for manifest in (item.as_dict() for item in ModelCatalogLoader().load())
         if "current_contract" in manifest.get("evidence", {})
     }
     assert {_identity(manifest): manifest for manifest in seeded} == current

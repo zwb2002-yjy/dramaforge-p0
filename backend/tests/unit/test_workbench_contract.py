@@ -87,17 +87,48 @@ def test_keyframe_selects_text_or_single_reference_contract() -> None:
             ),
         },
     )
-    assert select_workbench_contract(
-        operation=operation, media_kind="image", references=[]
-    ).contract_id == "text"
-    assert select_workbench_contract(
-        operation=operation,
-        media_kind="image",
-        references=[("reference_image", "image/png")],
-    ).contract_id == "character"
-    with pytest.raises(ValueError, match="最多接受一张参考图片"):
+    assert (
+        select_workbench_contract(
+            operation=operation, media_kind="image", references=[]
+        ).contract_id
+        == "text"
+    )
+    assert (
+        select_workbench_contract(
+            operation=operation,
+            media_kind="image",
+            references=[("reference_image", "image/png")],
+        ).contract_id
+        == "character"
+    )
+    with pytest.raises(ValueError, match="matched 0"):
         select_workbench_contract(
             operation=operation,
             media_kind="image",
             references=[("reference_image", "image/png"), ("reference_image", "image/png")],
+        )
+
+
+def test_keyframe_multiple_references_follow_the_selected_contract_limit() -> None:
+    operation = OperationManifest(
+        operation="image.generate",
+        capabilities=["image.i2i"],
+        input_contracts={
+            "multi_image": InputContractSpec(
+                input_slots={"reference_image": {"minimum": 1, "maximum": 3}},
+                minimum_total_references=1,
+            )
+        },
+    )
+    selected = select_workbench_contract(
+        operation=operation,
+        media_kind="image",
+        references=[("reference_image", "image/png"), ("reference_image", "image/png")],
+    )
+    assert selected.contract_id == "multi_image"
+    with pytest.raises(ValueError, match="matched 0"):
+        select_workbench_contract(
+            operation=operation,
+            media_kind="image",
+            references=[("reference_image", "image/png")] * 4,
         )

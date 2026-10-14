@@ -25,6 +25,7 @@ from app.providers.availability_projection import (
 )
 from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.catalog_publication import effective_publication_lifecycle
 from app.providers.catalog_service import ModelCatalogService
 from app.providers.manifest import (
     ModelCapabilityManifest,
@@ -1077,7 +1078,9 @@ class ProviderConnectionService:
                 details={"code": "MODEL_NOT_IN_CATALOG"},
             )
         if (
-            entry.lifecycle != "active"
+            effective_publication_lifecycle(
+                entry.provider_type, entry.protocol_profile, entry.model_id, entry.lifecycle
+            ) != "active"
             or entry.provider_type != plugin.provider_type
             or entry.protocol_profile != plugin.protocol_profile
             or entry.media_kind != media_type

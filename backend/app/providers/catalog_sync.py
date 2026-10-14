@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.providers.catalog_loader import LoadedCatalogManifest, ModelCatalogLoader
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.catalog_publication import lock_catalog_publication
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,8 @@ async def sync_model_catalog(
     untouched. Retired rows are never reactivated implicitly.
     """
     source = manifests if manifests is not None else ModelCatalogLoader().load()
+    if apply:
+        await lock_catalog_publication(session, shared=False)
     existing = list((await session.execute(select(ModelCatalogEntry))).scalars().all())
     by_identity = {
         (row.provider_type, row.protocol_profile, row.model_id, row.model_revision): row

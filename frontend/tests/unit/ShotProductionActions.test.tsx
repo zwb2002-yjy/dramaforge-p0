@@ -199,6 +199,10 @@ describe("ShotProductionActions", () => {
     expect(screen.queryByTestId("generate-video")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("视频方式"), { target: { value: "text_to_video" } });
     await waitFor(() => expect(screen.getByTestId("generate-video")).toBeEnabled());
+    expect(screen.getByTestId("production-stage-indicator")).toHaveTextContent(
+      "视频生成 (仅用文字)",
+    );
+    expect(screen.queryByTestId("production-preflight-source-frame")).not.toBeInTheDocument();
     expect(screen.getByTestId("delegate-video-to-director")).toBeDisabled();
   });
 

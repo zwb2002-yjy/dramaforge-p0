@@ -377,6 +377,16 @@ async def test_remote_identity_resumes_interrupted_download_with_zero_create(rec
         operation.selection_plan = {"execution_identity": identity.model_dump(mode="json")}
         operation.request_summary = dict(operation.selection_plan)
         operation.resume_token = resume.model_dump(mode="json")
+        operation.actual_provider = resume.provider_type
+        operation.protocol_profile = resume.protocol_profile
+        operation.actual_model = identity.invoke_model_value
+        operation.connection_id = identity.connection_id
+        operation.provider_connection_revision_id = identity.connection_revision_id
+        operation.credential_revision_id = identity.credential_revision_id
+        operation.model_binding_id = identity.provider_model_binding_id
+        operation.catalog_entry_id = identity.catalog_entry_id
+        operation.capability_manifest_hash = identity.manifest_hash
+        operation.request_fingerprint = identity.request_fingerprint
         operation_id = operation.id
         await session.commit()
     runtime = SimpleNamespace(
@@ -600,6 +610,16 @@ async def test_poll_timeout_releases_lease_then_cancel_retries_same_remote_id(
         operation.selection_plan = {"execution_identity": identity.model_dump(mode="json")}
         operation.request_summary = dict(operation.selection_plan)
         operation.resume_token = resume.model_dump(mode="json")
+        operation.actual_provider = resume.provider_type
+        operation.protocol_profile = resume.protocol_profile
+        operation.actual_model = identity.invoke_model_value
+        operation.connection_id = identity.connection_id
+        operation.provider_connection_revision_id = identity.connection_revision_id
+        operation.credential_revision_id = identity.credential_revision_id
+        operation.model_binding_id = identity.provider_model_binding_id
+        operation.catalog_entry_id = identity.catalog_entry_id
+        operation.capability_manifest_hash = identity.manifest_hash
+        operation.request_fingerprint = identity.request_fingerprint
         operation_id = operation.id
         await session.commit()
 

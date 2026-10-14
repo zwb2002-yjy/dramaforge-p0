@@ -1,5 +1,6 @@
 import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
+import { MODEL_CONTRACT_BLOCKER_LABELS } from "../../lib/modelResolutionLabels";
 
 export type BatchProductionStage = components["schemas"]["BatchProductionDispatchBody"]["stage"];
 
@@ -16,6 +17,7 @@ const BATCH_REASON_LABELS: Record<string, string> = {
   MODEL_CAPABILITY_UNSUPPORTED: "模型不支持此方式",
   REFERENCE_UNAVAILABLE: "参考素材不可用",
   BATCH_PREFLIGHT_UNAVAILABLE: "预检暂不可用",
+  ...MODEL_CONTRACT_BLOCKER_LABELS,
 };
 
 export function batchReasonLabel(code: string | null | undefined): string {
@@ -25,7 +27,7 @@ export function batchReasonLabel(code: string | null | undefined): string {
 
 /** Blocked reasons that the creator fixes in model settings, not on the shot. */
 export function isModelSetupReason(code: string | null | undefined): boolean {
-  return Boolean(code && code.startsWith("MODEL_"));
+  return Boolean(code && (code.startsWith("MODEL_") || code.startsWith("CATALOG_")));
 }
 
 export type BatchProductionPreviewItem = components["schemas"]["BatchPreviewItemRead"];

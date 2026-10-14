@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
 from sqlalchemy import select
 
@@ -72,8 +72,10 @@ async def get_artifact_content(
     artifact_id: UUID,
     user: CurrentUser,
     session: SessionDep,
+    request: Request,
 ) -> Response:
-    """Stream artifact bytes for the owning user's workspace."""
+    """Deliver authenticated Artifact bytes, including ranges for native media seek."""
+    from app.storage.http_range import byte_range
     from app.storage.minio_store import get_object_store
 
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
@@ -86,7 +88,24 @@ async def get_artifact_content(
     except KeyError as exc:
         raise NotFoundError("artifact bytes not in object store") from exc
     media = art.mime_type or "application/octet-stream"
-    return Response(content=data, media_type=media)
+    etag = f'"{art.content_hash}"'
+    headers = {"Accept-Ranges": "bytes", "ETag": etag, "Cache-Control": "private, max-age=0"}
+    range_header = request.headers.get("range")
+    if_range = request.headers.get("if-range")
+    if range_header and (if_range is None or if_range == etag):
+        try:
+            start, end = byte_range(range_header, len(data))
+        except ValueError:
+            return Response(
+                status_code=416, headers={**headers, "Content-Range": f"bytes */{len(data)}"}
+            )
+        return Response(
+            content=data[start : end + 1],
+            media_type=media,
+            status_code=206,
+            headers={**headers, "Content-Range": f"bytes {start}-{end}/{len(data)}"},
+        )
+    return Response(content=data, media_type=media, headers=headers)
 
 
 @router.get("/projects/{project_id}/artifacts/{artifact_id}/video-frames/{role}")

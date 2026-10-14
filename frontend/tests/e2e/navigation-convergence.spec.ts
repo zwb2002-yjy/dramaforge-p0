@@ -428,6 +428,7 @@ test("A12-A15: remembered scene wins, refresh and settings preserve scene query 
   await page.getByRole("link", { name: "设置", exact: true }).click();
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe(SCENE);
   await page.getByRole("link", { name: "账号", exact: true }).click();
+  await expect(page.getByRole("link", { name: "返回工作台" })).toHaveAttribute("href", SCENE);
   await page.getByRole("link", { name: "返回工作台" }).click();
   await expect(page).toHaveURL(SCENE);
   expect(writes).toEqual([]);

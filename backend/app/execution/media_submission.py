@@ -21,7 +21,10 @@ from app.execution.run_state import (
     _commit_terminal_failure,
 )
 from app.production.execution_plan import WorkbenchExecutionPlan
+from app.providers.capability_resolver import ProductCapabilityPolicy
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.create_admission import require_frozen_create_admission
+from app.providers.execution_contract import execution_contract_gaps, freeze_execution_contract
 from app.providers.execution_identity import (
     ExecutionIdentityReference,
     ExecutionIdentitySnapshot,
@@ -119,6 +122,14 @@ async def prepare_media_submission(
     The same frozen identity is revalidated on a rejected-operation retry. The
     transaction commit deliberately precedes the caller's paid network boundary.
     """
+    if frozen_identity is not None:
+        gaps = execution_contract_gaps(frozen_identity.execution_contract)
+        if gaps:
+            raise ValidationAppError(
+                "已冻结执行合同无法核验，请重新预览并显式确认新请求",
+                details={"code": gaps[0]},
+            )
+    applied_policy: ProductCapabilityPolicy | None = None
     if (
         frozen_identity is None
         and workbench_plan is None
@@ -205,8 +216,16 @@ async def prepare_media_submission(
             aspect_ratio=image_ratio,
             seed=None,
             reference_artifact_ids=[
-                reference_id for reference_id in [(reference_uuid)] if reference_id is not None
-            ],
+                reference.artifact_id
+                for reference in workbench_planned_references
+                if reference.role == "reference_image"
+                and reference.artifact_id is not None
+                and reference.delivery != "unsupported"
+            ]
+            if workbench_plan is not None
+            else [reference_uuid]
+            if reference_uuid is not None
+            else [],
             reference_fingerprint=(
                 workbench_image_reference.fingerprint
                 if workbench_image_reference is not None
@@ -498,7 +517,7 @@ async def prepare_media_submission(
                     "professional workbench connection revision is unavailable",
                     details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
                 )
-                resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_resolution(
+            resolved = await ProviderRuntimeResolver(session).resolve_runtime_for_resolution(
                 resolution=frozen_resolution,
                 workspace_id=project.workspace_id,
                 connection_revision_id=connection_revision.id,
@@ -614,7 +633,7 @@ async def prepare_media_submission(
             invoke_model_value = plan.invoke_model_value
             provider_type = plan.provider_type
             protocol_profile = plan.protocol_profile
-    
+
     if frozen_identity is None:
         snap = {
             **snap,
@@ -794,6 +813,7 @@ async def prepare_media_submission(
                 raise ValidationAppError(
                     str(exc), details={"code": "MODEL_INPUT_COMBINATION_UNSUPPORTED"}
                 ) from exc
+            applied_policy = selected_contract.policy
             if (
                 workbench_plan is not None
                 and workbench_plan.mode_id != selected_contract.contract_id
@@ -881,6 +901,7 @@ async def prepare_media_submission(
                 raise ValidationAppError(
                     str(exc), details={"code": "MODEL_INPUT_COMBINATION_UNSUPPORTED"}
                 ) from exc
+            applied_policy = selected_contract.policy
             if (
                 workbench_plan is not None
                 and workbench_plan.mode_id != selected_contract.contract_id
@@ -977,6 +998,30 @@ async def prepare_media_submission(
         "dropped_options": [],
         "warnings": [],
     }
+    policy_snapshot = cast(
+        dict[str, JsonValue],
+        {
+            "policy_id": "unified_media_mainchain_v1",
+            "policy_kind": "formal_workbench_contract"
+            if applied_policy
+            else "explicit_legacy_binding",
+            "allowed_operations": [compiled.operation],
+            "allowed_contracts": sorted(applied_policy.allowed_contracts)
+            if applied_policy
+            else [plan.mode_id],
+            "allowed_options": sorted(applied_policy.allowed_options)
+            if applied_policy and applied_policy.allowed_options is not None
+            else None,
+            "requires_frozen_binding": True,
+            "allow_model_fallback": False,
+            "requires_explicit_user_create": True,
+        },
+    )
+    execution_contract = freeze_execution_contract(
+        provider_type=compiled.provider_type,
+        protocol_profile=compiled.protocol_profile,
+        product_policy=policy_snapshot,
+    )
     if frozen_identity is None:
         identity = ExecutionIdentitySnapshot(
             requested_model=(plan.execution_model_resolution.requested_model_id or plan.model_id),
@@ -1000,6 +1045,7 @@ async def prepare_media_submission(
             resolved_references=identity_references,
             translation_report=cast(dict[str, JsonValue], translation_report),
             request_fingerprint=fingerprint,
+            execution_contract=execution_contract,
         )
         # The selection resolver above is allowed to inspect mutable
         # configuration, but the network boundary must consume the exact
@@ -1039,6 +1085,7 @@ async def prepare_media_submission(
             resolved_references=identity_references,
             translation_report=cast(dict[str, JsonValue], translation_report),
             request_fingerprint=fingerprint,
+            execution_contract=execution_contract,
         )
         if candidate_identity != frozen_identity:
             raise ValidationAppError(
@@ -1052,6 +1099,7 @@ async def prepare_media_submission(
             details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
         )
     identity_json = identity.model_dump(mode="json")
+    await require_frozen_create_admission(session, identity)
     selection_snapshot["execution_identity"] = identity_json
     snap = {
         **snap,

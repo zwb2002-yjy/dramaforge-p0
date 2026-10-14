@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 
-import { Button, Disclosure, Field, Input, Select, PageHeader } from "../components/ui";
+import { Button, Disclosure, Input, PageHeader } from "../components/ui";
 import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
 import { ProjectModelSourceSummary } from "../components/provider/ProjectModelSourceSummary";
-import { ProviderList } from "../components/provider/ProviderList";
+import { ModelConnectionSettings } from "../components/provider/ModelConnectionSettings";
+import { useSettingsWorkspace } from "../hooks/useSettingsWorkspace";
 import { AdvancedRecoveryPanel } from "../features/maintenance/AdvancedRecoveryPanel";
 import {
   ApiError,
@@ -14,9 +15,6 @@ import {
   fetchCurrentUser,
   fetchHealth,
   fetchProject,
-  getSelectedWorkspaceId,
-  listWorkspaceProjects,
-  listWorkspaces,
   logoutUser,
   renameWorkspace,
   setSelectedWorkspaceId as persistSelectedWorkspaceId,
@@ -38,70 +36,6 @@ const ENVIRONMENT_LABELS: Record<string, string> = {
 function environmentLabel(env: string | undefined): string {
   if (!env) return "—";
   return ENVIRONMENT_LABELS[env] ?? env;
-}
-
-function useSettingsWorkspace(onSelect?: (workspaceId: string | null) => void) {
-  const workspaces = useQuery({
-    queryKey: queryKeys.workspace.list(),
-    queryFn: listWorkspaces,
-  });
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
-    getSelectedWorkspaceId,
-  );
-  const selectWorkspace = useCallback(
-    (workspaceId: string | null) => {
-      persistSelectedWorkspaceId(workspaceId);
-      setSelectedWorkspaceId(workspaceId);
-      onSelect?.(workspaceId);
-    },
-    [onSelect],
-  );
-
-  useEffect(() => {
-    if (!selectedWorkspaceId && workspaces.data?.[0]) selectWorkspace(workspaces.data[0].id);
-    if (
-      selectedWorkspaceId &&
-      workspaces.data &&
-      !workspaces.data.some((workspace) => workspace.id === selectedWorkspaceId)
-    ) {
-      selectWorkspace(workspaces.data[0]?.id ?? null);
-    }
-  }, [selectWorkspace, selectedWorkspaceId, workspaces.data]);
-
-  const projects = useQuery({
-    queryKey: queryKeys.workspace.projects(selectedWorkspaceId),
-    queryFn: () => listWorkspaceProjects(selectedWorkspaceId!),
-    enabled: Boolean(selectedWorkspaceId),
-  });
-
-  return { workspaces, projects, selectedWorkspaceId, selectWorkspace };
-}
-
-function WorkspaceSelector({
-  workspaces,
-  selectedWorkspaceId,
-  onChange,
-}: {
-  workspaces: WorkspaceRead[];
-  selectedWorkspaceId: string | null;
-  onChange: (workspaceId: string | null) => void;
-}) {
-  return (
-    <Field>
-      工作空间
-      <Select
-        aria-label="设置工作空间"
-        value={selectedWorkspaceId ?? ""}
-        onChange={(event) => onChange(event.target.value || null)}
-      >
-        {workspaces.map((workspace) => (
-          <option key={workspace.id} value={workspace.id}>
-            {workspace.name}
-          </option>
-        ))}
-      </Select>
-    </Field>
-  );
 }
 
 export function AccountSettingsPage() {
@@ -338,39 +272,10 @@ export function WorkspaceSettingsPage({
 }
 
 export function ModelConnectionSettingsPage() {
-  const { workspaces, selectedWorkspaceId, selectWorkspace } = useSettingsWorkspace();
-  const [adding, setAdding] = useState(false);
-
   return (
-    <main className="df-page df-settings-page df-model-settings" data-testid="model-settings-page">
+    <main className="df-page df-settings-page" data-testid="model-settings-page">
       <SettingsHeader title="模型设置" />
-      {workspaces.isError ? (
-        <p className="flash err" role="alert">
-          无法读取工作空间。<Button onClick={() => void workspaces.refetch()}>重试</Button>
-        </p>
-      ) : workspaces.isPending ? (
-        !selectedWorkspaceId && <p role="status">正在读取工作空间…</p>
-      ) : (workspaces.data ?? []).length > 1 ? (
-        <div className="df-settings-section">
-          <WorkspaceSelector
-            workspaces={workspaces.data ?? []}
-            selectedWorkspaceId={selectedWorkspaceId}
-            onChange={selectWorkspace}
-          />
-        </div>
-      ) : null}
-      {selectedWorkspaceId ? (
-        <>
-          <ProviderList
-            key={`providers-${selectedWorkspaceId}`}
-            workspaceId={selectedWorkspaceId}
-            adding={adding}
-            onAddingChange={setAdding}
-          />
-        </>
-      ) : (
-        !workspaces.isPending && <p className="muted">请先创建工作空间。</p>
-      )}
+      <ModelConnectionSettings />
     </main>
   );
 }

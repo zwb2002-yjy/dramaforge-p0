@@ -14,6 +14,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.providers.execution_contract import ExecutionContractSnapshot
+
 _SECRET_KEY_FRAGMENTS: Final[tuple[str, ...]] = (
     "secret",
     "password",
@@ -91,6 +93,8 @@ class ExecutionIdentitySnapshot(BaseModel):
         max_length=64,
         pattern=r"^[0-9a-fA-F]{64}$",
     )
+    # Absent on historical identities. Reading never invents the missing facts.
+    execution_contract: ExecutionContractSnapshot | None = None
 
     def model_copy(
         self,
@@ -123,6 +127,8 @@ class ExecutionIdentitySnapshot(BaseModel):
             raise ValueError("connection revision identity has conflicting field values")
         _validate_safe_evidence(self.effective_options, path="effective_options")
         _validate_safe_evidence(self.translation_report, path="translation_report")
+        if self.execution_contract is not None:
+            _validate_safe_evidence(self.execution_contract.product_policy, path="product_policy")
         return self
 
 

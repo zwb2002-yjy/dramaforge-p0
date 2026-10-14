@@ -210,10 +210,10 @@ async def test_cancel_restart_never_recreates_remote_task(
             binding.enabled = False
             await session.commit()
             result = await jobs.execute_node_run({}, str(run_ids[1]))
-            assert result["status"] == "completed", result
+            assert result["status"] == "failed", result
             await session.refresh(op)
             assert op.selection_plan["execution_identity"] == frozen
-            assert calls == {"create": 2, "poll": 1, "cancel": 0}
+            assert calls == {"create": 1, "poll": 0, "cancel": 0}
             return
         if outcome in {"invalid_media", "missing_media", "raw_media", "download_failure"}:
             if outcome == "download_failure":

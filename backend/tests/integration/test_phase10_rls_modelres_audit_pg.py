@@ -39,7 +39,7 @@ from app.production.workbench_execution import (
     WorkbenchExecutionInput,
     WorkbenchExecutionService,
 )
-from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
+from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.model_profiles.slots import ModelSlot
@@ -54,6 +54,7 @@ from app.shared.security import hash_password
 from pg_support import available, database_url
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from tests.unit.model_infra_fixture import unit_video_manifest
 
 
 def _postgres_is_available() -> bool:
@@ -539,7 +540,7 @@ async def _seed_professional_resolution(session: AsyncSession, suffix: str) -> d
     shot.formal_keyframe_artifact_id = keyframe.id
     await session.flush()
 
-    manifest = next(item for item in CATALOG_MODELS if item["model_id"] == "agnes-video-v2.0")
+    manifest = unit_video_manifest()
     model_id = f"p10-res-{suffix}"
     entry = ModelCatalogEntry(
         provider_type="agnes",

@@ -5,7 +5,7 @@ from uuid import UUID
 import pytest
 from app.providers.adapters_v2 import BridgeComponents, ProviderAdapterBridge
 from app.providers.capabilities import Capability
-from app.providers.catalog_loader import CATALOG_MODELS
+from app.providers.catalog_loader import CATALOG_MODELS, ModelCatalogLoader
 from app.providers.contracts.common import ArtifactRef
 from app.providers.contracts.image import ImageEditRequest
 from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
@@ -123,6 +123,74 @@ async def test_preview_compiles_without_a_runtime_and_never_exposes_payload() ->
     assert "sensitive private" not in preview.model_dump_json()
     assert "https://" not in preview.model_dump_json()
     assert "wire_request" not in preview.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    ("model_id", "mode_id", "expected"),
+    [
+        ("agnes-image-2.1-flash", "text_to_image", "contract_validated"),
+        ("agnes-video-v2.0", "first_frame", "contract_validated"),
+        ("agnes-image-2.1-flash", "first_frame", "blocked"),
+        ("agnes-video-v2.0", "text_to_image", "blocked"),
+    ],
+)
+async def test_preview_accepts_only_the_matching_legacy_workbench_mode(
+    model_id: str, mode_id: str, expected: str
+) -> None:
+    from app.providers.compile_preview import PreviewReference, preview_compile
+    from app.providers.intents import (
+        ArtifactReferenceIntent,
+        ImageGenerationIntent,
+        ModelSelectionIntent,
+        VideoGenerationIntentV1,
+        VideoOutputIntent,
+    )
+
+    revision = "v3" if model_id == "agnes-image-2.1-flash" else "v2"
+    # Pure compilation can inspect a frozen historical contract without making
+    # its retired model an active/new-Create candidate.
+    manifest = ModelCapabilityManifest.model_validate(
+        next(
+            entry.as_dict()
+            for entry in ModelCatalogLoader().load()
+            if entry.identity[2:] == (model_id, revision)
+        )
+    )
+    selection = ModelSelectionIntent(mode="explicit_binding")
+    ref_id = UUID(int=1)
+    if manifest.media_kind == "image":
+        intent = ImageGenerationIntent(
+            prompt="Traveller in the rain",
+            aspect_ratio="9:16",
+            selection=selection,
+            mode_id=mode_id,
+        )
+        references = []
+    else:
+        intent = VideoGenerationIntentV1(
+            prompt="Traveller in the rain",
+            selection=selection,
+            mode_id=mode_id,
+            references=[ArtifactReferenceIntent(artifact_id=ref_id, role="first_frame")],
+            output=VideoOutputIntent(aspect_ratio="9:16", duration_seconds=5),
+        )
+        references = [
+            PreviewReference(
+                role="first_frame",
+                artifact_id=ref_id,
+                fingerprint="a" * 64,
+                mime_type="image/png",
+            )
+        ]
+    preview = await preview_compile(
+        manifest=manifest,
+        invoke_model_value=model_id,
+        intent=intent,
+        references=references,
+    )
+    assert preview.readiness == expected
+    if expected == "blocked":
+        assert preview.errors == ["MODE_UNSUPPORTED"]
 
 
 async def test_preview_rejects_mismatched_reference_identity() -> None:
@@ -329,7 +397,11 @@ def test_agnes_video_rejects_untransmitted_controls(field: str, value: object) -
     )
 
     manifest = ModelCapabilityManifest.model_validate(
-        next(row for row in CATALOG_MODELS if row["model_id"] == "agnes-video-v2.0")
+        next(
+            item.as_dict()
+            for item in ModelCatalogLoader().load()
+            if item.identity[2] == "agnes-video-v2.0"
+        )
     )
     intent = VideoGenerationIntentV1(
         prompt="test",

@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 from app.access.models import Project, User, Workspace
-from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
+from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.intents import (
     ArtifactReferenceIntent,
@@ -25,6 +25,7 @@ from app.shared.base import Base
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from tests.unit.model_infra_fixture import unit_video_manifest
 
 
 @pytest.fixture
@@ -63,11 +64,11 @@ async def _seed(
     session.add(project)
     await session.flush()
 
-    manifest = next(m for m in CATALOG_MODELS if m["model_id"] == "agnes-video-v2.0")
+    manifest = unit_video_manifest()
     entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
-        model_id="agnes-video-v2.0",
+        model_id="unit-agnes-video",
         model_revision="v1",
         display_name="Agnes Video",
         media_kind="video",
@@ -99,7 +100,7 @@ async def _seed(
         workspace_id=workspace.id,
         connection_id=connection.id,
         media_type="video",
-        model_id="agnes-video-v2.0",
+        model_id="unit-agnes-video",
         purpose="video",
         enabled=True,
         documented=True,
@@ -109,8 +110,8 @@ async def _seed(
         catalog_entry_id=entry.id,
         capability_manifest_hash=entry.contract_manifest_hash,
         remote_resource_kind="model",
-        remote_resource_id="agnes-video-v2.0",
-        invoke_model_value="agnes-video-v2.0",
+        remote_resource_id="unit-agnes-video",
+        invoke_model_value="unit-agnes-video",
         created_by=user.id,
         updated_by=user.id,
     )
@@ -144,7 +145,7 @@ async def test_explicit_project_binding_resolves_plan(session: AsyncSession) -> 
     await session.flush()
     plan = await ModelSelectionService(session).select_video(project=project, intent=_intent())
     assert plan.model_binding_id == binding.id
-    assert plan.invoke_model_value == "agnes-video-v2.0"
+    assert plan.invoke_model_value == "unit-agnes-video"
     assert plan.protocol_profile == "agnes_cn_v1"
     assert plan.purpose == "video"
     assert plan.evidence["account_verified"] is True
@@ -186,7 +187,7 @@ async def test_profile_binding_drives_media_selection_without_project_binding(
     await session.flush()
     plan = await ModelSelectionService(session).select_video(project=project, intent=_intent())
     assert plan.model_binding_id == binding.id
-    assert plan.invoke_model_value == "agnes-video-v2.0"
+    assert plan.invoke_model_value == "unit-agnes-video"
     assert plan.protocol_profile == "agnes_cn_v1"
 
 
@@ -328,7 +329,7 @@ async def test_real_video_model_with_first_frame_is_selectable(
         selection=ModelSelectionIntent(mode="explicit_binding"),
     )
     plan = await ModelSelectionService(session).select_video(project=project, intent=intent)
-    assert plan.invoke_model_value == "agnes-video-v2.0"
+    assert plan.invoke_model_value == "unit-agnes-video"
     assert plan.mode_id == "first_frame"
     assert plan.execution_model_resolution.mode_id == "first_frame"
     assert "video.i2v.first_frame" in plan.supported_capabilities

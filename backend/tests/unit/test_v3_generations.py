@@ -144,9 +144,11 @@ class TestReadSurface:
         client, _ = api
         _register(client)
         response = client.get("/api/v1/models/agnes/agnes-video-v2.0")
+        assert response.status_code == 404  # Retired models are not executable registrations.
+        response = client.get("/api/v1/models/minimax/MiniMax-H3")
         assert response.status_code == 200
         manifest = response.json()
-        assert manifest["id"] == "agnes/agnes-video-v2.0"
+        assert manifest["id"] == "minimax/MiniMax-H3"
         assert manifest["execution_mode"] == "async_poll"
         assert "video.image_to_video" in manifest["capability_specs"]
 

@@ -23,6 +23,10 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.catalog_publication import (
+    catalog_new_create_blocker,
+    effective_publication_lifecycle,
+)
 from app.providers.models import ProviderConnection, ProviderModelBinding
 
 # Capability names referenced by requirements/preferences.
@@ -133,8 +137,30 @@ async def evaluate_candidate(
     if catalog_entry is None:
         _issues_add(issues, "MODEL_NOT_IN_CATALOG")
     else:
-        if catalog_entry.lifecycle != "active":
-            _issues_add(issues, "MODEL_LIFECYCLE_INACTIVE", catalog_entry.lifecycle)
+        lifecycle = effective_publication_lifecycle(
+            catalog_entry.provider_type,
+            catalog_entry.protocol_profile,
+            catalog_entry.model_id,
+            catalog_entry.lifecycle,
+        )
+        if lifecycle != "active":
+            _issues_add(issues, "MODEL_LIFECYCLE_INACTIVE", lifecycle)
+        if catalog_entry.catalog_source == "protocol_contract":
+            _issues_add(issues, "DYNAMIC_MODEL_CAPABILITY_UNVERIFIED")
+        blocker = catalog_new_create_blocker(
+            catalog_entry.provider_type,
+            catalog_entry.protocol_profile,
+            catalog_entry.model_id,
+            catalog_entry.model_revision,
+            catalog_entry.contract_manifest_hash,
+            schema_version=catalog_entry.capability_manifest_json.get("schema_version", "1"),
+            lifecycle=catalog_entry.lifecycle,
+            catalog_source=catalog_entry.catalog_source,
+        )
+        if blocker and not any(issue.code == blocker for issue in issues):
+            _issues_add(issues, blocker, "官方证据尚未覆盖该冻结合同的全部可执行字段")
+        if catalog_entry.capability_manifest_json.get("schema_version", "1") != "1":
+            return _early_ineligible(binding, issues)
         if (
             catalog_entry.provider_type != connection.provider_type
             or catalog_entry.protocol_profile != connection.protocol_profile

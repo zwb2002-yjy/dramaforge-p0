@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from app.providers.bootstrap import build_v3_registry
 from app.providers.capabilities import Capability
-from app.providers.catalog_loader import CATALOG_MODELS, active_manifests_for
+from app.providers.catalog_loader import CATALOG_MODELS, ModelCatalogLoader, active_manifests_for
 from app.providers.contracts.common import ExecutionContext
 from app.providers.manifest import (
     ModelCapabilityManifest,
@@ -26,9 +26,9 @@ from app.providers.transport_registry import (
 def agnes_video_manifest() -> ModelCapabilityManifest:
     return ModelCapabilityManifest.model_validate(
         next(
-            item
-            for item in active_manifests_for(provider_type="agnes")
-            if item["model_id"] == "agnes-video-v2.0"
+            item.as_dict()
+            for item in ModelCatalogLoader().load()
+            if item.identity[2] == "agnes-video-v2.0"
         )
     )
 
@@ -112,8 +112,9 @@ class TestModelRegistry:
             if item["catalog_source"] != "protocol_contract"
         }
 
-        registered = model_registry.get("agnes/agnes-video-v2.0")
-        assert registered.manifest.display_name == "Agnes Video V2.0"
+        assert model_registry.get_or_none("agnes/agnes-video-v2.0") is None
+        registered = model_registry.get("minimax/MiniMax-H3")
+        assert registered.manifest.display_name
         with pytest.raises(UnknownModelError):
             model_registry.get("nonexistent/model")
 
@@ -147,9 +148,9 @@ class TestModelRegistry:
         registry = ModelRegistry()
         manifest = ModelCapabilityManifest.model_validate(
             next(
-                item
-                for item in active_manifests_for(provider_type="agnes")
-                if item["model_id"] == "agnes-video-v2.0"
+                item.as_dict()
+                for item in ModelCatalogLoader().load()
+                if item.identity[2] == "agnes-video-v2.0"
             )
         )
         v3 = to_v3_model_manifest(manifest, transport_profile_id="t1")
@@ -171,13 +172,13 @@ class TestDefaultRegistryQueryable:
         from app.shared.errors import ValidationAppError
 
         registry, _ = build_v3_registry()
-        assert registry.get("agnes/agnes-video-v2.0").adapter is None
+        assert registry.get("minimax/MiniMax-H3").adapter is None
         with pytest.raises(ValidationAppError) as blocked:
             await CapabilityRouter(registry=registry).create(
                 capability=Capability.VIDEO_IMAGE_TO_VIDEO,
                 request=object(),
                 context=ExecutionContext(trace_id="readonly"),
-                model_id="agnes/agnes-video-v2.0",
+                model_id="minimax/MiniMax-H3",
             )
         assert blocked.value.details["code"] == "MODEL_PROFILE_MODEL_NOT_CONFIGURED"
 

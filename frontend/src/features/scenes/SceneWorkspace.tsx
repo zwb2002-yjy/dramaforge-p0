@@ -2,23 +2,25 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ReferenceResolutionState } from "../../components/assets/AssetReferencePicker";
-import { Button, Drawer } from "../../components/ui";
+import { Button, Dialog, Drawer } from "../../components/ui";
 import { timeOfDayLabel } from "../../lib/sceneLabels";
-import { ModelConnectionSettingsPage } from "../../routes/settings-page";
+import { ModelConnectionSettings } from "../../components/provider/ModelConnectionSettings";
 import { CinematicCanvas } from "../shots/CinematicCanvas";
 import { ShotCandidateTray } from "../shots/ShotCandidateTray";
 import { ShotInspector, type InspectorFocus } from "../shots/ShotInspector";
 import { ShotStrip } from "../shots/ShotStrip";
+import { ShotContinuityCompare } from "../shots/ShotContinuityCompare";
 import { parseShotCandidates, type ShotCandidate } from "../shots/shotCandidates";
 import type { ShotExecutionReference, ShotLite } from "../shots/api";
 import type { ShotDesignDraft } from "../shots/ShotDesignPanel";
 import { hasActiveSceneRuns, SCENE_ACTIVE_REFETCH_MS } from "../production/sceneRunState";
 import { fetchSceneWorkspace, type SceneWorkspaceRead } from "./api";
 import { queryKeys } from "../../lib/queryKeys";
-import { SceneAnimaticPlayer } from "./SceneAnimaticPlayer";
+import { SceneAnimaticPreview } from "./SceneAnimaticPreview";
 import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 import { ResonanceStage } from "../resonance/ResonanceStage";
 import { BatchFillActions } from "../production";
+import { replaceMentionLabel } from "../../lib/mentionLabels";
 
 type SceneWorkspaceProps = {
   projectId: string;
@@ -29,7 +31,9 @@ type SceneWorkspaceProps = {
   openGenerate?: boolean;
   openCandidates?: boolean;
   onOpenEditing?: () => void;
+  onOpenOverview?: () => void;
   onDirtyStateChange?: (dirty: boolean) => void;
+  onSelectedShotChange?: (shotId: string) => void;
 };
 
 type ShotReferenceContext = {
@@ -86,7 +90,9 @@ export function SceneWorkspace({
   openGenerate = false,
   openCandidates = false,
   onOpenEditing,
+  onOpenOverview,
   onDirtyStateChange,
+  onSelectedShotChange,
 }: SceneWorkspaceProps) {
   const [selectedShotId, setSelectedShotId] = useState<string | null>(initialShotId ?? null);
   const [previewCandidate, setPreviewCandidate] = useState<ShotCandidate | null>(null);
@@ -154,7 +160,9 @@ export function SceneWorkspace({
     setPendingShotId(null);
     setModelSettingsOpen(false);
     setAnimaticOpen(false);
-  }, [projectId, sceneId, initialShotId, openDirector, openPrompts, openGenerate, openCandidates]);
+    // Scope changes reset drafts; navigating within the same Scene must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, sceneId]);
 
   useEffect(() => {
     onDirtyStateChange?.(designDirty);
@@ -203,16 +211,29 @@ export function SceneWorkspace({
 
   const selectShot = useCallback(
     (shotId: string) => {
-      if (shotId === selectedShotKey) return;
+      // An explicit route selection already exists before workspace data arrives.
+      // Do not issue another navigation while the router is restoring that Scene.
+      if (shotId === selectedShotId || shotId === selectedShotKey) return;
       if (designDirty) {
         setPendingShotId(shotId);
         return;
       }
       setSelectedShotId(shotId);
       setPreviewCandidate(null);
+      onSelectedShotChange?.(shotId);
     },
-    [designDirty, selectedShotKey],
+    [designDirty, selectedShotId, selectedShotKey, onSelectedShotChange],
   );
+  const selectFromRoute = useRef(selectShot);
+  selectFromRoute.current = selectShot;
+  useEffect(() => {
+    if (initialShotId) selectFromRoute.current(initialShotId);
+  }, [initialShotId]);
+  useEffect(() => {
+    const focus = initialFocus(openGenerate, openPrompts, openDirector);
+    if (focus) setFocusRequest((current) => ({ ...focus, revision: (current?.revision ?? 0) + 1 }));
+    if (openCandidates) setTrayExpanded(true);
+  }, [openGenerate, openPrompts, openDirector, openCandidates]);
 
   const requestFocus = useCallback((focus: InspectorFocus) => {
     setFocusRequest((current) => ({ focus, revision: (current?.revision ?? 0) + 1 }));
@@ -317,6 +338,19 @@ export function SceneWorkspace({
     <div className="qc-scene-workspace" data-testid="scene-workspace">
       <header className="qc-scene-header">
         <div className="qc-scene-context" data-testid="scene-context">
+          <a
+            className="qc-scene-back"
+            href={`/projects/${projectId}/scenes`}
+            aria-label="返回全片分镜总览"
+            onClick={(event) => {
+              if (onOpenOverview) {
+                event.preventDefault();
+                onOpenOverview();
+              }
+            }}
+          >
+            ← 全片分镜
+          </a>
           <span className="director-stage-kicker">分镜</span>
           <h1>{data?.scene.location_name ?? "场景"}</h1>
           <span>
@@ -399,6 +433,12 @@ export function SceneWorkspace({
               trace={trace}
             />
           </ResonanceStage>
+          <ShotContinuityCompare
+            projectId={projectId}
+            shots={shots}
+            shotId={selectedShotKey}
+            candidate={previewCandidate}
+          />
           <div ref={trayAnchor}>
             <ShotCandidateTray
               projectId={projectId}
@@ -440,6 +480,20 @@ export function SceneWorkspace({
           onDesignDirtyChange={updateDesignDirty}
           designDraft={designDraft}
           onDesignDraftChange={updateDesignDraft}
+          onReferenceLabelChanged={(before, after) => {
+            if (!selected) return;
+            setDesignDrafts((current) => {
+              const draft = current[selected.id] ?? draftFromShot(selected);
+              return {
+                ...current,
+                [selected.id]: {
+                  ...draft,
+                  image_prompt: replaceMentionLabel(draft.image_prompt, before, after),
+                  video_prompt: replaceMentionLabel(draft.video_prompt, before, after),
+                },
+              };
+            });
+          }}
           suggestionDraft={suggestionDraft}
           onApplySuggestionDraft={setSuggestionDraft}
           onDesignSaved={handleDesignSaved}
@@ -468,6 +522,7 @@ export function SceneWorkspace({
             setDesignDirty(false);
             setSuggestionDraft(null);
             setSelectedShotId(pendingShotId);
+            onSelectedShotChange?.(pendingShotId);
             setPreviewCandidate(null);
             setPendingShotId(null);
           }}
@@ -481,16 +536,25 @@ export function SceneWorkspace({
         size="wide"
         testId="scene-model-settings-drawer"
       >
-        <ModelConnectionSettingsPage />
+        <ModelConnectionSettings />
       </Drawer>
       {animaticOpen && (
-        <SceneAnimaticPlayer
-          projectId={projectId}
-          sceneName={data?.scene.location_name}
-          shots={shots}
+        <Dialog
+          title={`场景连播 · ${data?.scene.location_name ?? "预览"}`}
+          size="wide"
           onClose={() => setAnimaticOpen(false)}
-          onSelectShot={selectShot}
-        />
+          testId="scene-animatic-player-dialog"
+        >
+          <SceneAnimaticPreview
+            projectId={projectId}
+            shots={shots}
+            candidates={data?.candidates}
+            onSelectShot={(shotId) => {
+              selectShot(shotId);
+              setAnimaticOpen(false);
+            }}
+          />
+        </Dialog>
       )}
     </div>
   );

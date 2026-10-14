@@ -56,6 +56,7 @@ services:
       backend-quality:
         condition: service_completed_successfully
     environment:
+      CI: ${CI:-}
       DRAMAFORGE_OPENAPI_JSON: /contract/openapi.json
     volumes:
       - ${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}:/contract:ro

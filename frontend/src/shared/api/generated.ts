@@ -1012,6 +1012,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/edit-sessions/{session_id}/preview-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Get Timeline Preview Plan */
+        post: operations["get_timeline_preview_plan_api_v1_projects__project_id__edit_sessions__session_id__preview_plan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/edit-sessions/{session_id}/timeline": {
         parameters: {
             query?: never;
@@ -1138,7 +1155,7 @@ export interface paths {
         };
         /**
          * Get Artifact Content
-         * @description Stream artifact bytes for the owning user's workspace.
+         * @description Deliver authenticated Artifact bytes, including ranges for native media seek.
          */
         get: operations["get_artifact_content_api_v1_projects__project_id__artifacts__artifact_id__content_get"];
         put?: never;
@@ -3220,6 +3237,27 @@ export interface components {
             /** Approximate Strategy Id */
             approximate_strategy_id?: string | null;
         };
+        /** CapabilityBound */
+        CapabilityBound: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "bounded" | "unlimited" | "unknown";
+            /** Value */
+            value?: number | null;
+            /**
+             * Claim Status
+             * @default unknown
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /**
+             * Inclusive
+             * @default true
+             */
+            inclusive: boolean;
+        };
         /**
          * CapabilityCatalogBody
          * @description The resolvable creative capability catalog (read-only).
@@ -4260,6 +4298,38 @@ export interface components {
             /** Total Shots */
             total_shots: number;
         };
+        /** EvidenceOverride */
+        EvidenceOverride: {
+            /**
+             * Claim Status
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /** Source Snapshot Ref */
+            source_snapshot_ref: string;
+            evidence_review: components["schemas"]["EvidenceReview"];
+            /**
+             * Issue
+             * @default
+             */
+            issue: string;
+        };
+        /** EvidenceReview */
+        EvidenceReview: {
+            /** Covers */
+            covers: string;
+            /** Reviewed Subtree Hash */
+            reviewed_subtree_hash: string;
+            /** Reviewed By */
+            reviewed_by: string;
+            /**
+             * Review Kind
+             * @enum {string}
+             */
+            review_kind: "human" | "authorized_agent" | "synthetic_test";
+            /** Locator */
+            locator: string;
+        };
         /** ExecutionBody */
         ExecutionBody: {
             /**
@@ -4999,6 +5069,22 @@ export interface components {
             description?: string | null;
         };
         JsonValue: unknown;
+        /** KnowledgeFieldRead */
+        KnowledgeFieldRead: {
+            /** Path */
+            path: string;
+            /**
+             * Claim Status
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /** Source Snapshot Ref */
+            source_snapshot_ref: string | null;
+            /** Evidence Resolution */
+            evidence_resolution: string;
+            /** Blocker */
+            blocker: string | null;
+        };
         /** LifecycleWarning */
         LifecycleWarning: {
             /**
@@ -5195,6 +5281,9 @@ export interface components {
             lifecycle_warnings?: components["schemas"]["LifecycleWarning"][];
             /** Limitations */
             limitations?: string[];
+            knowledge?: components["schemas"]["ModelKnowledgeRead"] | null;
+            /** New Create Blocker */
+            new_create_blocker?: string | null;
         };
         /** ModelCapabilitySummary */
         ModelCapabilitySummary: {
@@ -5216,6 +5305,57 @@ export interface components {
             limits?: {
                 [key: string]: number;
             };
+        };
+        /** ModelKnowledgeRead */
+        ModelKnowledgeRead: {
+            /**
+             * Schema Version
+             * @default 2
+             * @constant
+             */
+            schema_version: "2";
+            /** Model Revision */
+            model_revision: string;
+            /** Manifest Hash */
+            manifest_hash: string;
+            /** Lifecycle */
+            lifecycle: string;
+            /** Operations */
+            operations: {
+                [key: string]: components["schemas"]["TypedOperation"];
+            };
+            /** Fields */
+            fields: components["schemas"]["KnowledgeFieldRead"][];
+            /** Claim Counts */
+            claim_counts: {
+                [key: string]: number;
+            };
+            /** Official Supported Fields */
+            official_supported_fields: number;
+            /** Unknown Bounds */
+            unknown_bounds: number;
+            /** Sources */
+            sources?: components["schemas"]["OfficialSource"][];
+            /**
+             * Implementation Status
+             * @default not_implemented
+             * @constant
+             */
+            implementation_status: "not_implemented";
+            /**
+             * Product Open
+             * @default false
+             * @constant
+             */
+            product_open: false;
+            /**
+             * Account Status
+             * @default not_checked
+             * @constant
+             */
+            account_status: "not_checked";
+            /** Blockers */
+            blockers?: string[];
         };
         /** ModelQueryRead */
         ModelQueryRead: {
@@ -5248,6 +5388,8 @@ export interface components {
             configured: boolean;
             /** Available */
             available: boolean;
+            /** Availability Reason */
+            availability_reason?: string | null;
             /** Capabilities */
             capabilities: string[];
             /**
@@ -5322,16 +5464,17 @@ export interface components {
         OfficialSource: {
             /** Url */
             url: string;
-            /**
-             * Checked At
-             * Format: date
-             */
-            checked_at: string;
+            /** Checked At */
+            checked_at?: string | null;
             /**
              * Status
-             * @default documented_claim
+             * @default source_registered_unreviewed
              */
             status: string;
+            /** Source Id */
+            source_id?: string | null;
+            /** Source Snapshot Ref */
+            source_snapshot_ref?: string | null;
         };
         /** OpenCutClip */
         OpenCutClip: {
@@ -6253,6 +6396,9 @@ export interface components {
                 [key: string]: unknown;
             };
             capability_summary: components["schemas"]["ModelCapabilitySummary"];
+            knowledge?: components["schemas"]["ModelKnowledgeRead"] | null;
+            /** New Create Blocker */
+            new_create_blocker?: string | null;
         };
         /** ProviderPluginRead */
         ProviderPluginRead: {
@@ -6626,6 +6772,13 @@ export interface components {
         };
         /** ResolvedReferenceRead */
         ResolvedReferenceRead: {
+            /**
+             * Binding Id
+             * Format: uuid
+             */
+            binding_id: string;
+            /** Stage */
+            stage: string;
             /** Purpose */
             purpose: string;
             /** Role */
@@ -6643,6 +6796,10 @@ export interface components {
             asset_id?: string | null;
             /** Asset Version Id */
             asset_version_id?: string | null;
+            /** Mime Type */
+            mime_type: string;
+            /** Fingerprint */
+            fingerprint: string;
         };
         /**
          * ReviewDecisionBody
@@ -7014,6 +7171,14 @@ export interface components {
             formal_video_count: number;
             /** Risk Count */
             risk_count: number;
+            /** Pending Review Count */
+            pending_review_count: number;
+            /** Generating Count */
+            generating_count: number;
+            /** Failed Count */
+            failed_count: number;
+            /** Unknown Count */
+            unknown_count: number;
             representative_artifact: components["schemas"]["ArtifactSummaryRead"] | null;
         };
         /**
@@ -7068,6 +7233,10 @@ export interface components {
             /** Trace */
             trace: {
                 [key: string]: unknown[];
+            };
+            /** Overview */
+            overview: {
+                [key: string]: components["schemas"]["ShotOverviewRead"];
             };
         };
         /** ScriptDocumentRead */
@@ -7470,6 +7639,17 @@ export interface components {
             /** Video Model Id */
             video_model_id?: string | null;
         };
+        /** ShotOverviewRead */
+        ShotOverviewRead: {
+            /** Pending Review */
+            pending_review: boolean;
+            /** Generating */
+            generating: boolean;
+            /** Generation Failed */
+            generation_failed: boolean;
+            /** Outcome Unknown */
+            outcome_unknown: boolean;
+        };
         /** ShotPromptRead */
         ShotPromptRead: {
             /** Visual Description */
@@ -7759,6 +7939,55 @@ export interface components {
         SuggestionDirectorState: {
             [key: string]: unknown;
         };
+        /** TimelinePreviewClipRead */
+        TimelinePreviewClipRead: {
+            /** Clip Id */
+            clip_id: string;
+            /**
+             * Video Artifact Id
+             * Format: uuid
+             */
+            video_artifact_id: string;
+            /** Start Ms */
+            start_ms: number;
+            /** End Ms */
+            end_ms: number;
+            /** Source In Ms */
+            source_in_ms: number;
+            /** Source Out Ms */
+            source_out_ms: number;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Subtitle Text */
+            subtitle_text: string;
+            /** Audio Artifact Id */
+            audio_artifact_id: string | null;
+            /**
+             * Audio State
+             * @enum {string}
+             */
+            audio_state: "available" | "muted" | "none" | "unavailable";
+            /** Audio Volume */
+            audio_volume: number;
+        };
+        /** TimelinePreviewRead */
+        TimelinePreviewRead: {
+            /**
+             * Edit Session Id
+             * Format: uuid
+             */
+            edit_session_id: string;
+            /** Baseline Version */
+            baseline_version: number;
+            /** Draft Fingerprint */
+            draft_fingerprint: string;
+            /** Duration Ms */
+            duration_ms: number;
+            /** Clips */
+            clips: components["schemas"]["TimelinePreviewClipRead"][];
+            /** Unsupported */
+            unsupported: string[];
+        };
         /**
          * TranslationReport
          * @description Auditable record of what the user requested vs what the model received
@@ -7779,6 +8008,257 @@ export interface components {
             dropped_options?: string[];
             /** Warnings */
             warnings?: string[];
+        };
+        /** TypedConstraint */
+        TypedConstraint: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "requires" | "requires_any" | "exclusion" | "conditional" | "derived" | "forced" | "sum_limit";
+            /**
+             * Claim Status
+             * @default unknown
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /** When */
+            when?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * When Present
+             * @default []
+             */
+            when_present: string[];
+            /**
+             * Require
+             * @default []
+             */
+            require: string[];
+            /**
+             * Forbid
+             * @default []
+             */
+            forbid: string[];
+            /** Allowed */
+            allowed?: {
+                [key: string]: components["schemas"]["JsonValue"][];
+            };
+            /** Target */
+            target?: string | null;
+            value?: components["schemas"]["JsonValue"];
+            /** Derivation */
+            derivation?: ("reference_count" | "reference_duration_sum") | null;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Sum Fields
+             * @default []
+             */
+            sum_fields: string[];
+        };
+        /** TypedInputContract */
+        TypedInputContract: {
+            /**
+             * Claim Status
+             * @default unknown
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /** Input Slots */
+            input_slots?: {
+                [key: string]: components["schemas"]["TypedInputSlot"];
+            };
+            /** Output Options */
+            output_options?: {
+                [key: string]: components["schemas"]["TypedParameter"];
+            };
+            minimum_total_references?: components["schemas"]["CapabilityBound"];
+            maximum_total_references?: components["schemas"]["CapabilityBound"];
+            /** Max Total Duration Seconds */
+            max_total_duration_seconds?: {
+                [key: string]: components["schemas"]["CapabilityBound"];
+            };
+            /** Min Total Duration Seconds */
+            min_total_duration_seconds?: {
+                [key: string]: components["schemas"]["CapabilityBound"];
+            };
+            maximum_total_bytes?: components["schemas"]["CapabilityBound"];
+            /** Max Total Bytes By Role */
+            max_total_bytes_by_role?: {
+                [key: string]: components["schemas"]["CapabilityBound"];
+            };
+            /**
+             * Constraints
+             * @default []
+             */
+            constraints: components["schemas"]["TypedConstraint"][];
+            /** Evidence Group Ref */
+            evidence_group_ref?: string | null;
+            evidence_review?: components["schemas"]["EvidenceReview"] | null;
+        };
+        /** TypedInputSlot */
+        TypedInputSlot: {
+            /**
+             * Claim Status
+             * @default unknown
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /**
+             * Required
+             * @default false
+             */
+            required: boolean;
+            minimum?: components["schemas"]["CapabilityBound"];
+            maximum?: components["schemas"]["CapabilityBound"];
+            /**
+             * Media Types
+             * @default []
+             */
+            media_types: string[];
+            /**
+             * Codecs
+             * @default []
+             */
+            codecs: string[];
+            /**
+             * Aspect Ratios
+             * @default []
+             */
+            aspect_ratios: string[];
+            /**
+             * Ordering
+             * @default unknown
+             * @enum {string}
+             */
+            ordering: "preserve" | "unknown";
+            /** Wire Field */
+            wire_field?: string | null;
+            /**
+             * Delivery Formats
+             * @default []
+             */
+            delivery_formats: string[];
+            /** Wire Attributes */
+            wire_attributes?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Wire Options */
+            wire_options?: {
+                [key: string]: components["schemas"]["TypedParameter"];
+            };
+            max_bytes?: components["schemas"]["CapabilityBound"];
+            min_duration_seconds?: components["schemas"]["CapabilityBound"];
+            max_duration_seconds?: components["schemas"]["CapabilityBound"];
+            min_width?: components["schemas"]["CapabilityBound"];
+            max_width?: components["schemas"]["CapabilityBound"];
+            min_height?: components["schemas"]["CapabilityBound"];
+            max_height?: components["schemas"]["CapabilityBound"];
+            min_fps?: components["schemas"]["CapabilityBound"];
+            max_fps?: components["schemas"]["CapabilityBound"];
+            min_pixels?: components["schemas"]["CapabilityBound"];
+            max_pixels?: components["schemas"]["CapabilityBound"];
+            min_aspect_ratio?: components["schemas"]["CapabilityBound"];
+            max_aspect_ratio?: components["schemas"]["CapabilityBound"];
+            /** Evidence Group Ref */
+            evidence_group_ref?: string | null;
+            evidence_review?: components["schemas"]["EvidenceReview"] | null;
+        };
+        /** TypedOperation */
+        TypedOperation: {
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "image.generate" | "image.edit" | "image.extend" | "image.layer_decomposition" | "image.interactive_edit" | "video.generate" | "video.edit" | "video.extend";
+            /**
+             * Claim Status
+             * @default unknown
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /** Input Contracts */
+            input_contracts?: {
+                [key: string]: components["schemas"]["TypedInputContract"];
+            };
+            /** Output Options */
+            output_options?: {
+                [key: string]: components["schemas"]["TypedParameter"];
+            };
+            /**
+             * Constraints
+             * @default []
+             */
+            constraints: components["schemas"]["TypedConstraint"][];
+            maximum_request_bytes?: components["schemas"]["CapabilityBound"];
+            /** Protocol Facts */
+            protocol_facts?: {
+                [key: string]: components["schemas"]["TypedParameter"];
+            };
+            prompt_spec?: components["schemas"]["TypedParameter"] | null;
+            /** Evidence Group Ref */
+            evidence_group_ref?: string | null;
+            evidence_review?: components["schemas"]["EvidenceReview"] | null;
+            /** Evidence Overrides */
+            evidence_overrides?: {
+                [key: string]: components["schemas"]["EvidenceOverride"];
+            };
+        };
+        /** TypedParameter */
+        TypedParameter: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "string" | "integer" | "number" | "boolean" | "array" | "object";
+            /**
+             * Claim Status
+             * @default unknown
+             * @enum {string}
+             */
+            claim_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /**
+             * Control
+             * @default unknown
+             * @enum {string}
+             */
+            control: "native" | "derived" | "prompt_only" | "unsupported" | "unknown";
+            /** Required */
+            required?: boolean | null;
+            /** Wire Name */
+            wire_name?: string | null;
+            /** Multiple Of */
+            multiple_of?: number | null;
+            /**
+             * Enum
+             * @default []
+             */
+            enum: components["schemas"]["JsonValue"][];
+            minimum?: components["schemas"]["CapabilityBound"];
+            maximum?: components["schemas"]["CapabilityBound"];
+            min_items?: components["schemas"]["CapabilityBound"];
+            max_items?: components["schemas"]["CapabilityBound"];
+            min_length?: components["schemas"]["CapabilityBound"];
+            max_length?: components["schemas"]["CapabilityBound"];
+            /** Dimension Bounds */
+            dimension_bounds?: {
+                [key: string]: components["schemas"]["CapabilityBound"];
+            };
+            default?: components["schemas"]["JsonValue"];
+            /**
+             * Default Status
+             * @default unknown
+             * @enum {string}
+             */
+            default_status: "documented_supported" | "documented_unsupported" | "unknown" | "conflicting";
+            /** Evidence Group Ref */
+            evidence_group_ref?: string | null;
+            evidence_review?: components["schemas"]["EvidenceReview"] | null;
         };
         /** UpstreamDependencyRead */
         UpstreamDependencyRead: {
@@ -10720,6 +11200,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_timeline_preview_plan_api_v1_projects__project_id__edit_sessions__session_id__preview_plan_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                session_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditTimelineUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimelinePreviewRead"];
                 };
             };
             /** @description Validation Error */

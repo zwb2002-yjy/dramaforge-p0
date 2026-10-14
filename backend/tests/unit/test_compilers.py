@@ -21,7 +21,11 @@ from app.providers.runtime import ResolvedReference
 
 
 def _video_manifest() -> ModelCapabilityManifest:
-    raw = next(m for m in CATALOG_MODELS if m["model_id"] == "agnes-video-v2.0")
+    raw = next(
+        item.as_dict()
+        for item in ModelCatalogLoader().load()
+        if item.identity[2] == "agnes-video-v2.0"
+    )
     return ModelCapabilityManifest.model_validate(raw)
 
 

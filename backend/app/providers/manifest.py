@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import math
 from datetime import date
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, JsonValue, model_validator
 
 from app.providers.capabilities import Capability
 from app.providers.reference_roles import ROLE_MEDIA_TYPES, canonical_reference_role
+
+if TYPE_CHECKING:
+    from app.providers.capability_manifest_v2 import TypedModelCapabilityManifest
 
 ManifestVersion = str
 MediaKind = Literal["image", "video", "text", "voice"]
@@ -188,6 +191,8 @@ class ModelCapabilityManifest(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def require_contract_evidence(cls, value: Any) -> Any:
+        if isinstance(value, dict) and value.get("schema_version", "1") != "1":
+            raise ValueError("typed capability schema requires the versioned Catalog reader")
         if (
             isinstance(value, dict)
             and value.get("implementation_status") == "contract_tested"
@@ -195,6 +200,20 @@ class ModelCapabilityManifest(BaseModel):
         ):
             raise ValueError("contract-tested manifest lacks reproducible evidence")
         return value
+
+
+def read_catalog_manifest(
+    raw: dict[str, Any],
+) -> ModelCapabilityManifest | TypedModelCapabilityManifest:
+    """Single version boundary; missing tags belong only to frozen legacy V1."""
+    version = raw.get("schema_version", "1")
+    if version == "1":
+        return ModelCapabilityManifest.model_validate(raw)
+    if version == "2":
+        from app.providers.capability_manifest_v2 import TypedModelCapabilityManifest
+
+        return TypedModelCapabilityManifest.model_validate(raw)
+    raise ValueError(f"unknown capability schema version: {version}")
 
 
 # ---------------------------------------------------------------------------

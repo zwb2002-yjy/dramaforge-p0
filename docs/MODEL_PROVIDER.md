@@ -3,7 +3,62 @@
 Status: current（入口见 [CURRENT.md](CURRENT.md)）；
 Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/0005-provider-plugin-driven-configuration.md)。
 
+新 Create 在提交标记前锁定并重新读取当前 Binding/Connection 资格，Catalog 与维护同步
+共用事务协调锁，运行角色保持 Catalog 只读权限。准入必须匹配
+最新连接和凭据修订以及该修订下的正向模型可见性证据。旧排队计划在轮换后失效；已提交
+任务仍按原身份恢复。仅有 `@contract/...` 协议 Fixture 和 `/models` 可见性的动态模型
+返回 `DYNAMIC_MODEL_CAPABILITY_UNVERIFIED`，在精确能力确认机制完成前不开放新 Create。
+退役审查记录位于 `catalog_publication_events.json`，只降低唯一 Catalog 的发布资格，不
+改写旧能力 JSON/Hash。Agnes Video V2.0 已按官方页面下线声明阻断新 Create；历史身份
+和素材保留。无法匹配已冻结 Handler 的历史任务必须人工核对，不自动重发。
+
+首批六个既有 Active 官方修订的可执行字段尚缺完整官方审核，已在同一发布事件文件
+登记精确 revision/hash 的 `MODEL_OFFICIAL_EVIDENCE_GAP` 新 Create 限制。该限制由
+候选资格、模型解析和提交前准入共同消费，不改变 lifecycle、Binding 或旧 Manifest。
+只读查询仍显示冻结合同与候选知识，纯 Provider Compiler Fixture 可离线检查；候选
+知识和账号目录成功均不能解除该冻结修订的限制。已提交任务的恢复不读取新准入事件。
+
 ## 当前唯一模型执行系统
+
+来源登记、不可变来源快照和追加检查记录集中在
+`backend/app/providers/model_sources/` 的三个 JSON 文件。来源目录只保存 URL、精确适用
+范围及证据元数据，不能定义能力或替代 Manifest。原二十份捕获保持 `unreviewed`；
+后续审核追加独立快照，十份新审核覆盖精确型号/API/地区及实际声明的字段。
+HTTP 200、SDK 示例和 Compiler Fixture 不会自动赋予字段官方支持。
+
+新合同的证据关联通过 `source_evidence.resolve_field_evidence` 解析：显式字段 override
+优先，其次最近能力/输入组，最后操作组。字段必须有自身声明状态，父组不能把未知字段
+升级为支持。`covers` 使用 JSON pointer；`reviewed_manifest_subtree_hash` 包含能力值、
+支持状态和条件/派生/强制规则，排除来源及审核元数据。新增字段或修改值会使旧审核
+失效；参数名及字面 JSON 中同名的 `checked_at/source_url` 仍属于能力语义。
+
+维护命令 `scripts/model_source_evidence.py` 提供 `lint`、`register --record-json`、
+`snapshot --record-json --body` 和 `check --record-json`，可用 `--root` 指定离线副本。
+捕获快照必须提交实际哈希一致的正文；重复身份不同内容被拒绝，检查仅追加，旧时间戳
+原样保留。命令不联网、不解密、不写 Manifest、不开放模型；并发写入直接拒绝。
+来源后续修订采用新快照/检查 ID，旧引用继续解析。生产调用只读取 Manifest 能力，
+不从 URL 内容或检查记录动态推断参数。
+
+Catalog 的版本入口 `read_catalog_manifest` 读取冻结 V1 与类型化 V2。V2 显式区分
+bounded / unknown / unlimited，支持未实现的编辑、延长与分层操作、逐素材和聚合限制、
+声明式组合/派生规则。它通过同一 CapabilityResolver 校验实际输入和字段级证据，
+最终选项再次检查组合约束；匹配成功不注册 Compiler 或开放 Create。V2 暂为候选，
+Loader 拒绝未经实施发布的 Active。V2 Hash 排除生命周期和文档日期；V1 原算法、
+JSON、Fixture 与历史执行语义冻结不变。
+
+首批二十个型号/合同身份各有一个 V2 候选，覆盖原二十四个修订。`knowledge_projection`
+把操作、参数、逐素材/聚合限制、分组来源、未知/冲突及实施状态投影到现有查询 API，
+当前 Binding 的窄合同和附带的候选知识分别显示版本与 Hash。Candidate 的官方事实
+不提升当前绑定资格，未实施操作不注册 Runtime。编译用的参数与固定输出事实分开：
+例如帧率/产物格式和图层上限只作为协议观察；来源范围未知仍明示阻塞。
+来源链接按实际引用的 Snapshot 单独投影，检查日期只来自该引用的追加检查，不能
+借同一 URL 的另一个已审核型号授予支持。设置页的能力说明为只读；实际高级控件
+继续使用已经实施的 CapabilitySpec，候选知识不注册输入控件或生成动作。
+
+`scripts/audit_model_knowledge.py` 可把冻结 Inventory 与显式审核映射对照新候选，
+分别报告身份覆盖、观察分类、结构化映射、来源证据、Compiler 和产品开放；只输出到
+新的 `tmp/` 目录，不联网、不访问数据库、不发布。来源注记和退役事实保留在报告中，
+不进入可执行能力覆盖的分母。检查日志变化不会改写既有修订。
 
 项目尚未发布。模型执行统一为文件 Catalog/Manifest、具体 ProviderModelBinding、
 Connection/Credential revision、严格 Compiler 和 ExecutionIdentitySnapshot。
@@ -19,12 +74,50 @@ Connection/Credential revision、严格 Compiler 和 ExecutionIdentitySnapshot�
 - 媒体通过工作台预览和显式确认，工作台冻结 WorkbenchExecutionPlan，实验图在排队前冻结相同 ExecutionModelResolution；Worker 缺少计划
   与已冻结执行身份时拒绝执行，不能转去重新选模型或单独生成。
 - ProductCapabilityPolicy 是编译时的显式产品开放子集，不引入另一套策略存储。
+- 实际提交在执行身份内保存产品策略快照及精确协议/实现指纹；属于原执行的冻结
+  证据，不建立第二套 Policy、Handler 或 Runtime。历史身份没有这些事实时只报告
+  阻塞，不能自动补造。当前策略与可见性重新检查只用于新 Create。
 - ProviderAvailabilityEvidence 为模型、连接和凭证修订的追加证据，Availability 是其
   当前投影；静态合同、目录列表、账号执行验证和人工质量认证必须分别表述。
 
 当前修订必须显式声明 implementation_status；contract_tested 还需可复现合同证据。
 不再按旧 hash 白名单补足状态。preview 只可用于离线检查，不能注册为可执行绑定。
 当前离线测试不证明任何实际账号或作品质量。
+
+### 离线能力基线审计
+
+`scripts/audit_model_capabilities.py` 复用唯一 Catalog Loader，冻结精确型号/协议/修订、
+原文件与 Manifest Hash，枚举操作、参数、输入、限制和未结构化的功能声明，并核对
+同一修订的 Fixture。首批统计为 Agnes、MiniMax、Volcengine；其他协议合同另列上下文。
+目录声明、官方事实、Compiler 测试、产品开放与账号可用分别报告。型号级
+`contract_tested` 与 Fixture 关联不能认证每条能力，逐能力实施验证缺证据时保持未核验。
+Catalog 字段保留数量仅说明读取结果；声明值映射的分母是明确识别的官方能力事实，
+SourceAnnotation 不进入能力分母，枚举值按一项事实统计。未评估、明确缺失和值失配
+分别计数；未录入逐事实映射审核时不报告 0% 覆盖。路径和值吻合不认证完整 typed 合同
+或 Compiler 实施。现有来源缺少审核
+覆盖时，审计状态为 `unknown`，不改变既有合同或自动停用当前 Binding。
+发布验收要求的显式新 Create 限制由发布事件投影单独报告，不把限制伪装为型号退役。
+
+在 backend 质量容器的锁定环境中，以 `/workspace` 为工作目录运行：
+
+```sh
+PYTHONPATH=/workspace/backend uv run --project backend python scripts/audit_model_capabilities.py --output-dir /workspace/tmp/model-audit/new-check
+```
+
+可用 `--observations <JSON>` 附加人工核验的源码/数据库/官方资料记录，用
+`--compare <前次审计JSON>` 检测同一修订 Hash 被修改。观察记录不提升能力证据等级。
+原文陈述、型号/协议/区域适用性、合同证据状态独立记录；原文的 `documented_supported`
+不提升适用性未核实的合同。新增观察字段没有显式状态时为 unknown，不继承父级肯定。
+
+`--source-checks <JSON> --source-bodies <目录>` 可选读取已采集缓存：先核对原响应 Hash，
+再以纯 JSON 解析正文（包括 Ark 的 `window._ROUTER_DATA` / `MDContent`），不执行
+JavaScript。提取正文、HTTP 200 和正文 Hash 都不授予能力支持；原响应保持不变，
+衍生正文写入新报告的 `source-texts/`。正文已获取但未审核为 `extracted_unreviewed`，
+不应记为来源不可用。
+
+该命令不联网、不访问数据库、不调用 Provider、不修改目录或运行状态；输出仅允许
+位于 `tmp/` 的新目录，拒绝覆盖旧报告。一次性基线和误删审计不进入当前权威文档树。
+它不代替官方来源审核、只读历史恢复预检或发布质量 Gate。
 
 ## Model Capability / Prompt Compiler 详细指南
 
@@ -36,6 +129,9 @@ Connection/Credential revision、严格 Compiler 和 ExecutionIdentitySnapshot�
 模型能力查询、无副作用编译预览与生成快照已由 production/model_inspection.py 的只读service及
 api/v1/model_inspection.py 提供。预览复用原compiler，使用占位reference且不证明账号/传输就绪；
 不写NodeRun/ProviderOperation或调用Provider。Agent ToolRegistry与自主工具循环仍未实现。
+无命名输入模式的目录仍按槽位和原 Compiler 校验；编译预览接受既有工作台关键帧的
+`text_to_image` 与视频的 `first_frame` 阶段名。跨媒体阶段名和未知模式仍会阻止预览，
+有命名合同的模型只接受实际声明的合同 ID。
 
 ## 分层
 
