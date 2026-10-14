@@ -16,6 +16,8 @@ import {
 import { queryKeys } from "../../lib/queryKeys";
 import { Button, Disclosure, Field, Input } from "../ui";
 import { ModelPicker } from "./ModelPicker";
+import { ModelKnowledgePanel } from "./ModelKnowledgePanel";
+import { createBlockerLabel } from "./modelKnowledge";
 import { useModelActivation } from "./useModelActivation";
 import { bindingBatchMessage, createBindings } from "./providerBindings";
 import {
@@ -37,6 +39,8 @@ function bindingStatus(
   );
   if (!contract || contract.lifecycle !== "active")
     return { tone: "warn", label: "调用方式待更新" };
+  if (contract.new_create_blocker)
+    return { tone: "warn", label: createBlockerLabel(contract.new_create_blocker) };
   if (!binding.account_verified) return { tone: "warn", label: "待验证" };
   return { tone: "ok", label: "可用" };
 }
@@ -391,6 +395,9 @@ export function ProviderDetails({
           <p className="df-status ok" role="status">
             {message}
           </p>
+        )}
+        {!isText && plugin && (
+          <ModelKnowledgePanel plugin={plugin} bindings={bindings.data ?? []} />
         )}
         {usage.activate.isSuccess && (
           <p className="df-status ok" role="status">

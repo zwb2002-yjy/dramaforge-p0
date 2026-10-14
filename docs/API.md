@@ -52,8 +52,14 @@ provider evidence and media are retained; no old interface or recovery route is 
 
 ## Read-only Model Capability / Prompt Compiler
 
+- GET /provider-plugins retains exact catalog revisions and adds optional typed `knowledge`
+  with field evidence, referenced sources, implementation/product/account distinctions and
+  `new_create_blocker`. Knowledge never substitutes the selected Binding revision.
+- GET /models reports `available=false` and `availability_reason` for blocked bindings while
+  preserving their connection/configuration facts; directory visibility does not qualify a contract.
 - GET /projects/{project_id}/model-capabilities: exactly one explicit model_id, current media
   stage, or text slot; returns manifest facts, bounded public controls, source/lifecycle annotations.
+  Known blocked current bindings remain inspectable with their original Hash and blocker.
 - POST /projects/{project_id}/shots/{shot_id}/compile-preview: ExecutionPlanBody with a current
   shot version, saved creative inputs only; refuses model-supplied approximation acceptance.
   Calls existing compilers with placeholder references, never a Provider or production writer.

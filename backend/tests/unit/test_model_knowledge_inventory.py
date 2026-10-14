@@ -104,6 +104,9 @@ def test_knowledge_query_does_not_replace_frozen_executable_revision():
     assert report.knowledge.model_revision == "knowledge-2026-10-13-r1"
     assert report.manifest_hash != report.knowledge.manifest_hash
     assert report.knowledge.product_open is False
+    assert len(report.knowledge.sources) == 1
+    assert report.knowledge.sources[0].status == "source_snapshot_reviewed"
+    assert report.knowledge.sources[0].url.startswith("https://wiki.agnes-ai.cn/")
 
 
 def test_object_protocol_literals_do_not_add_fake_claims_or_unknown_bounds():

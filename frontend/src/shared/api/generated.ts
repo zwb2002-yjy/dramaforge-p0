@@ -5317,6 +5317,8 @@ export interface components {
             official_supported_fields: number;
             /** Unknown Bounds */
             unknown_bounds: number;
+            /** Sources */
+            sources?: components["schemas"]["OfficialSource"][];
             /**
              * Implementation Status
              * @default not_implemented

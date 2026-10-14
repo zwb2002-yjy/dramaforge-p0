@@ -8,7 +8,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.providers.capability_manifest_v2 import TypedModelCapabilityManifest, TypedOperation
-from app.providers.catalog_loader import ModelCatalogLoader, hash_manifest
+from app.providers.capability_sources import OfficialSource
+from app.providers.catalog_loader import LoadedCatalogManifest, ModelCatalogLoader, hash_manifest
 from app.providers.source_evidence import (
     ClaimStatus,
     SourceEvidenceStore,
@@ -42,6 +43,7 @@ class ModelKnowledgeRead(BaseModel):
     claim_counts: dict[str, int]
     official_supported_fields: int
     unknown_bounds: int
+    sources: list[OfficialSource] = Field(default_factory=list)
     implementation_status: Literal["not_implemented"] = "not_implemented"
     product_open: Literal[False] = False
     account_status: Literal["not_checked"] = "not_checked"
@@ -99,6 +101,39 @@ def project_model_knowledge(
             )
         )
     blockers = sorted({field.blocker for field in fields if field.blocker})
+    sources = []
+    for reference in sorted(
+        {field.source_snapshot_ref for field in fields if field.source_snapshot_ref}
+    ):
+        snapshot = next(
+            (item for item in evidence.snapshots if item.source_snapshot_id == reference), None
+        )
+        if snapshot is None:
+            continue
+        source = next(item for item in evidence.sources if item.source_id == snapshot.source_id)
+        checks = [check for check in evidence.checks if check.source_snapshot_ref == reference]
+        latest = max(checks, key=lambda check: check.checked_at) if checks else None
+        status = (
+            "source_unavailable"
+            if snapshot.capture_status == "unavailable"
+            else (
+                "source_snapshot_reviewed"
+                if snapshot.review_status == "reviewed"
+                and manifest.source_scope() in snapshot.reviewed_scopes
+                else "source_scope_unverified"
+            )
+        )
+        if latest and latest.result == "changed":
+            status = "source_changed_not_reviewed"
+        sources.append(
+            OfficialSource(
+                url=source.url,
+                source_id=source.source_id,
+                source_snapshot_ref=reference,
+                checked_at=latest.checked_at.date() if latest else None,
+                status=status,
+            )
+        )
     return ModelKnowledgeRead(
         model_revision=manifest.model_revision,
         manifest_hash=hash_manifest(raw),
@@ -111,16 +146,21 @@ def project_model_knowledge(
             for field in fields
         ),
         unknown_bounds=unknown_bounds,
+        sources=sources,
         blockers=["MODEL_CONTRACT_NOT_TESTED", "NOT_ACTIVE", *blockers],
     )
 
 
 def knowledge_for_model(
-    provider_type: str, protocol_profile: str, model_id: str
+    provider_type: str,
+    protocol_profile: str,
+    model_id: str,
+    *,
+    catalog: tuple[LoadedCatalogManifest, ...] | None = None,
 ) -> ModelKnowledgeRead | None:
     candidates = [
         item
-        for item in ModelCatalogLoader().load()
+        for item in (catalog if catalog is not None else ModelCatalogLoader().load())
         if item.identity[:3] == (provider_type, protocol_profile, model_id)
         and item.as_dict().get("schema_version") == "2"
     ]

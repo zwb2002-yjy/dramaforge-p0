@@ -20,6 +20,7 @@ from app.api.deps import (
     require_selected_workspace,
 )
 from app.providers.capability_summary import ModelCapabilitySummary, summarize_model_capability
+from app.providers.catalog_loader import ModelCatalogLoader
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_publication import (
     catalog_new_create_blocker,
@@ -89,8 +90,13 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
     """
     entries = await ModelCatalogService(session).list_entries()
     by_plugin: dict[tuple[str, str], list[ProviderPluginModelRead]] = {}
+    knowledge_catalog = ModelCatalogLoader().load()
+    knowledge_cache: dict[tuple[str, str, str], ModelKnowledgeRead | None] = {}
     for entry in entries:
         manifest = read_catalog_manifest(entry.capability_manifest_json)
+        key = (entry.provider_type, entry.protocol_profile, entry.model_id)
+        if key not in knowledge_cache:
+            knowledge_cache[key] = knowledge_for_model(*key, catalog=knowledge_catalog)
         blocker = catalog_new_create_blocker(
             entry.provider_type,
             entry.protocol_profile,
@@ -129,9 +135,7 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
                 option_schema=dict(entry.option_schema_json or {}),
                 capability_summary=summarize_model_capability(manifest, new_create_blocker=blocker),
                 new_create_blocker=blocker,
-                knowledge=knowledge_for_model(
-                    entry.provider_type, entry.protocol_profile, entry.model_id
-                )
+                knowledge=knowledge_cache[key]
                 if isinstance(manifest, ModelCapabilityManifest)
                 else project_model_knowledge(entry.capability_manifest_json),
             )
