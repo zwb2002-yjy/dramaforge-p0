@@ -31,6 +31,19 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 The project is unreleased. Retain old instance volumes separately; current startup does not
 reuse another worktree, old image tags or queued provider tasks.
 
+### Frontend hot reload and backend identity
+
+A frontend source bind mount or Vite hot reload updates only browser code. It does not
+rebuild or replace the API, dispatcher, workers, or database migrations. After a change that
+requires a new API, build the current images, apply the current migration chain, and update
+the application services together, using the same source identity. Preserve credentials,
+volumes and existing execution records; never resubmit old Provider operations during rollout.
+
+Before reporting a local workflow fixed, check `/health` through the actual browser gateway
+and compare `source_commit` with the deployed image identity. Check the dispatcher and each
+worker image too, then exercise the affected API from that browser page. Source tests or
+a working frontend hot reload alone do not establish that the running backend has the change.
+
 ## Future packaged release start
 
 Download and extract the complete online bundle from one GitHub Release. On

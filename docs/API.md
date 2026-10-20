@@ -209,7 +209,7 @@ Node installation for development or release evidence.
 
 **状态：待实现/待验收。** 本节是开发约束，不是当前 OpenAPI；语义字段清单不预先
 宣称具体 DTO 或 endpoint 已存在。需求来源见 [开发合同](ARCHITECTURE_MAPPING.md#creation-improvement-contract)、
-MODEL_PROVIDER 的 MP-01–MP-12 和 FRONTEND_WORKBENCH 的 UI-01–UI-12。
+MODEL_PROVIDER 的 MP-01–MP-12 和 FRONTEND_WORKBENCH 的 UI-01–UI-13。
 优先演进 Route ownership 中的现有领域入口，禁止另建通用生成/任务/模型代理 API。
 
 ### 连接、发现与默认模型
@@ -253,6 +253,36 @@ URL+Key 可以在同一向导提交，但 UI 必须明确各写入结果。若�
 correlation ID、字段/引用定位、是否需新预览及明确恢复动作；区分查询原任务与新提交。
 HTTP 状态与业务状态须一致解释，`unknown_submission` 不返回引导自动 create 的重试提示。
 
+#### 创作者参数与预检的具体接口设计（目标，未实现）
+
+| 既有入口 | 本切片扩展与约束 |
+|---|---|
+| `GET …/model-capabilities?stage=…&mode_id=…` | 解析当前 Binding；返回同合同的参数 schema、可编辑性/映射限制、来源与身份；显式 `model_id` 目录查询不等于当前选择或账号资格 |
+| `PATCH …/shots/{shot_id}/design` | 在既有 `director_state` 下校验并保存 typed `generation_settings`，与原始 prompt 分开；保留其它设计字段，校验 `expected_version`，返回保存后的版本；结构见 DATA_MODEL |
+| `POST …/shots/{shot_id}/execution-plan` | 从已保存 Shot、阶段设置和当前解析身份形成单一冻结编译结果；允许接受已声明的近似（`allow_approximation=True`）并更新计划指纹；返回完整安全投影和确认指纹，不接受任意调用方参数 JSON 绕过保存 |
+| `POST …/shots/{shot_id}/compile-preview` | 保留只读诊断用途，复用同一构建/编译结果的安全投影；严格拒绝任何模型近似（`allow_approximation=False`，触发即阻断且返回 `MODEL_APPROXIMATION_NOT_ACCEPTED`）；删除独立拼五秒和拒绝所有 native_options 的重复构造；诊断成功仍不表示账号或传输验证通过 |
+| `POST …/shots/{shot_id}/executions` | 精确指纹、输入版本、已接受近似及命令身份；受理前原子验证，失败不创建 NodeRun/排队/create；成功将同一语义请求冻结到原 NodeRun |
+| `GET …/shots/{shot_id}/executions/receipt` | 按原命令查询；恢复只观察已受理事实；404 也不作为自动另开命令的依据 |
+
+上述 URL 的省略部分沿用各入口当前项目路径；这是现有端点演进，不新增通用生成 API。
+常用项和 native 参数必须同时经过模式 schema、产品开放范围及实际 Compiler 映射校验。
+字段级错误定位到阶段/字段/引用，并区分未知字段、不支持、越界、类型错误、条件冲突、
+版本/身份失效；前端可以校验，但不能代替后端。未保存覆盖、受保护字段及越权对象均拒绝。
+
+确认指纹覆盖最终文本、有效参数及类型、生成时长、项目画幅、输入/合同/Compiler 版本、
+连接与凭证修订、有序引用及内容 hash、接受的近似；计划时长等参与编译的保存事实同时纳入
+版本核对。仅允许列举的认证与短期传输槽晚绑定。抽屉直接消费该投影，不从执行历史摘要
+拼出另一份“本次发送”。接受近似会改变指纹，必须重新展示并再次确认；阻断项不能仅靠勾选消除。
+
+命令身份与计划指纹分离：用户一次明确确认生成产生一个幂等 key，并在发送前保存原操作
+身份；双击、响应丢失、恢复查询沿用原 key。用户明确再次生成即使计划相同也产生新 key，
+不能继续仅用 fingerprint 作为永久命令身份。相同 key 不同请求拒绝，重放已受理同命令返回
+原回执；未知提交不自动重发，回执丢失测试必须断言零新增 Provider create。
+
+公共请求投影不返回原始 wire JSON 或鉴权材料；模型、参数和参考按安全白名单结构展示。
+哈希只保留凭证修订身份，不包含 Key、签名地址或易变时间戳。具体响应名与错误 code 以
+实现后的 Pydantic/OpenAPI 为唯一类型源，本节不宣称这些扩展已出现在当前 OpenAPI。
+
 ### 预演、审片与剪辑
 
 动态分镜读取现有 Shot、Artifact、保存时长/字幕/音频的播放投影，不新建服务端生产入口。
@@ -267,6 +297,17 @@ Editing 继续使用既有 EditSession timeline 和乐观版本。预览和导�
 片段配音音量、现有配音与字幕的时间映射；不把只播源片段当作编辑效果预览。不支持预览的高级效果
 明确标识，保留数据与现有导出。保存 409 返回冲突语义，前端保留草稿；Export 绑定已保存
 版本，不能偷偷 Save。验收采用 AC-11–AC-15，新增类型统一从后端生成。
+
+剧本树是既有 StoryProposal 的读投影；“采用当前场”仍提交准确的 operation ID 集合。
+服务端验证父级存在或已显式纳入同一事务，并按依赖顺序执行；不能只靠前端选中父级保证完整性。
+重复/部分已采用与 409 复用既有提案回执，不增加场景树写入端点，也不自动包含其它场或删除操作。
+
+连续性看板通过既有批注/修复接口流转，定位精确 Shot、Artifact/NodeRun 和时间点；
+人工清单不等于审批。连续性四区证据通过镜头详情或上下文读取投影一次性获取相邻首末帧与参考资产，
+避免多重并发散装请求竞态。动态分镜试听所需关联对白音频由镜头只读投影字段（如 `dialogue_audio_url`
+与 `voice_artifact_id`）随镜头直接返回，不发起额外反查，不增加试听生成入口。
+剪辑替换只读当前 Formal manifest，再修改既有 EditSession 草稿；来源复核失败、版本变化或
+源裁切越界必须明确阻断，源时长不足不能静默重裁切或改正式素材。
 
 ## 无前端消费者的能力：先判用途，再决定清退
 
