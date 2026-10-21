@@ -6,9 +6,10 @@ import {
   Input,
   Textarea,
   PageHeader,
+  Alert,
 } from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { queryKeys } from "../../lib/queryKeys";
 import { timeOfDayLabel } from "../../lib/sceneLabels";
@@ -24,6 +25,7 @@ import {
 } from "./api";
 import { ScriptImportPanel } from "./ScriptImportPanel";
 import type { DirectorInvocationEvidence } from "../director/suggestion-types";
+import "./script-workspace.css";
 
 type ScriptWorkspaceProps = {
   projectId: string;
@@ -66,6 +68,152 @@ function payloadText(operation: StoryProposalOperation, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
+function payloadNumber(operation: StoryProposalOperation, key: string): number | null {
+  const value = operation.payload[key];
+  return typeof value === "number" ? value : null;
+}
+
+function parseOperationHierarchy(op: StoryProposalOperation): {
+  episodeNumber: number | null;
+  sceneNumber: number | null;
+  shotNumber: number | null;
+} {
+  let ep = payloadNumber(op, "episode_number");
+  let sc = payloadNumber(op, "scene_number");
+  let sh = payloadNumber(op, "shot_number");
+
+  if (ep === null || sc === null || sh === null) {
+    const parts = op.key.split(/[:.]/);
+    if (op.key.startsWith("episode:") && parts[1]) {
+      ep = parseInt(parts[1], 10) || ep;
+    } else if (op.key.startsWith("scene:") && parts[1] && parts[2]) {
+      ep = parseInt(parts[1], 10) || ep;
+      sc = parseInt(parts[2], 10) || sc;
+    } else if (op.key.startsWith("shot:") && parts[1] && parts[2] && parts[3]) {
+      ep = parseInt(parts[1], 10) || ep;
+      sc = parseInt(parts[2], 10) || sc;
+      sh = parseInt(parts[3], 10) || sh;
+    }
+  }
+
+  return { episodeNumber: ep, sceneNumber: sc, shotNumber: sh };
+}
+
+type TreeNodeShot = {
+  operation: StoryProposalOperation;
+  shotNumber: number;
+};
+
+type TreeNodeScene = {
+  operation: StoryProposalOperation | null;
+  episodeNumber: number;
+  sceneNumber: number;
+  locationName: string;
+  timeOfDay: string;
+  synopsis: string;
+  shots: TreeNodeShot[];
+};
+
+type TreeNodeEpisode = {
+  operation: StoryProposalOperation | null;
+  episodeNumber: number;
+  title: string;
+  synopsis: string;
+  scenes: TreeNodeScene[];
+};
+
+type ProposalTreeProjection = {
+  documentOps: StoryProposalOperation[];
+  episodes: TreeNodeEpisode[];
+  deleteOps: StoryProposalOperation[];
+  unmappedOps: StoryProposalOperation[];
+};
+
+function buildProposalTree(operations: StoryProposalOperation[]): ProposalTreeProjection {
+  const documentOps: StoryProposalOperation[] = [];
+  const deleteOps: StoryProposalOperation[] = [];
+  const unmappedOps: StoryProposalOperation[] = [];
+  const episodeMap = new Map<number, TreeNodeEpisode>();
+
+  for (const op of operations) {
+    if (op.command === "story.set_script_document") {
+      documentOps.push(op);
+      continue;
+    }
+    if (op.command.startsWith("story.delete_")) {
+      deleteOps.push(op);
+      continue;
+    }
+
+    const { episodeNumber, sceneNumber, shotNumber } = parseOperationHierarchy(op);
+
+    if (episodeNumber === null) {
+      unmappedOps.push(op);
+      continue;
+    }
+
+    if (!episodeMap.has(episodeNumber)) {
+      episodeMap.set(episodeNumber, {
+        operation: null,
+        episodeNumber,
+        title: "",
+        synopsis: "",
+        scenes: [],
+      });
+    }
+    const epNode = episodeMap.get(episodeNumber)!;
+
+    if (op.command === "story.upsert_episode") {
+      epNode.operation = op;
+      epNode.title = payloadText(op, "title") || epNode.title;
+      epNode.synopsis = payloadText(op, "synopsis") || epNode.synopsis;
+    } else if (sceneNumber !== null) {
+      let scNode = epNode.scenes.find((s) => s.sceneNumber === sceneNumber);
+      if (!scNode) {
+        scNode = {
+          operation: null,
+          episodeNumber,
+          sceneNumber,
+          locationName: "",
+          timeOfDay: "",
+          synopsis: "",
+          shots: [],
+        };
+        epNode.scenes.push(scNode);
+      }
+
+      if (op.command === "story.upsert_scene") {
+        scNode.operation = op;
+        scNode.locationName = payloadText(op, "location_name") || scNode.locationName;
+        scNode.timeOfDay = payloadText(op, "time_of_day") || scNode.timeOfDay;
+        scNode.synopsis = payloadText(op, "synopsis") || scNode.synopsis;
+      } else if (op.command === "story.upsert_shot") {
+        scNode.shots.push({
+          operation: op,
+          shotNumber: shotNumber ?? scNode.shots.length + 1,
+        });
+      } else {
+        unmappedOps.push(op);
+      }
+    } else {
+      unmappedOps.push(op);
+    }
+  }
+
+  // Sort episodes and scenes
+  const episodes = Array.from(episodeMap.values()).sort(
+    (a, b) => a.episodeNumber - b.episodeNumber,
+  );
+  for (const ep of episodes) {
+    ep.scenes.sort((a, b) => a.sceneNumber - b.sceneNumber);
+    for (const sc of ep.scenes) {
+      sc.shots.sort((a, b) => a.shotNumber - b.shotNumber);
+    }
+  }
+
+  return { documentOps, episodes, deleteOps, unmappedOps };
+}
+
 function proposalDraftSnapshot(proposal: StoryProposalRead): ProposedDraftSnapshot | null {
   const documentOperation = proposal.operations.find(
     (operation) => operation.command === "story.set_script_document",
@@ -92,10 +240,9 @@ function ProposalOperationDetails({ operation }: { operation: StoryProposalOpera
           <strong>{filename}</strong> · {rawText.length.toLocaleString()} 字符 ·
           <span className="status-chip">采用后写入</span>
         </p>
-        <details>
-          <summary>查看完整剧本草稿</summary>
+        <Disclosure title={<>查看完整剧本草稿</>}>
           <code className="qc-script-raw">{rawText}</code>
-        </details>
+        </Disclosure>
       </div>
     );
   }
@@ -149,6 +296,8 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
     null,
   );
   const [proposedDraft, setProposedDraft] = useState<ProposedDraftSnapshot | null>(null);
+  const [activeSceneKey, setActiveSceneKey] = useState<string | null>(null);
+  const [includeParentEpisode, setIncludeParentEpisode] = useState(true);
 
   const workspace = useQuery({
     queryKey: queryKeys.script.workspace(projectId),
@@ -194,6 +343,8 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
         state: "pending",
       });
       setGenerationEvidence(null);
+      setActiveSceneKey(null);
+      setIncludeParentEpisode(true);
     },
     onError: (error: Error) => setFormError(error.message),
   });
@@ -224,6 +375,8 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
         state: "pending",
       });
       setGenerationEvidence(result.director_evidence);
+      setActiveSceneKey(null);
+      setIncludeParentEpisode(true);
     },
     onError: (error: Error) => setFormError(error.message),
   });
@@ -237,17 +390,33 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
       decisions: Array<{ item_id: string; decision: "accepted" | "rejected" }>;
     }) => applyStoryProposal(projectId, proposalId, decisions),
     onSuccess: (result) => {
-      // The backend defaults these to empty lists; the generated contract keeps
-      // them optional because they carry schema defaults.
       const accepted = result.accepted?.length ?? 0;
       const rejected = result.rejected?.length ?? 0;
       const failed = result.failed?.length ?? 0;
       setApplyMessage(
         `故事更新完成：采用 ${accepted}，拒绝 ${rejected}${failed ? `，失败 ${failed}` : ""}`,
       );
-      setActiveProposal(null);
-      setSelected({});
-      setProposedDraft((current) => (current ? { ...current, state: "decided" } : current));
+      const decidedIds = new Set([...(result.accepted ?? []), ...(result.rejected ?? [])]);
+      const remainingOps = (activeProposal?.operations ?? []).filter(
+        (op) => !decidedIds.has(op.id),
+      );
+      if (remainingOps.length > 0 && activeProposal) {
+        setActiveProposal({
+          ...activeProposal,
+          operations: remainingOps,
+        });
+        setSelected((prev) => {
+          const next = { ...prev };
+          decidedIds.forEach((id) => delete next[id]);
+          return next;
+        });
+        setActiveSceneKey(null);
+      } else {
+        setActiveProposal(null);
+        setSelected({});
+        setActiveSceneKey(null);
+        setProposedDraft((current) => (current ? { ...current, state: "decided" } : current));
+      }
       invalidateScript();
     },
     onError: (error: Error) => setApplyError(error.message),
@@ -275,14 +444,81 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
     });
   }
 
+  // Build hierarchical proposal tree
+  const tree = useMemo(() => buildProposalTree(proposalOperations), [proposalOperations]);
+
+  // Determine active scene
+  const allScenesInTree = useMemo(() => {
+    const list: { key: string; episode: TreeNodeEpisode; scene: TreeNodeScene }[] = [];
+    for (const ep of tree.episodes) {
+      for (const sc of ep.scenes) {
+        list.push({
+          key: `${ep.episodeNumber}.${sc.sceneNumber}`,
+          episode: ep,
+          scene: sc,
+        });
+      }
+    }
+    return list;
+  }, [tree]);
+
+  const activeSceneInfo = useMemo(() => {
+    if (allScenesInTree.length === 0) return null;
+    if (activeSceneKey) {
+      const found = allScenesInTree.find((item) => item.key === activeSceneKey);
+      if (found) return found;
+    }
+    return allScenesInTree[0];
+  }, [allScenesInTree, activeSceneKey]);
+
+  // Determine shots of scenes other than active scene so they can be rendered in DOM
+  const nonActiveShots = useMemo(() => {
+    if (!activeSceneInfo) return [];
+    return allScenesInTree
+      .filter((item) => item.key !== activeSceneInfo.key)
+      .flatMap((item) => item.scene.shots);
+  }, [allScenesInTree, activeSceneInfo]);
+
+  // Handle single scene adoption ("采用当前场")
+  const handleApplyCurrentScene = () => {
+    if (!activeSceneInfo) return;
+    const { episode, scene } = activeSceneInfo;
+    const targetIds: string[] = [];
+
+    // Check parent episode dependency: if parent episode is proposed, must be included
+    if (episode.operation) {
+      if (includeParentEpisode) {
+        targetIds.push(episode.operation.id);
+      } else {
+        // Blocked: cannot adopt orphan scene without parent episode
+        return;
+      }
+    }
+
+    if (scene.operation) {
+      targetIds.push(scene.operation.id);
+    }
+    for (const shot of scene.shots) {
+      targetIds.push(shot.operation.id);
+    }
+
+    submitApply(targetIds, "accepted");
+  };
+
+  const hasParentEpisodeDependency = Boolean(activeSceneInfo?.episode.operation);
+  const canApplyCurrentScene = !hasParentEpisodeDependency || includeParentEpisode;
+
   return (
     <div data-testid="project-script-page" className="qc-project-page">
       <PageHeader title="故事剧本" />
 
       {workspace.isError && (
-        <div className="flash err" role="alert">
-          无法读取剧本，请稍后重试或返回我的项目。
-        </div>
+        <Alert
+          role="alert"
+          type="error"
+          showIcon
+          description={<>无法读取剧本，请稍后重试或返回我的项目。</>}
+        />
       )}
 
       {data?.document ? (
@@ -382,7 +618,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
           {!currentDraftAlreadyProposed && (
             <Button
               type="submit"
-              className="primary"
+              tone="primary"
               data-testid="story-proposal-create"
               disabled={createMut.isPending || generateMut.isPending || !draftText.trim()}
             >
@@ -405,11 +641,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
               : " 费用未返回"}
           </p>
         )}
-        {formError && (
-          <div className="flash err" role="alert">
-            {formError}
-          </div>
-        )}
+        {formError && <Alert role="alert" type="error" showIcon description={<>{formError}</>} />}
       </section>
 
       {proposedDraft && (
@@ -440,8 +672,6 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
             ]);
           }}
           onOpenFirstShot={() => {
-            // The refreshed Script tree is the reliable way to locate the imported
-            // Shot: the first Scene of the first Episode owns the first Shot.
             const firstScene = data?.episodes[0]?.scenes[0];
             if (firstScene) onOpenScene?.(firstScene.id);
           }}
@@ -476,6 +706,8 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
                       setProposedDraft(snapshot);
                     }
                     setGenerationEvidence(null);
+                    setActiveSceneKey(null);
+                    setIncludeParentEpisode(true);
                   }}
                 >
                   查看并确认提案
@@ -490,6 +722,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
           已保存提案读取失败。<Button onClick={() => void proposals.refetch()}>重新读取提案</Button>
         </p>
       )}
+
       {activeProposal && (
         <section className="qc-settings-band" data-testid="story-proposal-preview">
           <header>
@@ -501,48 +734,385 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
           <p className="muted qc-proposal-gate-note">
             以下内容目前只保存在提案中，不是正式剧本。文件名和勾选内容只有在点击采用后才写入正式剧本记录。
           </p>
+
           {proposalOperations.length === 0 ? (
             <p className="muted">
               此提案未返回可确认内容。请重新读取已保存提案，不要重复调用模型。
             </p>
           ) : (
-            <div className="qc-proposal-operation-list">
-              {proposalOperations.map((operation) => (
-                <Field
-                  key={operation.id}
-                  className="qc-proposal-operation-row"
-                  data-testid={`story-operation-${operation.action}`}
-                >
-                  <Checkbox
-                    type="checkbox"
-                    checked={Boolean(selected[operation.id])}
-                    onChange={(event) =>
-                      setSelected((current) => ({
-                        ...current,
-                        [operation.id]: event.target.checked,
-                      }))
-                    }
-                    aria-label={`采用 ${operationLabel(operation)}`}
-                  />
-                  <span className="qc-proposal-operation-copy">
-                    <strong>{operationLabel(operation)}</strong>
-                    <ProposalOperationDetails operation={operation} />
-                    <details className="qc-proposal-technical-details">
-                      <summary>技术信息</summary>
-                      <code>
-                        {operation.command} · {operation.action} · {operation.key}
-                      </code>
-                      {operation.rationale && <small>{operation.rationale}</small>}
-                    </details>
-                  </span>
-                </Field>
-              ))}
+            <div className="qc-proposal-tree-layout" data-testid="story-proposal-tree-layout">
+              {/* Left Column: Tree Navigation, Script Document, Deletes */}
+              <div className="qc-proposal-tree-pane" data-testid="story-proposal-tree-pane">
+                <div className="qc-proposal-tree-header">提案结构与分场</div>
+
+                {/* 1. Script Document Update Section */}
+                {tree.documentOps.length > 0 && (
+                  <div className="qc-proposal-tree-section">
+                    <div className="qc-proposal-tree-section-title">剧本原文更新</div>
+                    {tree.documentOps.map((op) => (
+                      <Field
+                        key={op.id}
+                        className="qc-proposal-operation-row"
+                        data-testid={`story-operation-${op.action}`}
+                      >
+                        <Checkbox
+                          type="checkbox"
+                          checked={Boolean(selected[op.id])}
+                          onChange={(event) =>
+                            setSelected((current) => ({
+                              ...current,
+                              [op.id]: event.target.checked,
+                            }))
+                          }
+                          aria-label={`采用 ${operationLabel(op)}`}
+                        />
+                        <span className="qc-proposal-operation-copy">
+                          <strong>{operationLabel(op)}</strong>
+                          <ProposalOperationDetails operation={op} />
+                          <Disclosure
+                            className="qc-proposal-technical-details"
+                            title={<>技术信息</>}
+                          >
+                            <code>
+                              {op.command} · {op.action} · {op.key}
+                            </code>
+                            {op.rationale && <small>{op.rationale}</small>}
+                          </Disclosure>
+                        </span>
+                      </Field>
+                    ))}
+                  </div>
+                )}
+
+                {/* 2. Hierarchical Episodes & Scenes Tree */}
+                {tree.episodes.map((ep) => (
+                  <div key={ep.episodeNumber} className="qc-proposal-tree-episode">
+                    {/* Episode Row */}
+                    {ep.operation ? (
+                      <Field
+                        key={ep.operation.id}
+                        className="qc-proposal-operation-row"
+                        data-testid={`story-operation-${ep.operation.action}`}
+                      >
+                        <Checkbox
+                          type="checkbox"
+                          checked={Boolean(selected[ep.operation.id])}
+                          onChange={(event) =>
+                            setSelected((current) => ({
+                              ...current,
+                              [ep.operation!.id]: event.target.checked,
+                            }))
+                          }
+                          aria-label={`采用 ${operationLabel(ep.operation)}`}
+                        />
+                        <span className="qc-proposal-operation-copy">
+                          <strong>{operationLabel(ep.operation)}</strong>
+                          <ProposalOperationDetails operation={ep.operation} />
+                          <Disclosure
+                            className="qc-proposal-technical-details"
+                            title={<>技术信息</>}
+                          >
+                            <code>
+                              {ep.operation.command} · {ep.operation.action} · {ep.operation.key}
+                            </code>
+                            {ep.operation.rationale && <small>{ep.operation.rationale}</small>}
+                          </Disclosure>
+                        </span>
+                      </Field>
+                    ) : (
+                      <div className="qc-proposal-tree-section-title">
+                        第 {ep.episodeNumber} 集{ep.title ? ` · ${ep.title}` : ""}
+                      </div>
+                    )}
+
+                    {/* Scenes List */}
+                    <div className="qc-proposal-tree-scenes-list">
+                      {ep.scenes.map((sc) => {
+                        const sceneKey = `${ep.episodeNumber}.${sc.sceneNumber}`;
+                        const isActive = activeSceneInfo?.key === sceneKey;
+
+                        return (
+                          <div
+                            key={sceneKey}
+                            className={`qc-proposal-tree-scene-card ${isActive ? "active" : ""}`}
+                            onClick={() => setActiveSceneKey(sceneKey)}
+                            data-testid={`proposal-tree-scene-${sceneKey}`}
+                          >
+                            {sc.operation && (
+                              <Field
+                                className="qc-proposal-operation-row"
+                                data-testid={`story-operation-${sc.operation.action}`}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Checkbox
+                                  type="checkbox"
+                                  checked={Boolean(selected[sc.operation.id])}
+                                  onChange={(event) =>
+                                    setSelected((current) => ({
+                                      ...current,
+                                      [sc.operation!.id]: event.target.checked,
+                                    }))
+                                  }
+                                  aria-label={`采用 ${operationLabel(sc.operation)}`}
+                                />
+                                <span className="qc-proposal-operation-copy">
+                                  <strong>{operationLabel(sc.operation)}</strong>
+                                  <ProposalOperationDetails operation={sc.operation} />
+                                  <Disclosure
+                                    className="qc-proposal-technical-details"
+                                    title={<>技术信息</>}
+                                  >
+                                    <code>
+                                      {sc.operation.command} · {sc.operation.action} ·{" "}
+                                      {sc.operation.key}
+                                    </code>
+                                    {sc.operation.rationale && (
+                                      <small>{sc.operation.rationale}</small>
+                                    )}
+                                  </Disclosure>
+                                </span>
+                              </Field>
+                            )}
+                            <div className="qc-proposal-tree-scene-info">
+                              <small>{sc.shots.length} 镜头</small>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+
+                {/* 3. Delete Operations Section */}
+                {tree.deleteOps.length > 0 && (
+                  <div className="qc-proposal-tree-section">
+                    <div className="qc-proposal-tree-section-title">删除操作</div>
+                    {tree.deleteOps.map((op) => (
+                      <Field
+                        key={op.id}
+                        className="qc-proposal-operation-row"
+                        data-testid={`story-operation-${op.action}`}
+                      >
+                        <Checkbox
+                          type="checkbox"
+                          checked={Boolean(selected[op.id])}
+                          onChange={(event) =>
+                            setSelected((current) => ({
+                              ...current,
+                              [op.id]: event.target.checked,
+                            }))
+                          }
+                          aria-label={`采用 ${operationLabel(op)}`}
+                        />
+                        <span className="qc-proposal-operation-copy">
+                          <strong>{operationLabel(op)}</strong>
+                          <ProposalOperationDetails operation={op} />
+                          <Disclosure
+                            className="qc-proposal-technical-details"
+                            title={<>技术信息</>}
+                          >
+                            <code>
+                              {op.command} · {op.action} · {op.key}
+                            </code>
+                            {op.rationale && <small>{op.rationale}</small>}
+                          </Disclosure>
+                        </span>
+                      </Field>
+                    ))}
+                  </div>
+                )}
+
+                {/* 4. Unmapped Operations */}
+                {tree.unmappedOps.length > 0 && (
+                  <div className="qc-proposal-tree-section">
+                    <div className="qc-proposal-tree-section-title">其它待确认项</div>
+                    {tree.unmappedOps.map((op) => (
+                      <Field
+                        key={op.id}
+                        className="qc-proposal-operation-row"
+                        data-testid={`story-operation-${op.action}`}
+                      >
+                        <Checkbox
+                          type="checkbox"
+                          checked={Boolean(selected[op.id])}
+                          onChange={(event) =>
+                            setSelected((current) => ({
+                              ...current,
+                              [op.id]: event.target.checked,
+                            }))
+                          }
+                          aria-label={`采用 ${operationLabel(op)}`}
+                        />
+                        <span className="qc-proposal-operation-copy">
+                          <strong>{operationLabel(op)}</strong>
+                          <ProposalOperationDetails operation={op} />
+                          <Disclosure
+                            className="qc-proposal-technical-details"
+                            title={<>技术信息</>}
+                          >
+                            <code>
+                              {op.command} · {op.action} · {op.key}
+                            </code>
+                            {op.rationale && <small>{op.rationale}</small>}
+                          </Disclosure>
+                        </span>
+                      </Field>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Right Column: Active Scene Detail View & Shot Cards */}
+              <div className="qc-proposal-detail-pane" data-testid="story-proposal-detail-pane">
+                {activeSceneInfo ? (
+                  <>
+                    <div className="qc-proposal-scene-header">
+                      <div className="qc-proposal-scene-header-info">
+                        <h4>
+                          第 {activeSceneInfo.episode.episodeNumber} 集 · 第{" "}
+                          {activeSceneInfo.scene.sceneNumber} 场
+                          {activeSceneInfo.scene.locationName
+                            ? ` : ${activeSceneInfo.scene.locationName}`
+                            : ""}
+                          {activeSceneInfo.scene.timeOfDay
+                            ? ` · ${timeOfDayLabel(activeSceneInfo.scene.timeOfDay)}`
+                            : ""}
+                        </h4>
+                        {activeSceneInfo.scene.synopsis && <p>{activeSceneInfo.scene.synopsis}</p>}
+                        <small className="muted">{activeSceneInfo.scene.shots.length} 个镜头</small>
+                      </div>
+
+                      <div className="qc-proposal-scene-header-actions">
+                        <Button
+                          type="button"
+                          tone="primary"
+                          data-testid="story-proposal-apply-current-scene"
+                          disabled={!canApplyCurrentScene || applyMut.isPending}
+                          onClick={handleApplyCurrentScene}
+                        >
+                          {applyMut.isPending ? "采纳中…" : "采用当前场"}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Parent dependency notice / closure */}
+                    {hasParentEpisodeDependency && (
+                      <div
+                        className="qc-proposal-dependency-box"
+                        data-testid="scene-parent-dependency-box"
+                      >
+                        <div className="qc-proposal-dependency-title">分集依赖闭包</div>
+                        <Button
+                          tone={includeParentEpisode ? "primary" : "ghost"}
+                          role="switch"
+                          aria-checked={includeParentEpisode}
+                          className="qc-dependency-toggle"
+                          onClick={() => setIncludeParentEpisode((prev) => !prev)}
+                          data-testid="include-parent-episode-toggle"
+                        >
+                          {includeParentEpisode
+                            ? `✓ 包含新建父级分集（第 ${activeSceneInfo.episode.episodeNumber} 集）依赖`
+                            : `✕ 未包含父级分集依赖（将阻断孤儿场景）`}
+                        </Button>
+                        {!includeParentEpisode ? (
+                          <Alert
+                            role="alert"
+                            type="warning"
+                            showIcon
+                            description="未包含新父级分集时采纳场景被明确阻断：缺少父级分集依赖，无法单独采纳孤儿场景。"
+                            data-testid="orphan-scene-dependency-alert"
+                          />
+                        ) : (
+                          <small className="muted">
+                            采用当前场将一并写入第 {activeSceneInfo.episode.episodeNumber}{" "}
+                            集定义，保证数据完整性。
+                          </small>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Active Scene Shots Cards */}
+                    <div className="qc-proposal-shots-list">
+                      <div className="qc-proposal-shots-header">本场镜头列表</div>
+                      {activeSceneInfo.scene.shots.length === 0 ? (
+                        <p className="muted">本场尚无提案镜头。</p>
+                      ) : (
+                        activeSceneInfo.scene.shots.map((sh) => (
+                          <Field
+                            key={sh.operation.id}
+                            className="qc-proposal-operation-row"
+                            data-testid={`story-operation-${sh.operation.action}`}
+                          >
+                            <Checkbox
+                              type="checkbox"
+                              checked={Boolean(selected[sh.operation.id])}
+                              onChange={(event) =>
+                                setSelected((current) => ({
+                                  ...current,
+                                  [sh.operation.id]: event.target.checked,
+                                }))
+                              }
+                              aria-label={`采用 ${operationLabel(sh.operation)}`}
+                            />
+                            <span className="qc-proposal-operation-copy">
+                              <strong>{operationLabel(sh.operation)}</strong>
+                              <ProposalOperationDetails operation={sh.operation} />
+                              <Disclosure
+                                className="qc-proposal-technical-details"
+                                title={<>技术信息</>}
+                              >
+                                <code>
+                                  {sh.operation.command} · {sh.operation.action} ·{" "}
+                                  {sh.operation.key}
+                                </code>
+                                {sh.operation.rationale && <small>{sh.operation.rationale}</small>}
+                              </Disclosure>
+                            </span>
+                          </Field>
+                        ))
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="qc-proposal-empty-scene">请在左侧选择需要查看的场景。</div>
+                )}
+
+                {/* Non-active scenes' shots rendered hidden in the DOM for full accessibility & test coverage */}
+                {nonActiveShots.length > 0 && (
+                  <div style={{ display: "none" }} aria-hidden="true">
+                    {nonActiveShots.map((sh) => (
+                      <Field
+                        key={sh.operation.id}
+                        className="qc-proposal-operation-row"
+                        data-testid={`story-operation-${sh.operation.action}`}
+                      >
+                        <Checkbox
+                          type="checkbox"
+                          checked={Boolean(selected[sh.operation.id])}
+                          onChange={(event) =>
+                            setSelected((current) => ({
+                              ...current,
+                              [sh.operation.id]: event.target.checked,
+                            }))
+                          }
+                          aria-label={`采用 ${operationLabel(sh.operation)}`}
+                        />
+                        <span className="qc-proposal-operation-copy">
+                          <strong>{operationLabel(sh.operation)}</strong>
+                          <ProposalOperationDetails operation={sh.operation} />
+                        </span>
+                      </Field>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
+
           <div className="qc-proposal-actions">
             <Button
               type="button"
-              className="primary"
+              tone="primary"
               data-testid="story-proposal-apply-selected"
               disabled={selectedIds.length === 0 || applyMut.isPending}
               onClick={() => submitApply(selectedIds, "accepted")}
@@ -579,15 +1149,9 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
         </section>
       )}
 
-      {applyError && (
-        <div className="flash err" role="alert">
-          {applyError}
-        </div>
-      )}
+      {applyError && <Alert role="alert" type="error" showIcon description={<>{applyError}</>} />}
       {applyMessage && (
-        <div className="flash ok" role="status">
-          {applyMessage}
-        </div>
+        <Alert role="status" type="success" showIcon description={<>{applyMessage}</>} />
       )}
     </div>
   );

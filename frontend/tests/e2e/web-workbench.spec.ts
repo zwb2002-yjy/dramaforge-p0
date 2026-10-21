@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installProfessionalMock, PROJECT_ID, SCENE_ID, WORKSPACE_ID } from "./professional-mocks";
+import { expectLibraryGeometry } from "./layoutGeometry";
 
 async function setup(page: Page) {
   await installProfessionalMock(page);
@@ -33,12 +34,42 @@ const scenarios = [
   ["工作空间", "/?panel=workspace"],
   ["模型设置", "/settings/models"],
   ["账号", "/settings/account"],
+  ["项目模型", `/settings/projects/${PROJECT_ID}`],
+  ["组件预览", "/design-preview"],
   ...["script", "assets", "scenes", "production", "review", "edit"].map((v) => [
     v,
     `/projects/${PROJECT_ID}/${v}`,
   ]),
   ["场景画布", `/projects/${PROJECT_ID}/scenes/${SCENE_ID}`],
 ];
+for (const initialized of [true, false]) {
+  test(`account entry keeps library field geometry when owner initialized is ${initialized}`, async ({
+    page,
+  }) => {
+    await setup(page);
+    await page.route("**/api/v1/auth/me", (route) =>
+      route.fulfill({ status: 401, json: { detail: "not authenticated" } }),
+    );
+    await page.route("**/api/v1/auth/bootstrap-status", (route) =>
+      route.fulfill({
+        json: { owner_initialized: initialized, registration_available: !initialized },
+      }),
+    );
+    await page.goto("/");
+    const email = page.getByLabel("邮箱", { exact: true });
+    const password = page.getByLabel("密码", { exact: true });
+    await expect(email).toBeVisible();
+    await expect(password).toBeVisible();
+    for (const width of [1440, 900]) {
+      await page.setViewportSize({ width, height: 1000 });
+      const emailBox = (await email.boundingBox())!;
+      const passwordBox = (await password.boundingBox())!;
+      expect(emailBox.width).toBeGreaterThan(200);
+      expect(Math.abs(emailBox.width - passwordBox.width)).toBeLessThan(1);
+      await expectLibraryGeometry(page);
+    }
+  });
+}
 for (const width of [1920, 1440, 1024, 768]) {
   test(`web workspace matrix at ${width}px`, async ({ page }) => {
     test.setTimeout(90_000);
@@ -63,7 +94,7 @@ for (const width of [1920, 1440, 1024, 768]) {
         await expect
           .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
           .toBe(true);
-        if (url.startsWith("/?") || url === "/")
+        if (!url.startsWith("/settings") && !url.startsWith("/projects/"))
           await expect(page.locator(".df-context-sidebar")).toHaveCount(0);
         else
           await expect(page.locator(".df-context-sidebar")).toBeVisible({ visible: width >= 1100 });
@@ -73,6 +104,7 @@ for (const width of [1920, 1440, 1024, 768]) {
           // One project navigation only; the in-page step map is gone.
           await expect(page.getByRole("navigation", { name: "创作流程" })).toHaveCount(0);
         }
+        await expectLibraryGeometry(page);
       });
     }
     expect(errors).toEqual([]);

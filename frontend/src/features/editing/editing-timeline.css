@@ -2,7 +2,10 @@
   display: grid;
   gap: var(--df-space-3);
   min-width: 0;
-  margin-block: var(--df-space-4);
+  margin-block: 0;
+  padding: var(--df-space-4);
+  background: var(--df-surface-1);
+  border-radius: var(--df-radius-container);
 }
 .editing-preview-workspace {
   min-width: 0;
@@ -11,17 +14,54 @@
   color: var(--df-text-muted);
   font-size: var(--df-font-size-caption);
 }
+.editing-timeline > header {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--df-space-3);
+  align-items: start;
+  flex-wrap: wrap;
+}
+.editing-timeline h2,
+.editing-timeline p {
+  margin: 0;
+}
+.editing-timeline h2 small {
+  color: var(--df-text-muted);
+  font-weight: var(--df-weight-normal);
+  font-size: var(--df-font-size-caption);
+  margin-inline-start: var(--df-space-2);
+}
+.editing-timeline-timecode {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--df-font-size-body-lg);
+  color: var(--df-verdigris);
+}
+.editing-timeline-timecode span {
+  color: var(--df-text-muted);
+}
+.editing-selected-label,
+.editing-geometry-status {
+  color: var(--df-text-muted);
+  font-size: var(--df-font-size-caption);
+}
+.editing-geometry-status {
+  margin-inline-end: auto;
+}
 .editing-timeline-scroll {
   overflow-x: auto;
   max-width: 100%;
   scrollbar-gutter: stable;
+}
+.editing-timeline-content {
+  position: relative;
+  min-width: 0;
 }
 .editing-time-ruler,
 .editing-timeline-lane {
   display: flex;
   align-items: stretch;
   gap: var(--df-space-1);
-  min-width: var(--df-timeline-min-width);
+  min-width: 0;
 }
 .editing-timeline-tools {
   display: flex;
@@ -29,18 +69,40 @@
   flex-wrap: wrap;
   gap: var(--df-space-3);
 }
-.editing-timeline-tools > label {
+.editing-timeline-tools > .ant-form-item {
   min-width: 0;
   margin: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--df-space-2);
+  font-size: var(--df-font-size-caption);
+}
+.editing-timeline-tools .ant-slider {
+  width: var(--df-edit-toolbar-range-width);
 }
 .editing-track-body {
   position: relative;
   flex: 0 0 auto;
-  height: var(--df-timeline-lane-height);
+  height: var(--df-timeline-linked-height);
 }
 .editing-time-ruler .editing-track-body {
   height: var(--df-timeline-ruler-height);
-  margin-inline-end: var(--df-timeline-label-width);
+  margin: 0;
+}
+.editing-ruler-seek {
+  position: relative;
+  display: block;
+  padding: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--df-text-muted);
+  cursor: crosshair;
+}
+.editing-duration-mark {
+  transform: translateX(-100%);
 }
 .editing-time-ruler span {
   position: absolute;
@@ -49,28 +111,99 @@
 .editing-timeline-cell {
   position: absolute;
   height: 100%;
+  padding-inline-end: var(--df-space-1);
+}
+.editing-timeline-cell[data-dragging="true"] {
+  z-index: var(--df-z-overlay);
+  opacity: var(--df-timeline-drag-opacity);
+}
+.editing-drop-indicator {
+  position: absolute;
+  inset-block: 0;
+  width: var(--df-focus-width);
+  background: var(--df-verdigris);
+  pointer-events: none;
+  z-index: var(--df-z-overlay);
 }
 .editing-timeline-cell > .editing-timeline-clip {
   width: 100%;
   height: 100%;
-  padding-inline: var(--df-space-4);
+  padding: var(--df-space-1);
+  justify-content: start;
+  align-items: stretch;
 }
-.editing-crop-handle.df-btn {
+.editing-timeline-lane[data-testid="editing-visual-track"] .editing-track-body {
+  height: var(--df-timeline-video-height);
+}
+.editing-clip-thumbnail {
+  display: block;
+  width: 100%;
+  height: var(--df-edit-thumbnail-height);
+  flex: 0 0 var(--df-edit-thumbnail-height);
+  background: var(--df-surface-screen);
+  overflow: hidden;
+  border-radius: var(--df-radius-control);
+}
+.editing-clip-thumbnail img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.editing-thumbnail-placeholder {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--df-text-muted);
+  gap: var(--df-space-1);
+}
+.editing-timeline-clip small,
+.editing-track-clip-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--df-font-size-meta);
+  display: block;
+}
+.editing-track-clip-label {
+  color: var(--df-text-primary);
+}
+.editing-timeline-clip small {
+  color: var(--df-text-muted);
+}
+.editing-crop-handle {
   position: absolute;
   inset-block: 0;
-  width: var(--df-timeline-trim-handle-width);
+  width: min(var(--df-timeline-trim-handle-width), 20%);
   height: 100%;
   min-width: 0;
   padding: 0;
   touch-action: none;
   cursor: ew-resize;
   font-size: var(--df-font-size-meta);
+  border: 0;
+  background: transparent;
+  color: var(--df-text-muted);
+  border-radius: var(--df-radius-control);
+}
+.editing-timeline-cell:has([aria-pressed="true"]) .editing-crop-handle {
+  color: var(--df-verdigris);
+}
+.editing-timeline-cell:not(:has(.editing-timeline-clip[aria-pressed="true"])) .editing-crop-handle {
+  visibility: hidden;
+}
+.editing-timeline[data-compact="true"] .editing-timeline-clip {
+  padding-inline: 0;
+}
+.editing-timeline[data-compact="true"] .editing-crop-handle {
+  display: none;
 }
 .editing-crop-in {
   inset-inline-start: 0;
 }
 .editing-crop-out {
-  inset-inline-end: 0;
+  inset-inline-end: var(--df-space-1);
 }
 .editing-crop-value {
   position: absolute;
@@ -91,30 +224,73 @@
   min-width: 0;
 }
 .editing-timeline-lane {
-  margin-block: var(--df-space-2);
+  margin-block: var(--df-space-1);
 }
 .editing-timeline-lane > strong {
   flex: 0 0 var(--df-timeline-label-width);
   align-self: center;
   font-size: var(--df-font-size-caption);
+  display: flex;
+  flex-direction: column;
+  gap: var(--df-space-1);
+  align-items: center;
+  position: sticky;
+  left: 0;
+  background: var(--df-surface-1);
+  z-index: var(--df-z-sticky);
+  padding-block: var(--df-space-2);
 }
-.editing-timeline-clip.df-btn {
+.editing-timeline-clip {
+  display: flex;
   flex: 0 0 auto;
   min-width: 0;
-  min-height: var(--df-control-height);
-  height: auto;
+  min-height: 0;
+  height: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   flex-direction: column;
-  white-space: normal;
+  white-space: nowrap;
   text-align: left;
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-control);
+  background: var(--df-surface-2);
+}
+.editing-timeline-clip[data-lane="audio"] {
+  background: var(--df-info-dim);
+  color: var(--df-text-secondary);
+}
+.editing-timeline-clip[data-lane="subtitles"] {
+  background: var(--df-brass-tint);
+  color: var(--df-text-secondary);
 }
 .editing-timeline-clip[aria-pressed="true"] {
-  outline: 1px solid var(--df-verdigris);
+  border-color: var(--df-verdigris);
   color: var(--df-verdigris);
 }
-.editing-timeline-clip[draggable="true"] {
+.editing-timeline-cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--df-verdigris);
+  pointer-events: none;
+  z-index: var(--df-z-sticky);
+}
+.editing-timeline-cursor > span {
+  display: block;
+  width: var(--df-space-2);
+  height: var(--df-space-2);
+  transform: translateX(-50%);
+  background: var(--df-verdigris);
+  border-radius: var(--df-radius-control);
+}
+.editing-timeline-clip[data-testid^="editing-track-clip-"] {
   cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.editing-timeline-cell[data-dragging="true"] .editing-timeline-clip {
+  cursor: grabbing;
 }
 .editing-composition-screen {
   position: relative;

@@ -72,6 +72,7 @@ describe("Asset version decisions", () => {
     );
 
     await screen.findByTestId("asset-card");
+    fireEvent.click(screen.getByRole("button", { name: "管理素材" }));
     fireEvent.click(screen.getByRole("button", { name: "版本" }));
     fireEvent.click(await screen.findByTestId("asset-version-reject"));
 

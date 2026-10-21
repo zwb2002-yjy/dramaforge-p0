@@ -57,6 +57,7 @@ function summarize(preview: BatchProductionPreview) {
 }
 
 function BatchFillDialog({
+  open,
   projectId,
   sceneId,
   stage,
@@ -65,6 +66,7 @@ function BatchFillDialog({
   onSubmitted,
   onStale,
 }: {
+  open: boolean;
   projectId: string;
   sceneId?: string;
   stage: BatchProductionStage;
@@ -103,6 +105,11 @@ function BatchFillDialog({
 
   return (
     <Dialog
+      open={open}
+      afterClose={() => {
+        dispatch.reset();
+        setStale(false);
+      }}
       title={copy.fill}
       kicker={sceneId ? "当前场景" : "全片"}
       onClose={onClose}
@@ -310,17 +317,16 @@ function BatchFillButton({
           已创建 {accepted} 个任务
         </span>
       )}
-      {open && (
-        <BatchFillDialog
-          projectId={projectId}
-          sceneId={sceneId}
-          stage={stage}
-          preview={preview}
-          onClose={() => setOpen(false)}
-          onSubmitted={submitted}
-          onStale={refresh}
-        />
-      )}
+      <BatchFillDialog
+        open={open}
+        projectId={projectId}
+        sceneId={sceneId}
+        stage={stage}
+        preview={preview}
+        onClose={() => setOpen(false)}
+        onSubmitted={submitted}
+        onStale={refresh}
+      />
     </>
   );
 }

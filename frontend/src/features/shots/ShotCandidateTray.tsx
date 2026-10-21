@@ -8,7 +8,7 @@ import { artifactContentUrl } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { AddArtifactToAssetDialog } from "../assets/AddArtifactToAssetDialog";
 import { HumanReviewDecisionPanel } from "../review";
-import { Button } from "../../components/ui";
+import { Button, ExternalLink } from "../../components/ui";
 import "./shot-inspector.css";
 import {
   setShotFormalKeyframe,
@@ -154,7 +154,7 @@ export function ShotCandidateTray({
   const activeArtifactId = confirm.isPending ? confirm.variables?.artifactId : null;
   if (!expanded) {
     return (
-      <button
+      <Button
         type="button"
         className="df-candidates-bar"
         data-testid="shot-candidate-tray"
@@ -166,7 +166,7 @@ export function ShotCandidateTray({
         <span>候选</span>
         <span className="df-num">{parsedCandidates.length}</span>
         <ChevronUp size={16} aria-hidden="true" />
-      </button>
+      </Button>
     );
   }
   return (
@@ -189,7 +189,7 @@ export function ShotCandidateTray({
           多版本尝试
         </a>
         {onToggleExpanded && (
-          <button
+          <Button
             type="button"
             className="df-candidates-collapse"
             data-testid="shot-candidate-collapse"
@@ -198,7 +198,7 @@ export function ShotCandidateTray({
             onClick={onToggleExpanded}
           >
             <ChevronDown size={16} aria-hidden="true" />
-          </button>
+          </Button>
         )}
       </header>
 
@@ -226,7 +226,7 @@ export function ShotCandidateTray({
                 data-selected={selected ? "true" : "false"}
                 title={`${nodeRunStatusLabel(candidate.status)} · ${candidate.artifactId}`}
               >
-                <button
+                <Button
                   type="button"
                   className="df-candidate-preview"
                   data-testid={`shot-candidate-select-${candidate.artifactId}`}
@@ -248,7 +248,7 @@ export function ShotCandidateTray({
                     />
                   )}
                   <span className="df-candidate-badge">{selected ? "预览中" : label}</span>
-                </button>
+                </Button>
                 <span
                   className={`df-status ${review.tone}`}
                   data-testid={`shot-candidate-review-${candidate.artifactId}`}
@@ -265,15 +265,16 @@ export function ShotCandidateTray({
                 )}
                 <div className="df-candidate-actions">
                   {candidate.reviewAllowed ? (
-                    <button
+                    <Button
                       type="button"
-                      className="df-btn primary"
                       data-testid={`shot-candidate-confirm-${candidate.artifactId}`}
+                      block
                       onClick={() => confirm.mutate(candidate)}
                       disabled={confirm.isPending}
+                      tone="primary"
                     >
                       {activeArtifactId === candidate.artifactId ? "确认中…" : "设为正式"}
-                    </button>
+                    </Button>
                   ) : (
                     <>
                       <Button
@@ -285,8 +286,8 @@ export function ShotCandidateTray({
                       >
                         就地审查
                       </Button>
-                      <a
-                        className="df-btn"
+                      <ExternalLink
+                        type="link"
                         href={reviewTargetHref(projectId, {
                           shotId: shot.id,
                           artifactId: candidate.artifactId,
@@ -299,30 +300,30 @@ export function ShotCandidateTray({
                         })}
                       >
                         审查
-                      </a>
+                      </ExternalLink>
                     </>
                   )}
-                  <button
+                  <Button
                     type="button"
-                    className="df-btn ghost"
                     data-testid={`shot-candidate-add-asset-${candidate.artifactId}`}
                     onClick={() => setAssetCandidate(candidate)}
+                    tone="ghost"
                   >
                     加入资产
-                  </button>
+                  </Button>
                   {characterReferences.length > 0 && (
-                    <button
+                    <Button
                       type="button"
-                      className="df-btn ghost"
                       data-testid={`shot-candidate-continuity-${candidate.artifactId}`}
                       onClick={() =>
                         setComparingCandidateId((current) =>
                           current === candidate.artifactId ? null : candidate.artifactId,
                         )
                       }
+                      tone="ghost"
                     >
                       {comparingCandidateId === candidate.artifactId ? "收起设定" : "对比设定"}
-                    </button>
+                    </Button>
                   )}
                 </div>
                 {comparingCandidateId === candidate.artifactId && (
@@ -332,7 +333,7 @@ export function ShotCandidateTray({
                   >
                     <div className="df-continuity-header">
                       <span>角色基准设定图 ({characterReferences.length})</span>
-                      <button
+                      <Button
                         type="button"
                         className="df-dialog-close"
                         style={{ width: "1.25rem", height: "1.25rem" }}
@@ -340,7 +341,7 @@ export function ShotCandidateTray({
                         onClick={() => setComparingCandidateId(null)}
                       >
                         ×
-                      </button>
+                      </Button>
                     </div>
                     <div className="df-continuity-grid">
                       {characterReferences.map((ref) => {

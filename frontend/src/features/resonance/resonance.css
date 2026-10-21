@@ -161,8 +161,11 @@
 }
 .rs-stage .qc-canvas-media img,
 .rs-stage .qc-canvas-media video {
+  width: auto;
+  height: auto;
+  max-width: 100%;
   max-height: 58vh;
-  object-fit: contain;
+  object-fit: scale-down;
 }
 .rs-stage .qc-canvas-state {
   border-radius: 20px;
@@ -388,11 +391,6 @@
 .rs-memory-detail {
   margin-block: 12px;
   color: var(--df-text-secondary);
-}
-.rs-memory-detail summary {
-  min-height: 44px;
-  padding-block: 12px;
-  cursor: pointer;
 }
 .rs-memory-strip {
   display: flex;

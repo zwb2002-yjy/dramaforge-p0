@@ -1,7 +1,7 @@
+import { Button, Dialog, Field, Input, Select, Alert } from "../../components/ui";
 import { useMutation } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
-import { useModalDialog } from "../../components/ui/useModalDialog";
 import {
   assetKindsForArtifactType,
   createAssetFromArtifact,
@@ -52,8 +52,10 @@ export function AddArtifactToAssetDialog({
   sourceLabel,
   shotId,
   onCreated,
-  onClose,
+  onClose: onClosed,
 }: AddArtifactToAssetDialogProps) {
+  const [open, setOpen] = useState(true);
+  const onClose = () => setOpen(false);
   // Only kinds this Artifact may actually become: the server refuses the rest,
   // and a late refusal after an explicit confirmation is a dead end.
   const allowedKinds = assetKindsForArtifactType(artifactType);
@@ -72,7 +74,6 @@ export function AddArtifactToAssetDialog({
   // One explicit operation keeps one request key across retries; a second,
   // deliberate creation must start a new operation (and a new key).
   const requestKey = useRef(`asset-from-artifact:${globalThis.crypto.randomUUID()}`);
-  const dialogRef = useModalDialog<HTMLElement>(true, onClose);
 
   const createMut = useMutation({
     mutationFn: async () =>
@@ -132,125 +133,129 @@ export function AddArtifactToAssetDialog({
   });
 
   return (
-    <div className="qc-unsaved-backdrop" data-testid="add-artifact-to-asset-dialog">
-      <section
-        ref={dialogRef}
-        className="qc-unsaved-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-asset-title"
-        tabIndex={-1}
-      >
-        <span className="director-stage-kicker">显式动作</span>
-        <h2 id="add-asset-title">将生成结果加入资产</h2>
-        <p className="muted" data-testid="add-asset-source">
-          来源：{sourceLabel} · 素材 {artifactId.slice(0, 8)}
-        </p>
+    <Dialog
+      open={open}
+      afterClose={onClosed}
+      title="将生成结果加入资产"
+      kicker="显式动作"
+      testId="add-artifact-to-asset-dialog"
+      onClose={onClose}
+    >
+      <p className="muted" data-testid="add-asset-source">
+        来源：{sourceLabel} · 素材 {artifactId.slice(0, 8)}
+      </p>
 
-        {created ? (
-          <div data-testid="add-asset-result" role="status">
-            <p>已创建资产「{created.name}」，并将此版本设为正式（v1，status=formal）。</p>
-            {shotId ? (
-              <button
-                type="button"
-                data-testid="add-asset-bind-shot"
-                disabled={bound || bindMut.isPending}
-                onClick={() => bindMut.mutate(created)}
-              >
-                {bound ? "已绑定到当前镜头" : "绑定到当前镜头"}
-              </button>
-            ) : (
-              <p className="muted">未选择镜头，本次不会自动绑定引用。</p>
-            )}
-            <div className="qc-unsaved-actions">
-              <button type="button" className="secondary" onClick={onClose}>
-                完成
-              </button>
-            </div>
+      {created ? (
+        <div data-testid="add-asset-result" role="status">
+          <p>已创建资产「{created.name}」，并将此版本设为正式（v1，status=formal）。</p>
+          {shotId ? (
+            <Button
+              type="button"
+              data-testid="add-asset-bind-shot"
+              disabled={bound || bindMut.isPending}
+              onClick={() => bindMut.mutate(created)}
+            >
+              {bound ? "已绑定到当前镜头" : "绑定到当前镜头"}
+            </Button>
+          ) : (
+            <p className="muted">未选择镜头，本次不会自动绑定引用。</p>
+          )}
+          <div className="qc-unsaved-actions">
+            <Button type="button" onClick={onClose} tone="default">
+              完成
+            </Button>
           </div>
-        ) : (
-          <>
-            <label>
-              资产名称
-              <input
-                aria-label="资产名称"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                disabled={createMut.isPending}
-              />
-            </label>
-            <label>
-              资产类型
-              <select
-                aria-label="资产类型"
-                value={kind}
-                onChange={(event) => {
-                  const next = event.target.value;
-                  setKind(next);
-                  setReferenceRole(rolesForAssetKind(next)[0] ?? "primary");
-                }}
-                disabled={createMut.isPending}
-              >
-                {allowedKinds.map((option) => (
-                  <option key={option} value={option}>
-                    {KIND_LABELS[option] ?? option}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              参考角色
-              <select
-                aria-label="参考角色"
-                value={referenceRole}
-                onChange={(event) => setReferenceRole(event.target.value)}
-                disabled={createMut.isPending}
-              >
-                {rolesForAssetKind(kind).map((role) => (
-                  <option key={role} value={role}>
-                    {roleLabel(role)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              说明
-              <input
-                aria-label="资产说明"
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                disabled={createMut.isPending}
-              />
-            </label>
+        </div>
+      ) : (
+        <>
+          <Field>
+            资产名称
+            <Input
+              aria-label="资产名称"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              disabled={createMut.isPending}
+            />
+          </Field>
+          <Field>
+            资产类型
+            <Select
+              aria-label="资产类型"
+              value={kind}
+              onChange={(event) => {
+                const next = event;
+                setKind(next);
+                setReferenceRole(rolesForAssetKind(next)[0] ?? "primary");
+              }}
+              disabled={createMut.isPending}
+            >
+              {allowedKinds.map((option) => (
+                <option key={option} value={option}>
+                  {KIND_LABELS[option] ?? option}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field>
+            参考角色
+            <Select
+              aria-label="参考角色"
+              value={referenceRole}
+              onChange={(event) => setReferenceRole(event)}
+              disabled={createMut.isPending}
+            >
+              {rolesForAssetKind(kind).map((role) => (
+                <option key={role} value={role}>
+                  {roleLabel(role)}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field>
+            说明
+            <Input
+              aria-label="资产说明"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              disabled={createMut.isPending}
+            />
+          </Field>
 
-            {error && (
-              <p className="flash err" data-testid="add-asset-error" role="alert">
-                {error}
-              </p>
-            )}
+          {error && (
+            <Alert
+              data-testid="add-asset-error"
+              role="alert"
+              type="error"
+              showIcon
+              description={<>{error}</>}
+            />
+          )}
 
-            <div className="qc-unsaved-actions">
-              <button type="button" className="secondary" onClick={onClose}>
-                取消
-              </button>
-              <button
-                type="button"
-                data-testid="add-asset-confirm"
-                disabled={createMut.isPending || !name.trim() || !artifactId}
-                onClick={() => createMut.mutate()}
-              >
-                创建资产并将此版本设为正式
-              </button>
-            </div>
-          </>
-        )}
+          <div className="qc-unsaved-actions">
+            <Button type="button" onClick={onClose} tone="default">
+              取消
+            </Button>
+            <Button
+              type="button"
+              data-testid="add-asset-confirm"
+              disabled={createMut.isPending || !name.trim() || !artifactId}
+              onClick={() => createMut.mutate()}
+            >
+              创建资产并将此版本设为正式
+            </Button>
+          </div>
+        </>
+      )}
 
-        {created && error && (
-          <p className="flash err" data-testid="add-asset-error" role="alert">
-            {error}
-          </p>
-        )}
-      </section>
-    </div>
+      {created && error && (
+        <Alert
+          data-testid="add-asset-error"
+          role="alert"
+          type="error"
+          showIcon
+          description={<>{error}</>}
+        />
+      )}
+    </Dialog>
   );
 }

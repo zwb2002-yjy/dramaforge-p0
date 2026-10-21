@@ -10,6 +10,53 @@ const productionWrites = (state: Journey) =>
     /\/(executions|formal-keyframe|formal-video|review-decisions)$/.test(item.path),
   );
 
+test("an unavailable model precheck explains the blocker and opens settings without executing", async ({
+  page,
+}) => {
+  const state = await installShotJourneyMock(page);
+  await page.route("**/execution-plan", (route) =>
+    route.fulfill({
+      status: 422,
+      json: {
+        code: "WORKBENCH_EXECUTION_INVALID",
+        detail: "selected execution model is unavailable: MODEL_LIFECYCLE_INACTIVE",
+        details: { code: "MODEL_LIFECYCLE_INACTIVE", resolution_status: "UNAVAILABLE" },
+      },
+    }),
+  );
+  await page.goto(`${sceneUrl}?shotId=${JOURNEY_SHOT_IDS[0]}`);
+  await page.getByTestId("inspect-shot-plan").click();
+  const error = page.getByRole("alert");
+  await expect(error).toContainText("当前模型版本不可用于生成");
+  await expect(error).not.toContainText("MODEL_LIFECYCLE_INACTIVE");
+  await page
+    .getByTestId("shot-preflight-drawer")
+    .getByRole("button", { name: "去设置模型", exact: true })
+    .click();
+  await expect(page.getByTestId("shot-preflight-drawer")).toBeHidden();
+  await expect(page.getByRole("dialog", { name: "模型与服务设置", exact: true })).toBeVisible();
+  expect(productionWrites(state)).toEqual([]);
+});
+
+test("prompt deep links open the library panel and its controls stay operable", async ({
+  page,
+}) => {
+  const state = await installShotJourneyMock(page);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${sceneUrl}?shotId=${JOURNEY_SHOT_IDS[0]}&tool=prompts`);
+  const panel = page.getByTestId("shot-design-prompts");
+  const prompt = panel.getByRole("textbox", { name: "图片提示词", exact: true });
+  await expect(prompt).toBeVisible();
+  await expect(prompt).toBeInViewport();
+  await panel.getByRole("button", { name: "提示词", exact: true }).click();
+  await expect(prompt).toBeHidden();
+  await panel.getByRole("button", { name: "提示词", exact: true }).click();
+  await expect(prompt).toBeVisible();
+  await page.getByTestId(`shot-strip-card-${JOURNEY_SHOT_IDS[1]}`).click();
+  await expect(prompt).toBeHidden();
+  expect(productionWrites(state)).toEqual([]);
+});
+
 async function reviewCandidate(
   page: Page,
   state: Journey,
@@ -19,6 +66,15 @@ async function reviewCandidate(
   const artifact = `journey-${index + 1}-${stage}`;
   const kind = stage === "video" ? "video_drift" : "identity";
   const candidate = page.getByTestId(`shot-candidate-${artifact}`);
+  const preview = candidate.getByTestId(`shot-candidate-select-${artifact}`);
+  const previewBox = (await preview.boundingBox())!;
+  expect(previewBox.width / previewBox.height).toBeCloseTo(16 / 10, 1);
+  expect(previewBox.height).toBeGreaterThan(75);
+  for (const action of await candidate.locator(".df-candidate-actions .ant-btn").all()) {
+    const box = (await action.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(previewBox.x + previewBox.width + 2);
+    expect(box.height).toBeGreaterThanOrEqual(32);
+  }
   const before = productionWrites(state).length;
   await candidate.getByTestId(`shot-candidate-select-${artifact}`).click();
   await expect(page.getByTestId(`shot-candidate-preview-${artifact}`)).toBeVisible();
@@ -79,7 +135,7 @@ test("three Shots retain saved drafts through preflight, candidate, human review
       shotId,
     );
     await inspector.getByLabel("画面描述").fill(`镜头 ${index + 1} 保存画面`);
-    await inspector.getByTestId("shot-design-prompts").locator(":scope > summary").click();
+    await inspector.getByTestId("shot-design-prompts").getByRole("button").first().click();
     await inspector.getByLabel("图片提示词").fill(`saved frame ${index + 1}`);
     await inspector.getByLabel("视频提示词").fill(`saved motion ${index + 1}`);
     await page.getByTestId(`shot-strip-card-${JOURNEY_SHOT_IDS[(index + 1) % 3]}`).click();

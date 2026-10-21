@@ -1,3 +1,4 @@
+import { expectSelectValue, selectValue } from "./selectValue";
 import { expect, test } from "@playwright/test";
 import { EDIT_SESSION_ID, PROJECT_ID, installProfessionalMock } from "./professional-mocks";
 
@@ -95,14 +96,14 @@ test("editing audio is auditioned, selected by Artifact identity and saved witho
     await audition.evaluate((element) => (element as HTMLAudioElement).error?.code ?? null),
   ).toBeNull();
   await page.getByRole("button", { name: "使用音频 1", exact: true }).click();
-  await expect(page.getByLabel("镜头 1 配音", { exact: true })).toHaveValue(AUDIO_ID);
+  await expectSelectValue(page.getByLabel("镜头 1 配音", { exact: true }), AUDIO_ID);
   await page.getByText("背景音乐（可选）", { exact: true }).click();
   await page.getByRole("button", { name: "选择背景音乐", exact: true }).click();
   await expect(page.getByRole("region", { name: "背景音乐音频库", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("audio-picker-ready.png"), fullPage: true });
   await page.getByRole("button", { name: "使用音频 1", exact: true }).click();
-  await expect(page.getByTestId("timeline-music-artifact")).toHaveValue(AUDIO_ID);
+  await expectSelectValue(page.getByTestId("timeline-music-artifact"), AUDIO_ID);
   expect(saves).toBe(0);
   await expect(page.getByTestId("export-final-film")).toBeDisabled();
   await page.getByTestId("save-edit-timeline").click();
@@ -113,8 +114,8 @@ test("editing audio is auditioned, selected by Artifact identity and saved witho
   });
   expect(state.editing.session.timeline.metadata.music_artifact_id).toBe(AUDIO_ID);
   await page.reload();
-  await expect(page.getByLabel("镜头 1 配音", { exact: true })).toHaveValue(AUDIO_ID);
-  await page.getByLabel("镜头 1 配音", { exact: true }).selectOption("__muted__");
+  await expectSelectValue(page.getByLabel("镜头 1 配音", { exact: true }), AUDIO_ID);
+  await selectValue(page.getByLabel("镜头 1 配音", { exact: true }), "__muted__");
   await page.getByTestId("save-edit-timeline").click();
   await expect.poll(() => saves).toBe(2);
   expect(state.editing.session.timeline.clips[0]).toMatchObject({ audio_id: "", muted: true });

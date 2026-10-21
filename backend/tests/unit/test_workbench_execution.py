@@ -40,7 +40,9 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
     await engine.dispose()
 
 
-async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, User]:
+async def _seed(
+    session: AsyncSession, manifest_override: dict | None = None
+) -> tuple[Project, ProviderModelBinding, User]:
     user = User(
         email=f"workbench-{uuid4().hex}@example.com",
         display_name="Workbench",
@@ -59,7 +61,7 @@ async def _seed(session: AsyncSession) -> tuple[Project, ProviderModelBinding, U
     )
     session.add(project)
     await session.flush()
-    manifest = unit_video_manifest()
+    manifest = manifest_override or unit_video_manifest()
     entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
@@ -1757,3 +1759,218 @@ async def test_project_creative_snapshot_is_inherited_and_shot_override_wins(
     assert changed.semantic_intent["effective_creative_intent"]["lighting"] == "Only candlelight"
     assert style.lighting not in changed.prompt
     assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0
+
+
+def _video_manifest_with_contract() -> dict:
+    manifest = unit_video_manifest()
+    op = manifest["operations"]["video.generate"]
+    op["input_contracts"] = {
+        "image_to_video": {
+            "input_slots": {
+                "first_frame": {"minimum": 1, "maximum": 1, "media_types": ["image/*"]},
+            },
+            "common_options": {
+                "motion_bucket_id": {"type": "integer", "minimum": 1, "maximum": 255},
+                "duration_seconds": {"type": "number", "enum": [4.0, 5.0]},
+                "prompt_override": {"type": "string"},
+            },
+            "native_options": {
+                "fps": {"type": "integer", "enum": [12, 24, 30]},
+            },
+        }
+    }
+    return manifest
+
+
+@pytest.mark.asyncio
+async def test_generation_settings_flow_into_plan_and_node_run(
+    session: AsyncSession,
+) -> None:
+    project, binding, user = await _seed(session, manifest_override=_video_manifest_with_contract())
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    shot.video_prompt = "hero stands on the cliff"
+    shot.director_state = {
+        "generation_settings": {
+            "schema_version": 1,
+            "video": {
+                "mode_id": "image_to_video",
+                "request_duration_seconds": 4.0,
+                "common_options": {"motion_bucket_id": 127},
+                "native_options": {"fps": 24},
+                "prompt_override": "cinematic camera pan, hero on the cliff",
+            },
+        }
+    }
+    await session.flush()
+
+    execution_input = WorkbenchExecutionInput(
+        project_id=project.id,
+        shot_id=shot.id,
+        stage="video",
+        prompt=shot.video_prompt,
+        mode_id="image_to_video",
+        requested_binding_id=binding.id,
+        expected_shot_version=shot.version,
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(project=project, execution_input=execution_input)
+
+    assert plan.duration_seconds == 4.0
+    assert plan.effective_options == {
+        "motion_bucket_id": 127,
+        "fps": 24,
+        "duration_seconds": 4.0,
+    }
+    assert plan.prompt == "cinematic camera pan, hero on the cliff"
+    assert plan.prompt_override == "cinematic camera pan, hero on the cliff"
+    assert plan.supports_prompt_override is True
+
+    run = await service.create_and_dispatch(
+        project=project,
+        execution_input=execution_input,
+    )
+    assert run.input_snapshot["duration_seconds"] == 4.0
+    assert run.input_snapshot["options"] == {
+        "motion_bucket_id": 127,
+        "fps": 24,
+        "duration_seconds": 4.0,
+    }
+    assert run.input_snapshot["prompt_override"] == "cinematic camera pan, hero on the cliff"
+
+
+@pytest.mark.asyncio
+async def test_undeclared_options_rejected_by_preflight(
+    session: AsyncSession,
+) -> None:
+    # default unit_video_manifest does not declare custom options
+    project, binding, user = await _seed(session)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    shot.video_prompt = "hero stands on the cliff"
+    shot.director_state = {
+        "generation_settings": {
+            "schema_version": 1,
+            "video": {
+                "common_options": {"undeclared_custom_option": 123},
+            },
+        }
+    }
+    await session.flush()
+
+    execution_input = WorkbenchExecutionInput(
+        project_id=project.id,
+        shot_id=shot.id,
+        stage="video",
+        prompt=shot.video_prompt,
+        mode_id="image_to_video",
+        requested_binding_id=binding.id,
+        expected_shot_version=shot.version,
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    with pytest.raises(WorkbenchExecutionError) as exc_info:
+        await service.build_plan(project=project, execution_input=execution_input)
+    assert exc_info.value.details.get("code") == "MODEL_OPTION_UNDECLARED"
+    assert exc_info.value.details.get("option") == "undeclared_custom_option"
+
+
+@pytest.mark.asyncio
+async def test_prompt_override_rejected_when_slot_not_declared(
+    session: AsyncSession,
+) -> None:
+    # default unit_video_manifest has no prompt_override slot
+    project, binding, user = await _seed(session)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    shot.video_prompt = "hero stands on the cliff"
+    shot.director_state = {
+        "generation_settings": {
+            "schema_version": 1,
+            "video": {
+                "prompt_override": "override prompt without declaration",
+            },
+        }
+    }
+    await session.flush()
+
+    execution_input = WorkbenchExecutionInput(
+        project_id=project.id,
+        shot_id=shot.id,
+        stage="video",
+        prompt=shot.video_prompt,
+        mode_id="image_to_video",
+        requested_binding_id=binding.id,
+        expected_shot_version=shot.version,
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    with pytest.raises(WorkbenchExecutionError) as exc_info:
+        await service.build_plan(project=project, execution_input=execution_input)
+    assert exc_info.value.details.get("code") == "PROMPT_OVERRIDE_SLOT_UNDECLARED"
+
+
+@pytest.mark.asyncio
+async def test_conflicting_common_and_native_options_rejected(
+    session: AsyncSession,
+) -> None:
+    project, binding, user = await _seed(session, manifest_override=_video_manifest_with_contract())
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    shot.video_prompt = "hero stands on the cliff"
+    shot.director_state = {
+        "generation_settings": {
+            "schema_version": 1,
+            "video": {
+                "common_options": {"motion_bucket_id": 100},
+                "native_options": {"motion_bucket_id": 200},
+            },
+        }
+    }
+    await session.flush()
+
+    execution_input = WorkbenchExecutionInput(
+        project_id=project.id,
+        shot_id=shot.id,
+        stage="video",
+        prompt=shot.video_prompt,
+        mode_id="image_to_video",
+        requested_binding_id=binding.id,
+        expected_shot_version=shot.version,
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    with pytest.raises(WorkbenchExecutionError) as exc_info:
+        await service.build_plan(project=project, execution_input=execution_input)
+    assert exc_info.value.details.get("code") == "MODEL_OPTION_CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_prompt_override_contract_constraints(
+    session: AsyncSession,
+) -> None:
+    project, binding, user = await _seed(session, manifest_override=_video_manifest_with_contract())
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    shot.video_prompt = "hero stands on the cliff"
+    shot.director_state = {
+        "generation_settings": {
+            "schema_version": 1,
+            "video": {
+                "prompt_override": "   ",
+            },
+        }
+    }
+    await session.flush()
+
+    execution_input = WorkbenchExecutionInput(
+        project_id=project.id,
+        shot_id=shot.id,
+        stage="video",
+        prompt=shot.video_prompt,
+        mode_id="image_to_video",
+        requested_binding_id=binding.id,
+        expected_shot_version=shot.version,
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    with pytest.raises(WorkbenchExecutionError) as exc_info:
+        await service.build_plan(project=project, execution_input=execution_input)
+    assert exc_info.value.details.get("code") == "PROMPT_CONTRACT_UNSUPPORTED"
+
+    shot.director_state["generation_settings"]["video"]["prompt_override"] = "x" * 4005
+    await session.flush()
+    with pytest.raises(WorkbenchExecutionError) as exc_info2:
+        await service.build_plan(project=project, execution_input=execution_input)
+    assert exc_info2.value.details.get("code") == "PROMPT_CONTRACT_UNSUPPORTED"

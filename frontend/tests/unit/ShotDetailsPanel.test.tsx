@@ -41,7 +41,7 @@ describe("ShotDetailsPanel", () => {
     expect(screen.getByTestId("shot-details-status")).toHaveTextContent("草稿");
     const body = (() => {
       const clone = sheet.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll("details").forEach((element) => element.remove());
+      clone.querySelectorAll(".ant-collapse").forEach((element) => element.remove());
       return clone.textContent ?? "";
     })();
     expect(body).toContain("已确认");
@@ -57,7 +57,7 @@ describe("ShotDetailsPanel", () => {
     const trace = screen.getByTestId("shot-production-trace");
     const visible = (() => {
       const clone = trace.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll("details").forEach((element) => element.remove());
+      clone.querySelectorAll(".ant-collapse").forEach((element) => element.remove());
       return clone.textContent ?? "";
     })();
     expect(visible).toContain("已完成");

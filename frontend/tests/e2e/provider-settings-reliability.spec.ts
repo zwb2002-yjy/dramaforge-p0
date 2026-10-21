@@ -1,4 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
+import { selectValue } from "./selectValue";
+import { expectLibraryGeometry } from "./layoutGeometry";
 import {
   installProfessionalMock,
   PROJECT_ID,
@@ -9,6 +11,9 @@ import {
 
 async function setupProviders(page: Page) {
   await installProfessionalMock(page);
+  await page.route("**/api/v1/workspaces", (route) =>
+    route.fulfill({ json: [{ id: WORKSPACE_ID, name: "我的空间" }] }),
+  );
   const writes: string[] = [];
   page.on("request", (request) => {
     const path = new URL(request.url()).pathname;
@@ -130,6 +135,71 @@ async function setupProviders(page: Page) {
   );
   return { writes, model, connection };
 }
+
+test("provider rows and explicit protocol mapping stay readable at desktop widths", async ({
+  page,
+}) => {
+  const { model } = await setupProviders(page);
+  const remote = "team/a-very-long-discovered-model-name-with-an-explicit-protocol";
+  await page.route("**/api/v1/provider-plugins", (route) =>
+    route.fulfill({
+      json: [
+        {
+          provider_type: "fixture",
+          protocol_profile: "fixture-v1",
+          display_name: "Fixture Provider",
+          default_base_url: "https://fixture.invalid",
+          kind: "media",
+          implemented: true,
+          paid_capabilities: [],
+          capabilities: ["auth_models"],
+          models: [{ ...model, model_id: "@contract/fixture-image", display_name: "显式图片协议" }],
+        },
+      ],
+    }),
+  );
+  await page.route(
+    `**/api/v1/workspaces/${WORKSPACE_ID}/provider-connections/connection-fixture/probes`,
+    (route) =>
+      route.fulfill({
+        json:
+          route.request().method() === "POST"
+            ? {
+                probe_id: "geometry-probe",
+                capability: "auth_models",
+                status: "passed",
+                discovered_model_ids: [remote],
+                connection_revision_id: "fixture-revision",
+                tested_at: "2026-10-20T00:00:00Z",
+              }
+            : [],
+      }),
+  );
+  await page.goto("/settings/models");
+  const row = page.getByRole("button", { name: "管理 Fixture Provider", exact: true });
+  await row.click();
+  await page
+    .getByTestId("provider-detail")
+    .getByRole("button", { name: "添加模型", exact: true })
+    .click();
+  const mapping = page.getByRole("combobox", { name: `${remote} 调用方式`, exact: true });
+  await selectValue(mapping, model.catalog_entry_id);
+  await expect(page.getByRole("checkbox", { name: `使用 ${remote}`, exact: true })).toBeEnabled();
+  for (const width of [1440, 1100, 900]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const rowBox = (await row.boundingBox())!;
+    expect(rowBox.height).toBeGreaterThanOrEqual(56);
+    const icon = (await row.locator(".df-provider-mark").boundingBox())!;
+    const copy = (await row.locator(".df-provider-option-copy").boundingBox())!;
+    expect(copy.x).toBeGreaterThanOrEqual(icon.x + icon.width);
+    expect(copy.x + copy.width).toBeLessThanOrEqual(rowBox.x + rowBox.width);
+    const selector = mapping.locator(
+      "xpath=ancestor::*[contains(concat(' ',normalize-space(@class),' '),' ant-select ')][1]",
+    );
+    expect((await selector.boundingBox())!.width).toBeGreaterThan(180);
+    await expectLibraryGeometry(page);
+  }
+});
 
 test("text service owns its URL and key and its discovered model can be activated for the workspace", async ({
   page,
@@ -266,7 +336,7 @@ test("supplier settings stay read-only while browsing, show failed evidence, and
   expect(detailBox).not.toBeNull();
   expect(sidebarBox!.x + sidebarBox!.width).toBeLessThanOrEqual(detailBox!.x + 1);
   expect(detailBox!.width).toBeGreaterThan(sidebarBox!.width);
-  await dialog.getByTestId("provider-diagnostics-disclosure").locator("summary").click();
+  await dialog.getByTestId("provider-diagnostics-disclosure").getByRole("button").first().click();
   await expect(dialog.getByText("检查记录读取失败。")).toBeVisible();
   await expect(dialog.getByText("暂无检查记录。")).toHaveCount(0);
   await expect(dialog.getByLabel("诊断模型")).toHaveCount(0);
@@ -280,7 +350,7 @@ test("supplier settings stay read-only while browsing, show failed evidence, and
   await page.goto(`/settings/projects/${PROJECT_ID}?returnTo=${encodeURIComponent(origin)}`);
   await expect(page.getByTestId("project-settings-page")).toBeVisible();
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe(origin);
-  await page.getByTestId("project-model-source-disclosure").locator("summary").click();
+  await page.getByTestId("project-model-source-disclosure").getByRole("button").first().click();
   const summary = page.getByTestId("project-model-source-summary");
   await expect(summary.getByTestId("model-source-visual.keyframe")).toContainText(
     "fixture/exact-image-v2",

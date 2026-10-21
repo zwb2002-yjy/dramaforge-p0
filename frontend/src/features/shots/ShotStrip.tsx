@@ -1,3 +1,4 @@
+import { Button } from "../../components/ui";
 import { artifactContentUrl } from "../../lib/api";
 import { nodeRunStatusKind } from "../../lib/runLabels";
 import { shotTypeLabel } from "../../lib/shotLabels";
@@ -57,7 +58,7 @@ export function ShotStrip({
         </div>
         <span>{shots.length} 镜</span>
         {onToggleExpanded && (
-          <button
+          <Button
             type="button"
             className="qc-shot-strip-toggle"
             data-testid="shot-strip-toggle"
@@ -65,7 +66,7 @@ export function ShotStrip({
             onClick={onToggleExpanded}
           >
             {expanded ? "收起" : "展开详情"}
-          </button>
+          </Button>
         )}
       </header>
       <ol
@@ -80,7 +81,7 @@ export function ShotStrip({
           const risk = hasTraceRisk(traceByShot[shot.id] ?? []);
           return (
             <li key={shot.id}>
-              <button
+              <Button
                 type="button"
                 className={selected ? "active" : undefined}
                 aria-current={selected ? "true" : undefined}
@@ -114,7 +115,7 @@ export function ShotStrip({
                     {risk && <em className="risk">生产失败风险</em>}
                   </span>
                 )}
-              </button>
+              </Button>
             </li>
           );
         })}

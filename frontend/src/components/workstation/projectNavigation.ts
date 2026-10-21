@@ -1,6 +1,12 @@
 import { createContext, type RefCallback } from "react";
 import type { WorkspaceView } from "../../hooks/useProjectWorkspaceState";
 
+export const GLOBAL_NAV_LABELS = {
+  projects: "我的项目",
+  projectsCompact: "项目",
+  settings: "设置",
+};
+
 export const PROJECT_VIEW_LABELS: Record<WorkspaceView, string> = {
   production: "项目总览",
   script: "故事剧本",

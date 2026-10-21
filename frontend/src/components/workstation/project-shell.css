@@ -1,4 +1,4 @@
-﻿/* DramaForge — canonical product workstation shell styles.
+/* DramaForge — canonical product workstation shell styles.
    Owns the qc-* classes consumed by the real shells and formal business files. */
 
 .qc-preview-shell {
@@ -960,9 +960,11 @@
 
 .qc-cinematic-canvas img,
 .qc-cinematic-canvas video {
-  width: 100%;
+  width: auto;
+  height: auto;
+  max-width: 100%;
   max-height: min(680px, 72vh);
-  object-fit: contain;
+  object-fit: scale-down;
 }
 
 .qc-canvas-media {
@@ -1142,6 +1144,7 @@
 
 .qc-scene-workspace {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--df-space-4);
   min-width: 0;
 }
@@ -1190,6 +1193,7 @@
 
 .qc-scene-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: end;
   justify-content: space-between;
   gap: var(--df-space-4);
@@ -1228,9 +1232,10 @@
 
 .qc-scene-header-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--df-space-3);
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   color: var(--df-text-muted);
   font-size: var(--df-text-xs);
 }

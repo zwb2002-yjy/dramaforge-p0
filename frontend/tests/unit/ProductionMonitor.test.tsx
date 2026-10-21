@@ -192,12 +192,12 @@ it("filters risk scenes locally without changing the overview totals", () => {
       experimentCount={0}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "仅看风险" }));
+  fireEvent.click(screen.getByRole("radio", { name: "仅看风险" }));
   expect(screen.queryByTestId("monitor-scene-scene-1")).not.toBeInTheDocument();
   expect(screen.getByTestId("monitor-scene-scene-2")).toBeInTheDocument();
   expect(screen.getByTestId("stat-scenes")).toHaveTextContent("2");
   expect(screen.getByTestId("stat-risks")).toHaveTextContent("2");
-  fireEvent.click(screen.getByRole("button", { name: "全部场景" }));
+  fireEvent.click(screen.getByRole("radio", { name: "全部场景" }));
   expect(screen.getByTestId("monitor-scene-scene-1")).toBeInTheDocument();
 });
 
@@ -240,7 +240,7 @@ it("offers a next step for a zero-risk scene missing one formal video", () => {
     "href",
     "/projects/project-1/scenes/scene-1",
   );
-  fireEvent.click(screen.getByRole("button", { name: "未完成" }));
+  fireEvent.click(screen.getByRole("radio", { name: "未完成" }));
   expect(screen.getByTestId("monitor-scene-scene-1")).toBeInTheDocument();
   expect(screen.getByTestId("stat-risks")).toHaveTextContent("0");
 });
@@ -310,12 +310,12 @@ it("does not offer stale next steps or declare a stale filtered list complete af
     shots,
   };
   const { rerender } = render(<ProductionMonitor {...props} />);
-  fireEvent.click(screen.getByRole("button", { name: "未完成" }));
+  fireEvent.click(screen.getByRole("radio", { name: "未完成" }));
   rerender(<ProductionMonitor {...props} scenesError />);
   expect(screen.queryByTestId("production-next-step")).not.toBeInTheDocument();
   expect(screen.queryByText("所有场景的正式产物均已齐备。")).not.toBeInTheDocument();
   expect(screen.getByRole("status")).toHaveTextContent("暂时无法判断筛选结果");
-  fireEvent.click(screen.getByRole("button", { name: "全部场景" }));
+  fireEvent.click(screen.getByRole("radio", { name: "全部场景" }));
   expect(screen.getByTestId("monitor-scene-scene-1")).toHaveTextContent("状态待刷新");
   expect(screen.getByTestId("monitor-scene-scene-1")).not.toHaveTextContent("2 / 2");
 });
@@ -325,7 +325,7 @@ it("retains the chosen filter while refreshed scene facts update the next step",
   const { rerender } = render(
     <ProductionMonitor projectId="project-1" scenes={[scene]} shots={shots} />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "未完成" }));
+  fireEvent.click(screen.getByRole("radio", { name: "未完成" }));
   rerender(
     <ProductionMonitor
       projectId="project-1"
@@ -333,7 +333,7 @@ it("retains the chosen filter while refreshed scene facts update the next step",
       shots={shots}
     />,
   );
-  expect(screen.getByRole("button", { name: "未完成" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("radio", { name: "未完成" })).toBeChecked();
   expect(screen.getByRole("status")).toHaveTextContent("所有场景的正式产物均已齐备");
   expect(screen.getByRole("link", { name: "进入剪辑" })).toBeInTheDocument();
 });
@@ -410,6 +410,7 @@ it("hides stale stage counts and failure links after a read error, then restores
     },
   };
   const { rerender } = render(<ProductionMonitor {...props} />);
+  fireEvent.click(screen.getByRole("button", { name: "查看执行环节" }));
   const stage = screen.getByTestId("production-stage-video");
   expect(stage).toHaveTextContent("已完成 2");
   expect(within(stage).getByRole("link", { name: "查看失败镜头" })).toBeInTheDocument();

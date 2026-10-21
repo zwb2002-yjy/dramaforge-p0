@@ -1,3 +1,4 @@
+import { expectSelectValue, selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -68,9 +69,7 @@ it("keeps voice configuration outside model selection and preserves other active
   fireEvent.click(screen.getByRole("button", { name: "按环节配置" }));
   expect(screen.queryByTestId("model-picker-audio.tts")).not.toBeInTheDocument();
   expect(putProjectModelProfile).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByTestId("model-picker-visual.character"), {
-    target: { value: "image-a" },
-  });
+  await selectValue(screen.getByTestId("model-picker-visual.character"), "image-a");
   fireEvent.click(screen.getByRole("button", { name: "保存高级模式" }));
   await waitFor(() =>
     expect(putProjectModelProfile).toHaveBeenCalledWith("project-1", {
@@ -84,8 +83,8 @@ it("keeps voice configuration outside model selection and preserves other active
 it("clears an explicit model override when the user chooses the default scheme", async () => {
   show();
   const picker = await screen.findByTestId("model-picker-visual.character");
-  await waitFor(() => expect(picker).toHaveValue("image-a"));
-  fireEvent.change(picker, { target: { value: "" } });
+  await waitFor(() => expectSelectValue(picker, "image-a"));
+  await selectValue(picker, "");
   fireEvent.click(screen.getByRole("button", { name: "保存模型选择" }));
   await waitFor(() =>
     expect(putProjectModelProfile).toHaveBeenCalledWith("project-1", { bindings: {} }),
@@ -111,6 +110,6 @@ it("shows inherited configuration as inheritance, not as an explicit project ove
   show();
   const picker = await screen.findByTestId("model-picker-visual.character");
   await waitFor(() => expect(screen.getByRole("button", { name: "保存模型选择" })).toBeEnabled());
-  expect(picker).toHaveValue("");
+  expectSelectValue(picker, "");
   expect(putProjectModelProfile).not.toHaveBeenCalled();
 });

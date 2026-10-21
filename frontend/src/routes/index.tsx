@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createRoute, useNavigate, useRouterState, redirect } from "@tanstack/react-router";
-import { Clapperboard, Plus, Search } from "lucide-react";
+import { Plus, Search, Settings2 } from "lucide-react";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -17,10 +17,22 @@ import {
 } from "../lib/api";
 import { queryKeys } from "../lib/queryKeys";
 import { getRememberedProjectId } from "../lib/navigationPreferences";
-import { Button, Field, Input, Select, PageHeader } from "../components/ui";
+import {
+  Button,
+  Field,
+  Input,
+  Select,
+  PageHeader,
+  RecordList,
+  ActionLink,
+  Card,
+  Alert,
+} from "../components/ui";
 import { CreateProjectForm } from "../features/project/CreateProjectForm";
 import { WorkspaceModelNotice } from "../features/project/WorkspaceModelNotice";
-import { ProjectActions } from "../features/project/ProjectActions";
+import { ProjectCard } from "../features/project/ProjectCard";
+import { projectCopy as copy } from "../features/project/projectCopy";
+import "../features/project/project-library.css";
 import { LazyWorkspaceSettingsPage } from "./pages";
 import { rootRoute } from "./__root";
 
@@ -199,24 +211,60 @@ function HomePage() {
   }
 
   return (
-    <main className="df-page df-project-lobby" data-testid="home-panel">
+    <main
+      className="df-page df-project-lobby"
+      data-testid="home-panel"
+      data-view={
+        currentUser.data && !createOpen && search.panel !== "workspace" ? "library" : "task"
+      }
+    >
       <PageHeader
-        title={createOpen ? "新建项目" : search.panel === "workspace" ? "工作空间" : "我的项目"}
+        title={
+          createOpen ? copy.newProject : search.panel === "workspace" ? copy.workspace : copy.title
+        }
         actions={
           <>
             {!apiLive && <span className="status-bad">服务未就绪</span>}
             {currentUser.data && !createOpen && search.panel !== "workspace" && (
               <Button tone="primary" onClick={() => setCreateOpen(true)}>
                 <Plus size={16} aria-hidden="true" />
-                新建项目
+                {copy.newProject}
               </Button>
             )}
           </>
         }
-      />
+      >
+        {currentUser.data && !createOpen && search.panel !== "workspace" && (
+          <div className="df-workspace-filter">
+            <Field>
+              <span className="sr-only">{copy.workspace}</span>
+              <Select
+                aria-label={copy.workspaceFilter}
+                value={selectedWorkspaceId ?? ""}
+                onChange={(event) => selectWorkspace(event || null)}
+              >
+                {(workspaces.data ?? []).map((workspace) => (
+                  <option key={workspace.id} value={workspace.id}>
+                    {workspace.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <ActionLink
+              tone="ghost"
+              to="/"
+              search={{ panel: "workspace" }}
+              aria-label={copy.manageWorkspace}
+              title={copy.manageWorkspace}
+            >
+              <Settings2 size={18} aria-hidden="true" />
+            </ActionLink>
+          </div>
+        )}
+      </PageHeader>
 
       {!currentUser.data ? (
-        <section className="panel auth-panel">
+        <Card className="auth-panel">
           {!bootstrapReady ? (
             <p className="muted auth-loading">正在确认实例账号状态…</p>
           ) : (
@@ -302,7 +350,7 @@ function HomePage() {
               </form>
             </>
           )}
-        </section>
+        </Card>
       ) : (
         <>
           <CreateProjectForm
@@ -339,37 +387,6 @@ function HomePage() {
             aria-label="项目列表与筛选"
           >
             <div className="df-project-filters" id="project-filters">
-              <div className="df-workspace-filter">
-                <Field>
-                  <span className="sr-only">工作空间</span>
-                  <Select
-                    aria-label="工作空间筛选"
-                    value={selectedWorkspaceId ?? ""}
-                    onChange={(event) => selectWorkspace(event.target.value || null)}
-                  >
-                    {(workspaces.data ?? []).map((workspace) => (
-                      <option key={workspace.id} value={workspace.id}>
-                        {workspace.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Link className="df-btn ghost" to="/" search={{ panel: "workspace" }}>
-                  管理工作空间
-                </Link>
-              </div>
-              <Field>
-                <span className="sr-only">搜索项目</span>
-                <span className="df-search-field">
-                  <Search size={16} aria-hidden="true" />
-                  <Input
-                    aria-label="搜索项目"
-                    value={projectFilter}
-                    onChange={(event) => setProjectFilter(event.target.value)}
-                    placeholder="搜索项目名称"
-                  />
-                </span>
-              </Field>
               <nav className="qc-local-tabs" aria-label="项目筛选">
                 <Link
                   to="/"
@@ -377,7 +394,7 @@ function HomePage() {
                   activeProps={{}}
                   aria-current={search.panel !== "recent" ? "page" : undefined}
                 >
-                  全部项目
+                  {copy.all}
                 </Link>
                 <Link
                   to="/"
@@ -385,13 +402,27 @@ function HomePage() {
                   activeProps={{}}
                   aria-current={search.panel === "recent" ? "page" : undefined}
                 >
-                  最近打开
+                  {copy.recent}
                 </Link>
+                {projects.isSuccess && (
+                  <span className="df-project-total" aria-live="polite">
+                    {copy.count(visibleProjects.length)}
+                  </span>
+                )}
               </nav>
+              <div className="df-project-search">
+                <Input
+                  prefix={<Search size={16} aria-hidden="true" />}
+                  aria-label={copy.search}
+                  value={projectFilter}
+                  onChange={(event) => setProjectFilter(event.target.value)}
+                  placeholder={copy.search}
+                />
+              </div>
             </div>
 
             {workspaces.isError || projects.isError ? (
-              <div className="panel" role="status">
+              <Card role="status">
                 <p>无法读取项目列表，请重新加载。</p>
                 <Button
                   onClick={() => {
@@ -401,51 +432,30 @@ function HomePage() {
                 >
                   重新加载列表
                 </Button>
-              </div>
+              </Card>
             ) : workspaces.isPending ? (
               <p role="status">正在读取工作空间…</p>
             ) : !workspaces.data?.length ? (
-              <div className="panel">
+              <Card>
                 <p>还没有工作空间。</p>
                 <Link to="/" search={{ panel: "workspace" }}>
                   管理工作空间
                 </Link>
-              </div>
+              </Card>
             ) : projects.isPending ? (
-              <div className="panel muted" role="status">
+              <Card className="muted" role="status">
                 正在读取项目…
-              </div>
+              </Card>
             ) : visibleProjects.length ? (
-              <div className="df-project-grid" role="list" aria-label="项目列表">
+              <RecordList className="df-project-grid" aria-label="项目列表">
                 {displayedProjects.map((project) => (
-                  <div role="listitem" key={project.id}>
-                    <article className="df-project-card" aria-label={project.name}>
-                      <ProjectActions project={project} />
-                      <span className="df-project-cover" aria-hidden="true">
-                        <Clapperboard size={24} />
-                      </span>
-                      <span className="df-project-card-body">
-                        <strong title={project.name}>{project.name}</strong>
-                        <span className="df-project-card-meta">
-                          {project.aspect_ratio === "16:9" ? "横屏" : "竖屏"} ·{" "}
-                          {project.aspect_ratio}
-                        </span>
-                        <span className="df-project-card-actions">
-                          <Button
-                            type="button"
-                            onClick={() => openProject(project.id)}
-                            aria-label={`进入工作台 ${project.name}`}
-                          >
-                            进入工作台
-                          </Button>
-                        </span>
-                      </span>
-                    </article>
-                  </div>
+                  <li key={project.id}>
+                    <ProjectCard project={project} onOpen={openProject} />
+                  </li>
                 ))}
-              </div>
+              </RecordList>
             ) : (
-              <div className="panel muted">
+              <Card className="muted">
                 <p>
                   {search.panel === "recent" && !recentProject
                     ? "当前空间还没有最近打开的项目。"
@@ -458,7 +468,7 @@ function HomePage() {
                     创建第一个项目
                   </Button>
                 )}
-              </div>
+              </Card>
             )}
 
             {remainingProjectCount > 0 && (
@@ -477,9 +487,7 @@ function HomePage() {
       )}
 
       {(error || queryError) && (
-        <p className="flash err" role="alert">
-          {error ?? queryError}
-        </p>
+        <Alert role="alert" type="error" showIcon description={<>{error ?? queryError}</>} />
       )}
     </main>
   );

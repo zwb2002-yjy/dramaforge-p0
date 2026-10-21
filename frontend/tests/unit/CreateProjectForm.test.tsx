@@ -1,3 +1,4 @@
+import { selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -69,7 +70,7 @@ it("creates with explicit defaults only after submission and trims the project n
   ]);
 });
 
-it("preserves the draft on cancel/reopen and prevents whitespace-only submissions", () => {
+it("preserves the draft on cancel/reopen and prevents whitespace-only submissions", async () => {
   const { writes, rerender } = setup();
   fireEvent.change(screen.getByLabelText("项目名"), { target: { value: "保留的草稿" } });
   rerender(false);
@@ -77,16 +78,18 @@ it("preserves the draft on cancel/reopen and prevents whitespace-only submission
   rerender(true);
   expect(screen.getByLabelText("项目名")).toHaveValue("保留的草稿");
   fireEvent.change(screen.getByLabelText("项目名"), { target: { value: "   " } });
-  expect(screen.getByRole("button", { name: "创建并进入剧本" })).toBeDisabled();
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "创建并进入剧本" })).toBeDisabled(),
+  );
   expect(writes).toEqual([]);
 });
 
 it("submits the selected template and autonomy, not hidden defaults", async () => {
   const { writes, props } = setup();
   expect(screen.getByRole("combobox", { name: "创作起点" })).toBeVisible();
-  fireEvent.change(screen.getByLabelText("创作起点"), { target: { value: "TEMPLATE" } });
-  fireEvent.change(screen.getByLabelText("创作模板"), { target: { value: "single_monologue_v1" } });
-  fireEvent.change(screen.getByLabelText("导演参与度"), { target: { value: "MANUAL" } });
+  await selectValue(screen.getByLabelText("创作起点"), "TEMPLATE");
+  await selectValue(await screen.findByLabelText("创作模板"), "single_monologue_v1");
+  await selectValue(screen.getByLabelText("导演参与度"), "MANUAL");
   fireEvent.click(screen.getByRole("button", { name: "创建并进入剧本" }));
   await waitFor(() => expect(props.onCreated).toHaveBeenCalled());
   expect(writes[0]).toMatchObject({

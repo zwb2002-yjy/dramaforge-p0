@@ -150,7 +150,7 @@ test("contextual intent reaches the existing director endpoint once and errors s
   });
   expect(state.candidates).toHaveLength(0);
   expect(state.shotVersion).toBe(1);
-  await page.getByTestId("shot-inspector-director").locator(":scope > summary").click();
+  await page.getByTestId("shot-inspector-director").getByRole("button").first().click();
   await expect(page.getByTestId("director-companion")).toHaveAttribute("data-state", "failed");
 });
 
@@ -204,9 +204,9 @@ test("the AI director sits beside the shot editor and never drops its draft", as
   await page.getByTestId("director-companion").click();
   await expect(page.getByRole("textbox", { name: "导演要求", exact: true })).toBeVisible();
   const prompts = page.getByTestId("shot-design-prompts");
-  await prompts.locator(":scope > summary").click();
+  await prompts.getByRole("button").first().click();
   await page.getByLabel("图片提示词").fill("保留她的沉默");
-  await page.getByTestId("shot-inspector-director").locator(":scope > summary").click();
+  await page.getByTestId("shot-inspector-director").getByRole("button").first().click();
   await page.getByTestId("director-companion").click();
   await expect(page.getByLabel("图片提示词")).toHaveValue("保留她的沉默");
   await expect(page.getByTestId("shot-primary-save")).toBeEnabled();
@@ -220,7 +220,7 @@ test("changing shots isolates both the intention and Director entry", async ({ p
   await expect(page.getByRole("textbox", { name: "导演要求", exact: true })).toHaveValue(
     "只用于第一个镜头",
   );
-  await page.getByTestId("shot-inspector-director").locator(":scope > summary").click();
+  await page.getByTestId("shot-inspector-director").getByRole("button").first().click();
   await page.getByRole("button", { name: "展开镜头关系图" }).click();
   await page.getByRole("button", { name: "聚焦镜头 2", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "此刻的创作意图" })).toHaveValue("");
@@ -295,9 +295,72 @@ test("the inspector sits beside the canvas without covering it", async ({ page }
     contentType: "application/json",
   });
   expect(geometry[1].left).toBeGreaterThanOrEqual(geometry[0].right);
-  await page.getByTestId("shot-inspector-details").locator(":scope > summary").click();
+  await page.getByTestId("shot-inspector-details").getByRole("button").first().click();
   await expect(page.getByTestId("shot-details-sheet")).toBeVisible();
 });
+
+for (const width of [390, 768]) {
+  test(`compact inspector stays inside the viewport and preserves drafts across preview jumps at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    const state = await installProfessionalMock(page);
+    await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
+    const inspector = page.getByTestId("shot-inspector");
+    await expect(inspector).toBeVisible();
+
+    const expectUnclipped = async () => {
+      const geometry = await page.evaluate(() => {
+        const viewportRight = document.documentElement.clientWidth;
+        const selectors = [
+          ".qc-scene-header-actions",
+          '[data-testid="shot-inspector"]',
+          '[data-testid="shot-inspector"] textarea',
+          '[data-testid="shot-inspector"] input',
+          '[data-testid="shot-inspector"] button',
+        ];
+        return [...document.querySelectorAll(selectors.join(","))]
+          .map((element) => ({
+            element: element.getAttribute("aria-label") || element.className,
+            box: element.getBoundingClientRect().toJSON(),
+            viewportRight,
+          }))
+          .filter(({ box }) => box.width > 0 && box.height > 0);
+      });
+      for (const item of geometry) {
+        expect(item.box.left, JSON.stringify(item)).toBeGreaterThanOrEqual(0);
+        expect(item.box.right, JSON.stringify(item)).toBeLessThanOrEqual(item.viewportRight + 1);
+      }
+    };
+    await expectUnclipped();
+    const edit = page.getByRole("button", { name: "编辑镜头", exact: true });
+    await expect(edit).toBeInViewport();
+    await edit.press("Enter");
+    const visual = page.getByRole("textbox", { name: "画面描述", exact: true });
+    await expect(visual).toBeFocused();
+    await expect(visual).toBeInViewport();
+    const dialogue = page.getByRole("textbox", { name: "对白／旁白文本", exact: true });
+    await dialogue.fill("窄屏未保存草稿");
+    await inspector.getByRole("button", { name: /^镜头参数/ }).click();
+    await expect(page.getByRole("spinbutton", { name: "时长（秒）", exact: true })).toBeVisible();
+    await expectUnclipped();
+    await page.getByRole("button", { name: "返回预览", exact: true }).click();
+    await expect(edit).toBeFocused();
+    await expect(edit).toBeInViewport();
+    await edit.press("Enter");
+    await expect(visual).toBeFocused();
+    await expect(dialogue).toHaveValue("窄屏未保存草稿");
+    await expect(inspector).toHaveAttribute("data-shot-id", SHOT_ID);
+    expect(
+      state.editing.requests.filter(
+        (request) =>
+          ["POST", "PATCH", "PUT", "DELETE"].includes(request.method) &&
+          !request.path.endsWith("/workspace-state") &&
+          !request.path.endsWith("/references/resolve"),
+      ),
+    ).toEqual([]);
+  });
+}
 
 test.describe("touch and silent feedback", () => {
   test.use({ hasTouch: true, viewport: { width: 390, height: 844 } });

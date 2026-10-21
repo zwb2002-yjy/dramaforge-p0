@@ -13,7 +13,7 @@ test("the overview keeps engine details behind one disclosure and one project na
   await expect(nav).toContainText("故事剧本");
   await expect(nav).toContainText("剪辑成片");
   await expect(page.getByTestId("production-stage-prompt")).not.toBeVisible();
-  await page.locator("summary").filter({ hasText: "查看执行环节" }).click();
+  await page.getByRole("button", { name: "查看执行环节", exact: true }).click();
   await expect(page.getByTestId("production-stage-prompt")).toBeVisible();
 });
 

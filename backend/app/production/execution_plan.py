@@ -171,6 +171,10 @@ class WorkbenchExecutionPlan(BaseModel):
     translation_report: TranslationReport | None = None
     accepted_approximations: list[str] = Field(default_factory=list)
     expected_shot_version: int | None = None
+    duration_seconds: float | None = None
+    prompt_override: str | None = None
+    effective_options: dict[str, JsonValue] = Field(default_factory=dict)
+    supports_prompt_override: bool = False
 
     def freeze(self) -> WorkbenchExecutionPlan:
         """Return a copy with a deterministic ``plan_fingerprint``.

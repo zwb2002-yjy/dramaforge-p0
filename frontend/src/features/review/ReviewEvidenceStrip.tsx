@@ -1,3 +1,4 @@
+import { Button, Alert } from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "../../lib/queryKeys";
@@ -51,18 +52,21 @@ export function ReviewEvidenceStrip({
     );
   if (summary.isError)
     return (
-      <p className="flash err" role="alert">
-        无法读取自动抽帧检查结果；仍可直接播放视频审片。
-      </p>
+      <Alert
+        role="alert"
+        type="error"
+        showIcon
+        description={<>无法读取自动抽帧检查结果；仍可直接播放视频审片。</>}
+      />
     );
   if (frames.length === 0) {
     return (
       <div data-testid="review-evidence-empty">
         <p className="muted">暂无自动抽帧检查结果，可直接播放下方视频并进行人工审片。</p>
         {stage === "formal_video" && (
-          <button type="button" disabled={regenerate.isPending} onClick={() => regenerate.mutate()}>
+          <Button type="button" disabled={regenerate.isPending} onClick={() => regenerate.mutate()}>
             {regenerate.isPending ? "正在重新抽取首中尾帧…" : "重新抽取首帧、中帧、尾帧"}
-          </button>
+          </Button>
         )}
         {regenerate.isError && <p role="alert">重新抽帧失败：{String(regenerate.error)}</p>}
       </div>
@@ -82,13 +86,13 @@ export function ReviewEvidenceStrip({
         {frames.map((frame) => (
           <figure key={frame.sample_id} data-testid={`review-evidence-${frame.sample_id}`}>
             {frame.delivery_path ? (
-              <button
+              <Button
                 type="button"
                 onClick={() => onSelectTime?.(frame.timestamp_seconds)}
                 aria-label={`定位${frame.role} ${frame.timestamp_seconds}秒`}
               >
                 <img src={frame.delivery_path} alt={`${frame.role}帧`} />
-              </button>
+              </Button>
             ) : (
               <div className="muted">证据不可用</div>
             )}

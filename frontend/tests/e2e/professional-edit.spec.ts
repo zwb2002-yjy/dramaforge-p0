@@ -76,10 +76,18 @@ test("professional edit: formal manifest → persisted session → proposal-only
   await expect(page.getByTestId("editing-workspace")).toBeVisible();
   await expect(page.getByRole("heading", { name: "剪辑成片" })).toBeVisible();
   await expect(page.getByTestId("editing-read-only")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "正式时间线" })).toBeVisible();
+  const inventory = page.getByTestId("editing-source-inventory");
+  await expect(inventory.getByRole("table")).toBeHidden();
+  await inventory.getByRole("button", { name: /^正式素材清单/ }).click();
+  await expect(inventory.getByRole("table")).toBeVisible();
   await expect(page.getByText("选择已有剪辑，或用正式镜头创建时间线。")).toBeVisible();
   const formalPreviewClip = page.getByTestId("editing-clip").first();
-  await expect(formalPreviewClip).toContainText("正式视频 · 0–5 秒 · 片段 1 · 镜头 #1");
+  await expect(formalPreviewClip.getByRole("cell")).toHaveText([
+    "正式视频",
+    "片段 1 · 镜头 #1",
+    "0–5 秒",
+    "正式素材已交付",
+  ]);
   await expect(formalPreviewClip).toContainText("正式素材已交付");
   await expect(formalPreviewClip).not.toContainText(/[0-9a-f]{8}-[0-9a-f-]{27,}/i);
   await expect(formalPreviewClip).not.toContainText("artifact-video");
@@ -163,6 +171,7 @@ test("professional edit: formal manifest → persisted session → proposal-only
   ]);
 
   // Export is read-only and uses the same exact persisted session identity.
+  await page.getByText("更多操作", { exact: true }).click();
   await page.getByTestId("export-edit-session").click();
   const exportPanel = page.getByTestId("edit-session-export");
   await expect(exportPanel).toContainText("dramaforge-edit-v1");
@@ -181,7 +190,7 @@ test("professional edit: formal manifest → persisted session → proposal-only
   // it is not an implicit timeline apply or save.
   const timelineBeforeSuggestion = clone(state.editing.session.timeline);
   const lineageBeforeSuggestion = clone(state.editing.session.production_lineage);
-  await page.locator("summary").filter({ hasText: "导演剪辑建议" }).click();
+  await page.getByRole("button", { name: "导演剪辑建议", exact: true }).click();
   await page.getByTestId("editing-director-suggestion-instruction").fill("让开场更快进入冲突");
   await page.getByTestId("request-editing-director-suggestion").click();
   const preview = page.getByTestId("editing-suggestion-preview");

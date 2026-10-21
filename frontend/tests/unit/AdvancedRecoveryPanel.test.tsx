@@ -74,7 +74,7 @@ describe("AdvancedRecoveryPanel", () => {
     // collapsed diagnostics block.
     const visible = (() => {
       const clone = alert.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll("details").forEach((element) => element.remove());
+      clone.querySelectorAll(".ant-collapse").forEach((element) => element.remove());
       return clone.textContent ?? "";
     })();
     expect(visible).toContain("重放未成功");

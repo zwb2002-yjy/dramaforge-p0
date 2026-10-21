@@ -65,10 +65,12 @@ async function recordLayout(page: Page, testInfo: TestInfo) {
       ".df-context-sidebar",
       ".df-shell-content",
     ].map((selector) => {
-      const element = document.querySelector(selector)!;
+      const element = document.querySelector(selector);
+      if (!element) return { selector, mounted: false };
       const rect = element.getBoundingClientRect();
       return {
         selector,
+        mounted: true,
         top: rect.top,
         height: rect.height,
         scrollTop: element.scrollTop,

@@ -1,34 +1,361 @@
 .shot-continuity {
   display: grid;
   gap: var(--df-space-3);
+  margin-top: var(--df-space-2);
 }
+
+.shot-continuity-container {
+  display: grid;
+  gap: var(--df-space-4);
+  padding: var(--df-space-4);
+  background: var(--df-surface-raised, #18191c);
+  border: 1px solid var(--df-border, #333);
+  border-radius: var(--df-radius-container, 8px);
+}
+
 .shot-continuity-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--df-space-3);
 }
+
 .shot-continuity-item {
   display: grid;
   align-content: start;
   gap: var(--df-space-2);
   margin: 0;
   padding: var(--df-space-3);
-  border: 1px solid var(--df-border);
-  border-radius: var(--df-radius-container);
+  border: 1px solid var(--df-border, #333);
+  border-radius: var(--df-radius-container, 8px);
+  background: var(--df-surface-base, #1e1f22);
 }
+
+.shot-continuity-item figcaption {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--df-text-primary, #fff);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shot-continuity-extra-meta {
+  font-size: 0.75rem;
+  font-weight: normal;
+  color: var(--df-text-secondary, #999);
+}
+
 .shot-continuity-item img,
 .shot-continuity-item video {
   width: 100%;
   aspect-ratio: 16 / 9;
   object-fit: contain;
-  background: var(--df-surface-screen);
+  background: var(--df-surface-screen, #000);
+  border-radius: var(--df-radius-subtle, 4px);
 }
+
+.shot-continuity-references .shot-continuity-ref-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--df-space-2);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.shot-continuity-ref-item {
+  display: flex;
+  align-items: center;
+  gap: var(--df-space-2);
+  padding: var(--df-space-2);
+  background: var(--df-surface-overlay, #2b2d31);
+  border-radius: var(--df-radius-subtle, 4px);
+  border: 1px solid var(--df-border, #333);
+}
+
+.shot-continuity-ref-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.shot-continuity-ref-placeholder {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  font-size: 0.75rem;
+  color: var(--df-text-secondary, #999);
+  background: var(--df-surface-screen, #000);
+  border-radius: 4px;
+}
+
+.shot-continuity-ref-info {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.75rem;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.shot-continuity-ref-info strong {
+  color: var(--df-text-primary, #fff);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .shot-continuity-note {
-  grid-column: 1 / -1;
   margin: 0;
-  color: var(--df-text-secondary);
+  font-size: 0.8rem;
+  color: var(--df-text-secondary, #999);
 }
-@media (max-width: 899px) {
+
+/* 2. Narrative Comparison */
+.shot-continuity-narrative {
+  display: grid;
+  gap: var(--df-space-2);
+  border-top: 1px solid var(--df-border, #333);
+  padding-top: var(--df-space-3);
+}
+
+.shot-continuity-narrative h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--df-text-primary, #fff);
+}
+
+.shot-continuity-narrative-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--df-space-3);
+}
+
+.shot-continuity-narrative-col {
+  padding: var(--df-space-3);
+  background: var(--df-surface-base, #1e1f22);
+  border: 1px solid var(--df-border, #333);
+  border-radius: var(--df-radius-container, 8px);
+}
+
+.shot-continuity-narrative-col.current {
+  border-color: var(--df-primary, #4a90e2);
+}
+
+.shot-continuity-narrative-col h5 {
+  margin: 0 0 var(--df-space-2) 0;
+  font-size: 0.85rem;
+  color: var(--df-text-primary, #fff);
+}
+
+.shot-continuity-narrative-col dl {
+  display: grid;
+  gap: var(--df-space-2);
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.shot-continuity-narrative-col dt {
+  color: var(--df-text-secondary, #999);
+  font-size: 0.75rem;
+}
+
+.shot-continuity-narrative-col dd {
+  margin: 0;
+  color: var(--df-text-primary, #eee);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 3. Checklist */
+.shot-continuity-checklist {
+  display: grid;
+  gap: var(--df-space-3);
+  border-top: 1px solid var(--df-border, #333);
+  padding-top: var(--df-space-3);
+}
+
+.shot-continuity-checklist-header h4 {
+  margin: 0 0 4px 0;
+  font-size: 0.95rem;
+  color: var(--df-text-primary, #fff);
+}
+
+.shot-continuity-checklist-desc {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--df-text-secondary, #999);
+}
+
+.shot-continuity-checklist-table {
+  display: flex;
+  flex-direction: column;
+  gap: var(--df-space-2);
+}
+
+.shot-continuity-check-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--df-space-2) var(--df-space-3);
+  background: var(--df-surface-base, #1e1f22);
+  border: 1px solid var(--df-border, #333);
+  border-radius: var(--df-radius-subtle, 4px);
+}
+
+.shot-continuity-check-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shot-continuity-check-label strong {
+  font-size: 0.85rem;
+  color: var(--df-text-primary, #fff);
+}
+
+.shot-continuity-check-label small {
+  font-size: 0.75rem;
+  color: var(--df-text-secondary, #999);
+}
+
+.shot-continuity-check-actions {
+  display: flex;
+  gap: var(--df-space-2);
+}
+
+.shot-continuity-radio-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--df-text-secondary, #aaa);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.shot-continuity-radio-label.selected {
+  color: var(--df-text-primary, #fff);
+  background: var(--df-surface-overlay, #2b2d31);
+  border-color: var(--df-primary, #4a90e2);
+}
+
+.shot-continuity-checklist-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--df-space-3);
+}
+
+/* 4. Issue Form & Repair Scope */
+.shot-continuity-issue-form {
+  display: grid;
+  gap: var(--df-space-3);
+  padding: var(--df-space-4);
+  background: var(--df-surface-base, #1e1f22);
+  border: 1px solid var(--df-border, #444);
+  border-radius: var(--df-radius-container, 8px);
+}
+
+.shot-continuity-issue-form h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--df-text-primary, #fff);
+}
+
+.shot-continuity-evidence-binding {
+  font-size: 0.8rem;
+  color: var(--df-text-secondary, #aaa);
+}
+
+.shot-continuity-severity-radios {
+  display: flex;
+  gap: var(--df-space-4);
+}
+
+.shot-continuity-severity-radios label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+.shot-continuity-timecode-input {
+  width: 180px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  background: var(--df-surface-screen, #000);
+  border: 1px solid var(--df-border, #444);
+  border-radius: 4px;
+  color: #fff;
+}
+
+.shot-continuity-static-frame {
+  font-size: 0.85rem;
+  color: var(--df-text-secondary, #aaa);
+}
+
+.shot-continuity-involved-items {
+  font-size: 0.85rem;
+  color: var(--df-primary, #4a90e2);
+  font-weight: 500;
+}
+
+.shot-continuity-form-actions {
+  display: flex;
+  gap: var(--df-space-2);
+}
+
+.shot-continuity-annotation-success {
+  display: grid;
+  gap: var(--df-space-3);
+  margin-top: var(--df-space-2);
+}
+
+.shot-continuity-review-link a.button-like {
+  display: inline-block;
+  padding: 8px 16px;
+  background: var(--df-primary, #4a90e2);
+  color: #fff;
+  border-radius: 4px;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.shot-continuity-repair-scope-card {
+  padding: var(--df-space-3);
+  background: var(--df-surface-overlay, #2b2d31);
+  border: 1px solid var(--df-border, #444);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.shot-continuity-repair-scope-card h5 {
+  margin: 0 0 var(--df-space-2) 0;
+  font-size: 0.9rem;
+  color: var(--df-text-primary, #fff);
+}
+
+.shot-continuity-repair-scope-card ul {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+  color: var(--df-text-secondary, #ccc);
+}
+
+@media (max-width: 1199px) {
+  .shot-continuity-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .shot-continuity-narrative-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 699px) {
   .shot-continuity-grid {
     grid-template-columns: 1fr;
   }

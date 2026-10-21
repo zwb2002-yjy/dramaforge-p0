@@ -253,7 +253,9 @@ describe("Frontend Optimization Plan - Acceptance Criteria Verification", () => 
       SHOT_IMAGE_STAGE.id,
     );
     fireEvent.click(screen.getByRole("button", { name: /^关闭$/ }));
-    expect(screen.queryByTestId("scene-model-settings-drawer")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByTestId("scene-model-settings-drawer")).not.toBeVisible(),
+    );
 
     // Verify 场景连播 button is in the scene header and can launch the player modal
     const playBtn = screen.getByTestId("scene-animatic-play-btn");

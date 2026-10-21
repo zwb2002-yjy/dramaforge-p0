@@ -22,8 +22,22 @@
 
 ## 2. 技术方案与 UI 组件库
 
-React 18 + TypeScript + Vite；TanStack Router 管路由，Query 管服务端状态，zustand 管少量 UI 状态。
-使用现有 Visual System 原语，不引入第三方或平行组件体系，不另建导航、请求层。
+React 18 + TypeScript + Vite；TanStack Router 管路由，Query 管服务端状态。
+基础组件唯一采用 **Ant Design 6**（依赖版本锁在 package-lock.json），通过 `UiProvider`
+配置中文、暗色算法及现有品牌 / 表面 Token。`components/ui` 只负责产品语义映射与业务组合，
+不再维护按钮、下拉、页签、弹窗、抽屉或折叠项的独立样式、键盘和焦点实现。
+
+选型比较：Ant Design 的表单、选择器、表格、菜单与覆盖层可以覆盖当前全产品需求；
+Mantine 同样覆盖常用控件，但此次不同时引入第二套体系；MUI 可用，当前产品不需要另引入
+Material 视觉语言及 Emotion 样式层。比较依据为各库官方安装、主题与组件文档：
+[Ant Design](https://ant.design/docs/react/customize-theme/)、
+[Mantine](https://mantine.dev/getting-started/)、
+[MUI](https://mui.com/material-ui/getting-started/installation/)。
+
+迁移按共享原语 → 各页面控件与表格 / 菜单 → 旧配方与自建覆盖层清理 → 全产品验证完成。
+表单状态、Save / Formal / Export 和 Provider 授权边界不变。仅媒体元素、画布 / 时间线
+热点、文件与颜色输入等具有专用浏览器语义的控件保留原生实现，并在自动检查中明确列出。
+验收检查真实库组件采用、选择器键盘、弹窗焦点与离页草稿保护，以及类型、单测和浏览器回归。
 
 ## 3. 目录与模块边界
 
@@ -46,9 +60,25 @@ React 18 + TypeScript + Vite；TanStack Router 管路由，Query 管服务端状
 
 ## 4. 组件复用规则
 
-- 按钮、输入、卡片、徽标、页头、标签页使用 src/components/ui 的 Button、Input、Card、Badge、PageHeader、Tabs/Tab；其他共享样式使用 df-* 类。
+- 按钮、输入、卡片、徽标、页头、标签页从 src/components/ui 导入，以 Ant Design 实现；业务组合布局使用 df-* 类。
 - 原语不足时封装业务组件；每个原语只保留一个实现。
 - 同一 UI 结构出现超过两次时抽为组件。
+- 区块标题用 `SectionHeader`；标签 / 数值摘要用 `MetadataList`；会话、成片与生产历史
+  用 `RecordList / RecordItem`。这些展示组件沿用既有表面、字级和间距，不在业务 CSS
+  复制原语配方。次要技术信息用 `Disclosure`（记录行内使用 `compact`）。
+- 正常界面优先短标题、状态、摘要及动作；文件大小 / 时长使用可读格式。
+- 项目总览的内容导航使用 `Tabs type="line"` 及库的 `items / activeKey` API；方向键、Home / End
+  定位，Enter / Space 激活，页签与面板关系由库维护。本地互斥筛选使用 `SegmentedControl`
+  （Ant Design Segmented），方向键改变选择；长选项使用 Ant Design Select 弹层。
+  顶栏标签与控件用 `Field layout="inline"`（Form.Item）对齐，视觉统一由库主题管理。
+  场景进度在执行详情之前，执行与资源信息复用紧凑 `Disclosure`，不叠加外边距与容器间距。
+  总览场景表的正文采用 15px 语义字号，表头、常用状态及辅助信息至少 14px；
+  12px 仅留给技术标识等低频信息，不用浏览器缩放补偿页面字号。
+  重复的行为说明不常驻，必要操作提示按需展开；错误、未保存保护及用户决策限制保留。
+- 首页项目库优先显示可读项目名，采用单列项目记录、宽内容区与独立筛选 / 搜索。
+  项目、创建、空间管理仍分别承担浏览、创建与设置任务；没有封面、时间或进度事实时不补造。
+  项目记录使用共享 Card / Button / RecordList，项目布局只在 `project-library.css` 维护。
+  全局窄导航显示短名「项目」，可访问名称、tooltip 与入口仍为「我的项目」，避免文字挤断。
 
 ## 5. 样式系统
 
@@ -120,29 +150,39 @@ Owner 允许共鸣世界更亮、更暖及发光，例外仅限 .rs-stage 子树
 ## 原语使用入口
 
 - 基础控件只从 `src/components/ui` 导入：`Button`、`Input`、`Select`、`Textarea`、
-  `Checkbox`、`Field`、`PageHeader`、`Card`、`Tabs` / `Tab`、`Badge`、`Disclosure`。
-- `Field` 是包裹一个控件的原生 label，保留标签点击聚焦；勾选组仍使用 fieldset。
-- 标准按钮和单行控件共用 `--df-control-height`、`--df-control-line-height` 及内边距；
-  字段、面板和页头的视觉声明只存在于 `components.css`，不再复制到导航或页面样式。
-- `.panel` 是既有容器的兼容类，与 `.df-panel` / `.df-card` 使用同一表面配方；
-  原生控件只保留同一配方的低优先级兼容选择器，不构成第二套组件系统。
-- 新加入迁移清单的页面接受 `ui:check` 约束；画布热点、媒体时间线等特殊操作不套用通用按钮。
+  `Checkbox`、`Field`、`PageHeader`、`Card`、`Tabs`、`SegmentedControl`、`Badge`、`Disclosure`。
+- `Field` 组合 Form.Item 与单个库控件，自动关联标签；Checkbox / Radio 使用库自身的标签。
+- 布局选择器不得再依赖旧 `df-btn / df-input / df-field / df-tabs` 或原生 details / summary；
+  控件尺寸、全宽与折叠外观优先使用 Ant Design API。媒体热点用业务布局类定义比例和尺寸，
+  Card 内的播放器用自身类定位，避免库增加包装层后失效。
+  回归检查字段字级、按钮高度、图片实际面积和比例、操作区边界与容器利用率。
+- 多字段录入优先使用 Ant Design Form 的字段存储和校验；排列复用 Row/Col、Flex。
+  剪辑检查器沿用同一纵向标签布局，字幕占完整行，不用局部原生 label 配方缩小字号。
+  Dialog 先关闭，再由 `afterClose` 清理数据或卸载；焦点进入、约束与归还交给库。
+  `Fieldset` 同时禁用原生表单字段和库控件，提交期间的锁定不得只依赖原生 fieldset。
+- `Select.onChange` 接收值，页面不得继续读取伪造的 DOM 事件；原有声明式 option 只转为库的选项数据。
+- 控件、弹层、表格和菜单的配方来自 Ant Design，主题只在 UiProvider 将设计 Token 映射为库 Token。
+  不复制库的内部 CSS 或键盘 / 焦点实现。Card 等业务组合的内容编排继续归属领域布局文件。
+- `ui:check` 扫描整个前端的 TSX；原生例外仅为专业时间线热点、脚本文件输入、媒体播放位置
+  及 Select 的不可交互表单序列化字段。禁止重新写普通 select / details / dialog / table。
 
 ## 全产品视觉更新：专业创作工作台（2026-09-19）
 
-本轮范围覆盖大厅、双层导航、设置及剧本 / 资产 / 场景 / 制作 / 审片 / 剪辑，不只调整资产页。保留 React 与既有共享组件，不引入新库、不修改业务授权门。
+范围覆盖大厅、双层导航、设置及剧本 / 资产 / 场景 / 制作 / 审片 / 剪辑。React 与业务授权门保持，基础控件已统一采用 Ant Design 6。
 
 - 风格：中性黑灰背景、青色主操作、暖金色人工确认；背景不使用装饰光晕，媒体底板保持纯黑。
 - Token：控件 6px、卡片 10px、顶层容器 12px 圆角；40px 控件高度；边框使用透明中性色而非实线蓝灰。
 - 面层级：全局画布 / 平整内容表面 / 不透明浮层；结构容器不额外包边，嵌套表单不堆叠面板。
-- 复用：按钮、输入、页签、页头、卡片、空状态集中在 components/ui 与 design/components.css；领域 CSS 只定义内容编排。
+- 复用：基础控件来自 Ant Design，components/ui 负责业务组合，UiProvider 负责统一主题；领域 CSS 只定义内容编排。
 - 导航：填充式选中态替代硬边强调条；统一字体、间距和可见键盘焦点。
 - 资产：素材类型封面（不是伪造的媒体预览）、可读名称、标签和状态；版本与编辑操作按需展开，保留显式保存与确认。
 - 验证：跨路由组件样式 / 溢出 / 减少动态偏好 / 键盘焦点、资产交互回归，再运行前端单测与浏览器回归；自动化 mock 回归不调用真实服务。真实 UI 成片验收须取得当前任务的 Owner 明确授权，并单独留证，不混同于 mock 通过。
 
-### 原生下拉菜单
+### 下拉菜单与覆盖层
 
-`select` 收起控件可共用半透明表单填充，但 `option` / `optgroup` 必须显式使用不透明的 `--df-surface-2` 背景与 `--df-text-primary` 文字。禁用文字使用 muted；选中和键盘高亮由浏览器原生控件负责，不另造选择状态。原生选项弹层不能依靠父级透明背景；回归须检查选项本身，而不只比较收起控件的尺寸。
+下拉弹层、菜单、Modal 与 Drawer 使用 Ant Design 的完整实现。暗色浮层和文字由同一主题生成；
+回归核对实际弹层对比度、方向键 / Escape、禁用选项、焦点恢复与明确提交，不再注入原生 select
+测试另一套皮肤。预览模式切换销毁旧播放器；编辑 / 实验等表单面板保持挂载以保留草稿。
 
 ## 创作入口与检查器（2026-10-07）
 

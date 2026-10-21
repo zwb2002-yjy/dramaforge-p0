@@ -37,7 +37,7 @@ function renderStatus(rows: unknown[]) {
 /** Text a user sees without opening the collapsed diagnostics block. */
 function ordinarySurfaceText(): string {
   const clone = screen.getByTestId("director-turn-status").cloneNode(true) as HTMLElement;
-  clone.querySelectorAll("details").forEach((element) => element.remove());
+  clone.querySelectorAll(".ant-collapse").forEach((element) => element.remove());
   return clone.textContent ?? "";
 }
 
@@ -63,7 +63,9 @@ describe("DirectorTurnStatus product vocabulary", () => {
     expect(diagnostics).toHaveTextContent("some_new_runtime_reason");
     expect(diagnostics).toHaveTextContent("some_new_status");
     expect(diagnostics).not.toHaveAttribute("open");
-    expect(diagnostics.querySelector("summary")).toHaveTextContent("开发 / 诊断详情（只读）");
+    expect(diagnostics.querySelector(".ant-collapse-header")).toHaveTextContent(
+      "开发 / 诊断详情（只读）",
+    );
   });
 
   it("keeps the stopped-turn summary in creative language", () => {

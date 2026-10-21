@@ -73,9 +73,7 @@ async def _counts(session: AsyncSession, project_id: object) -> dict[str, int]:
     return {
         "documents": (
             await session.scalar(
-                select(func.count(ScriptDocument.id)).where(
-                    ScriptDocument.project_id == project_id
-                )
+                select(func.count(ScriptDocument.id)).where(ScriptDocument.project_id == project_id)
             )
         )
         or 0,
@@ -95,9 +93,7 @@ async def _counts(session: AsyncSession, project_id: object) -> dict[str, int]:
         )
         or 0,
         "shots": (
-            await session.scalar(
-                select(func.count(Shot.id)).where(Shot.project_id == project_id)
-            )
+            await session.scalar(select(func.count(Shot.id)).where(Shot.project_id == project_id))
         )
         or 0,
     }
@@ -157,18 +153,14 @@ async def test_whole_apply_writes_canonical_without_provider_or_execution(
     assert counts["shots"] == 3
 
     assert (
-        await session.scalar(
-            select(func.count(NodeRun.id)).where(NodeRun.project_id == project.id)
-        )
+        await session.scalar(select(func.count(NodeRun.id)).where(NodeRun.project_id == project.id))
     ) == 0
     assert (
         await session.scalar(
             select(func.count(ProviderOperation.id))
             .select_from(ProviderOperation)
             .join(NodeRun, NodeRun.id == ProviderOperation.node_run_id)
-            .where(
-                NodeRun.project_id == project.id
-            )
+            .where(NodeRun.project_id == project.id)
         )
     ) == 0
 
@@ -190,7 +182,8 @@ async def test_partial_apply_only_accepts_chosen_scene(session: AsyncSession) ->
     chosen = [
         item
         for item in result.items
-        if item.command in {
+        if item.command
+        in {
             "story.set_script_document",
             "story.upsert_episode",
         }
@@ -213,6 +206,36 @@ async def test_partial_apply_only_accepts_chosen_scene(session: AsyncSession) ->
     assert counts["scenes"] == 1
     assert counts["shots"] == 2
 
+    # Proposal remains pending while pending items exist
+    await session.refresh(result.proposal)
+    assert result.proposal.status == "pending"
+
+    # Now adopt Scene 2 on the same proposal
+    chosen_scene_2 = [
+        item
+        for item in result.items
+        if item.command in {"story.upsert_scene", "story.upsert_shot"}
+        and (item.payload or {}).get("scene_number") == 2
+    ]
+    assert len(chosen_scene_2) > 0
+    outcome_2 = await ProposalService(session, actor=user).partial_apply(
+        project=project,
+        proposal_id=result.proposal.id,
+        apply_input=PartialApplyInput(
+            decisions=[
+                ProposalDecision(item_id=item.id, decision="accepted") for item in chosen_scene_2
+            ]
+        ),
+    )
+    assert outcome_2.failed == []
+    counts_2 = await _counts(session, project.id)
+    assert counts_2["scenes"] == 2
+    assert counts_2["shots"] == 3
+
+    # Now all items are decided, proposal transitions to applied
+    await session.refresh(result.proposal)
+    assert result.proposal.status == "applied"
+
 
 @pytest.mark.asyncio
 async def test_stale_episode_apply_fails_closed(session: AsyncSession) -> None:
@@ -231,9 +254,7 @@ async def test_stale_episode_apply_fails_closed(session: AsyncSession) -> None:
     )
     assert episode is not None
     second = await _proposal(session, project, user, f"story-{uuid4().hex}")
-    episode_item = next(
-        item for item in second.items if item.command == "story.upsert_episode"
-    )
+    episode_item = next(item for item in second.items if item.command == "story.upsert_episode")
     episode.version += 1  # competing canonical write after proposal creation
     await session.flush()
 
@@ -305,8 +326,7 @@ def test_story_proposal_api_create_preview_and_apply(client: TestClient) -> None
         f"/api/v1/projects/{project_id}/story/proposals/{proposal['id']}/apply",
         json={
             "decisions": [
-                {"item_id": operation["id"], "decision": "accepted"}
-                for operation in operations
+                {"item_id": operation["id"], "decision": "accepted"} for operation in operations
             ]
         },
         headers={CSRF_HEADER: csrf},

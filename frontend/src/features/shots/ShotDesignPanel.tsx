@@ -36,6 +36,8 @@ type ShotDesignPanelProps = {
   references?: ReactNode;
   /** Generation block, rendered between the shot facts and the prompts. */
   production?: (control: ShotDesignSaveControl) => ReactNode;
+  promptsOpen?: boolean;
+  onPromptsOpenChange?: (open: boolean) => void;
 };
 
 export type ShotDesignDraft = {
@@ -140,6 +142,8 @@ export function ShotDesignPanel({
   applyDraft,
   references,
   production,
+  promptsOpen,
+  onPromptsOpenChange,
 }: ShotDesignPanelProps) {
   // An unsaved draft keeps the server version it was edited from. A background
   // refresh may reveal a conflict, but cannot silently rebase or erase it.
@@ -369,6 +373,7 @@ export function ShotDesignPanel({
       )}
 
       <Disclosure
+        compact
         title="镜头参数"
         description={`${shotTypeOptionsFor(shotType).find((option) => option.value === shotType)?.label ?? "景别"} · ${cameraMove || "固定机位"} · ${durationSeconds || "—"} 秒`}
         testId="shot-camera-parameters"
@@ -376,11 +381,7 @@ export function ShotDesignPanel({
         <div className="df-shot-camera" data-testid="shot-design-camera-facts">
           <Field>
             景别
-            <Select
-              aria-label="镜头类型"
-              value={shotType}
-              onChange={(event) => setShotType(event.target.value)}
-            >
+            <Select aria-label="镜头类型" value={shotType} onChange={(event) => setShotType(event)}>
               {shotTypeOptionsFor(shotType).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -467,7 +468,13 @@ export function ShotDesignPanel({
         </div>
       )}
 
-      <Disclosure title="提示词" testId="shot-design-prompts">
+      <Disclosure
+        compact
+        title="提示词"
+        testId="shot-design-prompts"
+        open={promptsOpen}
+        onOpenChange={onPromptsOpenChange}
+      >
         <AssetMentionInput
           projectId={projectId}
           shotId={shot.id}
@@ -490,7 +497,7 @@ export function ShotDesignPanel({
           onChange={(value) => updateDraft({ ...draft, video_prompt: value })}
         />
       </Disclosure>
-      <Disclosure title="配音" testId="shot-design-voice">
+      <Disclosure compact title="配音" testId="shot-design-voice">
         {voiceSettings ? (
           <ShotVoiceSettings projectId={projectId} value={voiceSettings} onChange={updateVoice} />
         ) : (

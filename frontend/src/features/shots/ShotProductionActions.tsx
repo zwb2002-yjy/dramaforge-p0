@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
-import { Button, Disclosure, Field, Select } from "../../components/ui";
+import { Button, Disclosure, ExternalLink, Field, Select } from "../../components/ui";
 
 import { queryKeys } from "../../lib/queryKeys";
 import { ApiError, getExecutionModelPreflight, listModels } from "../../lib/api";
+import { ShotPreflightDrawer } from "./ShotPreflightDrawer";
 import {
   capabilityGapReason,
   capabilityGapSeverityLabel,
@@ -12,7 +13,7 @@ import {
   referenceDeliveryLabel,
 } from "../../lib/executionPlanLabels";
 import { getSelectedWorkspaceId } from "../../lib/navigationPreferences";
-import { executionModelBlockerLabel } from "../../lib/modelResolutionLabels";
+import { executionModelBlockerLabel, modelPreflightCopy } from "../../lib/modelResolutionLabels";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
 import {
   activeStageStatus,
@@ -271,6 +272,8 @@ export function ShotProductionActions({
     null,
   );
   const [planFailure, setPlanFailure] = useState<"unsupported" | null>(null);
+  const [preflightDrawerStage, setPreflightDrawerStage] = useState<ShotExecutionStage | null>(null);
+  const [approximationsAccepted, setApproximationsAccepted] = useState(false);
 
   useEffect(() => {
     setFeedback(null);
@@ -362,10 +365,21 @@ export function ShotProductionActions({
 
   const inspectPlan = useMutation({
     retry: false,
-    mutationFn: (stage: ShotExecutionStage) => {
+    mutationFn: (
+      target:
+        | ShotExecutionStage
+        | { stage: ShotExecutionStage; acceptApproximations?: boolean },
+    ) => {
+      const stage = typeof target === "string" ? target : target.stage;
+      const acceptApproximations =
+        typeof target === "string" ? false : Boolean(target.acceptApproximations);
       if (dirty || !referencesReady || !promptReferencesReady[stage])
         throw new Error("请先保存镜头并处理未解析的素材引用。");
-      return previewShotExecution(projectId, shot.id, executionInput(stage));
+      const input: ShotExecutionInput = {
+        ...executionInput(stage),
+        accept_approximations: acceptApproximations,
+      };
+      return previewShotExecution(projectId, shot.id, input);
     },
     onSuccess: (plan) => setDisplayedPlan(plan),
   });
@@ -539,6 +553,76 @@ export function ShotProductionActions({
     },
   });
 
+  const executeConfirmedPlan = useMutation({
+    mutationFn: async ({
+      stage,
+      plan,
+      acceptApproximations,
+    }: {
+      stage: ShotExecutionStage;
+      plan: ShotExecutionPlanRead;
+      acceptApproximations: boolean;
+    }) => {
+      if (dirty) {
+        throw new Error("请先保存镜头设计，再生成关键帧或视频。");
+      }
+      const input: ShotExecutionInput = {
+        ...executionInput(stage),
+        accept_approximations: acceptApproximations,
+      };
+      let effectivePlan = plan;
+      const hasWarningGaps = (plan.plan.capability_gaps ?? []).some((g) => g.severity === "warning");
+      const unacceptedInPlan = (plan.plan.accepted_approximations ?? []).length === 0;
+      if (acceptApproximations && (hasWarningGaps || unacceptedInPlan)) {
+        effectivePlan = await previewShotExecution(projectId, shot.id, input);
+      }
+      const prepared: PreparedShotExecution = {
+        input,
+        preview: effectivePlan,
+        idempotencyKey: shotExecutionIdempotencyKey(shot.id, effectivePlan.plan_fingerprint),
+      };
+      recordProductionOperation(
+        productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
+        {
+          operationKey: prepared.idempotencyKey,
+          planFingerprint: prepared.preview.plan_fingerprint,
+          stage,
+          recordedAt: new Date().toISOString(),
+          nodeRunId: null,
+        },
+      );
+      const execution = await submitShotExecution(projectId, shot.id, prepared);
+      return { stage, prepared, execution };
+    },
+    onMutate: () => setFeedback(null),
+    onSuccess: async ({ stage, prepared, execution }) => {
+      setDisplayedPlan(prepared.preview);
+      setPlanFailure(null);
+      setPendingApproximation(null);
+      if (submissionProvablyEnded(null, execution.status)) {
+        clearProductionOperation(
+          productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
+        );
+      }
+      setFeedback({
+        kind: "success",
+        stage,
+        message: execution.status,
+        nodeRunId: execution.node_run_id,
+      });
+      await refreshAfterExecution(execution);
+    },
+    onError: (error, { stage }) => {
+      const message = errorMessage(error);
+      if (submissionProvablyEnded(error)) {
+        clearProductionOperation(
+          productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
+        );
+      }
+      setFeedback({ kind: "error", stage, message });
+    },
+  });
+
   const delegate = useMutation({
     mutationFn: async (stage: ShotExecutionStage) => {
       if (dirty) throw new Error("请先保存镜头设计，再委托导演执行。");
@@ -585,11 +669,13 @@ export function ShotProductionActions({
 
   const activeStage = produce.isPending
     ? produce.variables
-    : delegate.isPending
-      ? delegate.variables
-      : confirmApproximation.isPending
-        ? (pendingApproximation?.input.stage ?? null)
-        : null;
+    : executeConfirmedPlan.isPending
+      ? executeConfirmedPlan.variables.stage
+      : delegate.isPending
+        ? delegate.variables
+        : confirmApproximation.isPending
+          ? (pendingApproximation?.input.stage ?? null)
+          : null;
   const keyframeStatus = activeStageStatus(trace, "image_keyframe");
   const videoStatus = activeStageStatus(trace, "video");
   const keyframeOutcomeUnknown = stageOutcomeUnknown(trace, "image_keyframe");
@@ -635,6 +721,7 @@ export function ShotProductionActions({
   const busy =
     inspectPlan.isPending ||
     produce.isPending ||
+    executeConfirmedPlan.isPending ||
     delegate.isPending ||
     confirmApproximation.isPending ||
     Boolean(pendingApproximation);
@@ -719,6 +806,27 @@ export function ShotProductionActions({
   const settingsHref = `/settings/models?returnTo=${encodeURIComponent(
     `/projects/${projectId}/scenes/${shot.scene_id}?shotId=${shot.id}`,
   )}`;
+  const modelSettingsAction = (
+    <ExternalLink
+      type="link"
+      href={settingsHref}
+      role="button"
+      onClick={(event) => {
+        if (onOpenModelSettings) {
+          event.preventDefault();
+          onOpenModelSettings();
+        }
+      }}
+    >
+      {modelPreflightCopy.configure}
+    </ExternalLink>
+  );
+  const inspectionModelReason =
+    inspectPlan.error instanceof ApiError &&
+    typeof inspectPlan.error.details.resolution_status === "string" &&
+    typeof inspectPlan.error.details.code === "string"
+      ? executionModelBlockerLabel(inspectPlan.error.details.code)
+      : null;
 
   const primary = (() => {
     switch (next.kind) {
@@ -832,6 +940,8 @@ export function ShotProductionActions({
 
       <Button
         tone="primary"
+        block
+        size="large"
         className="df-shot-primary"
         data-testid={primary.testId}
         disabled={primary.disabled}
@@ -842,34 +952,35 @@ export function ShotProductionActions({
       {blockedReason && (
         <p className="df-shot-hint" data-testid="shot-primary-blocked" role="status">
           {blockedReason}
-          {blockedByModel && (
-            <a
-              href={settingsHref}
-              role="button"
-              onClick={(e) => {
-                if (onOpenModelSettings) {
-                  e.preventDefault();
-                  onOpenModelSettings();
-                }
-              }}
-            >
-              去设置模型
-            </a>
-          )}
+          {blockedByModel && modelSettingsAction}
         </p>
       )}
       <Button
         tone="ghost"
         data-testid="inspect-shot-plan"
         disabled={busy || dirty || !referencesReady || !promptReferencesReady[focusStage]}
-        onClick={() => inspectPlan.mutate(focusStage)}
+        onClick={() => {
+          setPreflightDrawerStage(focusStage);
+          setApproximationsAccepted(false);
+          inspectPlan.mutate({ stage: focusStage, acceptApproximations: false });
+        }}
       >
         {inspectPlan.isPending ? "正在核对输入…" : "查看生成预检"}
       </Button>
       {inspectPlan.isError && (
-        <p className="df-shot-hint err" role="alert">
-          预检未通过：{errorMessage(inspectPlan.error)}
-        </p>
+        <div className="df-shot-hint err" data-testid="shot-plan-error">
+          <p role={preflightDrawerStage === null ? "alert" : "status"}>
+            {modelPreflightCopy.failed}：{inspectionModelReason ?? errorMessage(inspectPlan.error)}
+          </p>
+          {inspectionModelReason && (
+            <>
+              {modelSettingsAction}
+              <Disclosure compact title={modelPreflightCopy.diagnostics}>
+                <small>{errorMessage(inspectPlan.error)}</small>
+              </Disclosure>
+            </>
+          )}
+        </div>
       )}
 
       {(showKeyframeSecondary || showVideoSecondary) && (
@@ -965,8 +1076,12 @@ export function ShotProductionActions({
                 </ul>
               )}
               {delivery === "exact" ? (
-                <details className="df-shot-plan-details" data-testid="shot-exact-plan-details">
-                  <summary>查看本次模型与参考</summary>
+                <Disclosure
+                  compact
+                  className="df-shot-plan-details"
+                  data-testid="shot-exact-plan-details"
+                  title={<>查看本次模型与参考</>}
+                >
                   <p data-testid="shot-execution-plan-model">执行模型：{planModel.label}</p>
                   <p data-testid="shot-execution-plan-references">
                     引用：完全支持{" "}
@@ -975,7 +1090,7 @@ export function ShotProductionActions({
                     不支持{" "}
                     {plannedReferences.filter((row) => row.delivery === "unsupported").length}
                   </p>
-                </details>
+                </Disclosure>
               ) : (
                 <>
                   <p data-testid="shot-execution-plan-model">执行模型：{planModel.label}</p>
@@ -1013,11 +1128,12 @@ export function ShotProductionActions({
                   </ul>
                 </div>
               )}
-              <details
+              <Disclosure
+                compact
                 className="editing-diagnostics"
                 data-testid="shot-execution-plan-diagnostics"
+                title={<>诊断详情</>}
               >
-                <summary>诊断详情</summary>
                 <small>
                   适配 {delivery} · 模型 {planModel.raw || "无"}
                   {(displayedPlan.plan.capability_gaps ?? [])
@@ -1027,7 +1143,7 @@ export function ShotProductionActions({
                     )
                     .join("")}
                 </small>
-              </details>
+              </Disclosure>
             </>
           )}
           {pendingApproximation && (
@@ -1078,18 +1194,7 @@ export function ShotProductionActions({
           {/MODEL_BINDING_MISSING/.test(feedback.message) ? (
             <>
               还没有可用的{STAGE_NOUN[feedback.stage]}模型，本次没有提交。
-              <a
-                href={settingsHref}
-                role="button"
-                onClick={(e) => {
-                  if (onOpenModelSettings) {
-                    e.preventDefault();
-                    onOpenModelSettings();
-                  }
-                }}
-              >
-                去设置模型
-              </a>
+              {modelSettingsAction}
             </>
           ) : (
             <>
@@ -1099,14 +1204,14 @@ export function ShotProductionActions({
         </p>
       )}
 
-      <Disclosure title="更多设置" testId="shot-generate-more">
+      <Disclosure compact title="更多设置" testId="shot-generate-more">
         <Field>
           视频方式
           <Select
             aria-label="视频方式"
             value={videoMode}
             disabled={Boolean(videoStatus) || videoOutcomeUnknown || produce.isPending}
-            onChange={(event) => setExplicitMode(event.target.value as ShotVideoMode)}
+            onChange={(event) => setExplicitMode(event as ShotVideoMode)}
           >
             {(Object.keys(VIDEO_MODE_LABEL) as ShotVideoMode[]).map((mode) => (
               <option key={mode} value={mode}>
@@ -1155,6 +1260,69 @@ export function ShotProductionActions({
           </Button>
         </div>
       </Disclosure>
+
+      <ShotPreflightDrawer
+        open={preflightDrawerStage !== null}
+        onClose={() => setPreflightDrawerStage(null)}
+        stage={preflightDrawerStage ?? focusStage}
+        rawPrompt={
+          (preflightDrawerStage ?? focusStage) === "video"
+            ? shot.video_prompt || shot.visual_description || ""
+            : shot.image_prompt || shot.visual_description || ""
+        }
+        plan={displayedPlan}
+        isLoading={inspectPlan.isPending}
+        error={inspectPlan.error instanceof Error ? inspectPlan.error : null}
+        errorSummary={inspectionModelReason}
+        recoveryAction={
+          inspectionModelReason ? (
+            <Button
+              onClick={() => {
+                setPreflightDrawerStage(null);
+                if (onOpenModelSettings) onOpenModelSettings();
+                else window.location.assign(settingsHref);
+              }}
+            >
+              去设置模型
+            </Button>
+          ) : undefined
+        }
+        dirty={dirty}
+        onSaveAndRecompute={async () => {
+          await onSave?.();
+          if (preflightDrawerStage) {
+            inspectPlan.mutate({
+              stage: preflightDrawerStage,
+              acceptApproximations: approximationsAccepted,
+            });
+          }
+        }}
+        onConfirmGenerate={() => {
+          if (preflightDrawerStage) {
+            if (displayedPlan) {
+              executeConfirmedPlan.mutate({
+                stage: preflightDrawerStage,
+                plan: displayedPlan,
+                acceptApproximations: approximationsAccepted,
+              });
+            } else {
+              produce.mutate(preflightDrawerStage);
+            }
+            setPreflightDrawerStage(null);
+          }
+        }}
+        isGenerating={produce.isPending || executeConfirmedPlan.isPending}
+        approximationsAccepted={approximationsAccepted}
+        onAcceptApproximationsChange={(accepted) => {
+          setApproximationsAccepted(accepted);
+          if (preflightDrawerStage) {
+            inspectPlan.mutate({
+              stage: preflightDrawerStage,
+              acceptApproximations: accepted,
+            });
+          }
+        }}
+      />
     </section>
   );
 }

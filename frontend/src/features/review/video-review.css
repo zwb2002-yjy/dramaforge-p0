@@ -10,13 +10,10 @@
   gap: var(--df-space-3);
   margin-block: var(--df-space-3);
 }
-.video-review-controls label {
-  display: grid;
-  gap: var(--df-space-2);
+.video-review-controls .ant-form-item {
   min-width: 0;
 }
-.video-review-controls input,
-.video-review-controls select {
+.video-review-controls input[type="range"] {
   width: 100%;
   min-width: 0;
 }
@@ -69,11 +66,6 @@
 .qc-project-page[data-testid="review-workspace"] > * {
   min-width: 0;
   max-width: 100%;
-}
-.qc-project-page[data-testid="review-workspace"] select {
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
 }
 .video-playback-actions {
   display: flex;

@@ -1,3 +1,4 @@
+import { expectSelectValue, selectValue } from "./selectValue";
 import { expect, test, type Page } from "@playwright/test";
 import { installProfessionalMock, PROJECT_ID, WORKSPACE_ID, SCENE_ID } from "./professional-mocks";
 
@@ -86,16 +87,16 @@ test("project deletion needs confirmation, cancellation never deletes, and succe
   await page.goto("/");
   const card = page.getByRole("article", { name: "测试作品" });
   await card.getByLabel("更多操作 测试作品").click();
-  await card.getByRole("button", { name: "删除项目" }).click();
+  await page.getByRole("menuitem", { name: "删除项目" }).click();
   const dialog = page.getByTestId("project-delete-dialog");
-  await expect(dialog).toHaveAccessibleName("删除项目「测试作品」？");
+  await expect(page.getByRole("dialog")).toHaveAccessibleName("删除项目「测试作品」？");
   expect(deletes).toHaveLength(0);
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
   await expect(card).toBeVisible();
   await expect(card.getByLabel("更多操作 测试作品")).toBeFocused();
   expect(deletes).toHaveLength(0);
   await card.getByLabel("更多操作 测试作品").click();
-  await card.getByRole("button", { name: "删除项目" }).click();
+  await page.getByRole("menuitem", { name: "删除项目" }).click();
   await dialog.getByRole("button", { name: "确认删除", exact: true }).click();
   await expect(card).toHaveCount(0);
   await expect(dialog).toHaveCount(0);
@@ -118,7 +119,9 @@ test("create=false is normalized without logging out; only explicit logout chang
   expect(writes).toEqual([]);
   await page.goto("/settings/account");
   await expect(page.getByText("owner@example.com")).toBeVisible();
-  await expect(page.getByTestId("account-maintenance-disclosure")).not.toHaveAttribute("open", "");
+  await expect(
+    page.getByTestId("account-maintenance-disclosure").getByRole("button").first(),
+  ).toHaveAttribute("aria-expanded", "false");
   await page.getByRole("button", { name: "退出登录", exact: true }).click();
   await expect(page.getByRole("link", { name: "前往登录" })).toBeVisible();
   await page.getByRole("link", { name: "前往登录" }).click();
@@ -145,8 +148,8 @@ test("director policy follows creation, not project model settings", async ({ pa
   await page.goto(`/projects/${PROJECT_ID}/production`);
   const policy = page.getByRole("combobox", { name: "导演参与度" });
   await expect(policy).toBeInViewport();
-  await policy.selectOption("MANUAL");
-  await expect(policy).toHaveValue("MANUAL");
+  await selectValue(policy, "MANUAL");
+  await expectSelectValue(policy, "MANUAL");
   expect(writes).toEqual([
     {
       path: `/api/v1/projects/${PROJECT_ID}/creative-profile`,
@@ -159,7 +162,7 @@ test("director policy follows creation, not project model settings", async ({ pa
     .getByRole("navigation", { name: "创作导航" })
     .getByRole("link", { name: "分镜制作" })
     .click();
-  await expect(policy).toHaveValue("MANUAL");
+  await expectSelectValue(policy, "MANUAL");
   await page.goto(`/settings/projects/${PROJECT_ID}`);
   await expect(page.getByTestId("project-settings-page")).toBeVisible();
   await expect(page.getByRole("combobox", { name: "导演参与度" })).toHaveCount(0);
@@ -204,13 +207,13 @@ test("project model fields fit a narrow window without overlapping or overflowin
   await page.setViewportSize({ width: 600, height: 730 });
   await page.goto(`/settings/projects/${PROJECT_ID}`);
   // The settings drawer starts closed at this width.
-  const controls = page.getByTestId("model-profile-settings").locator("select");
+  const controls = page.getByTestId("model-profile-settings").getByRole("combobox");
   await expect(controls).toHaveCount(3);
   await expect(page.getByTestId("model-picker-audio.tts")).toHaveCount(0);
   const bounds = await controls.evaluateAll((elements) =>
     elements.map((element) => {
-      const parent = element.closest("label")!.getBoundingClientRect();
-      const box = element.getBoundingClientRect();
+      const parent = element.closest(".ant-form-item")!.getBoundingClientRect();
+      const box = element.closest(".ant-select")!.getBoundingClientRect();
       return {
         left: box.left,
         right: box.right,

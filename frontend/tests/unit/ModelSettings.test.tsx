@@ -1,3 +1,4 @@
+import { selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState, type ReactElement } from "react";
@@ -143,6 +144,8 @@ function mockApi(handler: (call: Call) => Promise<Response> | undefined) {
 async function connectWith(plugins: ProviderPluginRead[], key = "sk-test") {
   wrap(<AddProviderDialog workspaceId={WS} plugins={plugins} onClose={() => undefined} />);
   const dialog = await screen.findByRole("dialog", { name: "添加供应商" });
+  await waitFor(() => expect(dialog).toBeVisible());
+  await waitFor(() => expect(dialog).toBeVisible());
   fireEvent.change(within(dialog).getByLabelText("API Key"), { target: { value: key } });
   fireEvent.click(within(dialog).getByRole("button", { name: "连接并读取模型" }));
   return dialog;
@@ -162,6 +165,8 @@ describe("AddProviderDialog", () => {
       />,
     );
     const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(dialog).toBeVisible());
+    await waitFor(() => expect(dialog).toBeVisible());
     expect(within(dialog).queryByRole("navigation")).toBeNull();
     expect(within(dialog).getByLabelText("连接名称")).toHaveValue("");
     expect(within(dialog).getByLabelText("服务地址")).toHaveValue("");
@@ -278,9 +283,7 @@ describe("AddProviderDialog", () => {
     const picker = await screen.findByTestId("provider-model-picker");
     const check = within(picker).getByRole("checkbox", { name: "使用 h3-local" });
     expect(check).toBeDisabled();
-    fireEvent.change(within(picker).getByLabelText("h3-local 调用方式"), {
-      target: { value: "c-generic" },
-    });
+    await selectValue(within(picker).getByLabelText("h3-local 调用方式"), "c-generic");
     fireEvent.click(within(picker).getByRole("checkbox", { name: "使用 h3-local" }));
     fireEvent.click(screen.getByRole("button", { name: "添加 1 个模型" }));
     await waitFor(() =>
@@ -328,6 +331,8 @@ describe("AddProviderDialog", () => {
     });
     wrap(<AddProviderDialog workspaceId={WS} plugins={[TEXT_PLUGIN]} onClose={() => undefined} />);
     const dialog = await screen.findByRole("dialog", { name: "添加供应商" });
+    await waitFor(() => expect(dialog).toBeVisible());
+    await waitFor(() => expect(dialog).toBeVisible());
     expect(within(dialog).getByLabelText("服务地址")).toHaveValue("");
     fireEvent.change(within(dialog).getByLabelText("服务地址"), {
       target: { value: "https://my-text.test/v1" },

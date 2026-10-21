@@ -52,6 +52,25 @@ class ShotModelOverrides(BaseModel):
     video_model_id: str | None = Field(default=None, max_length=240)
 
 
+class StageGenerationSettings(BaseModel):
+    """Scoped parameter overrides and mode selection for a generation stage."""
+
+    mode_id: str | None = Field(default=None, max_length=120)
+    source_contract_hash: str | None = Field(default=None, max_length=120)
+    common_options: dict[str, object] = Field(default_factory=dict)
+    native_options: dict[str, object] = Field(default_factory=dict)
+    prompt_override: str | None = Field(default=None, max_length=4000)
+    request_duration_seconds: float | None = Field(default=None, ge=0.1, le=120.0)
+
+
+class ShotGenerationSettings(BaseModel):
+    """Typed generation parameter draft and override container for a shot."""
+
+    schema_version: int = Field(default=1, ge=1)
+    image_keyframe: StageGenerationSettings | None = Field(default=None)
+    video: StageGenerationSettings | None = Field(default=None)
+
+
 class ShotDirectorState(BaseModel):
     """Serialized professional shot director intent.
 
@@ -70,3 +89,4 @@ class ShotDirectorState(BaseModel):
     model_overrides: ShotModelOverrides = Field(default_factory=ShotModelOverrides)
     voice: ShotVoiceSettings = Field(default_factory=ShotVoiceSettings)
     video_reference_risk: dict[str, object] | None = Field(default=None)
+    generation_settings: ShotGenerationSettings | None = Field(default=None)

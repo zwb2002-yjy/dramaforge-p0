@@ -1,3 +1,4 @@
+import { Button, Field, Textarea, Checkbox } from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -503,33 +504,33 @@ export function ShotDirectorSuggestionPanel({
         onRefresh={(turn) => turnControl.mutate({ turn, action: "refresh" })}
       />
 
-      <button
+      <Button
         type="button"
         data-testid="request-proactive-director-recommendation"
         onClick={() => proactive.mutate()}
         disabled={proactive.isPending || request.isPending || dirty}
       >
         {proactive.isPending ? "正在主动分析…" : "主动分析当前镜头"}
-      </button>
+      </Button>
 
-      <label>
+      <Field>
         导演要求
-        <textarea
+        <Textarea
           aria-label="导演要求"
           value={instruction}
           onChange={(event) => setInstruction(event.target.value)}
           placeholder="例如：让人物更克制，镜头缓慢推进"
           disabled={request.isPending}
         />
-      </label>
-      <button
+      </Field>
+      <Button
         type="button"
         data-testid="request-shot-director-suggestion"
         onClick={() => request.mutate()}
         disabled={request.isPending || proactive.isPending || dirty || !instruction.trim()}
       >
         {request.isPending ? "正在生成建议…" : "生成镜头建议"}
-      </button>
+      </Button>
 
       {dirty && (
         <p
@@ -630,22 +631,22 @@ export function ShotDirectorSuggestionPanel({
             </p>
           )}
           <div className="qc-shot-director-suggestion-actions">
-            <button
+            <Button
               type="button"
               data-testid="apply-shot-director-suggestion"
               onClick={applyProposal}
               disabled={!canApply || proposalDecision.isPending}
             >
               {applied ? "已应用到草稿" : "应用到镜头草稿"}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               data-testid="discard-shot-director-suggestion"
               onClick={discardProposal}
               disabled={proposalDecision.isPending || stale || proposalTurnInactive || applied}
             >
               丢弃建议
-            </button>
+            </Button>
           </div>
         </article>
       )}
@@ -700,8 +701,8 @@ export function ShotDirectorSuggestionPanel({
             ))}
           </div>
           {recommendation.typed_operations.map((operation, index) => (
-            <label key={`${operation.op}-${index}`} className="qc-recommendation-operation-row">
-              <input
+            <Field key={`${operation.op}-${index}`} className="qc-recommendation-operation-row">
+              <Checkbox
                 type="checkbox"
                 data-testid={`recommendation-operation-${index}`}
                 checked={Boolean(selectedOps[index])}
@@ -714,7 +715,7 @@ export function ShotDirectorSuggestionPanel({
               />
               <code>{operation.op}</code>
               {typeof operation.field === "string" ? <span>{operation.field}</span> : null}
-            </label>
+            </Field>
           ))}
           {recStale && (
             <p className="qc-shot-director-suggestion-hint" role="alert">
@@ -727,7 +728,7 @@ export function ShotDirectorSuggestionPanel({
             </p>
           ) : null}
           <div className="qc-shot-director-suggestion-actions">
-            <button
+            <Button
               type="button"
               data-testid="apply-director-recommendation"
               disabled={
@@ -741,15 +742,15 @@ export function ShotDirectorSuggestionPanel({
               onClick={applySelectedRecommendation}
             >
               采用已选推荐
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               data-testid="discard-director-recommendation"
               disabled={recommendationDecision.isPending || recStale || recommendationTurnInactive}
               onClick={() => recommendationDecision.mutate({ decision: "reject" })}
             >
               拒绝推荐
-            </button>
+            </Button>
           </div>
         </article>
       )}

@@ -1,3 +1,4 @@
+import { selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -270,7 +271,7 @@ describe("ShotDesignPanel canvas write gate", () => {
 
     expect(screen.getByTestId("shot-design-camera-facts")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("画面描述"), { target: { value: "A turns" } });
-    fireEvent.change(screen.getByLabelText("镜头类型"), { target: { value: "close_up" } });
+    await selectValue(screen.getByLabelText("镜头类型"), "close_up");
     fireEvent.change(screen.getByLabelText("机位运动"), { target: { value: "缓慢推近" } });
     fireEvent.change(screen.getByLabelText("时长（秒）"), { target: { value: "5" } });
     fireEvent.click(screen.getByTestId("save-shot-design"));

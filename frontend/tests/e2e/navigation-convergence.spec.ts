@@ -1,3 +1,4 @@
+import { expectSelectValue, selectValue } from "./selectValue";
 import { expect, test, type Page } from "@playwright/test";
 import { WORKSPACE_MODEL_ROLES } from "../../src/lib/workspaceModelRoles";
 import {
@@ -184,7 +185,7 @@ test("review: cached project context is activated before cross-space history rea
   await page.goto(`${ROOT}/script`);
   await expect(page.getByTestId("project-script-page")).toBeVisible();
   await page.getByRole("link", { name: "我的项目", exact: true }).click();
-  await page.getByRole("combobox", { name: "工作空间筛选" }).selectOption(OTHER_WS);
+  await selectValue(page.getByRole("combobox", { name: "工作空间筛选" }), OTHER_WS);
   await page.getByRole("button", { name: "进入工作台 项目二" }).click();
   await expect(page).toHaveURL("/projects/other-project/script");
   await page.goBack();
@@ -243,7 +244,11 @@ test("A01-A05: one global entry, reading order and a single card action", async 
   await page.goto("/");
   const primary = page.getByRole("navigation", { name: "一级导航" });
   await expect(primary.getByRole("link")).toHaveCount(2);
-  await expect(primary).toHaveText(/我的项目.*设置/s);
+  await expect(primary).toHaveText(/项目.*设置/s);
+  await expect(primary.getByRole("link", { name: "我的项目", exact: true })).toHaveAttribute(
+    "href",
+    "/",
+  );
   await expect(page.locator(".df-context-sidebar")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "全部项目" })).toHaveCount(0);
   const notice = page.getByTestId("workspace-model-notice");
@@ -263,7 +268,15 @@ test("A01-A05: one global entry, reading order and a single card action", async 
   await expect(card.locator(".df-project-card-actions").getByRole("button")).toHaveCount(1);
   await expect(card.getByRole("button", { name: "进入工作台 项目一 1" })).toBeVisible();
   await card.getByLabel("更多操作 项目一 1").click();
-  await expect(card.getByRole("button", { name: "删除项目" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "删除项目" })).toBeVisible();
+  await expect(page).toHaveURL("/");
+  await card.getByLabel("更多操作 项目一 1").click();
+  const nameBounds = (await card
+    .getByRole("heading", { name: "项目一 1", exact: true })
+    .boundingBox())!;
+  // The row's one open button owns this area, including the visible name.
+  await page.mouse.click(nameBounds.x + nameBounds.width / 2, nameBounds.y + nameBounds.height / 2);
+  await expect(page).toHaveURL(`${ROOT}/script`);
   expect(writes).toEqual([]);
   expect(errors).toEqual([]);
 });
@@ -316,7 +329,7 @@ test("A06-A07: search, single recent selection and pagination stay inside the se
   await page.getByRole("textbox", { name: "搜索项目" }).fill("14");
   await expect(page.getByText("没有符合搜索条件的项目。")).toBeVisible();
   await page.getByRole("textbox", { name: "搜索项目" }).fill("");
-  await page.getByRole("combobox", { name: "工作空间筛选" }).selectOption(OTHER_WS);
+  await selectValue(page.getByRole("combobox", { name: "工作空间筛选" }), OTHER_WS);
   await expect(page.getByText("当前空间还没有最近打开的项目。")).toBeVisible();
   await expect(page.getByTestId("workspace-model-notice")).toContainText(
     "缺少可用的文本／图片／视频模型",
@@ -324,11 +337,11 @@ test("A06-A07: search, single recent selection and pagination stay inside the se
   await page.getByRole("link", { name: "全部项目", exact: true }).click();
   await expect(page.getByRole("article", { name: "项目二", exact: true })).toBeVisible();
   await expect(page.getByRole("article", { name: "项目一 1", exact: true })).toHaveCount(0);
-  await page.getByRole("combobox", { name: "工作空间筛选" }).selectOption(WORKSPACE_ID);
+  await selectValue(page.getByRole("combobox", { name: "工作空间筛选" }), WORKSPACE_ID);
   await expect(list.getByRole("listitem")).toHaveCount(12);
-  await page.getByRole("combobox", { name: "工作空间筛选" }).selectOption(OTHER_WS);
+  await selectValue(page.getByRole("combobox", { name: "工作空间筛选" }), OTHER_WS);
   await page.getByRole("link", { name: "配置模型" }).click();
-  await expect(page.getByRole("combobox", { name: "设置工作空间" })).toHaveValue(OTHER_WS);
+  await expectSelectValue(page.getByRole("combobox", { name: "设置工作空间" }), OTHER_WS);
   expect(modelHeaders).toContain(OTHER_WS);
   expect(modelHeaders).not.toContain(undefined);
 });
@@ -510,7 +523,7 @@ for (const destination of ["settings", "other-project"] as const) {
         route.fulfill({ json: { state: {} } }),
       );
       await page.getByRole("link", { name: "我的项目", exact: true }).click();
-      await page.getByRole("combobox", { name: "工作空间筛选" }).selectOption(OTHER_WS);
+      await selectValue(page.getByRole("combobox", { name: "工作空间筛选" }), OTHER_WS);
       await page.getByRole("button", { name: "进入工作台 项目二" }).click();
       await expect(page).toHaveURL("/projects/other-project/script");
     }
@@ -568,11 +581,22 @@ for (const width of [1440, 1100, 1099, 808, 390]) {
       await expect(drawer).not.toBeVisible();
       await toggle.focus();
       await page.keyboard.press("Enter");
-      await expect(drawer).toHaveAttribute("role", "dialog");
-      await expect(drawer).toHaveAttribute("aria-modal", "true");
+      const navigationDialog = page.getByRole("dialog", { name: "二级导航", exact: true });
+      await expect(navigationDialog).toHaveAttribute("aria-modal", "true");
       await expect(page.getByRole("link", { name: "切换项目" })).toBeFocused();
       await page.keyboard.press("Shift+Tab");
-      await expect(drawer.getByRole("link", { name: "剪辑成片" })).toBeFocused();
+      await expect(
+        navigationDialog.getByRole("button", { name: "关闭二级导航", exact: true }),
+      ).toBeFocused();
+      await page.keyboard.press("Shift+Tab");
+      await expect(
+        drawer.getByRole("link", { name: "剪辑成片" }),
+        await page.evaluate(() => document.activeElement?.outerHTML),
+      ).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(
+        navigationDialog.getByRole("button", { name: "关闭二级导航", exact: true }),
+      ).toBeFocused();
       await page.keyboard.press("Tab");
       await expect(page.getByRole("link", { name: "切换项目" })).toBeFocused();
       await page.keyboard.press("Escape");

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { Button } from "../../components/ui";
+import { Button, Alert } from "../../components/ui";
 import { queryKeys } from "../../lib/queryKeys";
 import { timeOfDayLabel } from "../../lib/sceneLabels";
 import { shotStatusLabel } from "../../lib/shotLabels";
@@ -145,10 +145,17 @@ export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
       {data && <p className="muted">场景完成按正式视频统计；镜头创作状态不代表有任务正在运行。</p>}
       {overview.isPending && <p role="status">正在读取生成任务…</p>}
       {overview.isError && (
-        <div className="flash err" role="alert">
-          生成任务读取失败，不能据此判断项目没有任务。
-          <Button onClick={() => void overview.refetch()}>重新读取生成任务</Button>
-        </div>
+        <Alert
+          role="alert"
+          type="error"
+          showIcon
+          description={
+            <>
+              生成任务读取失败，不能据此判断项目没有任务。
+              <Button onClick={() => void overview.refetch()}>重新读取生成任务</Button>
+            </>
+          }
+        />
       )}
       <div className="workflow-episode-list">
         {overview.isSuccess && episodes.length === 0 && (

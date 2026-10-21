@@ -1,3 +1,4 @@
+import { Disclosure } from "../../components/ui";
 import { useEffect, useState } from "react";
 
 import { fetchExecutionTrace, type ExecutionTraceRead } from "../../lib/api";
@@ -78,10 +79,14 @@ export function ShotDetailsBody({ projectId, shot, trace }: ShotDetailsBodyProps
       {traceDetailError && (
         <div className="df-shot-hint err" data-testid="execution-trace-error" role="alert">
           <p>执行记录读取失败，可以稍后重试。</p>
-          <details className="editing-diagnostics" data-testid="execution-trace-error-diagnostics">
-            <summary>诊断详情</summary>
+          <Disclosure
+            compact
+            className="editing-diagnostics"
+            data-testid="execution-trace-error-diagnostics"
+            title={<>诊断详情</>}
+          >
             <small>{traceDetailError}</small>
-          </details>
+          </Disclosure>
         </div>
       )}
       {traceDetail && (
@@ -98,23 +103,31 @@ export function ShotDetailsBody({ projectId, shot, trace }: ShotDetailsBodyProps
           {traceDetail.operation_outcome_unknown && (
             <p className="df-shot-hint warn">提交结果未知，请先核对，不要直接重试。</p>
           )}
-          <details className="editing-diagnostics" data-testid="execution-trace-diagnostics">
-            <summary>诊断详情</summary>
+          <Disclosure
+            compact
+            className="editing-diagnostics"
+            data-testid="execution-trace-diagnostics"
+            title={<>诊断详情</>}
+          >
             <small>
               运行 {traceDetail.run_id} · 节点 {traceDetail.node_key ?? "无"} · 状态{" "}
               {traceDetail.status} · Provider {traceDetail.actual_provider ?? "无"} · 操作状态{" "}
               {traceDetail.operation_status ?? "无"}
             </small>
-          </details>
+          </Disclosure>
         </section>
       )}
-      <details className="editing-diagnostics" data-testid="shot-details-diagnostics">
-        <summary>诊断详情</summary>
+      <Disclosure
+        compact
+        className="editing-diagnostics"
+        data-testid="shot-details-diagnostics"
+        title={<>诊断详情</>}
+      >
         <small>
           状态 {shot.status} · 正式画面 {shot.formal_keyframe_artifact_id ?? "无"} · 正式视频{" "}
           {shot.formal_video_artifact_id ?? "无"}
         </small>
-      </details>
+      </Disclosure>
     </div>
   );
 }

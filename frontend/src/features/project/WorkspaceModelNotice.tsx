@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
-import { Button } from "../../components/ui";
+import { Button, ActionLink } from "../../components/ui";
+import { CircleAlert, Settings2, TriangleAlert } from "lucide-react";
 import { getWorkspaceModelProfile, listModels, listWorkspaceModelProfiles } from "../../lib/api";
 import { validateSettingsReturnTo } from "../../lib/navigationPreferences";
 import { queryKeys } from "../../lib/queryKeys";
@@ -63,12 +63,15 @@ export function WorkspaceModelNotice({
     }
     if (!failed && !missing.length && !unbound.length) return null;
   }
+  const NoticeIcon = failed ? CircleAlert : ready ? TriangleAlert : Settings2;
   return (
     <section
       className="df-model-notice"
       aria-label="模型配置提示"
       data-testid="workspace-model-notice"
+      data-state={failed ? "error" : ready ? "attention" : "loading"}
     >
+      <NoticeIcon size={18} aria-hidden="true" />
       <div role={failed ? "alert" : "status"}>
         {failed ? (
           "无法读取模型配置"
@@ -92,15 +95,15 @@ export function WorkspaceModelNotice({
           重试
         </Button>
       )}
-      <Link
-        className="df-btn ghost"
+      <ActionLink
+        tone="ghost"
         to="/settings/models"
         search={{
           returnTo: validateSettingsReturnTo(returnTo),
         }}
       >
         配置模型
-      </Link>
+      </ActionLink>
     </section>
   );
 }

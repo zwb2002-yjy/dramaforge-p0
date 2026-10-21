@@ -1,3 +1,4 @@
+import { expectSelectValue, selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
@@ -81,7 +82,7 @@ describe("AudioArtifactPicker", () => {
     expect(changed).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "使用音频 26" }));
     expect(changed).toHaveBeenCalledWith("artifact-audio-2", false);
-    expect(screen.getByTestId("audio-choice")).toHaveValue("artifact-audio-2");
+    expectSelectValue(screen.getByTestId("audio-choice"), "artifact-audio-2");
     expect(screen.getByLabelText("背景音乐试听")).toHaveAttribute(
       "src",
       expect.stringContaining("artifact-audio-2/content"),
@@ -99,21 +100,21 @@ describe("AudioArtifactPicker", () => {
     const changed = mount("saved-audio");
     fireEvent.click(screen.getByRole("button", { name: "选择背景音乐" }));
     await screen.findByText(/音频读取失败/);
-    expect(screen.getByTestId("audio-choice")).toHaveValue("saved-audio");
+    expectSelectValue(screen.getByTestId("audio-choice"), "saved-audio");
     fail = false;
     fireEvent.click(screen.getByRole("button", { name: "刷新音频" }));
     await screen.findByText(/当前没有可用音频结果/);
     fireEvent.error(screen.getByLabelText("背景音乐试听"));
     expect(screen.getByText(/已保留原选择/)).toBeInTheDocument();
-    expect(screen.getByTestId("audio-choice")).toHaveValue("saved-audio");
+    expectSelectValue(screen.getByTestId("audio-choice"), "saved-audio");
     expect(changed).not.toHaveBeenCalled();
   });
 
-  it("distinguishes muting from inheriting a shot's default dialogue", () => {
+  it("distinguishes muting from inheriting a shot's default dialogue", async () => {
     const changed = mount("", undefined, true);
-    fireEvent.change(screen.getByTestId("audio-choice"), { target: { value: "__muted__" } });
+    await selectValue(screen.getByTestId("audio-choice"), "__muted__");
     expect(changed).toHaveBeenLastCalledWith("", true);
-    fireEvent.change(screen.getByTestId("audio-choice"), { target: { value: "" } });
+    await selectValue(screen.getByTestId("audio-choice"), "");
     expect(changed).toHaveBeenLastCalledWith("", false);
   });
 

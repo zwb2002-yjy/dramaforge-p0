@@ -89,7 +89,7 @@ test("production exposes the whole read-only flow and links a failure to the exa
   await page.goto(`/projects/${PROJECT_ID}/production`);
   const flow = page.getByRole("region", { name: "制作流程", exact: true });
   await expect(flow).toBeVisible();
-  await flow.locator("summary").filter({ hasText: "查看执行环节" }).click();
+  await flow.getByRole("button", { name: "查看执行环节", exact: true }).click();
   for (const name of [
     "提示词",
     "关键帧",
@@ -133,7 +133,7 @@ test("a missing production read endpoint shows an actionable version warning, no
   await expect(page.getByRole("alert")).toContainText("前后端版本");
   const flow = page.getByRole("region", { name: "制作流程", exact: true });
   await expect(flow).toBeVisible();
-  await flow.locator("summary").filter({ hasText: "查看执行环节" }).click();
+  await flow.getByRole("button", { name: "查看执行环节", exact: true }).click();
   await expect(flow.getByTestId("production-stage-voice")).toContainText("状态暂不可用");
   await expect(flow.getByTestId("production-stage-voice")).not.toContainText("暂无执行记录");
   await expect(
@@ -167,7 +167,7 @@ test("production flow fits a narrow viewport and stage links support keyboard na
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/projects/${PROJECT_ID}/production`);
   const flow = page.getByRole("region", { name: "制作流程", exact: true });
-  await flow.locator("summary").filter({ hasText: "查看执行环节" }).click();
+  await flow.getByRole("button", { name: "查看执行环节", exact: true }).click();
   await expect(flow.getByTestId("production-stage-video")).toContainText("失败");
   for (const key of stageKeys) {
     const box = await flow.getByTestId(`production-stage-${key}`).boundingBox();
@@ -190,7 +190,7 @@ test("a flow handoff generates one mock candidate only after explicit submission
   const { state, writes, errors } = await setup(page);
   const formalBefore = state.formalKeyframeArtifactId;
   await page.goto(`/projects/${PROJECT_ID}/production`);
-  await page.locator("summary").filter({ hasText: "查看执行环节" }).click();
+  await page.getByRole("button", { name: "查看执行环节", exact: true }).click();
   await page
     .getByTestId("production-stage-video")
     .getByRole("link", { name: "查看失败镜头" })

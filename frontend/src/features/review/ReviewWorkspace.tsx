@@ -1,7 +1,6 @@
-import { Button, Field, Input, Select, PageHeader } from "../../components/ui";
+import { Button, Field, Input, Select, PageHeader, ActionLink, Alert } from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
 import {
@@ -221,26 +220,33 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
         title="审片确认"
         actions={
           shot && (
-            <Link
-              className="df-btn"
+            <ActionLink
+              tone="default"
               to="/projects/$projectId/scenes/$sceneId"
               params={{ projectId, sceneId: shot.scene_id }}
               search={{ shotId: shot.id, tool: undefined }}
             >
               返回此镜头选择正式版本
-            </Link>
+            </ActionLink>
           )
         }
       />
 
-      {shots.isError && <div className="flash err">无法读取镜头：{String(shots.error)}</div>}
+      {shots.isError && (
+        <Alert
+          role="note"
+          type="error"
+          showIcon
+          description={<>无法读取镜头：{String(shots.error)}</>}
+        />
+      )}
       <Field>
         当前镜头
         <Select
           aria-label="当前镜头"
           disabled={explicitTarget}
           value={shotId ?? ""}
-          onChange={(event) => setSelectedShotId(event.target.value || null)}
+          onChange={(event) => setSelectedShotId(event || null)}
         >
           {(shots.data ?? []).map((item) => (
             <option key={item.id} value={item.id}>
@@ -438,13 +444,23 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
               </ul>
             )}
             {decideAnnotation.isError && (
-              <div className="flash err">批注状态更新失败：{String(decideAnnotation.error)}</div>
+              <Alert
+                role="note"
+                type="error"
+                showIcon
+                description={<>批注状态更新失败：{String(decideAnnotation.error)}</>}
+              />
             )}
           </section>
         </>
       )}
       {addAnnotation.isError && addAnnotation.variables?.shotId === shotId && (
-        <div className="flash err">批注保存失败：{String(addAnnotation.error)}</div>
+        <Alert
+          role="note"
+          type="error"
+          showIcon
+          description={<>批注保存失败：{String(addAnnotation.error)}</>}
+        />
       )}
     </div>
   );

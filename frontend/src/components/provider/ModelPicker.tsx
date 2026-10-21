@@ -169,7 +169,7 @@ export function ModelPicker({
                         next.delete(previous);
                         onChange(next);
                       }
-                      setMapped((current) => ({ ...current, [modelId]: event.target.value }));
+                      setMapped((current) => ({ ...current, [modelId]: event }));
                     }}
                   >
                     <option value="">暂不使用</option>

@@ -1,7 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
-import { Button, Checkbox, Input, Textarea } from "../../components/ui";
+import {
+  Button,
+  Checkbox,
+  Radio,
+  Textarea,
+  Disclosure,
+  Field,
+  Fieldset,
+  Alert,
+} from "../../components/ui";
 import { ApiError, getSelectedWorkspaceId, listModels } from "../../lib/api";
 import {
   capabilityGapReason,
@@ -114,12 +123,11 @@ function ExecutionPreview({ preview }: { preview: RepairStepPlanRead }) {
         不是标注区域的局部修补，不自动替换正式版本。
       </p>
       <p data-testid="repair-step-model">实际模型：{model.label}</p>
-      <details>
-        <summary>模型身份与计划凭据（只读）</summary>
+      <Disclosure title={<>模型身份与计划凭据（只读）</>}>
         <p>模型：{model.raw || "尚未解析"}</p>
         <p>模型绑定：{preview.plan.resolved_model?.provider_model_binding_id ?? "无"}</p>
         <p>计划指纹：{preview.plan.plan_fingerprint ?? "无"}</p>
-      </details>
+      </Disclosure>
       <h4>本步实际引用</h4>
       <ul data-testid="repair-step-references">
         {(preview.plan.planned_references ?? []).map((reference, index) => (
@@ -130,12 +138,14 @@ function ExecutionPreview({ preview }: { preview: RepairStepPlanRead }) {
               {referencePurposeLabel(reference.purpose)} {index + 1} ·{" "}
               {referenceDeliveryLabel(reference.delivery)}
             </span>
-            <details data-testid={`repair-reference-identity-${index + 1}`}>
-              <summary>查看引用 {index + 1} 身份（只读）</summary>
+            <Disclosure
+              data-testid={`repair-reference-identity-${index + 1}`}
+              title={<>查看引用 {index + 1} 身份（只读）</>}
+            >
               <p>产物：{reference.artifact_id ?? "无"}</p>
               <p>素材版本：{reference.asset_version_id ?? "无"}</p>
               <p>用途凭据：{reference.purpose}</p>
-            </details>
+            </Disclosure>
           </li>
         ))}
       </ul>
@@ -153,11 +163,10 @@ function ExecutionPreview({ preview }: { preview: RepairStepPlanRead }) {
                 {Boolean(gap.controls?.length) && (
                   <p>涉及用途：{gap.controls?.map(referencePurposeLabel).join("、")}</p>
                 )}
-                <details>
-                  <summary>能力差异依据（只读）</summary>
+                <Disclosure title={<>能力差异依据（只读）</>}>
                   <p>{gap.reason}</p>
                   <p>{gap.controls?.join("、")}</p>
-                </details>
+                </Disclosure>
               </li>
             ))}
           </ul>
@@ -170,19 +179,18 @@ function ExecutionPreview({ preview }: { preview: RepairStepPlanRead }) {
             {preview.plan.accepted_approximations?.map((purpose, index) => (
               <li key={`${purpose}-${index}`}>
                 {referencePurposeLabel(purpose)} · 近似处理
-                <details>
-                  <summary>接受凭据（只读）</summary>
+                <Disclosure title={<>接受凭据（只读）</>}>
                   <p>{purpose}</p>
-                </details>
+                </Disclosure>
               </li>
             ))}
           </ul>
         </section>
       )}
-      <label>
+      <Field>
         本步实际提示词
         <Textarea readOnly rows={6} value={preview.plan.prompt} data-testid="repair-step-prompt" />
-      </label>
+      </Field>
       <p className="muted">
         执行将调用以上模型，可能产生费用；这里不提供确定报价。只执行这一媒体步骤，之后仍须人工审查并明确采用。
       </p>
@@ -431,14 +439,26 @@ function ActiveRepair({
         刷新修复状态
       </Button>
       {request.next_action === "wait" && !unknown && (
-        <p className="flash" data-testid="repair-wait-hint" role="status">
-          本步仍在运行，正在自动同步；现在无需人工审查，也不能执行下一步或结束修复。
-        </p>
+        <Alert
+          data-testid="repair-wait-hint"
+          role="status"
+          type="info"
+          showIcon
+          description={
+            <>本步仍在运行，正在自动同步；现在无需人工审查，也不能执行下一步或结束修复。</>
+          }
+        />
       )}
       {unknown && (
-        <p className="flash err" data-testid="repair-unknown-hint" role="alert">
-          原提交结果未知，可能已计费。请核对原运行，不要重试、关闭后重做或创建新请求。
-        </p>
+        <Alert
+          data-testid="repair-unknown-hint"
+          role="alert"
+          type="error"
+          showIcon
+          description={
+            <>原提交结果未知，可能已计费。请核对原运行，不要重试、关闭后重做或创建新请求。</>
+          }
+        />
       )}
       {(request.next_action === "wait" || unknown || pending) && (
         <p>
@@ -448,24 +468,48 @@ function ActiveRepair({
         </p>
       )}
       {request.next_action === "human_decision" && !unknown && (
-        <p className="flash" data-testid="repair-review-hint" role="status">
-          请通过“审查本步候选”检查对应结果，通过人工审核后明确设为正式，才可继续。修复尚未完成。
-        </p>
+        <Alert
+          data-testid="repair-review-hint"
+          role="status"
+          type="info"
+          showIcon
+          description={
+            <>
+              请通过“审查本步候选”检查对应结果，通过人工审核后明确设为正式，才可继续。修复尚未完成。
+            </>
+          }
+        />
       )}
       {request.next_action === "close_or_replan" && !unknown && (
-        <p className="flash" role="status">
-          本次结果无法继续。可显式放弃本次修复，再预览并确认新计划；不会自动重试。
-        </p>
+        <Alert
+          role="status"
+          type="info"
+          showIcon
+          description={
+            <>本次结果无法继续。可显式放弃本次修复，再预览并确认新计划；不会自动重试。</>
+          }
+        />
       )}
       {request.next_action === "ready_to_close" && !unknown && (
-        <p className="flash" data-testid="repair-ready-to-close" role="status">
-          最后一步视频已通过审查并设为正式。请显式完成本次修复；不会自动关闭标注。
-        </p>
+        <Alert
+          data-testid="repair-ready-to-close"
+          role="status"
+          type="info"
+          showIcon
+          description={
+            <>最后一步视频已通过审查并设为正式。请显式完成本次修复；不会自动关闭标注。</>
+          }
+        />
       )}
       {recovery.blocked && (
-        <p className="flash err" role="alert">
-          无法安全保存或恢复提交凭据。已阻止新的生成，请先核对原运行及浏览器存储权限。
-        </p>
+        <Alert
+          role="alert"
+          type="error"
+          showIcon
+          description={
+            <>无法安全保存或恢复提交凭据。已阻止新的生成，请先核对原运行及浏览器存储权限。</>
+          }
+        />
       )}
       {pending && !unknown && (
         <section data-testid="repair-recovery">
@@ -473,12 +517,11 @@ function ActiveRepair({
             正在恢复第 {pending.input.expected_step_ordinal}{" "}
             步的原提交；不预览或自动提交另一份计划。
           </p>
-          <details>
-            <summary>原提交凭据（只读）</summary>
+          <Disclosure title={<>原提交凭据（只读）</>}>
             <p>{pending.input.idempotency_key}</p>
             <p>{pending.input.expected_plan_fingerprint}</p>
             <p>原近似选择：{pending.input.accept_approximations ? "已接受" : "未接受"}</p>
-          </details>
+          </Disclosure>
           {pending.outcome === "unconfirmed" && (
             <Button
               disabled={!executable || busy}
@@ -508,7 +551,7 @@ function ActiveRepair({
           )}
           {displayed && matches && <ExecutionPreview preview={displayed} />}
           {(needsApproximationConsent || acceptApproximations) && (
-            <label>
+            <Field>
               <Checkbox
                 checked={acceptApproximations}
                 disabled={busy}
@@ -520,17 +563,32 @@ function ActiveRepair({
                 }}
               />
               接受所列近似处理
-            </label>
+            </Field>
           )}
           {displayed && matches && supported && !approximationConfirmed && (
-            <p className="flash" role="status" data-testid="repair-approximation-required">
-              尚未取得明确接受近似处理的冻结计划。请核对所列差异，明确勾选接受并等待新预览；未接受前不能执行。
-            </p>
+            <Alert
+              role="status"
+              data-testid="repair-approximation-required"
+              type="info"
+              showIcon
+              description={
+                <>
+                  尚未取得明确接受近似处理的冻结计划。请核对所列差异，明确勾选接受并等待新预览；未接受前不能执行。
+                </>
+              }
+            />
           )}
           {displayed && (!matches || !supported) && (
-            <p className="flash err" role="alert">
-              本步计划与当前范围不符、缺少凭据或模型不支持。未开放执行，请核对配置并重新预览。
-            </p>
+            <Alert
+              role="alert"
+              type="error"
+              showIcon
+              description={
+                <>
+                  本步计划与当前范围不符、缺少凭据或模型不支持。未开放执行，请核对配置并重新预览。
+                </>
+              }
+            />
           )}
           {displayed &&
             matches &&
@@ -539,14 +597,14 @@ function ActiveRepair({
             !preview.isPending &&
             !preview.isError && (
               <>
-                <label>
+                <Field>
                   <Checkbox
                     checked={acknowledged}
                     disabled={busy}
                     onChange={(event) => setAcknowledged(event.target.checked)}
                   />
                   我已核对本步实际模型、引用、提示词和范围，确认可能产生模型费用
-                </label>
+                </Field>
                 <Button
                   tone="primary"
                   data-testid="repair-execute-step"
@@ -595,9 +653,12 @@ function ActiveRepair({
         </p>
       )}
       {request.next_action === "execute_step" && !repairCanPreviewStep(request) && !unknown && (
-        <p className="flash" role="status">
-          步骤事实尚未满足执行条件。请刷新状态，先审核并采用本步的正式关键帧。
-        </p>
+        <Alert
+          role="status"
+          type="info"
+          showIcon
+          description={<>步骤事实尚未满足执行条件。请刷新状态，先审核并采用本步的正式关键帧。</>}
+        />
       )}
       {request.next_action === "ready_to_close" && !unknown && (
         <Button
@@ -709,15 +770,31 @@ function RepairPanelContent({ projectId, shotId, onClose }: RepairPlanPanelProps
       </header>
       {repairs.isPending && <p role="status">正在读取修复记录…</p>}
       {repairs.isError && (
-        <p className="flash err" role="alert" data-testid="repair-list-error">
-          无法读取当前修复状态，已暂停创建及执行；不会把读取失败当成没有修复。
-          <Button onClick={refresh}>重新读取</Button>
-        </p>
+        <Alert
+          role="alert"
+          data-testid="repair-list-error"
+          type="error"
+          showIcon
+          description={
+            <>
+              无法读取当前修复状态，已暂停创建及执行；不会把读取失败当成没有修复。
+              <Button onClick={refresh}>重新读取</Button>
+            </>
+          }
+        />
       )}
       {!active && plan.isError && (
-        <p className="flash err" data-testid="repair-plan-error" role="alert">
-          无法读取修复计划。<Button onClick={() => void plan.refetch()}>重新预览</Button>
-        </p>
+        <Alert
+          data-testid="repair-plan-error"
+          role="alert"
+          type="error"
+          showIcon
+          description={
+            <>
+              无法读取修复计划。<Button onClick={() => void plan.refetch()}>重新预览</Button>
+            </>
+          }
+        />
       )}
       {!active && repairs.isSuccess && plan.isPending && <p role="status">正在预览修复方案…</p>}
       {!active && repairs.isSuccess && plan.data && (
@@ -730,11 +807,11 @@ function RepairPanelContent({ projectId, shotId, onClose }: RepairPlanPanelProps
           <p className="muted" data-testid="repair-plan-cost">
             {plan.data.cost_estimate_note}
           </p>
-          <fieldset data-testid="repair-options" disabled={confirm.isPending}>
+          <Fieldset data-testid="repair-options" disabled={confirm.isPending}>
             <legend>修复选项</legend>
             {plan.data.repair_options.map((value) => (
-              <label key={value}>
-                <Input
+              <Field key={value}>
+                <Radio
                   type="radio"
                   name={`repair-option-${shotId}`}
                   value={value}
@@ -745,9 +822,9 @@ function RepairPanelContent({ projectId, shotId, onClose }: RepairPlanPanelProps
                   }}
                 />
                 {REPAIR_OPTION_LABEL[value]}
-              </label>
+              </Field>
             ))}
-          </fieldset>
+          </Fieldset>
           <ol data-testid="repair-plan-steps">
             {REPAIR_OPTION_STAGES[selected].map((stage) => (
               <li key={stage}>{repairStageLabel(stage)}</li>
@@ -777,8 +854,7 @@ function RepairPanelContent({ projectId, shotId, onClose }: RepairPlanPanelProps
         />
       )}
       {history.length > 0 && (
-        <details data-testid="repair-history">
-          <summary>历史修复（{history.length}）</summary>
+        <Disclosure data-testid="repair-history" title={<>历史修复（{history.length}）</>}>
           {history.map((request) => (
             <section key={request.id}>
               <p>
@@ -788,7 +864,7 @@ function RepairPanelContent({ projectId, shotId, onClose }: RepairPlanPanelProps
               <StepHistory projectId={projectId} shotId={shotId} request={request} />
             </section>
           ))}
-        </details>
+        </Disclosure>
       )}
       {feedback && (
         <p className="muted" data-testid="repair-plan-feedback" role="status">

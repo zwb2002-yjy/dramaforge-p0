@@ -1,3 +1,4 @@
+import { Button, Disclosure } from "../../components/ui";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
 import { zhErrorParts, zhNode } from "../../lib/zh";
 
@@ -67,13 +68,16 @@ export function ShotProductionTrace({ shotId, trace, onSelectRun }: ShotProducti
                   </strong>
                 ) : null}
                 {runId && onSelectRun ? (
-                  <button type="button" className="ghost" onClick={() => onSelectRun(runId)}>
+                  <Button type="button" onClick={() => onSelectRun(runId)} tone="ghost">
                     查看完整证据
-                  </button>
+                  </Button>
                 ) : null}
                 {(runId || errorCode || failure.raw) && (
-                  <details data-testid="shot-production-trace-diagnostics">
-                    <summary>开发 / 诊断详情（只读）</summary>
+                  <Disclosure
+                    compact
+                    data-testid="shot-production-trace-diagnostics"
+                    title={<>开发 / 诊断详情（只读）</>}
+                  >
                     <small>
                       {runId && <span>运行 {runId}</span>}
                       {nodeKey && <span> · 节点 {nodeKey}</span>}
@@ -81,7 +85,7 @@ export function ShotProductionTrace({ shotId, trace, onSelectRun }: ShotProducti
                       {errorCode && <span> · 错误码 {errorCode}</span>}
                       {failure.raw && <span> · 原始信息 {failure.raw}</span>}
                     </small>
-                  </details>
+                  </Disclosure>
                 )}
               </li>
             );

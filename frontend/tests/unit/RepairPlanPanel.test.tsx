@@ -98,6 +98,7 @@ function stepPlan(request = NEW_REPAIR): RepairStepPlanRead {
     step_ordinal: request.next_step_ordinal ?? 1,
     stage: video ? "video_rerun" : "keyframe_regenerate",
     plan: {
+      supports_prompt_override: false,
       plan_fingerprint: "b".repeat(64),
       project_id: PROJECT_ID,
       shot_id: SHOT_ID,
@@ -273,9 +274,9 @@ async function previewAndAcknowledge() {
 
 function inspectReferenceIdentity(expectedVersion: string | null) {
   const identity = screen.getByTestId("repair-reference-identity-1");
-  expect(identity).not.toHaveAttribute("open");
+  expect(identity.querySelector("[aria-expanded]")).toHaveAttribute("aria-expanded", "false");
   fireEvent.click(within(identity).getByText("查看引用 1 身份（只读）"));
-  expect(identity).toHaveAttribute("open");
+  expect(identity.querySelector("[aria-expanded]")).toHaveAttribute("aria-expanded", "true");
   expect(within(identity).getByText(`产物：${ARTIFACT_ID}`)).toBeVisible();
   expect(within(identity).getByText(`素材版本：${expectedVersion ?? "无"}`)).toBeVisible();
 }

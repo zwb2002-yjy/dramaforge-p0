@@ -5,6 +5,7 @@ import { useSyncExternalStore } from "react";
 import { ProductionFactsSse } from "./components/sse/ProductionFactsSse";
 import { getSelectedWorkspaceId, subscribeSelectedWorkspaceId } from "./lib/navigationPreferences";
 import { router } from "./router";
+import { UiProvider } from "./components/ui/UiProvider";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -32,9 +33,11 @@ function LiveProductionFacts() {
 
 export function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <LiveProductionFacts />
-      <RouterProvider router={router} />
-    </QueryClientProvider>
+    <UiProvider>
+      <QueryClientProvider client={queryClient}>
+        <LiveProductionFacts />
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </UiProvider>
   );
 }

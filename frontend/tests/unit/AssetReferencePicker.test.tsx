@@ -1,3 +1,4 @@
+import { selectValue, selectOptions } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -92,9 +93,7 @@ describe("AssetReferencePicker recycled assets and empty resolution", () => {
     await waitFor(() => expect(screen.getByTestId("asset-reference-picker")).toBeInTheDocument());
     fireEvent.click(await screen.findByRole("button", { name: "添加" }));
     const options = await screen.findByLabelText("选择资产");
-    const values = Array.from(options.querySelectorAll("option")).map(
-      (option) => (option as HTMLOptionElement).value,
-    );
+    const values = selectOptions(options).map((option) => option.value);
     expect(values).toContain(ACTIVE_ASSET);
     expect(values).not.toContain(RECYCLED_ASSET);
     expect(await screen.findByText(/@林墨/)).toBeInTheDocument();
@@ -167,7 +166,7 @@ it("persists a new binding after existing reference slots instead of reusing sor
   });
   renderPicker();
   fireEvent.click(await screen.findByRole("button", { name: "添加" }));
-  fireEvent.change(await screen.findByLabelText("选择资产"), { target: { value: ACTIVE_ASSET } });
+  await selectValue(await screen.findByLabelText("选择资产"), ACTIVE_ASSET);
   fireEvent.click(screen.getByRole("button", { name: "添加引用" }));
   await waitFor(() => {
     const post = calls.find((call) => call.method === "POST" && call.url.endsWith("/references"));

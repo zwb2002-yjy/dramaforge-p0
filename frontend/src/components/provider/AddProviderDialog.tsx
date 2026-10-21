@@ -48,6 +48,7 @@ export function AddProviderDialog({
   onBusyChange?: (busy: boolean) => void;
   onClose: (connectionId?: string) => void;
 }) {
+  const [open, setOpen] = useState(true);
   const queryClient = useQueryClient();
   const ordered = useMemo(
     () =>
@@ -74,7 +75,7 @@ export function AddProviderDialog({
     (custom || plugin?.kind === "text" ? "" : plugin?.default_base_url) ??
     "";
   const localMiniMax = plugin?.provider_type === "minimax" && isLocalServiceUrl(urlValue);
-  const finish = () => onClose(connection?.id);
+  const finish = () => (inline ? onClose(connection?.id) : setOpen(false));
 
   const refresh = async () => {
     await Promise.all([
@@ -321,6 +322,8 @@ export function AddProviderDialog({
     );
   return (
     <Dialog
+      open={open}
+      afterClose={() => onClose(connection?.id)}
       title={
         phase === "connect"
           ? custom && isText

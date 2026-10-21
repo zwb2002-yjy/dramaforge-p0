@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import "./creative-settings.css";
-import { Button, Checkbox, Disclosure, Field, Select } from "../../components/ui";
+import { Button, Checkbox, Disclosure, Field, Select, Alert } from "../../components/ui";
 import { queryKeys } from "../../lib/queryKeys";
 import {
   fetchCreativeCapabilityCatalog,
@@ -149,7 +149,7 @@ export function CreativeCapabilitiesPanel({
       <div className="creative-capability-form">
         <Field>
           创作类型
-          <Select aria-label="创作类型" value={genre} onChange={(e) => setGenre(e.target.value)}>
+          <Select aria-label="创作类型" value={genre} onChange={(e) => setGenre(e)}>
             <option value="">默认</option>
             {(catalog.data?.genres ?? []).map((item) => (
               <option key={item.key} value={item.key} title={item.description}>
@@ -164,7 +164,7 @@ export function CreativeCapabilitiesPanel({
         </Field>
         <Field>
           风格
-          <Select aria-label="风格" value={style} onChange={(e) => setStyle(e.target.value)}>
+          <Select aria-label="风格" value={style} onChange={(e) => setStyle(e)}>
             <option value="">默认</option>
             {(catalog.data?.styles ?? []).map((item) => (
               <option key={item.key} value={item.key} title={item.description}>
@@ -180,11 +180,7 @@ export function CreativeCapabilitiesPanel({
         <Disclosure title="镜头语言、质量与创作手法">
           <Field>
             镜头语言
-            <Select
-              aria-label="镜头语言"
-              value={shotLanguage}
-              onChange={(e) => setShotLanguage(e.target.value)}
-            >
+            <Select aria-label="镜头语言" value={shotLanguage} onChange={(e) => setShotLanguage(e)}>
               <option value="">默认</option>
               {(catalog.data?.shot_languages ?? []).map((item) => (
                 <option key={item.key} value={item.key} title={item.description}>
@@ -199,11 +195,7 @@ export function CreativeCapabilitiesPanel({
           </Field>
           <Field>
             质量策略
-            <Select
-              aria-label="质量策略"
-              value={quality}
-              onChange={(e) => setQuality(e.target.value)}
-            >
+            <Select aria-label="质量策略" value={quality} onChange={(e) => setQuality(e)}>
               <option value="">默认</option>
               {(catalog.data?.quality_policies ?? []).map((item) => (
                 <option key={item.key} value={item.key} title={item.description}>
@@ -262,9 +254,12 @@ export function CreativeCapabilitiesPanel({
           </p>
         )}
         {catalog.isError && (
-          <div className="flash err" role="alert">
-            无法加载创意能力目录：{String(catalog.error)}
-          </div>
+          <Alert
+            role="alert"
+            type="error"
+            showIcon
+            description={<>无法加载创意能力目录：{String(catalog.error)}</>}
+          />
         )}
       </div>
 
@@ -312,10 +307,9 @@ export function CreativeCapabilitiesPanel({
               </li>
             ))}
           </ul>
-          <details className="creative-provenance-raw">
-            <summary>技术记录</summary>
+          <Disclosure className="creative-provenance-raw" title={<>技术记录</>}>
             <pre>{JSON.stringify(prov, null, 2)}</pre>
-          </details>
+          </Disclosure>
         </Disclosure>
       )}
     </div>

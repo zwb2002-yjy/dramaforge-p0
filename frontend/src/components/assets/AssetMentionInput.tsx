@@ -47,11 +47,13 @@ export function AssetMentionInput({
   const mounted = useRef(true);
   const scopeKey = `${projectId}:${shotId}:${stage}`;
   const currentScope = useRef(scopeKey);
+  const pendingFocus = useRef<{ scope: string; value: string; cursor: number } | null>(null);
   currentScope.current = scopeKey;
   const [settling, setSettling] = useState(false);
   useEffect(() => {
     mounted.current = true;
     setSettling(false);
+    pendingFocus.current = null;
     return () => {
       mounted.current = false;
     };
@@ -132,6 +134,21 @@ export function AssetMentionInput({
     retry: false,
   });
   const pending = create.isPending || remove.isPending || settling;
+  useEffect(() => {
+    const request = pendingFocus.current;
+    if (pending || !request) return;
+    pendingFocus.current = null;
+    if (
+      request.scope !== scopeKey ||
+      request.value !== value ||
+      !input.current ||
+      input.current.disabled
+    )
+      return;
+    input.current.focus();
+    input.current.setSelectionRange(request.cursor, request.cursor);
+    setCursor(request.cursor);
+  }, [pending, scopeKey, value]);
   const ready =
     !tokens.length ||
     (!pending &&
@@ -146,6 +163,7 @@ export function AssetMentionInput({
     if (!match || pending) return;
     const before = value.slice(0, cursor - match[0].length);
     const after = value.slice(cursor);
+    pendingFocus.current = { scope: scopeKey, value, cursor };
     setSettling(true);
     try {
       const saved = await create.mutateAsync(asset);
@@ -153,10 +171,15 @@ export function AssetMentionInput({
         await invalidate();
         return;
       }
-      onChange(`${before}${saved.label} ${after}`);
+      const next = `${before}${saved.label} ${after}`;
+      pendingFocus.current = {
+        scope: scopeKey,
+        value: next,
+        cursor: before.length + saved.label.length + 1,
+      };
+      onChange(next);
       setOpen(false);
       await invalidate();
-      input.current?.focus();
     } catch {
       await invalidate();
       /* Mutation feedback keeps the typed draft intact. */
@@ -165,6 +188,7 @@ export function AssetMentionInput({
     }
   }
   async function removeMention(label: string, id: string) {
+    pendingFocus.current = { scope: scopeKey, value, cursor };
     setSettling(true);
     try {
       await remove.mutateAsync(id);
@@ -172,7 +196,13 @@ export function AssetMentionInput({
         await invalidate();
         return;
       }
-      onChange(value.replace(TOKEN, (token) => (token === label ? "" : token)));
+      const next = value.replace(TOKEN, (token) => (token === label ? "" : token));
+      pendingFocus.current = {
+        scope: scopeKey,
+        value: next,
+        cursor: Math.min(cursor, next.length),
+      };
+      onChange(next);
       await invalidate();
     } catch {
       /* A refused delete keeps both the label and the server binding. */

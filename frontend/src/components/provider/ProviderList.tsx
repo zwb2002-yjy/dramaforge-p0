@@ -142,15 +142,13 @@ export function ProviderList({
               <span>供应商</span>
               <span className="muted df-num">{entries.length}</span>
             </header>
-            <span className="df-search-field">
-              <Search size={16} aria-hidden="true" />
-              <Input
-                aria-label="搜索供应商"
-                placeholder="搜索供应商"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </span>
+            <Input
+              prefix={<Search size={16} aria-hidden="true" />}
+              aria-label="搜索供应商"
+              placeholder="搜索供应商"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
             <div className="df-provider-options">
               {filtered.map((entry) => {
                 const { connection, plugin } = entry;

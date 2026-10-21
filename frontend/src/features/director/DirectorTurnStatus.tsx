@@ -1,3 +1,4 @@
+import { Disclosure, Button } from "../../components/ui";
 import type { DirectorTurnRead } from "./suggestion-types";
 import { AgentPresence } from "../resonance/AgentPresence";
 
@@ -197,8 +198,11 @@ export function DirectorTurnStatus({
               </>
             ) : null}
           </dl>
-          <details className="rs-memory-detail" data-testid="director-turn-diagnostics">
-            <summary>开发 / 诊断详情（只读）</summary>
+          <Disclosure
+            className="rs-memory-detail"
+            data-testid="director-turn-diagnostics"
+            title={<>开发 / 诊断详情（只读）</>}
+          >
             <p>
               #{latest.id.slice(0, 8)} · {latest.step_count} 步 · revision{" "}
               {latest.runtime_revision ?? latest.revision}
@@ -207,47 +211,45 @@ export function DirectorTurnStatus({
               状态 {latest.status}
               {latest.wait_reason ? ` · 等待原因 ${latest.wait_reason}` : ""}
             </p>
-          </details>
+          </Disclosure>
           {latest.last_error ? (
             <>
               <p role="alert" data-testid="director-stop-summary">
                 {stopSummary(latest.last_error)}
               </p>
-              <details className="rs-memory-detail">
-                <summary>开发 / 诊断详情（只读）</summary>
+              <Disclosure className="rs-memory-detail" title={<>开发 / 诊断详情（只读）</>}>
                 <p>{latest.last_error}</p>
-              </details>
+              </Disclosure>
             </>
           ) : null}
           <div className="qc-shot-director-suggestion-actions">
             {latest.status === "awaiting_user" || latest.status === "awaiting_execution" ? (
-              <button
+              <Button
                 type="button"
-                className="secondary"
                 data-testid="refresh-director-turn"
                 disabled={busyTurnId === latest.id}
                 onClick={() => onRefresh(latest)}
+                tone="default"
               >
                 刷新服务器状态
-              </button>
+              </Button>
             ) : null}
             {ACTIVE.has(latest.status) ? (
-              <button
+              <Button
                 type="button"
-                className="secondary"
                 data-testid="stop-director-turn"
                 disabled={busyTurnId === latest.id}
                 onClick={() => onStop(latest)}
+                tone="default"
               >
                 停止新的导演动作
-              </button>
+              </Button>
             ) : null}
           </div>
         </article>
       ) : null}
       {turns.length > 1 && (
-        <details className="rs-memory-detail">
-          <summary>此前的协作 · {turns.length - 1}</summary>
+        <Disclosure className="rs-memory-detail" title={<>此前的协作 · {turns.length - 1}</>}>
           <ol className="rs-memory-strip" aria-label="此前的协作">
             {turns.slice(1).map((turn) => (
               <li key={turn.id}>
@@ -258,7 +260,7 @@ export function DirectorTurnStatus({
               </li>
             ))}
           </ol>
-        </details>
+        </Disclosure>
       )}
     </section>
   );

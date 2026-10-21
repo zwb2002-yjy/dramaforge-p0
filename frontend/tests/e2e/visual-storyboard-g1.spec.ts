@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { selectSegment } from "./selectSegment";
 import { fileURLToPath } from "node:url";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -166,6 +167,67 @@ async function installStoryboardFixture(page: Page, options: StoryboardFixture) 
   return { reads, writes };
 }
 
+for (const [width, shots] of [
+  [1440, 1],
+  [1920, 3],
+  [1280, 5],
+] as const) {
+  test(`storyboard previews keep their media size and use only occupied columns at ${width}px with ${shots} shots`, async ({
+    page,
+  }) => {
+    await installStoryboardFixture(page, {
+      shots,
+      scenes: 1,
+      missingVideoAt: shots + 1,
+      statusByShot: {
+        1: {
+          pending_review: true,
+          generating: false,
+          generation_failed: false,
+          outcome_unknown: false,
+        },
+      },
+    });
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto(`/projects/${PROJECT_ID}/scenes`);
+    const cards = page.getByTestId("scene-shot-card");
+    await expect(cards).toHaveCount(shots);
+    const thumbnails = page.locator(".scene-shot-thumbnail");
+    for (const thumb of await thumbnails.all()) {
+      const box = (await thumb.boundingBox())!;
+      expect(box.width).toBeGreaterThan(200);
+      expect(box.width).toBeLessThanOrEqual(448);
+      expect(box.height).toBeGreaterThan(125);
+      expect(box.width / box.height).toBeCloseTo(16 / 9, 1);
+    }
+    const image = thumbnails.first().getByRole("img");
+    await expect
+      .poll(() => image.evaluate((el: HTMLImageElement) => el.naturalWidth))
+      .toBeGreaterThan(0);
+    await expect(image).toHaveCSS("object-fit", "contain");
+    const imageBox = (await image.boundingBox())!;
+    expect(imageBox.height).toBeGreaterThan(125);
+    const grid = page.locator(".scene-shot-grid");
+    const used = await grid.evaluate((el) => {
+      const cards = [...el.querySelectorAll(".scene-shot-card")].map((c) =>
+        c.getBoundingClientRect(),
+      );
+      const firstRow = cards.filter((c) => Math.abs(c.y - cards[0].y) < 1);
+      return {
+        width: el.getBoundingClientRect().width,
+        used:
+          firstRow.reduce((sum, c) => sum + c.width, 0) +
+          (firstRow.length - 1) * parseFloat(getComputedStyle(el).columnGap),
+      };
+    });
+    expect(Math.abs(used.width - used.used)).toBeLessThan(2);
+    await expect(page.locator(".scene-media-note")).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  });
+}
+
 test("34-shot storyboards locate the sole missing Formal without creating media", async ({
   page,
 }) => {
@@ -179,7 +241,7 @@ test("34-shot storyboards locate the sole missing Formal without creating media"
   await expect(page.getByLabel("全片制作素材概览").getByText("34 镜头")).toBeVisible();
   await expect(page.getByText("正式视频 33 / 34")).toBeVisible();
   await expect(page.getByTestId("scene-shot-card")).toHaveCount(34);
-  await page.getByRole("button", { name: "缺正式视频" }).click();
+  await selectSegment(page.getByRole("radio", { name: "缺正式视频" }));
   await expect(page.getByTestId("scene-shot-card")).toHaveCount(1);
   await expect(page.getByRole("link", { name: "编辑镜头 17" })).toHaveAttribute(
     "href",
@@ -190,31 +252,62 @@ test("34-shot storyboards locate the sole missing Formal without creating media"
   await page.getByRole("link", { name: "编辑镜头 17" }).click();
   await expect(page.getByRole("link", { name: "返回全片分镜总览" })).toBeVisible();
   await page.getByRole("link", { name: "返回全片分镜总览" }).click();
-  await expect(page.getByRole("button", { name: "缺正式视频" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await expect(page.getByRole("radio", { name: "缺正式视频" })).toBeChecked();
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
 });
 
-test("100-shot overview reads one scene at a time and restores focused scene", async ({ page }) => {
+test("scrolling reveals each scene's shots without closing previously viewed scenes", async ({
+  page,
+}) => {
+  const { reads, writes } = await installStoryboardFixture(page, {
+    shots: 9,
+    scenes: 3,
+    missingVideoAt: 9,
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(`/projects/${PROJECT_ID}/scenes`);
+  const first = page.getByTestId("scene-card").nth(0);
+  const second = page.getByTestId("scene-card").nth(1);
+  await expect(first.getByTestId("scene-shot-card")).toHaveCount(3);
+  await second.scrollIntoViewIfNeeded();
+  await expect(second.getByTestId("scene-shot-card")).toHaveCount(3);
+  await expect(first.getByTestId("scene-shot-card")).toHaveCount(3);
+  await second.getByRole("button", { name: "收起分镜", exact: true }).click();
+  await expect(second.getByTestId("scene-shot-card")).toHaveCount(0);
+  await expect(first.getByTestId("scene-shot-card")).toHaveCount(3);
+  await second.getByRole("button", { name: "展开分镜", exact: true }).click();
+  await expect(second.getByTestId("scene-shot-card")).toHaveCount(3);
+  expect(reads.some((path) => path.includes("scene-large-2/workspace"))).toBe(true);
+  expect(writes).toEqual([]);
+});
+
+test("100-shot overview loads visible scenes and restores the last scene used", async ({
+  page,
+}) => {
   const { reads, writes } = await installStoryboardFixture(page, {
     shots: 100,
     scenes: 20,
     missingVideoAt: 57,
   });
+  await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/projects/" + PROJECT_ID + "/scenes");
   await expect(page.getByTestId("scene-card")).toHaveCount(20);
   await expect(page.getByLabel("全片制作素材概览").getByText("100 镜头")).toBeVisible();
-  await expect.poll(() => reads.length).toBe(1);
-  await page.getByRole("button", { name: "查看镜头", exact: true }).first().click();
-  await expect.poll(() => reads.length).toBe(2);
+  await expect(page.getByTestId("scene-card").first().getByTestId("scene-shot-card")).toHaveCount(
+    5,
+  );
+  expect(new Set(reads).size).toBeLessThanOrEqual(3);
+  const second = page.getByTestId("scene-card").nth(1);
+  await second.scrollIntoViewIfNeeded();
+  await second.getByRole("button", { name: "预览镜头 6", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "关闭", exact: true }).click();
   await page.reload();
   await expect(page.getByTestId("scene-card")).toHaveCount(20);
-  await expect(page.getByRole("button", { name: "正在查看镜头" })).toHaveCount(1);
-  expect(reads.length).toBeLessThanOrEqual(3);
+  await expect(second.getByTestId("scene-shot-card")).toHaveCount(5);
+  await expect(page.locator("#scene-media-scene-large-2")).toBeInViewport();
+  expect(reads.some((path) => path.includes("scene-large-20/workspace"))).toBe(false);
   expect(writes).toEqual([]);
 });
 
@@ -265,7 +358,7 @@ test("pending review, generating, failed and unknown filters use server facts an
     ["失败或阻断", 3],
     ["状态待核对", 6],
   ] as const) {
-    await page.getByRole("button", { name: label, exact: true }).click();
+    await selectSegment(page.getByRole("radio", { name: label, exact: true }));
     await expect(page.getByTestId("scene-card")).toHaveCount(1);
     await expect(page.getByTestId("scene-shot-card")).toHaveCount(1);
     await expect(page.getByTestId("scene-shot-card")).toHaveAttribute(
@@ -295,30 +388,27 @@ test("two projects retain independent filters and focused scenes across refresh"
   const began = Date.now();
   await page.goto(`/projects/${PROJECT_ID}/scenes`);
   await expect(page.getByTestId("scene-card")).toHaveCount(20);
-  await expect(page.getByTestId("scene-shot-card")).toHaveCount(5);
-  await page.getByRole("button", { name: "缺正式视频", exact: true }).click();
+  await expect(page.getByTestId("scene-card").first().getByTestId("scene-shot-card")).toHaveCount(
+    5,
+  );
+  await selectSegment(page.getByRole("radio", { name: "缺正式视频", exact: true }));
   await expect(page.getByTestId("scene-shot-card")).toHaveAttribute("data-shot-id", "shot-large-1");
-  await page.getByRole("button", { name: "正在查看镜头", exact: true }).click();
   await page.goto(`/projects/${secondId}/scenes`);
   await expect(page.getByTestId("scene-card")).toHaveCount(2);
-  await page.getByRole("button", { name: "缺正式视频", exact: true }).click();
+  await selectSegment(page.getByRole("radio", { name: "缺正式视频", exact: true }));
   await expect(page.getByTestId("scene-shot-card")).toHaveAttribute(
     "data-shot-id",
     "shot-large-10",
   );
-  await page.getByRole("button", { name: "正在查看镜头", exact: true }).click();
   await page.reload();
   await expect(page.getByTestId("scene-shot-card")).toHaveAttribute(
     "data-shot-id",
     "shot-large-10",
   );
   await page.goto(`/projects/${PROJECT_ID}/scenes`);
-  await expect(page.getByRole("button", { name: "缺正式视频", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await expect(page.getByRole("radio", { name: "缺正式视频", exact: true })).toBeChecked();
   await expect(page.getByTestId("scene-shot-card")).toHaveAttribute("data-shot-id", "shot-large-1");
-  expect(new Set(first.reads).size).toBe(1);
+  expect(new Set(first.reads).size).toBeLessThanOrEqual(3);
   expect(new Set(second.reads).size).toBe(2);
   expect([...first.writes, ...second.writes]).toEqual([]);
   const nodes = await page.evaluate(() => document.querySelectorAll("*").length);

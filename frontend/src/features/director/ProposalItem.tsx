@@ -1,3 +1,4 @@
+import { Button } from "../../components/ui";
 /**
  * ProposalItem (P7-06 / 03 §66).
  *
@@ -67,20 +68,20 @@ export function ProposalItem({ item, onAccept, onReject }: ProposalItemProps) {
       </dl>
       {item.status === "pending" && (
         <div className="mt-2 flex gap-2">
-          <button
+          <Button
             type="button"
             className="rounded bg-green-600 px-2 py-1 text-xs text-white"
             onClick={() => onAccept?.(item.id)}
           >
             接受
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             className="rounded bg-red-600 px-2 py-1 text-xs text-white"
             onClick={() => onReject?.(item.id)}
           >
             拒绝
-          </button>
+          </Button>
         </div>
       )}
     </div>

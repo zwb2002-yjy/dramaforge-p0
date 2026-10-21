@@ -3,7 +3,7 @@ import type {
   ProviderPluginModelRead,
   ProviderPluginRead,
 } from "../../lib/api";
-import { Disclosure } from "../ui";
+import { Disclosure, Table } from "../ui";
 import {
   boundLabel,
   CONTROL_LABEL,
@@ -37,32 +37,30 @@ function ParameterFacts({
   if (!Object.keys(values).length) return <p className="muted">参数尚未明确。</p>;
   return (
     <div className="df-knowledge-table-wrap">
-      <table className="df-knowledge-table">
-        <thead>
-          <tr>
-            <th scope="col">参数</th>
-            <th scope="col">取值或限制</th>
-            <th scope="col">控制方式</th>
-            <th scope="col">核验状态</th>
-          </tr>
-        </thead>
-        <tbody>
-          {Object.entries(values).map(([name, parameter]) => (
-            <tr key={name}>
-              <th scope="row">{parameterLabel(name)}</th>
-              <td>{parameterValue(parameter, name)}</td>
-              <td>{CONTROL_LABEL[parameter.control]}</td>
-              <td>
-                {parameterEvidence(
-                  knowledge,
-                  fieldPaths?.[name] ?? `${path}/${pointerSegment(name)}`,
-                  parameter.claim_status,
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <Table
+        size="small"
+        pagination={false}
+        rowKey="name"
+        scroll={{ x: true }}
+        dataSource={Object.entries(values).map(([name, parameter]) => ({ name, parameter }))}
+        columns={[
+          { title: "参数", dataIndex: "name", render: (name: string) => parameterLabel(name) },
+          {
+            title: "取值或限制",
+            render: (_, { name, parameter }) => parameterValue(parameter, name),
+          },
+          { title: "控制方式", render: (_, { parameter }) => CONTROL_LABEL[parameter.control] },
+          {
+            title: "核验状态",
+            render: (_, { name, parameter }) =>
+              parameterEvidence(
+                knowledge,
+                fieldPaths?.[name] ?? `${path}/${pointerSegment(name)}`,
+                parameter.claim_status,
+              ),
+          },
+        ]}
+      />
     </div>
   );
 }

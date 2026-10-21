@@ -179,6 +179,12 @@ async def prepare_media_submission(
     )
     image_intent: ImageGenerationIntent | None = None
     video_intent: VideoGenerationIntentV1 | None = None
+    effective_opts: dict[str, Any] = {}
+    raw_options = snap.get("options")
+    if isinstance(raw_options, dict):
+        effective_opts.update(raw_options)
+    if workbench_plan and workbench_plan.effective_options:
+        effective_opts.update(workbench_plan.effective_options)
     if node_type == "keyframe":
         workbench_image_reference = next(
             (
@@ -201,7 +207,12 @@ async def prepare_media_submission(
                 reference_uuid = UUID(str(canonical_artifact_id))
             except (TypeError, ValueError, AttributeError):
                 reference_uuid = None
-        raw_ratio = str(snap.get("aspect_ratio") or project.aspect_ratio or "")
+        raw_ratio = str(
+            effective_opts.get("aspect_ratio")
+            or snap.get("aspect_ratio")
+            or project.aspect_ratio
+            or ""
+        )
         image_ratio: Literal["9:16", "16:9"] | None = (
             "9:16" if raw_ratio == "9:16" else "16:9" if raw_ratio == "16:9" else None
         )
@@ -210,11 +221,20 @@ async def prepare_media_submission(
                 "unified image request has an unsupported aspect ratio",
                 details={"code": "ASPECT_RATIO_UNSUPPORTED", "aspect_ratio": raw_ratio},
             )
+        image_size = str(effective_opts["size"]) if effective_opts.get("size") is not None else None
+        image_seed: int | None = None
+        if effective_opts.get("seed") is not None:
+            try:
+                image_seed = int(str(effective_opts["seed"]))
+            except (ValueError, TypeError) as exc:
+                raise ValidationAppError(
+                    "invalid image seed", details={"code": "MODEL_OPTION_INVALID", "option": "seed"}
+                ) from exc
         image_intent = ImageGenerationIntent(
             prompt=prompt,
-            size=None,
+            size=image_size,
             aspect_ratio=image_ratio,
-            seed=None,
+            seed=image_seed,
             reference_artifact_ids=[
                 reference.artifact_id
                 for reference in workbench_planned_references
@@ -255,7 +275,7 @@ async def prepare_media_submission(
                     "UPSTREAM_ARTIFACT_MISSING: approved first-frame bytes "
                     "unavailable for video I2V"
                 )
-        raw_duration = snap.get("duration_seconds")
+        raw_duration = effective_opts.get("duration_seconds") or snap.get("duration_seconds")
         try:
             duration_seconds = round(float(str(raw_duration)))
         except (TypeError, ValueError):
@@ -265,7 +285,12 @@ async def prepare_media_submission(
                 "unified video request has no valid duration",
                 details={"code": "DURATION_REQUIRED"},
             )
-        raw_ratio = str(snap.get("aspect_ratio") or project.aspect_ratio or "")
+        raw_ratio = str(
+            effective_opts.get("aspect_ratio")
+            or snap.get("aspect_ratio")
+            or project.aspect_ratio
+            or ""
+        )
         video_ratio: Literal["9:16", "16:9"] | None = (
             "9:16" if raw_ratio == "9:16" else "16:9" if raw_ratio == "16:9" else None
         )
@@ -274,6 +299,24 @@ async def prepare_media_submission(
                 "unified video request has an unsupported aspect ratio",
                 details={"code": "ASPECT_RATIO_UNSUPPORTED", "aspect_ratio": raw_ratio},
             )
+        video_resolution = (
+            str(effective_opts["resolution"])
+            if effective_opts.get("resolution") is not None
+            else None
+        )
+        video_audio = (
+            bool(effective_opts["generate_audio"])
+            if effective_opts.get("generate_audio") is not None
+            else None
+        )
+        video_seed: int | None = None
+        if effective_opts.get("seed") is not None:
+            try:
+                video_seed = int(str(effective_opts["seed"]))
+            except (ValueError, TypeError) as exc:
+                raise ValidationAppError(
+                    "invalid video seed", details={"code": "MODEL_OPTION_INVALID", "option": "seed"}
+                ) from exc
         planned_video_references = [
             reference
             for reference in workbench_planned_references
@@ -337,7 +380,9 @@ async def prepare_media_submission(
             output=VideoOutputIntent(
                 aspect_ratio=video_ratio,
                 duration_seconds=duration_seconds,
-                generate_audio=None,
+                resolution=video_resolution,
+                generate_audio=video_audio,
+                seed=video_seed,
             ),
             references=intent_references,
             selection=ModelSelectionIntent(
@@ -951,25 +996,44 @@ async def prepare_media_submission(
         requested_options: dict[str, object] = {
             "size": image_intent.size,
             "aspect_ratio": image_intent.aspect_ratio,
+            "seed": image_intent.seed,
+            **effective_opts,
         }
         effective_options: dict[str, object] = {
-            "size": compiled.safe_request_summary.get("size"),
-            "aspect_ratio": compiled.safe_request_summary.get("aspect_ratio"),
+            "size": compiled.safe_request_summary.get("size") or image_intent.size,
+            "aspect_ratio": compiled.safe_request_summary.get("aspect_ratio")
+            or image_intent.aspect_ratio,
+            "seed": image_intent.seed,
         }
+        for k, v in effective_opts.items():
+            if k not in effective_options:
+                effective_options[k] = v
     else:
         assert video_intent is not None
         requested_options = {
             "aspect_ratio": video_intent.output.aspect_ratio,
             "duration_seconds": video_intent.output.duration_seconds,
+            "resolution": video_intent.output.resolution,
             "generate_audio": video_intent.output.generate_audio,
+            "seed": video_intent.output.seed,
+            **effective_opts,
         }
         effective_options = {
-            "aspect_ratio": compiled.safe_request_summary.get("aspect_ratio"),
-            "duration_seconds": compiled.safe_request_summary.get("duration_seconds"),
+            "aspect_ratio": compiled.safe_request_summary.get("aspect_ratio")
+            or video_intent.output.aspect_ratio,
+            "duration_seconds": compiled.safe_request_summary.get("duration_seconds")
+            or video_intent.output.duration_seconds,
+            "resolution": compiled.safe_request_summary.get("resolution")
+            or video_intent.output.resolution,
             "frame_rate": compiled.safe_request_summary.get("frame_rate"),
             "num_frames": compiled.safe_request_summary.get("num_frames"),
-            "generate_audio": compiled.safe_request_summary.get("native_audio"),
+            "generate_audio": compiled.safe_request_summary.get("native_audio")
+            or video_intent.output.generate_audio,
+            "seed": video_intent.output.seed,
         }
+        for k, v in effective_opts.items():
+            if k not in effective_options:
+                effective_options[k] = v
     effective_request = {
         "operation": compiled.operation,
         "model_id": compiled.model_id,

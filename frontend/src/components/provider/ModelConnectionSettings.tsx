@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Field, Select } from "../ui";
+import { Button, Field, Select, Alert } from "../ui";
 import { useSettingsWorkspace } from "../../hooks/useSettingsWorkspace";
 import type { WorkspaceRead } from "../../lib/api";
 import { ProviderList } from "./ProviderList";
@@ -19,7 +19,7 @@ function WorkspaceSelector({
       <Select
         aria-label="设置工作空间"
         value={selectedWorkspaceId ?? ""}
-        onChange={(event) => onChange(event.target.value || null)}
+        onChange={(event) => onChange(event || null)}
       >
         {workspaces.map((workspace) => (
           <option key={workspace.id} value={workspace.id}>
@@ -38,9 +38,16 @@ export function ModelConnectionSettings() {
   return (
     <section className="df-model-settings" data-testid="model-settings-panel">
       {workspaces.isError ? (
-        <p className="flash err" role="alert">
-          无法读取工作空间。<Button onClick={() => void workspaces.refetch()}>重试</Button>
-        </p>
+        <Alert
+          role="alert"
+          type="error"
+          showIcon
+          description={
+            <>
+              无法读取工作空间。<Button onClick={() => void workspaces.refetch()}>重试</Button>
+            </>
+          }
+        />
       ) : workspaces.isPending ? (
         !selectedWorkspaceId && <p role="status">正在读取工作空间…</p>
       ) : (workspaces.data ?? []).length > 1 ? (

@@ -1,3 +1,4 @@
+import { expectSelectValue, selectValue } from "./selectValue";
 import { expect, test, type Page } from "@playwright/test";
 import {
   EDIT_SESSION_ID,
@@ -87,10 +88,11 @@ test("switching workspace keeps supplier settings free of the retired project pi
   const { writes } = await setup(page);
   const origin = `/projects/${PROJECT_ID}/production`;
   await page.goto(`/settings/models?returnTo=${encodeURIComponent(origin)}`);
-  await page
-    .getByRole("combobox", { name: "设置工作空间", exact: true })
-    .selectOption("workspace-other");
-  await expect(page.getByRole("combobox", { name: "设置工作空间" })).toHaveValue("workspace-other");
+  await selectValue(
+    page.getByRole("combobox", { name: "设置工作空间", exact: true }),
+    "workspace-other",
+  );
+  await expectSelectValue(page.getByRole("combobox", { name: "设置工作空间" }), "workspace-other");
   expect(
     await page.evaluate(() => sessionStorage.getItem("dramaforge.selected-workspace-id")),
   ).toBe("workspace-other");

@@ -1,3 +1,5 @@
+import { sliderValue } from "./sliderValue";
+import { findSelectOption, expectSelectValue, selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -100,8 +102,8 @@ function renderPanel(shot: ShotLite = SHOT) {
   return { onSaved, applySuggestion: (draft: ShotDesignDraft) => view.rerender(panel(draft)) };
 }
 async function selectVoice() {
-  await screen.findByRole("option", { name: "目录声音乙 · zh-CN" });
-  fireEvent.change(screen.getByLabelText("配音音色"), { target: { value: "voice:voice-b" } });
+  await findSelectOption(screen.getByLabelText("配音音色"), "目录声音乙 · zh-CN");
+  await selectValue(screen.getByLabelText("配音音色"), "voice:voice-b");
 }
 function editDialogue(text = "新的镜头旁白") {
   fireEvent.change(screen.getByLabelText("对白／旁白文本"), { target: { value: text } });
@@ -116,10 +118,10 @@ describe("ShotDesignPanel dialogue and voice gates", () => {
   it("does not materialize defaults or write anything merely by opening the panel", async () => {
     const { writes } = backend();
     renderPanel();
-    await screen.findByRole("option", { name: "目录声音甲 · zh-CN" });
+    await findSelectOption(screen.getByLabelText("配音音色"), "目录声音甲 · zh-CN");
     expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("原始对白");
-    expect(screen.getByLabelText("配音音色")).toHaveValue("");
-    expect(screen.getByLabelText("配音语速")).toHaveValue("0");
+    expectSelectValue(screen.getByLabelText("配音音色"), "");
+    expect(screen.getByLabelText("配音语速")).toHaveAttribute("aria-valuenow", "0");
     expect(screen.getByRole("button", { name: "保存镜头" })).toBeDisabled();
     expect(screen.getByText(/导出成片时按这里的音色和语速生成配音/)).toBeInTheDocument();
     expect(writes()).toEqual([]);
@@ -149,7 +151,7 @@ describe("ShotDesignPanel dialogue and voice gates", () => {
     const { writes } = backend();
     const { onSaved } = renderPanel();
     await selectVoice();
-    fireEvent.change(screen.getByLabelText("配音语速"), { target: { value: "-15" } });
+    sliderValue(screen.getByLabelText("配音语速"), -15);
     expect(writes()).toEqual([]);
     save();
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
@@ -175,7 +177,7 @@ describe("ShotDesignPanel dialogue and voice gates", () => {
     const { onSaved } = renderPanel();
     editDialogue();
     await selectVoice();
-    fireEvent.change(screen.getByLabelText("配音语速"), { target: { value: "30" } });
+    sliderValue(screen.getByLabelText("配音语速"), 30);
     save();
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     expect(writes().map((call) => [call.method, call.url.split("/").at(-1)])).toEqual([
@@ -196,7 +198,7 @@ describe("ShotDesignPanel dialogue and voice gates", () => {
       director_state: { voice: { voice_id: "legacy-voice", rate_percent: 0 } },
     });
     await screen.findByText(/当前音色不在此引擎的目录中/);
-    fireEvent.change(screen.getByLabelText("配音语速"), { target: { value: "-30" } });
+    sliderValue(screen.getByLabelText("配音语速"), -30);
     save();
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     expect(writes()[0].body).toMatchObject({
@@ -210,8 +212,8 @@ describe("ShotDesignPanel dialogue and voice gates", () => {
       ...SHOT,
       director_state: { voice: { voice_id: "voice-b", rate_percent: 10 } },
     });
-    await screen.findByRole("option", { name: "沿用实例默认（目录声音甲）" });
-    fireEvent.change(screen.getByLabelText("配音音色"), { target: { value: "" } });
+    await findSelectOption(screen.getByLabelText("配音音色"), "沿用实例默认（目录声音甲）");
+    await selectValue(screen.getByLabelText("配音音色"), "");
     save();
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     expect(writes()[0].body).toMatchObject({
@@ -231,7 +233,7 @@ describe("ShotDesignPanel dialogue and voice gates", () => {
       expect(screen.getByLabelText("对白／旁白文本")).toHaveValue(
         fail === "canvas" ? "新的镜头旁白" : "原始对白",
       );
-      expect(screen.getByLabelText("配音音色")).toHaveValue("voice:voice-b");
+      expectSelectValue(screen.getByLabelText("配音音色"), "voice:voice-b");
       expect(writes()).toHaveLength(1);
       expect(onSaved).not.toHaveBeenCalled();
       expect(screen.getByTestId("shot-design-dirty")).toBeInTheDocument();
@@ -243,15 +245,15 @@ describe("ShotDesignPanel dialogue and voice gates", () => {
     const { applySuggestion } = renderPanel();
     editDialogue();
     await selectVoice();
-    fireEvent.change(screen.getByLabelText("配音语速"), { target: { value: "6" } });
+    sliderValue(screen.getByLabelText("配音语速"), 6);
     applySuggestion({
       image_prompt: "suggested image",
       video_prompt: "suggested video",
       director_state: { expression: { mood: "happy" } },
     });
     expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("新的镜头旁白");
-    expect(screen.getByLabelText("配音音色")).toHaveValue("voice:voice-b");
-    expect(screen.getByLabelText("配音语速")).toHaveValue("6");
+    expectSelectValue(screen.getByLabelText("配音音色"), "voice:voice-b");
+    expect(screen.getByLabelText("配音语速")).toHaveAttribute("aria-valuenow", "6");
     expect(screen.getByLabelText("图片提示词")).toHaveValue("suggested image");
     expect(writes()).toEqual([]);
   });
@@ -286,8 +288,8 @@ describe("ShotDesignPanel dialogue and voice gates", () => {
     fireEvent.click(screen.getByRole("button", { name: "载入最新版本" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("服务器新对白");
-    expect(screen.getByLabelText("配音音色")).toHaveValue("voice:voice-a");
-    expect(screen.getByLabelText("配音语速")).toHaveValue("-7");
+    expectSelectValue(screen.getByLabelText("配音音色"), "voice:voice-a");
+    expect(screen.getByLabelText("配音语速")).toHaveAttribute("aria-valuenow", "-7");
     expect(writes()).toHaveLength(1);
   });
 });

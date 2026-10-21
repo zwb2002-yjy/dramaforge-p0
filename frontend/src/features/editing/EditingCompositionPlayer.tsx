@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Button } from "../../components/ui";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { artifactContentUrl } from "../../lib/api";
 import type { TimelinePreviewRead } from "./api";
 import { timelineCopy as copy } from "./timelineCopy";
@@ -11,27 +10,48 @@ export function EditingCompositionPlayer({
   seekRequest,
   onPosition,
   onClipChange,
+  playRequest,
+  onPlayingChange,
 }: {
   projectId: string;
   plan: TimelinePreviewRead;
   seekRequest: { value: number; revision: number };
   onPosition: (milliseconds: number) => void;
   onClipChange: (clipId: string) => void;
+  playRequest: { playing: boolean; revision: number };
+  onPlayingChange: (playing: boolean) => void;
 }) {
-  const [index, setIndex] = useState(0);
-  const [elapsed, setElapsed] = useState(0);
+  const initialPosition = Math.max(0, Math.min(plan.duration_ms, seekRequest.value));
+  const initialIndex = Math.max(
+    0,
+    plan.clips.findIndex((item) => initialPosition < item.end_ms),
+  );
+  const [index, setIndex] = useState(
+    initialPosition === plan.duration_ms ? plan.clips.length - 1 : initialIndex,
+  );
+  const [elapsed, setElapsed] = useState(
+    initialPosition -
+      (plan.clips[initialPosition === plan.duration_ms ? plan.clips.length - 1 : initialIndex]
+        ?.start_ms ?? 0),
+  );
   const [playing, setPlaying] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const callbacks = useRef({ onPosition, onClipChange });
-  callbacks.current = { onPosition, onClipChange };
+  const clockEpoch = useRef(0);
+  const callbacks = useRef({ onPosition, onClipChange, onPlayingChange });
+  callbacks.current = { onPosition, onClipChange, onPlayingChange };
   const clip = plan.clips[index];
   const position = clip ? clip.start_ms + elapsed : 0;
+  const positionRef = useRef(position);
+  positionRef.current = position;
   const rate = clip ? (clip.source_out_ms - clip.source_in_ms) / clip.duration_ms : 1;
   const seek = useCallback(
     (value: number) => {
+      clockEpoch.current++;
+      videoRef.current?.pause();
+      audioRef.current?.pause();
       const bounded = Math.min(plan.duration_ms, Math.max(0, value));
       const next = plan.clips.findIndex((item) => bounded < item.end_ms);
       const selected = next < 0 ? plan.clips.length - 1 : next;
@@ -43,9 +63,18 @@ export function EditingCompositionPlayer({
     },
     [plan],
   );
-  useEffect(() => {
+  useLayoutEffect(() => {
     seek(seekRequest.value);
   }, [seekRequest, seek]);
+  useLayoutEffect(() => {
+    clockEpoch.current++;
+    if (playRequest.playing && positionRef.current >= plan.duration_ms) seek(0);
+    setPlaying(playRequest.playing);
+  }, [playRequest, plan.duration_ms, seek]);
+  useEffect(() => {
+    callbacks.current.onPlayingChange(playing);
+  }, [playing]);
+  useEffect(() => () => callbacks.current.onPlayingChange(false), []);
   useEffect(() => {
     callbacks.current.onPosition(position);
     if (clip) callbacks.current.onClipChange(clip.clip_id);
@@ -109,7 +138,9 @@ export function EditingCompositionPlayer({
   useEffect(() => {
     if (!playing || !ready || !clip) return;
     let frame = 0;
+    const epoch = clockEpoch.current;
     const tick = () => {
+      if (clockEpoch.current !== epoch) return;
       const video = videoRef.current;
       if (!video) return;
       const progress = Math.min(
@@ -126,6 +157,7 @@ export function EditingCompositionPlayer({
       )
         audio.currentTime = Math.min(audio.duration, progress / 1000);
       if (progress >= clip.duration_ms - 1) {
+        clockEpoch.current++;
         if (index === plan.clips.length - 1) {
           setElapsed(clip.duration_ms);
           setPlaying(false);
@@ -139,13 +171,6 @@ export function EditingCompositionPlayer({
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [playing, ready, clip, rate, index, plan]);
-  useEffect(() => {
-    const pauseHidden = () => {
-      if (document.hidden) setPlaying(false);
-    };
-    document.addEventListener("visibilitychange", pauseHidden);
-    return () => document.removeEventListener("visibilitychange", pauseHidden);
-  }, []);
   if (!clip) return null;
   return (
     <section
@@ -166,8 +191,12 @@ export function EditingCompositionPlayer({
           onLoadedData={prepareVideo}
           onSeeked={() => setReady(true)}
           onError={fail}
-          onEnded={() => {
-            if (elapsed < clip.duration_ms - 100) fail();
+          onEnded={(event) => {
+            if (event.currentTarget !== videoRef.current) return;
+            clockEpoch.current++;
+            // The media event can precede the last animation frame. Compare the
+            // actual source clock, not the previous React-rendered elapsed time.
+            if (event.currentTarget.currentTime * 1000 < clip.source_out_ms - 2) fail();
             else if (index === plan.clips.length - 1) {
               setElapsed(clip.duration_ms);
               setPlaying(false);
@@ -203,18 +232,6 @@ export function EditingCompositionPlayer({
       </p>
       {error && <p role="alert">{error}</p>}
       <progress aria-label="剪辑预览播放头" max={plan.duration_ms} value={position} />
-      <Button
-        data-testid="editing-composition-toggle"
-        disabled={!ready || !!error}
-        onClick={() => {
-          if (position >= plan.duration_ms) {
-            seek(0);
-            setPlaying(true);
-          } else setPlaying((value) => !value);
-        }}
-      >
-        {playing ? copy.pause : copy.play}
-      </Button>
     </section>
   );
 }

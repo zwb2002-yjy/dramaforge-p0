@@ -5,9 +5,15 @@ const MODEL_SOURCE_LABELS: Record<string, string> = {
   request_override: "本次请求显式指定",
 };
 
+export const modelPreflightCopy = {
+  failed: "预检未通过",
+  configure: "去设置模型",
+  diagnostics: "诊断详情",
+};
+
 export const MODEL_CONTRACT_BLOCKER_LABELS: Record<string, string> = {
   MODEL_OFFICIAL_EVIDENCE_GAP: "官方证据尚未覆盖当前合同的全部执行字段",
-  MODEL_LIFECYCLE_INACTIVE: "当前修订未开放新建请求",
+  MODEL_LIFECYCLE_INACTIVE: "当前模型版本不可用于生成",
   DYNAMIC_MODEL_CAPABILITY_UNVERIFIED: "远端模型的精确能力尚未确认",
   MODEL_CONTRACT_NOT_TESTED: "候选能力尚未接入执行",
   CATALOG_MANIFEST_HASH_MISMATCH: "合同内容不一致，需要维护核对",

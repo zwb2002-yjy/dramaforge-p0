@@ -1,3 +1,4 @@
+import { selectValue } from "./selectValue";
 import { expect, test } from "@playwright/test";
 import { PROJECT_ID, SHOT_ID, installProfessionalMock } from "./professional-mocks";
 
@@ -36,7 +37,7 @@ test("review workspace persists time and image-region annotations without changi
     element.dispatchEvent(new Event("loadedmetadata"));
   });
   await page.getByLabel("批注说明").fill("转头时人物身份漂移");
-  await page.getByLabel("批注类型").selectOption("range");
+  await selectValue(page.getByLabel("批注类型"), "range");
   await page.getByLabel("批注开始时间").fill("1.2");
   await page.getByLabel("批注结束时间").fill("2.5");
   expect(state.annotations).toHaveLength(0);

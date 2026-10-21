@@ -268,7 +268,7 @@ describe("Workstation shell", () => {
     expect(shell).toHaveClass("secondary-open");
     expect(navigation).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "关闭二级导航" }));
+    fireEvent.click(screen.getByRole("button", { name: "项目导航" }));
     expect(screen.getByRole("button", { name: "项目导航" })).toHaveAttribute(
       "aria-expanded",
       "false",

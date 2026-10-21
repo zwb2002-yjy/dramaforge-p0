@@ -1,3 +1,4 @@
+import { getSelectOption, selectValue, expectSelectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -116,9 +117,7 @@ describe("ExperimentBranchPanel", () => {
     fireEvent.change(screen.getByLabelText("实验名称"), {
       target: { value: "镜头4 关键帧模型实验" },
     });
-    fireEvent.change(screen.getByLabelText("实验模型"), {
-      target: { value: "agnes/agnes-image-2.1-flash" },
-    });
+    await selectValue(screen.getByLabelText("实验模型"), "agnes/agnes-image-2.1-flash");
     fireEvent.click(screen.getByRole("button", { name: "创建实验分支" }));
 
     await waitFor(() => expect(onCreateExperiment).toHaveBeenCalledTimes(1));
@@ -130,13 +129,13 @@ describe("ExperimentBranchPanel", () => {
 
     // Switching the stage carries the video model's binding through unchanged.
     // A successful create clears the form, so the second one is filled again.
-    fireEvent.change(screen.getByLabelText("实验阶段"), { target: { value: "video" } });
+    await selectValue(screen.getByLabelText("实验阶段"), "video");
+    expectSelectValue(screen.getByLabelText("实验阶段"), "video");
     fireEvent.change(screen.getByLabelText("实验名称"), {
       target: { value: "镜头4 视频模型实验" },
     });
-    fireEvent.change(screen.getByLabelText("实验模型"), {
-      target: { value: "agnes/agnes-video-v2.0" },
-    });
+    await selectValue(screen.getByLabelText("实验模型"), "agnes/agnes-video-v2.0");
+    await waitFor(() => expect(screen.getByRole("button", { name: "创建实验分支" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "创建实验分支" }));
     await waitFor(() => expect(onCreateExperiment).toHaveBeenCalledTimes(2));
     expect(onCreateExperiment).toHaveBeenLastCalledWith({
@@ -146,7 +145,7 @@ describe("ExperimentBranchPanel", () => {
     });
   });
 
-  it("refuses a model that has no binding for the chosen stage instead of failing at start", () => {
+  it("refuses a model that has no binding for the chosen stage instead of failing at start", async () => {
     renderPanel({
       modelCandidates: {
         keyframe: [candidate({})],
@@ -161,27 +160,30 @@ describe("ExperimentBranchPanel", () => {
         ],
       },
     });
-    const imageOption = screen.getByRole("option", {
-      name: /Agnes Image Flash/,
-    }) as HTMLOptionElement;
-    const videoOption = screen.getByRole("option", {
-      name: /Agnes Video V2.0/,
-    }) as HTMLOptionElement;
+    const imageOption = getSelectOption(
+      screen.getByLabelText("实验模型"),
+      /Agnes Image Flash/,
+    ) as HTMLOptionElement;
+    const videoOption = getSelectOption(
+      screen.getByLabelText("实验模型"),
+      /Agnes Video V2.0/,
+    ) as HTMLOptionElement;
     // Keyframe stage is the default, so the video-only model is not selectable.
-    expect(imageOption.disabled).toBe(false);
-    expect(videoOption.disabled).toBe(true);
+    expect(imageOption).not.toHaveAttribute("aria-disabled", "true");
+    expect(videoOption).toHaveAttribute("aria-disabled", "true");
     expect(videoOption.textContent).toContain("无关键帧阶段绑定");
 
-    fireEvent.change(screen.getByLabelText("实验阶段"), { target: { value: "video" } });
+    await selectValue(screen.getByLabelText("实验阶段"), "video");
     expect(
-      (screen.getByRole("option", { name: /Agnes Video V2.0/ }) as HTMLOptionElement).disabled,
-    ).toBe(false);
-    expect(
-      (screen.getByRole("option", { name: /Agnes Image Flash/ }) as HTMLOptionElement).disabled,
-    ).toBe(true);
+      getSelectOption(screen.getByLabelText("实验模型"), /Agnes Video V2.0/),
+    ).not.toHaveAttribute("aria-disabled", "true");
+    expect(getSelectOption(screen.getByLabelText("实验模型"), /Agnes Image Flash/)).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 
-  it("keeps an uncertified but bound model selectable and states the missing evidence", () => {
+  it("keeps an uncertified but bound model selectable and states the missing evidence", async () => {
     renderPanel({
       modelCandidates: {
         keyframe: [
@@ -194,9 +196,7 @@ describe("ExperimentBranchPanel", () => {
       },
     });
     fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "画质未验收" } });
-    fireEvent.change(screen.getByLabelText("实验模型"), {
-      target: { value: "agnes/agnes-image-2.1-flash" },
-    });
+    await selectValue(screen.getByLabelText("实验模型"), "agnes/agnes-image-2.1-flash");
     // Decision 2026-09-19: quality certification is evidence, not admission, so
     // the model stays selectable and the form says what is still missing.
     const eligibility = screen.getByTestId("experiment-model-eligibility");
@@ -217,10 +217,8 @@ describe("ExperimentBranchPanel", () => {
       },
     });
     fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "绑定已停用" } });
-    fireEvent.change(screen.getByLabelText("实验模型"), {
-      target: { value: "agnes/agnes-image-2.1-flash" },
-    });
-    expect(screen.getByTestId("experiment-model-eligibility").textContent).toContain("绑定已停用");
+    const disabledModel = getSelectOption(screen.getByLabelText("实验模型"), /绑定已停用/);
+    expect(disabledModel).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("button", { name: "创建实验分支" })).toBeDisabled();
   });
 
@@ -249,7 +247,7 @@ describe("ExperimentBranchPanel", () => {
     );
   });
 
-  it("labels stage availability per option and keeps the provider codes out of the surface", () => {
+  it("labels stage availability per option and keeps the provider codes out of the surface", async () => {
     const VIDEO_MODELS: ModelRead[] = [
       {
         id: "agnes/video-v2",
@@ -289,21 +287,23 @@ describe("ExperimentBranchPanel", () => {
       </QueryClientProvider>,
     );
 
-    fireEvent.change(screen.getByLabelText("实验阶段"), { target: { value: "video" } });
+    await selectValue(screen.getByLabelText("实验阶段"), "video");
     // A bound but uncertified model is selectable: certification is evidence.
-    const boundOption = screen.getByRole("option", {
-      name: "Agnes Video · 未认证",
-    }) as HTMLOptionElement;
-    expect(boundOption.disabled).toBe(false);
+    const boundOption = getSelectOption(
+      screen.getByLabelText("实验模型"),
+      "Agnes Video · 未认证",
+    ) as HTMLOptionElement;
+    expect(boundOption).not.toHaveAttribute("aria-disabled", "true");
     expect(boundOption.textContent).toContain("未认证");
     // A model without a binding for this stage is a hard stop.
-    const unboundOption = screen.getByRole("option", {
-      name: "Agnes Video Pro · 无视频阶段绑定",
-    }) as HTMLOptionElement;
-    expect(unboundOption.disabled).toBe(true);
+    const unboundOption = getSelectOption(
+      screen.getByLabelText("实验模型"),
+      "Agnes Video Pro · 无视频阶段绑定",
+    ) as HTMLOptionElement;
+    expect(unboundOption).toHaveAttribute("aria-disabled", "true");
     expect(unboundOption.textContent).toContain("无视频阶段绑定");
 
-    fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: "agnes/video-v2" } });
+    await selectValue(screen.getByLabelText("实验模型"), "agnes/video-v2");
     const eligibility = screen.getByTestId("experiment-model-eligibility");
     expect(eligibility.textContent).toContain("尚未通过质量验收");
     expect(eligibility.textContent).not.toContain("MODEL_QUALITY_GATE_MISSING");
@@ -330,9 +330,7 @@ describe("ExperimentBranchPanel", () => {
     // about eligibility and the Owner is not locked out.
     expect(screen.queryByTestId("experiment-model-eligibility")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "换模型验证" } });
-    fireEvent.change(screen.getByLabelText("实验模型"), {
-      target: { value: "agnes/agnes-video-v2.0" },
-    });
+    await selectValue(screen.getByLabelText("实验模型"), "agnes/agnes-video-v2.0");
     expect(screen.getByRole("button", { name: "创建实验分支" })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("button", { name: "创建实验分支" }));
@@ -362,8 +360,8 @@ it("creates separate candidate drafts without submitting paid generation", async
     onStartExperiment: start,
   });
   fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "多图比较" } });
-  fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: MODELS[0].id } });
-  fireEvent.change(screen.getByLabelText("候选任务数量"), { target: { value: "3" } });
+  await selectValue(screen.getByLabelText("实验模型"), MODELS[0].id);
+  await selectValue(screen.getByLabelText("候选任务数量"), "3");
   fireEvent.click(screen.getByRole("button", { name: "创建实验分支" }));
   await waitFor(() => expect(create).toHaveBeenCalledTimes(3));
   expect(create.mock.calls.map((args) => args[0].name)).toEqual([
@@ -385,7 +383,7 @@ it("freezes one independent prompt per candidate line", async () => {
     onCreateExperiment: create,
   });
   fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "提示词比较" } });
-  fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: MODELS[0].id } });
+  await selectValue(screen.getByLabelText("实验模型"), MODELS[0].id);
   fireEvent.change(screen.getByLabelText("候选提示词"), {
     target: { value: "冷色低机位\n暖色平视中景" },
   });
@@ -406,7 +404,7 @@ it("requires a visible selection when an experiment has multiple artifacts", asy
     />,
   );
   expect(screen.getByRole("button", { name: "采纳候选" })).toBeDisabled();
-  expect(screen.getAllByRole("img")).toHaveLength(2);
+  expect(document.querySelectorAll("img")).toHaveLength(2);
   fireEvent.click(screen.getByRole("radio", { name: "候选 2" }));
   fireEvent.click(screen.getByRole("button", { name: "采纳候选" }));
   await waitFor(() =>
@@ -436,8 +434,8 @@ it("stops a partially created group and preserves the same identities for recove
     onStartExperiment: start,
   });
   fireEvent.change(screen.getByLabelText("实验名称"), { target: { value: "稳定候选" } });
-  fireEvent.change(screen.getByLabelText("实验模型"), { target: { value: MODELS[0].id } });
-  fireEvent.change(screen.getByLabelText("候选任务数量"), { target: { value: "3" } });
+  await selectValue(screen.getByLabelText("实验模型"), MODELS[0].id);
+  await selectValue(screen.getByLabelText("候选任务数量"), "3");
   fireEvent.click(screen.getByRole("button", { name: "创建实验分支" }));
   await waitFor(() => expect(screen.getByTestId("experiment-message")).toHaveClass("status-bad"));
   expect(create).toHaveBeenCalledTimes(2);

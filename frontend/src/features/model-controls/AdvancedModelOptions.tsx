@@ -1,3 +1,4 @@
+import { Disclosure } from "../../components/ui";
 /**
  * AdvancedModelOptions (P4-03/MS8).
  *
@@ -28,12 +29,12 @@ export function AdvancedModelOptions({
   const keys = Object.keys(options);
   if (keys.length === 0) return null;
   return (
-    <details
+    <Disclosure
       data-testid="advanced-model-options"
       open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onOpenChange={(event) => setOpen(event)}
+      title={<>高级参数</>}
     >
-      <summary className="cursor-pointer text-sm font-medium text-gray-700">高级参数</summary>
       <div className="mt-2 space-y-3">
         {keys.map((key) => {
           const parameter = options[key];
@@ -52,6 +53,6 @@ export function AdvancedModelOptions({
           );
         })}
       </div>
-    </details>
+    </Disclosure>
   );
 }

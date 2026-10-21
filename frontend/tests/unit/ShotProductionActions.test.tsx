@@ -1,3 +1,4 @@
+import { selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -60,6 +61,7 @@ function planResponse({
   return {
     plan_fingerprint: fingerprint,
     plan: {
+      supports_prompt_override: false,
       plan_fingerprint: fingerprint,
       project_id: SHOT.project_id,
       shot_id: SHOT.id,
@@ -197,7 +199,7 @@ describe("ShotProductionActions", () => {
     renderActions([], [], undefined, false);
     // Without a formal frame the default next step is the frame itself.
     expect(screen.queryByTestId("generate-video")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("视频方式"), { target: { value: "text_to_video" } });
+    await selectValue(screen.getByLabelText("视频方式"), "text_to_video");
     await waitFor(() => expect(screen.getByTestId("generate-video")).toBeEnabled());
     expect(screen.getByTestId("production-stage-indicator")).toHaveTextContent(
       "视频生成 (仅用文字)",
@@ -249,7 +251,7 @@ describe("ShotProductionActions", () => {
       fingerprint: "hash-1",
     };
     renderActions([reference]);
-    fireEvent.change(screen.getByLabelText("视频方式"), { target: { value: "omni_reference" } });
+    await selectValue(screen.getByLabelText("视频方式"), "omni_reference");
     await waitFor(() => expect(screen.getByTestId("generate-video")).toBeEnabled());
     expect(screen.getByTestId("production-preflight-video")).toHaveTextContent(
       "SGLang H3 多素材参考 (Ref2VA) · v2",
@@ -304,7 +306,7 @@ describe("ShotProductionActions", () => {
     };
     renderActions([unrelated, lastFrame], [], undefined, true, formalFrame);
     expect(label).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("视频方式"), { target: { value: mode } });
+    await selectValue(screen.getByLabelText("视频方式"), mode);
     await waitFor(() => expect(screen.getByTestId("generate-video")).toBeEnabled());
     fireEvent.click(screen.getByTestId("generate-video"));
     await waitFor(() =>

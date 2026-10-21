@@ -1,5 +1,10 @@
 import type { SceneSummary, ShotLite, ShotOverviewRead } from "./api";
 
+export const sceneOverviewCopy = {
+  collapse: "收起分镜",
+  expand: "展开分镜",
+};
+
 export type SceneMediaFilter =
   | "all"
   | "missing-keyframe"

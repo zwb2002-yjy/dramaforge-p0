@@ -1,7 +1,6 @@
 .production-flow {
   display: grid;
-  gap: var(--df-space-4);
-  padding-block: var(--df-space-4);
+  min-width: 0;
 }
 .production-flow h2,
 .production-flow h3,

@@ -8,6 +8,18 @@ import "@testing-library/jest-dom/vitest";
 // a margin for the real condition, not a substitute for waiting on it.
 configure({ asyncUtilTimeout: 5_000 });
 
+// Ant Design observes real element geometry. Layout assertions run in Chromium.
+class TestResizeObserver implements ResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+Object.defineProperty(globalThis, "ResizeObserver", {
+  value: TestResizeObserver,
+  configurable: true,
+});
+Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { value() {}, configurable: true });
+
 // jsdom does not implement scrollTo; TanStack Router may call it.
 Object.defineProperty(window, "scrollTo", {
   value: () => undefined,

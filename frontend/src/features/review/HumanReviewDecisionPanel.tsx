@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
-import { Button } from "../../components/ui";
+import { Button, Field, Input, Alert } from "../../components/ui";
 import { queryKeys } from "../../lib/queryKeys";
 import { reviewBlockerLabel, reviewMachineStatusLabel } from "./reviewLabels";
 import {
@@ -199,9 +199,13 @@ function ReviewDecisionSession({
     <section className="qc-review-decision" data-testid={`review-decision-${reviewKind}`}>
       <h3>{title}</h3>
       {summary.isError && (
-        <p className="flash err" data-testid="review-summary-error" role="alert">
-          无法读取审查状态。
-        </p>
+        <Alert
+          data-testid="review-summary-error"
+          role="alert"
+          type="error"
+          showIcon
+          description={<>无法读取审查状态。</>}
+        />
       )}
       <dl className="qc-review-decision-facts">
         <dt>自动检查</dt>
@@ -225,20 +229,24 @@ function ReviewDecisionSession({
         </p>
       )}
       {blocker && (
-        <p className="flash err" data-testid="review-blocker" role="status">
-          {blocker}
-        </p>
+        <Alert
+          data-testid="review-blocker"
+          role="status"
+          type="error"
+          showIcon
+          description={<>{blocker}</>}
+        />
       )}
 
-      <label>
+      <Field>
         判断理由（必填）
-        <input
+        <Input
           aria-label={`${title}判断理由`}
           value={reason}
           onChange={(event) => setReason(event.target.value)}
           disabled={decide.isPending}
         />
-      </label>
+      </Field>
       <div className="qc-unsaved-actions">
         {showFormalAction && (stage === "formal_keyframe" || stage === "formal_video") && (
           <Button
@@ -255,7 +263,7 @@ function ReviewDecisionSession({
             {approveAndFormal.isPending ? "正在通过并设置…" : "通过并设为正式"}
           </Button>
         )}
-        <button
+        <Button
           type="button"
           data-testid={`review-approve-${reviewKind}`}
           disabled={
@@ -264,29 +272,29 @@ function ReviewDecisionSession({
           onClick={() => decide.mutate("approved")}
         >
           人工通过此素材
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="secondary"
           data-testid={`review-reject-${reviewKind}`}
           disabled={
             approveAndFormal.isPending || decide.isPending || !reason.trim() || !hasEvidence
           }
           onClick={() => decide.mutate("rejected")}
+          tone="default"
         >
           人工拒绝此素材
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="secondary"
           data-testid={`review-demo-confirm-${reviewKind}`}
           disabled={
             approveAndFormal.isPending || decide.isPending || !reason.trim() || !hasEvidence
           }
           onClick={() => decide.mutate("demo_confirmed")}
+          tone="default"
         >
           仅确认演示流程（不放行）
-        </button>
+        </Button>
       </div>
       {!hasEvidence && (
         <>

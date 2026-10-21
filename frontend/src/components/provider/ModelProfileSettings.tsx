@@ -1,4 +1,4 @@
-import { Button, Field, Select } from "../ui";
+import { Button, Field, Select, Card, Alert } from "../ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
@@ -153,11 +153,7 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
     if (!slot) return null;
     const candidates = modelsForCapability(slot, value);
     return (
-      <Select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        data-testid={`model-picker-${slotId}`}
-      >
+      <Select value={value} onChange={(e) => onChange(e)} data-testid={`model-picker-${slotId}`}>
         <option value="">使用默认方案</option>
         {candidates.map((m) => (
           <option key={m.id} value={m.id}>
@@ -172,26 +168,33 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
   const profileHasChanges = inheritsProfile && !save.isPending;
 
   return (
-    <section className="panel" data-testid="model-profile-settings">
+    <Card data-testid="model-profile-settings">
       <div className="panel-header">
         <h3>模型选择</h3>
       </div>
 
       {readFailed && (
-        <p className="flash err" role="alert">
-          模型配置读取失败，请重新读取后再保存。
-          <Button
-            type="button"
-            onClick={() => {
-              void slots.refetch();
-              void models.refetch();
-              void effective.refetch();
-              void projectProfile.refetch();
-            }}
-          >
-            重新读取
-          </Button>
-        </p>
+        <Alert
+          role="alert"
+          type="error"
+          showIcon
+          description={
+            <>
+              模型配置读取失败，请重新读取后再保存。
+              <Button
+                type="button"
+                onClick={() => {
+                  void slots.refetch();
+                  void models.refetch();
+                  void effective.refetch();
+                  void projectProfile.refetch();
+                }}
+              >
+                重新读取
+              </Button>
+            </>
+          }
+        />
       )}
       {readsPending && <p role="status">正在读取模型配置…</p>}
       {!advanced ? (
@@ -218,10 +221,10 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
             })}
           </div>
           <div className="toolbar">
-            <Button type="button" className="primary" onClick={saveSimple} disabled={!canSave}>
+            <Button type="button" tone="primary" onClick={saveSimple} disabled={!canSave}>
               保存模型选择
             </Button>
-            <Button type="button" className="ghost" onClick={() => setAdvanced(true)}>
+            <Button type="button" tone="ghost" onClick={() => setAdvanced(true)}>
               按环节配置
             </Button>
           </div>
@@ -246,10 +249,10 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
             })}
           </div>
           <div className="toolbar">
-            <Button type="button" className="primary" onClick={saveAdvanced} disabled={!canSave}>
+            <Button type="button" tone="primary" onClick={saveAdvanced} disabled={!canSave}>
               保存高级模式
             </Button>
-            <Button type="button" className="ghost" onClick={() => setAdvanced(false)}>
+            <Button type="button" tone="ghost" onClick={() => setAdvanced(false)}>
               返回常用模型
             </Button>
           </div>
@@ -263,6 +266,6 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
         </div>
       )}
       {profileHasChanges && <p className="muted">当前跟随默认方案；保存后仅覆盖此项目。</p>}
-    </section>
+    </Card>
   );
 }

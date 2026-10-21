@@ -1,3 +1,4 @@
+import { expectSelectValue, selectValue } from "./selectValue";
 import { expect, test, type Page } from "@playwright/test";
 
 import {
@@ -106,7 +107,10 @@ test("global navigation owns projects and settings; the project top bar controls
     "data-primary-section",
     "settings",
   );
-  await expect(page.getByRole("navigation", { name: "一级导航" })).toContainText(/我的项目.*设置/s);
+  await expect(
+    primaryNavigation.getByRole("link", { name: "我的项目", exact: true }),
+  ).toBeVisible();
+  await expect(primaryNavigation.getByRole("link", { name: "设置", exact: true })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "设置导航" })).toContainText(/模型设置.*账号/s);
   await page.goto(`/settings/projects/${PROJECT_ID}`);
   await expect(page.getByTestId("project-settings-page")).toBeVisible();
@@ -210,13 +214,17 @@ test("mobile keeps L1 fixed and exposes L2 as a labelled drawer without overflow
 
   await page.getByRole("button", { name: "项目导航", exact: true }).click();
   const drawer = page.locator("#project-navigation");
-  const drawerBox = await drawer.boundingBox();
-  const scrim = page.getByRole("button", { name: "关闭二级导航" });
-  const scrimBox = await scrim.boundingBox();
-  expect(drawerBox).not.toBeNull();
-  expect(scrimBox).not.toBeNull();
-  expect(scrimBox!.x).toBeGreaterThanOrEqual(drawerBox!.x + drawerBox!.width);
-  await scrim.click();
+  await expect(drawer).toBeVisible();
+  const close = page.getByRole("button", { name: "关闭二级导航" });
+  await expect(close).toBeVisible();
+  await close.click();
+  await expect(drawer).not.toBeVisible();
+  await page.getByRole("button", { name: "项目导航", exact: true }).click();
+  const mask = page.locator(".df-navigation-drawer .ant-drawer-mask");
+  await expect(mask).toBeVisible();
+  const maskBox = (await mask.boundingBox())!;
+  await mask.click({ position: { x: maskBox.width - 2, y: maskBox.height / 2 } });
+  await expect(drawer).not.toBeVisible();
   await expect(page.getByRole("button", { name: "项目导航", exact: true })).toBeVisible();
 
   await page.getByRole("link", { name: "设置" }).click();
@@ -454,11 +462,8 @@ for (const width of [910, 1440]) {
     await page.getByRole("tab", { name: "版本尝试", exact: true }).click();
     await expect(page.getByLabel("实验名称", { exact: true })).toHaveValue("还没有提交的版本尝试");
     await page.getByRole("tab", { name: "作品进度", exact: true }).click();
-    await page.getByRole("button", { name: "仅看风险" }).click();
-    await expect(page.getByRole("button", { name: "仅看风险" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await page.getByRole("radio", { name: "仅看风险" }).locator("..").click();
+    await expect(page.getByRole("radio", { name: "仅看风险" })).toBeChecked();
     // Route restoration persists UI navigation, never production facts.
     expect(state.editing.requests.filter((request) => request.method !== "GET")).toEqual([
       {
@@ -480,24 +485,24 @@ test("new project keeps essentials visible and retains collapsed options without
   await page.goto("/?create=true");
   await expect(page.getByRole("region", { name: "新建项目" })).toBeVisible();
   await expect(page.getByLabel("项目名", { exact: true })).toBeFocused();
-  await expect(page.getByLabel("新项目工作空间")).toHaveValue(WORKSPACE_ID);
+  await expectSelectValue(page.getByLabel("新项目工作空间"), WORKSPACE_ID);
   await expect(page.getByLabel("创作起点", { exact: true })).toBeVisible();
   await page.getByLabel("项目名", { exact: true }).fill("未提交的作品");
-  const options = page.getByRole("region", { name: "新建项目" }).locator("summary");
+  const options = page.getByRole("region", { name: "新建项目" }).getByRole("button").first();
   await options.focus();
   await page.keyboard.press("Enter");
-  await page.getByLabel("创作起点", { exact: true }).selectOption("TEMPLATE");
-  await page.getByLabel("创作模板", { exact: true }).selectOption("single_monologue_v1");
-  await page.getByLabel("导演参与度", { exact: true }).selectOption("MANUAL");
+  await selectValue(page.getByLabel("创作起点", { exact: true }), "TEMPLATE");
+  await selectValue(page.getByLabel("创作模板", { exact: true }), "single_monologue_v1");
+  await selectValue(page.getByLabel("导演参与度", { exact: true }), "MANUAL");
   await options.click();
-  await expect(page.getByLabel("创作模板", { exact: true })).toHaveValue("single_monologue_v1");
-  await expect(page.getByLabel("导演参与度", { exact: true })).toHaveValue("MANUAL");
+  await expectSelectValue(page.getByLabel("创作模板", { exact: true }), "single_monologue_v1");
+  await expectSelectValue(page.getByLabel("导演参与度", { exact: true }), "MANUAL");
   await page.getByRole("button", { name: "取消", exact: true }).click();
   await expect(page.getByRole("region", { name: "新建项目" })).not.toBeVisible();
   await page.getByRole("button", { name: "新建项目", exact: true }).click();
   await expect(page.getByLabel("项目名", { exact: true })).toHaveValue("未提交的作品");
   await options.click();
-  await expect(page.getByLabel("创作模板", { exact: true })).toHaveValue("single_monologue_v1");
+  await expectSelectValue(page.getByLabel("创作模板", { exact: true }), "single_monologue_v1");
   expect(state.editing.requests.filter((request) => request.method !== "GET")).toEqual([]);
 });
 

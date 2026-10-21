@@ -13,7 +13,7 @@
   flex-wrap: wrap;
   gap: var(--df-space-2);
 }
-.editing-audio-picker-actions select {
+.editing-audio-picker-actions .ant-select {
   flex: 1;
   min-width: 0;
 }

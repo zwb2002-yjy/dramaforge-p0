@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { updateProjectCreativeProfile, type ProjectRead } from "../../lib/api";
+import { Field, Select, Alert } from "../../components/ui";
 
 export type CreativeAutonomy = "AUTO" | "ASSIST" | "MANUAL";
 
@@ -72,23 +73,23 @@ export function CreativeAutonomySwitcher({
         </header>
       )}
       <div className="creative-autonomy-controls">
-        <label>
+        <Field layout={compact ? "inline" : "stacked"}>
           {compact ? "导演" : "当前策略"}
-          <select
+          <Select
             data-testid="creative-autonomy-select"
             aria-label="导演参与度"
             value={current}
             title={selected?.hint}
             disabled={update.isPending}
-            onChange={(event) => update.mutate(event.target.value as CreativeAutonomy)}
+            onChange={(event) => update.mutate(event as CreativeAutonomy)}
           >
             {AUTONOMY_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </select>
-        </label>
+          </Select>
+        </Field>
         {!compact && (
           <p className="creative-autonomy-hint" data-testid="creative-autonomy-hint">
             {selected ? `${selected.label}：${selected.hint}` : current}
@@ -100,13 +101,13 @@ export function CreativeAutonomySwitcher({
           </p>
         )}
         {message && (
-          <p
-            className={message.includes("失败") ? "flash err" : "flash ok"}
+          <Alert
+            type={message.includes("失败") ? "error" : "success"}
             data-testid="creative-autonomy-message"
             role={message.includes("失败") ? "alert" : "status"}
-          >
-            {message}
-          </p>
+            title={message}
+            showIcon
+          />
         )}
       </div>
     </section>

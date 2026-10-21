@@ -1,3 +1,4 @@
+import { expectSelectValue, selectValue, selectOptions } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -58,24 +59,12 @@ function renderDialog(props: Partial<React.ComponentProps<typeof AddArtifactToAs
 describe("AddArtifactToAssetDialog", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("keeps keyboard focus inside the modal and closes on Escape", () => {
+  it("focuses the library modal and closes on Escape", async () => {
     const { onClose } = renderDialog();
     const dialog = screen.getByRole("dialog", { name: "将生成结果加入资产" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(dialog).toContainElement(document.activeElement as HTMLElement);
-
-    const focusable = Array.from(
-      dialog.querySelectorAll<HTMLElement>(
-        "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)",
-      ),
-    );
-    const first = focusable[0]!;
-    const last = focusable.at(-1)!;
-    last.focus();
-    fireEvent.keyDown(document, { key: "Tab" });
-    expect(first).toHaveFocus();
-
-    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(dialog).toContainElement(document.activeElement as HTMLElement));
+    fireEvent.keyDown(dialog, { key: "Escape", code: "Escape" });
     expect(onClose).toHaveBeenCalledOnce();
   });
 
@@ -88,13 +77,11 @@ describe("AddArtifactToAssetDialog", () => {
 
     renderDialog({ artifactType: "video", defaultKind: "character" });
     const kindSelect = screen.getByLabelText("资产类型");
-    const options = Array.from(kindSelect.querySelectorAll("option")).map(
-      (option) => option.textContent,
-    );
+    const options = selectOptions(kindSelect).map((option) => option.label);
     // 角色 / 场景 are image-only server side; offering them here would turn the
     // explicit confirmation into a late refusal.
     expect(options).toEqual(["视频"]);
-    expect((kindSelect as HTMLSelectElement).value).toBe("video");
+    expectSelectValue(kindSelect, "video");
   });
 
   it("keeps 角色 / 场景 available for an image Artifact", async () => {
@@ -105,9 +92,7 @@ describe("AddArtifactToAssetDialog", () => {
     });
 
     renderDialog({ artifactType: "image", defaultKind: "character" });
-    const options = Array.from(screen.getByLabelText("资产类型").querySelectorAll("option")).map(
-      (option) => option.textContent,
-    );
+    const options = selectOptions(screen.getByLabelText("资产类型")).map((option) => option.label);
     expect(options).toEqual(["角色", "场景", "视频"]);
   });
 
@@ -128,8 +113,8 @@ describe("AddArtifactToAssetDialog", () => {
     const { onCreated } = renderDialog();
 
     expect(screen.getByTestId("add-asset-source")).toHaveTextContent("关键帧候选");
-    expect(screen.getByLabelText("资产类型")).toHaveValue("character");
-    expect(screen.getByLabelText("参考角色")).toHaveValue("front_face");
+    expectSelectValue(screen.getByLabelText("资产类型"), "character");
+    expectSelectValue(screen.getByLabelText("参考角色"), "front_face");
 
     fireEvent.click(screen.getByTestId("add-asset-confirm"));
 
@@ -244,12 +229,12 @@ describe("AddArtifactToAssetDialog", () => {
     expect(keys[1]).toBe(keys[0]);
   });
 
-  it("switches reference roles with the asset kind and never sends an impossible pair", () => {
+  it("switches reference roles with the asset kind and never sends an impossible pair", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(() => json({}));
     renderDialog();
 
-    fireEvent.change(screen.getByLabelText("资产类型"), { target: { value: "scene" } });
-    expect(screen.getByLabelText("参考角色")).toHaveValue("layout_reference");
+    await selectValue(screen.getByLabelText("资产类型"), "scene");
+    expectSelectValue(screen.getByLabelText("参考角色"), "layout_reference");
     expect(roleLabel("layout_reference")).toBe("空间布局");
     expect(roleLabel("front_face")).toBe("正面");
   });

@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
-import { Button, Dialog } from "../../components/ui";
+import { Button, Dialog, Dropdown } from "../../components/ui";
 import { deleteProject, type ProjectRead } from "../../lib/api";
 import { forgetProject } from "../../lib/navigationPreferences";
 import { queryKeys } from "../../lib/queryKeys";
@@ -12,7 +12,8 @@ export function ProjectActions({
   project: Pick<ProjectRead, "id" | "name" | "version">;
 }) {
   const [target, setTarget] = useState<Pick<ProjectRead, "id" | "name" | "version"> | null>(null);
-  const menuRef = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
   const queryClient = useQueryClient();
   const deletion = useMutation({
     retry: false,
@@ -22,39 +23,51 @@ export function ProjectActions({
       forgetProject(confirmed.id);
       queryClient.removeQueries({ predicate: (query) => query.queryKey.includes(confirmed.id) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.workspace.projectsRoot() });
-      setTarget(null);
+      setOpen(false);
     },
   });
   const close = () => {
     if (!deletion.isPending) {
-      setTarget(null);
-      deletion.reset();
+      setOpen(false);
     }
   };
   return (
     <>
-      <details className="df-project-menu" ref={menuRef}>
-        <summary className="df-btn ghost" aria-label={`更多操作 ${project.name}`}>
+      <Dropdown
+        trigger={["click"]}
+        menu={{
+          items: [
+            {
+              key: "delete",
+              label: "删除项目",
+              danger: true,
+              icon: <Trash2 size={16} aria-hidden="true" />,
+              onClick: () => {
+                setTarget({ id: project.id, name: project.name, version: project.version });
+                setOpen(true);
+              },
+            },
+          ],
+        }}
+      >
+        <Button
+          ref={trigger}
+          className="df-project-menu"
+          tone="ghost"
+          aria-label={`更多操作 ${project.name}`}
+        >
           <MoreHorizontal size={18} aria-hidden="true" />
-        </summary>
-        <div className="df-project-menu-items">
-          <Button
-            tone="ghost"
-            onClick={() => {
-              if (menuRef.current) {
-                menuRef.current.open = false;
-                menuRef.current.querySelector("summary")?.focus();
-              }
-              setTarget({ id: project.id, name: project.name, version: project.version });
-            }}
-          >
-            <Trash2 size={16} aria-hidden="true" />
-            删除项目
-          </Button>
-        </div>
-      </details>
+        </Button>
+      </Dropdown>
       {target && (
         <Dialog
+          open={open}
+          afterClose={() => {
+            setTarget(null);
+            deletion.reset();
+            // The opening menu item no longer exists; use its stable menu trigger.
+            trigger.current?.focus({ preventScroll: true });
+          }}
           title={`删除项目「${target.name}」？`}
           onClose={close}
           testId="project-delete-dialog"

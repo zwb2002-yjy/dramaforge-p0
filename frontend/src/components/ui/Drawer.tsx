@@ -1,13 +1,6 @@
-import { X } from "lucide-react";
-import { useId, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { Drawer as AntDrawer, Typography } from "antd";
+import type { ReactNode } from "react";
 
-import { useModalDialog } from "./useModalDialog";
-
-/**
- * The single drawer primitive: sliding modal from the right edge,
- * focus trap, Escape, restore focus.
- */
 export function Drawer({
   open,
   onClose,
@@ -17,50 +10,50 @@ export function Drawer({
   actions,
   size = "default",
   testId,
+  placement = "right",
+  closeLabel = "关闭",
+  className,
+  inline = false,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   kicker?: string;
-  children: ReactNode;
+  children?: ReactNode;
   actions?: ReactNode;
   size?: "default" | "wide";
   testId?: string;
+  placement?: "left" | "right";
+  closeLabel?: string;
+  className?: string;
+  inline?: boolean;
 }) {
-  const dialogRef = useModalDialog<HTMLElement>(open, onClose);
-  const titleId = useId();
-
-  if (!open) return null;
-
-  return createPortal(
-    <div
-      className="df-drawer-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+  return (
+    <AntDrawer
+      open={open}
+      onClose={onClose}
+      getContainer={inline ? false : undefined}
+      rootStyle={inline ? { position: "fixed" } : undefined}
+      focusable={{ trap: true }}
+      title={
+        <span role="heading" aria-level={2}>
+          {kicker && (
+            <Typography.Text aria-hidden="true" type="secondary">
+              {kicker} ·{" "}
+            </Typography.Text>
+          )}
+          {title}
+        </span>
+      }
+      placement={placement}
+      rootClassName={className}
+      size={size === "wide" ? "large" : "default"}
+      footer={actions}
+      destroyOnHidden={false}
+      closable={{ "aria-label": closeLabel }}
+      data-testid={testId}
     >
-      <section
-        ref={dialogRef}
-        className={size === "wide" ? "df-drawer wide" : "df-drawer"}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        data-testid={testId}
-      >
-        <header className="df-drawer-header">
-          <div>
-            {kicker && <p className="kicker">{kicker}</p>}
-            <h2 id={titleId}>{title}</h2>
-          </div>
-          <button type="button" className="df-drawer-close" aria-label="关闭" onClick={onClose}>
-            <X size={18} aria-hidden="true" />
-          </button>
-        </header>
-        <div className="df-drawer-body">{children}</div>
-        {actions && <footer className="df-drawer-actions">{actions}</footer>}
-      </section>
-    </div>,
-    document.body,
+      {children}
+    </AntDrawer>
   );
 }

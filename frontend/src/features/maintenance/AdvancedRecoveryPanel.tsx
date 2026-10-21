@@ -1,3 +1,4 @@
+import { Disclosure, Button, Alert } from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -73,16 +74,24 @@ export function AdvancedRecoveryPanel() {
       </p>
       {message && <p role="status">{message}</p>}
       {error && (
-        <div className="flash err" data-testid="advanced-recovery-error" role="alert">
-          <p>重放未成功。状态可能已被其他会话改变，请刷新后再试；不会盲目重试。</p>
-          <details
-            className="editing-diagnostics"
-            data-testid="advanced-recovery-error-diagnostics"
-          >
-            <summary>开发 / 诊断详情（只读）</summary>
-            <small>{error}</small>
-          </details>
-        </div>
+        <Alert
+          data-testid="advanced-recovery-error"
+          role="alert"
+          type="error"
+          showIcon
+          description={
+            <>
+              <p>重放未成功。状态可能已被其他会话改变，请刷新后再试；不会盲目重试。</p>
+              <Disclosure
+                className="editing-diagnostics"
+                data-testid="advanced-recovery-error-diagnostics"
+                title={<>开发 / 诊断详情（只读）</>}
+              >
+                <small>{error}</small>
+              </Disclosure>
+            </>
+          }
+        />
       )}
       <ul className="df-recovery-list">
         {failures.map((item) => (
@@ -95,21 +104,21 @@ export function AdvancedRecoveryPanel() {
               {itemReason(item).label} · 失败 {item.attempts} 次 ·{" "}
               {formatFailureTime(item.failed_at)}
             </small>
-            <details
+            <Disclosure
               className="editing-diagnostics"
               data-testid={`recovery-diagnostics-${item.id}`}
+              title={<>开发 / 诊断详情（只读）</>}
             >
-              <summary>开发 / 诊断详情（只读）</summary>
               <small>{item.detail}</small>
-            </details>
-            <button
+            </Disclosure>
+            <Button
               type="button"
               disabled={replay.isPending}
               onClick={() => replay.mutate(item)}
               data-testid={`recovery-replay-${item.id}`}
             >
               {replay.isPending ? "重放中…" : REPLAY_LABELS[item.kind]}
-            </button>
+            </Button>
           </li>
         ))}
       </ul>

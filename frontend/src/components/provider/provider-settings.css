@@ -58,7 +58,7 @@
   gap: var(--df-space-1);
   align-content: start;
 }
-.df-btn.df-provider-option {
+.df-action.df-provider-option {
   display: flex;
   justify-content: start;
   width: 100%;
@@ -159,11 +159,11 @@
   border: 0;
   background: none;
   overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
   color: var(--df-text-muted);
   font-family: var(--df-font-mono);
   font-size: var(--df-font-size-meta);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .df-provider-empty {
   display: grid;
@@ -222,17 +222,18 @@
   gap: var(--df-space-3);
   padding: var(--df-space-2) 0;
   border-bottom: 1px solid var(--df-border-subtle);
+  flex-wrap: wrap;
 }
 .df-model-picker li:last-child {
   border-bottom: 0;
 }
-.df-model-picker li > .df-input {
-  flex: 0 0 var(--df-mapping-select-w);
+.df-model-picker li > .ant-select {
+  flex: 1 1 var(--df-mapping-select-w);
+  min-width: min(100%, var(--df-mapping-select-w));
 }
-.df-field.df-model-check {
-  flex: 1;
-  gap: var(--df-space-3);
-  cursor: pointer;
+.ant-form-item.df-model-check {
+  flex: 1 1 var(--df-form-field-min);
+  min-width: 0;
 }
 .df-model-name {
   display: grid;

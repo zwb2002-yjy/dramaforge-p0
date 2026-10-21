@@ -86,26 +86,6 @@
 .qc-asset-card .qc-asset-status {
   justify-self: start;
 }
-.qc-asset-card .df-disclosure {
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-.qc-asset-card .df-disclosure summary {
-  padding: var(--df-space-2) 0;
-  font-size: var(--df-text-sm);
-  color: var(--df-text-secondary);
-}
-.qc-asset-card .df-disclosure-body {
-  padding: var(--df-space-3) 0 0;
-  display: grid;
-  gap: var(--df-space-3);
-}
-.qc-asset-card .df-disclosure-body > .df-btn {
-  justify-self: start;
-}
 .qc-asset-card form {
   display: flex;
   flex-wrap: wrap;

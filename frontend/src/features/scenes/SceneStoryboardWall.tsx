@@ -1,11 +1,18 @@
-import { PageHeader, EmptyState, Button } from "../../components/ui";
+import {
+  PageHeader,
+  EmptyState,
+  Button,
+  ActionLink,
+  Alert,
+  SegmentedControl,
+} from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SceneMediaGallery } from "./SceneMediaGallery";
 import {
   SCENE_MEDIA_FILTERS as FILTERS,
   sceneMatchesFilter,
+  sceneOverviewCopy as viewCopy,
   type SceneMediaFilter,
 } from "./sceneOverviewState";
 import { SCENE_ACTIVE_REFETCH_MS } from "../production";
@@ -18,6 +25,20 @@ import { copyScene, fetchScenes, reorderScene } from "./api";
 
 type SceneStoryboardWallProps = { projectId: string };
 type WallSelection = { projectId: string; filter: SceneMediaFilter; sceneId: string | null };
+
+function rememberSelection(selection: WallSelection) {
+  try {
+    sessionStorage.setItem(
+      "df:scene-wall:" + selection.projectId,
+      JSON.stringify({
+        filter: selection.filter,
+        sceneId: selection.sceneId,
+      }),
+    );
+  } catch {
+    // Browser storage is optional; browsing still works without it.
+  }
+}
 
 function readSelection(projectId: string): WallSelection {
   const fallback: WallSelection = { projectId, filter: "all", sceneId: null };
@@ -38,10 +59,11 @@ function readSelection(projectId: string): WallSelection {
   }
 }
 
-/** Read-only Scene/Shot projection: one expanded scene avoids eager per-scene workspace requests. */
+/** Every scene exposes its shots; offscreen galleries defer their own workspace reads. */
 export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
   const queryClient = useQueryClient();
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [collapsedScenes, setCollapsedScenes] = useState<Set<string>>(() => new Set());
   const [selection, setSelection] = useState<WallSelection>(() => readSelection(projectId));
   const current = selection.projectId === projectId ? selection : readSelection(projectId);
   useEffect(() => {
@@ -49,18 +71,15 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
   }, [projectId, selection.projectId]);
   useEffect(() => {
     if (selection.projectId !== projectId) return;
-    try {
-      sessionStorage.setItem(
-        "df:scene-wall:" + projectId,
-        JSON.stringify({
-          filter: selection.filter,
-          sceneId: selection.sceneId,
-        }),
-      );
-    } catch {
-      // Browser storage is optional; navigation still works without it.
-    }
+    rememberSelection(selection);
   }, [projectId, selection]);
+  const focusScene = (sceneId: string) => {
+    if (current.sceneId === sceneId) return;
+    const next = { projectId, filter: current.filter, sceneId };
+    // Remember before a native link can unload this page.
+    rememberSelection(next);
+    setSelection(next);
+  };
 
   const scenes = useQuery({
     queryKey: queryKeys.scene.summaries(projectId),
@@ -115,15 +134,19 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
 
   return (
     <div data-testid="scene-storyboard-wall" className="qc-scene-wall scene-browser">
-      <PageHeader
-        title="分镜总览"
-        description="按场景查看全片镜头。展开场景后可直接查看正式画面、视频和缺失位置。"
-      />
+      <PageHeader title="分镜总览" />
       {scenes.isError && (
-        <div className="flash err" role="alert">
-          无法读取场景：{String(scenes.error)}
-          <Button onClick={() => void scenes.refetch()}>重新读取场景</Button>
-        </div>
+        <Alert
+          role="alert"
+          type="error"
+          showIcon
+          description={
+            <>
+              无法读取场景：{String(scenes.error)}
+              <Button onClick={() => void scenes.refetch()}>重新读取场景</Button>
+            </>
+          }
+        />
       )}
       {scenes.isSuccess && rows.length > 0 && (
         <>
@@ -134,16 +157,16 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
               正式视频 {formalVideos} / {totalShots}
             </span>
           </div>
-          <div className="scene-wall-filters" role="group" aria-label="筛选分镜">
-            {FILTERS.map((option) => (
-              <Button
-                key={option.value}
-                aria-pressed={current.filter === option.value}
-                onClick={() => setSelection({ projectId, filter: option.value, sceneId: null })}
-              >
-                {option.label}
-              </Button>
-            ))}
+          <div className="scene-wall-filters">
+            <SegmentedControl
+              label="筛选分镜"
+              options={FILTERS}
+              value={current.filter}
+              onChange={(filter) => {
+                setCollapsedScenes(new Set());
+                setSelection({ projectId, filter, sceneId: null });
+              }}
+            />
           </div>
         </>
       )}
@@ -151,24 +174,34 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
       <ul className="qc-scene-wall-grid">
         {filteredRows.map((scene) => {
           const index = rows.findIndex((row) => row.id === scene.id);
-          const expanded = activeSceneId === scene.id;
+          const sceneKey = `${projectId}:${scene.id}`;
+          const expanded = !collapsedScenes.has(sceneKey);
           return (
-            <li key={scene.id} className="qc-scene-card" data-testid="scene-card">
+            <li
+              key={scene.id}
+              className="qc-scene-card"
+              data-testid="scene-card"
+              onPointerDownCapture={() => focusScene(scene.id)}
+              onFocusCapture={() => focusScene(scene.id)}
+            >
               <header
                 draggable
                 onDragStart={() => setDragIndex(index)}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={() => onDrop(index)}
               >
-                <a
-                  href={"/projects/" + projectId + "/scenes/" + scene.id}
-                  className="qc-scene-enter"
-                >
-                  {scene.location_name}
-                </a>
-                <span>
-                  {scene.episode_number}.{scene.scene_number} · {timeOfDayLabel(scene.time_of_day)}
-                </span>
+                <div className="scene-heading">
+                  <a
+                    href={"/projects/" + projectId + "/scenes/" + scene.id}
+                    className="qc-scene-enter"
+                  >
+                    {scene.location_name}
+                  </a>
+                  <span>
+                    {scene.episode_number}.{scene.scene_number} ·{" "}
+                    {timeOfDayLabel(scene.time_of_day)}
+                  </span>
+                </div>
                 <div className="scene-header-actions">
                   <span className="scene-wall-count">{scene.shot_count} 镜头</span>
                   <span className="scene-wall-count">
@@ -193,11 +226,17 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
                   <Button
                     aria-expanded={expanded}
                     aria-controls={"scene-media-" + scene.id}
-                    onClick={() =>
-                      setSelection({ projectId, filter: current.filter, sceneId: scene.id })
-                    }
+                    onClick={() => {
+                      setCollapsedScenes((before) => {
+                        const next = new Set(before);
+                        if (next.has(sceneKey)) next.delete(sceneKey);
+                        else next.add(sceneKey);
+                        return next;
+                      });
+                      setSelection({ projectId, filter: current.filter, sceneId: scene.id });
+                    }}
                   >
-                    {expanded ? "正在查看镜头" : "查看镜头"}
+                    {expanded ? viewCopy.collapse : viewCopy.expand}
                   </Button>
                   <Button
                     disabled={copy.isPending}
@@ -216,6 +255,7 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
                     projectId={projectId}
                     scene={scene}
                     filter={current.filter}
+                    eager={activeSceneId === scene.id}
                   />
                 )}
               </div>
@@ -236,9 +276,9 @@ export function SceneStoryboardWall({ projectId }: SceneStoryboardWallProps) {
           title="先写下你的故事"
           description="导入剧本并确认分场后，这里会按顺序呈现每一段故事。"
         >
-          <Link className="df-btn primary" to="/projects/$projectId/script" params={{ projectId }}>
+          <ActionLink tone="primary" to="/projects/$projectId/script" params={{ projectId }}>
             去写剧本
-          </Link>
+          </ActionLink>
         </EmptyState>
       )}
     </div>

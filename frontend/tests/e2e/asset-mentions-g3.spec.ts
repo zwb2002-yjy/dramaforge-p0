@@ -103,12 +103,20 @@ test("Prompt @Assets persist, rename and delete through the existing binding and
   );
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
   const inspector = page.getByTestId("shot-inspector");
-  await inspector.getByTestId("shot-design-prompts").locator(":scope > summary").click();
+  await inspector.getByTestId("shot-design-prompts").getByRole("button").first().click();
   const prompt = inspector.getByRole("textbox", { name: "图片提示词", exact: true });
-  await prompt.fill("@林");
-  await expect(prompt.locator("..").locator("..").getByRole("listbox")).toBeVisible();
+  await prompt.fill("");
+  await prompt.pressSequentially("@林");
+  // Completion belongs to the caret; text insertion alone does not fix its position.
+  await prompt.press("End");
+  await expect(inspector.getByRole("listbox")).toBeVisible();
+  await expect(inspector.getByRole("option", { name: /林墨/ })).toBeVisible();
   await prompt.press("Enter");
   await expect(prompt).toHaveValue("@林墨 ");
+  await expect(prompt).toBeFocused();
+  expect(await prompt.evaluate((element: HTMLTextAreaElement) => element.selectionStart)).toBe(
+    "@林墨 ".length,
+  );
   await expect(inspector.getByTestId("mention-unresolved")).toHaveCount(0);
   expect(bindings[0]).toMatchObject({
     asset_id: assetId,
@@ -119,6 +127,7 @@ test("Prompt @Assets persist, rename and delete through the existing binding and
   });
   await inspector.getByTestId("shot-primary-save").click();
   await expect(inspector.getByTestId("shot-design-message")).toHaveText("已保存。");
+  await expect(inspector.getByTestId("shot-design-saved-state")).toBeVisible();
   await inspector.getByTestId("inspect-shot-plan").click();
   await expect(inspector.getByTestId("shot-prompt-reference-map")).toContainText(
     "@林墨 → 参考图片1",
@@ -139,6 +148,11 @@ test("Prompt @Assets persist, rename and delete through the existing binding and
     state.editing.requests.filter((request) => request.path.endsWith("/executions")),
   ).toHaveLength(0);
 
+  await page
+    .getByTestId("shot-preflight-drawer")
+    .getByRole("button", { name: "取消", exact: true })
+    .click();
+  await expect(page.getByTestId("shot-preflight-drawer")).toBeHidden();
   await inspector.getByRole("button", { name: "编辑引用 @林墨" }).click();
   await inspector.getByLabel(`引用标签 ${bindingId}`).fill("@林墨_正面");
   await inspector.getByLabel(`引用顺序 ${bindingId}`).fill("3");
@@ -147,16 +161,23 @@ test("Prompt @Assets persist, rename and delete through the existing binding and
   await expect(inspector.getByTestId("shot-primary-save")).toBeVisible();
   await inspector.getByTestId("shot-primary-save").click();
   await expect(inspector.getByTestId("shot-design-message")).toHaveText("已保存。");
+  await expect(inspector.getByTestId("shot-design-saved-state")).toBeVisible();
   await inspector.getByTestId("inspect-shot-plan").click();
   await expect(inspector.getByTestId("shot-prompt-reference-map")).toContainText(
     "@林墨_正面 → 参考图片1",
   );
   expect(bindings[0]).toMatchObject({ asset_id: assetId, sort_order: 3, version: 2 });
 
+  await page
+    .getByTestId("shot-preflight-drawer")
+    .getByRole("button", { name: "取消", exact: true })
+    .click();
+  await expect(page.getByTestId("shot-preflight-drawer")).toBeHidden();
   await inspector.getByRole("button", { name: "删除提示词引用 @林墨_正面" }).click();
   await expect(prompt).toHaveValue(" ");
   await inspector.getByTestId("shot-primary-save").click();
   await expect(inspector.getByTestId("shot-design-message")).toHaveText("已保存。");
+  await expect(inspector.getByTestId("shot-design-saved-state")).toBeVisible();
   await inspector.getByTestId("inspect-shot-plan").click();
   await expect.poll(() => plans.length).toBe(3);
   expect(plans[2].references).toEqual([]);

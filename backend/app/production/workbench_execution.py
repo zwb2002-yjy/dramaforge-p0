@@ -50,7 +50,12 @@ from app.production.service import GraphService
 from app.providers.capabilities import Capability
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.errors import ProviderError
-from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
+from app.providers.manifest import (
+    InputModeSpec,
+    ModelCapabilityManifest,
+    ParameterSpec,
+    to_v3_model_manifest,
+)
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.model_resolution import ExecutionModelResolver
 from app.providers.models import ProviderConnection, ProviderConnectionRevision
@@ -1267,6 +1272,10 @@ class WorkbenchExecutionService:
             transport_profile_id="workbench",
         )
 
+        shot = await self._session.get(Shot, execution_input.shot_id)
+        if shot is None or shot.project_id != project.id:
+            raise WorkbenchExecutionError("shot not found")
+
         if execution_input.stage == "video" and (last_frame_video or first_last_video):
             last_frames = [ref for ref in references if ref.purpose == "last_frame"]
             if len(last_frames) != 1:
@@ -1277,9 +1286,6 @@ class WorkbenchExecutionService:
         ):
             # Video execution requires the shot formal keyframe; the latest
             # image must never be used as a fallback (03 §38/§39).
-            shot = await self._session.get(Shot, execution_input.shot_id)
-            if shot is None or shot.project_id != project.id:
-                raise WorkbenchExecutionError("shot not found")
             try:
                 formal = await require_formal_keyframe(
                     self._session,
@@ -1309,6 +1315,7 @@ class WorkbenchExecutionService:
             "video.generate" if execution_input.stage == "video" else "image.generate"
         )
         operation_manifest = capability_manifest.operations.get(operation_key)
+        matched_input_contract = None
         if operation_manifest is not None and operation_manifest.input_contracts:
             try:
                 selected_contract = select_workbench_contract(
@@ -1323,26 +1330,34 @@ class WorkbenchExecutionService:
                     str(exc), details={"code": "MODEL_INPUT_COMBINATION_UNSUPPORTED"}
                 ) from exc
             effective_mode_id = selected_contract.contract_id
+            matched_input_contract = operation_manifest.input_contracts.get(effective_mode_id)
             resolution = resolution.model_copy(update={"mode_id": effective_mode_id})
 
         # The Worker compiles the project's aspect ratio into the actual request.
         # Reject a fixed or enumerated output mismatch in the read-only preview,
         # before a queued run can turn a predictable contract error into a failure.
         spec = v3_manifest.capability_specs.get(capability)
+        mode_spec: InputModeSpec | None = None
         if spec is not None:
-            ratio_spec = spec.mode_spec(effective_mode_id).common_options.get("aspect_ratio")
-            if ratio_spec is not None and ratio_spec.enum != ["adaptive"]:
-                try:
-                    validate_parameter("aspect_ratio", project.aspect_ratio, ratio_spec)
-                except ProviderError as exc:
-                    raise WorkbenchExecutionError(
-                        f"Selected model cannot output project aspect ratio {project.aspect_ratio}",
-                        details={
-                            "code": "MODEL_OUTPUT_ASPECT_RATIO_UNSUPPORTED",
-                            "aspect_ratio": project.aspect_ratio,
-                            "supported": ratio_spec.enum,
-                        },
-                    ) from exc
+            try:
+                mode_spec = spec.mode_spec(effective_mode_id)
+            except ValueError:
+                mode_spec = None
+            if mode_spec is not None:
+                ratio_spec = mode_spec.common_options.get("aspect_ratio")
+                if ratio_spec is not None and ratio_spec.enum != ["adaptive"]:
+                    try:
+                        validate_parameter("aspect_ratio", project.aspect_ratio, ratio_spec)
+                    except ProviderError as exc:
+                        raise WorkbenchExecutionError(
+                            "Selected model cannot output project aspect ratio "
+                            f"{project.aspect_ratio}",
+                            details={
+                                "code": "MODEL_OUTPUT_ASPECT_RATIO_UNSUPPORTED",
+                                "aspect_ratio": project.aspect_ratio,
+                                "supported": ratio_spec.enum,
+                            },
+                        ) from exc
 
         compiled = compile_references(
             manifest=v3_manifest,
@@ -1358,6 +1373,201 @@ class WorkbenchExecutionService:
             project=project,
             semantic_intent=semantic_intent,
         )
+
+        gen_settings = _mapping(_mapping(shot.director_state).get("generation_settings"))
+        stage_settings = _mapping(gen_settings.get(execution_input.stage))
+
+        # Collect all declared options from contract / mode_spec / option_schema
+        declared_all_options: dict[str, ParameterSpec] = {}
+        if spec is not None:
+            declared_all_options.update(spec.common_options)
+            declared_all_options.update(spec.native_options)
+            if mode_spec is not None:
+                declared_all_options.update(mode_spec.common_options)
+                declared_all_options.update(mode_spec.native_options)
+        if matched_input_contract is not None:
+            declared_all_options.update(matched_input_contract.common_options)
+            declared_all_options.update(matched_input_contract.native_options)
+        if operation_manifest is not None and operation_manifest.output_options:
+            declared_all_options.update(operation_manifest.output_options)
+
+        raw_option_schema = entry.capability_manifest_json.get("option_schema") or {}
+        raw_options = (
+            raw_option_schema.get("options") if isinstance(raw_option_schema, dict) else {}
+        )
+        if isinstance(raw_options, dict):
+            for opt_k, opt_v in raw_options.items():
+                if opt_k not in declared_all_options and isinstance(opt_v, dict):
+                    opt_type = opt_v.get("type") or "string"
+                    if opt_type in {"string", "integer", "number", "boolean", "array", "object"}:
+                        declared_all_options[opt_k] = ParameterSpec.model_validate(
+                            {
+                                "type": opt_type,
+                                "enum": opt_v.get("values"),
+                                "default": opt_v.get("default"),
+                                "minimum": opt_v.get("minimum"),
+                                "maximum": opt_v.get("maximum"),
+                            }
+                        )
+
+        user_common_options = _mapping(stage_settings.get("common_options"))
+        user_native_options = _mapping(stage_settings.get("native_options"))
+
+        # MP-05: Check conflicting values for the same key between common and native options
+        common_keys = set(user_common_options.keys())
+        native_keys = set(user_native_options.keys())
+        for k in common_keys.intersection(native_keys):
+            if user_common_options[k] != user_native_options[k]:
+                raise WorkbenchExecutionError(
+                    f"Option '{k}' has conflicting values in common_options and native_options",
+                    details={"code": "MODEL_OPTION_CONFLICT", "option": k},
+                )
+
+        # MP-05: Reject undeclared options and validate option values
+        user_all_options = {**user_common_options, **user_native_options}
+        for k, v in user_all_options.items():
+            if k not in declared_all_options:
+                raise WorkbenchExecutionError(
+                    f"Model contract does not declare option '{k}'",
+                    details={"code": "MODEL_OPTION_UNDECLARED", "option": k},
+                )
+            try:
+                validate_parameter(k, v, declared_all_options[k])
+            except ProviderError as exc:
+                raise WorkbenchExecutionError(
+                    str(exc),
+                    details={"code": "MODEL_OPTION_INVALID", "option": k, "error": str(exc)},
+                ) from exc
+
+        effective_options: dict[str, JsonValue] = {}
+        for k, v in user_common_options.items():
+            effective_options[k] = cast(JsonValue, v)
+        for k, v in user_native_options.items():
+            effective_options[k] = cast(JsonValue, v)
+
+        plan_duration: float | None = None
+        if execution_input.stage == "video":
+            plan_duration = 5.0
+            requested_duration = (
+                stage_settings.get("request_duration_seconds")
+                or user_common_options.get("duration_seconds")
+                or user_common_options.get("duration")
+                or user_native_options.get("duration_seconds")
+                or user_native_options.get("duration")
+            )
+            duration_spec = declared_all_options.get("duration") or declared_all_options.get(
+                "duration_seconds"
+            )
+            if requested_duration is not None:
+                req_d = float(str(requested_duration))
+                if duration_spec is not None and duration_spec.enum:
+                    valid_enum = [
+                        float(x) for x in duration_spec.enum if str(x).replace(".", "", 1).isdigit()
+                    ]
+                    if valid_enum and req_d not in valid_enum:
+                        raise WorkbenchExecutionError(
+                            f"Requested duration {req_d}s not supported by model contract "
+                            f"(supported: {duration_spec.enum})",
+                            details={
+                                "code": "MODEL_DURATION_UNSUPPORTED",
+                                "supported": duration_spec.enum,
+                            },
+                        )
+                plan_duration = req_d
+            elif duration_spec is not None and duration_spec.default is not None:
+                try:
+                    plan_duration = float(duration_spec.default)
+                except (ValueError, TypeError):
+                    plan_duration = 5.0
+            effective_options["duration_seconds"] = plan_duration
+
+        supports_prompt_override = False
+        if (
+            "prompt_override" in declared_all_options
+            or (mode_spec is not None and "prompt_override" in mode_spec.input_slots)
+            or (
+                matched_input_contract is not None
+                and "prompt_override" in matched_input_contract.input_slots
+            )
+            or (spec is not None and "prompt_override" in spec.input_slots)
+        ):
+            supports_prompt_override = True
+        else:
+            raw_op = (entry.capability_manifest_json.get("operations") or {}).get(
+                operation_key
+            ) or {}
+            raw_prompt_spec = raw_op.get("prompt_spec") or {}
+            if isinstance(raw_prompt_spec, dict) and (
+                raw_prompt_spec.get("allow_override") is True
+                or raw_prompt_spec.get("prompt_override") is True
+            ):
+                supports_prompt_override = True
+
+        prompt_override = stage_settings.get("prompt_override")
+        if prompt_override is not None:
+            if not supports_prompt_override:
+                raise WorkbenchExecutionError(
+                    "Model contract does not declare an editable prompt override slot",
+                    details={"code": "PROMPT_OVERRIDE_SLOT_UNDECLARED"},
+                )
+            override_str = str(prompt_override).strip()
+            if not override_str:
+                raise WorkbenchExecutionError(
+                    "Prompt override cannot be blank",
+                    details={"code": "PROMPT_CONTRACT_UNSUPPORTED", "reason": "blank"},
+                )
+            if len(override_str) > 4000:
+                raise WorkbenchExecutionError(
+                    "Prompt override exceeds contract length limit of 4000 "
+                    f"(got {len(override_str)})",
+                    details={
+                        "code": "PROMPT_CONTRACT_UNSUPPORTED",
+                        "max_length": 4000,
+                        "actual_length": len(override_str),
+                    },
+                )
+            # Validate against prompt_spec in operation manifest if declared
+            op_manifest = capability_manifest.operations.get(operation_key)
+            if op_manifest is not None:
+                raw_op = (entry.capability_manifest_json.get("operations") or {}).get(
+                    operation_key
+                ) or {}
+                raw_prompt_spec = raw_op.get("prompt_spec")
+                if isinstance(raw_prompt_spec, dict):
+                    max_len_info = raw_prompt_spec.get("max_length")
+                    if isinstance(max_len_info, dict) and max_len_info.get("kind") == "bounded":
+                        bound = max_len_info.get("value")
+                        if isinstance(bound, (int, float)) and len(override_str) > bound:
+                            raise WorkbenchExecutionError(
+                                f"Prompt override length {len(override_str)} exceeds "
+                                f"model contract limit of {bound}",
+                                details={
+                                    "code": "PROMPT_CONTRACT_UNSUPPORTED",
+                                    "max_length": bound,
+                                    "actual_length": len(override_str),
+                                },
+                            )
+                    min_len_info = raw_prompt_spec.get("min_length")
+                    if isinstance(min_len_info, dict) and min_len_info.get("kind") == "bounded":
+                        bound = min_len_info.get("value")
+                        if isinstance(bound, (int, float)) and len(override_str) < bound:
+                            raise WorkbenchExecutionError(
+                                f"Prompt override length {len(override_str)} is below "
+                                f"model contract minimum of {bound}",
+                                details={
+                                    "code": "PROMPT_CONTRACT_UNSUPPORTED",
+                                    "min_length": bound,
+                                    "actual_length": len(override_str),
+                                },
+                            )
+            # Recompile the override's character tokens and references.
+            prompt = await self._compile_prompt_mentions(
+                project=project,
+                prompt=override_str,
+                references=references,
+                semantic_intent=semantic_intent,
+            )
+            prompt_override = override_str
 
         plan = WorkbenchExecutionPlan(
             project_id=project.id,
@@ -1380,6 +1590,10 @@ class WorkbenchExecutionService:
             credential_revision_id=credential_revision_id,
             accepted_approximations=compiled.accepted_approximations,
             expected_shot_version=execution_input.expected_shot_version,
+            duration_seconds=plan_duration,
+            prompt_override=prompt_override,
+            effective_options=effective_options,
+            supports_prompt_override=supports_prompt_override,
         ).freeze()
 
         # Fail closed on any remaining capability gap (fatal gaps always remain;
@@ -1633,12 +1847,18 @@ class WorkbenchExecutionService:
             "plan": {"prompt": plan.prompt},
         }
         if plan.stage == "video":
-            # The current Workbench API intentionally exposes no separate
-            # duration control.  The verified video manifests use the
-            # canonical five-second product intent, which is also the safe
-            # default used by the unified compiler.
-            snapshot["duration_seconds"] = 5
+            snapshot["duration_seconds"] = (
+                plan.duration_seconds if plan.duration_seconds is not None else 5
+            )
             snapshot["aspect_ratio"] = project.aspect_ratio
+        if plan.effective_options:
+            snapshot["options"] = plan.effective_options
+            if "aspect_ratio" in plan.effective_options:
+                snapshot["aspect_ratio"] = plan.effective_options["aspect_ratio"]
+            if "duration_seconds" in plan.effective_options:
+                snapshot["duration_seconds"] = plan.effective_options["duration_seconds"]
+        if plan.prompt_override:
+            snapshot["prompt_override"] = plan.prompt_override
         input_hash = _node_run_input_hash(snapshot)
         node_run = NodeRun(
             project_id=project.id,

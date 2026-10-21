@@ -1,3 +1,4 @@
+import { selectValue } from "./selectValue";
 import { expect, test } from "@playwright/test";
 import { exerciseContextualDirector, installContextualDirectorMock } from "./contextual-director";
 import { PROJECT_ID, installProfessionalMock } from "./professional-mocks";
@@ -12,7 +13,7 @@ test("contextual design and version experiments stay in separate workspaces", as
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await page.getByRole("tab", { name: "版本尝试", exact: true }).click();
   await page.getByLabel("实验名称").fill("Model B 转头验证");
-  await page.getByLabel("实验模型").selectOption("provider/model-b");
+  await selectValue(page.getByLabel("实验模型"), "provider/model-b");
   await expect(page.getByText(/动态能力/)).toContainText("video.image_to_video");
   await page.getByRole("button", { name: "创建实验分支" }).click();
   await expect(page.getByText("Model B 转头验证")).toBeVisible();

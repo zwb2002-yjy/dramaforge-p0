@@ -1,3 +1,5 @@
+import { sliderValue } from "./sliderValue";
+import { findSelectOption, expectSelectValue, selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -952,30 +954,30 @@ it("keeps dialogue and voice drafts and guards shot switches without generating"
     </QueryClientProvider>,
   );
   await screen.findByText("Voice Studio");
-  await screen.findByRole("option", { name: "目录声音乙 · zh-CN" });
+  await findSelectOption(screen.getByLabelText("配音音色"), "目录声音乙 · zh-CN");
   fireEvent.change(screen.getByLabelText("对白／旁白文本"), {
     target: { value: "尚未保存的对白" },
   });
-  fireEvent.change(screen.getByLabelText("配音音色"), { target: { value: "voice:catalog-b" } });
-  fireEvent.change(screen.getByLabelText("配音语速"), { target: { value: "-9" } });
+  await selectValue(screen.getByLabelText("配音音色"), "voice:catalog-b");
+  sliderValue(screen.getByLabelText("配音语速"), -9);
   expect(screen.getByTestId("shot-design-dirty")).toBeInTheDocument();
   expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("尚未保存的对白");
-  expect(screen.getByLabelText("配音音色")).toHaveValue("voice:catalog-b");
-  expect(screen.getByLabelText("配音语速")).toHaveValue("-9");
+  expectSelectValue(screen.getByLabelText("配音音色"), "voice:catalog-b");
+  expect(screen.getByLabelText("配音语速")).toHaveAttribute("aria-valuenow", "-9");
 
   fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
   expect(await screen.findByTestId("unsaved-changes-guard")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "返回保存" }));
   expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("尚未保存的对白");
-  expect(screen.getByLabelText("配音音色")).toHaveValue("voice:catalog-b");
+  expectSelectValue(screen.getByLabelText("配音音色"), "voice:catalog-b");
   fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
   fireEvent.click(await screen.findByRole("button", { name: "放弃并切换" }));
   await waitFor(() =>
     expect(screen.getByTestId("cinematic-canvas")).toHaveAttribute("data-shot-id", "shot-2"),
   );
   expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("第二个镜头的对白");
-  expect(screen.getByLabelText("配音音色")).toHaveValue("");
-  expect(screen.getByLabelText("配音语速")).toHaveValue("0");
+  expectSelectValue(screen.getByLabelText("配音音色"), "");
+  expect(screen.getByLabelText("配音语速")).toHaveAttribute("aria-valuenow", "0");
   expect(calls).toContainEqual({
     url: "/api/v1/projects/project-1/shots/shot-1/references/resolve",
     method: "POST",

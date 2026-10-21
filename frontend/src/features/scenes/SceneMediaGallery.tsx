@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Badge, Button } from "../../components/ui";
+import { Badge, Button, Dialog } from "../../components/ui";
 import { artifactContentUrl } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { shotTypeLabel } from "../../lib/shotLabels";
@@ -16,17 +16,36 @@ export function SceneMediaGallery({
   projectId,
   scene,
   filter = "all",
+  eager = true,
 }: {
   projectId: string;
   scene: SceneSummary;
   filter?: SceneMediaFilter;
+  eager?: boolean;
 }) {
+  const gallery = useRef<HTMLElement>(null);
+  const [inViewport, setInViewport] = useState(eager);
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") {
+      setInViewport(true);
+      return;
+    }
+    const element = gallery.current;
+    if (!element) return;
+    const observer = new IntersectionObserver((entries) => {
+      setInViewport(entries.some((entry) => entry.isIntersecting));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [animaticOpen, setAnimaticOpen] = useState(false);
   const workspace = useQuery({
     queryKey: queryKeys.scene.workspace(projectId, scene.id),
     queryFn: () => fetchSceneWorkspace(projectId, scene.id),
+    enabled: eager || inViewport,
     refetchInterval: (query) =>
+      inViewport &&
       Object.values(query.state.data?.overview ?? {}).some((facts) => facts.generating)
         ? SCENE_ACTIVE_REFETCH_MS
         : false,
@@ -35,13 +54,6 @@ export function SceneMediaGallery({
   const displayedShots = shots.filter((shot) =>
     shotMatchesFilter(shot, workspace.data?.overview?.[shot.id], filter),
   );
-  const shotCount = workspace.data ? shots.length : scene.shot_count;
-  const keyframeCount = workspace.data
-    ? shots.filter((shot) => shot.formal_keyframe_artifact_id).length
-    : scene.formal_keyframe_count;
-  const videoCount = workspace.data
-    ? shots.filter((shot) => shot.formal_video_artifact_id).length
-    : scene.formal_video_count;
   const shotUrl = (shot: ShotLite) =>
     "/projects/" + projectId + "/scenes/" + scene.id + "?shotId=" + shot.id;
   const open = (shot: ShotLite, kind: Preview["kind"]) => {
@@ -51,7 +63,12 @@ export function SceneMediaGallery({
   };
 
   return (
-    <section className="scene-media-gallery" aria-label={scene.location_name + " 镜头与素材"}>
+    <section
+      ref={gallery}
+      className="scene-media-gallery"
+      data-deferred={workspace.isPending}
+      aria-label={scene.location_name + " 镜头与素材"}
+    >
       {workspace.isPending ? (
         <p role="status">正在读取镜头与素材…</p>
       ) : workspace.isError ? (
@@ -63,10 +80,6 @@ export function SceneMediaGallery({
         <p>此场景尚无镜头。</p>
       ) : (
         <>
-          <p className="scene-media-note">
-            {shotCount} 镜头 · 正式画面 {keyframeCount}/{shotCount} · 正式视频 {videoCount}/
-            {shotCount}
-          </p>
           <Button
             onClick={() => setAnimaticOpen((value) => !value)}
             aria-expanded={animaticOpen}
@@ -84,7 +97,13 @@ export function SceneMediaGallery({
           {displayedShots.length === 0 ? (
             <p role="status">本场景没有符合当前筛选的镜头。</p>
           ) : (
-            <ol className="scene-shot-grid" aria-label="场景镜头列表">
+            <ol
+              className="scene-shot-grid"
+              aria-label="场景镜头列表"
+              style={{
+                maxWidth: `calc(${displayedShots.length} * var(--df-storyboard-card-max) + ${Math.max(0, displayedShots.length - 1)} * var(--df-space-4))`,
+              }}
+            >
               {displayedShots.map((shot) => {
                 const frameId = shot.formal_keyframe_artifact_id;
                 const videoId = shot.formal_video_artifact_id;
@@ -100,6 +119,26 @@ export function SceneMediaGallery({
                       <strong>镜头 {shot.shot_number}</strong>
                       <span>{shotTypeLabel(shot.shot_type)}</span>
                     </header>
+                    <Button
+                      className="scene-shot-thumbnail"
+                      aria-label={"预览镜头 " + shot.shot_number}
+                      disabled={!frameId && !videoId}
+                      onClick={() => open(shot, previewKind)}
+                    >
+                      <span className="scene-shot-thumbnail-content">
+                        {frameId ? (
+                          <img
+                            loading="lazy"
+                            src={artifactContentUrl(projectId, frameId)}
+                            alt={"镜头 " + shot.shot_number + " 正式关键帧"}
+                          />
+                        ) : (
+                          <span className="scene-shot-placeholder">
+                            {videoId ? "有正式视频，暂无正式关键帧" : "暂无正式素材"}
+                          </span>
+                        )}
+                      </span>
+                    </Button>
                     <div className="scene-shot-status" aria-label="镜头制作状态">
                       {workspace.data?.overview?.[shot.id]?.pending_review && (
                         <Badge tone="warning">待审候选</Badge>
@@ -116,22 +155,6 @@ export function SceneMediaGallery({
                         </Badge>
                       )}
                     </div>
-                    <Button
-                      className="scene-shot-thumbnail"
-                      aria-label={"预览镜头 " + shot.shot_number}
-                      disabled={!frameId && !videoId}
-                      onClick={() => open(shot, previewKind)}
-                    >
-                      {frameId ? (
-                        <img
-                          loading="lazy"
-                          src={artifactContentUrl(projectId, frameId)}
-                          alt={"镜头 " + shot.shot_number + " 正式关键帧"}
-                        />
-                      ) : (
-                        <span>{videoId ? "有正式视频，暂无正式关键帧" : "暂无正式素材"}</span>
-                      )}
-                    </Button>
                     <div
                       className="scene-shot-evidence"
                       aria-label={"镜头 " + shot.shot_number + " 素材状态"}
@@ -197,67 +220,62 @@ function MediaPreview({
   projectId,
   preview,
   shotUrl,
-  onClose,
+  onClose: onClosed,
 }: {
   projectId: string;
   preview: Preview;
   shotUrl: string;
   onClose: () => void;
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
+  const [open, setOpen] = useState(true);
+  const onClose = () => setOpen(false);
   const video = useRef<HTMLVideoElement>(null);
   const [failed, setFailed] = useState(false);
   const title = `镜头 ${preview.shot.shot_number} · ${preview.kind === "video" ? "正式视频" : "正式关键帧"}`;
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
   return (
-    <dialog
-      ref={dialog}
-      className="scene-media-preview"
-      aria-label={title}
-      onCancel={onClose}
+    <Dialog
+      open={open}
+      afterClose={onClosed}
+      title={title}
       onClose={onClose}
+      size="wide"
+      actions={<Button onClick={onClose}>关闭预览</Button>}
     >
-      <header>
-        <h2>{title}</h2>
-        <Button onClick={() => dialog.current?.close()} autoFocus>
-          关闭预览
-        </Button>
-      </header>
-      {preview.kind === "video" ? (
-        <video
-          ref={video}
-          controls
-          autoPlay
-          preload="metadata"
-          src={artifactContentUrl(projectId, preview.artifactId)}
-          aria-label={title}
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        <img
-          src={artifactContentUrl(projectId, preview.artifactId)}
-          alt={title}
-          onError={() => setFailed(true)}
-        />
-      )}
-      {failed && <p role="alert">素材加载失败，请关闭后重试；不会重新生成素材。</p>}
-      <footer>
-        {preview.kind === "video" && (
-          <>
-            <Button
-              onClick={() => {
-                void video.current?.play().catch(() => setFailed(true));
-              }}
-            >
-              播放视频
-            </Button>
-            <Button onClick={() => video.current?.pause()}>暂停视频</Button>
-          </>
+      <div className="scene-media-content">
+        {preview.kind === "video" ? (
+          <video
+            ref={video}
+            controls
+            autoPlay
+            preload="metadata"
+            src={artifactContentUrl(projectId, preview.artifactId)}
+            aria-label={title}
+            onError={() => setFailed(true)}
+          />
+        ) : (
+          <img
+            src={artifactContentUrl(projectId, preview.artifactId)}
+            alt={title}
+            onError={() => setFailed(true)}
+          />
         )}
-        <a href={shotUrl}>编辑此镜头</a>
-      </footer>
-    </dialog>
+        {failed && <p role="alert">素材加载失败，请关闭后重试；不会重新生成素材。</p>}
+        <footer>
+          {preview.kind === "video" && (
+            <>
+              <Button
+                onClick={() => {
+                  void video.current?.play().catch(() => setFailed(true));
+                }}
+              >
+                播放视频
+              </Button>
+              <Button onClick={() => video.current?.pause()}>暂停视频</Button>
+            </>
+          )}
+          <a href={shotUrl}>编辑此镜头</a>
+        </footer>
+      </div>
+    </Dialog>
   );
 }

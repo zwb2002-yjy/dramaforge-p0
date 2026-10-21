@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useId } from "react";
 
-import { Button, Field, Input, Select } from "../../components/ui";
+import { Button, Field, Select, Slider } from "../../components/ui";
 import { queryKeys } from "../../lib/queryKeys";
 import { fetchVoiceOptions, type ShotVoiceSettings as VoiceSettings } from "./api";
 import "./shot-voice-settings.css";
@@ -85,8 +85,7 @@ export function ShotVoiceSettings({
           onChange={(event) =>
             onChange({
               ...value,
-              voice_id:
-                event.target.value === "" ? null : event.target.value.slice("voice:".length),
+              voice_id: event === "" ? null : event.slice("voice:".length),
             })
           }
         >
@@ -116,16 +115,14 @@ export function ShotVoiceSettings({
       )}
       <Field>
         配音语速 · {rateLabel}
-        <Input
-          aria-label="配音语速"
-          aria-valuetext={rateLabel}
-          type="range"
+        <Slider
+          ariaLabelForHandle="配音语速"
+          ariaValueTextFormatterForHandle={() => rateLabel}
           min={-30}
           max={30}
           step={1}
           value={rate}
-          onChange={(event) => {
-            const next = Number(event.target.value);
+          onChange={(next) => {
             if (Number.isInteger(next) && next >= -30 && next <= 30) {
               onChange({ ...value, rate_percent: next });
             }

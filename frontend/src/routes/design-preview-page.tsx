@@ -1,6 +1,4 @@
 import { useState, type ReactNode } from "react";
-import { Link } from "@tanstack/react-router";
-
 import {
   Badge,
   Button,
@@ -9,9 +7,9 @@ import {
   Input,
   PageHeader,
   Select,
-  Tab,
   Tabs,
   Textarea,
+  ActionLink,
 } from "../components/ui";
 
 const PALETTE = [
@@ -42,10 +40,10 @@ export function DesignPreviewPage() {
         eyebrow="DramaForge"
         title="Visual System 2.0"
         actions={
-          <Link to="/" search={{ create: undefined }} className="df-btn ghost">
+          <ActionLink to="/" search={{ create: undefined }} tone="ghost">
             <span aria-hidden="true">←</span>
             返回我的项目
-          </Link>
+          </ActionLink>
         }
       />
 
@@ -87,22 +85,21 @@ export function DesignPreviewPage() {
 
       <PreviewSection title="Input">
         <div className="df-preview-form">
-          <Field className="df-form-group" htmlFor="preview-title">
-            <span className="df-label">作品名</span>
+          <Field className="df-preview-field" htmlFor="preview-title">
+            作品名
             <Input id="preview-title" defaultValue="雨停之前" />
           </Field>
-          <Field className="df-form-group" htmlFor="preview-idea">
-            <span className="df-label">一句话创意</span>
+          <Field className="df-preview-field" htmlFor="preview-idea">
+            一句话创意
             <Textarea
               id="preview-idea"
-              className="df-input"
               rows={3}
               defaultValue="一对多年未见的父女，在末班车上重新认识彼此。"
             />
           </Field>
-          <Field className="df-form-group" htmlFor="preview-ratio">
-            <span className="df-label">画幅</span>
-            <Select id="preview-ratio" className="df-input" defaultValue="9:16">
+          <Field className="df-preview-field" htmlFor="preview-ratio">
+            画幅
+            <Select id="preview-ratio" defaultValue="9:16">
               <option value="9:16">9:16 竖屏</option>
               <option value="16:9">16:9 横屏</option>
             </Select>
@@ -111,14 +108,15 @@ export function DesignPreviewPage() {
       </PreviewSection>
 
       <PreviewSection title="Tabs">
-        <Tabs label="工作模式">
-          <Tab active={activeTab === "story"} onClick={() => setActiveTab("story")}>
-            创作
-          </Tab>
-          <Tab active={activeTab === "production"} onClick={() => setActiveTab("production")}>
-            制作
-          </Tab>
-        </Tabs>
+        <Tabs
+          label="工作模式"
+          activeKey={activeTab}
+          onChange={(key) => setActiveTab(key as "story" | "production")}
+          items={[
+            { key: "story", label: "创作", children: "故事工作区" },
+            { key: "production", label: "制作", children: "制作工作区" },
+          ]}
+        />
       </PreviewSection>
 
       <PreviewSection title="Badge">

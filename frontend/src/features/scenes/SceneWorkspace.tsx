@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ReferenceResolutionState } from "../../components/assets/AssetReferencePicker";
-import { Button, Dialog, Drawer } from "../../components/ui";
+import { Button, Dialog, Drawer, Alert, Field, Select } from "../../components/ui";
 import { timeOfDayLabel } from "../../lib/sceneLabels";
 import { ModelConnectionSettings } from "../../components/provider/ModelConnectionSettings";
 import { CinematicCanvas } from "../shots/CinematicCanvas";
@@ -13,6 +13,16 @@ import { ShotContinuityCompare } from "../shots/ShotContinuityCompare";
 import { parseShotCandidates, type ShotCandidate } from "../shots/shotCandidates";
 import type { ShotExecutionReference, ShotLite } from "../shots/api";
 import type { ShotDesignDraft } from "../shots/ShotDesignPanel";
+import {
+  clearShotDraft,
+  detectDraftConflicts,
+  loadShotDraft,
+  saveShotDraft,
+  restoreShotDraft,
+  shotDraftFromServer,
+  type DraftConflictChoices,
+  type StoredShotDraft,
+} from "../shots/shotDraftStorage";
 import { hasActiveSceneRuns, SCENE_ACTIVE_REFETCH_MS } from "../production/sceneRunState";
 import { fetchSceneWorkspace, type SceneWorkspaceRead } from "./api";
 import { queryKeys } from "../../lib/queryKeys";
@@ -31,6 +41,7 @@ type SceneWorkspaceProps = {
   openGenerate?: boolean;
   openCandidates?: boolean;
   onOpenEditing?: () => void;
+  editingReturnHref?: string;
   onOpenOverview?: () => void;
   onDirtyStateChange?: (dirty: boolean) => void;
   onSelectedShotChange?: (shotId: string) => void;
@@ -90,6 +101,7 @@ export function SceneWorkspace({
   openGenerate = false,
   openCandidates = false,
   onOpenEditing,
+  editingReturnHref,
   onOpenOverview,
   onDirtyStateChange,
   onSelectedShotChange,
@@ -104,6 +116,7 @@ export function SceneWorkspace({
   const [trayExpanded, setTrayExpanded] = useState(openCandidates);
   const [stripExpanded, setStripExpanded] = useState(false);
   const trayAnchor = useRef<HTMLDivElement>(null);
+  const sceneHeader = useRef<HTMLElement>(null);
   const [intentSeed, setIntentSeed] = useState<{
     text: string;
     revision: number;
@@ -253,6 +266,7 @@ export function SceneWorkspace({
 
   const handleDesignSaved = useCallback(async () => {
     if (selectedShotKey !== null) {
+      clearShotDraft(projectId, selectedShotKey);
       setDesignDrafts((current) => {
         const next = { ...current };
         delete next[selectedShotKey];
@@ -262,14 +276,21 @@ export function SceneWorkspace({
     setDesignDirty(false);
     setSuggestionDraft(null);
     await workspace.refetch();
-  }, [selectedShotKey, workspace]);
+  }, [selectedShotKey, workspace, projectId]);
 
   const updateDesignDraft = useCallback(
     (draft: ShotDesignDraft) => {
-      if (selectedShotKey === null) return;
+      if (selectedShotKey === null || !selected) return;
       setDesignDrafts((current) => ({ ...current, [selectedShotKey]: draft }));
+      saveShotDraft(
+        projectId,
+        selectedShotKey,
+        selected.version,
+        draft,
+        shotDraftFromServer(selected),
+      );
     },
-    [selectedShotKey],
+    [selectedShotKey, selected, projectId],
   );
 
   const updateDesignDirty = useCallback(
@@ -334,9 +355,68 @@ export function SceneWorkspace({
   const trace = selected ? (data?.trace?.[selected.id] ?? []) : [];
   const designDraft = selected ? (designDrafts[selected.id] ?? draftFromShot(selected)) : undefined;
 
+  const [recoverableDraft, setRecoverableDraft] = useState<StoredShotDraft | null>(null);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [recoveryChoices, setRecoveryChoices] = useState<DraftConflictChoices>({});
+
+  useEffect(() => {
+    setRecoveryOpen(false);
+    setRecoveryChoices({});
+  }, [selected?.id, selected?.version]);
+
+  useEffect(() => {
+    if (!selected) {
+      setRecoverableDraft(null);
+      return;
+    }
+    const stored = loadShotDraft(projectId, selected.id);
+    setRecoverableDraft(stored);
+  }, [selected?.id, projectId]);
+
+  const draftConflicts = useMemo(
+    () => (selected && recoverableDraft ? detectDraftConflicts(selected, recoverableDraft) : null),
+    [selected, recoverableDraft],
+  );
+
+  const handleRestoreDraft = useCallback(() => {
+    if (!selected || !recoverableDraft) return;
+    const conflicts = detectDraftConflicts(selected, recoverableDraft);
+    if (conflicts.conflicts.some((item) => !recoveryChoices[item.field])) {
+      setRecoveryOpen(true);
+      return;
+    }
+    const restored = restoreShotDraft(selected, recoverableDraft, recoveryChoices);
+    setDesignDrafts((current) => ({
+      ...current,
+      [selected.id]: restored,
+    }));
+    clearShotDraft(projectId, selected.id);
+    const serverDraft = shotDraftFromServer(selected);
+    const hasLocalChanges = JSON.stringify(restored) !== JSON.stringify(serverDraft);
+    if (hasLocalChanges) {
+      saveShotDraft(projectId, selected.id, selected.version, restored, serverDraft);
+    }
+    setDesignDirty(hasLocalChanges);
+    setRecoveryOpen(false);
+    setRecoverableDraft(null);
+  }, [selected, recoverableDraft, recoveryChoices, projectId]);
+
+  const handleDiscardDraft = useCallback(() => {
+    if (!selected) return;
+    clearShotDraft(projectId, selected.id);
+    setRecoverableDraft(null);
+    setDesignDrafts((current) => {
+      if (!(selected.id in current)) return current;
+      const next = { ...current };
+      delete next[selected.id];
+      return next;
+    });
+    setDesignDirty(false);
+  }, [selected, projectId]);
+
   return (
     <div className="qc-scene-workspace" data-testid="scene-workspace">
-      <header className="qc-scene-header">
+      <header ref={sceneHeader} className="qc-scene-header">
         <div className="qc-scene-context" data-testid="scene-context">
           <a
             className="qc-scene-back"
@@ -362,6 +442,14 @@ export function SceneWorkspace({
         <div className="qc-scene-header-actions">
           <span className="df-num">{shots.length} 个镜头</span>
           <Button
+            className="df-scene-compact-jump"
+            data-testid="scene-inspector-jump"
+            disabled={!selected}
+            onClick={() => requestFocus("design")}
+          >
+            编辑镜头
+          </Button>
+          <Button
             tone="ghost"
             data-testid="scene-animatic-play-btn"
             onClick={() => setAnimaticOpen(true)}
@@ -371,7 +459,7 @@ export function SceneWorkspace({
           <BatchFillActions projectId={projectId} sceneId={sceneId} />
           <a
             className="qc-overview-primary"
-            href={`/projects/${projectId}/edit`}
+            href={editingReturnHref ?? `/projects/${projectId}/edit`}
             data-testid="scene-edit-entry"
             onClick={(event) => {
               if (onOpenEditing) {
@@ -380,20 +468,115 @@ export function SceneWorkspace({
               }
             }}
           >
-            进入剪辑
+            {editingReturnHref ? "返回剪辑" : "进入剪辑"}
           </a>
         </div>
       </header>
+
+      {recoverableDraft && selected && (
+        <Alert
+          type={draftConflicts?.hasConflict ? "warning" : "info"}
+          showIcon
+          style={{ margin: "8px 16px" }}
+          data-testid="recoverable-draft-banner"
+          title={
+            draftConflicts?.hasConflict
+              ? "发现未保存的本地草稿（服务端已有更新）"
+              : "发现未保存的本地草稿"
+          }
+          description={
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>
+                镜头 {selected.shot_number} 在本地保留了上次未提交的设计修改。
+                {draftConflicts?.hasConflict && (
+                  <span style={{ color: "var(--color-warning, #d46b08)", marginLeft: 8 }}>
+                    服务端已有新版本（v{selected.version}，草稿基线 v
+                    {recoverableDraft.baselineVersion}），请核对以下字段：
+                    {draftConflicts.conflicts.map((c) => c.label).join("、")}。
+                  </span>
+                )}
+              </span>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <Button size="small" tone="ghost" onClick={handleDiscardDraft}>
+                  放弃本地草稿
+                </Button>
+                <Button
+                  size="small"
+                  tone={draftConflicts?.hasConflict ? "danger" : "primary"}
+                  onClick={handleRestoreDraft}
+                >
+                  {draftConflicts?.hasConflict ? "核对并恢复草稿" : "恢复草稿"}
+                </Button>
+              </div>
+            </div>
+          }
+        />
+      )}
+
+      <Dialog
+        open={recoveryOpen && Boolean(recoverableDraft)}
+        title="核对草稿冲突"
+        onClose={() => setRecoveryOpen(false)}
+        testId="shot-draft-recovery-dialog"
+        actions={
+          <Button
+            tone="primary"
+            onClick={handleRestoreDraft}
+            disabled={draftConflicts?.conflicts.some((item) => !recoveryChoices[item.field])}
+          >
+            恢复选定修改到草稿
+          </Button>
+        }
+      >
+        <p>仅恢复选定字段，保存前不会修改服务端。服务端版本再次变化时须重新核对。</p>
+        {draftConflicts?.conflicts.map((item) => (
+          <section key={item.field}>
+            <strong>{item.label}</strong>
+            {recoverableDraft?.baseline && (
+              <p>编辑原值：{JSON.stringify(item.baselineValue) ?? "未设置"}</p>
+            )}
+            <p>本地草稿：{JSON.stringify(item.localValue) ?? "未设置"}</p>
+            <p>服务端值：{JSON.stringify(item.serverValue) ?? "未设置"}</p>
+            <Field>
+              选择 {item.label}
+              <Select
+                aria-label={`恢复字段 ${item.field}`}
+                value={recoveryChoices[item.field] ?? ""}
+                onChange={(value) =>
+                  setRecoveryChoices((current) => ({
+                    ...current,
+                    [item.field]: value as "local" | "server",
+                  }))
+                }
+              >
+                <option value="" disabled>
+                  请选择
+                </option>
+                <option value="server">采用服务端值</option>
+                <option value="local">保留本地修改</option>
+              </Select>
+            </Field>
+          </section>
+        ))}
+      </Dialog>
 
       {data && selectedShotId !== null && !selected && (
         <p role="alert">目标镜头不在此场景，请重新选择镜头。</p>
       )}
       {workspace.isError && (
-        <div className="flash err" data-testid="scene-sync-error">
-          {data
-            ? `连接中断，状态待同步：${String(workspace.error)}`
-            : `无法读取场景工作区：${String(workspace.error)}`}
-        </div>
+        <Alert
+          data-testid="scene-sync-error"
+          role="note"
+          type="error"
+          showIcon
+          description={
+            <>
+              {data
+                ? `连接中断，状态待同步：${String(workspace.error)}`
+                : `无法读取场景工作区：${String(workspace.error)}`}
+            </>
+          }
+        />
       )}
       {data && hasActiveSceneRuns(data.trace as Record<string, unknown[]>) && (
         <p className="qc-scene-sync" data-testid="scene-active-sync" role="status">
@@ -438,6 +621,7 @@ export function SceneWorkspace({
             shots={shots}
             shotId={selectedShotKey}
             candidate={previewCandidate}
+            bindings={selectedBindingRows}
           />
           <div ref={trayAnchor}>
             <ShotCandidateTray
@@ -500,6 +684,12 @@ export function SceneWorkspace({
           intentSeed={intentSeed?.shotId === selectedShotKey ? intentSeed : null}
           focusRequest={focusRequest}
           onOpenModelSettings={() => setModelSettingsOpen(true)}
+          onBackToPreview={() => {
+            sceneHeader.current?.scrollIntoView({ block: "start" });
+            sceneHeader.current
+              ?.querySelector<HTMLButtonElement>('[data-testid="scene-inspector-jump"]')
+              ?.focus({ preventScroll: true });
+          }}
         />
       </div>
       {pendingShotId !== null && (
@@ -513,6 +703,7 @@ export function SceneWorkspace({
           }}
           onDiscard={() => {
             if (selectedShotKey !== null) {
+              clearShotDraft(projectId, selectedShotKey);
               setDesignDrafts((current) => {
                 const next = { ...current };
                 delete next[selectedShotKey];
@@ -538,24 +729,23 @@ export function SceneWorkspace({
       >
         <ModelConnectionSettings />
       </Drawer>
-      {animaticOpen && (
-        <Dialog
-          title={`场景连播 · ${data?.scene.location_name ?? "预览"}`}
-          size="wide"
-          onClose={() => setAnimaticOpen(false)}
-          testId="scene-animatic-player-dialog"
-        >
-          <SceneAnimaticPreview
-            projectId={projectId}
-            shots={shots}
-            candidates={data?.candidates}
-            onSelectShot={(shotId) => {
-              selectShot(shotId);
-              setAnimaticOpen(false);
-            }}
-          />
-        </Dialog>
-      )}
+      <Dialog
+        open={animaticOpen}
+        title={`场景连播 · ${data?.scene.location_name ?? "预览"}`}
+        size="wide"
+        onClose={() => setAnimaticOpen(false)}
+        testId="scene-animatic-player-dialog"
+      >
+        <SceneAnimaticPreview
+          projectId={projectId}
+          shots={shots}
+          candidates={data?.candidates}
+          onSelectShot={(shotId) => {
+            selectShot(shotId);
+            setAnimaticOpen(false);
+          }}
+        />
+      </Dialog>
     </div>
   );
 }

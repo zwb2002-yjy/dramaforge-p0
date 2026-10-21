@@ -32,7 +32,8 @@ function setup(status = 204) {
       <ProjectActions project={{ id: "project-1", name: "我的短剧", version: 3 }} />
     </QueryClientProvider>,
   );
-  fireEvent.click(screen.getByRole("button", { name: "删除项目" }));
+  fireEvent.click(screen.getByRole("button", { name: "更多操作 我的短剧" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "删除项目" }));
   return {
     fetchMock,
     changeProject: () =>
@@ -44,9 +45,11 @@ function setup(status = 204) {
   };
 }
 
-it("opens a named confirmation without deleting, and cancellation never writes", () => {
+it("opens a named confirmation without deleting, and cancellation never writes", async () => {
   const { fetchMock } = setup();
-  expect(screen.getByRole("dialog", { name: "删除项目「我的短剧」？" })).toBeVisible();
+  await waitFor(() =>
+    expect(screen.getByRole("dialog", { name: "删除项目「我的短剧」？" })).toBeVisible(),
+  );
   expect(fetchMock).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "取消" }));
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -67,7 +70,7 @@ it("keeps confirmation and project context on a rejected delete without retrying
   const { fetchMock } = setup(409);
   fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("项目仍有生成任务");
-  expect(screen.getByRole("dialog")).toBeVisible();
+  await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
   expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE")).toHaveLength(1);
   expect(localStorage.getItem("dramaforge.last-project-id")).toBe("project-1");
 });

@@ -1,11 +1,48 @@
-import type { ReactNode } from "react";
+import type { ElementType, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SceneStoryboardWall } from "../../src/features/scenes/SceneStoryboardWall";
 
+const viewportEntries = new Map<Element, (visible: boolean) => void>();
+beforeEach(() => {
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      targets = new Set<Element>();
+      callback: (entries: { isIntersecting: boolean }[]) => void;
+      constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+        this.callback = callback;
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+        viewportEntries.set(target, (visible) => this.callback([{ isIntersecting: visible }]));
+      }
+      disconnect() {
+        this.targets.forEach((target) => viewportEntries.delete(target));
+      }
+    },
+  );
+});
+
 vi.mock("@tanstack/react-router", () => ({
+  createLink:
+    (Component: ElementType) =>
+    ({
+      to,
+      params,
+      children,
+      ...props
+    }: {
+      to: string;
+      params?: { projectId: string };
+      children: ReactNode;
+    }) => (
+      <Component {...props} href={params ? to.replace("$projectId", params.projectId) : to}>
+        {children}
+      </Component>
+    ),
   Link: ({
     to,
     params,
@@ -161,11 +198,13 @@ describe("SceneStoryboardWall", () => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  viewportEntries.clear();
   sessionStorage.clear();
 });
 
-describe("Scene wall focused loading", () => {
-  it("only fetches the focused scene until another scene is opened", async () => {
+describe("Scene wall viewport loading", () => {
+  it("loads a lower scene when visible and keeps the earlier scene's shots", async () => {
     const calls = mockBackend();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -178,10 +217,16 @@ describe("Scene wall focused loading", () => {
       expect(calls.filter((row) => row.url.endsWith("/workspace"))).toHaveLength(1),
     );
     expect(calls.filter((row) => row.url.includes("scene-2/workspace"))).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "查看镜头" }));
+    const street = screen.getByRole("region", { name: "Street 镜头与素材" });
+    act(() => viewportEntries.get(street)?.(true));
     await waitFor(() =>
       expect(calls.filter((row) => row.url.includes("scene-2/workspace"))).toHaveLength(1),
     );
+    await waitFor(() => expect(screen.getAllByTestId("scene-shot-card")).toHaveLength(3));
+    act(() => viewportEntries.get(street)?.(false));
+    expect(within(street).getAllByTestId("scene-shot-card")).toHaveLength(1);
+    fireEvent.click(within(street.closest("li")!).getByRole("button", { name: "收起分镜" }));
+    expect(screen.getAllByTestId("scene-shot-card")).toHaveLength(2);
     expect(calls.filter((row) => row.method !== "GET")).toHaveLength(0);
   });
 
@@ -194,11 +239,8 @@ describe("Scene wall focused loading", () => {
       </QueryClientProvider>,
     );
     await screen.findAllByTestId("scene-card");
-    fireEvent.click(screen.getByRole("button", { name: "缺正式画面" }));
-    expect(screen.getByRole("button", { name: "缺正式画面" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    fireEvent.click(screen.getByRole("radio", { name: "缺正式画面" }));
+    expect(screen.getByRole("radio", { name: "缺正式画面" })).toBeChecked();
     expect(calls.every((row) => row.method === "GET")).toBe(true);
   });
 });
@@ -260,7 +302,7 @@ describe("Large storyboard and project-scoped focus", () => {
       expect(requests.filter((url) => url.endsWith("/workspace"))).toHaveLength(1);
     });
     expect(screen.getByText("100 镜头")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "缺正式视频" }));
+    fireEvent.click(screen.getByRole("radio", { name: "缺正式视频" }));
     expect(requests.filter((url) => url.endsWith("/workspace"))).toHaveLength(1);
   });
 });

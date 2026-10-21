@@ -1,3 +1,4 @@
+import { selectValue } from "./selectValue";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 const PROJECT_ID = "project-cc10";
@@ -161,7 +162,11 @@ test("creative capabilities panel reads and freezes effective intent with proven
   });
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await page.getByRole("tab", { name: "导演手法", exact: true }).click();
-  await page.getByLabel("修改范围").selectOption("shot");
+  await page
+    .getByRole("radiogroup", { name: "修改范围", exact: true })
+    .getByRole("radio", { name: "单个镜头", exact: true })
+    .locator("..")
+    .click();
 
   const shotPanel = page.getByTestId("creative-capabilities-panel").filter({ visible: true });
   await expect(shotPanel).toBeVisible();
@@ -182,8 +187,8 @@ test("creative capabilities panel reads and freezes effective intent with proven
   );
 
   // User selects a genre + style and freezes an explicit selection.
-  await shotPanel.getByLabel("创作类型").selectOption("short_drama_suspense_v1");
-  await shotPanel.getByLabel("风格").selectOption("film_noir_v1");
+  await selectValue(shotPanel.getByLabel("创作类型"), "short_drama_suspense_v1");
+  await selectValue(shotPanel.getByLabel("风格"), "film_noir_v1");
   await shotPanel.getByRole("button", { name: "保存局部设置" }).click();
   await expect(shotPanel.getByText("设置已保存，后续生成时生效。")).toBeVisible();
   expect(freezeBody).toMatchObject({ shot_id: SHOT_ID });
@@ -212,7 +217,7 @@ test("scene creative capabilities freeze the shared configuration the Shots inhe
   await scenePanel.getByText("已保存的设置", { exact: true }).click();
   await expect(scenePanel.getByTestId("creative-provenance-summary")).toContainText("纪实自然");
 
-  await scenePanel.getByLabel("风格").selectOption("documentary_natural_v1");
+  await selectValue(scenePanel.getByLabel("风格"), "documentary_natural_v1");
   await scenePanel.getByRole("button", { name: "保存局部设置" }).click();
   await expect(scenePanel.getByText("设置已保存，后续生成时生效。")).toBeVisible();
   expect(freezeBodies).toHaveLength(1);
@@ -221,7 +226,11 @@ test("scene creative capabilities freeze the shared configuration the Shots inhe
 
   // The Shot scope is a separate target: its own panel still freezes the Shot.
   await page.getByRole("tab", { name: "导演手法", exact: true }).click();
-  await page.getByLabel("修改范围").selectOption("shot");
+  await page
+    .getByRole("radiogroup", { name: "修改范围", exact: true })
+    .getByRole("radio", { name: "单个镜头", exact: true })
+    .locator("..")
+    .click();
   const shotPanel = page.getByTestId("creative-capabilities-panel").filter({ visible: true });
   await shotPanel.getByRole("button", { name: "保存局部设置" }).click();
   await expect(shotPanel.getByText("设置已保存，后续生成时生效。")).toBeVisible();

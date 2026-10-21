@@ -262,6 +262,11 @@
 
 .inline-form {
   flex-wrap: wrap;
+  align-items: end;
+}
+.inline-form > .ant-form-item {
+  flex: 1;
+  min-width: 0;
 }
 
 .inline-form input {
@@ -1634,10 +1639,6 @@ code {
   gap: 0.35rem;
   margin-top: 0.55rem;
 }
-.suggestion-actions .df-btn {
-  font-size: 0.75rem;
-  padding: 0.3rem 0.52rem;
-}
 .assistant-footer {
   display: flex;
   align-items: center;
@@ -1888,9 +1889,6 @@ code {
   font-size: 0.75rem;
   color: var(--muted);
 }
-.creative-provenance-raw > summary {
-  cursor: pointer;
-}
 .creative-provenance pre {
   margin: 0.35rem 0 0;
   font-size: 0.6875rem;
@@ -1939,13 +1937,6 @@ code {
   gap: 0.45rem;
   margin-top: 0.65rem;
 }
-.asset-create-form input,
-.asset-create-form select,
-.asset-create-form textarea,
-.director-board-workspace input {
-  min-width: 0;
-  width: 100%;
-}
 .director-board-stage {
   min-height: 105px;
   margin: 0.6rem 0;
@@ -1974,36 +1965,15 @@ code {
 }
 
 /* P9-03B persisted edit-session draft controls. */
-.editing-session-facts,
-.editing-session-editor,
-.editing-session-export {
+.editing-session-editor {
   margin-top: 1rem;
   padding: 0.85rem;
   border: 1px solid var(--border);
   border-radius: var(--df-radius-container);
   background: var(--df-surface-0);
 }
-.editing-session-facts h2,
-.editing-session-facts h3,
-.editing-session-editor h2,
-.editing-session-export h2 {
+.editing-session-editor h2 {
   margin: 0 0 0.55rem;
-}
-.editing-session-facts dl,
-.editing-session-export dl {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 0.35rem 0.7rem;
-  margin: 0.55rem 0;
-}
-.editing-session-facts dt,
-.editing-session-export dt {
-  color: var(--muted);
-}
-.editing-session-facts dd,
-.editing-session-export dd {
-  margin: 0;
-  overflow-wrap: anywhere;
 }
 .editing-session-facts pre {
   max-height: 180px;
@@ -2051,16 +2021,6 @@ code {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
-.editing-session-editor > ol > li label {
-  display: grid;
-  gap: 0.2rem;
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-.editing-session-editor input {
-  width: 6.5rem;
-  box-sizing: border-box;
-}
 .editing-session-clip-actions,
 .editing-session-actions {
   display: flex;
@@ -2081,9 +2041,6 @@ code {
 @media (max-width: 720px) {
   .editing-session-editor > ol > li {
     grid-template-columns: 1fr;
-  }
-  .editing-session-editor input {
-    width: 100%;
   }
 }
 
@@ -2125,25 +2082,6 @@ code {
 .editing-director-suggestion-preview p {
   margin: 0;
   color: var(--muted);
-  font-size: 0.75rem;
-  line-height: 1.45;
-}
-.editing-director-suggestion label {
-  display: grid;
-  gap: 0.25rem;
-  font-size: 0.75rem;
-}
-.editing-director-suggestion textarea {
-  min-height: 65px;
-  width: 100%;
-  box-sizing: border-box;
-  resize: vertical;
-  border: 1px solid var(--border);
-  border-radius: var(--df-radius-control);
-  padding: 0.45rem 0.55rem;
-  background: var(--df-surface-0);
-  color: var(--text);
-  font: inherit;
   font-size: 0.75rem;
   line-height: 1.45;
 }
@@ -2255,25 +2193,6 @@ code {
 .qc-shot-director-suggestion > header > div {
   display: grid;
   gap: 0.15rem;
-}
-.qc-shot-director-suggestion label {
-  display: grid;
-  gap: 0.25rem;
-  font-size: 0.75rem;
-}
-.qc-shot-director-suggestion textarea {
-  min-height: 65px;
-  width: 100%;
-  box-sizing: border-box;
-  resize: vertical;
-  border: 1px solid var(--border);
-  border-radius: var(--df-radius-control);
-  padding: 0.45rem 0.55rem;
-  background: var(--df-surface-0);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.75rem;
-  line-height: 1.45;
 }
 .qc-shot-director-suggestion button {
   justify-self: start;

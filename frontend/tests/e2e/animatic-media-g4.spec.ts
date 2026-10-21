@@ -1,3 +1,4 @@
+import { selectValue } from "./selectValue";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 import {
@@ -162,10 +163,12 @@ test("real video, held last frame, image and missing-media playback obey planned
   await expect(animatic).toHaveAttribute("data-shot-id", SECOND_SHOT_ID);
   await animatic.getByTestId("animatic-play-toggle").click();
   await expect(animatic.getByTestId("animatic-play-toggle")).toHaveText("播放");
-  await expect(animatic.getByRole("img")).toBeVisible();
+  await expect(animatic.getByRole("img", { name: /^镜头/ })).toBeVisible();
   await expect
     .poll(() =>
-      animatic.getByRole("img").evaluate((element: HTMLImageElement) => element.naturalWidth),
+      animatic
+        .getByRole("img", { name: /^镜头/ })
+        .evaluate((element: HTMLImageElement) => element.naturalWidth),
     )
     .toBe(160);
   await animatic.getByTestId("animatic-play-toggle").click();
@@ -235,19 +238,25 @@ test("native candidate selection pauses Formal playback and never changes the ad
   await expect
     .poll(() => oldVideo!.evaluate((v: HTMLVideoElement) => v.currentTime))
     .toBeGreaterThan(0.1);
-  await animatic
-    .getByLabel("镜头 1 预览素材")
-    .selectOption("candidate/image_keyframe:preview-candidate-frame");
+  await selectValue(
+    animatic.getByLabel("镜头 1 预览素材"),
+    "candidate/image_keyframe:preview-candidate-frame",
+  );
   await expect.poll(() => oldVideo!.evaluate((v: HTMLVideoElement) => v.paused)).toBe(true);
   await expect(animatic).toHaveAttribute("data-media-source", "candidate");
   await expect(animatic.getByRole("progressbar")).toHaveAttribute("value", "0");
   await expect(animatic.getByRole("status")).toContainText("仅本地预览");
   await expect
-    .poll(() => animatic.getByRole("img").evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .poll(() =>
+      animatic
+        .getByRole("img", { name: /^镜头/ })
+        .evaluate((img: HTMLImageElement) => img.naturalWidth),
+    )
     .toBe(160);
-  await animatic
-    .getByLabel("镜头 1 预览素材")
-    .selectOption("candidate/video:preview-candidate-video");
+  await selectValue(
+    animatic.getByLabel("镜头 1 预览素材"),
+    "candidate/video:preview-candidate-video",
+  );
   const candidate = animatic.getByLabel("动态分镜视频");
   await expect(candidate).toHaveAttribute("src", /preview-candidate-video\/content/);
   await animatic.getByTestId("animatic-play-toggle").click();
@@ -255,13 +264,14 @@ test("native candidate selection pauses Formal playback and never changes the ad
     .poll(() => candidate.evaluate((v: HTMLVideoElement) => v.currentTime))
     .toBeGreaterThan(0.1);
   expect(await candidate.evaluate((v: HTMLVideoElement) => v.muted)).toBe(true);
-  await animatic.getByLabel("镜头 1 预览素材").selectOption("formal");
+  await selectValue(animatic.getByLabel("镜头 1 预览素材"), "formal");
   await expect(animatic.getByLabel("动态分镜视频")).toHaveAttribute(
     "src",
     /playback-video\/content/,
   );
-  await expect(page.locator(".scene-media-note")).toContainText("正式画面 2/3");
-  await expect(page.locator(".scene-media-note")).toContainText("正式视频 1/3");
+  const sceneHeader = page.getByTestId("scene-card").locator(":scope > header");
+  await expect(sceneHeader).toContainText("画面 2/3");
+  await expect(sceneHeader).toContainText("视频 1/3");
   expect(
     state.editing.requests.filter(
       (r) =>

@@ -1,3 +1,4 @@
+import { Field, Select } from "../../components/ui";
 /**
  * ReferencePurposeEditor (P4-03/MS8).
  *
@@ -24,14 +25,14 @@ export function ReferencePurposeEditor({
 }: ReferencePurposeEditorProps) {
   return (
     <div data-testid="reference-purpose-editor">
-      <label htmlFor="reference-purpose" className="mb-1 block text-xs font-medium text-gray-700">
+      <Field htmlFor="reference-purpose" className="mb-1 block text-xs font-medium text-gray-700">
         参考用途
-      </label>
-      <select
+      </Field>
+      <Select
         id="reference-purpose"
         value={value}
         disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => onChange(event)}
         className="w-full rounded border border-gray-300 px-2 py-1 text-sm disabled:opacity-50"
       >
         {REFERENCE_PURPOSES.map((purpose) => (
@@ -39,7 +40,7 @@ export function ReferencePurposeEditor({
             {purpose.label}（{purpose.description}）
           </option>
         ))}
-      </select>
+      </Select>
     </div>
   );
 }

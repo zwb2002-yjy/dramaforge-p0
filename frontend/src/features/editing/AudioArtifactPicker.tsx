@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 
-import { Button, Select } from "../../components/ui";
+import { Button, Select, Field } from "../../components/ui";
 import { artifactContentUrl } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { fetchEditingAudioArtifacts } from "./api";
@@ -49,19 +49,14 @@ export function AudioArtifactPicker({
 
   return (
     <div className="editing-audio-picker">
-      <label htmlFor={id}>{label}</label>
+      <Field htmlFor={id}>{label}</Field>
       <div className="editing-audio-picker-actions">
         <Select
           id={id}
           aria-label={label}
           data-testid={testId}
           value={muted ? MUTED : value}
-          onChange={(event) =>
-            onChange(
-              event.target.value === MUTED ? "" : event.target.value,
-              event.target.value === MUTED,
-            )
-          }
+          onChange={(event) => onChange(event === MUTED ? "" : event, event === MUTED)}
         >
           <option value="">{defaultLabel}</option>
           {allowMute && <option value={MUTED}>不使用配音</option>}

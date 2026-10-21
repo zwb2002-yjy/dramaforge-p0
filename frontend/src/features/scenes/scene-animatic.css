@@ -12,6 +12,12 @@
   color: var(--df-text-secondary);
   font-size: var(--df-font-size-caption);
 }
+.scene-animatic-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--df-space-3);
+  align-items: flex-end;
+}
 .scene-animatic-media {
   display: grid;
   place-items: center;
@@ -20,11 +26,13 @@
   overflow: hidden;
   background: var(--df-surface-screen);
   border-radius: var(--df-radius-container);
+  position: relative;
 }
-.scene-animatic-source {
+.scene-animatic-source,
+.scene-animatic-audio-source {
   display: grid;
   gap: var(--df-space-2);
-  max-width: var(--df-preview-inspection-max-width);
+  min-width: 200px;
 }
 .scene-animatic-media img,
 .scene-animatic-media video {
@@ -32,16 +40,42 @@
   height: 100%;
   object-fit: contain;
 }
+.scene-animatic-missing-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--df-space-3);
+}
 .scene-animatic-missing {
   max-width: 40ch;
   color: var(--df-text-secondary);
   text-align: center;
+  margin: 0;
 }
 .scene-animatic-dialogue {
   margin: 0;
+  font-size: 0.9rem;
+  color: var(--df-text-primary);
+}
+.scene-animatic-no-audio {
+  margin: 0;
+  color: var(--df-text-secondary);
+  font-size: 0.85rem;
+}
+.scene-animatic-ruler-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.scene-animatic-ruler {
+  width: 100%;
+  cursor: pointer;
 }
 .scene-animatic progress {
   width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
 }
 .scene-animatic-controls,
 .scene-animatic nav {
@@ -53,7 +87,4 @@
 .scene-animatic-controls span {
   color: var(--df-text-secondary);
   font-size: var(--df-font-size-caption);
-}
-.scene-animatic nav .df-btn[aria-pressed="true"] {
-  border-color: var(--df-verdigris);
 }

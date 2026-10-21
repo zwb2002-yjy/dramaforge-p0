@@ -337,8 +337,7 @@
    `status-card`, `callout`). Keep those class names for behavior and tests,
    but make their surfaces consume the same Visual 2.0 token vocabulary.
    ======================================================================== */
-  .qc-project-page,
-  .production-monitor {
+  .qc-project-page {
     display: grid;
     gap: var(--df-space-5);
     min-width: 0;
@@ -464,7 +463,7 @@
   .monitor-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: var(--df-text-sm);
+    font-size: var(--df-font-size-body-lg);
   }
 
   .monitor-table th,
@@ -477,7 +476,7 @@
 
   .monitor-table th {
     color: var(--df-text-muted);
-    font-size: var(--df-text-xs);
+    font-size: var(--df-font-size-body);
     font-weight: var(--df-weight-semibold);
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -611,17 +610,8 @@
     margin-left: var(--df-space-1);
   }
 
-  .qc-proposal-operation-details details,
   .qc-proposal-technical-details {
     margin-top: var(--df-space-2);
-  }
-
-  .qc-proposal-operation-details summary,
-  .qc-proposal-technical-details summary {
-    width: fit-content;
-    cursor: pointer;
-    color: var(--df-text-secondary);
-    font-size: var(--df-text-sm);
   }
 
   .qc-proposal-technical-details code,
@@ -757,21 +747,8 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .qc-project-page,
-    .production-monitor {
+    .qc-project-page {
       gap: var(--df-space-4);
-    }
-
-    /* The monitor is one column of panels; without an explicit shrinkable
-       track its column is floored by the widest panel content (the cross-scene
-       table), which pushed the table action past the clipped shell. */
-    .production-monitor {
-      grid-template-columns: minmax(0, 1fr);
-    }
-
-    .production-monitor > .panel {
-      min-width: 0;
-      overflow: hidden;
     }
 
     .monitor-table th,

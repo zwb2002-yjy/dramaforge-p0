@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { FormEvent, useState } from "react";
 
-import { Button, Disclosure, Input, PageHeader } from "../components/ui";
+import { Button, Disclosure, Input, PageHeader, Alert } from "../components/ui";
 import { ModelProfileSettings } from "../components/provider/ModelProfileSettings";
 import { ProjectModelSourceSummary } from "../components/provider/ProjectModelSourceSummary";
 import { ModelConnectionSettings } from "../components/provider/ModelConnectionSettings";
@@ -94,7 +94,7 @@ export function AccountSettingsPage() {
               <div className="toolbar">
                 <Button
                   type="button"
-                  className="ghost danger"
+                  tone="danger"
                   data-testid="logout-button"
                   onClick={() => logout.mutate()}
                   disabled={logout.isPending}
@@ -249,7 +249,7 @@ export function WorkspaceSettingsPage({
                     重命名
                   </Button>
                   <Button
-                    className="ghost danger"
+                    tone="danger"
                     type="button"
                     onClick={() => deleteMutation.mutate(workspace)}
                     disabled={Boolean(deleteDisabledReason)}
@@ -266,7 +266,7 @@ export function WorkspaceSettingsPage({
           )}
         </div>
       </section>
-      {error && <p className="flash err">{error}</p>}
+      {error && <Alert role="note" type="error" showIcon description={<>{error}</>} />}
     </section>
   );
 }
@@ -298,7 +298,12 @@ export function ProjectSettingsPage() {
           正在读取项目设置…
         </p>
       ) : project.isError || !project.data ? (
-        <p className="flash err">无法读取当前项目，请返回我的项目重新选择。</p>
+        <Alert
+          role="note"
+          type="error"
+          showIcon
+          description={<>无法读取当前项目，请返回我的项目重新选择。</>}
+        />
       ) : (
         <>
           <section className="df-settings-section">

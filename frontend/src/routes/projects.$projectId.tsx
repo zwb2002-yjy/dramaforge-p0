@@ -14,7 +14,7 @@ import { ProjectWorkspaceShell } from "../components/workstation/ProjectWorkspac
 import { useProjectWorkspaceState, workspaceViewFromPath } from "../hooks/useProjectWorkspaceState";
 import { ApiError, fetchProject } from "../lib/api";
 import { fetchSceneWorkspace } from "../features/scenes/api";
-import { Button } from "../components/ui";
+import { Button, ActionLink, Card, Alert } from "../components/ui";
 import { queryKeys } from "../lib/queryKeys";
 import { getRememberedProjectPath, rememberProjectPath } from "../lib/navigationPreferences";
 import { rootRoute } from "./__root";
@@ -130,10 +130,17 @@ function ProjectLayout() {
       }
     >
       {project.isError && (
-        <div className="flash err">
-          无法读取项目事实：
-          {project.error instanceof Error ? project.error.message : "未知错误"}
-        </div>
+        <Alert
+          role="note"
+          type="error"
+          showIcon
+          description={
+            <>
+              无法读取项目事实：
+              {project.error instanceof Error ? project.error.message : "未知错误"}
+            </>
+          }
+        />
       )}
       {project.isError ? (
         <Link to="/" search={{}}>
@@ -141,7 +148,7 @@ function ProjectLayout() {
         </Link>
       ) : atRoot ? (
         recoveryError ? (
-          <div role="alert" className="panel">
+          <Card role="alert">
             <p>无法读取上次位置</p>
             <Button
               onClick={() => {
@@ -151,10 +158,10 @@ function ProjectLayout() {
             >
               重试
             </Button>
-            <Link className="df-btn ghost" to="/projects/$projectId/script" params={{ projectId }}>
+            <ActionLink tone="ghost" to="/projects/$projectId/script" params={{ projectId }}>
               进入故事剧本
-            </Link>
-          </div>
+            </ActionLink>
+          </Card>
         ) : (
           <p className="muted" role="status">
             正在恢复上次位置…

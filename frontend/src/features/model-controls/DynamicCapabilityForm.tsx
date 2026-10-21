@@ -1,3 +1,4 @@
+import { Field, Checkbox, Select, Textarea, Input, Slider } from "../../components/ui";
 /**
  * DynamicCapabilityForm (P4-03/MS8).
  *
@@ -68,15 +69,15 @@ export function OptionField({
 
   if (component === "switch") {
     return (
-      <label className="flex items-center gap-2 text-sm">
-        <input
+      <Field className="flex items-center gap-2 text-sm">
+        <Checkbox
           type="checkbox"
           checked={Boolean(value)}
           disabled={effectiveDisabled}
           onChange={(event) => onChange(keyName, event.target.checked)}
         />
         {label}
-      </label>
+      </Field>
     );
   }
   if (component === "slider") {
@@ -85,13 +86,13 @@ export function OptionField({
     return (
       <div>
         {labelNode}
-        <input
-          type="range"
+        <Slider
+          ariaLabelForHandle={label}
           min={min}
           max={max}
           value={typeof value === "number" ? value : ((parameter.default as number) ?? min)}
           disabled={effectiveDisabled}
-          onChange={(event) => onChange(keyName, Number(event.target.value))}
+          onChange={(value) => onChange(keyName, value)}
           className="w-full"
         />
       </div>
@@ -102,10 +103,10 @@ export function OptionField({
     return (
       <div>
         {labelNode}
-        <select
+        <Select
           value={String(value ?? "")}
           disabled={effectiveDisabled}
-          onChange={(event) => onChange(keyName, event.target.value)}
+          onChange={(event) => onChange(keyName, event)}
           className={baseClass}
         >
           <option value="">（默认）</option>
@@ -114,7 +115,7 @@ export function OptionField({
               {String(option)}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
     );
   }
@@ -122,7 +123,7 @@ export function OptionField({
     return (
       <div>
         {labelNode}
-        <textarea
+        <Textarea
           value={String(value ?? "")}
           disabled={effectiveDisabled}
           onChange={(event) => onChange(keyName, event.target.value)}
@@ -136,7 +137,7 @@ export function OptionField({
     return (
       <div>
         {labelNode}
-        <input
+        <Input
           type="number"
           value={typeof value === "number" ? value : ""}
           disabled={effectiveDisabled}
@@ -149,7 +150,7 @@ export function OptionField({
   return (
     <div>
       {labelNode}
-      <input
+      <Input
         type="text"
         value={String(value ?? "")}
         disabled={effectiveDisabled}

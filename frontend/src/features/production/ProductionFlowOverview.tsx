@@ -41,7 +41,7 @@ export function ProductionFlowOverview({
 }: ProductionFlowOverviewProps) {
   return (
     <section className="production-flow" aria-label="制作流程" data-testid="production-flow">
-      <Disclosure title="查看执行环节" description="提示词、画面、视频与合成的真实执行状态">
+      <Disclosure title="查看执行环节" compact>
         <ol className="production-flow-stages">
           {stages.map((step, index) => {
             const facts = !unavailable

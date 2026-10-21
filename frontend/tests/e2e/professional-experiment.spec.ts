@@ -1,3 +1,4 @@
+import { selectValue } from "./selectValue";
 import { expect, test } from "@playwright/test";
 
 import { PROJECT_ID, installProfessionalMock } from "./professional-mocks";
@@ -9,7 +10,7 @@ test("experiment branch lifecycle: create, run, adopt candidate", async ({ page 
   await expect(page.getByTestId("professional-workbench")).toBeVisible();
 
   await page.getByLabel("实验名称").fill("Model B 转头验证");
-  await page.getByLabel("实验模型").selectOption("provider/model-b");
+  await selectValue(page.getByLabel("实验模型"), "provider/model-b");
   await expect(page.getByText(/动态能力/)).toContainText("video.image_to_video");
   await page.getByRole("button", { name: "创建实验分支" }).click();
   await expect(page.getByText("Model B 转头验证")).toBeVisible();
@@ -48,9 +49,9 @@ for (const failedRead of [false, true]) {
     });
     await page.goto(`/projects/${PROJECT_ID}/production`);
     await page.getByRole("tab", { name: "版本尝试", exact: true }).click();
-    await page.getByLabel("实验阶段").selectOption("video");
+    await selectValue(page.getByLabel("实验阶段"), "video");
     await page.getByLabel("实验名称").fill("Do not bypass reconciliation");
-    await page.getByLabel("实验模型").selectOption("provider/model-b");
+    await selectValue(page.getByLabel("实验模型"), "provider/model-b");
     await page.getByRole("button", { name: "创建实验分支" }).click();
     await page.getByRole("button", { name: "运行实验" }).click();
     await expect(page.getByTestId("experiment-message")).toContainText(

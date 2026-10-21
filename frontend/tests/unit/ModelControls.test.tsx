@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { selectValue, selectOptions, openSelect, getSelectOption } from "./selectValue";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { CapabilitySpecRead, ParameterSpecRead } from "../../src/lib/api";
@@ -83,7 +84,7 @@ describe("DynamicCapabilityForm", () => {
       />,
     );
     const select = screen.getByRole("combobox") as HTMLSelectElement;
-    const options = Array.from(select.options).map((o) => o.value);
+    const options = selectOptions(select).map((o) => o.value);
     expect(options).toContain("720p");
     expect(options).not.toContain("1080p");
   });
@@ -117,13 +118,14 @@ describe("AdvancedModelOptions", () => {
 describe("ReferencePurposeEditor", () => {
   it("lists reference purposes from the vocabulary", () => {
     render(<ReferencePurposeEditor value="identity" onChange={() => undefined} />);
-    const select = screen.getByTestId("reference-purpose-editor").querySelector("select");
+    const select = screen.getByTestId("reference-purpose-editor").querySelector("[role=combobox]");
     expect(select).not.toBeNull();
-    expect(screen.getByText(/角色身份/)).toBeTruthy();
-    expect(screen.getByText(/镜头语言/)).toBeTruthy();
+    openSelect(select!);
+    expect(getSelectOption(select!, /角色身份/)).toBeTruthy();
+    expect(getSelectOption(select!, /镜头语言/)).toBeTruthy();
   });
 
-  it("emits the selected purpose", () => {
+  it("emits the selected purpose", async () => {
     let value = "identity";
     render(
       <ReferencePurposeEditor
@@ -133,8 +135,8 @@ describe("ReferencePurposeEditor", () => {
         }}
       />,
     );
-    const select = screen.getByTestId("reference-purpose-editor").querySelector("select")!;
-    fireEvent.change(select, { target: { value: "camera_language" } });
+    const select = screen.getByTestId("reference-purpose-editor").querySelector("[role=combobox]")!;
+    await selectValue(select, "camera_language");
     expect(value).toBe("camera_language");
   });
 });

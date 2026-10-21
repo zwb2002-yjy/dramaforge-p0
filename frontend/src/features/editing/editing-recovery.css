@@ -5,40 +5,6 @@
   min-width: 0;
   max-width: 100%;
 }
-.editing-session-picker ul {
-  list-style: none;
-  padding: 0;
-  display: grid;
-  gap: var(--df-space-3);
-}
-.editing-session-picker li {
-  display: grid;
-  gap: var(--df-space-2);
-  min-width: 0;
-  padding: var(--df-space-4);
-  border: 1px solid var(--df-border-subtle);
-  background: var(--df-surface-tier-raised-bg);
-  border-radius: var(--df-radius-container);
-  overflow-wrap: anywhere;
-}
-.editing-session-picker button {
-  max-width: 100%;
-  white-space: normal;
-}
-.final-film-result video {
-  display: block;
-  width: 100%;
-  max-width: 100%;
-  max-height: 65vh;
-  background: var(--df-surface-screen);
-  border-radius: var(--df-radius-container);
-}
-.film-playback-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--df-space-2);
-  margin-block: var(--df-space-2);
-}
 
 .qc-project-page[data-testid="editing-workspace"] {
   overflow-wrap: anywhere;
@@ -49,9 +15,6 @@
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
-}
-.final-film-result dd {
-  margin-inline-start: 0;
 }
 .qc-project-page[data-testid="editing-workspace"] pre {
   min-width: 0;

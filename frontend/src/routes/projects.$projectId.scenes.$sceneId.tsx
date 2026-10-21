@@ -10,6 +10,8 @@ export const projectSceneWorkspaceRoute = createRoute({
   path: "/scenes/$sceneId",
   validateSearch: (search: Record<string, unknown>) => ({
     shotId: typeof search.shotId === "string" ? search.shotId : undefined,
+    ...(typeof search.editSessionId === "string" ? { editSessionId: search.editSessionId } : {}),
+    ...(typeof search.editClipId === "string" ? { editClipId: search.editClipId } : {}),
     tool:
       search.tool === "director" || search.tool === "prompts" || search.tool === "generate"
         ? search.tool
@@ -21,7 +23,8 @@ export const projectSceneWorkspaceRoute = createRoute({
 
 function SceneWorkspacePage() {
   const { projectId, sceneId } = projectSceneWorkspaceRoute.useParams();
-  const { shotId, tool, review } = projectSceneWorkspaceRoute.useSearch();
+  const { shotId, tool, review, editSessionId, editClipId } =
+    projectSceneWorkspaceRoute.useSearch();
   const navigate = projectSceneWorkspaceRoute.useNavigate();
   const [hasUnsavedDesign, setHasUnsavedDesign] = useState(false);
   const dirtyRef = useRef(false);
@@ -71,8 +74,13 @@ function SceneWorkspacePage() {
           void navigate({
             to: "/projects/$projectId/edit",
             params: { projectId },
-            search: { sessionId: undefined },
+            search: { sessionId: editSessionId, clipId: editClipId },
           })
+        }
+        editingReturnHref={
+          editSessionId
+            ? `/projects/${projectId}/edit?${new URLSearchParams({ sessionId: editSessionId, ...(editClipId ? { clipId: editClipId } : {}) })}`
+            : undefined
         }
       />
       {blocker.status === "blocked" && (

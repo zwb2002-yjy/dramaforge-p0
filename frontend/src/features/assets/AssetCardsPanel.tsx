@@ -9,6 +9,7 @@ import {
   Disclosure,
   EmptyState,
   Badge,
+  Alert,
 } from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useMemo, useState } from "react";
@@ -157,7 +158,7 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
           <Select
             aria-label="资产类型过滤"
             value={kindFilter}
-            onChange={(event) => setKindFilter(event.target.value)}
+            onChange={(event) => setKindFilter(event)}
           >
             <option value="">全部</option>
             {Object.entries(ASSET_KIND_LABEL).map(([value, label]) => (
@@ -172,7 +173,7 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
           <Select
             aria-label="资产状态过滤"
             value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
+            onChange={(event) => setStatusFilter(event)}
           >
             <option value="">全部</option>
             {Object.entries(ASSET_STATUS_LABEL).map(([value, label]) => (
@@ -194,11 +195,16 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
       </section>
 
       {(recycle.isError || restore.isError) && (
-        <p role="alert" className="flash err">
-          操作失败，请稍后重试。
-        </p>
+        <Alert role="alert" type="error" showIcon description={<>操作失败，请稍后重试。</>} />
       )}
-      {assets.isError && <div className="flash err">无法读取资产：{String(assets.error)}</div>}
+      {assets.isError && (
+        <Alert
+          role="note"
+          type="error"
+          showIcon
+          description={<>无法读取资产：{String(assets.error)}</>}
+        />
+      )}
 
       <ul className="qc-asset-grid">
         {rows.map((asset) => (
@@ -227,7 +233,7 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
                 >
                   {assetStatusLabel(asset.status)}
                 </span>
-                <Disclosure title="管理素材">
+                <Disclosure compact title="管理素材">
                   <TagEditor
                     options={tagOptions}
                     onSave={(names) => setTags.mutateAsync({ assetId: asset.id, names })}
@@ -308,11 +314,7 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
           )}
         </EmptyState>
       )}
-      {feedback && (
-        <p className="flash ok" role="status">
-          {feedback}
-        </p>
-      )}
+      {feedback && <Alert role="status" type="success" showIcon description={<>{feedback}</>} />}
     </div>
   );
 }
@@ -479,7 +481,7 @@ function VersionControls({
                     </Button>
                     <Button
                       type="button"
-                      className="ghost danger"
+                      tone="danger"
                       data-testid="asset-version-reject"
                       onClick={() => onReject(version.id)}
                     >

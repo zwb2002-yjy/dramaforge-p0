@@ -1,7 +1,16 @@
 import { useMemo, useState } from "react";
 
 import { artifactContentUrl, type ExperimentRead, type ModelRead } from "../../lib/api";
-import { Button } from "../../components/ui";
+import {
+  Button,
+  Field,
+  Radio,
+  Select,
+  Textarea,
+  Input,
+  Disclosure,
+  Card,
+} from "../../components/ui";
 import { candidateModelKey, type ModelCandidateRead } from "./modelCandidatesApi";
 import {
   EXPERIMENT_STAGE_LABEL,
@@ -180,7 +189,7 @@ export function ExperimentBranchPanel({
       data-testid="professional-workbench"
       data-project-id={projectId}
     >
-      <section className="panel experiment-branch-panel" data-testid="experiment-branches">
+      <Card className="experiment-branch-panel" data-testid="experiment-branches">
         <div className="panel-header">
           <div>
             <h3>尝试不同版本</h3>
@@ -234,7 +243,19 @@ export function ExperimentBranchPanel({
                       >
                         <legend>查看并选择候选</legend>
                         {candidates.map((artifactId, index) => (
-                          <label key={artifactId} className="qc-shot-candidate-card">
+                          <Field key={artifactId} className="qc-shot-candidate-card">
+                            <Radio
+                              type="radio"
+                              aria-label={`候选 ${index + 1}`}
+                              name={`candidate-${item.id}`}
+                              checked={selectedCandidate === artifactId}
+                              onChange={() =>
+                                setSelectedArtifacts((current) => ({
+                                  ...current,
+                                  [item.id]: artifactId,
+                                }))
+                              }
+                            />
                             {targetNodeKey === "keyframe" ? (
                               <img
                                 src={artifactContentUrl(projectId, artifactId)}
@@ -249,22 +270,8 @@ export function ExperimentBranchPanel({
                                 aria-label={`${item.name} · 候选 ${index + 1}`}
                               />
                             )}
-                            <span>
-                              <input
-                                type="radio"
-                                aria-label={`候选 ${index + 1}`}
-                                name={`candidate-${item.id}`}
-                                checked={selectedCandidate === artifactId}
-                                onChange={() =>
-                                  setSelectedArtifacts((current) => ({
-                                    ...current,
-                                    [item.id]: artifactId,
-                                  }))
-                                }
-                              />
-                              候选 {index + 1}
-                            </span>
-                          </label>
+                            <span>候选 {index + 1}</span>
+                          </Field>
                         ))}
                       </fieldset>
                     )}
@@ -367,27 +374,27 @@ export function ExperimentBranchPanel({
           <section>
             <h4>创建模型实验</h4>
             <div className="asset-create-form">
-              <label>
+              <Field>
                 候选任务数量
-                <select
+                <Select
                   aria-label="候选任务数量"
                   value={candidateCount}
                   disabled={experimentBusy}
-                  onChange={(event) => setCandidateCount(Number(event.target.value))}
+                  onChange={(event) => setCandidateCount(Number(event))}
                 >
                   {[1, 2, 3, 4].map((count) => (
                     <option key={count} value={count}>
                       {count} 个版本
                     </option>
                   ))}
-                </select>
-              </label>
+                </Select>
+              </Field>
               <small>
                 创建仅保存任务；逐个运行才会调用模型。采用前先查看候选，正式版本不会自动替换。
               </small>
-              <label>
+              <Field>
                 候选提示词（可选，每行一个版本）
-                <textarea
+                <Textarea
                   aria-label="候选提示词"
                   rows={5}
                   value={promptVariants}
@@ -395,34 +402,34 @@ export function ExperimentBranchPanel({
                   onChange={(event) => setPromptVariants(event.target.value)}
                   placeholder={"低机位，冷色逆光，强调孤独感\n平视中景，暖色窗光，强调人物表情"}
                 />
-              </label>
+              </Field>
               <small>
                 填写后按非空行数创建候选，并把每行作为独立冻结输入；不再让多个候选复用同一提示词。
               </small>
-              <input
+              <Input
                 disabled={experimentBusy}
                 aria-label="实验名称"
                 value={experimentName}
                 onChange={(event) => setExperimentName(event.target.value)}
                 placeholder="例如：换模型验证转头稳定性"
               />
-              <select
+              <Select
                 disabled={experimentBusy}
                 aria-label="实验阶段"
                 value={experimentStage}
-                onChange={(event) => setExperimentStage(experimentStageOf(event.target.value))}
+                onChange={(event) => setExperimentStage(experimentStageOf(event))}
               >
                 {EXPERIMENT_STAGE_ORDER.map((stage) => (
                   <option key={stage} value={stage}>
                     {EXPERIMENT_STAGE_LABEL[stage]}
                   </option>
                 ))}
-              </select>
-              <select
+              </Select>
+              <Select
                 disabled={experimentBusy}
                 aria-label="实验模型"
                 value={experimentModel}
-                onChange={(event) => setExperimentModel(event.target.value)}
+                onChange={(event) => setExperimentModel(event)}
               >
                 <option value="">选择模型</option>
                 {models.map((model) => {
@@ -444,14 +451,14 @@ export function ExperimentBranchPanel({
                           ? candidate.certified
                             ? " · 可用"
                             : " · 未认证"
-                          : " · 不可用"
+                          : " · " + modelIssueLabels(candidate.issues.map((issue) => issue.code))
                         : stageCandidates
                           ? ` · 无${EXPERIMENT_STAGE_SHORT_LABEL[experimentStage]}阶段绑定`
                           : ""}
                     </option>
                   );
                 })}
-              </select>
+              </Select>
               {experimentModelRecord && (
                 <small>动态能力：{experimentModelRecord.capabilities.join(" · ")}</small>
               )}
@@ -482,10 +489,12 @@ export function ExperimentBranchPanel({
                 </small>
               )}
               {experimentError && (
-                <details data-testid="experiment-error-diagnostics">
-                  <summary>开发 / 诊断详情（只读）</summary>
+                <Disclosure
+                  data-testid="experiment-error-diagnostics"
+                  title={<>开发 / 诊断详情（只读）</>}
+                >
                   <small>{experimentErrorDetail(experimentErrorRaw)}</small>
-                </details>
+                </Disclosure>
               )}
               <Button
                 tone="primary"
@@ -504,7 +513,7 @@ export function ExperimentBranchPanel({
             </div>
           </section>
         </div>
-      </section>
+      </Card>
     </section>
   );
 }

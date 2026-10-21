@@ -1,13 +1,23 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 
-import { Button, Disclosure } from "../../components/ui";
+import {
+  Badge,
+  Button,
+  Disclosure,
+  SectionHeader,
+  SegmentedControl,
+  Table,
+  ActionLink,
+  Alert,
+} from "../../components/ui";
 import { productionReadErrorMessage, type ProductionSummary } from "./api";
 import { ProductionFlowOverview } from "./ProductionFlowOverview";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
 import { zhNode } from "../../lib/zh";
 import { timeOfDayLabel } from "../../lib/sceneLabels";
 import type { SceneSummary } from "../scenes/api";
+import { productionCopy as copy } from "./productionCopy";
 import "./production-monitor.css";
 
 type ProductionMonitorProps = {
@@ -112,13 +122,20 @@ export function ProductionMonitor({
   return (
     <section className="production-monitor" data-testid="production-monitor" aria-label="制作进度">
       {(scenesError || shotsError || summaryError) && (
-        <div className="flash err" role="alert">
-          {summaryError && <p>{productionReadErrorMessage(summaryFailure)}</p>}
-          {(scenesError || shotsError) && (
-            <p>部分制作状态读取失败，相关统计暂不可用。已有场景列表可能不是最新状态。</p>
-          )}
-          {onRetry && <Button onClick={onRetry}>重新读取状态</Button>}
-        </div>
+        <Alert
+          role="alert"
+          type="error"
+          showIcon
+          description={
+            <>
+              {summaryError && <p>{productionReadErrorMessage(summaryFailure)}</p>}
+              {(scenesError || shotsError) && (
+                <p>部分制作状态读取失败，相关统计暂不可用。已有场景列表可能不是最新状态。</p>
+              )}
+              {onRetry && <Button onClick={onRetry}>重新读取状态</Button>}
+            </>
+          }
+        />
       )}
       {sceneFactsKnown && scenes.length === 0 && (
         <section
@@ -130,9 +147,9 @@ export function ProductionMonitor({
             <h2>先把故事变成分镜</h2>
             <p>写下想法或导入剧本，确认建议后再制作画面。</p>
           </div>
-          <Link className="df-btn primary" to="/projects/$projectId/script" params={{ projectId }}>
+          <ActionLink tone="primary" to="/projects/$projectId/script" params={{ projectId }}>
             开始故事剧本
-          </Link>
+          </ActionLink>
         </section>
       )}
       {sceneFactsKnown && scenes.length > 0 && (
@@ -146,23 +163,23 @@ export function ProductionMonitor({
           </div>
           <div className="monitor-next-actions">
             {nextScene ? (
-              <Link
-                className="df-btn primary"
+              <ActionLink
+                tone="primary"
                 to="/projects/$projectId/scenes/$sceneId"
                 params={{ projectId, sceneId: nextScene.id }}
                 search={{ shotId: nextShot?.id, tool: undefined }}
               >
                 {risky.length > 0 ? "检查风险场景" : "继续制作"}
-              </Link>
+              </ActionLink>
             ) : (
-              <Link
-                className="df-btn primary"
+              <ActionLink
+                tone="primary"
                 to="/projects/$projectId/edit"
                 params={{ projectId }}
                 search={{ sessionId: undefined }}
               >
                 进入剪辑
-              </Link>
+              </ActionLink>
             )}
           </div>
         </section>
@@ -207,74 +224,22 @@ export function ProductionMonitor({
         </span>
       </p>
 
-      <ProductionFlowOverview
-        projectId={projectId}
-        summary={summary}
-        unavailable={summaryError}
-        shots={!shotsLoading && !shotsError ? shots : []}
-      />
-      {runFactsKnown && failedRuns > 0 && (
-        <Disclosure title="查看失败执行" testId="production-failures-disclosure">
-          <section className="monitor-failures" aria-label="失败执行详情">
-            <p className="muted">
-              失败执行与场景风险分别统计；实验失败也会计入执行记录，不代表正式产物缺失。此处不会自动重试。
-            </p>
-            <ul>
-              {failures.map((run) => {
-                const shot =
-                  !shotsError && !shotsLoading
-                    ? shots.find((item) => item.id === run.shot_id)
-                    : undefined;
-                const scene = sceneFactsKnown
-                  ? scenes.find((item) => item.id === shot?.scene_id)
-                  : undefined;
-                const experiment = run.experiment_id || run.execution_branch === "experiment";
-                return (
-                  <li key={run.id}>
-                    <span>
-                      {zhNode(run.node_key)} · {experiment ? "实验执行" : "执行"}
-                      {nodeRunStatusLabel(run.status)}
-                    </span>
-                    {shot && scene ? (
-                      <Link
-                        to="/projects/$projectId/scenes/$sceneId"
-                        params={{ projectId, sceneId: scene.id }}
-                        search={{ shotId: shot.id, tool: undefined }}
-                      >
-                        查看镜头 {shot.shot_number} · {scene.location_name}
-                      </Link>
-                    ) : (
-                      <span className="muted">暂无可定位的镜头</span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-            {summary?.has_more_failures && (
-              <p>这里只显示最近 20 条失败执行，完整记录见下方任务历史。</p>
-            )}
-          </section>
-        </Disclosure>
-      )}
-
       <section className="monitor-scenes" aria-labelledby="monitor-scenes-title">
-        <header className="monitor-scene-heading">
-          <h2 id="monitor-scenes-title">
-            跨场景状态{" "}
+        <SectionHeader
+          title={<span id="monitor-scenes-title">跨场景状态</span>}
+          actions={
+            <SegmentedControl
+              label="场景状态筛选"
+              value={filter}
+              onChange={setFilter}
+              options={copy.sceneFilters}
+            />
+          }
+        >
+          <Badge>
             <span data-testid="stat-scenes">{sceneFactsKnown ? scenes.length : "—"}</span>
-          </h2>
-          <div className="monitor-filters" role="group" aria-label="场景状态筛选">
-            <Button aria-pressed={filter === "all"} onClick={() => setFilter("all")}>
-              全部场景
-            </Button>
-            <Button aria-pressed={filter === "unfinished"} onClick={() => setFilter("unfinished")}>
-              未完成
-            </Button>
-            <Button aria-pressed={filter === "risk"} onClick={() => setFilter("risk")}>
-              仅看风险
-            </Button>
-          </div>
-        </header>
+          </Badge>
+        </SectionHeader>
         {scenesLoading ? (
           <p role="status">正在读取场景制作进度…</p>
         ) : scenesError && scenes.length === 0 ? (
@@ -301,20 +266,25 @@ export function ProductionMonitor({
             aria-label="跨场景状态表格"
             tabIndex={0}
           >
-            <table className="monitor-table" data-testid="monitor-scene-table">
-              <thead>
-                <tr>
-                  <th>场景</th>
-                  <th>镜头</th>
-                  <th>正式关键帧 / 镜头</th>
-                  <th>正式视频 / 镜头</th>
-                  <th>风险</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleScenes.map(({ scene, description, unfinished: isUnfinished }) => (
-                  <tr key={scene.id} data-testid={`monitor-scene-${scene.id}`}>
-                    <td>
+            <Table
+              className="monitor-table"
+              data-testid="monitor-scene-table"
+              size="middle"
+              pagination={false}
+              dataSource={visibleScenes}
+              rowKey={(item) => item.scene.id}
+              scroll={{ x: "max-content" }}
+              onRow={(item) => ({
+                className: "monitor-scene-row",
+                "data-testid": "monitor-scene-" + item.scene.id,
+              })}
+              columns={[
+                {
+                  title: "场景",
+                  key: "scene",
+                  width: "40%",
+                  render: (_, { scene, description, unfinished: isUnfinished }) => (
+                    <>
                       <Link
                         className="qc-scene-enter monitor-scene-link"
                         to="/projects/$projectId/scenes/$sceneId"
@@ -338,48 +308,114 @@ export function ProductionMonitor({
                         {timeOfDayLabel(scene.time_of_day)} ·{" "}
                         {sceneFactsKnown ? description : "状态待刷新"}
                       </small>
-                    </td>
-                    <td>{sceneFactsKnown ? scene.shot_count : "—"}</td>
-                    <td>
-                      {sceneFactsKnown
-                        ? `${scene.formal_keyframe_count} / ${scene.shot_count}`
-                        : "—"}
-                    </td>
-                    <td>
-                      {sceneFactsKnown ? `${scene.formal_video_count} / ${scene.shot_count}` : "—"}
-                    </td>
-                    <td className={scene.risk_count ? "status-bad" : undefined}>
+                    </>
+                  ),
+                },
+                {
+                  title: "镜头",
+                  key: "shots",
+                  render: (_, { scene }) => (sceneFactsKnown ? scene.shot_count : "—"),
+                },
+                {
+                  title: "正式关键帧 / 镜头",
+                  key: "keyframes",
+                  render: (_, { scene }) =>
+                    sceneFactsKnown ? scene.formal_keyframe_count + " / " + scene.shot_count : "—",
+                },
+                {
+                  title: "正式视频 / 镜头",
+                  key: "videos",
+                  render: (_, { scene }) =>
+                    sceneFactsKnown ? scene.formal_video_count + " / " + scene.shot_count : "—",
+                },
+                {
+                  title: "风险",
+                  key: "risk",
+                  render: (_, { scene }) => (
+                    <span className={scene.risk_count ? "status-bad" : undefined}>
                       {sceneFactsKnown ? scene.risk_count : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </span>
+                  ),
+                },
+              ]}
+            />
           </div>
         )}
       </section>
-      <Disclosure
-        title="执行与资源统计"
-        description="辅助统计，不代表正式成片进度"
-        testId="production-statistics-disclosure"
-      >
-        <dl className="monitor-resource-stats">
-          <div>
-            <dt>已完成执行</dt>
-            <dd data-testid="stat-completed">{runFactsKnown ? completedRuns : "—"}</dd>
-          </div>
-          <div>
-            <dt>媒体结果</dt>
-            <dd data-testid="stat-artifacts">
-              {!summaryError ? (summary?.artifact_count ?? "—") : "—"}
-            </dd>
-          </div>
-          <div>
-            <dt>实验</dt>
-            <dd data-testid="stat-experiments">{experimentCount ?? "—"}</dd>
-          </div>
-        </dl>
-      </Disclosure>
+      <div className="monitor-details">
+        <ProductionFlowOverview
+          projectId={projectId}
+          summary={summary}
+          unavailable={summaryError}
+          shots={!shotsLoading && !shotsError ? shots : []}
+        />
+        {runFactsKnown && failedRuns > 0 && (
+          <Disclosure title="查看失败执行" testId="production-failures-disclosure" compact>
+            <section className="monitor-failures" aria-label="失败执行详情">
+              <p className="muted">
+                失败执行与场景风险分别统计；实验失败也会计入执行记录，不代表正式产物缺失。此处不会自动重试。
+              </p>
+              <ul>
+                {failures.map((run) => {
+                  const shot =
+                    !shotsError && !shotsLoading
+                      ? shots.find((item) => item.id === run.shot_id)
+                      : undefined;
+                  const scene = sceneFactsKnown
+                    ? scenes.find((item) => item.id === shot?.scene_id)
+                    : undefined;
+                  const experiment = run.experiment_id || run.execution_branch === "experiment";
+                  return (
+                    <li key={run.id}>
+                      <span>
+                        {zhNode(run.node_key)} · {experiment ? "实验执行" : "执行"}
+                        {nodeRunStatusLabel(run.status)}
+                      </span>
+                      {shot && scene ? (
+                        <Link
+                          to="/projects/$projectId/scenes/$sceneId"
+                          params={{ projectId, sceneId: scene.id }}
+                          search={{ shotId: shot.id, tool: undefined }}
+                        >
+                          查看镜头 {shot.shot_number} · {scene.location_name}
+                        </Link>
+                      ) : (
+                        <span className="muted">暂无可定位的镜头</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              {summary?.has_more_failures && (
+                <p>这里只显示最近 20 条失败执行，完整记录见下方任务历史。</p>
+              )}
+            </section>
+          </Disclosure>
+        )}
+        <Disclosure
+          title="执行与资源统计"
+          description="辅助统计，不代表正式成片进度"
+          testId="production-statistics-disclosure"
+          compact
+        >
+          <dl className="monitor-resource-stats">
+            <div>
+              <dt>已完成执行</dt>
+              <dd data-testid="stat-completed">{runFactsKnown ? completedRuns : "—"}</dd>
+            </div>
+            <div>
+              <dt>媒体结果</dt>
+              <dd data-testid="stat-artifacts">
+                {!summaryError ? (summary?.artifact_count ?? "—") : "—"}
+              </dd>
+            </div>
+            <div>
+              <dt>实验</dt>
+              <dd data-testid="stat-experiments">{experimentCount ?? "—"}</dd>
+            </div>
+          </dl>
+        </Disclosure>
+      </div>
     </section>
   );
 }

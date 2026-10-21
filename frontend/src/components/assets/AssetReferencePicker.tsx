@@ -294,7 +294,7 @@ export function AssetReferencePicker({
           );
           return (
             <li key={binding.id} className={invalid ? "invalid" : undefined}>
-              <button
+              <Button
                 type="button"
                 className="df-ref-chip"
                 aria-label={`编辑引用 ${binding.label || binding.id}`}
@@ -311,7 +311,7 @@ export function AssetReferencePicker({
                 />
                 <span>{binding.label || "未命名"}</span>
                 <small>{purposeLabel(binding.purpose)}</small>
-              </button>
+              </Button>
               {invalid && (
                 <span
                   className="df-status err"
@@ -324,7 +324,7 @@ export function AssetReferencePicker({
           );
         })}
         <li>
-          <button
+          <Button
             type="button"
             className="df-ref-add"
             aria-expanded={adding}
@@ -332,7 +332,7 @@ export function AssetReferencePicker({
           >
             <Plus size={14} aria-hidden="true" />
             {rows.length ? "添加" : "添加角色或参考"}
-          </button>
+          </Button>
         </li>
       </ul>
 
@@ -347,7 +347,7 @@ export function AssetReferencePicker({
           <Select
             aria-label="选择资产"
             value={selectedAssetId}
-            onChange={(event) => setSelectedAssetId(event.target.value)}
+            onChange={(event) => setSelectedAssetId(event)}
           >
             <option value="">选择素材…</option>
             {assetOptions.map((asset) => (
@@ -359,7 +359,7 @@ export function AssetReferencePicker({
           <Select
             aria-label="引用目的"
             value={selectedPurpose}
-            onChange={(event) => setSelectedPurpose(event.target.value)}
+            onChange={(event) => setSelectedPurpose(event)}
           >
             {PURPOSES.map((item) => (
               <option key={item} value={item}>
@@ -392,7 +392,7 @@ export function AssetReferencePicker({
             <Select
               aria-label={`引用作用域 ${binding.id}`}
               value={editStage}
-              onChange={(event) => setEditStage(event.target.value as "image" | "video" | "both")}
+              onChange={(event) => setEditStage(event as "image" | "video" | "both")}
             >
               <option value="image">仅图片提示词</option>
               <option value="video">仅视频提示词</option>
@@ -409,7 +409,7 @@ export function AssetReferencePicker({
             <Select
               aria-label={`参考素材 ${binding.id}`}
               value={editAssetId}
-              onChange={(event) => setEditAssetId(event.target.value)}
+              onChange={(event) => setEditAssetId(event)}
             >
               <option value="">选择素材…</option>
               {assetOptions.map((asset) => (
@@ -421,7 +421,7 @@ export function AssetReferencePicker({
             <Select
               aria-label={`参考用途 ${binding.id}`}
               value={editPurpose}
-              onChange={(event) => setEditPurpose(event.target.value)}
+              onChange={(event) => setEditPurpose(event)}
             >
               {PURPOSES.map((item) => (
                 <option key={item} value={item}>
@@ -433,9 +433,7 @@ export function AssetReferencePicker({
               aria-label={`参考方式 ${binding.id}`}
               value={editMode}
               onChange={(event) =>
-                setEditMode(
-                  event.target.value === "pinned_version" ? "pinned_version" : "current_formal",
-                )
+                setEditMode(event === "pinned_version" ? "pinned_version" : "current_formal")
               }
             >
               <option value="current_formal">跟随正式版本</option>

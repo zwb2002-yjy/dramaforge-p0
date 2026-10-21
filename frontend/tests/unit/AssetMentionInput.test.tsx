@@ -149,6 +149,11 @@ describe("persisted Asset mentions", () => {
     await waitFor(() => expect(within(list).getAllByRole("option")).toHaveLength(1));
     fireEvent.keyDown(input(), { key: "Enter" });
     await waitFor(() => expect(input()).toHaveValue("角色 @林墨 "));
+    await waitFor(() => {
+      expect(input()).toBeEnabled();
+      expect(input()).toHaveFocus();
+      expect((input() as HTMLTextAreaElement).selectionStart).toBe("角色 @林墨 ".length);
+    });
     expect(state.writes).toEqual([
       {
         method: "POST",

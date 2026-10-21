@@ -4,7 +4,7 @@ import {
   AssetReferencePicker,
   type ReferenceResolutionState,
 } from "../../components/assets/AssetReferencePicker";
-import { Disclosure } from "../../components/ui";
+import { Button, Disclosure } from "../../components/ui";
 import { CreativeCapabilitiesPanel } from "../production/CreativeCapabilitiesPanel";
 import { ShotDirectorSuggestionPanel } from "../director/ShotDirectorSuggestionPanel";
 import { ShotDesignPanel, type ShotDesignDraft } from "./ShotDesignPanel";
@@ -15,7 +15,7 @@ import type { ShotCandidate } from "./shotCandidates";
 import "./shot-inspector.css";
 
 /** Sections that a deep link or the canvas can open on arrival. */
-export type InspectorFocus = "generate" | "prompts" | "director" | null;
+export type InspectorFocus = "design" | "generate" | "prompts" | "director" | null;
 
 type ShotInspectorProps = {
   projectId: string;
@@ -41,6 +41,7 @@ type ShotInspectorProps = {
   focusRequest?: { focus: InspectorFocus; revision: number } | null;
   /** Open model settings in a drawer without leaving the canvas. */
   onOpenModelSettings?: () => void;
+  onBackToPreview?: () => void;
 };
 
 /**
@@ -73,25 +74,37 @@ export function ShotInspector({
   intentSeed,
   focusRequest,
   onOpenModelSettings,
+  onBackToPreview,
 }: ShotInspectorProps) {
   const root = useRef<HTMLElement>(null);
   const [directorOpen, setDirectorOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [promptsOpen, setPromptsOpen] = useState(focusRequest?.focus === "prompts");
+  const handledFocus = useRef<number | null>(null);
+  const previousShotId = useRef(shot?.id);
 
   useEffect(() => {
     setDirectorOpen(false);
     setDetailsOpen(false);
+    if (previousShotId.current !== shot?.id) setPromptsOpen(false);
+    previousShotId.current = shot?.id;
   }, [shot?.id]);
 
   // Deep links (?tool=…) and canvas entries reveal one section and bring it
   // into view. Nothing here writes a fact.
   // A request is handled once, as soon as the selected Shot has rendered.
-  const handledFocus = useRef<number | null>(null);
   useEffect(() => {
-    if (!focusRequest?.focus || !root.current) return;
+    if (!shot || !focusRequest?.focus || !root.current) return;
     if (handledFocus.current === focusRequest.revision) return;
     handledFocus.current = focusRequest.revision;
     const focus = focusRequest.focus;
+    if (focus === "design") {
+      root.current.scrollIntoView?.({ block: "start" });
+      root.current
+        .querySelector<HTMLTextAreaElement>('textarea[aria-label="画面描述"]')
+        ?.focus({ preventScroll: true });
+      return;
+    }
     if (focus === "director") setDirectorOpen(true);
     const target = root.current.querySelector<HTMLElement>(
       focus === "generate"
@@ -100,7 +113,7 @@ export function ShotInspector({
           ? '[data-testid="shot-design-prompts"]'
           : '[data-testid="shot-inspector-director"]',
     );
-    if (focus === "prompts" && target instanceof HTMLDetailsElement) target.open = true;
+    if (focus === "prompts") setPromptsOpen(true);
     target?.scrollIntoView?.({ block: "nearest" });
   }, [focusRequest, shot?.id]);
 
@@ -127,6 +140,11 @@ export function ShotInspector({
     >
       <header className="df-inspector-header">
         <h2>镜头 {shot.shot_number}</h2>
+        {onBackToPreview && (
+          <Button className="df-scene-compact-jump" tone="ghost" onClick={onBackToPreview}>
+            返回预览
+          </Button>
+        )}
         {designDirty ? (
           <span className="df-status warn" data-testid="shot-design-dirty" role="status">
             未保存
@@ -157,6 +175,8 @@ export function ShotInspector({
             onLabelChanged={onReferenceLabelChanged}
           />
         }
+        promptsOpen={promptsOpen}
+        onPromptsOpenChange={setPromptsOpen}
         production={(control) => (
           <ShotProductionActions
             key={`production:${shot.id}`}
@@ -180,6 +200,7 @@ export function ShotInspector({
       />
 
       <Disclosure
+        compact
         title="AI 导演"
         description="分析这个镜头，给出可应用的修改"
         testId="shot-inspector-director"
@@ -196,19 +217,19 @@ export function ShotInspector({
               onApplyDraft={onApplySuggestionDraft}
               intentSeed={intentSeed}
             />
-            <details className="df-inspector-subsection">
-              <summary>创作手法</summary>
+            <Disclosure compact className="df-inspector-subsection" title={<>创作手法</>}>
               <CreativeCapabilitiesPanel
                 key={`methods:${shot.id}`}
                 projectId={projectId}
                 shotId={shot.id}
               />
-            </details>
+            </Disclosure>
           </>
         )}
       </Disclosure>
 
       <Disclosure
+        compact
         title="详情"
         testId="shot-inspector-details"
         open={detailsOpen}

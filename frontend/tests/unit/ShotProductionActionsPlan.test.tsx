@@ -160,7 +160,7 @@ describe("ShotProductionActions plan preview vocabulary", () => {
     // collapsed diagnostics block.
     const visible = (() => {
       const clone = preview.cloneNode(true) as HTMLElement;
-      clone.querySelectorAll("details").forEach((element) => element.remove());
+      clone.querySelectorAll(".ant-collapse").forEach((element) => element.remove());
       return clone.textContent ?? "";
     })();
     expect(visible).not.toContain("approximate");
@@ -170,6 +170,130 @@ describe("ShotProductionActions plan preview vocabulary", () => {
     expect(diagnostics).toHaveTextContent("agnes/agnes-image-2.1-flash");
     expect(diagnostics).toHaveTextContent("does not declare input slot");
     expect(diagnostics).not.toHaveAttribute("open");
+  });
+  it("re-queries execution-plan with accept_approximations when checked in preflight drawer", async () => {
+    const unacceptedPlan = {
+      plan_fingerprint: "1111111111111111111111111111111111111111111111111111111111111111",
+      plan: {
+        resolved_model: { resolved_model_id: "agnes/agnes-image-2.1-flash" },
+        planned_references: [
+          {
+            delivery: "approximate",
+            role: "style",
+            artifact_id: "55555555-5555-4555-8555-555555555555",
+          },
+        ],
+        capability_gaps: [
+          {
+            capability: "image.generate",
+            severity: "warning",
+            controls: ["风格参考"],
+            reason: "approximate reference requires explicit acceptance",
+          },
+        ],
+        accepted_approximations: [],
+      },
+    };
+    const acceptedPlan = {
+      plan_fingerprint: "2222222222222222222222222222222222222222222222222222222222222222",
+      plan: {
+        ...unacceptedPlan.plan,
+        capability_gaps: [],
+        accepted_approximations: ["style"],
+      },
+    };
+
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.includes("/executions/receipt")) {
+        return json({ detail: "not found" }, 404);
+      }
+      if (url.includes("/execution-models/preflight")) {
+        return json({
+          project_id: PROJECT_ID,
+          stages: [
+            {
+              stage: "image_keyframe",
+              ready: true,
+              source: "project_binding",
+              requested_model_id: "agnes/agnes-image-2.1-flash",
+              resolved_model_id: "agnes/agnes-image-2.1-flash",
+              binding_id: "binding-image",
+            },
+            {
+              stage: "video",
+              ready: true,
+              source: "project_binding",
+              requested_model_id: "agnes/agnes-video-v2.0",
+              resolved_model_id: "agnes/agnes-video-v2.0",
+              binding_id: "binding-video",
+            },
+          ],
+        });
+      }
+      if (url.includes("/execution-plan") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        requests.push({ url, body });
+        return json(body.accept_approximations ? acceptedPlan : unacceptedPlan);
+      }
+      if (url.includes("/executions") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        requests.push({ url, body });
+        return json({
+          node_run_id: "run-123",
+          status: "queued",
+          graph_id: "g-1",
+          graph_version_id: "gv-1",
+          plan_fingerprint: body.plan_fingerprint,
+        });
+      }
+      return json({});
+    });
+
+    renderActions();
+
+    const inspectBtn = await screen.findByTestId("inspect-shot-plan");
+    fireEvent.click(inspectBtn);
+
+    // Initial inspect query sent accept_approximations: false
+    await waitFor(() => expect(screen.getByTestId("shot-preflight-drawer")).toBeInTheDocument());
+    expect(requests[0].body.accept_approximations).toBe(false);
+    expect(
+      screen.getByText("1111111111111111111111111111111111111111111111111111111111111111"),
+    ).toBeInTheDocument();
+
+    // Check approximation acceptance box
+    const checkbox = screen.getByTestId("accept-approximations-checkbox");
+    fireEvent.click(checkbox);
+
+    // Drawer triggers second preview with accept_approximations: true
+    await waitFor(() => {
+      expect(
+        requests.some(
+          (r) => r.url.includes("/execution-plan") && r.body.accept_approximations === true,
+        ),
+      ).toBe(true);
+      expect(
+        screen.getByText("2222222222222222222222222222222222222222222222222222222222222222"),
+      ).toBeInTheDocument();
+    });
+
+    // Confirm button enabled and submits with the accepted plan fingerprint
+    const confirmBtn = screen.getByTestId("confirm-generate-button");
+    expect(confirmBtn).toBeEnabled();
+    fireEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      const executionReq = requests.find((r) => r.url.endsWith("/executions"));
+      expect(executionReq).toBeDefined();
+      expect(executionReq?.body.plan_fingerprint).toBe(
+        "2222222222222222222222222222222222222222222222222222222222222222",
+      );
+      expect(executionReq?.body.accept_approximations).toBe(true);
+      expect(executionReq?.body.accepted_approximations).toEqual(["style"]);
+    });
   });
 });
 

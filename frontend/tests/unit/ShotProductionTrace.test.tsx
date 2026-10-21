@@ -13,7 +13,7 @@ const SHOT_ID = "58beaebf-6b5f-478a-873f-e1f828567492";
  */
 function ordinarySurfaceText(): string {
   const clone = screen.getByTestId("shot-production-trace").cloneNode(true) as HTMLElement;
-  clone.querySelectorAll("details").forEach((element) => element.remove());
+  clone.querySelectorAll(".ant-collapse").forEach((element) => element.remove());
   return clone.textContent ?? "";
 }
 

@@ -1,3 +1,4 @@
+import { findSelectOption, selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -28,6 +29,7 @@ function show() {
       />
     </QueryClientProvider>,
   );
+  fireEvent.click(screen.getByRole("button", { name: "风格与类型（可选）" }));
   return onCreated;
 }
 it("submits the explicit type and style in the single creation request", async () => {
@@ -37,13 +39,9 @@ it("submits the explicit type and style in the single creation request", async (
   } as never);
   vi.mocked(createProject).mockResolvedValue({ id: "p1" } as never);
   const onCreated = show();
-  await screen.findByRole("option", { name: "电影写实" });
-  fireEvent.change(screen.getByRole("combobox", { name: "创作类型" }), {
-    target: { value: "drama" },
-  });
-  fireEvent.change(screen.getByRole("combobox", { name: "画面风格" }), {
-    target: { value: "film" },
-  });
+  await findSelectOption(screen.getByLabelText("画面风格"), "电影写实");
+  await selectValue(screen.getByRole("combobox", { name: "创作类型" }), "drama");
+  await selectValue(screen.getByRole("combobox", { name: "画面风格" }), "film");
   fireEvent.submit(screen.getByRole("textbox", { name: "项目名" }).closest("form")!);
   await waitFor(() => expect(createProject).toHaveBeenCalledTimes(1));
   expect(createProject).toHaveBeenCalledWith(

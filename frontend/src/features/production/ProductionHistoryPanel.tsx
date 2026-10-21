@@ -1,8 +1,17 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Button } from "../../components/ui";
+import {
+  Button,
+  Disclosure,
+  MetadataList,
+  RecordItem,
+  RecordList,
+  ExternalLink,
+} from "../../components/ui";
+import { RunStatusBadge } from "../../components/shared/RunStatusBadge";
 import { artifactContentUrl } from "../../lib/api";
-import { nodeRunStatusLabel } from "../../lib/runLabels";
+import { formatFileSize } from "../../lib/formatMedia";
+import { historyCopy as copy } from "./historyCopy";
 import { queryKeys } from "../../lib/queryKeys";
 import { zhNode } from "../../lib/zh";
 import { fetchArtifactHistory, fetchRunHistory } from "./api";
@@ -42,12 +51,17 @@ function ProjectHistory({ projectId }: { projectId: string }) {
       </Button>
       {open && (
         <div>
-          <div role="group" aria-label="历史记录类型">
+          <div
+            className="df-section-actions"
+            role="group"
+            aria-label="历史记录类型"
+            title={copy.bounded}
+          >
             <Button aria-pressed={kind === "runs"} onClick={() => changeKind("runs")}>
-              任务历史
+              {copy.runs}
             </Button>
             <Button aria-pressed={kind === "artifacts"} onClick={() => changeKind("artifacts")}>
-              媒体结果
+              {copy.artifacts}
             </Button>
             <Button
               onClick={() => {
@@ -64,49 +78,63 @@ function ProjectHistory({ projectId }: { projectId: string }) {
                 });
               }}
             >
-              刷新历史
+              {copy.refresh}
             </Button>
           </div>
-          <p>每页最多 25 条历史记录；旧失败尝试不代表当前制作状态。</p>
           {current.isPending && <p role="status">正在读取历史…</p>}
           {current.isError && <p role="alert">历史读取失败，请重试；这不代表没有记录。</p>}
           {current.data?.items.length === 0 && <p>暂无历史记录。</p>}
           {kind === "runs" && (
-            <ul aria-label="任务历史列表">
+            <RecordList aria-label="任务历史列表">
               {runs.data?.items.map((run) => (
-                <li key={run.id}>
-                  {zhNode(run.node_key)} · {nodeRunStatusLabel(run.status)} · 第 {run.attempt_no}{" "}
-                  次尝试
-                  <details>
-                    <summary>诊断标识</summary>
+                <RecordItem
+                  key={run.id}
+                  title={zhNode(run.node_key)}
+                  status={<RunStatusBadge status={run.status} />}
+                  meta={copy.attempt(run.attempt_no)}
+                >
+                  <Disclosure title={copy.details} compact>
                     <code>{run.id}</code>
-                  </details>
-                </li>
+                  </Disclosure>
+                </RecordItem>
               ))}
-            </ul>
+            </RecordList>
           )}
           {kind === "artifacts" && (
-            <ul aria-label="媒体结果历史">
+            <RecordList aria-label="媒体结果历史">
               {artifacts.data?.items.map((artifact) => (
-                <li key={artifact.id}>
-                  {artifact.mime_type} · {artifact.byte_size} 字节 ·{" "}
-                  {artifact.content_hash.slice(0, 8)}
-                  {artifact.storage_state === "available" ? (
-                    <a
-                      href={artifactContentUrl(projectId, artifact.id)}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      查看媒体
-                    </a>
-                  ) : (
-                    <span>暂不可用</span>
-                  )}
-                </li>
+                <RecordItem
+                  key={artifact.id}
+                  title={artifact.mime_type}
+                  meta={formatFileSize(artifact.byte_size)}
+                  actions={
+                    artifact.storage_state === "available" ? (
+                      <ExternalLink
+                        type="text"
+                        href={artifactContentUrl(projectId, artifact.id)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {copy.view}
+                      </ExternalLink>
+                    ) : (
+                      <span className="muted">{copy.unavailable}</span>
+                    )
+                  }
+                >
+                  <Disclosure title={copy.details} compact>
+                    <MetadataList
+                      items={[
+                        { label: copy.artifactId, value: artifact.id },
+                        { label: copy.hash, value: artifact.content_hash },
+                      ]}
+                    />
+                  </Disclosure>
+                </RecordItem>
               ))}
-            </ul>
+            </RecordList>
           )}
-          <nav aria-label="历史分页">
+          <nav className="df-section-actions" aria-label="历史分页">
             <Button disabled={page === 0 || current.isFetching} onClick={() => setPage(page - 1)}>
               上一页
             </Button>

@@ -1,3 +1,4 @@
+import { selectValue } from "./selectValue";
 import { expect, test } from "@playwright/test";
 import { installProfessionalMock, PROJECT_ID, WORKSPACE_ID } from "./professional-mocks";
 
@@ -57,8 +58,8 @@ test("project cards have equal frames and creation asks for type and style", asy
   await page.getByText("风格与类型（可选）", { exact: true }).click();
   await expect(page.getByRole("combobox", { name: "创作类型", exact: true })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "画面风格", exact: true })).toBeVisible();
-  await page.getByRole("combobox", { name: "创作类型", exact: true }).selectOption("drama");
-  await page.getByRole("combobox", { name: "画面风格", exact: true }).selectOption("film");
+  await selectValue(page.getByRole("combobox", { name: "创作类型", exact: true }), "drama");
+  await selectValue(page.getByRole("combobox", { name: "画面风格", exact: true }), "film");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(writes).toEqual([]);

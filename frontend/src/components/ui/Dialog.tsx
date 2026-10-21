@@ -1,13 +1,8 @@
-import { X } from "lucide-react";
-import { useId, type ReactNode } from "react";
+import { Modal, Typography } from "antd";
+import type { ReactNode } from "react";
 
-import { useModalDialog } from "./useModalDialog";
-
-/**
- * The single modal dialog primitive: focus trap, Escape, restore focus.
- * Content and actions stay owned by the feature; the shell only frames them.
- */
 export function Dialog({
+  open,
   title,
   kicker,
   onClose,
@@ -15,7 +10,9 @@ export function Dialog({
   actions,
   size = "default",
   testId,
+  afterClose,
 }: {
+  open: boolean;
   title: string;
   kicker?: string;
   onClose: () => void;
@@ -23,37 +20,33 @@ export function Dialog({
   actions?: ReactNode;
   size?: "default" | "wide";
   testId?: string;
+  afterClose?: () => void;
 }) {
-  const dialogRef = useModalDialog<HTMLElement>(true, onClose);
-  const titleId = useId();
   return (
-    <div
-      className="df-dialog-backdrop"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+    <Modal
+      open={open}
+      destroyOnHidden
+      afterClose={afterClose}
+      centered
+      title={
+        <span role="heading" aria-level={2}>
+          {kicker && (
+            <Typography.Text aria-hidden="true" type="secondary">
+              {kicker} ·{" "}
+            </Typography.Text>
+          )}
+          {title}
+        </span>
+      }
+      onCancel={onClose}
+      footer={actions ?? null}
+      width={
+        size === "wide" ? "var(--df-dialog-wide-width, 64rem)" : "var(--df-dialog-width, 38rem)"
+      }
+      closable={{ "aria-label": "关闭" }}
+      modalRender={(node) => <div data-testid={testId}>{node}</div>}
     >
-      <section
-        ref={dialogRef}
-        className={size === "wide" ? "df-dialog wide" : "df-dialog"}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        data-testid={testId}
-      >
-        <header className="df-dialog-header">
-          <div>
-            {kicker && <p className="kicker">{kicker}</p>}
-            <h2 id={titleId}>{title}</h2>
-          </div>
-          <button type="button" className="df-dialog-close" aria-label="关闭" onClick={onClose}>
-            <X size={18} aria-hidden="true" />
-          </button>
-        </header>
-        <div className="df-dialog-body">{children}</div>
-        {actions && <footer className="df-dialog-actions">{actions}</footer>}
-      </section>
-    </div>
+      {children}
+    </Modal>
   );
 }

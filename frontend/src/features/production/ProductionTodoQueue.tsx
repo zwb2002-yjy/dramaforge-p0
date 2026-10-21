@@ -1,3 +1,4 @@
+import { Card } from "../../components/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
@@ -65,7 +66,7 @@ export function ProductionTodoQueue({ projectId }: { projectId: string }) {
     query.data?.counts && typeof query.data.counts === "object" ? query.data.counts : {};
   const risks = Array.isArray(query.data?.consistency_risks) ? query.data.consistency_risks : [];
   return (
-    <section className="panel" data-testid="production-todo-queue" aria-label="制作待办队列">
+    <Card data-testid="production-todo-queue" aria-label="制作待办队列">
       <header className="panel-header">
         <div>
           <h2>制作待办</h2>
@@ -141,6 +142,6 @@ export function ProductionTodoQueue({ projectId }: { projectId: string }) {
           </section>
         </>
       )}
-    </section>
+    </Card>
   );
 }

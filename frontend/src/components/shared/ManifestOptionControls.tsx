@@ -1,3 +1,4 @@
+import { Field, Checkbox, Select, Input, Textarea, Disclosure } from "../ui";
 /**
  * ManifestOptionControls — renders a model's capability spec as dynamic form
  * controls (V3 spec §59). All shapes come from the manifest: common options,
@@ -31,23 +32,23 @@ function OptionControl({
   const component = uiComponentFor(parameter);
   if (component === "switch") {
     return (
-      <label className="option-control">
+      <Field className="option-control">
         <span>{parameter.title ?? keyName}</span>
-        <input
+        <Checkbox
           type="checkbox"
           checked={Boolean(value)}
           onChange={(event) => onChange(keyName, event.target.checked)}
         />
-      </label>
+      </Field>
     );
   }
   if (component === "select") {
     return (
-      <label className="option-control">
+      <Field className="option-control">
         <span>{parameter.title ?? keyName}</span>
-        <select
+        <Select
           value={value === undefined ? "" : String(value)}
-          onChange={(event) => onChange(keyName, event.target.value)}
+          onChange={(event) => onChange(keyName, event)}
         >
           <option value="">未设置</option>
           {allowed.map((item) => (
@@ -55,15 +56,15 @@ function OptionControl({
               {String(item)}
             </option>
           ))}
-        </select>
-      </label>
+        </Select>
+      </Field>
     );
   }
   if (component === "number") {
     return (
-      <label className="option-control">
+      <Field className="option-control">
         <span>{parameter.title ?? keyName}</span>
-        <input
+        <Input
           type="number"
           step={parameter.type === "number" ? "any" : "1"}
           value={value === undefined ? "" : String(value)}
@@ -72,18 +73,18 @@ function OptionControl({
             onChange(keyName, raw === "" ? undefined : Number(raw));
           }}
         />
-      </label>
+      </Field>
     );
   }
   if (component === "textarea") {
     return (
-      <label className="option-control">
+      <Field className="option-control">
         <span>{parameter.title ?? keyName}</span>
-        <textarea
+        <Textarea
           value={value === undefined ? "" : String(value)}
           onChange={(event) => onChange(keyName, event.target.value)}
         />
-      </label>
+      </Field>
     );
   }
   if (component === "multi_select") {
@@ -92,8 +93,8 @@ function OptionControl({
       <fieldset className="option-control">
         <legend>{parameter.title ?? keyName}</legend>
         {allowed.map((item) => (
-          <label key={String(item)}>
-            <input
+          <Field key={String(item)}>
+            <Checkbox
               type="checkbox"
               checked={selected.includes(item)}
               onChange={(event) => {
@@ -104,20 +105,20 @@ function OptionControl({
               }}
             />
             {String(item)}
-          </label>
+          </Field>
         ))}
       </fieldset>
     );
   }
   return (
-    <label className="option-control">
+    <Field className="option-control">
       <span>{parameter.title ?? keyName}</span>
-      <input
+      <Input
         type="text"
         value={value === undefined ? "" : String(value)}
         onChange={(event) => onChange(keyName, event.target.value)}
       />
-    </label>
+    </Field>
   );
 }
 
@@ -173,11 +174,11 @@ export function ManifestOptionControls({ spec, values, onChange }: ManifestOptio
       })}
 
       {nativeKeys.length > 0 && (
-        <details
+        <Disclosure
           open={advancedOpen}
-          onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
+          onOpenChange={(event) => setAdvancedOpen(event)}
+          title={<>高级参数</>}
         >
-          <summary>高级参数</summary>
           {nativeKeys.map((keyName) => {
             const parameter = nativeOptions[keyName];
             return (
@@ -191,7 +192,7 @@ export function ManifestOptionControls({ spec, values, onChange }: ManifestOptio
               />
             );
           })}
-        </details>
+        </Disclosure>
       )}
     </div>
   );

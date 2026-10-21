@@ -1,24 +1,45 @@
 import { expect, test, type Locator } from "@playwright/test";
+import { expectSelectValue } from "./selectValue";
 import { installProfessionalMock, PROJECT_ID, WORKSPACE_ID } from "./professional-mocks";
 
-async function expectReadableOptions(select: Locator) {
-  await expect(select).toHaveCSS("color-scheme", "dark");
-  await expect(select.locator("option").first()).toBeAttached();
-  const options = await select.locator("option, optgroup").evaluateAll((elements) =>
-    elements.map((el) => {
-      const s = getComputedStyle(el);
-      return { text: el.textContent, foreground: s.color, background: s.backgroundColor };
-    }),
+async function expectReadableOptions(control: Locator) {
+  await control
+    .locator(
+      "xpath=ancestor-or-self::*[contains(concat(' ', normalize-space(@class), ' '), ' ant-select ')][1]",
+    )
+    .click();
+  const popup = control.page().locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)");
+  await expect(popup).toBeVisible();
+  const colors = await popup.evaluate((element) => {
+    const text = element.querySelector("[data-option-value]") ?? element;
+    return {
+      background: getComputedStyle(element).backgroundColor,
+      foreground: getComputedStyle(text).color,
+    };
+  });
+  const rgb = (color: string) =>
+    color
+      .match(/[\d.]+/g)!
+      .slice(0, 3)
+      .map(Number);
+  const luminance = (color: string) =>
+    rgb(color)
+      .map((part) => {
+        const value = part / 255;
+        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+      })
+      .reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+  expect(colors.background).not.toBe("rgba(0, 0, 0, 0)");
+  const light = luminance(colors.foreground),
+    dark = luminance(colors.background);
+  expect((Math.max(light, dark) + 0.05) / (Math.min(light, dark) + 0.05)).toBeGreaterThanOrEqual(
+    4.5,
   );
-  expect(options.length).toBeGreaterThan(0);
-  for (const option of options) {
-    // A translucent option lets the OS popup fall back to white under light text.
-    expect(option.background, option.text ?? "option").toBe("rgb(35, 40, 46)");
-    expect(option.foreground, option.text ?? "option").toBe("rgb(242, 244, 247)");
-  }
+  await control.press("Escape");
+  await expect(popup).not.toBeVisible();
 }
 
-test("model setting options have their own opaque dark surface, not just a styled closed select", async ({
+test("library model options use an opaque dark popup and Escape preserves the current workspace", async ({
   page,
 }) => {
   const state = await installProfessionalMock(page);
@@ -31,42 +52,26 @@ test("model setting options have their own opaque dark surface, not just a style
     }),
   );
   await page.goto("/settings/models");
-  const textModel = page.getByRole("combobox", { name: "设置工作空间", exact: true });
-  await expect(textModel).toBeVisible();
-  await expectReadableOptions(textModel);
-  const value = await textModel.inputValue();
-  await textModel.focus();
-  await textModel.press("ArrowDown");
-  await textModel.press("Escape");
-  await textModel.selectOption(value);
-  await expect(textModel).toHaveValue(value);
+  const workspace = page.getByRole("combobox", { name: "设置工作空间", exact: true });
+  await expectReadableOptions(workspace);
+  await expectSelectValue(workspace, WORKSPACE_ID);
   expect(state.editing.requests.filter((r) => r.method !== "GET")).toEqual([]);
 });
 
-test("native options remain readable across routes and grouped list controls", async ({ page }) => {
+test("creation and asset filters use the same library popup and remain within the workspace", async ({
+  page,
+}) => {
   await installProfessionalMock(page);
   await page.route("**/api/v1/workspaces", (route) =>
-    route.fulfill({ json: [{ id: "workspace-professional", name: "我的工作空间" }] }),
+    route.fulfill({ json: [{ id: WORKSPACE_ID, name: "我的工作空间" }] }),
   );
   for (const path of ["/?create=true", "/projects/" + PROJECT_ID + "/assets"]) {
     await page.goto(path);
-    const selects = page.locator("select:visible");
-    await expect(selects.first()).toBeVisible();
-    expect(await selects.count()).toBeGreaterThan(0);
-    for (const select of await selects.all()) {
-      if (await select.locator("option").count()) await expectReadableOptions(select);
-    }
+    const controls = page.getByRole("combobox");
+    await expect(controls.first()).toBeVisible();
+    await expectReadableOptions(controls.first());
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
   }
-  // Use native variants against the real loaded stylesheet; no parallel control implementation.
-  await page.evaluate(() => {
-    const field = document.createElement("select");
-    field.setAttribute("aria-label", "分组测试");
-    field.multiple = true;
-    const group = document.createElement("optgroup");
-    group.label = "画面";
-    group.append(new Option("图片", "image"), new Option("视频", "video"));
-    field.append(group);
-    document.body.append(field);
-  });
-  await expectReadableOptions(page.getByRole("listbox", { name: "分组测试" }));
 });

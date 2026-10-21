@@ -1,3 +1,5 @@
+import { sliderValue } from "./sliderValue";
+import { findSelectOption, expectSelectValue, getSelectOption, selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
@@ -64,23 +66,29 @@ describe("ShotVoiceSettings", () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(() => json(OPTIONS));
     const { changed } = renderSettings();
     expect(screen.getByRole("status")).toHaveTextContent("正在读取音色配置");
-    expect(await screen.findByRole("option", { name: "目录男声 · zh-CN" })).toBeInTheDocument();
+    expect(
+      await findSelectOption(screen.getByLabelText("配音音色"), "目录男声 · zh-CN"),
+    ).toBeInTheDocument();
     expect(screen.getByText(OPTIONS.service_notice)).toBeInTheDocument();
     expect(screen.getByText(/对白文本将发送至微软/)).toHaveTextContent("失败不会回退为旧机械音");
-    expect(screen.getByLabelText("配音音色")).toHaveValue("");
-    expect(screen.getByRole("option", { name: "沿用实例默认（目录女声）" })).toBeInTheDocument();
+    expectSelectValue(screen.getByLabelText("配音音色"), "");
+    expect(
+      getSelectOption(screen.getByLabelText("配音音色"), "沿用实例默认（目录女声）"),
+    ).toBeInTheDocument();
     expect(changed).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByLabelText("配音音色"), { target: { value: "voice:catalog-man" } });
+    await selectValue(screen.getByLabelText("配音音色"), "voice:catalog-man");
     expect(changed).toHaveBeenLastCalledWith({ voice_id: "catalog-man", rate_percent: 0 });
     for (const rate of [-30, 0, 30]) {
-      fireEvent.change(screen.getByLabelText("配音语速"), { target: { value: String(rate) } });
+      sliderValue(screen.getByLabelText("配音语速"), rate);
       expect(changed).toHaveBeenLastCalledWith({ voice_id: "catalog-man", rate_percent: rate });
     }
-    expect(screen.getByLabelText("配音语速")).toHaveAttribute("min", "-30");
-    expect(screen.getByLabelText("配音语速")).toHaveAttribute("max", "30");
-    expect(screen.getByLabelText("配音语速")).toHaveAttribute("step", "1");
-    fireEvent.change(screen.getByLabelText("配音音色"), { target: { value: "" } });
+    expect(screen.getByLabelText("配音语速")).toHaveAttribute("aria-valuemin", "-30");
+    expect(screen.getByLabelText("配音语速")).toHaveAttribute("aria-valuemax", "30");
+    fireEvent.keyDown(screen.getByLabelText("配音语速"), { key: "ArrowLeft", keyCode: 37 });
+    expect(changed).toHaveBeenLastCalledWith({ voice_id: "catalog-man", rate_percent: 29 });
+    fireEvent.keyDown(screen.getByLabelText("配音语速"), { key: "ArrowRight", keyCode: 39 });
+    await selectValue(screen.getByLabelText("配音音色"), "");
     expect(changed).toHaveBeenLastCalledWith({ voice_id: null, rate_percent: 30 });
     expect(screen.queryByRole("button", { name: /生成|试听/ })).not.toBeInTheDocument();
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -92,13 +100,13 @@ describe("ShotVoiceSettings", () => {
   it("keeps an unknown saved voice through catalog load and speed changes", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(() => json(OPTIONS));
     const { changed } = renderSettings({ voice_id: "retired-voice", rate_percent: -10 });
-    expect(screen.getByLabelText("配音音色")).toHaveValue("voice:retired-voice");
+    expectSelectValue(screen.getByLabelText("配音音色"), "voice:retired-voice");
     expect(await screen.findByRole("alert")).toHaveTextContent("不会静默切换到默认音色");
     expect(
-      screen.getByRole("option", { name: /未在当前目录中的音色.*retired-voice/ }),
+      getSelectOption(screen.getByLabelText("配音音色"), /未在当前目录中的音色.*retired-voice/),
     ).toBeInTheDocument();
     expect(changed).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByLabelText("配音语速"), { target: { value: "12" } });
+    sliderValue(screen.getByLabelText("配音语速"), 12);
     expect(changed).toHaveBeenLastCalledWith({ voice_id: "retired-voice", rate_percent: 12 });
   });
 
@@ -106,16 +114,16 @@ describe("ShotVoiceSettings", () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
     const { changed } = renderSettings({ voice_id: "saved-voice", rate_percent: 8 });
     expect(await screen.findByRole("alert")).toHaveTextContent("当前音色和语速已保留");
-    expect(screen.getByLabelText("配音音色")).toHaveValue("voice:saved-voice");
+    expectSelectValue(screen.getByLabelText("配音音色"), "voice:saved-voice");
     expect(screen.getByLabelText("配音音色")).toBeDisabled();
-    expect(screen.getByLabelText("配音语速")).toHaveValue("8");
+    expect(screen.getByLabelText("配音语速")).toHaveAttribute("aria-valuenow", "8");
     expect(changed).not.toHaveBeenCalled();
     expect(fetch).toHaveBeenCalledTimes(1);
     fetch.mockImplementation(() => json(OPTIONS));
     fireEvent.click(screen.getByRole("button", { name: "重新读取音色" }));
-    await screen.findByRole("option", { name: "目录男声 · zh-CN" });
+    await findSelectOption(screen.getByLabelText("配音音色"), "目录男声 · zh-CN");
     expect(fetch).toHaveBeenCalledTimes(2);
-    expect(screen.getByLabelText("配音音色")).toHaveValue("voice:saved-voice");
+    expectSelectValue(screen.getByLabelText("配音音色"), "voice:saved-voice");
     expect(changed).not.toHaveBeenCalled();
     expect(
       fetch.mock.calls.every(
@@ -127,14 +135,14 @@ describe("ShotVoiceSettings", () => {
   it("does not present stale configuration as current after a failed refresh", async () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(() => json(OPTIONS));
     const { client, changed } = renderSettings({ voice_id: "catalog-man", rate_percent: 0 });
-    await screen.findByRole("option", { name: "目录男声 · zh-CN" });
+    await findSelectOption(screen.getByLabelText("配音音色"), "目录男声 · zh-CN");
     fetch.mockRejectedValue(new Error("offline"));
     await act(async () => {
       await client.invalidateQueries({ queryKey: queryKeys.shot.voiceOptions("project-1") });
     });
     await waitFor(() => expect(screen.getByLabelText("配音音色")).toBeDisabled());
     expect(screen.queryByText(OPTIONS.service_notice)).not.toBeInTheDocument();
-    expect(screen.getByLabelText("配音音色")).toHaveValue("voice:catalog-man");
+    expectSelectValue(screen.getByLabelText("配音音色"), "voice:catalog-man");
     expect(changed).not.toHaveBeenCalled();
   });
 

@@ -55,6 +55,12 @@ export default defineConfig({
           if (id.includes("react-router")) return "vendor-tanstack";
           if (id.includes("@tanstack")) return "vendor-tanstack";
           if (id.includes("zustand")) return "vendor-zustand";
+          if (
+            id.includes("/antd/") ||
+            id.includes("/@ant-design/") ||
+            id.includes("/@rc-component/")
+          )
+            return "vendor-antd";
           if (id.includes("lucide-react")) return "vendor-lucide";
           if (id.includes("react")) return "vendor-react";
           return undefined;

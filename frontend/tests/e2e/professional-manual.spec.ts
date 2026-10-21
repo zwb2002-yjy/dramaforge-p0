@@ -1,3 +1,4 @@
+import { selectValue } from "./selectValue";
 import { expect, test } from "@playwright/test";
 
 import {
@@ -22,26 +23,29 @@ for (const viewport of [
     // Without a formal frame the one primary step is the frame itself.
     await expect(inspector.getByTestId("generate-keyframe")).toBeVisible();
     await expect(inspector.getByTestId("generate-video")).toHaveCount(0);
-    await inspector.getByTestId("shot-generate-more").locator(":scope > summary").click();
+    await inspector.getByTestId("shot-generate-more").getByRole("button").first().click();
     const mode = inspector.getByLabel("视频方式");
     await expect(mode).toBeVisible();
-    await expect(mode.locator("option")).toHaveText([
+    await mode.click();
+    const modePopup = page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)");
+    await expect(modePopup.locator("[data-option-value]")).toHaveText([
       "正式画面作为首帧",
       "正式画面 + 尾帧",
       "尾帧生成",
       "仅用文字",
       "参考素材生成",
     ]);
+    await mode.press("Escape");
     for (const value of ["last_frame", "omni_reference"]) {
-      await mode.selectOption(value);
+      await selectValue(mode, value);
       await expect(inspector.getByTestId("shot-primary-blocked")).toBeVisible();
       await expect(inspector.getByTestId("generate-video")).toBeDisabled();
     }
     // First + last frame still starts from the formal frame.
-    await mode.selectOption("first_last_frame");
+    await selectValue(mode, "first_last_frame");
     await expect(inspector.getByTestId("generate-keyframe")).toBeVisible();
     await expect(inspector.getByTestId("generate-video")).toHaveCount(0);
-    await mode.selectOption("text_to_video");
+    await selectValue(mode, "text_to_video");
     await expect(inspector.getByTestId("generate-video")).toBeEnabled();
     await inspector.getByTestId("generate-video").click();
     await expect
@@ -72,11 +76,13 @@ test("AUTO delegates one frozen Shot plan to the Director runtime", async ({ pag
   state.directorAutonomy = "AUTO";
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
   const inspector = page.getByTestId("shot-inspector");
-  await inspector.getByTestId("shot-generate-more").locator(":scope > summary").click();
+  await inspector.getByTestId("shot-generate-more").getByRole("button").first().click();
   await inspector.getByTestId("delegate-keyframe-to-director").click();
 
   // Delegation reveals the local AI director for this shot.
-  await expect(inspector.getByTestId("shot-inspector-director")).toHaveAttribute("open", "");
+  await expect(
+    inspector.getByTestId("shot-inspector-director").getByRole("button").first(),
+  ).toHaveAttribute("aria-expanded", "true");
   const delegation = state.editing.requests.find(
     (request) =>
       request.method === "POST" &&
@@ -121,9 +127,9 @@ test("manual professional production: Scene Workbench design → candidate previ
   await expect(inspector.getByRole("tab")).toHaveCount(0);
   await expect(inspector.getByLabel("画面描述")).toBeVisible();
   await expect(inspector.getByLabel("镜头类型")).toBeHidden();
-  await inspector.getByTestId("shot-camera-parameters").locator(":scope > summary").click();
+  await inspector.getByTestId("shot-camera-parameters").getByRole("button").first().click();
   await expect(inspector.getByLabel("镜头类型")).toBeVisible();
-  await inspector.getByTestId("shot-camera-parameters").locator(":scope > summary").click();
+  await inspector.getByTestId("shot-camera-parameters").getByRole("button").first().click();
   await expect(page.getByTestId("shot-details-sheet")).toHaveCount(0);
   await expect(page.getByTestId("shot-candidate-tray")).toHaveCount(0);
   await expect(page.getByTestId("project-evidence-inspector")).toHaveCount(0);
@@ -139,7 +145,7 @@ test("manual professional production: Scene Workbench design → candidate previ
   expect(canvasBox?.width ?? 0).toBeGreaterThan(inspectorBox?.width ?? 0);
   expect((inspectorBox?.x ?? 0) > (canvasBox?.x ?? 0)).toBe(true);
 
-  await inspector.getByTestId("shot-design-prompts").locator(":scope > summary").click();
+  await inspector.getByTestId("shot-design-prompts").getByRole("button").first().click();
   await inspector.getByLabel("视频提示词").fill("slow push-in, locked frame");
   await expect(inspector.getByTestId("shot-design-dirty")).toBeVisible();
   await inspector.getByTestId("shot-primary-save").click();
@@ -149,9 +155,9 @@ test("manual professional production: Scene Workbench design → candidate previ
   );
   expect(designRequest?.body).toMatchObject({ expected_version: 1 });
   expect(state.shotVersion).toBe(2);
-  await inspector.getByTestId("shot-inspector-details").locator(":scope > summary").click();
+  await inspector.getByTestId("shot-inspector-details").getByRole("button").first().click();
   await expect(page.getByTestId("shot-details-sheet")).toContainText("v2");
-  await inspector.getByTestId("shot-inspector-details").locator(":scope > summary").click();
+  await inspector.getByTestId("shot-inspector-details").getByRole("button").first().click();
 
   await expect(inspector.getByTestId("shot-production-actions")).toBeVisible();
   await expect(inspector).not.toContainText("NodeRun");
@@ -189,10 +195,10 @@ test("manual professional production: Scene Workbench design → candidate previ
   await expect(page.getByTestId("shot-formal-output")).toBeVisible();
   await expect(page.getByTestId("shot-candidate")).toHaveCount(0);
   expect(state.shotVersion).toBe(3);
-  await inspector.getByTestId("shot-inspector-details").locator(":scope > summary").click();
+  await inspector.getByTestId("shot-inspector-details").getByRole("button").first().click();
   await expect(page.getByTestId("shot-details-sheet")).toContainText("v3");
   await expect(page.getByTestId("shot-production-trace")).toBeVisible();
-  await inspector.getByTestId("shot-inspector-details").locator(":scope > summary").click();
+  await inspector.getByTestId("shot-inspector-details").getByRole("button").first().click();
 
   // The same Artifact can still be selected for a temporary comparison while
   // formal remains authoritative after the preview is cleared.
@@ -277,7 +283,7 @@ test("Scene Workbench and other Project views stay focused at 910px", async ({ p
   });
   expect(sceneLayout.columns).toBe(1);
   expect(sceneLayout.documentFits).toBe(true);
-  await inspector.getByTestId("shot-design-prompts").locator(":scope > summary").click();
+  await inspector.getByTestId("shot-design-prompts").getByRole("button").first().click();
   await expect(inspector.getByLabel("图片提示词")).toBeVisible();
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
@@ -311,11 +317,11 @@ test("Scene draft survives collapsing its section and guards route departure", a
   await expect(page.getByTestId("scene-workspace")).toBeVisible();
 
   const prompts = page.getByTestId("shot-design-prompts");
-  await prompts.locator(":scope > summary").click();
+  await prompts.getByRole("button").first().click();
   await page.getByLabel("图片提示词").fill("unsaved guarded keyframe");
   await expect(page.getByTestId("shot-design-dirty")).toBeVisible();
-  await prompts.locator(":scope > summary").click();
-  await prompts.locator(":scope > summary").click();
+  await prompts.getByRole("button").first().click();
+  await prompts.getByRole("button").first().click();
   await expect(page.getByLabel("图片提示词")).toHaveValue("unsaved guarded keyframe");
   await page.getByTestId(`shot-strip-card-${SECOND_SHOT_ID}`).click();
   await expect(page.getByTestId("unsaved-changes-guard")).toBeVisible();

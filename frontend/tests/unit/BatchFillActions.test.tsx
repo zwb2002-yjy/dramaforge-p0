@@ -110,6 +110,8 @@ describe("BatchFillActions", () => {
     fireEvent.click(fill);
 
     const dialog = await screen.findByRole("dialog", { name: "补齐画面" });
+    await waitFor(() => expect(dialog).toBeVisible());
+    await waitFor(() => expect(dialog).toBeVisible());
     expect(within(dialog).getByText("已有正式版本")).toBeVisible();
     expect(within(dialog).getByText("正在生成")).toBeVisible();
     expect(within(dialog).getByText("未选择模型")).toBeVisible();
@@ -153,6 +155,8 @@ describe("BatchFillActions", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "补齐画面 · 1" }));
     const dialog = await screen.findByRole("dialog", { name: "补齐画面" });
+    await waitFor(() => expect(dialog).toBeVisible());
+    await waitFor(() => expect(dialog).toBeVisible());
     fireEvent.click(within(dialog).getByRole("button", { name: "确认生成 1 个" }));
     expect(await within(dialog).findByText(/镜头状态已变化/)).toBeVisible();
     await waitFor(() => expect(previewReads).toBeGreaterThan(1));

@@ -7517,6 +7517,7 @@ export interface components {
             video_reference_risk?: {
                 [key: string]: unknown;
             } | null;
+            generation_settings?: components["schemas"]["ShotGenerationSettings"] | null;
         };
         /**
          * ShotDirectorSuggestion
@@ -7581,6 +7582,19 @@ export interface components {
              * @default
              */
             target: string;
+        };
+        /**
+         * ShotGenerationSettings
+         * @description Typed generation parameter draft and override container for a shot.
+         */
+        ShotGenerationSettings: {
+            /**
+             * Schema Version
+             * @default 1
+             */
+            schema_version: number;
+            image_keyframe?: components["schemas"]["StageGenerationSettings"] | null;
+            video?: components["schemas"]["StageGenerationSettings"] | null;
         };
         /** ShotLiteRead */
         ShotLiteRead: {
@@ -7850,6 +7864,28 @@ export interface components {
             video_model_id?: string | null;
             /** Expected Version */
             expected_version?: number | null;
+        };
+        /**
+         * StageGenerationSettings
+         * @description Scoped parameter overrides and mode selection for a generation stage.
+         */
+        StageGenerationSettings: {
+            /** Mode Id */
+            mode_id?: string | null;
+            /** Source Contract Hash */
+            source_contract_hash?: string | null;
+            /** Common Options */
+            common_options?: {
+                [key: string]: unknown;
+            };
+            /** Native Options */
+            native_options?: {
+                [key: string]: unknown;
+            };
+            /** Prompt Override */
+            prompt_override?: string | null;
+            /** Request Duration Seconds */
+            request_duration_seconds?: number | null;
         };
         /** StoryGenerationRequest */
         StoryGenerationRequest: {
@@ -8406,6 +8442,19 @@ export interface components {
             accepted_approximations?: string[];
             /** Expected Shot Version */
             expected_shot_version?: number | null;
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /** Prompt Override */
+            prompt_override?: string | null;
+            /** Effective Options */
+            effective_options?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * Supports Prompt Override
+             * @default false
+             */
+            supports_prompt_override: boolean;
         };
         /** WorkerTickResponse */
         WorkerTickResponse: {

@@ -1,7 +1,7 @@
-import { ChevronDown } from "lucide-react";
-import type { ReactNode } from "react";
+import { Collapse, Typography } from "antd";
+import { ChevronRight } from "lucide-react";
+import type { HTMLAttributes, ReactNode } from "react";
 
-/** Collapsing hides controls without discarding in-progress drafts. */
 export function Disclosure({
   title,
   description,
@@ -9,30 +9,45 @@ export function Disclosure({
   testId,
   open,
   onOpenChange,
-}: {
-  title: string;
+  compact = false,
+  ...props
+}: Omit<HTMLAttributes<HTMLDivElement>, "title" | "onChange"> & {
+  title: ReactNode;
   description?: string;
   children: ReactNode;
   testId?: string;
-  /** Optional control; omit both to let the element manage itself. */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  compact?: boolean;
 }) {
   return (
-    <details
-      className="df-disclosure"
+    <Collapse
       data-testid={testId}
-      open={open}
-      onToggle={onOpenChange ? (event) => onOpenChange(event.currentTarget.open) : undefined}
-    >
-      <summary>
-        <span>
-          <strong>{title}</strong>
-          {description && <small>{description}</small>}
-        </span>
-        <ChevronDown size={18} aria-hidden="true" />
-      </summary>
-      <div className="df-disclosure-body">{children}</div>
-    </details>
+      {...props}
+      ghost={compact}
+      destroyOnHidden={false}
+      expandIcon={({ isActive }) => (
+        <ChevronRight
+          aria-hidden="true"
+          size={16}
+          style={{ transform: isActive ? "rotate(90deg)" : undefined }}
+        />
+      )}
+      activeKey={open === undefined ? undefined : open ? ["content"] : []}
+      onChange={(keys) => onOpenChange?.(keys.includes("content"))}
+      items={[
+        {
+          key: "content",
+          forceRender: true,
+          label: (
+            <>
+              <Typography.Text strong>{title}</Typography.Text>
+              {description && <Typography.Text type="secondary"> · {description}</Typography.Text>}
+            </>
+          ),
+          children: <div className="df-disclosure-content">{children}</div>,
+        },
+      ]}
+    />
   );
 }

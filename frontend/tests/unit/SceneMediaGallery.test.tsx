@@ -63,7 +63,10 @@ it("exposes all six shots, six frame actions and five playable videos without wr
   const list = await screen.findByRole("list", { name: "场景镜头列表" });
   expect(within(list).getAllByRole("listitem")).toHaveLength(6);
   expect(within(list).getAllByRole("img")).toHaveLength(6);
-  expect(screen.getByText(/6 镜头 · 正式画面 6\/6 · 正式视频 5\/6/)).toBeInTheDocument();
+  expect(within(list).getAllByText("正式画面：已选定")).toHaveLength(6);
+  expect(within(list).getAllByText("正式视频：已选定")).toHaveLength(5);
+  expect(within(list).getAllByText("正式视频：未选定")).toHaveLength(1);
+  expect(screen.queryByText(/镜头 · 正式画面/)).not.toBeInTheDocument();
   expect(screen.getAllByTestId("scene-shot-card")).toHaveLength(6);
   expect(
     screen
@@ -145,7 +148,8 @@ it("locates the sole missing Formal video among 34 shots without any write", asy
     "href",
     "/projects/project-1/scenes/scene-1?shotId=shot-large-17",
   );
-  expect(screen.getByText(/34 镜头 · 正式画面 34\/34 · 正式视频 33\/34/)).toBeInTheDocument();
+  expect(within(list).getByText("正式画面：已选定")).toBeInTheDocument();
+  expect(within(list).getByText("正式视频：未选定")).toBeInTheDocument();
   expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
 });
 

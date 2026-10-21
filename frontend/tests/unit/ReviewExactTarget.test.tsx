@@ -1,3 +1,4 @@
+import { expectSelectValue } from "./selectValue";
 import {
   createRootRoute,
   createRouter,
@@ -204,7 +205,7 @@ it("opens a shot-only review link at the chosen shot without claiming an exact A
   show({ shotId: "s1" });
   const player = await screen.findByLabelText("正式视频审片播放器");
   expect(player).toHaveAttribute("src", "/api/v1/projects/p1/artifacts/formal-A/content");
-  expect(screen.getByLabelText("当前镜头")).toHaveValue("s1");
+  expectSelectValue(screen.getByLabelText("当前镜头"), "s1");
   expect(writes).toEqual([]);
 });
 

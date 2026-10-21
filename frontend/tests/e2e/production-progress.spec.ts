@@ -96,6 +96,85 @@ async function expectClientNavigation(page: Page) {
   ).toBe("alive");
 }
 
+test("overview keeps primary progress ahead of details and shares aligned choice controls", async ({
+  page,
+}) => {
+  const { writes, errors } = await installProgressMock(page);
+  await page.goto(`/projects/${PROJECT_ID}/production`);
+  for (const width of [1440, 1024, 760]) {
+    await page.setViewportSize({ width, height: 900 });
+    const control = page.getByRole("combobox", { name: "导演参与度", exact: true });
+    const field = control.locator(
+      "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' ant-form-item ')][1]",
+    );
+    await expect(field).toHaveClass(/ant-form-item-horizontal/);
+    const fieldBox = (await field.boundingBox())!;
+    const controlBox = (await control
+      .locator(
+        "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' ant-select ')][1]",
+      )
+      .boundingBox())!;
+    expect(fieldBox.height).toBeCloseTo(controlBox.height, 0);
+    const scenesBox = (await page.locator(".monitor-scenes").boundingBox())!;
+    const flowBox = (await page.getByTestId("production-flow").boundingBox())!;
+    expect(scenesBox.y + scenesBox.height).toBeLessThanOrEqual(flowBox.y);
+    const tabsBox = (await page
+      .getByRole("region", { name: "制作内容", exact: true })
+      .getByRole("tablist")
+      .boundingBox())!;
+    const monitorBox = (await page.getByTestId("production-monitor").boundingBox())!;
+    expect(monitorBox.y - tabsBox.y - tabsBox.height).toBeLessThanOrEqual(24);
+    for (const selector of [
+      ".monitor-table th",
+      ".monitor-scene-description",
+      ".monitor-overview span",
+      ".monitor-execution-status",
+    ]) {
+      expect(
+        await page
+          .locator(selector)
+          .first()
+          .evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
+      ).toBeGreaterThanOrEqual(14);
+    }
+    expect(
+      await page
+        .locator(".monitor-table tbody tr strong")
+        .first()
+        .evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
+    ).toBeGreaterThanOrEqual(15);
+    await expect(page.getByTestId(`monitor-scene-${SCENE_ID}`)).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  }
+  const tabs = page.getByRole("region", { name: "制作内容", exact: true }).getByRole("tablist");
+  await expect(
+    tabs.locator(
+      "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' ant-tabs ')][1]",
+    ),
+  ).toHaveClass(/ant-tabs/);
+  const filters = page.getByRole("radiogroup", { name: "场景状态筛选", exact: true });
+  await expect(filters).toHaveClass(/ant-segmented/);
+  const all = filters.getByRole("radio", { name: "全部场景", exact: true });
+  await all.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(filters.getByRole("radio", { name: "未完成", exact: true })).toBeChecked();
+  await page.keyboard.press("ArrowRight");
+  await expect(filters.getByRole("radio", { name: "仅看风险", exact: true })).toBeChecked();
+  await expect(page.getByText("当前没有带风险的场景；未完成制作请切换到“未完成”。")).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(all).toBeChecked();
+  await expect(page.getByTestId(`monitor-scene-${SCENE_ID}`)).toBeVisible();
+  await page.getByRole("tab", { name: "导演手法", exact: true }).click();
+  const scopes = page.getByRole("radiogroup", { name: "修改范围", exact: true });
+  await expect(scopes).toHaveClass(/ant-segmented/);
+  await scopes.getByRole("radio", { name: "单个镜头", exact: true }).locator("..").click();
+  await expect(page.getByRole("combobox", { name: "设置目标镜头", exact: true })).toBeVisible();
+  expect(writes).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test("narrow desktop exposes incomplete scenes without production writes", async ({ page }) => {
   const { writes, errors } = await installProgressMock(page);
   await page.setViewportSize({ width: 760, height: 730 });
@@ -107,9 +186,9 @@ test("narrow desktop exposes incomplete scenes without production writes", async
   await expect(action).toBeInViewport();
   await expect(page.getByTestId("stat-risks")).toHaveText("0");
   await expect(page.getByTestId(`monitor-scene-${SCENE_ID}`)).toContainText("1 / 2");
-  await page.getByRole("button", { name: "仅看风险", exact: true }).click();
+  await page.getByRole("radio", { name: "仅看风险", exact: true }).locator("..").click();
   await expect(page.getByText("当前没有带风险的场景；未完成制作请切换到“未完成”。")).toBeVisible();
-  await page.getByRole("button", { name: "未完成", exact: true }).click();
+  await page.getByRole("radio", { name: "未完成", exact: true }).locator("..").click();
   await expect(page.getByTestId(`monitor-scene-${SCENE_ID}`)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await rememberNavigation(page);
@@ -127,7 +206,7 @@ test("production notices refresh formal counts and next step while retaining the
   const { progress, writes, errors } = await installProgressMock(page);
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByTestId("production-next-step")).toContainText("未确认正式视频");
-  await page.getByRole("button", { name: "未完成", exact: true }).click();
+  await page.getByRole("radio", { name: "未完成", exact: true }).locator("..").click();
   progress.videos = 2;
   await page.evaluate(
     ({ projectId, shotId }) => {
@@ -142,10 +221,7 @@ test("production notices refresh formal counts and next step while retaining the
     { projectId: PROJECT_ID, shotId: SHOT_ID },
   );
   await expect(page.getByTestId("stat-formal-videos")).toHaveText("2", { timeout: 10000 });
-  await expect(page.getByRole("button", { name: "未完成", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await expect(page.getByRole("radio", { name: "未完成", exact: true })).toBeChecked();
   await expect(page.getByText("所有场景的正式产物均已齐备。")).toBeVisible();
   await expect(page.getByTestId("production-next-step")).not.toContainText("已导出成片");
   expect(progress.sceneReads).toBeGreaterThan(1);
@@ -196,7 +272,7 @@ test("failed executions expand on demand and locate the shot without retrying", 
   await page.goto(`/projects/${PROJECT_ID}/production`);
   await expect(page.getByTestId("stat-failed")).toHaveText("1");
   await expect(page.getByTestId("stat-risks")).toHaveText("0");
-  const toggle = page.getByTestId("production-failures-disclosure").locator(":scope > summary");
+  const toggle = page.getByTestId("production-failures-disclosure").getByRole("button").first();
   await toggle.focus();
   await page.keyboard.press("Enter");
   const details = page.getByRole("region", { name: "失败执行详情" });

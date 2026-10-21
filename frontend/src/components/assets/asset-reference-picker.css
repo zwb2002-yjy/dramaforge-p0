@@ -101,7 +101,7 @@
 .df-mention-options li[aria-selected="true"] {
   background: var(--df-control-background);
 }
-.df-mention-options .df-btn {
+.df-mention-options .df-action {
   width: 100%;
   justify-content: space-between;
 }
