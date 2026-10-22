@@ -1,0 +1,68 @@
+name: C2 wire proof verification (one shot)
+
+on:
+  push:
+    branches:
+      - agent/c2-wire-proof-20261022
+    paths:
+      - .github/workflows/c2-wire-proof-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: true
+      - name: Backend Python 3.14 tests and contract export
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace/backend \
+            -e APP_ENV=test -e SESSION_SECRET=test-session-secret-32chars-min \
+            -e BYOK_FERNET_KEY=test-byok-fernet-key-replace== \
+            python:3.14-slim-bookworm \
+            sh -ec '
+              set -eu
+              pip install --no-cache-dir "uv==0.12.0"
+              uv sync --locked --extra dev
+              uv run --no-sync ruff format app/providers/compile_preview.py app/production/workbench_execution.py app/execution/media_submission.py app/contracts/production_commands.py app/production/application/commands.py tests/unit/test_c2_wire_proof.py
+              uv run --no-sync ruff check --fix app/providers/compile_preview.py app/production/workbench_execution.py app/execution/media_submission.py app/contracts/production_commands.py app/production/application/commands.py tests/unit/test_c2_wire_proof.py
+              uv run --no-sync ruff check app/providers/compile_preview.py app/production/workbench_execution.py app/execution/media_submission.py app/contracts/production_commands.py app/production/application/commands.py tests/unit/test_c2_wire_proof.py
+              uv run --no-sync pytest -q tests/unit/test_c2_wire_proof.py tests/unit/test_workbench_execution.py tests/unit/test_workbench_api.py
+              uv run --no-sync python /workspace/scripts/_export_openapi.py --out /workspace/openapi-c2-wire.json
+            '
+      - name: Frontend Node 24 type generation and tests
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace/frontend \
+            node:24.21.0-alpine3.24 \
+            sh -ec '
+              set -eu
+              npm ci --ignore-scripts
+              npx openapi-typescript /workspace/openapi-c2-wire.json -o src/shared/api/generated.ts
+              npx prettier --write src/features/shots/api.ts src/features/shots/ShotPreflightDrawer.tsx tests/unit/ShotPreflightDrawer.test.tsx
+              npm run format:check
+              npm run lint
+              npm run typecheck
+              npm test -- tests/unit/ShotPreflightDrawer.test.tsx tests/unit/ShotProductionActionsPlan.test.tsx
+            '
+      - name: Finalize validated snapshot
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/c2-wire-proof-once.yml
+          rm -f openapi-c2-wire.json
+          git add backend/app/providers/compile_preview.py backend/app/production/workbench_execution.py backend/app/execution/media_submission.py
+          git add backend/app/contracts/production_commands.py backend/app/production/application/commands.py backend/tests/unit/test_c2_wire_proof.py
+          git add frontend/src/features/shots/api.ts frontend/src/features/shots/ShotPreflightDrawer.tsx frontend/tests/unit/ShotPreflightDrawer.test.tsx frontend/src/shared/api/generated.ts
+          git diff --cached --check
+          git commit -m "test(c2): verify same-compiler confirmed wire proof"
+          git push origin "HEAD:agent/c2-wire-proof-20261022"
