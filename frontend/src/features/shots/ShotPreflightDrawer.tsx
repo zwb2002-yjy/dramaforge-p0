@@ -31,17 +31,6 @@ export interface ShotPreflightDrawerProps {
   approximationsAccepted?: boolean;
 }
 
-type CompilerContractPreview = {
-  compile_level: "provider_contract";
-  readiness: "contract_validated" | "blocked";
-  transport_verified: false;
-  account_verified: false;
-  effective_options: Record<string, unknown>;
-  transformations: string[];
-  errors: string[];
-  warnings: string[];
-};
-
 export function ShotPreflightDrawer({
   open,
   onClose,
@@ -60,11 +49,8 @@ export function ShotPreflightDrawer({
   approximationsAccepted = false,
 }: ShotPreflightDrawerProps): ReactNode {
   const p = plan?.plan;
-  // The generated API contract will be regenerated with the next OpenAPI sync.
-  // This optional read-only field does not participate in the plan fingerprint.
-  const compilerPreview = (
-    plan as (ShotExecutionPlanRead & { compiler_contract_preview?: CompilerContractPreview | null }) | null
-  )?.compiler_contract_preview;
+  // Advisory only: compiler-contract evidence is outside the executable plan fingerprint.
+  const compilerPreview = plan?.compiler_contract_preview;
   const references = p?.planned_references ?? [];
   const exactRefs = references.filter((r) => r.delivery === "exact");
   const approxRefs = references.filter((r) => r.delivery === "approximate");
