@@ -260,6 +260,7 @@ async def prepare_media_submission(
                 if workbench_image_reference is not None
                 else str(snap.get("canonical_mime_type") or "image/png")
             ),
+            mode_id=workbench_plan.mode_id if workbench_plan is not None else None,
             selection=ModelSelectionIntent(
                 mode="explicit_binding",
                 model_binding_id=frozen_binding_id,
