@@ -525,6 +525,11 @@ def test_executions_dispatch_queued_run_and_revalidate_fingerprint(
     fingerprint = preview["plan_fingerprint"]
 
     # 2) execute with matching fingerprint
+    assert preview["compiler_contract_preview"] is not None, {
+        "mode": preview["plan"]["mode_id"],
+        "gaps": preview["plan"]["capability_gaps"],
+        "references": preview["plan"]["planned_references"],
+    }
     assert preview["compiler_contract_preview"]["readiness"] == "contract_validated"
     body = {
         **_plan_body(binding_id),
