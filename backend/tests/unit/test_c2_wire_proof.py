@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-
 from uuid import uuid4
 
 import pytest
@@ -93,6 +92,7 @@ def test_unbound_media_and_credential_keys_fail_closed() -> None:
 def test_byte_backed_data_uri_normalizes_to_stable_media_slot() -> None:
     artifact_id = uuid4()
     digest = "f" * 64
+
     def view(media: bytes):
         encoded = base64.b64encode(media).decode("ascii")
         reference = ResolvedReference(
@@ -116,6 +116,7 @@ def test_byte_backed_data_uri_normalizes_to_stable_media_slot() -> None:
 
 def test_byte_backed_raw_base64_is_stable_and_requires_matching_slot() -> None:
     artifact_id = uuid4()
+
     def view(media: bytes):
         reference = ResolvedReference(
             role="reference_image",
@@ -126,7 +127,9 @@ def test_byte_backed_raw_base64_is_stable_and_requires_matching_slot() -> None:
         value = base64.b64encode(media).decode("ascii")
         compiled = _compiled("ignored")
         body = {"model": "model-1", "image_b64": value}
-        return compiled_wire_evidence(compiled.model_copy(update={"wire_request": body}), [reference])
+        return compiled_wire_evidence(
+            compiled.model_copy(update={"wire_request": body}), [reference]
+        )
 
     first, redacted = view(b"preview-placeholder")
     second, _ = view(b"verified bytes")
