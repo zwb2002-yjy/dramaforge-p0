@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Mapping
 from typing import Final, Literal, cast
@@ -1447,38 +1448,75 @@ class WorkbenchExecutionService:
 
         plan_duration: float | None = None
         if execution_input.stage == "video":
+            # Shot.duration_seconds owns editing; the saved stage-specific setting
+            # is the explicit generation request, not a timeline fallback.
             plan_duration = 5.0
-            requested_duration = (
-                stage_settings.get("request_duration_seconds")
-                or user_common_options.get("duration_seconds")
-                or user_common_options.get("duration")
-                or user_native_options.get("duration_seconds")
-                or user_native_options.get("duration")
-            )
-            duration_spec = declared_all_options.get("duration") or declared_all_options.get(
-                "duration_seconds"
+            requested_duration = stage_settings.get("request_duration_seconds")
+            duration_options = [
+                value
+                for value in (
+                    user_common_options.get("duration_seconds"),
+                    user_common_options.get("duration"),
+                    user_native_options.get("duration_seconds"),
+                    user_native_options.get("duration"),
+                )
+                if value is not None
+            ]
+            if requested_duration is None and duration_options:
+                requested_duration = duration_options[0]
+            duration_spec = (
+                declared_all_options.get("duration_seconds") or declared_all_options.get("duration")
             )
             if requested_duration is not None:
-                req_d = float(str(requested_duration))
-                if duration_spec is not None and duration_spec.enum:
-                    valid_enum = [
-                        float(x) for x in duration_spec.enum if str(x).replace(".", "", 1).isdigit()
-                    ]
-                    if valid_enum and req_d not in valid_enum:
-                        raise WorkbenchExecutionError(
-                            f"Requested duration {req_d}s not supported by model contract "
-                            f"(supported: {duration_spec.enum})",
-                            details={
-                                "code": "MODEL_DURATION_UNSUPPORTED",
-                                "supported": duration_spec.enum,
-                            },
-                        )
+                if duration_spec is None:
+                    raise WorkbenchExecutionError(
+                        "Selected model does not declare a video duration option",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    )
+                try:
+                    req_d = float(str(requested_duration))
+                    option_durations = [float(str(value)) for value in duration_options]
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise WorkbenchExecutionError(
+                        "Requested video duration is invalid",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    ) from exc
+                if (
+                    isinstance(requested_duration, bool)
+                    or not math.isfinite(req_d)
+                    or req_d <= 0
+                    or not req_d.is_integer()
+                    or any(value != req_d for value in option_durations)
+                ):
+                    raise WorkbenchExecutionError(
+                        "Requested video duration must be a supported whole number of seconds",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    )
+                try:
+                    validate_parameter("duration_seconds", req_d, duration_spec)
+                except ProviderError as exc:
+                    raise WorkbenchExecutionError(
+                        "Requested duration is outside the model contract",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    ) from exc
                 plan_duration = req_d
             elif duration_spec is not None and duration_spec.default is not None:
                 try:
-                    plan_duration = float(duration_spec.default)
-                except (ValueError, TypeError):
-                    plan_duration = 5.0
+                    plan_duration = float(str(duration_spec.default))
+                except (ValueError, TypeError, OverflowError) as exc:
+                    raise WorkbenchExecutionError(
+                        "Model contract has an invalid default video duration",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    ) from exc
+                if (
+                    not math.isfinite(plan_duration)
+                    or plan_duration <= 0
+                    or not plan_duration.is_integer()
+                ):
+                    raise WorkbenchExecutionError(
+                        "Model contract has an unsupported default video duration",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    )
             effective_options["duration_seconds"] = plan_duration
 
         supports_prompt_override = False

@@ -1839,6 +1839,50 @@ async def test_generation_settings_flow_into_plan_and_node_run(
 
 
 @pytest.mark.asyncio
+async def test_generation_duration_does_not_use_timeline_duration(
+    session: AsyncSession,
+) -> None:
+    project, binding, user = await _seed(session, manifest_override=_video_manifest_with_contract())
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    shot.duration_seconds = 3
+    shot.director_state = {
+        "generation_settings": {"video": {"request_duration_seconds": 4}}
+    }
+    await session.flush()
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    execution_input = _input(
+        shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+    )
+    plan = await service.build_plan(project=project, execution_input=execution_input)
+    assert plan.duration_seconds == 4.0
+    assert plan.effective_options["duration_seconds"] == 4.0
+    run = await service.create_and_dispatch(project=project, execution_input=execution_input)
+    assert run.input_snapshot["duration_seconds"] == 4.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requested", [4.5, 6, 0, -1, "NaN", "invalid"])
+async def test_invalid_generation_duration_is_rejected_before_dispatch(
+    session: AsyncSession, requested: object,
+) -> None:
+    project, binding, user = await _seed(session, manifest_override=_video_manifest_with_contract())
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    shot.director_state = {
+        "generation_settings": {"video": {"request_duration_seconds": requested}}
+    }
+    await session.flush()
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    with pytest.raises(WorkbenchExecutionError) as exc:
+        await service.build_plan(
+            project=project,
+            execution_input=_input(
+                shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+            ),
+        )
+    assert exc.value.details["code"] == "MODEL_DURATION_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
 async def test_undeclared_options_rejected_by_preflight(
     session: AsyncSession,
 ) -> None:
