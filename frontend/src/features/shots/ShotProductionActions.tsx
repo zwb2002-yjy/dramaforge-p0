@@ -822,14 +822,22 @@ export function ShotProductionActions({
           label: buttonLabel("image_keyframe", keyframeStatus),
           testId: "generate-keyframe",
           disabled: keyframeDisabled,
-          run: () => produce.mutate("image_keyframe"),
+          run: () => {
+            setPreflightDrawerStage("image_keyframe");
+            setApproximationsAccepted(false);
+            inspectPlan.mutate({ stage: "image_keyframe", acceptApproximations: false });
+          },
         };
       case "generate_video":
         return {
           label: buttonLabel("video", videoStatus),
           testId: "generate-video",
           disabled: videoDisabled,
-          run: () => produce.mutate("video"),
+          run: () => {
+            setPreflightDrawerStage("video");
+            setApproximationsAccepted(false);
+            inspectPlan.mutate({ stage: "video", acceptApproximations: false });
+          },
         };
       case "running":
         return {
@@ -963,7 +971,11 @@ export function ShotProductionActions({
             <Button
               tone="ghost"
               data-testid="secondary-generate-keyframe"
-              onClick={() => produce.mutate("image_keyframe")}
+              onClick={() => {
+                setPreflightDrawerStage("image_keyframe");
+                setApproximationsAccepted(false);
+                inspectPlan.mutate({ stage: "image_keyframe", acceptApproximations: false });
+              }}
             >
               {buttonLabel("image_keyframe", keyframeStatus)}
             </Button>
@@ -972,7 +984,11 @@ export function ShotProductionActions({
             <Button
               tone="ghost"
               data-testid="secondary-generate-video"
-              onClick={() => produce.mutate("video")}
+              onClick={() => {
+                setPreflightDrawerStage("video");
+                setApproximationsAccepted(false);
+                inspectPlan.mutate({ stage: "video", acceptApproximations: false });
+              }}
             >
               {buttonLabel("video", videoStatus)}
             </Button>
