@@ -4,6 +4,9 @@ Reference transports are placeholders. Success proves compiler acceptance, not
 media validity, transport reachability, account access or executable readiness.
 """
 
+import base64
+import hashlib
+import json
 from collections import Counter
 from typing import Literal, TypedDict
 from uuid import UUID
@@ -16,7 +19,12 @@ from app.providers.manifest import ModelCapabilityManifest
 from app.providers.normalizer import normalize_image, normalize_video
 from app.providers.reference_roles import ReferenceRoleValue
 from app.providers.registry import get_plugin
-from app.providers.runtime import ResolvedReference
+from app.providers.runtime import (
+    CompiledImageRequest,
+    CompiledVideoRequest,
+    ResolvedReference,
+)
+from app.providers.workbench_contract import select_workbench_contract
 
 
 class _PreviewIdentity(TypedDict):
@@ -47,6 +55,8 @@ class CompilePreview(BaseModel):
     reference_ids: list[UUID]
     requested_options: dict[str, JsonValue] = Field(default_factory=dict)
     effective_options: dict[str, JsonValue] = Field(default_factory=dict)
+    wire_fingerprint: str | None = None
+    redacted_wire: dict[str, JsonValue] = Field(default_factory=dict)
     transformations: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(
@@ -156,12 +166,75 @@ def _effective_options(wire: dict[str, JsonValue]) -> dict[str, JsonValue]:
     }
 
 
+def compiled_wire_evidence(
+    compiled: CompiledImageRequest | CompiledVideoRequest,
+    references: list[ResolvedReference],
+) -> tuple[str, dict[str, JsonValue]]:
+    """Exact non-media wire fields + ordered frozen reference identities.
+
+    Random reference grants and raw media bytes are replaced with typed slot
+    markers, so preflight and Worker can compare the actual Compiler output
+    without disclosing the URL token, image bytes or credentials.
+    """
+    replacements: list[tuple[str, str]] = []
+    for index, ref in enumerate(references):
+        marker = f"<reference:{index}:{ref.fingerprint or ref.artifact_id}>"
+        if ref.content_url:
+            replacements.append((ref.content_url, marker))
+        if ref.content_bytes:
+            replacements.append((base64.b64encode(ref.content_bytes).decode("ascii"), marker))
+    replacements.sort(key=lambda pair: len(pair[0]), reverse=True)
+
+    def scrub(value: JsonValue, key: str = "") -> JsonValue:
+        if isinstance(value, dict):
+            result: dict[str, JsonValue] = {}
+            for field, child in value.items():
+                normalized = field.lower().replace("-", "_")
+                if any(
+                    fragment in normalized
+                    for fragment in (
+                        "authorization", "api_key", "apikey",
+                        "password", "secret", "ciphertext", "bearer",
+                    )
+                ):
+                    raise ValueError("credential key in Provider wire")
+                result[field] = scrub(child, field)
+            return result
+        if isinstance(value, list):
+            return [scrub(child, key) for child in value]
+        if isinstance(value, str):
+            result = value
+            for raw, marker in replacements:
+                if raw in result:
+                    result = result.replace(raw, marker)
+            if "https://" in result or "http://" in result or ";base64," in result:
+                raise ValueError("unbound URL or media value in Provider wire")
+            if ("base64" in key.lower() or "b64" in key.lower()) and "<reference:" not in result:
+                raise ValueError("unbound binary field in Provider wire")
+            return result
+        return value
+
+    projection: dict[str, JsonValue] = {
+        "provider_type": compiled.provider_type,
+        "protocol_profile": compiled.protocol_profile,
+        "model_id": compiled.model_id,
+        "operation": compiled.operation,
+        "request_schema_version": compiled.request_schema_version,
+        "wire_request": scrub(compiled.wire_request),
+        "reference_artifact_ids": [str(value) for value in compiled.reference_artifact_ids],
+        "reference_fingerprints": list(compiled.reference_fingerprints),
+    }
+    encoded = json.dumps(projection, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest(), projection
+
+
 async def preview_compile(
     *,
     manifest: ModelCapabilityManifest,
     invoke_model_value: str,
     intent: ImageGenerationIntent | VideoGenerationIntentV1,
     references: list[PreviewReference],
+    expected_mode_id: str | None = None,
 ) -> CompilePreview:
     import hashlib
 
@@ -250,16 +323,35 @@ async def preview_compile(
             )
             for ref in references
         ]
-        compiled = await compiler.compile(
-            intent,
-            manifest,
-            resolved,
-            invoke_model_value=invoke_model_value,
-        )
+        if operation is not None and operation.input_contracts:
+            selected = select_workbench_contract(
+                operation=operation,
+                media_kind="image" if isinstance(intent, ImageGenerationIntent) else "video",
+                references=[(ref.role, ref.mime_type) for ref in resolved],
+            )
+            if expected_mode_id is not None and selected.contract_id != expected_mode_id:
+                return CompilePreview(
+                    readiness="blocked", errors=["CONTRACT_MODE_MISMATCH"], **common
+                )
+            if isinstance(intent, VideoGenerationIntentV1):
+                intent = intent.model_copy(
+                    update={"output": intent.output.model_copy(update={"generate_audio": None})}
+                )
+            from typing import Any, cast
+
+            compiled = await cast(Any, compiler).compile(
+                intent, manifest, resolved, invoke_model_value=invoke_model_value,
+                policy=selected.policy,
+            )
+        else:
+            compiled = await compiler.compile(
+                intent, manifest, resolved, invoke_model_value=invoke_model_value,
+            )
         if compiled.reference_artifact_ids != [ref.artifact_id for ref in references]:
             return CompilePreview(
                 readiness="blocked", errors=["REFERENCE_IDENTITY_MISMATCH"], **common
             )
+        fingerprint, redacted_wire = compiled_wire_evidence(compiled, resolved)
         effective = _effective_options(compiled.wire_request)
         transformations = [
             f"{key}:compiler_mapped"
@@ -270,9 +362,11 @@ async def preview_compile(
             readiness="contract_validated",
             effective_options=effective,
             transformations=transformations,
+            wire_fingerprint=fingerprint,
+            redacted_wire=redacted_wire,
             **common,
         )
-    except (ValueError, LookupError):
+    except (ValueError, LookupError, TypeError):
         # Compiler exceptions may include caller-controlled text; only a stable
         # code leaves this boundary. The original prompt/wire never leaves it.
         return CompilePreview(
