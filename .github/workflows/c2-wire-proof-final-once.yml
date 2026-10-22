@@ -1,4 +1,4 @@
-name: C2 wire proof final validation (one shot)
+name: C2 two-step paid confirmation regression (one shot)
 
 on:
   push:
@@ -48,11 +48,11 @@ jobs:
               set -eu
               npm ci --ignore-scripts
               npx openapi-typescript /workspace/openapi-c2-final.json -o src/shared/api/generated.ts
-              npx prettier --write src/features/shots/api.ts src/features/shots/ShotPreflightDrawer.tsx src/features/shots/ShotProductionActions.tsx tests/unit/ShotPreflightDrawer.test.tsx tests/unit/ShotProductionActionsPlan.test.tsx
+              npx prettier --write src/features/shots/api.ts src/features/shots/ShotPreflightDrawer.tsx src/features/shots/ShotProductionActions.tsx tests/unit/ShotPreflightDrawer.test.tsx tests/unit/ShotProductionActionsPlan.test.tsx tests/unit/ShotProductionActions.test.tsx
               npm run format:check
               npm run lint
               npm run typecheck
-              npm test -- tests/unit/ShotPreflightDrawer.test.tsx tests/unit/ShotProductionActionsPlan.test.tsx
+              npm test -- tests/unit/ShotPreflightDrawer.test.tsx tests/unit/ShotProductionActionsPlan.test.tsx tests/unit/ShotProductionActions.test.tsx
             '
       - name: Stage validated sources without temporary workflow
         run: |
@@ -64,7 +64,7 @@ jobs:
           git add backend/app/providers/compile_preview.py backend/app/production/workbench_execution.py backend/app/execution/media_submission.py
           git add backend/app/contracts/production_commands.py backend/app/production/application/commands.py backend/tests/unit/test_c2_wire_proof.py backend/tests/unit/test_workbench_api.py backend/tests/unit/test_workbench_execution.py
           git add frontend/src/features/shots/api.ts frontend/src/features/shots/ShotPreflightDrawer.tsx frontend/src/features/shots/ShotProductionActions.tsx
-          git add frontend/tests/unit/ShotPreflightDrawer.test.tsx frontend/tests/unit/ShotProductionActionsPlan.test.tsx frontend/src/shared/api/generated.ts
+          git add frontend/tests/unit/ShotPreflightDrawer.test.tsx frontend/tests/unit/ShotProductionActionsPlan.test.tsx frontend/tests/unit/ShotProductionActions.test.tsx frontend/src/shared/api/generated.ts
           git diff --cached --check
           git commit -m "test(c2): verify media wire proof and explicit confirmation routes"
           git push origin "HEAD:agent/c2-wire-proof-20261022"
