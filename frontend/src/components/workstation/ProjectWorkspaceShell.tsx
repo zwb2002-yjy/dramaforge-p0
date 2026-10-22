@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, type ReactNode } from "react";
+import { useContext, useLayoutEffect, useRef, type ReactNode } from "react";
 import { Menu } from "lucide-react";
 import { Button } from "../ui";
 import { ProjectStageGuide } from "./ProjectStageGuide";
@@ -38,25 +38,31 @@ export function ProjectWorkspaceShell({
   const shellRef = useRef<HTMLDivElement | null>(null);
   const barRef = useRef<HTMLElement | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const bar = barRef.current;
     const shell = shellRef.current;
     if (!bar || !shell) return;
 
+    // The measured height is consumed by sticky children, never by the bar itself:
+    // feeding it back into min-height would prevent the bar from shrinking.
+    let measuredHeight = 0;
     const syncTopbarHeight = () => {
-      const height = bar.getBoundingClientRect().height;
-      if (height > 0) {
-        shell.style.setProperty("--df-topbar-h", `${Math.round(height)}px`);
+      const height = Math.ceil(bar.getBoundingClientRect().height);
+      if (height > 0 && height !== measuredHeight) {
+        measuredHeight = height;
+        shell.style.setProperty("--df-project-topbar-height", `${height}px`);
       }
     };
 
     syncTopbarHeight();
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(syncTopbarHeight);
+    observer?.observe(bar);
 
-    if (typeof ResizeObserver !== "undefined") {
-      const observer = new ResizeObserver(syncTopbarHeight);
-      observer.observe(bar);
-      return () => observer.disconnect();
-    }
+    return () => {
+      observer?.disconnect();
+      shell.style.removeProperty("--df-project-topbar-height");
+    };
   }, []);
 
   return (

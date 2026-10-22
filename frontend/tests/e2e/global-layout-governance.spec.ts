@@ -50,7 +50,7 @@ async function inspectGeometricCollisions(
   return page.evaluate(
     ({ containerSelector, itemSelector }) => {
       const container = document.querySelector(containerSelector);
-      if (!container) return { found: false, overlaps: [], clipped: [] };
+      if (!container) return { found: false, count: 0, overlaps: [], clipped: [] };
 
       const containerRect = container.getBoundingClientRect();
       const items = Array.from(container.querySelectorAll(itemSelector)).filter((el) => {
@@ -64,12 +64,13 @@ async function inspectGeometricCollisions(
       const overlaps: string[] = [];
       const clipped: string[] = [];
 
-      // 检测右侧是否被容器裁切（允许 2px 亚像素误差）
+      // Check both horizontal boundaries, not only document-wide overflow.
+      // Allow 2px for fractional layout/zoom rounding.
       for (const item of items) {
         const r = item.getBoundingClientRect();
-        if (r.right > containerRect.right + 2) {
+        if (r.right > containerRect.right + 2 || r.left < containerRect.left - 2) {
           clipped.push(
-            `Element "${item.textContent?.trim().slice(0, 20)}" clipped right: item.right (${r.right.toFixed(1)}) > container.right (${containerRect.right.toFixed(1)})`,
+            `Element "${item.textContent?.trim().slice(0, 20)}" outside container: [${r.left.toFixed(1)}, ${r.right.toFixed(1)}] vs [${containerRect.left.toFixed(1)}, ${containerRect.right.toFixed(1)}]`,
           );
         }
       }
@@ -202,9 +203,9 @@ test.describe("DramaForge 全局布局与滚动重叠治理", () => {
         const boundaryCheck = await page.evaluate((cardSel) => {
           const card = document.querySelector(cardSel);
           if (!card) return { ok: false, reason: "card not found" };
-          const title = card.querySelector(".qc-scene-location");
+          const title = card.querySelector(".scene-heading");
           const actions = card.querySelector(".scene-header-actions");
-          if (!title || !actions) return { ok: true };
+          if (!title || !actions) return { ok: false, reason: "scene heading/actions missing" };
 
           const tRect = title.getBoundingClientRect();
           const aRect = actions.getBoundingClientRect();
@@ -228,8 +229,11 @@ test.describe("DramaForge 全局布局与滚动重叠治理", () => {
         const collisionResult = await inspectGeometricCollisions(
           page,
           `${cardSelector} .scene-header-actions`,
-          ".ant-tag, .qc-scene-badge, button",
+          ":scope > *",
         );
+        expect(collisionResult.found).toBe(true);
+        // Includes the real .scene-wall-count / .qc-risk spans as well as buttons.
+        expect(collisionResult.count).toBeGreaterThanOrEqual(5);
         expect(collisionResult.overlaps).toEqual([]);
         expect(collisionResult.clipped).toEqual([]);
       }
@@ -291,29 +295,38 @@ test.describe("DramaForge 全局布局与滚动重叠治理", () => {
       }
     });
 
-    // 等待 ResizeObserver 同步更新 --df-topbar-h
-    await page.waitForTimeout(100);
+    const measuredHeight = () =>
+      page.locator("[data-testid='project-workspace-shell']").evaluate((el) =>
+        Number.parseFloat(getComputedStyle(el).getPropertyValue("--df-project-topbar-height")),
+      );
+    const barHeight = () => topbar.evaluate((el) => el.getBoundingClientRect().height);
+
+    await expect.poll(barHeight).toBeGreaterThan(topbarBox!.height + 20);
+    await expect.poll(measuredHeight).toBeGreaterThan(topbarBox!.height + 20);
 
     const expandedTopbarBox = await topbar.boundingBox();
     const syncedInspectorBox = await inspector.boundingBox();
-
-    // 顶栏高度确实已变高
-    expect(expandedTopbarBox!.height).toBeGreaterThan(topbarBox!.height);
-    // 检查器吸顶位置依然严格位于变高后的顶栏下方，无任何图层遮挡！
     expect(syncedInspectorBox!.y).toBeGreaterThanOrEqual(
       expandedTopbarBox!.y + expandedTopbarBox!.height + 6,
     );
 
-    // 清理测试临时元素
+    // Remove the extra row: the observer must report a smaller height again.
     await page.evaluate(() => {
       document.getElementById("governance-dynamic-spacer")?.remove();
     });
-    await page.waitForTimeout(50);
+    await expect.poll(barHeight).toBeLessThan(expandedTopbarBox!.height - 20);
+    await expect.poll(measuredHeight).toBeLessThan(expandedTopbarBox!.height - 20);
 
-    // 验证检查器内部主操作仍然可正常点击
-    const keyframeBtn = inspector.getByTestId("generate-keyframe");
-    await expect(keyframeBtn).toBeVisible();
-    await expect(keyframeBtn).toBeEnabled();
+    const restoredBarBox = await topbar.boundingBox();
+    const restoredInspectorBox = await inspector.boundingBox();
+    expect(Math.abs(restoredBarBox!.height - topbarBox!.height)).toBeLessThanOrEqual(1);
+    expect(restoredInspectorBox!.y).toBeGreaterThanOrEqual(
+      restoredBarBox!.y + restoredBarBox!.height + 6,
+    );
+
+    // Layout checks must not assume a particular generation state or start a paid request.
+    await expect(inspector.getByTestId("shot-production-actions")).toBeVisible();
+    await expect(inspector.locator(".df-shot-primary")).toHaveCount(1);
   });
 
   test("全有效工作区页面巡检：各路由多视口滚动过程无水平溢出、无图层重叠与样式完整", async ({
@@ -335,6 +348,18 @@ test.describe("DramaForge 全局布局与滚动重叠治理", () => {
         await page.setViewportSize({ width, height: 720 });
         await page.goto(route.url);
         await page.waitForLoadState("domcontentloaded");
+        await expect(page.locator(".df-page-header").first()).toBeVisible();
+
+        // Shared page heading and optional action group must remain disjoint.
+        const headerGeometry = await inspectGeometricCollisions(
+          page,
+          ".df-page-header",
+          ":scope > .df-page-header-copy, :scope > .df-page-header-actions",
+        );
+        expect(headerGeometry.found).toBe(true);
+        expect(headerGeometry.count).toBeGreaterThan(0);
+        expect(headerGeometry.overlaps).toEqual([]);
+        expect(headerGeometry.clipped).toEqual([]);
 
         // 顶部无水平溢出
         let hasHScroll = await page.evaluate(() => {
@@ -353,6 +378,13 @@ test.describe("DramaForge 全局布局与滚动重叠治理", () => {
         // 滚动后再次检查水平无溢出
         await page.evaluate(() => window.scrollTo(0, 300));
         await page.waitForTimeout(50);
+        const scrolledHeaderGeometry = await inspectGeometricCollisions(
+          page,
+          ".df-page-header",
+          ":scope > .df-page-header-copy, :scope > .df-page-header-actions",
+        );
+        expect(scrolledHeaderGeometry.overlaps).toEqual([]);
+        expect(scrolledHeaderGeometry.clipped).toEqual([]);
 
         hasHScroll = await page.evaluate(() => {
           return document.documentElement.scrollWidth > document.documentElement.clientWidth + 1;

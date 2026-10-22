@@ -300,8 +300,8 @@
 
 .qc-director-panel {
   position: sticky;
-  top: var(--df-topbar-h);
-  height: calc(100vh - var(--df-topbar-h));
+  top: var(--df-project-topbar-height, var(--df-topbar-h));
+  height: calc(100vh - var(--df-project-topbar-height, var(--df-topbar-h)));
   display: flex;
   flex-direction: column;
   min-width: 0;

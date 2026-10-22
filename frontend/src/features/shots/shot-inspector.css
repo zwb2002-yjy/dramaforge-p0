@@ -19,13 +19,13 @@
 /* ---- Inspector ---- */
 .df-inspector {
   position: sticky;
-  top: calc(var(--df-topbar-h) + var(--df-space-3));
+  top: calc(var(--df-project-topbar-height, var(--df-topbar-h)) + var(--df-space-3));
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: var(--df-space-4);
   align-content: start;
-  max-height: calc(100svh - var(--df-topbar-h) - var(--df-space-6));
+  max-height: calc(100svh - var(--df-project-topbar-height, var(--df-topbar-h)) - var(--df-space-6));
   overflow-y: auto;
   padding: var(--df-space-5);
   border: 1px solid var(--df-surface-tier-raised-border);

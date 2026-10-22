@@ -145,8 +145,8 @@
   }
 
   .qc-director-panel {
-    top: var(--df-topbar-h);
-    height: calc(100vh - var(--df-topbar-h));
+    top: var(--df-project-topbar-height, var(--df-topbar-h));
+    height: calc(100vh - var(--df-project-topbar-height, var(--df-topbar-h)));
     padding: var(--df-space-5);
     border-left-color: var(--df-border-subtle);
     background: var(--df-surface-1);
