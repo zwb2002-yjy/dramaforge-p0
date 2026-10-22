@@ -60,11 +60,23 @@ export function ShotPreflightDrawer({
   const hasUnacceptedApproximations =
     (hasWarningGaps || approxRefs.length > 0) && !approximationsAccepted;
 
+  // A plan preview is not itself the Provider wire payload. Do not permit
+  // confirmation when its execution-stage identity or effective duration is
+  // incomplete, even if a malformed/old response reached this drawer.
+  const durationConfirmed =
+    stage !== "video" ||
+    (typeof p?.duration_seconds === "number" &&
+      Number.isSafeInteger(p.duration_seconds) &&
+      p.duration_seconds > 0 &&
+      p.effective_options?.duration_seconds === p.duration_seconds);
+  const planStageConfirmed = p?.stage === stage;
   const canConfirm =
     !dirty &&
     !isLoading &&
     !error &&
     Boolean(plan) &&
+    planStageConfirmed &&
+    durationConfirmed &&
     !hasFatalGaps &&
     !hasUnacceptedApproximations;
 
@@ -139,6 +151,16 @@ export function ShotPreflightDrawer({
 
       {!isLoading && plan && (
         <div>
+          <p className="df-shot-hint" data-testid="preflight-plan-boundary">
+            当前显示服务端冻结的执行计划；最终供应商协议请求由 Worker 的 Provider Compiler
+            编译，尚未提供逐字段同源 Payload 预览。
+          </p>
+          {!planStageConfirmed && (
+            <Alert type="error" showIcon title="执行阶段不一致，请重新预检。" />
+          )}
+          {!durationConfirmed && (
+            <Alert type="error" showIcon title="生成时长与有效参数未能一致确认，请重新预检。" />
+          )}
           {/* Section A: 提示词与引用核对 */}
           <div data-testid="preflight-prompt-section">
             <Typography.Title level={5}>1. 原文与发送提示词核对</Typography.Title>
