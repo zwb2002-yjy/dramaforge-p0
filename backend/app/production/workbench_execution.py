@@ -49,8 +49,15 @@ from app.production.reference_intents import (
 )
 from app.production.service import GraphService
 from app.providers.capabilities import Capability
+from app.providers.compile_preview import CompilePreview, preview_compile
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.errors import ProviderError
+from app.providers.intents import (
+    ImageGenerationIntent,
+    ModelSelectionIntent,
+    VideoGenerationIntentV1,
+    VideoOutputIntent,
+)
 from app.providers.manifest import (
     InputModeSpec,
     ModelCapabilityManifest,
@@ -1649,6 +1656,82 @@ class WorkbenchExecutionService:
             reasons = "; ".join(gap.reason for gap in blocking_gaps)
             raise WorkbenchExecutionError(f"workbench plan has capability gaps: {reasons}")
         return plan
+
+
+    async def preview_compiler_contract(
+        self,
+        *,
+        project: Project,
+        plan: WorkbenchExecutionPlan,
+    ) -> CompilePreview | None:
+        """Read-only adapter compilation, deliberately NOT the final wire request.
+
+        Only artifact-free text-to-image/text-to-video can be checked without
+        inventing a transport URL or reading private media bytes. Other modes
+        remain semantic-only until the same-source transport-aware D2 cutover.
+        Do not create a NodeRun, ProviderOperation or ProviderRuntime here.
+        """
+        if plan.planned_references or plan.capability_gaps:
+            return None
+        identity = plan.resolved_model
+        if (
+            identity.catalog_entry_id is None
+            or identity.provider_model_binding_id is None
+            or not identity.invoke_model_value
+        ):
+            return None
+        if plan.stage == "video" and plan.mode_id != "text_to_video":
+            return None
+        if plan.stage not in {"video", "image_keyframe"}:
+            return None
+        entry = await self._session.get(ModelCatalogEntry, identity.catalog_entry_id)
+        if entry is None or entry.contract_manifest_hash != identity.manifest_hash:
+            return None
+        manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
+        options = plan.effective_options
+        ratio = str(options.get("aspect_ratio") or project.aspect_ratio)
+        if ratio not in {"9:16", "16:9"}:
+            return None
+        seed_value = options.get("seed")
+        seed = int(seed_value) if isinstance(seed_value, int) and not isinstance(seed_value, bool) else None
+        selection = ModelSelectionIntent(
+            mode="explicit_binding",
+            model_binding_id=identity.provider_model_binding_id,
+        )
+        if plan.stage == "video":
+            duration = plan.duration_seconds
+            if duration is None or not float(duration).is_integer() or duration <= 0:
+                return None
+            resolution = options.get("resolution")
+            intent: ImageGenerationIntent | VideoGenerationIntentV1 = VideoGenerationIntentV1(
+                prompt=plan.prompt,
+                output=VideoOutputIntent(
+                    aspect_ratio=cast(Literal["9:16", "16:9"], ratio),
+                    duration_seconds=int(duration),
+                    resolution=str(resolution) if resolution is not None else None,
+                    generate_audio=None,
+                    seed=seed,
+                ),
+                mode_id="text_to_video",
+                references=[],
+                selection=selection,
+            )
+        else:
+            size = options.get("size")
+            intent = ImageGenerationIntent(
+                prompt=plan.prompt,
+                size=str(size) if size is not None else None,
+                aspect_ratio=cast(Literal["9:16", "16:9"], ratio),
+                seed=seed,
+                reference_artifact_ids=[],
+                selection=selection,
+            )
+        return await preview_compile(
+            manifest=manifest,
+            invoke_model_value=identity.invoke_model_value,
+            intent=intent,
+            references=[],
+        )
 
     async def lock_command_scope(self, *, project_id: UUID) -> None:
         # Command keys are unique per project, including accidental reuse on
