@@ -25,6 +25,7 @@ from app.production.execution_plan import WorkbenchExecutionPlan
 from app.providers.capability_resolver import ProductCapabilityPolicy
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.create_admission import require_frozen_create_admission
+from app.providers.compile_preview import compiled_wire_evidence
 from app.providers.execution_contract import execution_contract_gaps, freeze_execution_contract
 from app.providers.execution_identity import (
     ExecutionIdentityReference,
@@ -986,6 +987,23 @@ async def prepare_media_submission(
                 video_references,
                 invoke_model_value=invoke_model_value,
             )
+
+    if workbench_plan is not None:
+        expected_wire = snap.get("confirmed_compiler_wire_fingerprint")
+        if expected_wire is not None:
+            runtime_refs = refs if node_type == "keyframe" else video_references
+            try:
+                compiled_wire_hash, _redacted = compiled_wire_evidence(compiled, runtime_refs)
+            except ValueError as exc:
+                raise ValidationAppError(
+                    "Provider compiler produced unbound transport data",
+                    details={"code": "COMPILER_WIRE_PREVIEW_MISMATCH"},
+                ) from exc
+            if compiled_wire_hash != expected_wire:
+                raise ValidationAppError(
+                    "Provider compiler wire changed after user confirmation",
+                    details={"code": "COMPILER_WIRE_FINGERPRINT_MISMATCH"},
+                )
 
     if workbench_planned_references:
         expected_reference_ids = [
