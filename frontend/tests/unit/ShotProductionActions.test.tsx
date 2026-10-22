@@ -733,12 +733,10 @@ describe("ShotProductionActions", () => {
 
   it("gives repeated explicit creation of the same plan distinct command identities", async () => {
     const keys: Array<string | undefined> = [];
-    let previews = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
       if (url.endsWith("/execution-plan")) {
-        previews += 1;
         return json(planResponse({ fingerprint: "a".repeat(64) }));
       }
       if (url.includes("/executions/receipt")) {
