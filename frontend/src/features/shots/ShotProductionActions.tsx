@@ -200,6 +200,7 @@ export function ShotProductionActions({
     queryFn: () => fetchShotReferences(projectId, shot.id),
   });
   const delegationDecisionIds = useRef(new Map<string, string>());
+  const preflightSequence = useRef(0);
   const forStage = (stage: "image" | "video") =>
     references.filter((reference) => {
       const row = (Array.isArray(savedBindings.data) ? savedBindings.data : []).find(
@@ -282,6 +283,7 @@ export function ShotProductionActions({
   const [approximationsAccepted, setApproximationsAccepted] = useState(false);
 
   useEffect(() => {
+    preflightSequence.current += 1;
     setFeedback(null);
     setDisplayedPlan(null);
     setPendingApproximation(null);
@@ -385,9 +387,21 @@ export function ShotProductionActions({
       };
       return previewShotExecution(projectId, shot.id, input);
     },
-    onSuccess: (plan) => setDisplayedPlan(plan),
+    onMutate: () => ++preflightSequence.current,
+    onSuccess: (plan, _target, sequence) => {
+      if (
+        sequence !== preflightSequence.current ||
+        (plan.plan.shot_id && plan.plan.shot_id !== shot.id) ||
+        (plan.plan.expected_shot_version != null &&
+          plan.plan.expected_shot_version !== shot.version)
+      ) {
+        return;
+      }
+      setDisplayedPlan(plan);
+    },
   });
   useEffect(() => {
+    preflightSequence.current += 1;
     setDisplayedPlan(null);
   }, [shot.version, dirty, references, videoMode, savedBindings.data, modelPreflight.data]);
 
@@ -428,8 +442,12 @@ export function ShotProductionActions({
         },
       };
     },
-    onMutate: () => setFeedback(null),
-    onSuccess: ({ stage, prepared }) => {
+    onMutate: () => {
+      setFeedback(null);
+      return ++preflightSequence.current;
+    },
+    onSuccess: ({ stage, prepared }, _stage, sequence) => {
+      if (sequence !== preflightSequence.current) return;
       setDisplayedPlan(prepared.preview);
       setPlanFailure(null);
       setApproximationsAccepted(false);
