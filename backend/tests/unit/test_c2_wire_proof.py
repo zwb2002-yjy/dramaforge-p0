@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+
 from uuid import uuid4
 
 import pytest
@@ -86,3 +88,47 @@ def test_unbound_media_and_credential_keys_fail_closed() -> None:
     )
     with pytest.raises(ValueError, match="credential"):
         compiled_wire_evidence(changed, [])
+
+
+def test_byte_backed_data_uri_normalizes_to_stable_media_slot() -> None:
+    artifact_id = uuid4()
+    digest = "f" * 64
+    def view(media: bytes):
+        encoded = base64.b64encode(media).decode("ascii")
+        reference = ResolvedReference(
+            role="first_frame",
+            artifact_id=artifact_id,
+            fingerprint=digest,
+            mime_type="image/png",
+            content_bytes=media,
+        )
+        compiled = _compiled(f"data:image/png;base64,{encoded}")
+        return compiled_wire_evidence(compiled, [reference])
+
+    placeholder_hash, placeholder_wire = view(b"preview-placeholder")
+    actual_hash, actual_wire = view(b"real-verified-contents")
+    assert placeholder_hash == actual_hash
+    assert placeholder_wire == actual_wire
+    assert str(actual_wire).count("<reference:") == 1
+    assert "base64" not in str(actual_wire)
+    assert "real-verified-contents" not in str(actual_wire)
+
+
+def test_byte_backed_raw_base64_is_stable_and_requires_matching_slot() -> None:
+    artifact_id = uuid4()
+    def view(media: bytes):
+        reference = ResolvedReference(
+            role="reference_image",
+            artifact_id=artifact_id,
+            fingerprint="d" * 64,
+            content_bytes=media,
+        )
+        value = base64.b64encode(media).decode("ascii")
+        compiled = _compiled("ignored")
+        body = {"model": "model-1", "image_b64": value}
+        return compiled_wire_evidence(compiled.model_copy(update={"wire_request": body}), [reference])
+
+    first, redacted = view(b"preview-placeholder")
+    second, _ = view(b"verified bytes")
+    assert first == second
+    assert redacted["wire_request"]["image_b64"].startswith("<reference:")
