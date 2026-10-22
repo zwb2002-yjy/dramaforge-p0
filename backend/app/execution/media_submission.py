@@ -990,6 +990,13 @@ async def prepare_media_submission(
 
     if workbench_plan is not None:
         expected_wire = snap.get("confirmed_compiler_wire_fingerprint")
+        if snap.get("professional_unified") is True and not (
+            isinstance(expected_wire, str) and len(expected_wire) == 64
+        ):
+            raise ValidationAppError(
+                "Professional execution is missing its user-confirmed Compiler proof",
+                details={"code": "COMPILER_WIRE_CONFIRMATION_REQUIRED"},
+            )
         if expected_wire is not None:
             runtime_refs = refs if node_type == "keyframe" else video_references
             try:
