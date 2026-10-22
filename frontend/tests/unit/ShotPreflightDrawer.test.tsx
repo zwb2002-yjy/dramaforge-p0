@@ -32,9 +32,10 @@ const mockPlan: ShotExecutionPlanRead = {
         mime_type: "image/png",
       },
     ],
-    duration_seconds: 4.5,
+    duration_seconds: 4,
     effective_options: {
       motion_bucket_id: 120,
+      duration_seconds: 4,
     },
     capability_gaps: [],
   },
@@ -64,11 +65,53 @@ describe("ShotPreflightDrawer", () => {
       screen.getByText("A cinematic wide shot of a misty harbor at dusk."),
     ).toBeInTheDocument();
     expect(screen.getByText("provider/mock-video-v1")).toBeInTheDocument();
-    expect(screen.getByText("4.5 秒")).toBeInTheDocument();
+    expect(screen.getByText("4 秒")).toBeInTheDocument();
+    expect(screen.getByTestId("preflight-plan-boundary")).toHaveTextContent(
+      "尚未提供逐字段同源 Payload 预览",
+    );
     expect(screen.getByText(mockPlan.plan_fingerprint)).toBeInTheDocument();
 
     const confirmBtn = screen.getByTestId("confirm-generate-button");
     expect(confirmBtn).not.toBeDisabled();
+  });
+
+  it("blocks video confirmation when duration or effective options are missing", () => {
+    const onConfirm = vi.fn();
+    const invalid = {
+      ...mockPlan,
+      plan: { ...mockPlan.plan, duration_seconds: 4, effective_options: { duration_seconds: 5 } },
+    };
+    render(
+      <ShotPreflightDrawer
+        open
+        onClose={vi.fn()}
+        stage="video"
+        rawPrompt="Harbor"
+        plan={invalid}
+        isLoading={false}
+        onConfirmGenerate={onConfirm}
+      />,
+    );
+    expect(screen.getByTestId("confirm-generate-button")).toBeDisabled();
+    expect(screen.getByText("生成时长与有效参数未能一致确认，请重新预检。")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("confirm-generate-button"));
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("blocks a plan belonging to a different execution stage", () => {
+    render(
+      <ShotPreflightDrawer
+        open
+        onClose={vi.fn()}
+        stage="image_keyframe"
+        rawPrompt="Harbor"
+        plan={mockPlan}
+        isLoading={false}
+        onConfirmGenerate={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("confirm-generate-button")).toBeDisabled();
+    expect(screen.getByText("执行阶段不一致，请重新预检。")).toBeInTheDocument();
   });
 
   it("blocks confirmation and offers save/recompute when draft is dirty", () => {
