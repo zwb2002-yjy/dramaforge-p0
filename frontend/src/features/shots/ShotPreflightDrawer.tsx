@@ -8,7 +8,7 @@ import {
   Typography,
 } from "antd";
 import type { ReactNode } from "react";
-import { Drawer } from "../../components/ui";
+import { Disclosure, Drawer } from "../../components/ui";
 import type { ShotExecutionPlanRead, ShotExecutionStage } from "./api";
 
 const { Text, Paragraph } = Typography;
@@ -292,15 +292,18 @@ export function ShotPreflightDrawer({
               )}
               {compilerPreview.readiness === "contract_validated" &&
                 compilerPreview.redacted_wire && (
-                  <details data-testid="preflight-redacted-wire-details">
-                    <summary>查看完整脱敏请求结构（含模型、提示词和引用槽位）</summary>
+                  <Disclosure
+                    compact
+                    testId="preflight-redacted-wire-details"
+                    title="查看完整脱敏请求结构（含模型、提示词和引用槽位）"
+                  >
                     <pre
                       data-testid="preflight-redacted-wire"
                       style={{ maxHeight: 240, overflow: "auto", fontSize: "12px" }}
                     >
                       {JSON.stringify(compilerPreview.redacted_wire, null, 2)}
                     </pre>
-                  </details>
+                  </Disclosure>
                 )}
               {(compilerPreview.errors?.length ?? 0) > 0 && (
                 <Text type="warning">{compilerPreview.errors?.join("、")}</Text>
