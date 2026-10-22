@@ -1,4 +1,4 @@
-name: C2 wire proof verification (one shot)
+name: C2 wire proof typed verification (one shot)
 
 on:
   push:
