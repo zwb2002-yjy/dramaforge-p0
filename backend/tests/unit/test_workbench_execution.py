@@ -2082,10 +2082,16 @@ async def test_compiler_contract_preview_is_side_effect_free_for_text_video(
             shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
         ),
     )
-    # I2V always needs a formal first-frame reference. The preview must NOT
-    # fabricate media bytes/URLs or run a Provider on this path.
+    # I2V now invokes the real Compiler with normalized reference slots.
+    # A blocked model contract is distinct from a paid Provider call, and
+    # immutable Formal first-frame identity must be present in the proof.
     assert plan.planned_references
-    assert await service.preview_compiler_contract(project=project, plan=plan) is None
+    assert plan.planned_references[0].fingerprint == "b" * 64
+    media_preview = await service.preview_compiler_contract(project=project, plan=plan)
+    assert media_preview is not None
+    assert media_preview.transport_verified is False
+    assert media_preview.account_verified is False
+    assert media_preview.readiness in {"contract_validated", "blocked"}
     assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0
 
     # A pure no-reference semantic plan uses the actual compiler preview
