@@ -72,13 +72,11 @@
     position: sticky;
     top: 0;
     z-index: var(--df-z-sticky);
-    min-height: 56px;
+    min-height: var(--df-topbar-h);
     height: auto;
     padding: 0 clamp(var(--df-space-4), 2.4vw, var(--df-space-8));
     border-bottom: 1px solid var(--df-border-subtle);
-    background: var(--df-surface-overlay);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: var(--df-surface-1);
     box-shadow: var(--df-shadow-sm);
   }
 
@@ -106,7 +104,7 @@
 
   .qc-content-grid {
     grid-template-columns: minmax(0, 1fr) minmax(300px, 320px);
-    min-height: calc(100vh - 56px);
+    min-height: calc(100vh - var(--df-topbar-h));
     background: transparent;
   }
 
@@ -147,8 +145,8 @@
   }
 
   .qc-director-panel {
-    top: 56px;
-    height: calc(100vh - 56px);
+    top: var(--df-topbar-h);
+    height: calc(100vh - var(--df-topbar-h));
     padding: var(--df-space-5);
     border-left-color: var(--df-border-subtle);
     background: var(--df-surface-1);

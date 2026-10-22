@@ -1,7 +1,9 @@
 .qc-project-shell .qc-project-bar {
   height: auto;
-  min-height: var(--df-space-12);
+  min-height: var(--df-topbar-h);
   flex-wrap: wrap;
+  row-gap: var(--df-space-2);
+  column-gap: var(--df-space-3);
   padding-block: var(--df-space-2);
 }
 .qc-project-bar > .qc-project-name {

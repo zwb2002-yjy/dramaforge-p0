@@ -133,13 +133,14 @@
 }
 
 .qc-project-bar {
-  height: 54px;
+  min-height: var(--df-topbar-h);
+  height: auto;
   display: flex;
   align-items: center;
   gap: var(--df-space-3);
   padding: 0 var(--df-space-5);
   border-bottom: 1px solid var(--df-border-subtle);
-  background: var(--df-surface-overlay);
+  background: var(--df-surface-1);
 }
 
 .qc-icon-button,
@@ -193,7 +194,7 @@
 .qc-content-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 324px;
-  min-height: calc(100vh - 54px);
+  min-height: calc(100vh - var(--df-topbar-h));
   transition: grid-template-columns var(--df-duration-base) var(--df-ease);
 }
 
@@ -299,8 +300,8 @@
 
 .qc-director-panel {
   position: sticky;
-  top: 54px;
-  height: calc(100vh - 54px);
+  top: var(--df-topbar-h);
+  height: calc(100vh - var(--df-topbar-h));
   display: flex;
   flex-direction: column;
   min-width: 0;

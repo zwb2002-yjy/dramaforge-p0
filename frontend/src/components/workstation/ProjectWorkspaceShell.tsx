@@ -1,4 +1,4 @@
-import { useContext, type ReactNode } from "react";
+import { useContext, useEffect, useRef, type ReactNode } from "react";
 import { Menu } from "lucide-react";
 import { Button } from "../ui";
 import { ProjectStageGuide } from "./ProjectStageGuide";
@@ -35,14 +35,38 @@ export function ProjectWorkspaceShell({
 }: ProjectWorkspaceShellProps) {
   const displayModeLabel = modeLabel ?? VIEW_LABELS[activeView];
   const navigation = useContext(ProjectNavigationContext);
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const barRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const bar = barRef.current;
+    const shell = shellRef.current;
+    if (!bar || !shell) return;
+
+    const syncTopbarHeight = () => {
+      const height = bar.getBoundingClientRect().height;
+      if (height > 0) {
+        shell.style.setProperty("--df-topbar-h", `${Math.round(height)}px`);
+      }
+    };
+
+    syncTopbarHeight();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(syncTopbarHeight);
+      observer.observe(bar);
+      return () => observer.disconnect();
+    }
+  }, []);
 
   return (
     <div
+      ref={shellRef}
       className={`qc-project-shell${activeView === "scenes" ? " scene-view" : ""}`}
       data-testid="project-workspace-shell"
       data-project-id={projectId}
     >
-      <header className="qc-project-bar">
+      <header ref={barRef} className="qc-project-bar">
         {navigation && (
           <Button
             ref={navigation.triggerRef}
