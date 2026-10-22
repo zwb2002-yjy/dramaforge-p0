@@ -1318,6 +1318,15 @@ class WorkbenchExecutionService:
                         mime_type=formal.mime_type,
                     ),
                 )
+            # The Formal keyframe was inserted after initial hydration. Its
+            # immutable fingerprint must be bound before preview, freezing and
+            # worker compilation; otherwise D2 silently lacks media identity.
+            references = await self._hydrate_and_validate_references(
+                project=project,
+                shot_id=execution_input.shot_id,
+                stage=execution_input.stage,
+                references=references,
+            )
 
         effective_mode_id = execution_input.mode_id
         operation_key: Literal["image.generate", "video.generate"] = (
