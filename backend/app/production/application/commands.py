@@ -100,9 +100,21 @@ class ProductionCommands:
                 "accepted approximation set does not match the rebuilt plan",
                 details={"code": "ACCEPTED_APPROXIMATIONS_MISMATCH"},
             )
+        preview = await service.preview_compiler_contract(project=project, plan=plan)
+        if (
+            preview is None
+            or preview.readiness != "contract_validated"
+            or preview.wire_fingerprint is None
+            or body.compiler_wire_fingerprint != preview.wire_fingerprint
+        ):
+            raise ValidationAppError(
+                "This generation request has no matching acknowledged Compiler proof",
+                details={"code": "COMPILER_WIRE_CONFIRMATION_REQUIRED"},
+            )
         run = await service.create_and_dispatch(
             project=project, execution_input=command_input,
             idempotency_key_override=command_key, prepared_plan=plan, request_hash=identity,
+            confirmed_compiler_wire_fingerprint=preview.wire_fingerprint,
         )
         await append_production_notice(
             self._session, project_id=project_id, actor_id=actor.id,
