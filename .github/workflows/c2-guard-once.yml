@@ -1,4 +1,4 @@
-name: C2 semantic preflight guard (one shot)
+name: C2 semantic preflight guard validation (one shot)
 
 on:
   push:
