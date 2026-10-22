@@ -202,8 +202,10 @@
 .scene-header-actions {
   display: flex;
   align-items: center;
-  gap: var(--df-space-3);
+  row-gap: var(--df-space-2);
+  column-gap: var(--df-space-3);
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 /* Scene summaries stay visible; shot galleries load as they enter the viewport. */

@@ -380,7 +380,10 @@
 
 .df-workspace-return {
   display: flex;
+  align-items: center;
+  min-height: var(--df-space-10);
   padding: var(--df-space-2) var(--df-space-4);
+  background: var(--df-surface-1);
   border-bottom: 1px solid var(--df-border-subtle);
 }
 

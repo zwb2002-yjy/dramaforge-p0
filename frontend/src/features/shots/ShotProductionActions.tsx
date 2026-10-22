@@ -366,9 +366,7 @@ export function ShotProductionActions({
   const inspectPlan = useMutation({
     retry: false,
     mutationFn: (
-      target:
-        | ShotExecutionStage
-        | { stage: ShotExecutionStage; acceptApproximations?: boolean },
+      target: ShotExecutionStage | { stage: ShotExecutionStage; acceptApproximations?: boolean },
     ) => {
       const stage = typeof target === "string" ? target : target.stage;
       const acceptApproximations =
@@ -571,7 +569,9 @@ export function ShotProductionActions({
         accept_approximations: acceptApproximations,
       };
       let effectivePlan = plan;
-      const hasWarningGaps = (plan.plan.capability_gaps ?? []).some((g) => g.severity === "warning");
+      const hasWarningGaps = (plan.plan.capability_gaps ?? []).some(
+        (g) => g.severity === "warning",
+      );
       const unacceptedInPlan = (plan.plan.accepted_approximations ?? []).length === 0;
       if (acceptApproximations && (hasWarningGaps || unacceptedInPlan)) {
         effectivePlan = await previewShotExecution(projectId, shot.id, input);

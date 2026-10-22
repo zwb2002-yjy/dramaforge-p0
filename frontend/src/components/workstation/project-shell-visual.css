@@ -72,11 +72,14 @@
     position: sticky;
     top: 0;
     z-index: var(--df-z-sticky);
-    height: 56px;
+    min-height: 56px;
+    height: auto;
     padding: 0 clamp(var(--df-space-4), 2.4vw, var(--df-space-8));
-    border-bottom-color: transparent;
-    background: transparent;
-    box-shadow: none;
+    border-bottom: 1px solid var(--df-border-subtle);
+    background: var(--df-surface-overlay);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: var(--df-shadow-sm);
   }
 
   .qc-project-name {
