@@ -1,4 +1,4 @@
-name: C1 targeted container validation (one shot)
+name: C1 targeted container verification (one shot)
 
 on:
   push:
