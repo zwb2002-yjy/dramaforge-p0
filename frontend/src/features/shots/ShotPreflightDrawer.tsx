@@ -222,7 +222,7 @@ export function ShotPreflightDrawer({
                 {stage === "video"
                   ? p?.duration_seconds !== undefined && p?.duration_seconds !== null
                     ? `${p.duration_seconds} 秒`
-                    : "5.0 秒（模型默认）"
+                    : "未确定（不能提交生成）"
                   : "单帧静态"}
               </Descriptions.Item>
               <Descriptions.Item label="有效参数" span={2}>

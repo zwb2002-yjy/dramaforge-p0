@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -275,16 +276,27 @@ async def prepare_media_submission(
                     "UPSTREAM_ARTIFACT_MISSING: approved first-frame bytes "
                     "unavailable for video I2V"
                 )
-        raw_duration = effective_opts.get("duration_seconds") or snap.get("duration_seconds")
+        raw_duration = effective_opts.get("duration_seconds")
+        if raw_duration is None:
+            raw_duration = snap.get("duration_seconds")
         try:
-            duration_seconds = round(float(str(raw_duration)))
-        except (TypeError, ValueError):
-            duration_seconds = 0
-        if duration_seconds <= 0:
+            parsed_duration = float(str(raw_duration))
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValidationAppError(
                 "unified video request has no valid duration",
                 details={"code": "DURATION_REQUIRED"},
+            ) from exc
+        if (
+            isinstance(raw_duration, bool)
+            or not math.isfinite(parsed_duration)
+            or parsed_duration <= 0
+            or not parsed_duration.is_integer()
+        ):
+            raise ValidationAppError(
+                "unified video duration cannot be rounded or silently substituted",
+                details={"code": "MODEL_DURATION_UNSUPPORTED"},
             )
+        duration_seconds = int(parsed_duration)
         raw_ratio = str(
             effective_opts.get("aspect_ratio")
             or snap.get("aspect_ratio")
