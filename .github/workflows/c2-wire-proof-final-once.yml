@@ -1,4 +1,4 @@
-name: C2 paid confirmation and repeat create validation (one shot)
+name: C2 paid confirmation with receipt isolation validation (one shot)
 
 on:
   push:
