@@ -26,6 +26,9 @@ jobs:
             python:3.14-slim-bookworm \
             sh -ec '
               set -eu
+              apt-get update -qq
+              apt-get install -qq -y --no-install-recommends git
+              git config --global --add safe.directory /workspace
               pip install --no-cache-dir "uv==0.12.0"
               uv sync --locked --extra dev
               uv run --no-sync ruff check tests/unit/test_source_evidence_cli.py tests/unit/test_directory_compliance.py ../scripts/check_directory_compliance.py
