@@ -1464,9 +1464,9 @@ class WorkbenchExecutionService:
             ]
             if requested_duration is None and duration_options:
                 requested_duration = duration_options[0]
-            duration_spec = (
-                declared_all_options.get("duration_seconds") or declared_all_options.get("duration")
-            )
+            duration_spec = declared_all_options.get(
+                "duration_seconds"
+            ) or declared_all_options.get("duration")
             if requested_duration is not None:
                 if duration_spec is None:
                     raise WorkbenchExecutionError(
