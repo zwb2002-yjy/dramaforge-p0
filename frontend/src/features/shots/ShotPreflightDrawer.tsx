@@ -159,11 +159,7 @@ export function ShotPreflightDrawer({
             <Alert type="error" showIcon title="执行阶段不一致，请重新预检。" />
           )}
           {!durationConfirmed && (
-            <Alert
-              type="error"
-              showIcon
-              title="生成时长与有效参数未能一致确认，请重新预检。"
-            />
+            <Alert type="error" showIcon title="生成时长与有效参数未能一致确认，请重新预检。" />
           )}
           {/* Section A: 提示词与引用核对 */}
           <div data-testid="preflight-prompt-section">
