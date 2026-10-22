@@ -749,7 +749,9 @@ describe("ShotProductionActions", () => {
           node_run_id: "33333333-3333-4333-8333-333333333333",
           graph_id: "44444444-4444-4444-8444-444444444444",
           graph_version_id: "55555555-5555-4555-8555-555555555555",
-          status: "queued",
+          // The second explicit create is offered only after the preceding
+          // operation has actually reached a terminal state.
+          status: "completed",
           plan_fingerprint: "a".repeat(64),
         });
       }
