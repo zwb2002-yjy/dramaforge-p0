@@ -328,15 +328,19 @@ async def preview_compile(
             return CompilePreview(
                 readiness="blocked", errors=["REFERENCE_TRANSPORT_UNDECLARED"], **common
             )
-        as_bytes = transport == "bytes"
+        # An invented byte buffer cannot satisfy a real SHA-256 media hash.
+        # Use an inert URL-shaped reference for pure contract compilation. The
+        # actual Worker resolves and hashes media bytes; both transports are
+        # normalized to the same frozen reference slot by compiled_wire_evidence.
+        # A bytes-only compiler may reject this harmless preview; do not fake
+        # valid bytes or weaken its hash checks.
         resolved = [
             ResolvedReference(
                 role=ref.role,
                 artifact_id=ref.artifact_id,
                 mime_type=ref.mime_type,
                 fingerprint=ref.fingerprint,
-                content_bytes=b"preview-placeholder" if as_bytes else None,
-                content_url=None if as_bytes else f"https://preview.invalid/{ref.artifact_id}",
+                content_url=f"https://preview.invalid/{ref.artifact_id}",
             )
             for ref in references
         ]
