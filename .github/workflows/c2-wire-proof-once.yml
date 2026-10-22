@@ -1,4 +1,4 @@
-name: C2 wire proof complete API validation (one shot)
+name: C2 wire proof frontend and Worker validation (one shot)
 
 on:
   push:
