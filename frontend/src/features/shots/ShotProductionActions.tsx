@@ -201,6 +201,7 @@ export function ShotProductionActions({
   });
   const delegationDecisionIds = useRef(new Map<string, string>());
   const preflightSequence = useRef(0);
+  const explicitCreateId = useRef(globalThis.crypto.randomUUID());
   const forStage = (stage: "image" | "video") =>
     references.filter((reference) => {
       const row = (Array.isArray(savedBindings.data) ? savedBindings.data : []).find(
@@ -444,6 +445,7 @@ export function ShotProductionActions({
     },
     onMutate: () => {
       setFeedback(null);
+      explicitCreateId.current = globalThis.crypto.randomUUID();
       return ++preflightSequence.current;
     },
     onSuccess: ({ stage, prepared }, _stage, sequence) => {
@@ -529,7 +531,11 @@ export function ShotProductionActions({
       const prepared: PreparedShotExecution = {
         input,
         preview: effectivePlan,
-        idempotencyKey: shotExecutionIdempotencyKey(shot.id, effectivePlan.plan_fingerprint),
+        idempotencyKey: shotExecutionIdempotencyKey(
+          shot.id,
+          effectivePlan.plan_fingerprint,
+          explicitCreateId.current,
+        ),
       };
       recordProductionOperation(
         productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
@@ -910,6 +916,7 @@ export function ShotProductionActions({
         data-testid="inspect-shot-plan"
         disabled={busy || dirty || !referencesReady || !promptReferencesReady[focusStage]}
         onClick={() => {
+          explicitCreateId.current = globalThis.crypto.randomUUID();
           setPreflightDrawerStage(focusStage);
           setApproximationsAccepted(false);
           inspectPlan.mutate({ stage: focusStage, acceptApproximations: false });
