@@ -209,25 +209,22 @@ def compiled_wire_evidence(
         if isinstance(value, list):
             return [scrub(child, key) for child in value]
         if isinstance(value, str):
-            result = value
+            redacted: str = value
             for raw, marker in replacements:
-                if raw in result:
-                    result = result.replace(raw, marker)
-            # A byte-backed adapter may wrap the exact resolved bytes as a
-            # data URI. Strip that entire envelope after replacing its payload,
-            # so placeholder bytes and verified Worker bytes hash identically.
-            # Never retain raw or unrelated inline base64 in the projection.
+                if raw in redacted:
+                    redacted = redacted.replace(raw, marker)
+            # Normalize tokenized transport and binary data without leaking it.
             data_uri = re.fullmatch(
                 r"data:[a-zA-Z0-9.+/-]+;base64,(<reference:[^>]+>)",
-                result,
+                redacted,
             )
             if data_uri is not None:
-                result = data_uri.group(1)
-            if "https://" in result or "http://" in result or ";base64," in result:
+                redacted = data_uri.group(1)
+            if "https://" in redacted or "http://" in redacted or ";base64," in redacted:
                 raise ValueError("unbound URL or media value in Provider wire")
-            if ("base64" in key.lower() or "b64" in key.lower()) and "<reference:" not in result:
+            if ("base64" in key.lower() or "b64" in key.lower()) and "<reference:" not in redacted:
                 raise ValueError("unbound binary field in Provider wire")
-            return result
+            return redacted
         return value
 
     projection: dict[str, JsonValue] = {
