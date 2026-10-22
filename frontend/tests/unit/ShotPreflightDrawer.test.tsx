@@ -109,7 +109,9 @@ describe("ShotPreflightDrawer", () => {
       />,
     );
     expect(screen.getByTestId("confirm-generate-button")).toBeDisabled();
-    expect(screen.getByText("尚未生成可验证的编译请求指纹，不能提交付费生成。")).toBeInTheDocument();
+    expect(
+      screen.getByText("尚未生成可验证的编译请求指纹，不能提交付费生成。"),
+    ).toBeInTheDocument();
   });
 
   it("renders prompt, parameter, and fingerprint sections when plan is loaded", () => {

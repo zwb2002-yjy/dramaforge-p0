@@ -163,11 +163,7 @@ export function ShotPreflightDrawer({
             编译，尚未提供逐字段同源 Payload 预览。
           </p>
           {!compilerConfirmed && (
-            <Alert
-              type="error"
-              showIcon
-              title="尚未生成可验证的编译请求指纹，不能提交付费生成。"
-            />
+            <Alert type="error" showIcon title="尚未生成可验证的编译请求指纹，不能提交付费生成。" />
           )}
           {!planStageConfirmed && (
             <Alert type="error" showIcon title="执行阶段不一致，请重新预检。" />

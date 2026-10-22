@@ -24,8 +24,8 @@ from app.execution.run_state import (
 from app.production.execution_plan import WorkbenchExecutionPlan
 from app.providers.capability_resolver import ProductCapabilityPolicy
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.create_admission import require_frozen_create_admission
 from app.providers.compile_preview import compiled_wire_evidence
+from app.providers.create_admission import require_frozen_create_admission
 from app.providers.execution_contract import execution_contract_gaps, freeze_execution_contract
 from app.providers.execution_identity import (
     ExecutionIdentityReference,

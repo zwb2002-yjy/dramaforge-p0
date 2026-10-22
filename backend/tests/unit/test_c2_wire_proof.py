@@ -5,7 +5,6 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-
 from app.providers.compile_preview import compiled_wire_evidence
 from app.providers.runtime import CompiledVideoRequest, ResolvedReference
 

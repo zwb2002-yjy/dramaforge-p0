@@ -193,8 +193,13 @@ def compiled_wire_evidence(
                 if any(
                     fragment in normalized
                     for fragment in (
-                        "authorization", "api_key", "apikey",
-                        "password", "secret", "ciphertext", "bearer",
+                        "authorization",
+                        "api_key",
+                        "apikey",
+                        "password",
+                        "secret",
+                        "ciphertext",
+                        "bearer",
                     )
                 ):
                     raise ValueError("credential key in Provider wire")
@@ -343,12 +348,18 @@ async def preview_compile(
             from typing import Any, cast
 
             compiled = await cast(Any, compiler).compile(
-                intent, manifest, resolved, invoke_model_value=invoke_model_value,
+                intent,
+                manifest,
+                resolved,
+                invoke_model_value=invoke_model_value,
                 policy=selected.policy,
             )
         else:
             compiled = await compiler.compile(
-                intent, manifest, resolved, invoke_model_value=invoke_model_value,
+                intent,
+                manifest,
+                resolved,
+                invoke_model_value=invoke_model_value,
             )
         if compiled.reference_artifact_ids != [ref.artifact_id for ref in references]:
             return CompilePreview(
