@@ -242,9 +242,11 @@ describe("ShotProductionActions plan preview vocabulary", () => {
       plan: {
         project_id: PROJECT_ID,
         shot_id: SHOT_ID,
-        stage: "image_keyframe",
+        stage: "video",
         prompt: "mock scene",
-        mode_id: "single_reference",
+        mode_id: "first_frame",
+        duration_seconds: 5,
+        effective_options: { duration_seconds: 5 },
         resolved_model: { resolved_model_id: "agnes/agnes-image-2.1-flash" },
         planned_references: [
           {
