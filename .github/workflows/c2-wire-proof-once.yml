@@ -1,4 +1,4 @@
-name: C2 wire proof API validation (one shot)
+name: C2 wire proof API lineage validation (one shot)
 
 on:
   push:
