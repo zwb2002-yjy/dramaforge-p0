@@ -1,4 +1,4 @@
-name: C2 two-step paid confirmation regression (one shot)
+name: C2 paid confirmation and repeat create validation (one shot)
 
 on:
   push:
