@@ -203,9 +203,11 @@ test.describe("DramaForge 全局布局与滚动重叠治理", () => {
         const boundaryCheck = await page.evaluate((cardSel) => {
           const card = document.querySelector(cardSel);
           if (!card) return { ok: false, reason: "card not found" };
-          const title = card.querySelector(".scene-heading");
+          const title = card.querySelector(".scene-heading .qc-scene-enter");
           const actions = card.querySelector(".scene-header-actions");
-          if (!title || !actions) return { ok: false, reason: "scene heading/actions missing" };
+          if (!title || !actions) {
+            return { ok: false, reason: "scene title/actions missing" };
+          }
 
           const tRect = title.getBoundingClientRect();
           const aRect = actions.getBoundingClientRect();
@@ -225,6 +227,28 @@ test.describe("DramaForge 全局布局与滚动重叠治理", () => {
 
         expect(boundaryCheck.ok).toBe(true);
 
+        // Guard against missing real content: collision tests alone can pass
+        // when the offending text nodes or badges are deleted.
+        const card = page.locator(cardSelector);
+        const sceneTitle = card.locator(".scene-heading .qc-scene-enter");
+        await expect(sceneTitle).toHaveCount(1);
+        await expect(sceneTitle).toHaveText(
+          `场景 ${i + 1} 赛博街道与超长测试地名·夜雨转晴`,
+        );
+
+        const expectedLabels = [
+          "4 镜头",
+          "画面 2/4",
+          "视频 1/4",
+          ...(i === 0 ? ["2 风险"] : []),
+          "待审 1",
+          ...(i === 1 ? ["生成中 1"] : []),
+          ...(i === 2 ? ["失败或阻断 1"] : []),
+          ...(i === 3 ? ["待核对 1"] : []),
+        ];
+        const labels = card.locator(".scene-header-actions > span");
+        await expect(labels).toHaveText(expectedLabels);
+
         // 操作组内部所有徽标与按钮的成对几何碰撞检测
         const collisionResult = await inspectGeometricCollisions(
           page,
@@ -233,7 +257,7 @@ test.describe("DramaForge 全局布局与滚动重叠治理", () => {
         );
         expect(collisionResult.found).toBe(true);
         // Includes the real .scene-wall-count / .qc-risk spans as well as buttons.
-        expect(collisionResult.count).toBeGreaterThanOrEqual(5);
+        expect(collisionResult.count).toBe(expectedLabels.length + 2);
         expect(collisionResult.overlaps).toEqual([]);
         expect(collisionResult.clipped).toEqual([]);
       }
@@ -295,10 +319,13 @@ test.describe("DramaForge 全局布局与滚动重叠治理", () => {
       }
     });
 
-    const measuredHeight = () =>
-      page.locator("[data-testid='project-workspace-shell']").evaluate((el) =>
-        Number.parseFloat(getComputedStyle(el).getPropertyValue("--df-project-topbar-height")),
-      );
+    const measuredHeight = () => {
+      const shell = page.getByTestId("project-workspace-shell");
+      return shell.evaluate((element) => {
+        const height = getComputedStyle(element).getPropertyValue("--df-project-topbar-height");
+        return Number.parseFloat(height);
+      });
+    };
     const barHeight = () => topbar.evaluate((el) => el.getBoundingClientRect().height);
 
     await expect.poll(barHeight).toBeGreaterThan(topbarBox!.height + 20);
