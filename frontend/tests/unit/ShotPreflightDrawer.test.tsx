@@ -43,13 +43,18 @@ const mockPlan: ShotExecutionPlanRead = {
 
 describe("ShotPreflightDrawer", () => {
   it("shows read-only compiler-mapped parameters without claiming wire readiness", () => {
-    const compiled = {
+    const compiled: ShotExecutionPlanRead = {
       ...mockPlan,
       compiler_contract_preview: {
         compile_level: "provider_contract",
         readiness: "contract_validated",
         transport_verified: false,
         account_verified: false,
+        prompt_hash: "a".repeat(64),
+        semantic_hash: "b".repeat(64),
+        manifest_hash: "c".repeat(64),
+        reference_ids: [],
+        requested_options: { duration_seconds: 4 },
         effective_options: { duration_seconds: 4 },
         transformations: [],
         errors: [],
