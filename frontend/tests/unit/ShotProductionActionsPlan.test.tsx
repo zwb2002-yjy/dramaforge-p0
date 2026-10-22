@@ -240,6 +240,11 @@ describe("ShotProductionActions plan preview vocabulary", () => {
     const unacceptedPlan = {
       plan_fingerprint: "1111111111111111111111111111111111111111111111111111111111111111",
       plan: {
+        project_id: PROJECT_ID,
+        shot_id: SHOT_ID,
+        stage: "image_keyframe",
+        prompt: "mock scene",
+        mode_id: "single_reference",
         resolved_model: { resolved_model_id: "agnes/agnes-image-2.1-flash" },
         planned_references: [
           {
