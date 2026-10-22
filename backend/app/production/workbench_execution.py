@@ -1734,7 +1734,11 @@ class WorkbenchExecutionService:
                     aspect_ratio=cast(Literal["9:16", "16:9"], ratio),
                     duration_seconds=int(duration),
                     resolution=str(resolution) if resolution is not None else None,
-                    generate_audio=None,
+                    generate_audio=(
+                        bool(options["generate_audio"])
+                        if options.get("generate_audio") is not None
+                        else None
+                    ),
                     seed=seed,
                 ),
                 mode_id=(
@@ -1764,6 +1768,7 @@ class WorkbenchExecutionService:
                 reference_artifact_ids=[ref.artifact_id for ref in references],
                 reference_fingerprint=references[0].fingerprint if references else None,
                 reference_mime=references[0].mime_type if references else None,
+                mode_id=plan.mode_id,
                 selection=selection,
             )
         return await preview_compile(
