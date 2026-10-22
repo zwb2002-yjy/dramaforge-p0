@@ -1,0 +1,45 @@
+name: C2 semantic preflight guard (one shot)
+
+on:
+  push:
+    branches:
+      - agent/c2-preview-gates-20261022
+    paths:
+      - .github/workflows/c2-guard-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: true
+      - name: Frontend format lint typecheck and preflight tests
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace/frontend \
+            node:24.21.0-alpine3.24 \
+            sh -ec '
+              set -eu
+              npm ci --ignore-scripts
+              npx prettier --write src/features/shots/ShotPreflightDrawer.tsx tests/unit/ShotPreflightDrawer.test.tsx
+              npm run format:check
+              npm run lint
+              npm run typecheck
+              npm test -- tests/unit/ShotPreflightDrawer.test.tsx tests/unit/ShotProductionActionsPlan.test.tsx
+            '
+      - name: Commit only verified source; remove temporary CI
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/c2-guard-once.yml
+          git add frontend/src/features/shots/ShotPreflightDrawer.tsx frontend/tests/unit/ShotPreflightDrawer.test.tsx
+          git diff --cached --check
+          git commit -m "test(c2): verify guarded plan confirmation and formatting"
+          git push origin "HEAD:agent/c2-preview-gates-20261022"
