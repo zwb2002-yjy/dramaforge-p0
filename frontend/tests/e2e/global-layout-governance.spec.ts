@@ -232,9 +232,7 @@ test.describe("DramaForge 全局布局与滚动重叠治理", () => {
         const card = page.locator(cardSelector);
         const sceneTitle = card.locator(".scene-heading .qc-scene-enter");
         await expect(sceneTitle).toHaveCount(1);
-        await expect(sceneTitle).toHaveText(
-          `场景 ${i + 1} 赛博街道与超长测试地名·夜雨转晴`,
-        );
+        await expect(sceneTitle).toHaveText(`场景 ${i + 1} 赛博街道与超长测试地名·夜雨转晴`);
 
         const expectedLabels = [
           "4 镜头",
