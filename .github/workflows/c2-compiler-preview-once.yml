@@ -48,7 +48,7 @@ jobs:
             sh -ec '
               set -eu
               npm ci --ignore-scripts
-              npm run api:generate
+              npx openapi-typescript /workspace/openapi-c2.json -o src/shared/api/generated.ts
               npx prettier --write src/features/shots/ShotPreflightDrawer.tsx tests/unit/ShotPreflightDrawer.test.tsx
               npm run format:check
               npm run lint
