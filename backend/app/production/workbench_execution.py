@@ -1714,8 +1714,8 @@ class WorkbenchExecutionService:
         references = [
             PreviewReference(
                 role=cast(Any, ref.role),
-                artifact_id=cast(UUID, ref.artifact_id),
-                fingerprint=cast(str, ref.fingerprint),
+                artifact_id=ref.artifact_id,
+                fingerprint=ref.fingerprint,
                 mime_type=ref.mime_type,
             )
             for ref in plan.planned_references
