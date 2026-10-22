@@ -93,6 +93,13 @@ describe("ShotPreflightDrawer", () => {
       "真实素材字节与临时传输令牌仍由 Worker 核验",
     );
     expect(screen.getByTestId("preflight-compiler-options")).toHaveTextContent("duration_seconds");
+    const details = screen.getByTestId("preflight-redacted-wire-details");
+    expect(details).not.toHaveAttribute("open");
+    expect(screen.getByTestId("preflight-wire-fingerprint")).toHaveTextContent("d".repeat(64));
+    const wire = screen.getByTestId("preflight-redacted-wire");
+    expect(wire).toHaveTextContent('"duration": 4');
+    expect(wire).not.toHaveTextContent("https://");
+    expect(wire).not.toHaveTextContent("base64,");
   });
 
   it("blocks confirmation if the Compiler proof is absent", () => {
