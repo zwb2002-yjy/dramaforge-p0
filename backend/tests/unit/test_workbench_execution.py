@@ -2068,7 +2068,8 @@ async def test_prompt_override_contract_constraints(
 
 @pytest.mark.asyncio
 async def test_compiler_contract_preview_is_side_effect_free_for_text_video(
-    session: AsyncSession, monkeypatch: pytest.MonkeyPatch,
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.providers.compile_preview import CompilePreview
 
@@ -2108,9 +2109,7 @@ async def test_compiler_contract_preview_is_side_effect_free_for_text_video(
             effective_options={"duration_seconds": 5},
         )
 
-    monkeypatch.setattr(
-        "app.production.workbench_execution.preview_compile", fake_contract_preview
-    )
+    monkeypatch.setattr("app.production.workbench_execution.preview_compile", fake_contract_preview)
     preview = await service.preview_compiler_contract(project=project, plan=text_plan)
     assert preview is not None
     assert preview.readiness == "contract_validated"

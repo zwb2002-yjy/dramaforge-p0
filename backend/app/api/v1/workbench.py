@@ -578,14 +578,20 @@ async def execute_repair_step(
     response_model=RepairStepPlanRead,
 )
 async def preview_repair_step(
-    project_id: UUID, shot_id: UUID, repair_id: UUID,
-    user: CurrentUser, session: SessionDep,
+    project_id: UUID,
+    shot_id: UUID,
+    repair_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
     body: RepairStepPlanBody | None = None,
 ) -> RepairStepPlanRead:
     """Read-only media plan preview; no provider submission or queued run."""
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     return await RepairService(session).build_step_plan(
-        project=project, user=user, shot_id=shot_id, repair_id=repair_id,
+        project=project,
+        user=user,
+        shot_id=shot_id,
+        repair_id=repair_id,
         accept_approximations=body.accept_approximations if body else False,
     )
 
@@ -595,12 +601,20 @@ async def preview_repair_step(
     response_model=RepairRequestRead,
 )
 async def close_repair(
-    project_id: UUID, shot_id: UUID, repair_id: UUID, body: RepairCloseBody,
-    user: CurrentUser, session: SessionDep, _csrf: CsrfDep,
+    project_id: UUID,
+    shot_id: UUID,
+    repair_id: UUID,
+    body: RepairCloseBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
 ) -> RepairRequestRead:
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     state = await RepairService(session).close_repair(
-        project=project, shot_id=shot_id, repair_id=repair_id, reason=body.reason,
+        project=project,
+        shot_id=shot_id,
+        repair_id=repair_id,
+        reason=body.reason,
     )
     await session.commit()
     return state

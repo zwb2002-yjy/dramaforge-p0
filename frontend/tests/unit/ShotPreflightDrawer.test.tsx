@@ -78,7 +78,6 @@ describe("ShotPreflightDrawer", () => {
     expect(screen.getByTestId("preflight-compiler-options")).toHaveTextContent("duration_seconds");
   });
 
-
   it("renders prompt, parameter, and fingerprint sections when plan is loaded", () => {
     render(
       <ShotPreflightDrawer

@@ -49,8 +49,8 @@ from app.production.reference_intents import (
 )
 from app.production.service import GraphService
 from app.providers.capabilities import Capability
-from app.providers.compile_preview import CompilePreview, preview_compile
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.compile_preview import CompilePreview, preview_compile
 from app.providers.errors import ProviderError
 from app.providers.intents import (
     ImageGenerationIntent,
@@ -1657,7 +1657,6 @@ class WorkbenchExecutionService:
             raise WorkbenchExecutionError(f"workbench plan has capability gaps: {reasons}")
         return plan
 
-
     async def preview_compiler_contract(
         self,
         *,
@@ -1693,7 +1692,11 @@ class WorkbenchExecutionService:
         if ratio not in {"9:16", "16:9"}:
             return None
         seed_value = options.get("seed")
-        seed = int(seed_value) if isinstance(seed_value, int) and not isinstance(seed_value, bool) else None
+        seed = (
+            int(seed_value)
+            if isinstance(seed_value, int) and not isinstance(seed_value, bool)
+            else None
+        )
         selection = ModelSelectionIntent(
             mode="explicit_binding",
             model_binding_id=identity.provider_model_binding_id,
