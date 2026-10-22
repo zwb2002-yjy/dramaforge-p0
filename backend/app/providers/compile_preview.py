@@ -222,7 +222,10 @@ def compiled_wire_evidence(
         "request_schema_version": compiled.request_schema_version,
         "wire_request": scrub(compiled.wire_request),
         "reference_artifact_ids": [str(value) for value in compiled.reference_artifact_ids],
-        "reference_fingerprints": list(compiled.reference_fingerprints),
+        # Binary preview fixtures do not contain the media bytes. The actual
+        # Worker validates storage SHA-256 before compiling. The proof always
+        # binds the frozen reference hashes, never fixture-byte digests.
+        "reference_fingerprints": [ref.fingerprint for ref in references],
     }
     encoded = json.dumps(projection, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest(), projection
