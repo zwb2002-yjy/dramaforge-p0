@@ -73,6 +73,8 @@ describe("ShotPreflightDrawer", () => {
         reference_ids: [],
         requested_options: { duration_seconds: 4 },
         effective_options: { duration_seconds: 4 },
+        wire_fingerprint: "d".repeat(64),
+        redacted_wire: { model_id: "unit-video", wire_request: { duration: 4 } },
         transformations: [],
         errors: [],
         warnings: ["PLACEHOLDER_TRANSPORT_NOT_VERIFIED"],
