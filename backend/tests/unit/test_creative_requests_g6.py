@@ -116,8 +116,14 @@ async def test_four_creative_inputs_reach_distinct_frozen_provider_requests(
         )
         service = WorkbenchExecutionService(session, user_id=user.id)
         plan = await service.build_plan(project=project, execution_input=command)
+        proof = await service.preview_compiler_contract(project=project, plan=plan)
+        assert proof is not None and proof.readiness == "contract_validated"
+        assert proof.wire_fingerprint is not None
         run = await service.create_and_dispatch(
-            project=project, execution_input=command, prepared_plan=plan
+            project=project,
+            execution_input=command,
+            prepared_plan=plan,
+            confirmed_compiler_wire_fingerprint=proof.wire_fingerprint,
         )
         # Edits after acceptance must not replace the creative intent the Worker consumes.
         shot.director_state = {
