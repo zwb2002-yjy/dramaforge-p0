@@ -27,7 +27,7 @@ jobs:
             sh -ec '
               set -eu
               npm ci --ignore-scripts
-              npx prettier --write src/features/shots/ShotPreflightDrawer.tsx tests/unit/ShotPreflightDrawer.test.tsx
+              npx prettier --write src/features/shots/ShotPreflightDrawer.tsx tests/unit/ShotPreflightDrawer.test.tsx tests/unit/ShotProductionActionsPlan.test.tsx
               npm run format:check
               npm run lint
               npm run typecheck
@@ -39,7 +39,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/c2-guard-once.yml
-          git add frontend/src/features/shots/ShotPreflightDrawer.tsx frontend/tests/unit/ShotPreflightDrawer.test.tsx
+          git add frontend/src/features/shots/ShotPreflightDrawer.tsx frontend/tests/unit/ShotPreflightDrawer.test.tsx frontend/tests/unit/ShotProductionActionsPlan.test.tsx
           git diff --cached --check
           git commit -m "test(c2): verify guarded plan confirmation and formatting"
           git push origin "HEAD:agent/c2-preview-gates-20261022"
