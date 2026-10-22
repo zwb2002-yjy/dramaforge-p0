@@ -41,7 +41,7 @@ jobs:
             sh -ec '
               set -eu
               npm ci --ignore-scripts
-              npx prettier --write src/features/shots/ShotDesignPanel.tsx src/features/shots/ShotPreflightDrawer.tsx
+              npx prettier --write src/features/shots/ShotDesignPanel.tsx src/features/shots/ShotPreflightDrawer.tsx tests/e2e/global-layout-governance.spec.ts
               npm run format:check
               npm run lint
               npm run typecheck
@@ -54,6 +54,7 @@ jobs:
           git rm .github/workflows/c1-verification-once.yml
           git add frontend/src/features/shots/ShotDesignPanel.tsx
           git add frontend/src/features/shots/ShotPreflightDrawer.tsx
+          git add frontend/tests/e2e/global-layout-governance.spec.ts
           git diff --cached --check
           git commit -m "test(creation): validate video duration C1 and formatting"
           git push origin "HEAD:agent/c1-video-duration-20261022"
