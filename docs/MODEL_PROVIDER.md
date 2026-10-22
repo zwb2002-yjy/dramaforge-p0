@@ -487,7 +487,7 @@ create。能力边界细节见 [PRODUCTION_RUNTIME.md](PRODUCTION_RUNTIME.md)。
 | 当前实现 | 对目标的缺口 | 代码依据 |
 | --- | --- | --- |
 | 文本发现统一注册 Chat 能力，同名静态 alias 不替换 adapter | 目录分类及空间/部署来源尚不满足 MP-03、MP-09 | `litellm_gateway/workspace_registry.py`、`litellm_gateway/model_catalog.py` |
-| Workbench 预览生成语义计划，Provider Compiler 在 Worker 执行；创意上下文直接追加 JSON | 尚无可确认的最终 payload 预览；模型 prompt 策略和编译证据需要统一 | `production/workbench_execution.py::_compose_effective_prompt / build_plan`、`execution/media_submission.py` |
+| Workbench 已在 execution-plan 返回只读 Compiler 脱敏 wire 投影及确认指纹，受理和 Worker 在付费提交前复核同源编译；创意上下文仍经既有 Prompt 组装 | 临时素材传输值仅在 Worker 晚绑定；尚无真实账号/付费发送端到端证明，Prompt 策略及跨供应商映射证据仍需统一 | `providers/compile_preview.py`、`production/workbench_execution.py`、`production/application/commands.py`、`execution/media_submission.py` |
 | 编译器摘要字段形状不同，执行层从摘要顶层读取生效参数 | wire 已有参数仍可能在统一转换记录中缺失 | `providers/minimax.py::MiniMaxVideoCompiler`、`providers/openai_compatible_media.py`、`execution/media_submission.py` |
 | ProbeRequest 只有布尔付费确认，后端拒绝派发计费探测 | 受控首次验证授权尚未交付 | `api/v1/provider_connections.py::ProbeRequest`、`connection_service.py::probe` |
 
