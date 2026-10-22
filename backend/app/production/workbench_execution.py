@@ -1777,6 +1777,7 @@ class WorkbenchExecutionService:
             intent=intent,
             references=references,
             expected_mode_id=plan.mode_id,
+            include_redacted_wire=True,
         )
 
     async def lock_command_scope(self, *, project_id: UUID) -> None:
