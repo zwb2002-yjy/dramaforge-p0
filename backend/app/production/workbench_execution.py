@@ -20,7 +20,7 @@ import json
 import math
 import re
 from collections.abc import Mapping
-from typing import Final, Literal, cast
+from typing import Any, Final, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
