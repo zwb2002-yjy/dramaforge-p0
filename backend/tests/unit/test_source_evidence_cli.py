@@ -30,7 +30,7 @@ def test_check_append_preserves_old_records_snapshots_and_all_manifest_hashes(
     tmp_path, monkeypatch
 ):
     root = _copy(tmp_path)
-    before_checks = json.loads((root / "source_checks.json").read_text())["checks"]
+    before_checks = json.loads((root / "source_checks.json").read_text(encoding="utf-8"))["checks"]
     before_snapshots = (root / "source_snapshots.json").read_bytes()
     manifests = [(item.identity, item.manifest_hash) for item in ModelCatalogLoader().load()]
     record = {
@@ -41,13 +41,13 @@ def test_check_append_preserves_old_records_snapshots_and_all_manifest_hashes(
         "note": "Offline fixture",
     }
     path = tmp_path / "check.json"
-    path.write_text(json.dumps(record))
+    path.write_text(json.dumps(record), encoding="utf-8")
     module = _cli()
     monkeypatch.setattr(
         sys, "argv", ["source", "--root", str(root), "check", "--record-json", str(path)]
     )
     assert module.main() == 0
-    after = json.loads((root / "source_checks.json").read_text())["checks"]
+    after = json.loads((root / "source_checks.json").read_text(encoding="utf-8"))["checks"]
     assert after[:-1] == before_checks
     assert (root / "source_snapshots.json").read_bytes() == before_snapshots
     assert [
@@ -62,7 +62,7 @@ def test_snapshot_append_requires_real_body_and_rejects_rewriting_same_identity(
     tmp_path, monkeypatch
 ):
     root = _copy(tmp_path)
-    old = json.loads((root / "source_snapshots.json").read_text())["snapshots"]
+    old = json.loads((root / "source_snapshots.json").read_text(encoding="utf-8"))["snapshots"]
     body = tmp_path / "body.txt"
     body.write_bytes(b"controlled source capture")
     record = {
@@ -73,7 +73,7 @@ def test_snapshot_append_requires_real_body_and_rejects_rewriting_same_identity(
         "locator": "fixture",
     }
     path = tmp_path / "snapshot.json"
-    path.write_text(json.dumps(record))
+    path.write_text(json.dumps(record), encoding="utf-8")
     module = _cli()
     args = ["source", "--root", str(root), "snapshot", "--record-json", str(path)]
     monkeypatch.setattr(sys, "argv", args)
@@ -82,11 +82,12 @@ def test_snapshot_append_requires_real_body_and_rejects_rewriting_same_identity(
     assert not (root / ".source-metadata.lock").exists()
     monkeypatch.setattr(sys, "argv", [*args, "--body", str(body)])
     assert module.main() == 0
-    assert json.loads((root / "source_snapshots.json").read_text())["snapshots"][:-1] == old
+    snapshots = json.loads((root / "source_snapshots.json").read_text(encoding="utf-8"))
+    assert snapshots["snapshots"][:-1] == old
     original = (root / "source_snapshots.json").read_bytes()
     body.write_bytes(b"changed source")
     record["content_sha256"] = hashlib.sha256(body.read_bytes()).hexdigest()
-    path.write_text(json.dumps(record))
+    path.write_text(json.dumps(record), encoding="utf-8")
     with pytest.raises(ValueError, match="cannot be rewritten"):
         module.main()
     assert (root / "source_snapshots.json").read_bytes() == original
@@ -95,7 +96,7 @@ def test_snapshot_append_requires_real_body_and_rejects_rewriting_same_identity(
 def test_other_writer_lock_is_preserved_and_metadata_remains_unchanged(tmp_path, monkeypatch):
     root = _copy(tmp_path)
     lock = root / ".source-metadata.lock"
-    lock.write_text("another writer")
+    lock.write_text("another writer", encoding="utf-8")
     before = (root / "source_checks.json").read_bytes()
     module = _cli()
     monkeypatch.setattr(
@@ -103,5 +104,5 @@ def test_other_writer_lock_is_preserved_and_metadata_remains_unchanged(tmp_path,
     )
     with pytest.raises(FileExistsError):
         module.main()
-    assert lock.read_text() == "another writer"
+    assert lock.read_text(encoding="utf-8") == "another writer"
     assert (root / "source_checks.json").read_bytes() == before

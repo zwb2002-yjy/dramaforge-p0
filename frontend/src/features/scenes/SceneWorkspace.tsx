@@ -365,13 +365,13 @@ export function SceneWorkspace({
   }, [selected?.id, selected?.version]);
 
   useEffect(() => {
-    if (!selected) {
+    if (!selectedShotKey) {
       setRecoverableDraft(null);
       return;
     }
-    const stored = loadShotDraft(projectId, selected.id);
+    const stored = loadShotDraft(projectId, selectedShotKey);
     setRecoverableDraft(stored);
-  }, [selected?.id, projectId]);
+  }, [selectedShotKey, projectId]);
 
   const draftConflicts = useMemo(
     () => (selected && recoverableDraft ? detectDraftConflicts(selected, recoverableDraft) : null),

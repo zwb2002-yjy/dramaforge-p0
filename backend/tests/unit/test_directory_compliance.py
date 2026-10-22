@@ -54,3 +54,24 @@ def test_local_ide_artifacts_are_allowed_on_disk_but_rejected_in_git(tmp_path: P
     tracked = subprocess.run(command, capture_output=True, text=True, check=False)
     assert tracked.returncode != 0
     assert "forbidden path tracked by git" in tracked.stdout + tracked.stderr
+
+
+def test_playwright_results_are_local_only_and_cannot_be_tracked(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    trace = tmp_path / "test-results" / "playwright" / "trace.zip"
+    trace.parent.mkdir(parents=True)
+    trace.write_bytes(b"temporary test result")
+    report = tmp_path / "playwright-report" / "index.html"
+    report.parent.mkdir()
+    report.write_text("test report", encoding="utf-8")
+    command = [sys.executable, str(SCRIPT), "--root", str(tmp_path)]
+    local = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert local.returncode == 0, local.stdout + local.stderr
+
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", "-f", "test-results/playwright/trace.zip"],
+        check=True,
+    )
+    tracked = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert tracked.returncode != 0
+    assert "forbidden path tracked by git" in tracked.stdout + tracked.stderr
