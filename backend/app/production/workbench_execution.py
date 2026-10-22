@@ -50,9 +50,10 @@ from app.production.reference_intents import (
 from app.production.service import GraphService
 from app.providers.capabilities import Capability
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.compile_preview import CompilePreview, preview_compile
+from app.providers.compile_preview import CompilePreview, PreviewReference, preview_compile
 from app.providers.errors import ProviderError
 from app.providers.intents import (
+    ArtifactReferenceIntent,
     ImageGenerationIntent,
     ModelSelectionIntent,
     VideoGenerationIntentV1,
@@ -1665,12 +1666,14 @@ class WorkbenchExecutionService:
     ) -> CompilePreview | None:
         """Read-only adapter compilation, deliberately NOT the final wire request.
 
-        Only artifact-free text-to-image/text-to-video can be checked without
-        inventing a transport URL or reading private media bytes. Other modes
-        remain semantic-only until the same-source transport-aware D2 cutover.
+        All modes reuse the real Compiler; reference transports are normalized
+        by immutable artifact ID, content hash and ordinal. Media bytes are
+        reverified in the Worker immediately before the paid request.
         Do not create a NodeRun, ProviderOperation or ProviderRuntime here.
         """
-        if plan.planned_references or plan.capability_gaps:
+        if plan.capability_gaps or any(
+            ref.delivery == "unsupported" for ref in plan.planned_references
+        ):
             return None
         identity = plan.resolved_model
         if (
@@ -1678,8 +1681,6 @@ class WorkbenchExecutionService:
             or identity.provider_model_binding_id is None
             or not identity.invoke_model_value
         ):
-            return None
-        if plan.stage == "video" and plan.mode_id != "text_to_video":
             return None
         if plan.stage not in {"video", "image_keyframe"}:
             return None
@@ -1701,6 +1702,18 @@ class WorkbenchExecutionService:
             mode="explicit_binding",
             model_binding_id=identity.provider_model_binding_id,
         )
+        references = [
+            PreviewReference(
+                role=cast(Any, ref.role),
+                artifact_id=cast(UUID, ref.artifact_id),
+                fingerprint=cast(str, ref.fingerprint),
+                mime_type=ref.mime_type,
+            )
+            for ref in plan.planned_references
+            if ref.artifact_id is not None and ref.role is not None and ref.fingerprint is not None
+        ]
+        if len(references) != len(plan.planned_references):
+            return None
         if plan.stage == "video":
             duration = plan.duration_seconds
             if duration is None or not float(duration).is_integer() or duration <= 0:
@@ -1715,8 +1728,21 @@ class WorkbenchExecutionService:
                     generate_audio=None,
                     seed=seed,
                 ),
-                mode_id="text_to_video",
-                references=[],
+                mode_id=(
+                    "text_to_video"
+                    if plan.mode_id == "text_to_video"
+                    else "omni_reference"
+                    if plan.mode_id == "omni_reference"
+                    else "last_frame"
+                    if plan.mode_id == "last_frame"
+                    else "first_last_frame"
+                    if plan.mode_id == "first_last_frame"
+                    else "first_frame"
+                ),
+                references=[
+                    ArtifactReferenceIntent(artifact_id=ref.artifact_id, role=ref.role)
+                    for ref in references
+                ],
                 selection=selection,
             )
         else:
@@ -1726,14 +1752,17 @@ class WorkbenchExecutionService:
                 size=str(size) if size is not None else None,
                 aspect_ratio=cast(Literal["9:16", "16:9"], ratio),
                 seed=seed,
-                reference_artifact_ids=[],
+                reference_artifact_ids=[ref.artifact_id for ref in references],
+                reference_fingerprint=references[0].fingerprint if references else None,
+                reference_mime=references[0].mime_type if references else None,
                 selection=selection,
             )
         return await preview_compile(
             manifest=manifest,
             invoke_model_value=identity.invoke_model_value,
             intent=intent,
-            references=[],
+            references=references,
+            expected_mode_id=plan.mode_id,
         )
 
     async def lock_command_scope(self, *, project_id: UUID) -> None:
@@ -1816,6 +1845,7 @@ class WorkbenchExecutionService:
         idempotency_key_override: str | None = None,
         prepared_plan: WorkbenchExecutionPlan | None = None,
         request_hash: str | None = None,
+        confirmed_compiler_wire_fingerprint: str | None = None,
     ) -> NodeRun:
         """Resolve the shot graph, create a queued NodeRun and persist the
         frozen plan snapshot for the worker.
@@ -1938,6 +1968,7 @@ class WorkbenchExecutionService:
                 reference.model_dump(mode="json") for reference in plan.planned_references
             ],
             "plan_fingerprint": plan.plan_fingerprint,
+            "confirmed_compiler_wire_fingerprint": confirmed_compiler_wire_fingerprint,
             "stage": plan.stage,
             "mode_id": plan.mode_id,
             "prompt": plan.prompt,
