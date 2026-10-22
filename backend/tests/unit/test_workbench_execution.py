@@ -1845,9 +1845,7 @@ async def test_generation_duration_does_not_use_timeline_duration(
     project, binding, user = await _seed(session, manifest_override=_video_manifest_with_contract())
     shot, _artifact = await _seed_video_shot(session, project=project, user=user)
     shot.duration_seconds = 3
-    shot.director_state = {
-        "generation_settings": {"video": {"request_duration_seconds": 4}}
-    }
+    shot.director_state = {"generation_settings": {"video": {"request_duration_seconds": 4}}}
     await session.flush()
     service = WorkbenchExecutionService(session, user_id=user.id)
     execution_input = _input(
@@ -1863,7 +1861,8 @@ async def test_generation_duration_does_not_use_timeline_duration(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("requested", [4.5, 6, 0, -1, "NaN", "invalid"])
 async def test_invalid_generation_duration_is_rejected_before_dispatch(
-    session: AsyncSession, requested: object,
+    session: AsyncSession,
+    requested: object,
 ) -> None:
     project, binding, user = await _seed(session, manifest_override=_video_manifest_with_contract())
     shot, _artifact = await _seed_video_shot(session, project=project, user=user)
@@ -1871,6 +1870,52 @@ async def test_invalid_generation_duration_is_rejected_before_dispatch(
         "generation_settings": {"video": {"request_duration_seconds": requested}}
     }
     await session.flush()
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    with pytest.raises(WorkbenchExecutionError) as exc:
+        await service.build_plan(
+            project=project,
+            execution_input=_input(
+                shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+            ),
+        )
+    assert exc.value.details["code"] == "MODEL_DURATION_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
+async def test_integer_duration_manifest_accepts_whole_seconds(
+    session: AsyncSession,
+) -> None:
+    manifest = _video_manifest_with_contract()
+    duration = manifest["operations"]["video.generate"]["input_contracts"]["image_to_video"][
+        "common_options"
+    ]["duration_seconds"]
+    duration.update({"type": "integer", "enum": [4, 5]})
+    project, binding, user = await _seed(session, manifest_override=manifest)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    shot.director_state = {"generation_settings": {"video": {"request_duration_seconds": 4}}}
+    await session.flush()
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    execution_input = _input(
+        shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+    )
+    plan = await service.build_plan(project=project, execution_input=execution_input)
+    assert plan.duration_seconds == 4
+    assert plan.effective_options["duration_seconds"] == 4
+    run = await service.create_and_dispatch(project=project, execution_input=execution_input)
+    assert run.input_snapshot["duration_seconds"] == 4
+
+
+@pytest.mark.asyncio
+async def test_implicit_duration_default_must_match_model_contract(
+    session: AsyncSession,
+) -> None:
+    manifest = _video_manifest_with_contract()
+    duration = manifest["operations"]["video.generate"]["input_contracts"]["image_to_video"][
+        "common_options"
+    ]["duration_seconds"]
+    duration.update({"type": "integer", "enum": [4, 6]})
+    project, binding, user = await _seed(session, manifest_override=manifest)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
     service = WorkbenchExecutionService(session, user_id=user.id)
     with pytest.raises(WorkbenchExecutionError) as exc:
         await service.build_plan(

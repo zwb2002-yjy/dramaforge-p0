@@ -171,6 +171,71 @@ describe("ShotProductionActions plan preview vocabulary", () => {
     expect(diagnostics).toHaveTextContent("does not declare input slot");
     expect(diagnostics).not.toHaveAttribute("open");
   });
+
+  it("rejects changed generation parameters during approximation acceptance", async () => {
+    const discovery = {
+      plan_fingerprint: "a".repeat(64),
+      plan: {
+        project_id: PROJECT_ID,
+        shot_id: SHOT_ID,
+        stage: "image_keyframe",
+        prompt: "studio",
+        mode_id: "single_reference",
+        resolved_model: { resolved_model_id: "agnes/agnes-image-2.1-flash" },
+        planned_references: [{ delivery: "approximate", role: "style" }],
+        capability_gaps: [
+          { severity: "warning", capability: "image.generate", reason: "approximation" },
+        ],
+        accepted_approximations: [],
+        effective_options: { seed: 17 },
+      },
+    };
+    const accepted = {
+      plan_fingerprint: "b".repeat(64),
+      plan: {
+        ...discovery.plan,
+        capability_gaps: [],
+        accepted_approximations: ["style"],
+        effective_options: { seed: 18 },
+      },
+    };
+    let executionCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.includes("/execution-models/preflight")) {
+        return json({
+          project_id: PROJECT_ID,
+          stages: [
+            { stage: "image_keyframe", ready: true, binding_id: "image-binding" },
+            { stage: "video", ready: true, binding_id: "video-binding" },
+          ],
+        });
+      }
+      if (url.includes("/execution-plan") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { accept_approximations: boolean };
+        return json(body.accept_approximations ? accepted : discovery);
+      }
+      if (url.endsWith("/executions") && init?.method === "POST") {
+        executionCalls += 1;
+        return json({ node_run_id: "unexpected", status: "queued" });
+      }
+      return json({});
+    });
+    renderActions();
+    const generate = await screen.findByRole("button", { name: "重新生成画面" });
+    await waitFor(() => expect(generate).toBeEnabled());
+    fireEvent.click(generate);
+    const confirm = await screen.findByTestId("confirm-shot-execution-approximation");
+    fireEvent.click(confirm);
+    await waitFor(() =>
+      expect(screen.getByTestId("shot-production-error")).toHaveTextContent(
+        "模型、引用或创作意图在确认期间已变化",
+      ),
+    );
+    expect(executionCalls).toBe(0);
+  });
+
   it("re-queries execution-plan with accept_approximations when checked in preflight drawer", async () => {
     const unacceptedPlan = {
       plan_fingerprint: "1111111111111111111111111111111111111111111111111111111111111111",
