@@ -865,6 +865,7 @@ describe("ShotProductionActions", () => {
 
     renderActions();
     fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await confirmCurrentPreflight();
 
     await waitFor(() =>
       expect(screen.getByTestId("shot-production-status")).toHaveAttribute(
@@ -1020,8 +1021,11 @@ describe("ShotProductionActions", () => {
     expect(screen.getByTestId("plan-suggestion-genre:short_drama_romance_v1")).toHaveTextContent(
       "不参与执行计划",
     );
-    // Suggestions never become a capability gap or a blocking failure.
-    expect(screen.getByTestId("shot-production-status")).toBeInTheDocument();
+    // Suggestions are advisory: they neither block confirmation nor start a
+    // paid create without the explicit second click.
+    expect(screen.queryByTestId("shot-production-status")).not.toBeInTheDocument();
+    await confirmCurrentPreflight();
+    await waitFor(() => expect(screen.getByTestId("shot-production-status")).toBeInTheDocument());
   });
 
   it("does not claim suggestions when the plan has none", async () => {
