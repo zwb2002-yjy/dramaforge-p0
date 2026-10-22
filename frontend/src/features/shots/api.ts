@@ -196,8 +196,18 @@ export async function dispatchShotExecution(
  * the stored snapshot. Keeping it short keeps the stored key debuggable instead
  * of tripping the server's long-key hashing fallback.
  */
-export function shotExecutionIdempotencyKey(shotId: string, planFingerprint: string): string {
-  return `shot:${shotId}:${planFingerprint}`;
+export function shotExecutionIdempotencyKey(
+  shotId: string,
+  planFingerprint: string,
+  explicitCreateId?: string,
+): string {
+  // An explicit second generation is a distinct paid create, even when the
+  // same plan is selected. The per-confirmation id remains stable for a
+  // double-click, lost response, and receipt adoption of that one create.
+  // Keep the composed backend idempotency key below its 160-char limit.
+  return explicitCreateId
+    ? `shot:${shotId}:${planFingerprint.slice(0, 16)}:${explicitCreateId}`
+    : `shot:${shotId}:${planFingerprint}`;
 }
 
 /** Read the committed receipt of one production command, if it exists. */
