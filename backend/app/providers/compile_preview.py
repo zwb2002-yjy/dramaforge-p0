@@ -251,6 +251,7 @@ async def preview_compile(
     intent: ImageGenerationIntent | VideoGenerationIntentV1,
     references: list[PreviewReference],
     expected_mode_id: str | None = None,
+    include_redacted_wire: bool = False,
 ) -> CompilePreview:
     import hashlib
 
@@ -385,7 +386,7 @@ async def preview_compile(
             effective_options=effective,
             transformations=transformations,
             wire_fingerprint=fingerprint,
-            redacted_wire=redacted_wire,
+            redacted_wire=redacted_wire if include_redacted_wire else {},
             **common,
         )
     except (ValueError, LookupError, TypeError):
