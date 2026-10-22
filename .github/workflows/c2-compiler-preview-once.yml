@@ -1,0 +1,69 @@
+name: C2 compiler contract preview validation (one shot)
+
+on:
+  push:
+    branches:
+      - agent/c2-compiler-contract-preview-20261022
+    paths:
+      - .github/workflows/c2-compiler-preview-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: true
+      - name: Backend Python 3.14 format check tests and OpenAPI export
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace/backend \
+            -e APP_ENV=test \
+            -e SESSION_SECRET=test-session-secret-32chars-min \
+            -e BYOK_FERNET_KEY=test-byok-fernet-key-replace== \
+            python:3.14-slim-bookworm \
+            sh -ec '
+              set -eu
+              pip install --no-cache-dir "uv==0.12.0"
+              uv sync --locked --extra dev
+              uv run --no-sync ruff format app/production/workbench_execution.py app/api/v1/workbench.py tests/unit/test_workbench_execution.py
+              uv run --no-sync ruff check app/production/workbench_execution.py app/api/v1/workbench.py tests/unit/test_workbench_execution.py
+              uv run --no-sync pytest -q tests/unit/test_workbench_execution.py tests/unit/test_workbench_api.py
+              uv run --no-sync python /workspace/scripts/_export_openapi.py --out /workspace/openapi-c2.json
+            '
+      - name: Frontend Node 24 contract generation quality and regression
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace/frontend \
+            -e DRAMAFORGE_OPENAPI_JSON=/workspace/openapi-c2.json \
+            node:24.21.0-alpine3.24 \
+            sh -ec '
+              set -eu
+              npm ci --ignore-scripts
+              npm run api:generate
+              npx prettier --write src/features/shots/ShotPreflightDrawer.tsx tests/unit/ShotPreflightDrawer.test.tsx
+              npm run format:check
+              npm run lint
+              npm run typecheck
+              npm test -- tests/unit/ShotPreflightDrawer.test.tsx tests/unit/ShotProductionActionsPlan.test.tsx
+            '
+      - name: Commit verified sources and generated API types only
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/c2-compiler-preview-once.yml
+          rm -f openapi-c2.json
+          git add backend/app/production/workbench_execution.py backend/app/api/v1/workbench.py backend/tests/unit/test_workbench_execution.py
+          git add frontend/src/features/shots/ShotPreflightDrawer.tsx frontend/tests/unit/ShotPreflightDrawer.test.tsx frontend/src/shared/api/generated.ts
+          git diff --cached --check
+          git diff --cached --quiet && exit 1
+          git commit -m "test(c2): verify compiler preview and sync generated API types"
+          git push origin "HEAD:agent/c2-compiler-contract-preview-20261022"
