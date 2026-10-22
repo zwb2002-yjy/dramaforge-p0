@@ -5,6 +5,23 @@ import type { ShotExecutionPlanRead } from "../../src/features/shots/api";
 
 const mockPlan: ShotExecutionPlanRead = {
   plan_fingerprint: "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff",
+  compiler_contract_preview: {
+    compile_level: "provider_contract",
+    readiness: "contract_validated",
+    transport_verified: false,
+    account_verified: false,
+    prompt_hash: "a".repeat(64),
+    semantic_hash: "b".repeat(64),
+    manifest_hash: "c".repeat(64),
+    reference_ids: [],
+    requested_options: { duration_seconds: 4 },
+    effective_options: { duration_seconds: 4 },
+    wire_fingerprint: "d".repeat(64),
+    redacted_wire: { model_id: "unit-video", wire_request: { duration: 4 } },
+    transformations: [],
+    errors: [],
+    warnings: [],
+  },
   plan: {
     supports_prompt_override: false,
     project_id: "00000000-0000-0000-0000-000000000001",
@@ -73,9 +90,26 @@ describe("ShotPreflightDrawer", () => {
       />,
     );
     expect(screen.getByTestId("preflight-compiler-contract-preview")).toHaveTextContent(
-      "素材字节、传输地址、账户权限与最终发送请求尚未验证",
+      "真实素材字节与临时传输令牌仍由 Worker 核验",
     );
     expect(screen.getByTestId("preflight-compiler-options")).toHaveTextContent("duration_seconds");
+  });
+
+  it("blocks confirmation if the Compiler proof is absent", () => {
+    const incomplete = { ...mockPlan, compiler_contract_preview: null };
+    render(
+      <ShotPreflightDrawer
+        open
+        onClose={vi.fn()}
+        stage="video"
+        rawPrompt="Harbor"
+        plan={incomplete}
+        isLoading={false}
+        onConfirmGenerate={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("confirm-generate-button")).toBeDisabled();
+    expect(screen.getByText("尚未生成可验证的编译请求指纹，不能提交付费生成。")).toBeInTheDocument();
   });
 
   it("renders prompt, parameter, and fingerprint sections when plan is loaded", () => {
