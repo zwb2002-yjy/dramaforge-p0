@@ -404,7 +404,7 @@ export function ShotProductionActions({
   useEffect(() => {
     preflightSequence.current += 1;
     setDisplayedPlan(null);
-  }, [shot.version, dirty, references, videoMode, savedBindings.data, modelPreflight.data]);
+  }, [shot.version, dirty, references, videoMode]);
 
   async function refreshAfterExecution(result: ShotExecutionRead): Promise<void> {
     await Promise.all([
@@ -464,7 +464,9 @@ export function ShotProductionActions({
     onError: (error, stage) => {
       setDisplayedPlan(null);
       setPendingApproximation(null);
-      setFeedback({ kind: "error", stage, message: errorMessage(error) });
+      const message = errorMessage(error);
+      setPlanFailure(/unsupported|capability gap|不支持/i.test(message) ? "unsupported" : null);
+      setFeedback({ kind: "error", stage, message });
     },
   });
 
@@ -634,8 +636,23 @@ export function ShotProductionActions({
           : null;
   const keyframeStatus = activeStageStatus(trace, "image_keyframe");
   const videoStatus = activeStageStatus(trace, "video");
-  const keyframeOutcomeUnknown = stageOutcomeUnknown(trace, "image_keyframe");
-  const videoOutcomeUnknown = stageOutcomeUnknown(trace, "video");
+  // A lost browser response is not proof that the paid request was rejected.
+  // Until the durable command is reconciled with server trace/receipt, block
+  // another paid create even if the caller supplied an empty/stale trace.
+  const keyframeOutcomeUnknown =
+    stageOutcomeUnknown(trace, "image_keyframe") ||
+    Boolean(
+      readProductionOperation(
+        productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, "image_keyframe"),
+      ) && !keyframeStatus,
+    );
+  const videoOutcomeUnknown =
+    stageOutcomeUnknown(trace, "video") ||
+    Boolean(
+      readProductionOperation(
+        productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, "video"),
+      ) && !videoStatus,
+    );
   const keyframeQueue = stageQueueEstimate(trace, "image_keyframe");
   const videoQueue = stageQueueEstimate(trace, "video");
   const delivery = displayedPlan ? planDelivery(displayedPlan) : planFailure;
