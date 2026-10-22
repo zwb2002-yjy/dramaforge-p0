@@ -7,6 +7,7 @@ media validity, transport reachability, account access or executable readiness.
 import base64
 import hashlib
 import json
+import re
 from collections import Counter
 from typing import Literal, TypedDict
 from uuid import UUID
@@ -212,6 +213,16 @@ def compiled_wire_evidence(
             for raw, marker in replacements:
                 if raw in result:
                     result = result.replace(raw, marker)
+            # A byte-backed adapter may wrap the exact resolved bytes as a
+            # data URI. Strip that entire envelope after replacing its payload,
+            # so placeholder bytes and verified Worker bytes hash identically.
+            # Never retain raw or unrelated inline base64 in the projection.
+            data_uri = re.fullmatch(
+                r"data:[a-zA-Z0-9.+/-]+;base64,(<reference:[^>]+>)",
+                result,
+            )
+            if data_uri is not None:
+                result = data_uri.group(1)
             if "https://" in result or "http://" in result or ";base64," in result:
                 raise ValueError("unbound URL or media value in Provider wire")
             if ("base64" in key.lower() or "b64" in key.lower()) and "<reference:" not in result:
