@@ -268,6 +268,10 @@ describe("ShotProductionActions plan preview vocabulary", () => {
     };
     const acceptedPlan = {
       plan_fingerprint: "2222222222222222222222222222222222222222222222222222222222222222",
+      compiler_contract_preview: {
+        readiness: "contract_validated",
+        wire_fingerprint: "e".repeat(64),
+      },
       plan: {
         ...unacceptedPlan.plan,
         capability_gaps: [],

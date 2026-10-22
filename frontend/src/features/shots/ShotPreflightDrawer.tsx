@@ -8,7 +8,7 @@ import {
   Typography,
 } from "antd";
 import type { ReactNode } from "react";
-import { Drawer } from "../../components/ui";
+import { Disclosure, Drawer } from "../../components/ui";
 import type { ShotExecutionPlanRead, ShotExecutionStage } from "./api";
 
 const { Text, Paragraph } = Typography;
@@ -72,6 +72,10 @@ export function ShotPreflightDrawer({
       p.duration_seconds > 0 &&
       p.effective_options?.duration_seconds === p.duration_seconds);
   const planStageConfirmed = p?.stage === stage;
+  const compilerConfirmed =
+    compilerPreview?.readiness === "contract_validated" &&
+    typeof compilerPreview.wire_fingerprint === "string" &&
+    /^[0-9a-f]{64}$/.test(compilerPreview.wire_fingerprint);
   const canConfirm =
     !dirty &&
     !isLoading &&
@@ -79,6 +83,7 @@ export function ShotPreflightDrawer({
     Boolean(plan) &&
     planStageConfirmed &&
     durationConfirmed &&
+    compilerConfirmed &&
     !hasFatalGaps &&
     !hasUnacceptedApproximations;
 
@@ -157,6 +162,9 @@ export function ShotPreflightDrawer({
             当前显示服务端冻结的执行计划；最终供应商协议请求由 Worker 的 Provider Compiler
             编译，尚未提供逐字段同源 Payload 预览。
           </p>
+          {!compilerConfirmed && (
+            <Alert type="error" showIcon title="尚未生成可验证的编译请求指纹，不能提交付费生成。" />
+          )}
           {!planStageConfirmed && (
             <Alert type="error" showIcon title="执行阶段不一致，请重新预检。" />
           )}
@@ -272,11 +280,31 @@ export function ShotPreflightDrawer({
                     ? "已通过只读编译器合同映射"
                     : "编译器合同暂未验证通过"
                 }
-                description="仅证明参数映射符合当前模型编译器。素材字节、传输地址、账户权限与最终发送请求尚未验证。"
+                description="已冻结参数和引用槽位的规范化编译指纹。真实素材字节与临时传输令牌仍由 Worker 核验，发送前必须与确认指纹一致。"
               />
               <pre data-testid="preflight-compiler-options" style={{ fontSize: "12px" }}>
                 {JSON.stringify(compilerPreview.effective_options, null, 2)}
               </pre>
+              {compilerPreview.wire_fingerprint && (
+                <Text code data-testid="preflight-wire-fingerprint">
+                  {compilerPreview.wire_fingerprint}
+                </Text>
+              )}
+              {compilerPreview.readiness === "contract_validated" &&
+                compilerPreview.redacted_wire && (
+                  <Disclosure
+                    compact
+                    testId="preflight-redacted-wire-details"
+                    title="查看完整脱敏请求结构（含模型、提示词和引用槽位）"
+                  >
+                    <pre
+                      data-testid="preflight-redacted-wire"
+                      style={{ maxHeight: 240, overflow: "auto", fontSize: "12px" }}
+                    >
+                      {JSON.stringify(compilerPreview.redacted_wire, null, 2)}
+                    </pre>
+                  </Disclosure>
+                )}
               {(compilerPreview.errors?.length ?? 0) > 0 && (
                 <Text type="warning">{compilerPreview.errors?.join("、")}</Text>
               )}

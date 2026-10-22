@@ -525,7 +525,17 @@ def test_executions_dispatch_queued_run_and_revalidate_fingerprint(
     fingerprint = preview["plan_fingerprint"]
 
     # 2) execute with matching fingerprint
-    body = {**_plan_body(binding_id), "plan_fingerprint": fingerprint}
+    assert preview["compiler_contract_preview"] is not None, {
+        "mode": preview["plan"]["mode_id"],
+        "gaps": preview["plan"]["capability_gaps"],
+        "references": preview["plan"]["planned_references"],
+    }
+    assert preview["compiler_contract_preview"]["readiness"] == "contract_validated"
+    body = {
+        **_plan_body(binding_id),
+        "plan_fingerprint": fingerprint,
+        "compiler_wire_fingerprint": preview["compiler_contract_preview"]["wire_fingerprint"],
+    }
     resp = client.post(
         f"/api/v1/projects/{project_id}/shots/{shot_id}/executions",
         headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": "test-key-1"},
@@ -535,6 +545,20 @@ def test_executions_dispatch_queued_run_and_revalidate_fingerprint(
     data = resp.json()
     assert data["status"] == "queued"
     assert data["plan_fingerprint"] == fingerprint
+
+    # A valid plan with an altered Compiler proof never creates another run.
+    modified = {
+        **_plan_body(binding_id),
+        "plan_fingerprint": fingerprint,
+        "compiler_wire_fingerprint": "0" * 64,
+    }
+    wrong_proof = client.post(
+        f"/api/v1/projects/{project_id}/shots/{shot_id}/executions",
+        headers={CSRF_HEADER: _csrf(client)},
+        json=modified,
+    )
+    assert wrong_proof.status_code == 422
+    assert wrong_proof.json()["details"]["code"] == "COMPILER_WIRE_CONFIRMATION_REQUIRED"
 
     # 3) mismatched fingerprint is rejected
     bad = {**_plan_body(binding_id), "plan_fingerprint": "0" * 64}
@@ -607,7 +631,13 @@ def _start_command(api, *, autonomy="AUTO", key="receipt:one"):
         f"{path}/execution-plan", headers={CSRF_HEADER: _csrf(client)}, json=_plan_body(binding_id)
     )
     assert preview.status_code == 200, preview.text
-    body = {**_plan_body(binding_id), "plan_fingerprint": preview.json()["plan_fingerprint"]}
+    proof = preview.json()["compiler_contract_preview"]
+    assert proof["readiness"] == "contract_validated"
+    body = {
+        **_plan_body(binding_id),
+        "plan_fingerprint": preview.json()["plan_fingerprint"],
+        "compiler_wire_fingerprint": proof["wire_fingerprint"],
+    }
     response = client.post(
         f"{path}/executions",
         headers={CSRF_HEADER: _csrf(client), "Idempotency-Key": key},

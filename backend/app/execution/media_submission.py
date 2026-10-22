@@ -24,6 +24,7 @@ from app.execution.run_state import (
 from app.production.execution_plan import WorkbenchExecutionPlan
 from app.providers.capability_resolver import ProductCapabilityPolicy
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.compile_preview import compiled_wire_evidence
 from app.providers.create_admission import require_frozen_create_admission
 from app.providers.execution_contract import execution_contract_gaps, freeze_execution_contract
 from app.providers.execution_identity import (
@@ -259,6 +260,7 @@ async def prepare_media_submission(
                 if workbench_image_reference is not None
                 else str(snap.get("canonical_mime_type") or "image/png")
             ),
+            mode_id=workbench_plan.mode_id if workbench_plan is not None else None,
             selection=ModelSelectionIntent(
                 mode="explicit_binding",
                 model_binding_id=frozen_binding_id,
@@ -986,6 +988,30 @@ async def prepare_media_submission(
                 video_references,
                 invoke_model_value=invoke_model_value,
             )
+
+    if workbench_plan is not None:
+        expected_wire = snap.get("confirmed_compiler_wire_fingerprint")
+        if snap.get("professional_unified") is True and not (
+            isinstance(expected_wire, str) and len(expected_wire) == 64
+        ):
+            raise ValidationAppError(
+                "Professional execution is missing its user-confirmed Compiler proof",
+                details={"code": "COMPILER_WIRE_CONFIRMATION_REQUIRED"},
+            )
+        if expected_wire is not None:
+            runtime_refs = refs if node_type == "keyframe" else video_references
+            try:
+                compiled_wire_hash, _redacted = compiled_wire_evidence(compiled, runtime_refs)
+            except ValueError as exc:
+                raise ValidationAppError(
+                    "Provider compiler produced unbound transport data",
+                    details={"code": "COMPILER_WIRE_PREVIEW_MISMATCH"},
+                ) from exc
+            if compiled_wire_hash != expected_wire:
+                raise ValidationAppError(
+                    "Provider compiler wire changed after user confirmation",
+                    details={"code": "COMPILER_WIRE_FINGERPRINT_MISMATCH"},
+                )
 
     if workbench_planned_references:
         expected_reference_ids = [
