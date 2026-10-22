@@ -1,0 +1,59 @@
+name: C1 targeted container validation (one shot)
+
+on:
+  push:
+    branches:
+      - agent/c1-video-duration-20261022
+    paths:
+      - .github/workflows/c1-verification-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: true
+      - name: Backend Python 3.14 targeted regression
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace/backend \
+            python:3.14-slim-bookworm \
+            sh -ec '
+              set -eu
+              pip install --no-cache-dir "uv==0.12.0"
+              uv sync --locked --extra dev
+              uv run --no-sync ruff check app/production/workbench_execution.py app/execution/media_submission.py tests/unit/test_workbench_execution.py
+              uv run --no-sync pytest -q tests/unit/test_workbench_execution.py tests/unit/test_intent_bridge_video_options.py
+            '
+      - name: Frontend Node 24 format lint typecheck
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace/frontend \
+            node:24.21.0-alpine3.24 \
+            sh -ec '
+              set -eu
+              npm ci --ignore-scripts
+              npx prettier --write src/features/shots/ShotDesignPanel.tsx src/features/shots/ShotPreflightDrawer.tsx
+              npm run format:check
+              npm run lint
+              npm run typecheck
+            '
+      - name: Remove temporary workflow and commit validated formatting
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/c1-verification-once.yml
+          git add frontend/src/features/shots/ShotDesignPanel.tsx
+          git add frontend/src/features/shots/ShotPreflightDrawer.tsx
+          git diff --cached --check
+          git commit -m "test(creation): validate video duration C1 and formatting"
+          git push origin "HEAD:agent/c1-video-duration-20261022"
