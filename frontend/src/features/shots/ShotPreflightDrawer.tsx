@@ -277,8 +277,8 @@ export function ShotPreflightDrawer({
               <pre data-testid="preflight-compiler-options" style={{ fontSize: "12px" }}>
                 {JSON.stringify(compilerPreview.effective_options, null, 2)}
               </pre>
-              {compilerPreview.errors.length > 0 && (
-                <Text type="warning">{compilerPreview.errors.join("、")}</Text>
+              {(compilerPreview.errors?.length ?? 0) > 0 && (
+                <Text type="warning">{compilerPreview.errors?.join("、")}</Text>
               )}
             </div>
           )}
