@@ -73,6 +73,8 @@ LOCAL_ONLY_ROOT = {
     "node_modules",
     "dist",
     "coverage",
+    "test-results",
+    "playwright-report",
     ".venv",
     "venv",
     ".env",  # local secrets only; never committed
