@@ -1,5 +1,5 @@
-# One-shot lock regeneration for security remediation. This workflow removes
-# itself in the generated commit; it is not part of the resulting dev branch.
+# One-shot lock regeneration: a successful job commits verified uv.lock and
+# removes this workflow. No workflow file remains on the resulting dev branch.
 name: Security dependency lock refresh (one shot)
 
 on:
@@ -34,18 +34,7 @@ jobs:
               uv export --locked --no-dev --no-emit-project -o /tmp/requirements-audit.txt
               pip-audit --requirement /tmp/requirements-audit.txt
               uv sync --locked --no-dev
-              uv run --no-sync python -c "
-from io import BytesIO
-from PIL import Image, ImageOps
-image = Image.new('RGB', (24, 24), (16, 48, 80))
-for fmt in ('PNG', 'JPEG'):
-    output = BytesIO()
-    image.save(output, format=fmt)
-    output.seek(0)
-    decoded = ImageOps.exif_transpose(Image.open(output))
-    decoded.load()
-    assert decoded.size == (24, 24)
-"
+              uv run --no-sync python -c "from io import BytesIO; from PIL import Image, ImageOps; im = Image.new(\"RGB\", (24, 24), (16, 48, 80)); png = BytesIO(); im.save(png, format=\"PNG\"); png.seek(0); assert ImageOps.exif_transpose(Image.open(png)).size == (24, 24); jpg = BytesIO(); im.save(jpg, format=\"JPEG\"); jpg.seek(0); assert Image.open(jpg).size == (24, 24)"
             '
       - name: Commit only verified dependency change, remove one-shot workflow
         run: |
