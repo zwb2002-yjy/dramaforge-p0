@@ -21,10 +21,11 @@ from app.production.workbench_execution import (
 from app.providers.capabilities import Capability
 from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.intents import VideoGenerationIntentV1
 from app.providers.models import ProviderConnection, ProviderModelBinding
 from app.shared.base import Base
 from app.shared.security import hash_password
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from tests.unit.model_infra_fixture import unit_video_manifest
 
@@ -2091,10 +2092,13 @@ async def test_compiler_contract_preview_is_side_effect_free_for_text_video(
     text_plan = plan.model_copy(
         update={"mode_id": "text_to_video", "planned_references": [], "capability_gaps": []}
     )
-    seen: list[object] = []
+    seen: list[VideoGenerationIntentV1] = []
 
     async def fake_contract_preview(**kwargs: object) -> CompilePreview:
-        seen.append(kwargs)
+        intent = kwargs["intent"]
+        assert isinstance(intent, VideoGenerationIntentV1)
+        assert kwargs["references"] == []
+        seen.append(intent)
         return CompilePreview(
             readiness="contract_validated",
             prompt_hash="a" * 64,
@@ -2111,8 +2115,6 @@ async def test_compiler_contract_preview_is_side_effect_free_for_text_video(
     assert preview is not None
     assert preview.readiness == "contract_validated"
     assert len(seen) == 1
-    intent = seen[0]["intent"]
-    assert intent.mode_id == "text_to_video"
-    assert intent.output.duration_seconds == int(text_plan.duration_seconds)
-    assert seen[0]["references"] == []
+    assert seen[0].mode_id == "text_to_video"
+    assert seen[0].output.duration_seconds == int(text_plan.duration_seconds)
     assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0
