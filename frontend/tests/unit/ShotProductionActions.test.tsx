@@ -843,7 +843,7 @@ describe("ShotProductionActions", () => {
     ).not.toBeNull();
   });
 
-  it("forgets a finished operation so a later open cannot adopt a stale receipt", async () => {
+  it("forgets a finished explicitly confirmed operation before a later open", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
