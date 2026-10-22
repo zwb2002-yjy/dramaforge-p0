@@ -1,4 +1,4 @@
-name: C2 compiler contract preview typed validation (one shot)
+name: C2 compiler contract preview schema validation (one shot)
 
 on:
   push:
