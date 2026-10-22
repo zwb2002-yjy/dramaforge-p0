@@ -216,8 +216,14 @@ async def test_mentions_reach_the_actual_http_body_in_saved_order(session, monke
     mapping = plan.semantic_intent["prompt_reference_map"]
     assert [row["asset_id"] for row in mapping] == [str(asset.id) for asset in assets]
     assert [row["ordinal"] for row in mapping] == list(range(1, count + 1))
+    proof = await service.preview_compiler_contract(project=project, plan=plan)
+    assert proof is not None and proof.readiness == "contract_validated"
+    assert proof.wire_fingerprint is not None
     run = await service.create_and_dispatch(
-        project=project, execution_input=command, prepared_plan=plan
+        project=project,
+        execution_input=command,
+        prepared_plan=plan,
+        confirmed_compiler_wire_fingerprint=proof.wire_fingerprint,
     )
     captured = []
 
