@@ -285,6 +285,23 @@ export function ShotPreflightDrawer({
               <pre data-testid="preflight-compiler-options" style={{ fontSize: "12px" }}>
                 {JSON.stringify(compilerPreview.effective_options, null, 2)}
               </pre>
+              {compilerPreview.wire_fingerprint && (
+                <Text code data-testid="preflight-wire-fingerprint">
+                  {compilerPreview.wire_fingerprint}
+                </Text>
+              )}
+              {compilerPreview.readiness === "contract_validated" &&
+                compilerPreview.redacted_wire && (
+                  <details data-testid="preflight-redacted-wire-details">
+                    <summary>查看完整脱敏请求结构（含模型、提示词和引用槽位）</summary>
+                    <pre
+                      data-testid="preflight-redacted-wire"
+                      style={{ maxHeight: 240, overflow: "auto", fontSize: "12px" }}
+                    >
+                      {JSON.stringify(compilerPreview.redacted_wire, null, 2)}
+                    </pre>
+                  </details>
+                )}
               {(compilerPreview.errors?.length ?? 0) > 0 && (
                 <Text type="warning">{compilerPreview.errors?.join("、")}</Text>
               )}
