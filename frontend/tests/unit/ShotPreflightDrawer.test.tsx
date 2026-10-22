@@ -94,7 +94,9 @@ describe("ShotPreflightDrawer", () => {
     );
     expect(screen.getByTestId("preflight-compiler-options")).toHaveTextContent("duration_seconds");
     const details = screen.getByTestId("preflight-redacted-wire-details");
-    expect(details).not.toHaveAttribute("open");
+    expect(details.querySelector(".ant-collapse-item-active")).toBeNull();
+    fireEvent.click(screen.getByText("查看完整脱敏请求结构（含模型、提示词和引用槽位）"));
+    expect(details.querySelector(".ant-collapse-item-active")).not.toBeNull();
     expect(screen.getByTestId("preflight-wire-fingerprint")).toHaveTextContent("d".repeat(64));
     const wire = screen.getByTestId("preflight-redacted-wire");
     expect(wire).toHaveTextContent('"duration": 4');
