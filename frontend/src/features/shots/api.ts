@@ -175,6 +175,7 @@ export async function dispatchShotExecution(
     {
       ...frozenInput,
       plan_fingerprint: preview.plan_fingerprint,
+      compiler_wire_fingerprint: preview.compiler_contract_preview?.wire_fingerprint ?? null,
       accepted_approximations: acceptedApproximations,
     },
     csrf,
