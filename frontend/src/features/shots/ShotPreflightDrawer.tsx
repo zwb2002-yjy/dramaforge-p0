@@ -49,6 +49,8 @@ export function ShotPreflightDrawer({
   approximationsAccepted = false,
 }: ShotPreflightDrawerProps): ReactNode {
   const p = plan?.plan;
+  // Advisory only: compiler-contract evidence is outside the executable plan fingerprint.
+  const compilerPreview = plan?.compiler_contract_preview;
   const references = p?.planned_references ?? [];
   const exactRefs = references.filter((r) => r.delivery === "exact");
   const approxRefs = references.filter((r) => r.delivery === "approximate");
@@ -258,6 +260,28 @@ export function ShotPreflightDrawer({
               </Descriptions.Item>
             </Descriptions>
           </div>
+
+          {compilerPreview && (
+            <div data-testid="preflight-compiler-contract-preview">
+              <Typography.Title level={5}>编译器合同预览（不包含真实媒体传输）</Typography.Title>
+              <Alert
+                type={compilerPreview.readiness === "contract_validated" ? "info" : "warning"}
+                showIcon
+                title={
+                  compilerPreview.readiness === "contract_validated"
+                    ? "已通过只读编译器合同映射"
+                    : "编译器合同暂未验证通过"
+                }
+                description="仅证明参数映射符合当前模型编译器。素材字节、传输地址、账户权限与最终发送请求尚未验证。"
+              />
+              <pre data-testid="preflight-compiler-options" style={{ fontSize: "12px" }}>
+                {JSON.stringify(compilerPreview.effective_options, null, 2)}
+              </pre>
+              {(compilerPreview.errors?.length ?? 0) > 0 && (
+                <Text type="warning">{compilerPreview.errors?.join("、")}</Text>
+              )}
+            </div>
+          )}
 
           <Divider style={{ margin: "16px 0" }} />
 

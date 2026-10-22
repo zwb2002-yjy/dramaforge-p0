@@ -38,6 +38,7 @@ from app.production.trace import ExecutionTraceRead, build_execution_trace
 from app.production.workbench_execution import (
     WorkbenchExecutionService,
 )
+from app.providers.compile_preview import CompilePreview
 from app.providers.voice_config import voice_options
 from app.shared.errors import NotFoundError
 from app.workbench.scene_service import ShotWorkbenchService
@@ -170,6 +171,7 @@ async def get_shot_workbench(
 class ExecutionPlanRead(BaseModel):
     plan: WorkbenchExecutionPlan
     plan_fingerprint: str
+    compiler_contract_preview: CompilePreview | None = None
 
 
 class ExecutionRead(BaseModel):
@@ -201,9 +203,13 @@ async def create_execution_plan(
         execution_input=_execution_input(project_id, shot_id, body),
         allow_unaccepted_approximations=True,
     )
+    # Advisory: real pure Compiler mapping, not transport-verified Provider wire.
+    # Keep it outside the executable plan fingerprint.
+    compiler_contract_preview = await service.preview_compiler_contract(project=project, plan=plan)
     return ExecutionPlanRead(
         plan=plan,
         plan_fingerprint=plan.plan_fingerprint or "",
+        compiler_contract_preview=compiler_contract_preview,
     )
 
 
@@ -572,14 +578,20 @@ async def execute_repair_step(
     response_model=RepairStepPlanRead,
 )
 async def preview_repair_step(
-    project_id: UUID, shot_id: UUID, repair_id: UUID,
-    user: CurrentUser, session: SessionDep,
+    project_id: UUID,
+    shot_id: UUID,
+    repair_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
     body: RepairStepPlanBody | None = None,
 ) -> RepairStepPlanRead:
     """Read-only media plan preview; no provider submission or queued run."""
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     return await RepairService(session).build_step_plan(
-        project=project, user=user, shot_id=shot_id, repair_id=repair_id,
+        project=project,
+        user=user,
+        shot_id=shot_id,
+        repair_id=repair_id,
         accept_approximations=body.accept_approximations if body else False,
     )
 
@@ -589,12 +601,20 @@ async def preview_repair_step(
     response_model=RepairRequestRead,
 )
 async def close_repair(
-    project_id: UUID, shot_id: UUID, repair_id: UUID, body: RepairCloseBody,
-    user: CurrentUser, session: SessionDep, _csrf: CsrfDep,
+    project_id: UUID,
+    shot_id: UUID,
+    repair_id: UUID,
+    body: RepairCloseBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
 ) -> RepairRequestRead:
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     state = await RepairService(session).close_repair(
-        project=project, shot_id=shot_id, repair_id=repair_id, reason=body.reason,
+        project=project,
+        shot_id=shot_id,
+        repair_id=repair_id,
+        reason=body.reason,
     )
     await session.commit()
     return state

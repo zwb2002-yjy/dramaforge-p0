@@ -4482,6 +4482,7 @@ export interface components {
             plan: components["schemas"]["WorkbenchExecutionPlan"];
             /** Plan Fingerprint */
             plan_fingerprint: string;
+            compiler_contract_preview?: components["schemas"]["CompilePreview"] | null;
         };
         /** ExecutionRead */
         ExecutionRead: {

@@ -42,6 +42,42 @@ const mockPlan: ShotExecutionPlanRead = {
 };
 
 describe("ShotPreflightDrawer", () => {
+  it("shows read-only compiler-mapped parameters without claiming wire readiness", () => {
+    const compiled: ShotExecutionPlanRead = {
+      ...mockPlan,
+      compiler_contract_preview: {
+        compile_level: "provider_contract",
+        readiness: "contract_validated",
+        transport_verified: false,
+        account_verified: false,
+        prompt_hash: "a".repeat(64),
+        semantic_hash: "b".repeat(64),
+        manifest_hash: "c".repeat(64),
+        reference_ids: [],
+        requested_options: { duration_seconds: 4 },
+        effective_options: { duration_seconds: 4 },
+        transformations: [],
+        errors: [],
+        warnings: ["PLACEHOLDER_TRANSPORT_NOT_VERIFIED"],
+      },
+    };
+    render(
+      <ShotPreflightDrawer
+        open
+        onClose={vi.fn()}
+        stage="video"
+        rawPrompt="Harbor"
+        plan={compiled}
+        isLoading={false}
+        onConfirmGenerate={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("preflight-compiler-contract-preview")).toHaveTextContent(
+      "素材字节、传输地址、账户权限与最终发送请求尚未验证",
+    );
+    expect(screen.getByTestId("preflight-compiler-options")).toHaveTextContent("duration_seconds");
+  });
+
   it("renders prompt, parameter, and fingerprint sections when plan is loaded", () => {
     render(
       <ShotPreflightDrawer

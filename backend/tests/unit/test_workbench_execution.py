@@ -21,10 +21,11 @@ from app.production.workbench_execution import (
 from app.providers.capabilities import Capability
 from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.intents import VideoGenerationIntentV1
 from app.providers.models import ProviderConnection, ProviderModelBinding
 from app.shared.base import Base
 from app.shared.security import hash_password
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from tests.unit.model_infra_fixture import unit_video_manifest
 
@@ -2063,3 +2064,56 @@ async def test_prompt_override_contract_constraints(
     with pytest.raises(WorkbenchExecutionError) as exc_info2:
         await service.build_plan(project=project, execution_input=execution_input)
     assert exc_info2.value.details.get("code") == "PROMPT_CONTRACT_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
+async def test_compiler_contract_preview_is_side_effect_free_for_text_video(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.providers.compile_preview import CompilePreview
+
+    project, binding, user = await _seed(session, manifest_override=_video_manifest_with_contract())
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(
+        project=project,
+        execution_input=_input(
+            shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+        ),
+    )
+    # I2V always needs a formal first-frame reference. The preview must NOT
+    # fabricate media bytes/URLs or run a Provider on this path.
+    assert plan.planned_references
+    assert await service.preview_compiler_contract(project=project, plan=plan) is None
+    assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0
+
+    # A pure no-reference semantic plan uses the actual compiler preview
+    # function, never the paid provider runtime.
+    text_plan = plan.model_copy(
+        update={"mode_id": "text_to_video", "planned_references": [], "capability_gaps": []}
+    )
+    seen: list[VideoGenerationIntentV1] = []
+
+    async def fake_contract_preview(**kwargs: object) -> CompilePreview:
+        intent = kwargs["intent"]
+        assert isinstance(intent, VideoGenerationIntentV1)
+        assert kwargs["references"] == []
+        seen.append(intent)
+        return CompilePreview(
+            readiness="contract_validated",
+            prompt_hash="a" * 64,
+            semantic_hash="b" * 64,
+            manifest_hash="c" * 64,
+            reference_ids=[],
+            effective_options={"duration_seconds": 5},
+        )
+
+    monkeypatch.setattr("app.production.workbench_execution.preview_compile", fake_contract_preview)
+    preview = await service.preview_compiler_contract(project=project, plan=text_plan)
+    assert preview is not None
+    assert preview.readiness == "contract_validated"
+    assert len(seen) == 1
+    assert seen[0].mode_id == "text_to_video"
+    assert seen[0].output.duration_seconds == int(text_plan.duration_seconds)
+    assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0
