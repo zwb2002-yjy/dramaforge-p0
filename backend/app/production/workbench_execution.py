@@ -1492,13 +1492,6 @@ class WorkbenchExecutionService:
                         "Requested video duration must be a supported whole number of seconds",
                         details={"code": "MODEL_DURATION_UNSUPPORTED"},
                     )
-                try:
-                    validate_parameter("duration_seconds", req_d, duration_spec)
-                except ProviderError as exc:
-                    raise WorkbenchExecutionError(
-                        "Requested duration is outside the model contract",
-                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
-                    ) from exc
                 plan_duration = req_d
             elif duration_spec is not None and duration_spec.default is not None:
                 try:
@@ -1517,7 +1510,18 @@ class WorkbenchExecutionService:
                         "Model contract has an unsupported default video duration",
                         details={"code": "MODEL_DURATION_UNSUPPORTED"},
                     )
-            effective_options["duration_seconds"] = plan_duration
+            # Both integer and numeric contracts accept whole seconds; validating a
+            # float (4.0) against an integer contract wrongly rejects a valid 4s.
+            # Check implicit defaults too: never freeze an unsupported 5s fallback.
+            if duration_spec is not None:
+                try:
+                    validate_parameter("duration_seconds", int(plan_duration), duration_spec)
+                except ProviderError as exc:
+                    raise WorkbenchExecutionError(
+                        "Video duration is outside the selected model contract",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    ) from exc
+            effective_options["duration_seconds"] = int(plan_duration)
 
         supports_prompt_override = False
         if (

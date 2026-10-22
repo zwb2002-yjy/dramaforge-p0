@@ -159,6 +159,13 @@ function stablePlanIdentity(preview: ShotExecutionPlanRead): string {
     resolved_model: preview.plan.resolved_model,
     planned_references: preview.plan.planned_references,
     expected_shot_version: preview.plan.expected_shot_version,
+    duration_seconds: preview.plan.duration_seconds,
+    effective_options: preview.plan.effective_options,
+    prompt_override: preview.plan.prompt_override,
+    exact_controls: preview.plan.exact_controls,
+    approximate_controls: preview.plan.approximate_controls,
+    unsupported_controls: preview.plan.unsupported_controls,
+    semantic_request_preview: preview.plan.semantic_request_preview,
     connection_revision_id: preview.plan.connection_revision_id,
     credential_revision_id: preview.plan.credential_revision_id,
   });
@@ -575,6 +582,9 @@ export function ShotProductionActions({
       const unacceptedInPlan = (plan.plan.accepted_approximations ?? []).length === 0;
       if (acceptApproximations && (hasWarningGaps || unacceptedInPlan)) {
         effectivePlan = await previewShotExecution(projectId, shot.id, input);
+        if (stablePlanIdentity(effectivePlan) !== stablePlanIdentity(plan)) {
+          throw new Error("执行参数或提示词在确认期间已变化，请重新预检。");
+        }
       }
       const prepared: PreparedShotExecution = {
         input,
