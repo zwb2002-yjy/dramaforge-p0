@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from threading import Lock
 from dataclasses import dataclass
 from io import BytesIO
+from threading import Lock
 from typing import Protocol, cast
 
 from app.config import Settings, get_settings
