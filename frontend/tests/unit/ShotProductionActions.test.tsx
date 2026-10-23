@@ -441,6 +441,10 @@ describe("ShotProductionActions", () => {
 
     expect(delegationBodies).toHaveLength(2);
     expect(delegationBodies[1]?.decision_id).toBe(delegationBodies[0]?.decision_id);
+    expect(delegationBodies[1]?.authorization_expires_at).toBe(
+      delegationBodies[0]?.authorization_expires_at,
+    );
+    expect(delegationBodies[0]?.authorization_expires_at).toEqual(expect.any(String));
   });
 
   it("freezes and dispatches the selected shot as an image keyframe", async () => {
