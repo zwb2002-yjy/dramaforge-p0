@@ -78,6 +78,20 @@ class DirectorRuntimeDelegationService:
                 "Execution approximation decision changed before Director delegation",
                 details={"code": "ACCEPTED_APPROXIMATIONS_MISMATCH"},
             )
+        # Delegation is another entry to the same paid production command.
+        # Reject an unconfirmed Compiler wire before persisting a Director Turn;
+        # the production command and Worker will independently recheck it.
+        compiler_preview = await workbench.preview_compiler_contract(project=project, plan=plan)
+        if (
+            compiler_preview is None
+            or compiler_preview.readiness != "contract_validated"
+            or compiler_preview.wire_fingerprint is None
+            or execution.compiler_wire_fingerprint != compiler_preview.wire_fingerprint
+        ):
+            raise ValidationAppError(
+                "Director delegation has no matching acknowledged Compiler proof",
+                details={"code": "COMPILER_WIRE_CONFIRMATION_REQUIRED"},
+            )
         request_key = f"director-delegation:{decision_id}"
         existing = await self._session.scalar(
             select(DirectorTurn).where(
