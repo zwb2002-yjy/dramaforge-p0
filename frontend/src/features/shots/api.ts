@@ -257,6 +257,15 @@ export async function delegateShotExecutionToDirector(
   shotId: string,
   prepared: Pick<PreparedShotExecution, "input" | "preview"> & { decisionId: string },
 ): Promise<DirectorDelegationRead> {
+  const compilerPreview = prepared.preview.compiler_contract_preview;
+  const compilerFingerprint = compilerPreview?.wire_fingerprint;
+  if (
+    compilerPreview?.readiness !== "contract_validated" ||
+    typeof compilerFingerprint !== "string" ||
+    !/^[0-9a-f]{64}$/.test(compilerFingerprint)
+  ) {
+    throw new Error("导演委托缺少有效的编译请求确认指纹，请重新预检。");
+  }
   const csrf = await fetchCsrf();
   const frozenInput = freezeExecutionInput(prepared.input);
   const acceptedApproximations = Array.isArray(prepared.preview.plan.accepted_approximations)
@@ -274,6 +283,7 @@ export async function delegateShotExecutionToDirector(
       execution: {
         ...frozenInput,
         plan_fingerprint: prepared.preview.plan_fingerprint,
+        compiler_wire_fingerprint: compilerFingerprint,
         accepted_approximations: acceptedApproximations,
       },
     },
