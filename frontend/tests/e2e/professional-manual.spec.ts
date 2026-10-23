@@ -112,6 +112,7 @@ test("AUTO delegates one frozen Shot plan to the Director runtime", async ({ pag
       stage: "image_keyframe",
       expected_shot_version: 1,
       plan_fingerprint: "a".repeat(64),
+      compiler_wire_fingerprint: "b".repeat(64),
       accepted_approximations: [],
     },
   });
