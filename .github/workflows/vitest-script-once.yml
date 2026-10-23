@@ -1,0 +1,38 @@
+name: Verify canonical Vitest script once
+
+on:
+  push:
+    branches:
+      - agent/fix-vitest-double-workers-20261023
+    paths:
+      - .github/workflows/vitest-script-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate canonical package test script on Node 24
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace/frontend \
+            node:24.21.0-alpine3.24 \
+            sh -ec '
+              set -eu
+              npm ci --ignore-scripts
+              npm test
+            '
+      - name: Remove temporary workflow on success
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/vitest-script-once.yml
+          git diff --cached --check
+          git commit -m "test(ci): confirm frontend suite and clean temporary verifier"
+          git push origin "HEAD:agent/fix-vitest-double-workers-20261023"
