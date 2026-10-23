@@ -25,6 +25,15 @@ type Candidate = {
   review_artifact_id: string | null;
 };
 
+type FrozenShotPlan = {
+  shotId: string;
+  version: number;
+  stage: string;
+  prompt: string;
+  firstFrame: string | null;
+  wireFingerprint: string;
+};
+
 export async function installShotJourneyMock(page: Page) {
   await installProfessionalMock(page);
   const shots = JOURNEY_SHOT_IDS.map((id, index) => ({
@@ -54,10 +63,7 @@ export async function installShotJourneyMock(page: Page) {
     body: Record<string, unknown>;
     key: string | undefined;
   }> = [];
-  const plans = new Map<
-    string,
-    { shotId: string; version: number; stage: string; prompt: string; firstFrame: string | null; wireFingerprint: string }
-  >();
+  const plans = new Map<string, FrozenShotPlan>();
   const receipts = new Map<string, Record<string, unknown>>();
   const state = { shots, candidates, requests, plans, failNextFormal: false, failNextSave: false };
   const base = `/api/v1/projects/${PROJECT_ID}`;
