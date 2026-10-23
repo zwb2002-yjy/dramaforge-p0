@@ -150,7 +150,7 @@ describe("ShotPreflightDrawer", () => {
     expect(screen.getByText("provider/mock-video-v1")).toBeInTheDocument();
     expect(screen.getByText("4 秒")).toBeInTheDocument();
     expect(screen.getByTestId("preflight-plan-boundary")).toHaveTextContent(
-      "尚未提供逐字段同源 Payload 预览",
+      "实际 Provider Compiler 编译的脱敏请求结构和确认指纹",
     );
     expect(screen.getByText(mockPlan.plan_fingerprint)).toBeInTheDocument();
 
