@@ -56,7 +56,7 @@ export async function installShotJourneyMock(page: Page) {
   }> = [];
   const plans = new Map<
     string,
-    { shotId: string; version: number; stage: string; prompt: string; firstFrame: string | null }
+    { shotId: string; version: number; stage: string; prompt: string; firstFrame: string | null; wireFingerprint: string }
   >();
   const receipts = new Map<string, Record<string, unknown>>();
   const state = { shots, candidates, requests, plans, failNextFormal: false, failNextSave: false };
@@ -176,9 +176,28 @@ export async function installShotJourneyMock(page: Page) {
           firstFrame: stage === "video" ? shot.formal_keyframe_artifact_id : null,
         };
         const fingerprint = createHash("sha256").update(JSON.stringify(frozen)).digest("hex");
-        plans.set(fingerprint, frozen);
+        const wireFingerprint = createHash("sha256")
+          .update(`wire:${JSON.stringify(frozen)}`)
+          .digest("hex");
+        plans.set(fingerprint, { ...frozen, wireFingerprint });
         return json({
           plan_fingerprint: fingerprint,
+          compiler_contract_preview: {
+            compile_level: "provider_contract",
+            readiness: "contract_validated",
+            transport_verified: false,
+            account_verified: false,
+            wire_fingerprint: wireFingerprint,
+            redacted_wire: {
+              model_id: "provider/model-b",
+              operation: stage === "video" ? "video.generate" : "image.generate",
+              wire_request: { prompt: frozen.prompt, ...(stage === "video" ? { duration: 5 } : {}) },
+              reference_fingerprints: frozen.firstFrame ? [frozen.firstFrame] : [],
+            },
+            effective_options: stage === "video" ? { duration_seconds: 5 } : {},
+            errors: [],
+            warnings: ["MEDIA_BYTES_NOT_VERIFIED", "ACCOUNT_NOT_CHECKED"],
+          },
           plan: {
             project_id: PROJECT_ID,
             shot_id: shot.id,
@@ -194,6 +213,8 @@ export async function installShotJourneyMock(page: Page) {
             planned_references: [],
             capability_gaps: [],
             accepted_approximations: [],
+            duration_seconds: stage === "video" ? 5 : null,
+            effective_options: stage === "video" ? { duration_seconds: 5 } : {},
           },
         });
       }
@@ -201,6 +222,7 @@ export async function installShotJourneyMock(page: Page) {
         const frozen = plans.get(String(body.plan_fingerprint));
         expect(frozen).toMatchObject({ shotId: shot.id, version: shot.version, stage: body.stage });
         expect(body.expected_shot_version).toBe(shot.version);
+        expect(body.compiler_wire_fingerprint).toBe(frozen?.wireFingerprint);
         expect(request.headers()["idempotency-key"]).toBeTruthy();
         if (body.stage === "video")
           expect(frozen?.firstFrame).toBe(shot.formal_keyframe_artifact_id);
