@@ -14,9 +14,9 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   timeout: 30_000,
-  // The single-worker 145-case suite takes about 5 minutes on hosted CI.
-  // Allow teardown and the configured retry while keeping per-test timeouts strict.
-  globalTimeout: process.env.P0_REAL_UI === "1" ? 2_800_000 : process.env.CI ? 600_000 : 300_000,
+  // Let the full single-worker suite finish on slower CI and local Docker hosts.
+  // Individual tests keep their strict timeout; this only bounds the whole run.
+  globalTimeout: process.env.P0_REAL_UI === "1" ? 2_800_000 : 900_000,
   reporter: [["list"]],
   use: {
     baseURL: `http://127.0.0.1:${e2ePort}`,
