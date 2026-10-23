@@ -226,17 +226,34 @@ def test_artifact_byte_ranges_are_scoped_and_support_native_seeking(api) -> None
 
     artifact_id = _run(factory, store_content())
     path = f"/api/v1/projects/{project_id}/artifacts/{artifact_id}/content"
+
+    # A range request must read only the requested segment from the object
+    # store (backend-review 1.3), never the whole object first.
+    full_reads: list[str] = []
+    store = get_object_store()
+    original_get_bytes = store.get_bytes
+
+    async def counting_get_bytes(*, object_key: str) -> bytes:
+        full_reads.append(object_key)
+        return await original_get_bytes(object_key=object_key)
+
+    store.get_bytes = counting_get_bytes  # type: ignore[method-assign]
+    try:
+        for header, content, expected_range in [
+            ("bytes=2-4", b"234", "bytes 2-4/10"),
+            ("bytes=7-", b"789", "bytes 7-9/10"),
+            ("bytes=-3", b"789", "bytes 7-9/10"),
+        ]:
+            response = client.get(path, headers={"Range": header})
+            assert response.status_code == 206
+            assert response.content == content
+            assert response.headers["Content-Range"] == expected_range
+        assert full_reads == [], "range requests must not read the whole object"
+    finally:
+        store.get_bytes = original_get_bytes  # type: ignore[method-assign]
+
     complete = client.get(path)
     assert complete.status_code == 200 and complete.content == b"0123456789"
-    for header, content, expected_range in [
-        ("bytes=2-4", b"234", "bytes 2-4/10"),
-        ("bytes=7-", b"789", "bytes 7-9/10"),
-        ("bytes=-3", b"789", "bytes 7-9/10"),
-    ]:
-        response = client.get(path, headers={"Range": header})
-        assert response.status_code == 206
-        assert response.content == content
-        assert response.headers["Content-Range"] == expected_range
     for invalid in ["bytes=20-", "bytes=4-2", "bytes=-0", "bytes=0-1,4-5"]:
         response = client.get(path, headers={"Range": invalid})
         assert response.status_code == 416

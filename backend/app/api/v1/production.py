@@ -83,28 +83,38 @@ async def get_artifact_content(
     if art is None or art.project_id != project_id:
         raise NotFoundError("artifact not found")
     store = get_object_store()
-    try:
-        data = await store.get_bytes(object_key=art.object_key)
-    except KeyError as exc:
-        raise NotFoundError("artifact bytes not in object store") from exc
     media = art.mime_type or "application/octet-stream"
     etag = f'"{art.content_hash}"'
     headers = {"Accept-Ranges": "bytes", "ETag": etag, "Cache-Control": "private, max-age=0"}
+    total = art.byte_size or 0
     range_header = request.headers.get("range")
     if_range = request.headers.get("if-range")
     if range_header and (if_range is None or if_range == etag):
         try:
-            start, end = byte_range(range_header, len(data))
+            start, end = byte_range(range_header, total)
         except ValueError:
             return Response(
-                status_code=416, headers={**headers, "Content-Range": f"bytes */{len(data)}"}
+                status_code=416, headers={**headers, "Content-Range": f"bytes */{total}"}
             )
+        # Range requests read only the requested segment from the object
+        # store; a media seek must not pull the whole object first
+        # (backend-review 1.3).
+        try:
+            segment = await store.get_range(
+                object_key=art.object_key, offset=start, length=end - start + 1
+            )
+        except KeyError as exc:
+            raise NotFoundError("artifact bytes not in object store") from exc
         return Response(
-            content=data[start : end + 1],
+            content=segment,
             media_type=media,
             status_code=206,
-            headers={**headers, "Content-Range": f"bytes {start}-{end}/{len(data)}"},
+            headers={**headers, "Content-Range": f"bytes {start}-{end}/{total}"},
         )
+    try:
+        data = await store.get_bytes(object_key=art.object_key)
+    except KeyError as exc:
+        raise NotFoundError("artifact bytes not in object store") from exc
     return Response(content=data, media_type=media, headers=headers)
 
 

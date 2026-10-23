@@ -27,6 +27,8 @@ class ObjectStore(Protocol):
 
     async def get_bytes(self, *, object_key: str) -> bytes: ...
 
+    async def get_range(self, *, object_key: str, offset: int, length: int) -> bytes: ...
+
     async def delete_bytes(self, *, object_key: str) -> None: ...
 
     def clear(self) -> None: ...
@@ -54,7 +56,13 @@ class _MinioClient(Protocol):
         content_type: str,
     ) -> object: ...
 
-    def get_object(self, bucket_name: str, object_name: str) -> _MinioResponse: ...
+    def get_object(
+        self,
+        bucket_name: str,
+        object_name: str,
+        offset: int | None = None,
+        length: int | None = None,
+    ) -> _MinioResponse: ...
 
     def remove_object(self, bucket_name: str, object_name: str) -> None: ...
 
@@ -80,6 +88,11 @@ class InMemoryObjectStore:
         if object_key not in self._objects:
             raise KeyError(object_key)
         return self._objects[object_key]
+
+    async def get_range(self, *, object_key: str, offset: int, length: int) -> bytes:
+        if object_key not in self._objects:
+            raise KeyError(object_key)
+        return self._objects[object_key][offset : offset + length]
 
     async def delete_bytes(self, *, object_key: str) -> None:
         self._objects.pop(object_key, None)
@@ -171,6 +184,24 @@ class MinioObjectStore:
     def _get_bytes_sync(self, *, object_key: str) -> bytes:
         client = self._ensure_client()
         response = client.get_object(self._settings.minio_bucket, object_key)
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
+
+    async def get_range(self, *, object_key: str, offset: int, length: int) -> bytes:
+        return await asyncio.to_thread(
+            self._get_range_sync, object_key=object_key, offset=offset, length=length
+        )
+
+    def _get_range_sync(self, *, object_key: str, offset: int, length: int) -> bytes:
+        # Native object-store range read: a media seek fetches only the
+        # requested segment instead of the whole object (backend-review 1.3).
+        client = self._ensure_client()
+        response = client.get_object(
+            self._settings.minio_bucket, object_key, offset=offset, length=length
+        )
         try:
             return response.read()
         finally:
