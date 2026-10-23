@@ -1,0 +1,45 @@
+name: Frontend quality command regression (one shot)
+
+on:
+  push:
+    branches:
+      - agent/fix-vite-quality-dup-workers-20261023
+    paths:
+      - .github/workflows/frontend-quality-workers-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: true
+      - name: Test quality Docker CMD and full Vitest suite on Node 24
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          package = json.loads(Path('frontend/package.json').read_text(encoding='utf-8'))
+          dockerfile = Path('frontend/Dockerfile.quality').read_text(encoding='utf-8')
+          assert package['scripts']['test'] == 'vitest run --maxWorkers=1 --minWorkers=1'
+          assert 'npm run --prefix frontend test;' in dockerfile
+          assert 'npm run --prefix frontend test --' not in dockerfile
+          PY
+          docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace/frontend node:24.21.0-alpine3.24 sh -ec '
+            set -eu
+            npm ci --ignore-scripts
+            npm test
+          '
+      - name: Remove temporary CI and publish verified branch
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/frontend-quality-workers-once.yml
+          git diff --cached --check
+          git commit -m "test(ci): verify full Vitest suite under quality command"
+          git push origin HEAD:agent/fix-vite-quality-dup-workers-20261023
