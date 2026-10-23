@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+from threading import Lock
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Protocol, cast
@@ -93,6 +95,7 @@ class MinioObjectStore:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
         self._client: _MinioClient | None = None
+        self._client_lock = Lock()
 
     def clear(self) -> None:
         return None
@@ -100,25 +103,30 @@ class MinioObjectStore:
     def _ensure_client(self) -> _MinioClient:
         if self._client is not None:
             return self._client
-        from minio import Minio
+        # Async callers run this in a worker thread; initialization must be
+        # serialized so concurrent uploads do not create duplicate clients.
+        with self._client_lock:
+            if self._client is not None:
+                return self._client
+            from minio import Minio
 
-        endpoint = self._settings.minio_endpoint.replace("http://", "").replace(
-            "https://", ""
-        )
-        secure = self._settings.minio_endpoint.startswith("https://")
-        client = cast(
-            _MinioClient,
-            Minio(
-                endpoint,
-                access_key=self._settings.minio_access_key,
-                secret_key=self._settings.minio_secret_key,
-                secure=secure,
-                region=self._settings.minio_region,
-            ),
-        )
-        self._ensure_bucket(client)
-        self._client = client
-        return client
+            endpoint = self._settings.minio_endpoint.replace("http://", "").replace(
+                "https://", ""
+            )
+            secure = self._settings.minio_endpoint.startswith("https://")
+            client = cast(
+                _MinioClient,
+                Minio(
+                    endpoint,
+                    access_key=self._settings.minio_access_key,
+                    secret_key=self._settings.minio_secret_key,
+                    secure=secure,
+                    region=self._settings.minio_region,
+                ),
+            )
+            self._ensure_bucket(client)
+            self._client = client
+            return client
 
     def _ensure_bucket(self, client: _MinioClient) -> None:
         bucket = self._settings.minio_bucket
@@ -132,6 +140,13 @@ class MinioObjectStore:
                 raise
 
     async def put_bytes(
+        self, *, object_key: str, data: bytes, mime_type: str
+    ) -> StoredObject:
+        return await asyncio.to_thread(
+            self._put_bytes_sync, object_key=object_key, data=data, mime_type=mime_type
+        )
+
+    def _put_bytes_sync(
         self, *, object_key: str, data: bytes, mime_type: str
     ) -> StoredObject:
         client = self._ensure_client()
@@ -151,6 +166,9 @@ class MinioObjectStore:
         )
 
     async def get_bytes(self, *, object_key: str) -> bytes:
+        return await asyncio.to_thread(self._get_bytes_sync, object_key=object_key)
+
+    def _get_bytes_sync(self, *, object_key: str) -> bytes:
         client = self._ensure_client()
         response = client.get_object(self._settings.minio_bucket, object_key)
         try:
@@ -160,6 +178,9 @@ class MinioObjectStore:
             response.release_conn()
 
     async def delete_bytes(self, *, object_key: str) -> None:
+        await asyncio.to_thread(self._delete_bytes_sync, object_key=object_key)
+
+    def _delete_bytes_sync(self, *, object_key: str) -> None:
         client = self._ensure_client()
         client.remove_object(self._settings.minio_bucket, object_key)
 
