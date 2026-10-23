@@ -51,10 +51,12 @@ async def test_director_wakeup_failure_is_isolated_and_replayable(monkeypatch, d
                 requested_binding_id=binding.id,
                 expected_shot_version=shot.version,
             )
-            plan = await WorkbenchExecutionService(session, user_id=actor.id).build_plan(
-                project=project,
-                execution_input=command,
-            )
+            service = WorkbenchExecutionService(session, user_id=actor.id)
+            plan = await service.build_plan(project=project, execution_input=command)
+            preview = await service.preview_compiler_contract(project=project, plan=plan)
+            assert preview is not None
+            assert preview.readiness == "contract_validated"
+            assert preview.wire_fingerprint is not None
             receipt = await ProductionCommands(session).submit_user_execution(
                 actor=actor,
                 project_id=project.id,
@@ -63,6 +65,7 @@ async def test_director_wakeup_failure_is_isolated_and_replayable(monkeypatch, d
                 body=ExecutionBody(
                     **command.model_dump(exclude={"project_id", "shot_id", "experiment_branch_id"}),
                     plan_fingerprint=plan.plan_fingerprint,
+                    compiler_wire_fingerprint=preview.wire_fingerprint,
                     accepted_approximations=plan.accepted_approximations,
                 ),
             )
