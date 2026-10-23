@@ -821,8 +821,10 @@ describe("SceneWorkspace", () => {
     fireEvent.click(firstGenerate);
     const confirm = await screen.findByTestId("confirm-generate-button");
     await waitFor(() => expect(confirm).toBeEnabled());
-    expect(calls.filter((call) => call.method === "POST" && call.url.endsWith("/executions")))
-      .toHaveLength(0);
+    const executionWrites = calls.filter(
+      (call) => call.method === "POST" && call.url.endsWith("/executions"),
+    );
+    expect(executionWrites).toHaveLength(0);
     fireEvent.click(confirm);
     await screen.findByTestId("shot-production-status");
     const firstPlan = calls.find(
