@@ -374,6 +374,7 @@ describe("ShotProductionActions", () => {
         prompt: SHOT.image_prompt,
         expected_shot_version: SHOT.version,
         plan_fingerprint: "a".repeat(64),
+        compiler_wire_fingerprint: "e".repeat(64),
         accepted_approximations: [],
       },
     });
@@ -386,6 +387,27 @@ describe("ShotProductionActions", () => {
           !call.url.includes("/director/runtime/"),
       ),
     ).toBe(false);
+  });
+
+  it("refuses Director delegation without a validated Compiler wire proof", async () => {
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) {
+        return json({ ...planResponse(), compiler_contract_preview: null });
+      }
+      return json({});
+    });
+    renderActions();
+    fireEvent.click(screen.getByTestId("delegate-keyframe-to-director"));
+    await waitFor(() =>
+      expect(screen.getByTestId("shot-production-error")).toHaveTextContent(
+        "导演委托缺少有效的编译请求确认指纹",
+      ),
+    );
+    expect(calls.some((url) => url.includes("/director/runtime/shots/"))).toBe(false);
   });
 
   it("reuses the same Director decision after an uncertain response", async () => {
