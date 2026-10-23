@@ -436,6 +436,12 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       suggestionResponses: [],
     },
   };
+  // A completed mock candidate must have a durable receipt for its exact
+  // submitted command. Unknown keys still return 404 and never trigger a retry.
+  const executionReceipts = new Map<
+    string,
+    { stage: string; receipt: Record<string, unknown> }
+  >();
   await page.addInitScript((workspaceId) => {
     sessionStorage.setItem("dramaforge.selected-workspace-id", workspaceId);
   }, WORKSPACE_ID);
@@ -692,7 +698,12 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       });
     }
     if (path.endsWith("/executions/receipt") && method === "GET") {
-      return json(route, { code: "NOT_FOUND", detail: "no committed receipt" }, 404);
+      const key = url.searchParams.get("idempotency_key") ?? "";
+      const stage = url.searchParams.get("stage");
+      const existing = executionReceipts.get(key);
+      return existing && existing.stage === stage
+        ? json(route, existing.receipt)
+        : json(route, { code: "NOT_FOUND", detail: "no committed receipt" }, 404);
     }
     if (
       path.includes("/director/runtime/shots/") &&
@@ -765,13 +776,20 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
           },
         ];
       }
-      return json(route, {
+      const operationKey = request.headers()["idempotency-key"];
+      if (!operationKey) throw new Error("Mock production creates require an Idempotency-Key");
+      const receipt = {
         node_run_id: body.stage === "video" ? "run-video-1" : "run-keyframe-1",
         graph_id: "graph-1",
         graph_version_id: "version-graph-1",
         status: "queued",
         plan_fingerprint: "a".repeat(64),
+      };
+      executionReceipts.set(operationKey, {
+        stage: String(body.stage),
+        receipt: { ...receipt, status: "completed" },
       });
+      return json(route, receipt);
     }
     if (path.endsWith("/formal-keyframe") && method === "POST") {
       if (body.expected_shot_version !== state.shotVersion) {
