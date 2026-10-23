@@ -595,7 +595,12 @@ export function ShotProductionActions({
       if (planDelivery(preview) !== "exact") {
         throw new Error("当前计划需要近似适配确认，请先使用手动生成入口检查并确认。");
       }
-      const decisionKey = `${shot.id}:${stage}:${preview.plan_fingerprint}:${preview.compiler_contract_preview?.wire_fingerprint ?? "unverified"}`;
+      const decisionKey = [
+        shot.id,
+        stage,
+        preview.plan_fingerprint,
+        preview.compiler_contract_preview?.wire_fingerprint ?? "unverified",
+      ].join(":");
       let frozenDecision = delegationDecisionIds.current.get(decisionKey);
       if (!frozenDecision) {
         frozenDecision = {
