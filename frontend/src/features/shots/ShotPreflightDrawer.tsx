@@ -49,7 +49,7 @@ export function ShotPreflightDrawer({
   approximationsAccepted = false,
 }: ShotPreflightDrawerProps): ReactNode {
   const p = plan?.plan;
-  // Advisory only: compiler-contract evidence is outside the executable plan fingerprint.
+  // The normalized Compiler proof is independently checked by the execution command and Worker.
   const compilerPreview = plan?.compiler_contract_preview;
   const references = p?.planned_references ?? [];
   const exactRefs = references.filter((r) => r.delivery === "exact");
@@ -159,8 +159,8 @@ export function ShotPreflightDrawer({
       {!isLoading && plan && (
         <div>
           <p className="df-shot-hint" data-testid="preflight-plan-boundary">
-            当前显示服务端冻结的执行计划；最终供应商协议请求由 Worker 的 Provider Compiler
-            编译，尚未提供逐字段同源 Payload 预览。
+            本次发送使用实际 Provider Compiler 编译的脱敏请求结构和确认指纹；
+            真实媒体字节、临时传输值及账号可用性将在执行阶段进一步校验。
           </p>
           {!compilerConfirmed && (
             <Alert type="error" showIcon title="尚未生成可验证的编译请求指纹，不能提交付费生成。" />
