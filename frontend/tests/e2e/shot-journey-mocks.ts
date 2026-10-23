@@ -191,7 +191,10 @@ export async function installShotJourneyMock(page: Page) {
             redacted_wire: {
               model_id: "provider/model-b",
               operation: stage === "video" ? "video.generate" : "image.generate",
-              wire_request: { prompt: frozen.prompt, ...(stage === "video" ? { duration: 5 } : {}) },
+              wire_request: {
+                prompt: frozen.prompt,
+                ...(stage === "video" ? { duration: 5 } : {}),
+              },
               reference_fingerprints: frozen.firstFrame ? [frozen.firstFrame] : [],
             },
             effective_options: stage === "video" ? { duration_seconds: 5 } : {},
