@@ -438,10 +438,7 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
   };
   // A completed mock candidate must have a durable receipt for its exact
   // submitted command. Unknown keys still return 404 and never trigger a retry.
-  const executionReceipts = new Map<
-    string,
-    { stage: string; receipt: Record<string, unknown> }
-  >();
+  const executionReceipts = new Map<string, { stage: string; receipt: Record<string, unknown> }>();
   await page.addInitScript((workspaceId) => {
     sessionStorage.setItem("dramaforge.selected-workspace-id", workspaceId);
   }, WORKSPACE_ID);
