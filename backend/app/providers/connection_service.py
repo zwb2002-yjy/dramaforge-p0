@@ -27,6 +27,7 @@ from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_publication import effective_publication_lifecycle
 from app.providers.catalog_service import ModelCatalogService
+from app.providers.host_guard import validate_provider_base_url
 from app.providers.manifest import (
     ModelCapabilityManifest,
     has_reproducible_contract_evidence,
@@ -104,6 +105,9 @@ class ProviderConnectionService:
         host = (base_url or plugin.default_base_url).strip().rstrip("/")
         if not host:
             raise ValidationAppError("base_url must not be empty")
+        # Credential egress gate: the probe and every runtime call send the
+        # encrypted key to this destination (backend-review §1.7 / V6).
+        validate_provider_base_url(host, settings=get_settings())
         credential = await store_credential(
             self._session,
             workspace_id=workspace_id,
@@ -277,6 +281,8 @@ class ProviderConnectionService:
             host = base_url.strip().rstrip("/")
             if not host:
                 raise ValidationAppError("base_url must not be empty")
+            # Same credential egress gate on updates (backend-review §1.7).
+            validate_provider_base_url(host, settings=get_settings())
             if host != connection.base_url:
                 connection.base_url = host
                 execution_changed = True

@@ -151,6 +151,15 @@ class Settings(BaseSettings):
         description="Public HTTPS API origin used for short-lived Provider references",
     )
     reference_token_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
+    # Workspace-supplied provider base_urls decide where encrypted provider
+    # credentials are sent. Private self-hosted deployments are a supported
+    # product feature (joint review 6-4); this explicit operator opt-in
+    # admits private and loopback destinations (never link-local/metadata)
+    # for authenticated self-hosted networks.
+    provider_base_url_allow_private: bool = Field(
+        default=False,
+        description="Authorize private/loopback provider base_urls for self-hosted deployments",
+    )
 
     # Generic OpenAI-compatible media protocol. This is a protocol connection,
     # not a supplier-specific plugin: the workspace supplies URL + key and picks

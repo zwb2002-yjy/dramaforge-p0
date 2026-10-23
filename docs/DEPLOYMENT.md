@@ -123,6 +123,27 @@ publish PostgreSQL, Redis, MinIO, LiteLLM or the API. Setting the bind address t
 `0.0.0.0` exposes an unauthenticated HTTP boundary and is not a recommended
 internet deployment.
 
+## Provider connection security boundary
+
+Workspace-supplied Provider connections send their encrypted credentials to
+the configured `base_url` (connection create/patch and probes carry the key).
+Two operator settings govern this boundary:
+
+- `PROVIDER_BASE_URL_ALLOW_PRIVATE` (default `false`): connection base URLs
+  must be public HTTPS origins. Private/loopback IP literals are rejected
+  unless an operator explicitly sets this to `true` for an authenticated
+  self-hosted private deployment. Link-local, multicast, unspecified and
+  cloud-metadata destinations are rejected regardless — they are
+  credential-exfiltration primitives, not private deployments. Hostname
+  (non-literal) targets are checked statically at write time; no DNS
+  resolution is required to create or edit a connection.
+- `REFERENCE_PUBLIC_BASE_URL` (default empty): public HTTPS API origin used
+  for short-lived signed Provider references. Models whose wire contract
+  consumes public URLs (Ark, MiniMax, Agnes video contract revisions) issue
+  these grants from the Worker; without this setting those reference-bearing
+  generations fail closed with `REFERENCE_DELIVERY_NOT_CONFIGURED` instead of
+  silently degrading.
+
 ## Health and lifecycle
 
 ```text
