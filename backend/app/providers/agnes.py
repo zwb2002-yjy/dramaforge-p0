@@ -691,6 +691,15 @@ class AgnesImageCompiler:
 
     reference_transport = "bytes"
 
+    def reference_transport_for(self, model: Any) -> str:
+        """Contract revisions accept URLs or embedded data URIs; deliver bytes.
+
+        The Worker's stored-bytes delivery compiles to the data-URI branch
+        (verified end-to-end), while public-URL callers use the URL branch.
+        """
+
+        return "bytes"
+
     def validate(self, intent: Any, model: Any) -> None:
         op = model.operations.get("image.generate")
         if op is None:
@@ -901,8 +910,13 @@ class AgnesImageCompiler:
                     data=ref.content_bytes,
                     mime_type=ref.mime_type,
                 )
-                if ref.fingerprint is not None and ref.fingerprint != fingerprint:
-                    raise ValueError("Agnes image bytes do not match the resolved fingerprint")
+                # Content-hash equality with the resolved fingerprint is
+                # already enforced by the Worker before bytes reach any
+                # compiler (storage SHA-256 verification). Re-checking it
+                # here would couple the compiler to placeholder bytes used
+                # by the read-only preview, whose digest can never match the
+                # frozen media hash. The slot identity below always uses the
+                # resolved reference fingerprint, never the byte digest.
                 image_values.append(data_uri)
                 if ref.fingerprint is None:
                     fingerprints.append(fingerprint)
@@ -947,6 +961,14 @@ class AgnesVideoCompiler:
     wire request (first-frame I2V) using the same body builder as the HubClient."""
 
     reference_transport = "bytes"
+
+    def reference_transport_for(self, model: Any) -> str:
+        """Contract revisions take public HTTPS URLs; legacy takes raw bytes."""
+
+        operation = model.operations.get("video.generate")
+        if operation is not None and operation.input_contracts:
+            return "public_url"
+        return "bytes"
 
     def validate(self, intent: Any, model: Any) -> None:
         op = model.operations.get("video.generate")

@@ -131,7 +131,91 @@ def test_byte_backed_raw_base64_is_stable_and_requires_matching_slot() -> None:
             compiled.model_copy(update={"wire_request": body}), [reference]
         )
 
-    first, redacted = view(b"preview-placeholder")
+    first, redacted = view(b"preview-reference-0")
     second, _ = view(b"verified bytes")
     assert first == second
     assert redacted["wire_request"]["image_b64"].startswith("<reference:")
+
+
+def test_prompt_free_text_may_contain_https_links() -> None:
+    """N-08: a URL inside the prompt is user content, not a transport slot."""
+
+    artifact_id = uuid4()
+    ref = ResolvedReference(
+        role="first_frame",
+        artifact_id=artifact_id,
+        fingerprint="e" * 64,
+        content_url="https://grant.example/opaque-token",
+    )
+
+    def compiled(prompt: str) -> CompiledVideoRequest:
+        return _compiled(ref.content_url).model_copy(
+            update={
+                "wire_request": {
+                    **_compiled(ref.content_url).wire_request,
+                    "prompt": prompt,
+                }
+            }
+        )
+
+    value, projection = compiled_wire_evidence(
+        compiled("see https://example.com/mood-board for the visual tone"), [ref]
+    )
+    assert "https://example.com/mood-board" in projection["wire_request"]["prompt"]
+    # The transport slot itself is still normalized to the identity marker.
+    assert projection["wire_request"]["content"][0]["image_url"]["url"].startswith(
+        "<reference:"
+    )
+    # And a different prompt still changes the fingerprint.
+    other, _ = compiled_wire_evidence(
+        compiled("a different prompt entirely"), [ref]
+    )
+    assert value != other
+
+
+def test_preview_placeholder_bytes_are_ordinal_distinct() -> None:
+    """Two placeholder references must not collapse onto one slot marker."""
+
+    first_id, second_id = uuid4(), uuid4()
+    first = ResolvedReference(
+        role="reference_image",
+        artifact_id=first_id,
+        fingerprint="a" * 64,
+        content_bytes=b"preview-reference-0",
+    )
+    second = ResolvedReference(
+        role="reference_image",
+        artifact_id=second_id,
+        fingerprint="b" * 64,
+        content_bytes=b"preview-reference-1",
+    )
+    worker_first = first.__class__(
+        role="reference_image",
+        artifact_id=first_id,
+        fingerprint="a" * 64,
+        content_bytes=b"real first image bytes",
+    )
+    worker_second = second.__class__(
+        role="reference_image",
+        artifact_id=second_id,
+        fingerprint="b" * 64,
+        content_bytes=b"real second image bytes",
+    )
+
+    def compiled(refs: list[ResolvedReference]) -> CompiledVideoRequest:
+        values = [base64.b64encode(ref.content_bytes).decode("ascii") for ref in refs]
+        return _compiled("ignored").model_copy(
+            update={"wire_request": {"model": "model-1", "image_b64": values}}
+        )
+
+    preview_hash, preview_wire = compiled_wire_evidence(
+        compiled([first, second]), [first, second]
+    )
+    worker_hash, worker_wire = compiled_wire_evidence(
+        compiled([worker_first, worker_second]), [worker_first, worker_second]
+    )
+    assert preview_hash == worker_hash
+    markers = preview_wire["wire_request"]["image_b64"]
+    assert markers[0] != markers[1]
+    assert markers[0].startswith("<reference:0:")
+    assert markers[1].startswith("<reference:1:")

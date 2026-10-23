@@ -623,3 +623,60 @@ async def test_runtime_marks_transport_errors_as_unknown_submission() -> None:
     assert video_result.error_code == "PROVIDER_SUBMISSION_UNKNOWN"
     assert video_result.error == "ConnectError"
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_preview_compile_accepts_declared_reference_transport() -> None:
+    """N-02: the family declares its transport, so previews stop blocking.
+
+    Before the declaration, every OpenAI-compatible preview failed with
+    REFERENCE_TRANSPORT_UNDECLARED. The preview now compiles with the same
+    transport the Worker delivers (stored bytes), and its wire fingerprint
+    matches a Worker-style compile of the same references.
+    """
+
+    from app.providers.compile_preview import PreviewReference, preview_compile
+    from app.providers.intents import ImageGenerationIntent
+
+    artifact_id = uuid4()
+    manifest = _manifest("@contract/openai-image-v1")
+    intent = ImageGenerationIntent(
+        prompt="portrait with reference",
+        reference_artifact_ids=[artifact_id],
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    preview_reference = PreviewReference(
+        role="reference_image",
+        artifact_id=artifact_id,
+        mime_type="image/png",
+        fingerprint="a" * 64,
+    )
+    preview = await preview_compile(
+        manifest=manifest,
+        invoke_model_value="discovered-image-model",
+        intent=intent,
+        references=[preview_reference],
+        include_redacted_wire=True,
+    )
+    assert preview.readiness == "contract_validated", preview.errors
+    assert preview.wire_fingerprint is not None
+
+    # A Worker-style compile of real bytes produces the same fingerprint:
+    # both transports normalize to the same identity slot.
+    worker_ref = ResolvedReference(
+        role="reference_image",
+        artifact_id=artifact_id,
+        content_bytes=b"real image bytes",
+        mime_type="image/png",
+        fingerprint="a" * 64,
+    )
+    compiled = await OpenAICompatibleImageCompiler().compile(
+        intent,
+        manifest,
+        [worker_ref],
+        invoke_model_value="discovered-image-model",
+    )
+    from app.providers.compile_preview import compiled_wire_evidence
+
+    worker_hash, _redacted = compiled_wire_evidence(compiled, [worker_ref])
+    assert worker_hash == preview.wire_fingerprint

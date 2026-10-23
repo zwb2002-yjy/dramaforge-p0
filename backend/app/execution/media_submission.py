@@ -45,7 +45,10 @@ from app.providers.models import (
     ProviderConnectionRevision,
     ProviderModelBinding,
 )
-from app.providers.reference_delivery import approved_first_frame_for_video
+from app.providers.reference_delivery import (
+    approved_first_frame_for_video,
+    runtime_reference_transport,
+)
 from app.providers.request_summary import normalize_request_summary
 from app.providers.runtime import (
     CompiledImageRequest,
@@ -75,6 +78,7 @@ async def _unified_resolved_reference(
     mime_type: str,
     fingerprint: str | None,
     provider_type: str,
+    reference_transport: str | None = None,
 ) -> ResolvedReference:
     """Resolve one artifact reference through the provider delivery layer."""
     from app.providers.reference_delivery import resolve_reference_for_runtime
@@ -89,6 +93,7 @@ async def _unified_resolved_reference(
         mime_type=mime_type,
         fingerprint=fingerprint,
         provider_type=provider_type,
+        reference_transport=reference_transport,
     )
 
 
@@ -759,6 +764,7 @@ async def prepare_media_submission(
         *,
         existing_artifact: Artifact | None = None,
         existing_bytes: bytes | None = None,
+        reference_transport: str | None = None,
     ) -> ResolvedReference:
         """Load one frozen Workbench artifact for the existing compiler.
 
@@ -823,6 +829,7 @@ async def prepare_media_submission(
             mime_type=str(getattr(reference, "mime_type", None) or artifact.mime_type),
             fingerprint=str(getattr(reference, "fingerprint", None) or artifact.content_hash),
             provider_type=provider_type,
+            reference_transport=reference_transport,
         )
 
     if node_type == "keyframe":
@@ -830,10 +837,16 @@ async def prepare_media_submission(
         if image_compiler is None:
             raise ValidationAppError("unified plugin has no image compiler")
         assert image_intent is not None
+        # The delivery layer hands the compiler the transport it declares for
+        # this catalog revision (bytes vs signed public URL).
+        image_reference_transport = runtime_reference_transport(image_compiler, manifest)
         refs: list[ResolvedReference] = []
         if workbench_planned_references:
             refs = [
-                await _load_workbench_reference(reference)
+                await _load_workbench_reference(
+                    reference,
+                    reference_transport=image_reference_transport,
+                )
                 for reference in workbench_planned_references
                 if reference.delivery != "unsupported"
             ]
@@ -849,6 +862,7 @@ async def prepare_media_submission(
                     mime_type=str(snap.get("canonical_mime_type") or "image/png"),
                     fingerprint=hashlib.sha256(canonical_image_bytes).hexdigest(),
                     provider_type=provider_type,
+                    reference_transport=image_reference_transport,
                 )
             )
         identity_references = [
@@ -900,6 +914,7 @@ async def prepare_media_submission(
         video_compiler = resolved.video_compiler
         if video_compiler is None:
             raise ValidationAppError("unified plugin has no video compiler")
+        video_reference_transport = runtime_reference_transport(video_compiler, manifest)
         if text_video and workbench_planned_references:
             raise ValidationAppError("text_to_video cannot carry artifact references")
         if reference_video and not workbench_planned_references:
@@ -910,6 +925,7 @@ async def prepare_media_submission(
             video_references = [
                 await _load_workbench_reference(
                     reference,
+                    reference_transport=video_reference_transport,
                     existing_artifact=first_frame
                     if first_frame is not None and reference.artifact_id == first_frame.id
                     else None,
@@ -937,6 +953,7 @@ async def prepare_media_submission(
                     mime_type=first_frame.mime_type or "image/png",
                     fingerprint=first_frame.content_hash,
                     provider_type=provider_type,
+                    reference_transport=video_reference_transport,
                 )
             ]
         identity_references = [

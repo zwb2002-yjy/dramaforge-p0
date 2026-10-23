@@ -28,6 +28,19 @@ from app.providers.runtime import (
 from app.providers.workbench_contract import select_workbench_contract
 
 
+def _preview_placeholder_bytes(index: int) -> bytes:
+    """Deterministic, ordinal-distinct placeholder for bytes-transport compilers.
+
+    It only needs to make the compiler take its reference branch (data URI /
+    base64 embedding); compiled_wire_evidence replaces the encoded value with
+    the frozen identity slot, so the placeholder never influences the wire
+    fingerprint. Distinctness per ordinal keeps the slot replacement from
+    collapsing two distinct references onto one marker.
+    """
+
+    return f"preview-reference-{index}".encode("ascii")
+
+
 class _PreviewIdentity(TypedDict):
     prompt_hash: str
     semantic_hash: str
@@ -187,6 +200,12 @@ def compiled_wire_evidence(
     replacements.sort(key=lambda pair: len(pair[0]), reverse=True)
 
     def scrub(value: JsonValue, key: str = "") -> JsonValue:
+        # Free-text prompt values are user content, not transport slots: slot
+        # replacement still applies (a reference URL pasted into the prompt is
+        # normalized like any other occurrence), but a plain https:// link in
+        # prose must not fail the whole projection as an unbound transport
+        # value (N-08). Transport-bearing keys keep the fail-closed check.
+        free_text = key.lower() in {"prompt", "prompt_value", "text"}
         if isinstance(value, dict):
             result: dict[str, JsonValue] = {}
             for field, child in value.items():
@@ -220,9 +239,15 @@ def compiled_wire_evidence(
             )
             if data_uri is not None:
                 redacted = data_uri.group(1)
-            if "https://" in redacted or "http://" in redacted or ";base64," in redacted:
+            if not free_text and (
+                "https://" in redacted or "http://" in redacted or ";base64," in redacted
+            ):
                 raise ValueError("unbound URL or media value in Provider wire")
-            if ("base64" in key.lower() or "b64" in key.lower()) and "<reference:" not in redacted:
+            if (
+                not free_text
+                and ("base64" in key.lower() or "b64" in key.lower())
+                and "<reference:" not in redacted
+            ):
                 raise ValueError("unbound binary field in Provider wire")
             return redacted
         return value
@@ -323,26 +348,41 @@ async def preview_compile(
         compiler = image_compiler if isinstance(intent, ImageGenerationIntent) else video_compiler
         # Use the selected compiler contract, never the probe transport or
         # provider-name heuristics. No reference bytes are loaded here.
-        transport = getattr(compiler, "reference_transport", None)
+        from app.providers.reference_delivery import runtime_reference_transport
+
+        transport = runtime_reference_transport(compiler, manifest)
         if transport not in {"bytes", "public_url"}:
             return CompilePreview(
                 readiness="blocked", errors=["REFERENCE_TRANSPORT_UNDECLARED"], **common
             )
         # An invented byte buffer cannot satisfy a real SHA-256 media hash.
-        # Use an inert URL-shaped reference for pure contract compilation. The
-        # actual Worker resolves and hashes media bytes; both transports are
-        # normalized to the same frozen reference slot by compiled_wire_evidence.
-        # A bytes-only compiler may reject this harmless preview; do not fake
-        # valid bytes or weaken its hash checks.
+        # Build the preview reference in the transport the selected compiler
+        # actually consumes, so the preview projection matches the Worker
+        # projection field-for-field (including presence of reference fields
+        # and any operation derived from them). compiled_wire_evidence
+        # normalizes both placeholder and real media to the same identity
+        # slot, so only shape differences could change the fingerprint.
+        # Placeholder bytes are distinct per reference ordinal: two equal
+        # placeholders would collide in the slot replacement and collapse
+        # distinct references onto one marker. No real media bytes are
+        # loaded here; the Worker re-verifies the stored SHA-256 before the
+        # paid request.
         resolved = [
             ResolvedReference(
                 role=ref.role,
                 artifact_id=ref.artifact_id,
                 mime_type=ref.mime_type,
                 fingerprint=ref.fingerprint,
-                content_url=f"https://preview.invalid/{ref.artifact_id}",
+                content_bytes=(
+                    _preview_placeholder_bytes(index) if transport == "bytes" else None
+                ),
+                content_url=(
+                    f"https://preview.invalid/{ref.artifact_id}"
+                    if transport == "public_url"
+                    else None
+                ),
             )
-            for ref in references
+            for index, ref in enumerate(references)
         ]
         if operation is not None and operation.input_contracts:
             selected = select_workbench_contract(

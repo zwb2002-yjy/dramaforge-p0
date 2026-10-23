@@ -346,6 +346,11 @@ class OpenAICompatibleMediaClient:
 
 
 class OpenAICompatibleImageCompiler:
+    # The unified delivery layer hands this provider family stored media
+    # bytes (data-URI / b64 branches); the URL branch exists for callers
+    # that already hold a public URL, which the Workbench Worker is not.
+    reference_transport = "bytes"
+
     def validate(self, intent: Any, model: ModelCapabilityManifest) -> None:
         operation = model.operations.get("image.generate")
         if operation is None:
@@ -411,6 +416,10 @@ class OpenAICompatibleImageCompiler:
 
 
 class OpenAICompatibleVideoCompiler:
+    # Same as the image compiler: every reference-consuming branch of this
+    # family (FL2VA / Ref2VA / first-frame I2V) requires stored bytes.
+    reference_transport = "bytes"
+
     def validate(self, intent: Any, model: ModelCapabilityManifest) -> None:
         operation = model.operations.get("video.generate")
         if operation is None:

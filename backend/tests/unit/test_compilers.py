@@ -272,7 +272,18 @@ async def test_agnes_image_contract_compiles_ordered_multi_reference_without_net
 
 
 @pytest.mark.asyncio
-async def test_agnes_image_contract_rejects_reference_bytes_fingerprint_mismatch() -> None:
+async def test_agnes_image_contract_accepts_placeholder_preview_bytes() -> None:
+    """The content-hash/fingerprint coupling moved to the Worker boundary.
+
+    The Worker verifies the frozen reference fingerprint against the stored
+    artifact metadata and the storage SHA-256 before any compiler runs, so a
+    mismatched pair can no longer reach ``compile``. The compiler itself now
+    accepts any non-empty bytes: the read-only preview deliberately compiles
+    with placeholder bytes whose digest never equals the frozen media hash,
+    and ``compiled_wire_evidence`` normalizes both placeholder and real media
+    to the same identity slot.
+    """
+
     reference_id = uuid4()
     intent = ImageGenerationIntent(
         prompt="portrait",
@@ -281,22 +292,88 @@ async def test_agnes_image_contract_rejects_reference_bytes_fingerprint_mismatch
         ],
         selection=ModelSelectionIntent(mode="explicit_binding"),
     )
-    with pytest.raises(ValueError, match="bytes do not match"):
-        await AgnesImageCompiler().compile(
-            intent,
-            _candidate_image_manifest(),
-            [
-                ResolvedReference(
-                    role="reference_image",
-                    artifact_id=reference_id,
-                    content_bytes=b"image",
-                    mime_type="image/png",
-                    fingerprint="0" * 64,
-                )
-            ],
-            invoke_model_value="agnes-image-2.5-flash",
-            policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"reference"})),
-        )
+    compiled = await AgnesImageCompiler().compile(
+        intent,
+        _candidate_image_manifest(),
+        [
+            ResolvedReference(
+                role="reference_image",
+                artifact_id=reference_id,
+                content_bytes=b"\x00",
+                mime_type="image/png",
+                fingerprint="0" * 64,
+            )
+        ],
+        invoke_model_value="agnes-image-2.5-flash",
+        policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"reference"})),
+    )
+    assert compiled.wire_request["extra_body"]["image"][0].startswith(
+        "data:image/png;base64,"
+    )
+    assert compiled.reference_artifact_ids == [reference_id]
+
+
+@pytest.mark.asyncio
+async def test_agnes_legacy_image_preview_matches_worker_projection() -> None:
+    """N-04: legacy (non-contract) Agnes image previews equal Worker wires.
+
+    The preview compiles with the bytes transport this compiler declares and
+    ordinal-distinct placeholders; the Worker compiles with real verified
+    bytes. Both normalize to the same identity slots, so the confirmation
+    fingerprint no longer drifts between preview and execution (the old bug:
+    preview compiled a t2i wire without the image field while the Worker
+    compiled i2i with it).
+    """
+
+    from app.providers.compile_preview import (
+        PreviewReference,
+        compiled_wire_evidence,
+        preview_compile,
+    )
+
+    artifact_id = uuid4()
+    manifest = _image_manifest()
+    intent = ImageGenerationIntent(
+        prompt="character walks into frame",
+        reference_artifact_ids=[artifact_id],
+        reference_fingerprint="a" * 64,
+        reference_mime="image/png",
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    preview = await preview_compile(
+        manifest=manifest,
+        invoke_model_value="agnes-image-2.1-flash",
+        intent=intent,
+        references=[
+            PreviewReference(
+                role="reference_image",
+                artifact_id=artifact_id,
+                mime_type="image/png",
+                fingerprint="a" * 64,
+            )
+        ],
+        include_redacted_wire=True,
+    )
+    assert preview.readiness == "contract_validated", preview.errors
+    assert preview.wire_fingerprint is not None
+
+    worker_ref = ResolvedReference(
+        role="reference_image",
+        artifact_id=artifact_id,
+        content_bytes=b"real verified image bytes",
+        mime_type="image/png",
+        fingerprint="a" * 64,
+    )
+    compiled = await AgnesImageCompiler().compile(
+        intent,
+        manifest,
+        [worker_ref],
+        invoke_model_value="agnes-image-2.1-flash",
+    )
+    # Both sides take the i2i branch with an embedded reference image.
+    assert compiled.wire_request["extra_body"]["image"]
+    worker_hash, _redacted = compiled_wire_evidence(compiled, [worker_ref])
+    assert worker_hash == preview.wire_fingerprint
 
 
 @pytest.mark.asyncio
