@@ -32,6 +32,9 @@ jobs:
           docker run --rm -v "${{ github.workspace }}:/workspace" -w /workspace/frontend node:24.21.0-alpine3.24 sh -ec '
             set -eu
             npm ci --ignore-scripts
+            npx prettier --write tests/unit/SceneWorkspace.test.tsx
+            npm run format:check
+            npm test -- tests/unit/SceneWorkspace.test.tsx
             npm test
           '
       - name: Remove temporary CI and publish verified branch
@@ -40,6 +43,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/frontend-quality-workers-once.yml
+          git add frontend/tests/unit/SceneWorkspace.test.tsx
           git diff --cached --check
           git commit -m "test(ci): verify full Vitest suite under quality command"
           git push origin HEAD:agent/fix-vite-quality-dup-workers-20261023
