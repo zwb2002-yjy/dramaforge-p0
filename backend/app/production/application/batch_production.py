@@ -579,16 +579,21 @@ async def dispatch_batch_production(
     )
     if prior:
         frozen = [(run.input_snapshot or {}).get("paid_authorization") for run in prior]
+        if not all(isinstance(item, dict) for item in frozen):
+            raise ConflictError(
+                "batch contains invalid frozen authorization facts",
+                details={"code": "BATCH_AUTHORIZATION_REPLAY_CONFLICT"},
+            )
+        verified = [item for item in frozen if isinstance(item, dict)]
         if (
-            any(not isinstance(item, dict) for item in frozen)
-            or any(
+            any(
                 item.get("preview_fingerprint") != body.preview_fingerprint
                 or item.get("stage") != body.stage
                 or item.get("authorized_by") != str(user.id)
                 or item.get("authorized_call_count") != len(prior)
-                for item in frozen
+                for item in verified
             )
-            or {item.get("call_index") for item in frozen} != set(range(1, len(prior) + 1))
+            or {item.get("call_index") for item in verified} != set(range(1, len(prior) + 1))
             or len(prior) > body.max_provider_calls
         ):
             raise ConflictError(

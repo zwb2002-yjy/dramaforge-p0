@@ -84,7 +84,10 @@ async def test_minio_operations_run_off_event_loop() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("entrypoint", ["accept", "accept_existing_new_turn", "accept_existing_detached_turn"])
+@pytest.mark.parametrize(
+    "entrypoint",
+    ["accept", "accept_existing_new_turn", "accept_existing_detached_turn"],
+)
 async def test_director_start_fails_before_db_write_without_checkpoint(entrypoint: str) -> None:
     session = AsyncMock()
     service = DirectorRuntimeStartService(
@@ -123,7 +126,9 @@ class _Rows:
 
 
 @pytest.mark.asyncio
-async def test_batch_preview_fingerprint_binds_compiler_proof(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_batch_preview_fingerprint_binds_compiler_proof(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     shot_id, scene_id, project_id = uuid4(), uuid4(), uuid4()
     shot = SimpleNamespace(
         id=shot_id,
