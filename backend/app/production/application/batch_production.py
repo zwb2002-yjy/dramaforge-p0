@@ -583,6 +583,7 @@ async def dispatch_batch_production(
             any(not isinstance(item, dict) for item in frozen)
             or any(
                 item.get("preview_fingerprint") != body.preview_fingerprint
+                or item.get("stage") != body.stage
                 or item.get("authorized_by") != str(user.id)
                 or item.get("authorized_call_count") != len(prior)
                 for item in frozen
@@ -679,6 +680,7 @@ async def dispatch_batch_production(
         snapshot["paid_authorization"] = {
             "kind": "batch_owner_authorization",
             "batch_key": body.batch_key,
+            "stage": body.stage,
             "preview_fingerprint": preview.fingerprint,
             "authorized_by": str(user.id),
             "authorized_at": authorized_at,
