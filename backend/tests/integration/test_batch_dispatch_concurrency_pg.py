@@ -102,6 +102,45 @@ async def _dispatch(factory, *, project_id, workspace_id, actor_id, body):
 
 
 @pytest.mark.asyncio
+async def test_fill_skips_successful_candidate_before_formal_selection():
+    from app.execution.models import ProviderOperation
+    from tests.unit.test_formal_selection import _make_keyframe_artifact
+
+    dbname = f"dramaforge_fill_{uuid4().hex[:8]}"
+    await _create_database(dbname)
+    engine = create_async_engine(_async_url(dbname))
+    try:
+        _alembic(dbname)
+        factory = async_sessionmaker(engine, expire_on_commit=False)
+        project_id, workspace_id, actor_id, shot_id = await _seed(factory)
+        async with factory() as session:
+            project = await session.get(Project, project_id)
+            actor = await session.get(User, actor_id)
+            await _make_keyframe_artifact(session, project=project, shot_id=shot_id, user=actor)
+            await session.commit()
+        async with factory() as session:
+            await session.execute(text("SET LOCAL ROLE dramaforge_app"))
+            await set_rls_context(
+                session, user_id=actor_id, workspace_id=workspace_id, project_id=project_id,
+            )
+            project = await session.get(Project, project_id)
+            preview, prepared = await batch._prepare(
+                session, project=project, user_id=actor_id, stage="image_keyframe", scene_id=None,
+            )
+            assert preview.ready_count == 0
+            assert preview.skipped_count == 1
+            assert preview.items[0].reason == "CANDIDATE_AWAITING_REVIEW"
+            assert prepared == {}
+            actor = await session.get(User, actor_id)
+            todos = await batch.read_production_todos(project_id, actor, session)
+            assert todos.counts == {"awaiting_review": 1}
+            assert list((await session.scalars(select(ProviderOperation))).all()) == []
+    finally:
+        await engine.dispose()
+        await _drop_database(dbname)
+
+
+@pytest.mark.asyncio
 async def test_concurrent_dispatch_same_preview_authorizes_once():
     """Two concurrent dispatches of one confirmed preview authorize once."""
 

@@ -31,6 +31,9 @@ Director Runtime 是**独立于生产执行的编排 runtime**：它驱动导演
   使用私有 `director_runtime_checkpoints` schema（迁移 `20260910_0066`，
   角色 `dramaforge_director_checkpoint`，对 `PUBLIC` / `dramaforge_app` REVOKE，
   不进应用 model registry）。
+- checkpoint 未配置时，Story / Shot / Editing 的结构化文本入口与 Runtime start
+  共用可用性门；在创建 Turn / Invocation 或调用文本模型之前拒绝，避免返回文本后才失败。
+  MANUAL 媒体生产继续可用；配置存在不代表真实 checkpoint 连接已通过验收。
 - 引擎身份按 Turn 全有或全无（`ck_director_turn_engine_binding`），
   `runtime_execution_id` 唯一。
 - 代码位置：`backend/app/director/runtime`（engine ports、路由、投影、唤醒、

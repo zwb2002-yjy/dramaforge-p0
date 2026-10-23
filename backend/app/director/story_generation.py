@@ -13,6 +13,7 @@ from app.access.models import Project, User
 from app.assets.models import Episode, Scene, ScriptDocument, Shot
 from app.assets.script_import import parse_script_markdown
 from app.config import get_settings
+from app.director.runtime.capabilities import require_director_runtime_available
 from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.story_proposal import StoryProposalResult, create_story_proposal
 from app.director.text_transport import (
@@ -176,6 +177,7 @@ class StoryGenerationService:
         actor: User,
         request: StoryGenerationRequest,
     ) -> GeneratedStoryProposal:
+        require_director_runtime_available(get_settings())
         context, versions = await self._story_context(project)
         text_result = await self._text_transport.generate_structured(
             project=project,

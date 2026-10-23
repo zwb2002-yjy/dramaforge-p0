@@ -76,7 +76,8 @@ Provider 特定的 reference URL/bytes 决策在 provider delivery 层内部。
 项目 / 场景批量生成只是同一命令入口的显式编排：preview 为每个 Shot 重建正式
 Workbench plan，dispatch 核对 preview fingerprint 后逐项调用
 `ProductionCommands.submit_user_execution`。它不创建第二套队列或执行事实。「补齐」只处理
-缺少该环节正式产物、且没有在途任务的镜头；已有正式产物或正在生成的镜头记为 skipped，
+缺少该环节正式产物、成功候选和在途任务的镜头；已有正式产物、已有候选或正在生成的镜头记为 skipped。
+成功候选沿用 NodeRun + Artifact 与审片准入事实，分别归入待审片或待选正式版本，不能由「补齐」隐式再次生成；
 预检失败记为 blocked，dispatch 只消费 ready。批量提交要求 Owner 确认本次 preview
 fingerprint 与允许新建的 Provider 操作数（`max_provider_calls`）；授权随每个 NodeRun 快照
 持久化，不能继承到下一批，也不能绕过 unknown-submission 防重。供应商价格与实际收费由

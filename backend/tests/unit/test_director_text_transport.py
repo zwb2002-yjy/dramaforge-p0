@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 Handler = Callable[[httpx.Request], Awaitable[httpx.Response]]
 MODEL_ID = "litellm/controlled-storyboard"
+pytestmark = pytest.mark.usefixtures("configured_director_runtime")
 
 
 @pytest.mark.asyncio
@@ -204,6 +205,54 @@ def _valid_candidate(request: httpx.Request) -> dict[str, object]:
         "suggested_director_state": shot["director_state"],
         "change_summary": f"针对当前镜头调整：{visual}",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entrypoint", ["suggestion", "recommendation"])
+async def test_missing_checkpoint_rejects_before_text_call_or_turn_write(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    entrypoint: str,
+) -> None:
+    from app.config import clear_settings_cache
+
+    user, project, scene, shot, _ = await _seed(session)
+    monkeypatch.setenv("DIRECTOR_CHECKPOINT_DATABASE_URL", "")
+    clear_settings_cache()
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        candidate = _valid_candidate(request) if entrypoint == "suggestion" else {
+            "base_shot_version": shot.version, "scope": "shot", "category": "CAMERA_MOTION",
+            "current_state": "Static", "suggested_change": "Keep static", "reason": "Restraint",
+            "expected_effect": "Stillness", "risk": "Less movement", "affected_facts": [],
+            "typed_operations": [],
+        }
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": json.dumps(candidate)}}]}
+        )
+
+    transport = DirectorTextTransport(session, registry=_registry(handler))
+    with pytest.raises(ConflictError) as exc:
+        if entrypoint == "suggestion":
+            await ShotDirectorSuggestionService(session, text_transport=transport).suggest(
+                project_id=project.id,
+                actor=user,
+                request=_request(scene, shot, key="missing-checkpoint"),
+            )
+        else:
+            await DirectorRecommendationService(session, text_transport=transport).recommend(
+                project_id=project.id, actor=user,
+                request=DirectorRecommendationRequest(
+                    scene_id=scene.id, shot_id=shot.id,
+                    expected_shot_version=shot.version, request_key="missing-checkpoint",
+                ),
+            )
+    assert exc.value.details["code"] == "DIRECTOR_CHECKPOINT_NOT_CONFIGURED"
+    assert calls == []
+    assert await session.scalar(select(func.count()).select_from(DirectorTurn)) == 0
+    assert await session.scalar(select(func.count()).select_from(DirectorInvocation)) == 0
 
 
 @pytest.mark.asyncio

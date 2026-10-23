@@ -21,6 +21,7 @@ from app.access.models import User
 from app.access.projects import ProjectService
 from app.assets.models import Episode, Scene, Shot
 from app.config import get_settings
+from app.director.runtime.capabilities import require_director_runtime_available
 from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.text_transport import DirectorInvocationEvidence, DirectorTextTransport
 from app.director.turn_service import DirectorTurnService
@@ -266,6 +267,7 @@ class DirectorRecommendationService:
                     await self._transport.generate(context)
                 )
             else:
+                require_director_runtime_available(get_settings())
                 text_result = await self._text_transport.generate_structured(
                     project=project,
                     actor=actor,

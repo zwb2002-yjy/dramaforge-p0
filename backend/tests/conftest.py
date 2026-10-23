@@ -89,6 +89,15 @@ def _clear_settings() -> Iterator[None]:
 
 
 @pytest.fixture
+def configured_director_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Configure admission for text-bridge tests; no checkpoint I/O is performed."""
+    monkeypatch.setenv(
+        "DIRECTOR_CHECKPOINT_DATABASE_URL", "postgresql://checkpoint.invalid/unit-test"
+    )
+    clear_settings_cache()
+
+
+@pytest.fixture
 def client() -> Iterator[TestClient]:
     """App client with in-memory SQLite session (functional path only — not RLS)."""
     clear_settings_cache()

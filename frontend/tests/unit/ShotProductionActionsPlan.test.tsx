@@ -336,9 +336,11 @@ describe("ShotProductionActions plan preview vocabulary", () => {
     // Initial inspect query sent accept_approximations: false
     await waitFor(() => expect(screen.getByTestId("shot-preflight-drawer")).toBeInTheDocument());
     expect(requests[0].body.accept_approximations).toBe(false);
-    expect(
-      screen.getByText("1111111111111111111111111111111111111111111111111111111111111111"),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByText("1111111111111111111111111111111111111111111111111111111111111111"),
+      ).toBeInTheDocument(),
+    );
 
     // Check approximation acceptance box
     const checkbox = screen.getByTestId("accept-approximations-checkbox");

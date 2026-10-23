@@ -10,6 +10,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict
 
 from app.config import Settings
+from app.shared.errors import ConflictError
 
 DIRECTOR_BLOCKER_CHECKPOINT_NOT_CONFIGURED = "DIRECTOR_CHECKPOINT_NOT_CONFIGURED"
 
@@ -57,8 +58,22 @@ def build_director_capabilities(settings: Settings) -> DirectorCapabilitiesRead:
     )
 
 
+def require_director_runtime_available(settings: Settings) -> None:
+    """Reject an unavailable runtime before creating turns or calling text models."""
+    capabilities = build_director_capabilities(settings)
+    if not capabilities.runtime_turns_available:
+        raise ConflictError(
+            capabilities.blocker_message or "Director runtime is unavailable",
+            details={
+                "code": capabilities.blocker_code or "DIRECTOR_RUNTIME_UNAVAILABLE",
+                "manual_ok": capabilities.manual_production_available,
+            },
+        )
+
+
 __all__ = [
     "DIRECTOR_BLOCKER_CHECKPOINT_NOT_CONFIGURED",
     "DirectorCapabilitiesRead",
     "build_director_capabilities",
+    "require_director_runtime_available",
 ]

@@ -35,6 +35,7 @@ from app.config import get_settings
 from app.director.assistant_models import DirectorThread
 from app.director.proposal_creation import ProposalItemDraft, create_proposal
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
+from app.director.runtime.capabilities import require_director_runtime_available
 from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.text_transport import DirectorInvocationEvidence, DirectorTextTransport
 from app.director.turn_models import DirectorTurn
@@ -442,6 +443,7 @@ class EditingDirectorSuggestionService:
                     await self._transport.generate(context)
                 )
             else:
+                require_director_runtime_available(get_settings())
                 text_result = await self._text_transport.generate_structured(
                     project=project,
                     actor=actor,

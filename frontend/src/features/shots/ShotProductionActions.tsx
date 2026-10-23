@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button, Disclosure, ExternalLink, Field, Select } from "../../components/ui";
 
@@ -403,10 +403,52 @@ export function ShotProductionActions({
       setDisplayedPlan(plan);
     },
   });
-  useEffect(() => {
+  // Compare saved input values, so equivalent query refreshes and parent
+  // renders keep the confirmation open while changed execution facts expire it.
+  const referenceKey = JSON.stringify(references);
+  const bindingScopeKey = (Array.isArray(savedBindings.data) ? savedBindings.data : [])
+    .map((binding) => `${binding.id}:${binding.stage}`)
+    .sort()
+    .join("|");
+  const modelResolutionKey = Array.isArray(modelPreflight.data?.stages)
+    ? JSON.stringify(
+        modelPreflight.data.stages
+          .map((stage) => ({
+            stage: stage.stage,
+            ready: stage.ready,
+            source: stage.source,
+            requested_model_id: stage.requested_model_id,
+            resolved_model_id: stage.resolved_model_id,
+            provider_model_binding_id: stage.provider_model_binding_id,
+            model_revision: stage.model_revision,
+            reason: stage.reason,
+          }))
+          .sort((left, right) => left.stage.localeCompare(right.stage)),
+      )
+    : null;
+  const previousModelResolutionKey = useRef<string | null>(null);
+  const invalidatePreflight = useCallback(() => {
     preflightSequence.current += 1;
     setDisplayedPlan(null);
-  }, [shot.version, dirty, references, videoMode]);
+    setPendingApproximation(null);
+    setApproximationsAccepted(false);
+  }, []);
+  useEffect(invalidatePreflight, [
+    invalidatePreflight,
+    shot.version,
+    dirty,
+    referenceKey,
+    videoMode,
+    bindingScopeKey,
+  ]);
+  useEffect(() => {
+    if (modelResolutionKey === null) return;
+    const previous = previousModelResolutionKey.current;
+    previousModelResolutionKey.current = modelResolutionKey;
+    // The first read establishes the model baseline. It must not discard an
+    // inspection already in flight while that initial read was loading.
+    if (previous !== null && previous !== modelResolutionKey) invalidatePreflight();
+  }, [invalidatePreflight, modelResolutionKey]);
 
   async function refreshAfterExecution(result: ShotExecutionRead): Promise<void> {
     await Promise.all([

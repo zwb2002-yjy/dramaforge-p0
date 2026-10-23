@@ -141,6 +141,7 @@ async def test_batch_preview_fingerprint_binds_compiler_proof(
         visual_description="test",
     )
     project = SimpleNamespace(id=project_id)
+    monkeypatch.setattr(batch, "list_formal_candidates", AsyncMock(return_value={}))
 
     async def run_preview(proof: str | None) -> tuple[batch.BatchProductionPreviewRead, object]:
         session = AsyncMock()
@@ -235,6 +236,6 @@ async def test_batch_authorization_replay_is_safe(
         with pytest.raises(ConflictError) as exc:
             await batch.dispatch_batch_production(project_id, body, actor, session)
         assert exc.value.details["code"] == "BATCH_PREVIEW_ALREADY_AUTHORIZED"
-        prepare.assert_awaited_once()
+        prepare.assert_not_awaited()
     profile_lock.assert_awaited_once()
     session.commit.assert_not_awaited()

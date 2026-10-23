@@ -1,6 +1,6 @@
 import { selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ShotProductionActions } from "../../src/features/shots/ShotProductionActions";
@@ -141,10 +141,12 @@ function renderActions(
   onDirectorDelegated?: () => void,
   referencesReady = true,
   formalKeyframeId: string | null = null,
+  savedBindings: unknown[] = [],
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
   });
+  queryClient.setQueryData(queryKeys.asset.shotReferences(SHOT.project_id, SHOT.id), savedBindings);
   queryClient.setQueryData(queryKeys.model.executionPreflight(SHOT.project_id), {
     project_id: SHOT.project_id,
     ready: true,
@@ -173,7 +175,7 @@ function renderActions(
       },
     ],
   });
-  render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <ShotProductionActions
         projectId={SHOT.project_id}
@@ -185,12 +187,18 @@ function renderActions(
       />
     </QueryClientProvider>,
   );
+  return { queryClient, ...view };
 }
 
 async function confirmCurrentPreflight(): Promise<void> {
   const confirm = await screen.findByTestId("confirm-generate-button");
   await waitFor(() => expect(confirm).toBeEnabled());
   fireEvent.click(confirm);
+}
+
+async function confirmPreviewReady(): Promise<void> {
+  await waitFor(() => expect(screen.getByTestId("confirm-generate-button")).toBeEnabled());
+  expect(screen.getByTestId("preflight-wire-fingerprint")).toBeInTheDocument();
 }
 
 describe("ShotProductionActions", () => {
@@ -338,6 +346,159 @@ describe("ShotProductionActions", () => {
     const plan = calls.find((call) => call.url.endsWith("/execution-plan"));
     expect(plan?.body.mode_id).toBe(mode);
     expect(plan?.body.references).toEqual([lastFrame]);
+  });
+
+  it("invalidates preflight when a saved binding's stage scope changes", async () => {
+    // N-09 (joint review): a binding refresh changes which references a plan
+    // carries; the displayed plan must be invalidated instead of surviving
+    // with a stale projection. The server re-verifies the fingerprint, this
+    // is about not offering a stale confirmation view.
+    const fetched: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      fetched.push(url);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) return json(planResponse());
+      return json({});
+    });
+    const reference: ShotExecutionReference = {
+      binding_id: "binding-1",
+      purpose: "identity",
+      asset_version_id: "version-1",
+      artifact_id: "artifact-1",
+      resolution_mode: "current_formal",
+      mime_type: "image/png",
+      fingerprint: "hash-1",
+    };
+    // Seed the saved bindings the way a completed fetch would (stage scope
+    // "both" keeps the reference in the image plan).
+    const bindingRow = {
+      id: "binding-1",
+      stage: "both",
+      purpose: "identity",
+      asset_id: "asset-1",
+      asset_version_id: "version-1",
+      artifact_id: "artifact-1",
+      resolution_mode: "current_formal",
+      label: "角色",
+      sort_order: 0,
+    };
+    const { queryClient } = renderActions([reference], [], undefined, true, null, [bindingRow]);
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await waitFor(() => expect(fetched.some((url) => url.endsWith("/execution-plan"))).toBe(true));
+    await waitFor(() =>
+      expect(screen.getByTestId("preflight-wire-fingerprint")).toBeInTheDocument(),
+    );
+
+    // Semantically identical binding data (new array identity, same scope):
+    // the drawer must stay open.
+    queryClient.setQueryData(queryKeys.asset.shotReferences(SHOT.project_id, SHOT.id), [
+      { ...bindingRow },
+    ]);
+    await waitFor(() =>
+      expect(screen.getByTestId("preflight-wire-fingerprint")).toBeInTheDocument(),
+    );
+
+    // The binding scope now excludes the image stage: the displayed plan is
+    // invalidated with the binding semantics.
+    queryClient.setQueryData(queryKeys.asset.shotReferences(SHOT.project_id, SHOT.id), [
+      { ...bindingRow, stage: "video" },
+    ]);
+    await waitFor(() =>
+      expect(screen.queryByTestId("preflight-wire-fingerprint")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("confirm-generate-button")).toBeDisabled();
+    expect(fetched.some((url) => url.endsWith("/executions"))).toBe(false);
+  });
+
+  it.each([
+    { provider_model_binding_id: "new-binding" },
+    { resolved_model_id: "other/image-model" },
+    { model_revision: "v3" },
+    { ready: false, reason: "MODEL_BINDING_MISSING" },
+  ])("invalidates preflight after model resolution changes: %j", async (change) => {
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith("/execution-plan")) return json(planResponse());
+      return json({});
+    });
+    const { queryClient } = renderActions();
+    fireEvent.click(screen.getByTestId("generate-keyframe"));
+    await confirmPreviewReady();
+    const key = queryKeys.model.executionPreflight(SHOT.project_id);
+    const current = queryClient.getQueryData<{ stages: Array<Record<string, unknown>> }>(key)!;
+    await act(async () => {
+      queryClient.setQueryData(key, {
+        ...current,
+        stages: current.stages.map((stage) => ({
+          ...stage,
+          contract_display_name: "Updated display name",
+        })),
+      });
+    });
+    expect(screen.getByTestId("confirm-generate-button")).toBeEnabled();
+    await act(async () => {
+      queryClient.setQueryData(key, {
+        ...current,
+        stages: current.stages.map((stage) =>
+          stage.stage === "image_keyframe" ? { ...stage, ...change } : stage,
+        ),
+      });
+    });
+    await waitFor(() => expect(screen.getByTestId("confirm-generate-button")).toBeDisabled());
+    expect(screen.queryByTestId("preflight-wire-fingerprint")).not.toBeInTheDocument();
+    expect(calls.some((url) => url.endsWith("/executions"))).toBe(false);
+    fireEvent.click(screen.getByTestId("inspect-shot-plan"));
+    await confirmPreviewReady();
+    expect(calls.filter((url) => url.endsWith("/execution-plan"))).toHaveLength(2);
+  });
+
+  it("keeps preflight for equivalent reference props after a parent render", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) =>
+      json(String(input).endsWith("/execution-plan") ? planResponse() : {}),
+    );
+    const { queryClient, rerender } = renderActions();
+    fireEvent.click(screen.getByTestId("generate-keyframe"));
+    await confirmPreviewReady();
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ShotProductionActions projectId={SHOT.project_id} shot={{ ...SHOT }} references={[]} />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByTestId("confirm-generate-button")).toBeEnabled();
+  });
+
+  it("discards a pending preflight response after a model change", async () => {
+    let resolvePreview!: (response: Response) => void;
+    const pendingPreview = new Promise<Response>((resolve) => {
+      resolvePreview = resolve;
+    });
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      calls.push(url);
+      return url.endsWith("/execution-plan") ? pendingPreview : json({});
+    });
+    const { queryClient } = renderActions();
+    fireEvent.click(screen.getByTestId("inspect-shot-plan"));
+    await waitFor(() => expect(calls.some((url) => url.endsWith("/execution-plan"))).toBe(true));
+    const key = queryKeys.model.executionPreflight(SHOT.project_id);
+    const current = queryClient.getQueryData<{ stages: Array<Record<string, unknown>> }>(key)!;
+    await act(async () => {
+      queryClient.setQueryData(key, {
+        ...current,
+        stages: current.stages.map((stage) => ({ ...stage, model_revision: "updated" })),
+      });
+    });
+    await act(async () => {
+      resolvePreview(await json(planResponse()));
+    });
+    await waitFor(() => expect(screen.getByTestId("inspect-shot-plan")).toBeEnabled());
+    expect(screen.getByTestId("confirm-generate-button")).toBeDisabled();
+    expect(screen.queryByTestId("preflight-wire-fingerprint")).not.toBeInTheDocument();
+    expect(calls.some((url) => url.endsWith("/executions"))).toBe(false);
   });
 
   it("delegates one exact frozen plan to the Director runtime", async () => {

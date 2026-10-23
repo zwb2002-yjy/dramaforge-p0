@@ -32,6 +32,7 @@ from app.access.projects import ProjectService
 from app.assets.models import Scene, Shot
 from app.assets.schemas import ShotDirectorState
 from app.config import get_settings
+from app.director.runtime.capabilities import require_director_runtime_available
 from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.text_transport import DirectorInvocationEvidence, DirectorTextTransport
 from app.providers.model_profiles.slots import ModelSlot
@@ -295,6 +296,7 @@ class ShotDirectorSuggestionService:
                 scene = await self._session.get(Scene, shot.scene_id)
                 if scene is None:
                     raise NotFoundError("scene not found")
+                require_director_runtime_available(get_settings())
                 text_result = await self._text_transport.generate_structured(
                     project=project,
                     actor=actor,

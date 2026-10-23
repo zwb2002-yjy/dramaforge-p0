@@ -199,7 +199,8 @@ function BatchFillDialog({
       )}
 
       <p className="df-batch-footnote">
-        只生成缺少的{copy.noun}，已有正式版本不会被替换。费用由供应商账户结算。
+        只生成缺少的{copy.noun}
+        ，已有候选先审片或选为正式版本，已有正式版本不会被替换。费用由供应商账户结算。
       </p>
       {stale && (
         <p role="status" className="df-batch-note">

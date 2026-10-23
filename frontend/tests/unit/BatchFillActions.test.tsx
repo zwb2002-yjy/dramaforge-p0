@@ -88,6 +88,8 @@ describe("BatchFillActions", () => {
                 item(3, "skipped", "ALREADY_FORMAL"),
                 item(4, "skipped", "STAGE_ALREADY_ACTIVE"),
                 item(5, "blocked", "MODEL_BINDING_MISSING"),
+                item(6, "skipped", "CANDIDATE_AWAITING_REVIEW"),
+                item(7, "skipped", "CANDIDATE_AWAITING_FORMAL"),
               ])
             : preview(stage, [item(1, "skipped", "ALREADY_FORMAL")]),
         );
@@ -114,6 +116,8 @@ describe("BatchFillActions", () => {
     await waitFor(() => expect(dialog).toBeVisible());
     expect(within(dialog).getByText("已有正式版本")).toBeVisible();
     expect(within(dialog).getByText("正在生成")).toBeVisible();
+    expect(within(dialog).getByText("已有候选，待审片")).toBeVisible();
+    expect(within(dialog).getByText("审片已通过，待选正式版本")).toBeVisible();
     expect(within(dialog).getByText("未选择模型")).toBeVisible();
     expect(within(dialog).getByRole("link", { name: "镜头 5" })).toBeVisible();
     expect(within(dialog).getByRole("link", { name: "去设置模型" })).toBeVisible();

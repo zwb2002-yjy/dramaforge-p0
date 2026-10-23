@@ -134,7 +134,7 @@ async def _make_keyframe_artifact(
     artifact = Artifact(
         project_id=project.id,
         artifact_type=artifact_type or ("video" if node_type == "video" else "image"),
-        storage_state="stored",
+        storage_state="available",
         object_key=f"obj/{uuid4().hex}",
         content_hash=uuid4().hex * 2,
         mime_type="image/png",

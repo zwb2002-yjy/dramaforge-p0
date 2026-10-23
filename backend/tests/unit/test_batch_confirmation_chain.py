@@ -109,14 +109,10 @@ def _seed_project(
             project = await session.get(Project, UUID(project_id))
             assert project is not None
             owner = (
-                await session.execute(
-                    select(User).order_by(User.created_at.desc()).limit(1)
-                )
+                await session.execute(select(User).order_by(User.created_at.desc()).limit(1))
             ).scalar_one()
             await seed_model_infra(session, project=project, user=owner)
-            episode = Episode(
-                project_id=project.id, episode_number=1, title="E1", synopsis=""
-            )
+            episode = Episode(project_id=project.id, episode_number=1, title="E1", synopsis="")
             session.add(episode)
             await session.flush()
             scene = Scene(
@@ -203,16 +199,8 @@ def test_batch_confirmation_chain_end_to_end(
             runs = list((await session.scalars(select(NodeRun))).all())
             ops = list((await session.scalars(select(ProviderOperation))).all())
             return {
-                "batch_runs": [
-                    run
-                    for run in runs
-                    if "batch:" in (run.idempotency_key or "")
-                ],
-                "other_runs": [
-                    run
-                    for run in runs
-                    if "batch:" not in (run.idempotency_key or "")
-                ],
+                "batch_runs": [run for run in runs if "batch:" in (run.idempotency_key or "")],
+                "other_runs": [run for run in runs if "batch:" not in (run.idempotency_key or "")],
                 "ops": ops,
             }
 
@@ -292,9 +280,7 @@ def test_batch_dispatch_rejects_missing_compiler_proof(
     assert data["ready_count"] == 0
     assert data["blocked_count"] == 1
     assert data["items"][0]["disposition"] == "blocked"
-    assert (
-        data["items"][0]["reason"] == "COMPILER_WIRE_CONFIRMATION_REQUIRED"
-    )
+    assert data["items"][0]["reason"] == "COMPILER_WIRE_CONFIRMATION_REQUIRED"
 
 
 def test_batch_dispatch_rejects_forged_max_provider_calls(
@@ -321,9 +307,7 @@ def test_batch_dispatch_rejects_forged_max_provider_calls(
         json=body,
     )
     assert dispatch.status_code == 422, dispatch.text
-    assert (
-        dispatch.json()["details"]["code"] == "BATCH_CALL_LIMIT_EXCEEDED"
-    )
+    assert dispatch.json()["details"]["code"] == "BATCH_CALL_LIMIT_EXCEEDED"
 
     async def _runs() -> list[Any]:
         from app.execution.models import NodeRun
@@ -410,3 +394,73 @@ def test_batch_preview_recomputes_after_shot_change(
     )
     assert stale.status_code == 409, stale.text
     assert stale.json()["details"]["code"] == "BATCH_PREVIEW_STALE"
+
+
+def test_batch_fill_skips_candidates_formal_and_active_shots(batch_api) -> None:
+    """V4: fill creates only missing candidates and never bypasses review."""
+    from app.access.models import Project, User
+    from app.assets.models import Shot
+    from app.execution.models import NodeRun, ProviderOperation
+    from tests.unit.test_formal_selection import _make_keyframe_artifact
+
+    client, factory = batch_api
+    workspace_id = _register(client)
+    project_id, _ = _seed_project(client, factory, workspace_id, shots=4)
+    path = f"/api/v1/projects/{project_id}/batch-production"
+    before = client.get(f"{path}/preview", params={"stage": "image_keyframe"}).json()
+    assert before["ready_count"] == 4
+
+    async def seed_states():
+        async with factory() as session:
+            project = await session.get(Project, UUID(project_id))
+            owner = await session.scalar(select(User))
+            shots = list((await session.scalars(select(Shot).order_by(Shot.shot_number))).all())
+            for index in range(3):
+                artifact = await _make_keyframe_artifact(
+                    session,
+                    project=project,
+                    shot_id=shots[index].id,
+                    user=owner,
+                    run_status="running" if index == 2 else "completed",
+                )
+                if index == 1:
+                    shots[index].formal_keyframe_artifact_id = artifact.id
+                if index == 2:
+                    run = await session.get(NodeRun, artifact.produced_by_run_id)
+                    run.input_snapshot = {**run.input_snapshot, "node_key": "keyframe"}
+            await session.commit()
+            return [str(shot.id) for shot in shots]
+
+    shot_ids = asyncio.run(seed_states())
+    preview_response = client.get(f"{path}/preview", params={"stage": "image_keyframe"})
+    assert preview_response.status_code == 200, preview_response.text
+    preview = preview_response.json()
+    assert (preview["ready_count"], preview["skipped_count"], preview["blocked_count"]) == (1, 3, 0)
+    items = {item["shot_id"]: item for item in preview["items"]}
+    assert items[shot_ids[0]]["reason"] == "CANDIDATE_AWAITING_REVIEW"
+    assert items[shot_ids[1]]["reason"] == "ALREADY_FORMAL"
+    assert items[shot_ids[2]]["reason"] == "STAGE_ALREADY_ACTIVE"
+    assert items[shot_ids[3]]["disposition"] == "ready"
+    todos = client.get(f"/api/v1/projects/{project_id}/production-todos").json()
+    assert todos["counts"]["awaiting_review"] == 1
+    assert todos["counts"]["generating"] == 1
+    stale = client.post(
+        path, headers={CSRF_HEADER: _csrf(client)}, json=_batch_dispatch_body(before)
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["details"]["code"] == "BATCH_PREVIEW_STALE"
+    dispatched = client.post(
+        path, headers={CSRF_HEADER: _csrf(client)}, json=_batch_dispatch_body(preview)
+    )
+    assert dispatched.status_code == 200, dispatched.text
+    assert dispatched.json()["accepted_count"] == 1
+
+    async def assert_no_paid_operations():
+        async with factory() as session:
+            assert list((await session.scalars(select(ProviderOperation))).all()) == []
+            runs = list((await session.scalars(select(NodeRun))).all())
+            batch_runs = [run for run in runs if run.input_snapshot.get("paid_authorization")]
+            assert len(batch_runs) == 1
+            assert batch_runs[0].input_snapshot["shot_id"] == shot_ids[3]
+
+    asyncio.run(assert_no_paid_operations())

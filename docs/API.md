@@ -146,7 +146,8 @@ validated server-side; a disabled button is never the only guard.
 blocked by the Formal gate and never aliases `approved`.
 
 `GET …/batch-production/preview` is side-effect free. It classifies every Shot in scope as
-`ready`, `skipped` (`ALREADY_FORMAL`, `STAGE_ALREADY_ACTIVE`, `FORMAL_KEYFRAME_REQUIRED`) or
+`ready`, `skipped` (`ALREADY_FORMAL`, `STAGE_ALREADY_ACTIVE`, `CANDIDATE_AWAITING_REVIEW`,
+`CANDIDATE_AWAITING_FORMAL`, `FORMAL_KEYFRAME_REQUIRED`) or
 `blocked` (preflight / resolver code) and returns `ready_count`, `skipped_count` and
 `blocked_count`. `POST …/batch-production` requires the exact preview fingerprint,
 `max_provider_calls` (1–500, at least the ready count) and `owner_authorized=true`; it dispatches

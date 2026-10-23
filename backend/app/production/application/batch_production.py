@@ -46,7 +46,8 @@ class BatchPreviewItemRead(BaseModel):
     shot_number: int
     disposition: BatchDisposition
     # ``None`` only for ready items. Skipped reasons are fixed codes
-    # (ALREADY_FORMAL, STAGE_ALREADY_ACTIVE, FORMAL_KEYFRAME_REQUIRED);
+    # (ALREADY_FORMAL, STAGE_ALREADY_ACTIVE, CANDIDATE_AWAITING_REVIEW,
+    # CANDIDATE_AWAITING_FORMAL, FORMAL_KEYFRAME_REQUIRED);
     # blocked reasons carry the preflight / resolver error code.
     reason: str | None = None
     plan_fingerprint: str | None = None
@@ -197,6 +198,9 @@ async def _prepare(
         for row in active_rows
         if str((row.input_snapshot or {}).get("node_key") or "") == node_key
     }
+    candidates = await list_formal_candidates(
+        session, project_id=project.id, shot_ids=[shot.id for shot in shots]
+    )
     service = WorkbenchExecutionService(session, user_id=user_id)
     prepared: dict[UUID, tuple[WorkbenchExecutionInput, WorkbenchExecutionPlan, str]] = {}
     items: list[BatchPreviewItemRead] = []
@@ -214,7 +218,7 @@ async def _prepare(
 
     for shot in shots:
         # "补齐" only fills gaps: shots that already have the stage's formal
-        # output, or an in-flight run for it, are skipped, never regenerated.
+        # output, a successful candidate, or an in-flight run are skipped.
         already_formal = (
             shot.formal_keyframe_artifact_id is not None
             if stage == "image_keyframe"
@@ -225,6 +229,19 @@ async def _prepare(
             continue
         if str(shot.id) in active_shots:
             not_ready(shot, "skipped", "STAGE_ALREADY_ACTIVE")
+            continue
+        stage_candidates = [
+            candidate
+            for candidate in candidates.get(shot.id, [])
+            if candidate.get("stage") == stage
+        ]
+        if stage_candidates:
+            reason = (
+                "CANDIDATE_AWAITING_FORMAL"
+                if any(candidate.get("review_allowed") is True for candidate in stage_candidates)
+                else "CANDIDATE_AWAITING_REVIEW"
+            )
+            not_ready(shot, "skipped", reason)
             continue
         if stage == "video" and shot.formal_keyframe_artifact_id is None:
             not_ready(shot, "skipped", "FORMAL_KEYFRAME_REQUIRED")
@@ -575,7 +592,10 @@ async def dispatch_batch_production(
         project_id=project.id,
     )
     prior = await _recorded_batch_runs(
-        session, project_id=project.id, field="batch_key", value=body.batch_key,
+        session,
+        project_id=project.id,
+        field="batch_key",
+        value=body.batch_key,
     )
     if prior:
         frozen = [(run.input_snapshot or {}).get("paid_authorization") for run in prior]
@@ -607,6 +627,21 @@ async def dispatch_batch_production(
             statuses=[run.status for run in prior],
         )
 
+    # Check the frozen confirmation before recomputing: the winning dispatch
+    # changes shot state, so a competing key must report an already-consumed
+    # confirmation rather than letting that state change hide the journal.
+    already_accepted = await _recorded_batch_runs(
+        session,
+        project_id=project.id,
+        field="preview_fingerprint",
+        value=body.preview_fingerprint,
+    )
+    if already_accepted:
+        raise ConflictError(
+            "this batch preview has already been authorized",
+            details={"code": "BATCH_PREVIEW_ALREADY_AUTHORIZED"},
+        )
+
     preview, prepared = await _prepare(
         session,
         project=project,
@@ -629,19 +664,6 @@ async def dispatch_batch_production(
                 "required_calls": len(prepared),
                 "max_provider_calls": body.max_provider_calls,
             },
-        )
-    # The same frozen preview is one confirmation, even if an API client
-    # changes batch_key. Reauthorization requires a genuinely new preview.
-    already_accepted = await _recorded_batch_runs(
-        session,
-        project_id=project.id,
-        field="preview_fingerprint",
-        value=preview.fingerprint,
-    )
-    if already_accepted:
-        raise ConflictError(
-            "this batch preview has already been authorized",
-            details={"code": "BATCH_PREVIEW_ALREADY_AUTHORIZED"},
         )
     commands = ProductionCommands(session)
     run_ids: list[UUID] = []

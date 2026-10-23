@@ -12,7 +12,7 @@ from app.config import Settings
 from app.contracts.director_runtime import RuntimeInput, RuntimeScope
 from app.director.assistant_models import DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
-from app.director.runtime.capabilities import build_director_capabilities
+from app.director.runtime.capabilities import require_director_runtime_available
 from app.director.runtime.control import DirectorRuntimeControlService
 from app.director.runtime.models import DirectorRuntimeWakeup
 from app.director.runtime.routing import DirectorEngineRouter
@@ -28,17 +28,6 @@ class DirectorRuntimeStartService:
         self._session = session
         self._settings = settings
 
-    def _require_runtime_available(self) -> None:
-        capabilities = build_director_capabilities(self._settings)
-        if not capabilities.runtime_turns_available:
-            raise ConflictError(
-                capabilities.blocker_message or "Director runtime is unavailable",
-                details={
-                    "code": capabilities.blocker_code or "DIRECTOR_RUNTIME_UNAVAILABLE",
-                    "manual_ok": capabilities.manual_production_available,
-                },
-            )
-
     async def accept(
         self,
         *,
@@ -49,7 +38,7 @@ class DirectorRuntimeStartService:
         request_key: str,
         max_steps: int,
     ) -> tuple[DirectorTurn, DirectorRuntimeWakeup]:
-        self._require_runtime_available()
+        require_director_runtime_available(self._settings)
         result = await self._session.execute(
             select(DirectorProposal, DirectorThread)
             .join(DirectorThread, DirectorThread.id == DirectorProposal.thread_id)
@@ -162,7 +151,7 @@ class DirectorRuntimeStartService:
     ) -> DirectorRuntimeWakeup | None:
         """Bind or replay an exact durable Turn; unbound old Turns are rejected."""
 
-        self._require_runtime_available()
+        require_director_runtime_available(self._settings)
         if turn.project_id != project.id or turn.actor_id != actor.id:
             raise NotFoundError("Director turn not found")
         proposal = await self._session.scalar(
@@ -225,7 +214,7 @@ class DirectorRuntimeStartService:
     ) -> DirectorRuntimeWakeup | None:
         """Bind a newly generated draft-only suggestion without inventing a Proposal row."""
 
-        self._require_runtime_available()
+        require_director_runtime_available(self._settings)
         if turn.project_id != project.id or turn.actor_id != actor.id:
             raise NotFoundError("Director turn not found")
         task = (turn.request_summary or {}).get("task")
