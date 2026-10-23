@@ -129,6 +129,8 @@ type ProposalTreeProjection = {
   unmappedOps: StoryProposalOperation[];
 };
 
+const EMPTY_PROPOSAL_OPERATIONS: StoryProposalOperation[] = [];
+
 function buildProposalTree(operations: StoryProposalOperation[]): ProposalTreeProjection {
   const documentOps: StoryProposalOperation[] = [];
   const deleteOps: StoryProposalOperation[] = [];
@@ -422,7 +424,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
     onError: (error: Error) => setApplyError(error.message),
   });
 
-  const proposalOperations = activeProposal?.operations ?? [];
+  const proposalOperations = activeProposal?.operations ?? EMPTY_PROPOSAL_OPERATIONS;
   const normalizedFilename = filename.trim() || "story-draft.md";
   const currentDraftAlreadyProposed = Boolean(
     proposedDraft &&

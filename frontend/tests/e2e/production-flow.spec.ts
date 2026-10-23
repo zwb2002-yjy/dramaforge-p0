@@ -204,7 +204,15 @@ test("a flow handoff generates one mock candidate only after explicit submission
     );
   expect(executions()).toHaveLength(0);
   await page.getByRole("button", { name: "生成画面", exact: true }).click();
+  const drawer = page.getByTestId("shot-preflight-drawer");
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByTestId("preflight-wire-fingerprint")).toHaveText(/^[0-9a-f]{64}$/);
+  expect(executions()).toHaveLength(0);
+  await drawer.getByTestId("confirm-generate-button").click();
   await expect.poll(() => executions().length).toBe(1);
+  expect(executions()[0].body).toMatchObject({
+    compiler_wire_fingerprint: "b".repeat(64),
+  });
   await expect.poll(() => state.candidates.length).toBe(1);
   expect(executions()[0].body).toMatchObject({
     expected_shot_version: state.shotVersion,

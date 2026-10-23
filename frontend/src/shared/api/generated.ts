@@ -3402,6 +3402,12 @@ export interface components {
             effective_options?: {
                 [key: string]: components["schemas"]["JsonValue"];
             };
+            /** Wire Fingerprint */
+            wire_fingerprint?: string | null;
+            /** Redacted Wire */
+            redacted_wire?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
             /** Transformations */
             transformations?: string[];
             /** Errors */
@@ -4360,6 +4366,8 @@ export interface components {
             expected_shot_version: number;
             /** Plan Fingerprint */
             plan_fingerprint: string;
+            /** Compiler Wire Fingerprint */
+            compiler_wire_fingerprint?: string | null;
             /** Accepted Approximations */
             accepted_approximations?: string[];
         };
@@ -4482,6 +4490,7 @@ export interface components {
             plan: components["schemas"]["WorkbenchExecutionPlan"];
             /** Plan Fingerprint */
             plan_fingerprint: string;
+            compiler_contract_preview?: components["schemas"]["CompilePreview"] | null;
         };
         /** ExecutionRead */
         ExecutionRead: {

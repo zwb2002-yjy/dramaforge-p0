@@ -14,7 +14,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "node ./node_modules/@typescript/native/bin/tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=1 --minWorkers=1",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "api:generate": "node ../scripts/generate-openapi-types.mjs",

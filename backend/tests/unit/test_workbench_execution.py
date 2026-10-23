@@ -21,10 +21,11 @@ from app.production.workbench_execution import (
 from app.providers.capabilities import Capability
 from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.intents import VideoGenerationIntentV1
 from app.providers.models import ProviderConnection, ProviderModelBinding
 from app.shared.base import Base
 from app.shared.security import hash_password
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from tests.unit.model_infra_fixture import unit_video_manifest
 
@@ -1839,6 +1840,95 @@ async def test_generation_settings_flow_into_plan_and_node_run(
 
 
 @pytest.mark.asyncio
+async def test_generation_duration_does_not_use_timeline_duration(
+    session: AsyncSession,
+) -> None:
+    project, binding, user = await _seed(session, manifest_override=_video_manifest_with_contract())
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    shot.duration_seconds = 3
+    shot.director_state = {"generation_settings": {"video": {"request_duration_seconds": 4}}}
+    await session.flush()
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    execution_input = _input(
+        shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+    )
+    plan = await service.build_plan(project=project, execution_input=execution_input)
+    assert plan.duration_seconds == 4.0
+    assert plan.effective_options["duration_seconds"] == 4.0
+    run = await service.create_and_dispatch(project=project, execution_input=execution_input)
+    assert run.input_snapshot["duration_seconds"] == 4.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requested", [4.5, 6, 0, -1, "NaN", "invalid"])
+async def test_invalid_generation_duration_is_rejected_before_dispatch(
+    session: AsyncSession,
+    requested: object,
+) -> None:
+    project, binding, user = await _seed(session, manifest_override=_video_manifest_with_contract())
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    shot.director_state = {
+        "generation_settings": {"video": {"request_duration_seconds": requested}}
+    }
+    await session.flush()
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    with pytest.raises(WorkbenchExecutionError) as exc:
+        await service.build_plan(
+            project=project,
+            execution_input=_input(
+                shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+            ),
+        )
+    assert exc.value.details["code"] == "MODEL_DURATION_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
+async def test_integer_duration_manifest_accepts_whole_seconds(
+    session: AsyncSession,
+) -> None:
+    manifest = _video_manifest_with_contract()
+    duration = manifest["operations"]["video.generate"]["input_contracts"]["image_to_video"][
+        "common_options"
+    ]["duration_seconds"]
+    duration.update({"type": "integer", "enum": [4, 5]})
+    project, binding, user = await _seed(session, manifest_override=manifest)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    shot.director_state = {"generation_settings": {"video": {"request_duration_seconds": 4}}}
+    await session.flush()
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    execution_input = _input(
+        shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+    )
+    plan = await service.build_plan(project=project, execution_input=execution_input)
+    assert plan.duration_seconds == 4
+    assert plan.effective_options["duration_seconds"] == 4
+    run = await service.create_and_dispatch(project=project, execution_input=execution_input)
+    assert run.input_snapshot["duration_seconds"] == 4
+
+
+@pytest.mark.asyncio
+async def test_implicit_duration_default_must_match_model_contract(
+    session: AsyncSession,
+) -> None:
+    manifest = _video_manifest_with_contract()
+    duration = manifest["operations"]["video.generate"]["input_contracts"]["image_to_video"][
+        "common_options"
+    ]["duration_seconds"]
+    duration.update({"type": "integer", "enum": [4, 6]})
+    project, binding, user = await _seed(session, manifest_override=manifest)
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    with pytest.raises(WorkbenchExecutionError) as exc:
+        await service.build_plan(
+            project=project,
+            execution_input=_input(
+                shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+            ),
+        )
+    assert exc.value.details["code"] == "MODEL_DURATION_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
 async def test_undeclared_options_rejected_by_preflight(
     session: AsyncSession,
 ) -> None:
@@ -1974,3 +2064,62 @@ async def test_prompt_override_contract_constraints(
     with pytest.raises(WorkbenchExecutionError) as exc_info2:
         await service.build_plan(project=project, execution_input=execution_input)
     assert exc_info2.value.details.get("code") == "PROMPT_CONTRACT_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
+async def test_compiler_contract_preview_is_side_effect_free_for_text_video(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.providers.compile_preview import CompilePreview
+
+    project, binding, user = await _seed(session, manifest_override=_video_manifest_with_contract())
+    shot, _artifact = await _seed_video_shot(session, project=project, user=user)
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(
+        project=project,
+        execution_input=_input(
+            shot_id=shot.id, requested_binding_id=binding.id, prompt=shot.video_prompt
+        ),
+    )
+    # I2V now invokes the real Compiler with normalized reference slots.
+    # A blocked model contract is distinct from a paid Provider call, and
+    # immutable Formal first-frame identity must be present in the proof.
+    assert plan.planned_references
+    assert plan.planned_references[0].fingerprint == "b" * 64
+    media_preview = await service.preview_compiler_contract(project=project, plan=plan)
+    assert media_preview is not None
+    assert media_preview.transport_verified is False
+    assert media_preview.account_verified is False
+    assert media_preview.readiness in {"contract_validated", "blocked"}
+    assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0
+
+    # A pure no-reference semantic plan uses the actual compiler preview
+    # function, never the paid provider runtime.
+    text_plan = plan.model_copy(
+        update={"mode_id": "text_to_video", "planned_references": [], "capability_gaps": []}
+    )
+    seen: list[VideoGenerationIntentV1] = []
+
+    async def fake_contract_preview(**kwargs: object) -> CompilePreview:
+        intent = kwargs["intent"]
+        assert isinstance(intent, VideoGenerationIntentV1)
+        assert kwargs["references"] == []
+        seen.append(intent)
+        return CompilePreview(
+            readiness="contract_validated",
+            prompt_hash="a" * 64,
+            semantic_hash="b" * 64,
+            manifest_hash="c" * 64,
+            reference_ids=[],
+            effective_options={"duration_seconds": 5},
+        )
+
+    monkeypatch.setattr("app.production.workbench_execution.preview_compile", fake_contract_preview)
+    preview = await service.preview_compiler_contract(project=project, plan=text_plan)
+    assert preview is not None
+    assert preview.readiness == "contract_validated"
+    assert len(seen) == 1
+    assert seen[0].mode_id == "text_to_video"
+    assert seen[0].output.duration_seconds == int(text_plan.duration_seconds)
+    assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0

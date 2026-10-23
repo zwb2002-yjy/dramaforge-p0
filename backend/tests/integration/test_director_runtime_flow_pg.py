@@ -29,7 +29,7 @@ from app.production.application.events import append_production_notice
 from app.production.command_models import ProductionCommandAuthorization
 from app.production.workbench_execution import WorkbenchExecutionService
 from app.shared.db import set_rls_context
-from app.shared.errors import ConflictError
+from app.shared.errors import ConflictError, ValidationAppError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from test_director_turn_lifecycle_pg import (
@@ -570,15 +570,18 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
                 requested_binding_id=binding.id,
                 expected_shot_version=shot.version,
             )
-            plan = await WorkbenchExecutionService(
-                session,
-                user_id=actor.id,
-            ).build_plan(project=project, execution_input=execution_input)
+            service = WorkbenchExecutionService(session, user_id=actor.id)
+            plan = await service.build_plan(project=project, execution_input=execution_input)
+            compiler_proof = await service.preview_compiler_contract(project=project, plan=plan)
+            assert compiler_proof is not None
+            assert compiler_proof.readiness == "contract_validated"
+            assert compiler_proof.wire_fingerprint is not None
             body = ExecutionBody(
                 **execution_input.model_dump(
                     exclude={"project_id", "shot_id", "experiment_branch_id"},
                 ),
                 plan_fingerprint=plan.plan_fingerprint,
+                compiler_wire_fingerprint=compiler_proof.wire_fingerprint,
                 accepted_approximations=plan.accepted_approximations,
             )
             decision_id = uuid4()
@@ -592,6 +595,32 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
                 authorization_expires_at=expiry,
                 max_steps=6,
             )
+            invalid_decision = uuid4()
+            with pytest.raises(ValidationAppError) as bad_wire:
+                async with session.begin_nested():
+                    await director_api.delegate_shot_execution_to_director(
+                        project_id=project.id,
+                        shot_id=shot.id,
+                        body=director_api.DirectorRuntimeDelegationBody(
+                            decision_id=invalid_decision,
+                            execution=body.model_copy(
+                                update={"compiler_wire_fingerprint": "0" * 64}
+                            ),
+                            authorization_expires_at=expiry,
+                            max_steps=6,
+                        ),
+                        user=actor,
+                        session=session,
+                        _csrf="controlled",
+                    )
+            assert bad_wire.value.details["code"] == "COMPILER_WIRE_CONFIRMATION_REQUIRED"
+            invalid_grant = await session.scalar(
+                select(ProductionCommandAuthorization.id).where(
+                    ProductionCommandAuthorization.project_id == project.id,
+                    ProductionCommandAuthorization.command_key == f"approved:{invalid_decision}",
+                )
+            )
+            assert invalid_grant is None
             accepted = await director_api.delegate_shot_execution_to_director(
                 project_id=project.id,
                 shot_id=shot.id,

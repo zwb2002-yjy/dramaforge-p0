@@ -131,15 +131,24 @@ async def test_delegation_records_existing_user_grant_without_changing_execution
     execution = ExecutionBody(
         stage="video", prompt="test", mode_id="test-mode", expected_shot_version=7,
         plan_fingerprint="a" * 64,
+        compiler_wire_fingerprint="b" * 64,
     )
     approve = AsyncMock(return_value=authorization_id)
     build_plan = AsyncMock(return_value=SimpleNamespace(
         plan_fingerprint=execution.plan_fingerprint, accepted_approximations=[],
     ))
+    compiler_preview = AsyncMock(
+        return_value=SimpleNamespace(
+            readiness="contract_validated", wire_fingerprint="b" * 64,
+        )
+    )
     receipt = (object(), object())
     start = AsyncMock(return_value=receipt)
     monkeypatch.setattr(delegation.ProductionAuthorizations, "approve_user_action", approve)
     monkeypatch.setattr(delegation.WorkbenchExecutionService, "build_plan", build_plan)
+    monkeypatch.setattr(
+        delegation.WorkbenchExecutionService, "preview_compiler_contract", compiler_preview
+    )
     monkeypatch.setattr(delegation.DirectorRuntimeStartService, "accept", start)
     commit = AsyncMock(wraps=session.commit)
     monkeypatch.setattr(session, "commit", commit)
@@ -152,6 +161,7 @@ async def test_delegation_records_existing_user_grant_without_changing_execution
     )
     assert result is receipt
     approve.assert_awaited_once()
+    compiler_preview.assert_awaited_once()
     proposal = (await session.scalars(select(DirectorProposal))).one()
     item = (await session.scalars(select(DirectorProposalItem))).one()
     assert proposal.status == "applied" and item.status == "accepted"

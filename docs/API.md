@@ -34,6 +34,22 @@ Migration authority: [DATA_MODEL.md](DATA_MODEL.md)
 `MODEL_OUTPUT_ASPECT_RATIO_UNSUPPORTED`，不会创建 NodeRun 或调用 Provider。提交继续重验同一合同，
 不通过改写比例或替换模型修复冲突。
 
+当前 `POST …/shots/{shot_id}/execution-plan` 返回冻结的语义计划、`plan_fingerprint`，
+以及可选的 `compiler_contract_preview`（`readiness`、`redacted_wire`、
+`wire_fingerprint`）。后者由实际 Provider Compiler 只读计算：
+将参考素材的传输地址/二进制内容规范化为带顺序、Artifact ID 和内容指纹的槽位，
+其余有效 wire 字段参与 SHA-256 确认指纹。无法验证的组合明确阻断，
+不读取用户凭证、不创建 NodeRun/ProviderOperation，也不调用付费 Provider。
+
+`POST …/shots/{shot_id}/executions` 接受前端明确确认的
+`compiler_wire_fingerprint`，在重建语义计划后再次使用同一 Compiler 校验。
+缺少或不匹配的确认以 `COMPILER_WIRE_CONFIRMATION_REQUIRED` 拒绝，不入队。
+确认指纹冻结在 NodeRun 中；Worker 核验真实素材的不可变哈希、
+编译真实请求后再校验脱敏结构指纹，不一致以
+`COMPILER_WIRE_FINGERPRINT_MISMATCH` 阻断付费提交。
+临时 URL/媒体字节属于晚绑定传输值，预检成功不代表真实账号、可达性或供应商传输实测通过；
+同一命令的回执/重试复用 Idempotency-Key，用户明确再次创建另用新命令身份。
+
 `DELETE /api/v1/projects/{project_id}?expected_version=N` requires Owner workspace access
 and CSRF. Stale versions and active NodeRun/Director work return 409. Success returns 204,
 hides the project from lists and denies subsequent workbench access. Historical execution,

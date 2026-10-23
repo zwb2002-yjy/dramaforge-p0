@@ -9,6 +9,28 @@ import {
   installProfessionalMock,
 } from "./professional-mocks";
 
+async function confirmPreviewedGeneration(
+  page: import("@playwright/test").Page,
+  state: Awaited<ReturnType<typeof installProfessionalMock>>,
+) {
+  const executions = () =>
+    state.editing.requests.filter(
+      (request) => request.method === "POST" && request.path.endsWith("/executions"),
+    );
+  const before = executions().length;
+  const drawer = page.getByTestId("shot-preflight-drawer");
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByTestId("preflight-wire-fingerprint")).toHaveText(/^[0-9a-f]{64}$/);
+  expect(executions()).toHaveLength(before);
+  const confirm = drawer.getByTestId("confirm-generate-button");
+  await expect(confirm).toBeEnabled();
+  await confirm.click();
+  await expect.poll(() => executions().length).toBe(before + 1);
+  expect(executions().at(-1)?.body).toMatchObject({
+    compiler_wire_fingerprint: "b".repeat(64),
+  });
+}
+
 for (const viewport of [
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
@@ -48,13 +70,7 @@ for (const viewport of [
     await selectValue(mode, "text_to_video");
     await expect(inspector.getByTestId("generate-video")).toBeEnabled();
     await inspector.getByTestId("generate-video").click();
-    await expect
-      .poll(() =>
-        state.editing.requests.some(
-          (request) => request.method === "POST" && request.path.endsWith("/executions"),
-        ),
-      )
-      .toBe(true);
+    await confirmPreviewedGeneration(page, state);
     const execution = state.editing.requests.find(
       (request) => request.method === "POST" && request.path.endsWith("/executions"),
     );
@@ -96,6 +112,7 @@ test("AUTO delegates one frozen Shot plan to the Director runtime", async ({ pag
       stage: "image_keyframe",
       expected_shot_version: 1,
       plan_fingerprint: "a".repeat(64),
+      compiler_wire_fingerprint: "b".repeat(64),
       accepted_approximations: [],
     },
   });
@@ -162,6 +179,7 @@ test("manual professional production: Scene Workbench design → candidate previ
   await expect(inspector.getByTestId("shot-production-actions")).toBeVisible();
   await expect(inspector).not.toContainText("NodeRun");
   await inspector.getByRole("button", { name: "生成画面" }).click();
+  await confirmPreviewedGeneration(page, state);
   await expect(page.getByTestId("shot-production-status")).toContainText("已排队");
   await expect.poll(() => state.candidates.length).toBe(1);
   await expect(page.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "true");
@@ -231,6 +249,7 @@ test("manual professional production: Scene Workbench design → candidate previ
   // only the already confirmed keyframe and must persist the exact candidate.
   await expect(page.getByTestId("generate-video")).toBeEnabled();
   await page.getByRole("button", { name: "生成视频", exact: true }).click();
+  await confirmPreviewedGeneration(page, state);
   await expect.poll(() => state.candidates[0]?.artifact_id).toBe("candidate-video-1");
   await expect(page.getByTestId("shot-candidate-tray")).toHaveAttribute("data-expanded", "true");
   await page.getByTestId("shot-candidate-select-candidate-video-1").click();

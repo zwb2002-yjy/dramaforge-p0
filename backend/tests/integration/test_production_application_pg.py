@@ -51,13 +51,16 @@ async def test_application_duplicate_acceptance_needs_no_director(monkeypatch):
                 requested_binding_id=binding.id,
                 expected_shot_version=shot.version,
             )
-            plan = await WorkbenchExecutionService(session, user_id=actor.id).build_plan(
-                project=project,
-                execution_input=command,
-            )
+            service = WorkbenchExecutionService(session, user_id=actor.id)
+            plan = await service.build_plan(project=project, execution_input=command)
+            preview = await service.preview_compiler_contract(project=project, plan=plan)
+            assert preview is not None
+            assert preview.readiness == "contract_validated"
+            assert preview.wire_fingerprint is not None
             body = ExecutionBody(
                 **command.model_dump(exclude={"project_id", "shot_id", "experiment_branch_id"}),
                 plan_fingerprint=plan.plan_fingerprint,
+                compiler_wire_fingerprint=preview.wire_fingerprint,
                 accepted_approximations=plan.accepted_approximations,
             )
             project_id, workspace_id, actor_id, shot_id = (

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -23,6 +24,7 @@ from app.execution.run_state import (
 from app.production.execution_plan import WorkbenchExecutionPlan
 from app.providers.capability_resolver import ProductCapabilityPolicy
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.compile_preview import compiled_wire_evidence
 from app.providers.create_admission import require_frozen_create_admission
 from app.providers.execution_contract import execution_contract_gaps, freeze_execution_contract
 from app.providers.execution_identity import (
@@ -258,6 +260,7 @@ async def prepare_media_submission(
                 if workbench_image_reference is not None
                 else str(snap.get("canonical_mime_type") or "image/png")
             ),
+            mode_id=workbench_plan.mode_id if workbench_plan is not None else None,
             selection=ModelSelectionIntent(
                 mode="explicit_binding",
                 model_binding_id=frozen_binding_id,
@@ -275,16 +278,27 @@ async def prepare_media_submission(
                     "UPSTREAM_ARTIFACT_MISSING: approved first-frame bytes "
                     "unavailable for video I2V"
                 )
-        raw_duration = effective_opts.get("duration_seconds") or snap.get("duration_seconds")
+        raw_duration = effective_opts.get("duration_seconds")
+        if raw_duration is None:
+            raw_duration = snap.get("duration_seconds")
         try:
-            duration_seconds = round(float(str(raw_duration)))
-        except (TypeError, ValueError):
-            duration_seconds = 0
-        if duration_seconds <= 0:
+            parsed_duration = float(str(raw_duration))
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValidationAppError(
                 "unified video request has no valid duration",
                 details={"code": "DURATION_REQUIRED"},
+            ) from exc
+        if (
+            isinstance(raw_duration, bool)
+            or not math.isfinite(parsed_duration)
+            or parsed_duration <= 0
+            or not parsed_duration.is_integer()
+        ):
+            raise ValidationAppError(
+                "unified video duration cannot be rounded or silently substituted",
+                details={"code": "MODEL_DURATION_UNSUPPORTED"},
             )
+        duration_seconds = int(parsed_duration)
         raw_ratio = str(
             effective_opts.get("aspect_ratio")
             or snap.get("aspect_ratio")
@@ -974,6 +988,30 @@ async def prepare_media_submission(
                 video_references,
                 invoke_model_value=invoke_model_value,
             )
+
+    if workbench_plan is not None:
+        expected_wire = snap.get("confirmed_compiler_wire_fingerprint")
+        if snap.get("professional_unified") is True and not (
+            isinstance(expected_wire, str) and len(expected_wire) == 64
+        ):
+            raise ValidationAppError(
+                "Professional execution is missing its user-confirmed Compiler proof",
+                details={"code": "COMPILER_WIRE_CONFIRMATION_REQUIRED"},
+            )
+        if expected_wire is not None:
+            runtime_refs = refs if node_type == "keyframe" else video_references
+            try:
+                compiled_wire_hash, _redacted = compiled_wire_evidence(compiled, runtime_refs)
+            except ValueError as exc:
+                raise ValidationAppError(
+                    "Provider compiler produced unbound transport data",
+                    details={"code": "COMPILER_WIRE_PREVIEW_MISMATCH"},
+                ) from exc
+            if compiled_wire_hash != expected_wire:
+                raise ValidationAppError(
+                    "Provider compiler wire changed after user confirmation",
+                    details={"code": "COMPILER_WIRE_FINGERPRINT_MISMATCH"},
+                )
 
     if workbench_planned_references:
         expected_reference_ids = [

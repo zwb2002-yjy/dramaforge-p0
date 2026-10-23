@@ -60,6 +60,23 @@ function planResponse({
   const approximate = delivery === "approximate";
   return {
     plan_fingerprint: fingerprint,
+    compiler_contract_preview: {
+      compile_level: "provider_contract",
+      readiness: "contract_validated",
+      transport_verified: false,
+      account_verified: false,
+      prompt_hash: "9".repeat(64),
+      semantic_hash: "8".repeat(64),
+      manifest_hash: "7".repeat(64),
+      reference_ids: [],
+      requested_options: {},
+      effective_options: {},
+      wire_fingerprint: "e".repeat(64),
+      redacted_wire: { model_id: modelId, wire_request: { model: modelId } },
+      transformations: [],
+      errors: [],
+      warnings: [],
+    },
     plan: {
       supports_prompt_override: false,
       plan_fingerprint: fingerprint,
@@ -168,6 +185,12 @@ function renderActions(
       />
     </QueryClientProvider>,
   );
+}
+
+async function confirmCurrentPreflight(): Promise<void> {
+  const confirm = await screen.findByTestId("confirm-generate-button");
+  await waitFor(() => expect(confirm).toBeEnabled());
+  fireEvent.click(confirm);
 }
 
 describe("ShotProductionActions", () => {
@@ -351,6 +374,7 @@ describe("ShotProductionActions", () => {
         prompt: SHOT.image_prompt,
         expected_shot_version: SHOT.version,
         plan_fingerprint: "a".repeat(64),
+        compiler_wire_fingerprint: "e".repeat(64),
         accepted_approximations: [],
       },
     });
@@ -363,6 +387,27 @@ describe("ShotProductionActions", () => {
           !call.url.includes("/director/runtime/"),
       ),
     ).toBe(false);
+  });
+
+  it("refuses Director delegation without a validated Compiler wire proof", async () => {
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) {
+        return json({ ...planResponse(), compiler_contract_preview: null });
+      }
+      return json({});
+    });
+    renderActions();
+    fireEvent.click(screen.getByTestId("delegate-keyframe-to-director"));
+    await waitFor(() =>
+      expect(screen.getByTestId("shot-production-error")).toHaveTextContent(
+        "导演委托缺少有效的编译请求确认指纹",
+      ),
+    );
+    expect(calls.some((url) => url.includes("/director/runtime/shots/"))).toBe(false);
   });
 
   it("reuses the same Director decision after an uncertain response", async () => {
@@ -396,6 +441,10 @@ describe("ShotProductionActions", () => {
 
     expect(delegationBodies).toHaveLength(2);
     expect(delegationBodies[1]?.decision_id).toBe(delegationBodies[0]?.decision_id);
+    expect(delegationBodies[1]?.authorization_expires_at).toBe(
+      delegationBodies[0]?.authorization_expires_at,
+    );
+    expect(delegationBodies[0]?.authorization_expires_at).toEqual(expect.any(String));
   });
 
   it("freezes and dispatches the selected shot as an image keyframe", async () => {
@@ -426,6 +475,9 @@ describe("ShotProductionActions", () => {
 
     renderActions();
     fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await screen.findByTestId("confirm-generate-button");
+    expect(calls.filter((call) => call.url.endsWith("/executions"))).toHaveLength(0);
+    await confirmCurrentPreflight();
 
     await waitFor(() => expect(screen.getByTestId("shot-production-status")).toBeInTheDocument());
     const plan = calls.find((call) => call.url.endsWith("/execution-plan"));
@@ -515,6 +567,7 @@ describe("ShotProductionActions", () => {
     };
     renderActions([reference]);
     fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await confirmCurrentPreflight();
 
     await waitFor(() => expect(screen.getByTestId("shot-production-status")).toBeInTheDocument());
     const plan = calls.find((call) => call.url.endsWith("/execution-plan"));
@@ -561,6 +614,7 @@ describe("ShotProductionActions", () => {
     expect(preview).toHaveAttribute("data-delivery", "approximate");
     expect(calls.filter((call) => call.url.endsWith("/executions"))).toHaveLength(0);
     fireEvent.click(screen.getByTestId("confirm-shot-execution-approximation"));
+    await confirmCurrentPreflight();
 
     await screen.findByTestId("shot-production-status");
     const previews = calls.filter((call) => call.url.endsWith("/execution-plan"));
@@ -634,7 +688,7 @@ describe("ShotProductionActions", () => {
     expect(calls.filter((url) => url.endsWith("/executions"))).toHaveLength(0);
   });
 
-  it("reuses one command key when a production submission loses its response", async () => {
+  it("keeps an uncertain paid create in storage and refuses an automatic retry", async () => {
     const executions: Array<{ body: Record<string, unknown>; key: string | undefined }> = [];
     let attempts = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
@@ -663,17 +717,18 @@ describe("ShotProductionActions", () => {
 
     renderActions();
     fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await confirmCurrentPreflight();
     expect(await screen.findByTestId("shot-production-error")).toHaveTextContent("response lost");
-    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
-    await waitFor(() => expect(screen.getByTestId("shot-production-status")).toBeInTheDocument());
-
-    expect(executions).toHaveLength(2);
-    expect(executions[1]?.key).toBe(executions[0]?.key);
-    expect(executions[1]?.body).toEqual(executions[0]?.body);
-    expect(executions[1]?.key).toBe(`shot:${SHOT.id}:${"a".repeat(64)}`);
+    expect(executions).toHaveLength(1);
+    const stored = readProductionOperation(
+      productionOperationScope(null, SHOT.project_id, SHOT.id, "image_keyframe"),
+    );
+    expect(stored?.operationKey).toBe(executions[0]?.key);
+    expect(executions[0]?.key).toContain(`shot:${SHOT.id}:`);
+    expect(screen.getByTestId("shot-primary-unknown")).toBeDisabled();
   });
 
-  it("adopts the committed receipt instead of submitting a second media operation", async () => {
+  it("does not consult paid execution receipt or submit before the user confirms", async () => {
     const posted: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
@@ -697,25 +752,18 @@ describe("ShotProductionActions", () => {
 
     renderActions();
     fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
-
-    await waitFor(() =>
-      expect(screen.getByTestId("shot-production-status")).toHaveAttribute(
-        "data-status",
-        "running",
-      ),
-    );
+    await screen.findByTestId("confirm-generate-button");
     expect(posted).toHaveLength(0);
+    expect(screen.queryByTestId("shot-production-status")).not.toBeInTheDocument();
   });
 
-  it("gives a different frozen plan its own command identity", async () => {
+  it("gives repeated explicit creation of the same plan distinct command identities", async () => {
     const keys: Array<string | undefined> = [];
-    let previews = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
       if (url.endsWith("/execution-plan")) {
-        previews += 1;
-        return json(planResponse({ fingerprint: (previews === 1 ? "a" : "b").repeat(64) }));
+        return json(planResponse({ fingerprint: "a".repeat(64) }));
       }
       if (url.includes("/executions/receipt")) {
         return json({ code: "NOT_FOUND", detail: "no receipt" }, 404);
@@ -727,8 +775,10 @@ describe("ShotProductionActions", () => {
           node_run_id: "33333333-3333-4333-8333-333333333333",
           graph_id: "44444444-4444-4444-8444-444444444444",
           graph_version_id: "55555555-5555-4555-8555-555555555555",
-          status: "queued",
-          plan_fingerprint: (previews === 1 ? "a" : "b").repeat(64),
+          // The second explicit create is offered only after the preceding
+          // operation has actually reached a terminal state.
+          status: "completed",
+          plan_fingerprint: "a".repeat(64),
         });
       }
       return json({});
@@ -736,11 +786,14 @@ describe("ShotProductionActions", () => {
 
     renderActions();
     fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await confirmCurrentPreflight();
     await waitFor(() => expect(keys).toHaveLength(1));
     fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await confirmCurrentPreflight();
     await waitFor(() => expect(keys).toHaveLength(2));
 
     expect(keys[1]).not.toBe(keys[0]);
+    expect(keys.every((key) => key?.includes(SHOT.id))).toBe(true);
   });
 
   it("keeps the command key inside the backend idempotency column limit", () => {
@@ -750,6 +803,18 @@ describe("ShotProductionActions", () => {
     const key = shotExecutionIdempotencyKey(SHOT.id, "a".repeat(64));
     expect(`workbench:image_keyframe:${key}`.length).toBeLessThanOrEqual(160);
     expect(key).toBe(`shot:${SHOT.id}:${"a".repeat(64)}`);
+    const newCommand = shotExecutionIdempotencyKey(
+      SHOT.id,
+      "a".repeat(64),
+      "11111111-aaaa-4444-9999-111111111111",
+    );
+    expect(`workbench:image_keyframe:${newCommand}`.length).toBeLessThanOrEqual(160);
+    expect(newCommand).toBe(
+      shotExecutionIdempotencyKey(SHOT.id, "a".repeat(64), "11111111-aaaa-4444-9999-111111111111"),
+    );
+    expect(newCommand).not.toBe(
+      shotExecutionIdempotencyKey(SHOT.id, "a".repeat(64), "22222222-bbbb-4444-9999-222222222222"),
+    );
   });
 
   it("adopts the running operation after a page reload instead of resubmitting", async () => {
@@ -806,7 +871,7 @@ describe("ShotProductionActions", () => {
     ).not.toBeNull();
   });
 
-  it("forgets a finished operation so a later open cannot adopt a stale receipt", async () => {
+  it("forgets a finished explicitly confirmed operation before a later open", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
@@ -828,6 +893,7 @@ describe("ShotProductionActions", () => {
 
     renderActions();
     fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await confirmCurrentPreflight();
 
     await waitFor(() =>
       expect(screen.getByTestId("shot-production-status")).toHaveAttribute(
@@ -983,8 +1049,11 @@ describe("ShotProductionActions", () => {
     expect(screen.getByTestId("plan-suggestion-genre:short_drama_romance_v1")).toHaveTextContent(
       "不参与执行计划",
     );
-    // Suggestions never become a capability gap or a blocking failure.
-    expect(screen.getByTestId("shot-production-status")).toBeInTheDocument();
+    // Suggestions are advisory: they neither block confirmation nor start a
+    // paid create without the explicit second click.
+    expect(screen.queryByTestId("shot-production-status")).not.toBeInTheDocument();
+    await confirmCurrentPreflight();
+    await waitFor(() => expect(screen.getByTestId("shot-production-status")).toBeInTheDocument());
   });
 
   it("does not claim suggestions when the plan has none", async () => {

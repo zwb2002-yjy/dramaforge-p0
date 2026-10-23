@@ -10,6 +10,24 @@ const productionWrites = (state: Journey) =>
     /\/(executions|formal-keyframe|formal-video|review-decisions)$/.test(item.path),
   );
 
+async function generateAfterWireConfirmation(
+  page: Page,
+  state: Journey,
+  button: "generate-keyframe" | "generate-video",
+) {
+  const writesBeforeConfirmation = productionWrites(state).length;
+  await page.getByTestId(button).click();
+  const drawer = page.getByTestId("shot-preflight-drawer");
+  await expect(drawer).toBeVisible();
+  await expect(drawer.getByTestId("preflight-wire-fingerprint")).toHaveText(/^[0-9a-f]{64}$/);
+  await expect(drawer.getByTestId("preflight-redacted-wire-details")).toBeVisible();
+  expect(productionWrites(state)).toHaveLength(writesBeforeConfirmation);
+  const confirmation = drawer.getByTestId("confirm-generate-button");
+  await expect(confirmation).toBeEnabled();
+  await confirmation.click();
+  await expect.poll(() => productionWrites(state).length).toBe(writesBeforeConfirmation + 1);
+}
+
 test("an unavailable model precheck explains the blocker and opens settings without executing", async ({
   page,
 }) => {
@@ -146,12 +164,12 @@ test("three Shots retain saved drafts through preflight, candidate, human review
     await inspector.getByTestId("shot-primary-save").click();
     await expect(inspector.getByTestId("shot-design-message")).toHaveText("已保存。");
     expect(state.shots[index].version).toBe(3); // Canvas then design, each with its own optimistic version.
-    await inspector.getByTestId("generate-keyframe").click();
+    await generateAfterWireConfirmation(page, state, "generate-keyframe");
     await expect(
       page.getByTestId(`shot-candidate-journey-${index + 1}-image_keyframe`),
     ).toBeVisible();
     await reviewCandidate(page, state, index, "image_keyframe");
-    await page.getByTestId("generate-video").click();
+    await generateAfterWireConfirmation(page, state, "generate-video");
     await expect(page.getByTestId(`shot-candidate-journey-${index + 1}-video`)).toBeVisible();
     await reviewCandidate(page, state, index, "video");
     expect(state.shots[index].version).toBe(5);
@@ -258,7 +276,7 @@ test("approval survives a refused Formal selection and recovery never regenerate
 }) => {
   const state = await installShotJourneyMock(page);
   await page.goto(sceneUrl);
-  await page.getByTestId("generate-keyframe").click();
+  await generateAfterWireConfirmation(page, state, "generate-keyframe");
   await page
     .getByTestId("shot-candidate-journey-1-image_keyframe")
     .getByRole("link", { name: "审查", exact: true })

@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections.abc import Mapping
-from typing import Final, Literal, cast
+from typing import Any, Final, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
@@ -49,7 +50,15 @@ from app.production.reference_intents import (
 from app.production.service import GraphService
 from app.providers.capabilities import Capability
 from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.compile_preview import CompilePreview, PreviewReference, preview_compile
 from app.providers.errors import ProviderError
+from app.providers.intents import (
+    ArtifactReferenceIntent,
+    ImageGenerationIntent,
+    ModelSelectionIntent,
+    VideoGenerationIntentV1,
+    VideoOutputIntent,
+)
 from app.providers.manifest import (
     InputModeSpec,
     ModelCapabilityManifest,
@@ -1309,6 +1318,15 @@ class WorkbenchExecutionService:
                         mime_type=formal.mime_type,
                     ),
                 )
+            # The Formal keyframe was inserted after initial hydration. Its
+            # immutable fingerprint must be bound before preview, freezing and
+            # worker compilation; otherwise D2 silently lacks media identity.
+            references = await self._hydrate_and_validate_references(
+                project=project,
+                shot_id=execution_input.shot_id,
+                stage=execution_input.stage,
+                references=references,
+            )
 
         effective_mode_id = execution_input.mode_id
         operation_key: Literal["image.generate", "video.generate"] = (
@@ -1447,39 +1465,80 @@ class WorkbenchExecutionService:
 
         plan_duration: float | None = None
         if execution_input.stage == "video":
+            # Shot.duration_seconds owns editing; the saved stage-specific setting
+            # is the explicit generation request, not a timeline fallback.
             plan_duration = 5.0
-            requested_duration = (
-                stage_settings.get("request_duration_seconds")
-                or user_common_options.get("duration_seconds")
-                or user_common_options.get("duration")
-                or user_native_options.get("duration_seconds")
-                or user_native_options.get("duration")
-            )
-            duration_spec = declared_all_options.get("duration") or declared_all_options.get(
+            requested_duration = stage_settings.get("request_duration_seconds")
+            duration_options = [
+                value
+                for value in (
+                    user_common_options.get("duration_seconds"),
+                    user_common_options.get("duration"),
+                    user_native_options.get("duration_seconds"),
+                    user_native_options.get("duration"),
+                )
+                if value is not None
+            ]
+            if requested_duration is None and duration_options:
+                requested_duration = duration_options[0]
+            duration_spec = declared_all_options.get(
                 "duration_seconds"
-            )
+            ) or declared_all_options.get("duration")
             if requested_duration is not None:
-                req_d = float(str(requested_duration))
-                if duration_spec is not None and duration_spec.enum:
-                    valid_enum = [
-                        float(x) for x in duration_spec.enum if str(x).replace(".", "", 1).isdigit()
-                    ]
-                    if valid_enum and req_d not in valid_enum:
-                        raise WorkbenchExecutionError(
-                            f"Requested duration {req_d}s not supported by model contract "
-                            f"(supported: {duration_spec.enum})",
-                            details={
-                                "code": "MODEL_DURATION_UNSUPPORTED",
-                                "supported": duration_spec.enum,
-                            },
-                        )
+                if duration_spec is None:
+                    raise WorkbenchExecutionError(
+                        "Selected model does not declare a video duration option",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    )
+                try:
+                    req_d = float(str(requested_duration))
+                    option_durations = [float(str(value)) for value in duration_options]
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise WorkbenchExecutionError(
+                        "Requested video duration is invalid",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    ) from exc
+                if (
+                    isinstance(requested_duration, bool)
+                    or not math.isfinite(req_d)
+                    or req_d <= 0
+                    or not req_d.is_integer()
+                    or any(value != req_d for value in option_durations)
+                ):
+                    raise WorkbenchExecutionError(
+                        "Requested video duration must be a supported whole number of seconds",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    )
                 plan_duration = req_d
             elif duration_spec is not None and duration_spec.default is not None:
                 try:
-                    plan_duration = float(duration_spec.default)
-                except (ValueError, TypeError):
-                    plan_duration = 5.0
-            effective_options["duration_seconds"] = plan_duration
+                    plan_duration = float(str(duration_spec.default))
+                except (ValueError, TypeError, OverflowError) as exc:
+                    raise WorkbenchExecutionError(
+                        "Model contract has an invalid default video duration",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    ) from exc
+                if (
+                    not math.isfinite(plan_duration)
+                    or plan_duration <= 0
+                    or not plan_duration.is_integer()
+                ):
+                    raise WorkbenchExecutionError(
+                        "Model contract has an unsupported default video duration",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    )
+            # Both integer and numeric contracts accept whole seconds; validating a
+            # float (4.0) against an integer contract wrongly rejects a valid 4s.
+            # Check implicit defaults too: never freeze an unsupported 5s fallback.
+            if duration_spec is not None:
+                try:
+                    validate_parameter("duration_seconds", int(plan_duration), duration_spec)
+                except ProviderError as exc:
+                    raise WorkbenchExecutionError(
+                        "Video duration is outside the selected model contract",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    ) from exc
+            effective_options["duration_seconds"] = int(plan_duration)
 
         supports_prompt_override = False
         if (
@@ -1608,6 +1667,119 @@ class WorkbenchExecutionService:
             raise WorkbenchExecutionError(f"workbench plan has capability gaps: {reasons}")
         return plan
 
+    async def preview_compiler_contract(
+        self,
+        *,
+        project: Project,
+        plan: WorkbenchExecutionPlan,
+    ) -> CompilePreview | None:
+        """Read-only adapter compilation, deliberately NOT the final wire request.
+
+        All modes reuse the real Compiler; reference transports are normalized
+        by immutable artifact ID, content hash and ordinal. Media bytes are
+        reverified in the Worker immediately before the paid request.
+        Do not create a NodeRun, ProviderOperation or ProviderRuntime here.
+        """
+        if plan.capability_gaps or any(
+            ref.delivery == "unsupported" for ref in plan.planned_references
+        ):
+            return None
+        identity = plan.resolved_model
+        if (
+            identity.catalog_entry_id is None
+            or identity.provider_model_binding_id is None
+            or not identity.invoke_model_value
+        ):
+            return None
+        if plan.stage not in {"video", "image_keyframe"}:
+            return None
+        entry = await self._session.get(ModelCatalogEntry, identity.catalog_entry_id)
+        if entry is None or entry.contract_manifest_hash != identity.manifest_hash:
+            return None
+        manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
+        options = plan.effective_options
+        ratio = str(options.get("aspect_ratio") or project.aspect_ratio)
+        if ratio not in {"9:16", "16:9"}:
+            return None
+        seed_value = options.get("seed")
+        seed = (
+            int(seed_value)
+            if isinstance(seed_value, int) and not isinstance(seed_value, bool)
+            else None
+        )
+        selection = ModelSelectionIntent(
+            mode="explicit_binding",
+            model_binding_id=identity.provider_model_binding_id,
+        )
+        references = [
+            PreviewReference(
+                role=cast(Any, ref.role),
+                artifact_id=ref.artifact_id,
+                fingerprint=ref.fingerprint,
+                mime_type=ref.mime_type,
+            )
+            for ref in plan.planned_references
+            if ref.artifact_id is not None and ref.role is not None and ref.fingerprint is not None
+        ]
+        if len(references) != len(plan.planned_references):
+            return None
+        if plan.stage == "video":
+            duration = plan.duration_seconds
+            if duration is None or not float(duration).is_integer() or duration <= 0:
+                return None
+            resolution = options.get("resolution")
+            intent: ImageGenerationIntent | VideoGenerationIntentV1 = VideoGenerationIntentV1(
+                prompt=plan.prompt,
+                output=VideoOutputIntent(
+                    aspect_ratio=cast(Literal["9:16", "16:9"], ratio),
+                    duration_seconds=int(duration),
+                    resolution=str(resolution) if resolution is not None else None,
+                    generate_audio=(
+                        bool(options["generate_audio"])
+                        if options.get("generate_audio") is not None
+                        else None
+                    ),
+                    seed=seed,
+                ),
+                mode_id=(
+                    "text_to_video"
+                    if plan.mode_id == "text_to_video"
+                    else "omni_reference"
+                    if plan.mode_id == "omni_reference"
+                    else "last_frame"
+                    if plan.mode_id == "last_frame"
+                    else "first_last_frame"
+                    if plan.mode_id == "first_last_frame"
+                    else "first_frame"
+                ),
+                references=[
+                    ArtifactReferenceIntent(artifact_id=ref.artifact_id, role=ref.role)
+                    for ref in references
+                ],
+                selection=selection,
+            )
+        else:
+            size = options.get("size")
+            intent = ImageGenerationIntent(
+                prompt=plan.prompt,
+                size=str(size) if size is not None else None,
+                aspect_ratio=cast(Literal["9:16", "16:9"], ratio),
+                seed=seed,
+                reference_artifact_ids=[ref.artifact_id for ref in references],
+                reference_fingerprint=references[0].fingerprint if references else None,
+                reference_mime=references[0].mime_type if references else None,
+                mode_id=plan.mode_id,
+                selection=selection,
+            )
+        return await preview_compile(
+            manifest=manifest,
+            invoke_model_value=identity.invoke_model_value,
+            intent=intent,
+            references=references,
+            expected_mode_id=plan.mode_id,
+            include_redacted_wire=True,
+        )
+
     async def lock_command_scope(self, *, project_id: UUID) -> None:
         # Command keys are unique per project, including accidental reuse on
         # different Shots. Serialize the short DB-only queueing transaction.
@@ -1688,6 +1860,7 @@ class WorkbenchExecutionService:
         idempotency_key_override: str | None = None,
         prepared_plan: WorkbenchExecutionPlan | None = None,
         request_hash: str | None = None,
+        confirmed_compiler_wire_fingerprint: str | None = None,
     ) -> NodeRun:
         """Resolve the shot graph, create a queued NodeRun and persist the
         frozen plan snapshot for the worker.
@@ -1810,6 +1983,7 @@ class WorkbenchExecutionService:
                 reference.model_dump(mode="json") for reference in plan.planned_references
             ],
             "plan_fingerprint": plan.plan_fingerprint,
+            "confirmed_compiler_wire_fingerprint": confirmed_compiler_wire_fingerprint,
             "stage": plan.stage,
             "mode_id": plan.mode_id,
             "prompt": plan.prompt,

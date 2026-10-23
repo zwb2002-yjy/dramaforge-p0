@@ -8,7 +8,7 @@ import {
   Typography,
 } from "antd";
 import type { ReactNode } from "react";
-import { Drawer } from "../../components/ui";
+import { Disclosure, Drawer } from "../../components/ui";
 import type { ShotExecutionPlanRead, ShotExecutionStage } from "./api";
 
 const { Text, Paragraph } = Typography;
@@ -49,6 +49,8 @@ export function ShotPreflightDrawer({
   approximationsAccepted = false,
 }: ShotPreflightDrawerProps): ReactNode {
   const p = plan?.plan;
+  // The normalized Compiler proof is independently checked by the execution command and Worker.
+  const compilerPreview = plan?.compiler_contract_preview;
   const references = p?.planned_references ?? [];
   const exactRefs = references.filter((r) => r.delivery === "exact");
   const approxRefs = references.filter((r) => r.delivery === "approximate");
@@ -60,11 +62,28 @@ export function ShotPreflightDrawer({
   const hasUnacceptedApproximations =
     (hasWarningGaps || approxRefs.length > 0) && !approximationsAccepted;
 
+  // A plan preview is not itself the Provider wire payload. Do not permit
+  // confirmation when its execution-stage identity or effective duration is
+  // incomplete, even if a malformed/old response reached this drawer.
+  const durationConfirmed =
+    stage !== "video" ||
+    (typeof p?.duration_seconds === "number" &&
+      Number.isSafeInteger(p.duration_seconds) &&
+      p.duration_seconds > 0 &&
+      p.effective_options?.duration_seconds === p.duration_seconds);
+  const planStageConfirmed = p?.stage === stage;
+  const compilerConfirmed =
+    compilerPreview?.readiness === "contract_validated" &&
+    typeof compilerPreview.wire_fingerprint === "string" &&
+    /^[0-9a-f]{64}$/.test(compilerPreview.wire_fingerprint);
   const canConfirm =
     !dirty &&
     !isLoading &&
     !error &&
     Boolean(plan) &&
+    planStageConfirmed &&
+    durationConfirmed &&
+    compilerConfirmed &&
     !hasFatalGaps &&
     !hasUnacceptedApproximations;
 
@@ -139,6 +158,19 @@ export function ShotPreflightDrawer({
 
       {!isLoading && plan && (
         <div>
+          <p className="df-shot-hint" data-testid="preflight-plan-boundary">
+            本次发送使用实际 Provider Compiler 编译的脱敏请求结构和确认指纹；
+            真实媒体字节、临时传输值及账号可用性将在执行阶段进一步校验。
+          </p>
+          {!compilerConfirmed && (
+            <Alert type="error" showIcon title="尚未生成可验证的编译请求指纹，不能提交付费生成。" />
+          )}
+          {!planStageConfirmed && (
+            <Alert type="error" showIcon title="执行阶段不一致，请重新预检。" />
+          )}
+          {!durationConfirmed && (
+            <Alert type="error" showIcon title="生成时长与有效参数未能一致确认，请重新预检。" />
+          )}
           {/* Section A: 提示词与引用核对 */}
           <div data-testid="preflight-prompt-section">
             <Typography.Title level={5}>1. 原文与发送提示词核对</Typography.Title>
@@ -222,7 +254,7 @@ export function ShotPreflightDrawer({
                 {stage === "video"
                   ? p?.duration_seconds !== undefined && p?.duration_seconds !== null
                     ? `${p.duration_seconds} 秒`
-                    : "5.0 秒（模型默认）"
+                    : "未确定（不能提交生成）"
                   : "单帧静态"}
               </Descriptions.Item>
               <Descriptions.Item label="有效参数" span={2}>
@@ -236,6 +268,48 @@ export function ShotPreflightDrawer({
               </Descriptions.Item>
             </Descriptions>
           </div>
+
+          {compilerPreview && (
+            <div data-testid="preflight-compiler-contract-preview">
+              <Typography.Title level={5}>编译器合同预览（不包含真实媒体传输）</Typography.Title>
+              <Alert
+                type={compilerPreview.readiness === "contract_validated" ? "info" : "warning"}
+                showIcon
+                title={
+                  compilerPreview.readiness === "contract_validated"
+                    ? "已通过只读编译器合同映射"
+                    : "编译器合同暂未验证通过"
+                }
+                description="已冻结参数和引用槽位的规范化编译指纹。真实素材字节与临时传输令牌仍由 Worker 核验，发送前必须与确认指纹一致。"
+              />
+              <pre data-testid="preflight-compiler-options" style={{ fontSize: "12px" }}>
+                {JSON.stringify(compilerPreview.effective_options, null, 2)}
+              </pre>
+              {compilerPreview.wire_fingerprint && (
+                <Text code data-testid="preflight-wire-fingerprint">
+                  {compilerPreview.wire_fingerprint}
+                </Text>
+              )}
+              {compilerPreview.readiness === "contract_validated" &&
+                compilerPreview.redacted_wire && (
+                  <Disclosure
+                    compact
+                    testId="preflight-redacted-wire-details"
+                    title="查看完整脱敏请求结构（含模型、提示词和引用槽位）"
+                  >
+                    <pre
+                      data-testid="preflight-redacted-wire"
+                      style={{ maxHeight: 240, overflow: "auto", fontSize: "12px" }}
+                    >
+                      {JSON.stringify(compilerPreview.redacted_wire, null, 2)}
+                    </pre>
+                  </Disclosure>
+                )}
+              {(compilerPreview.errors?.length ?? 0) > 0 && (
+                <Text type="warning">{compilerPreview.errors?.join("、")}</Text>
+              )}
+            </div>
+          )}
 
           <Divider style={{ margin: "16px 0" }} />
 

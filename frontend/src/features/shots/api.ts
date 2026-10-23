@@ -175,6 +175,7 @@ export async function dispatchShotExecution(
     {
       ...frozenInput,
       plan_fingerprint: preview.plan_fingerprint,
+      compiler_wire_fingerprint: preview.compiler_contract_preview?.wire_fingerprint ?? null,
       accepted_approximations: acceptedApproximations,
     },
     csrf,
@@ -195,8 +196,18 @@ export async function dispatchShotExecution(
  * the stored snapshot. Keeping it short keeps the stored key debuggable instead
  * of tripping the server's long-key hashing fallback.
  */
-export function shotExecutionIdempotencyKey(shotId: string, planFingerprint: string): string {
-  return `shot:${shotId}:${planFingerprint}`;
+export function shotExecutionIdempotencyKey(
+  shotId: string,
+  planFingerprint: string,
+  explicitCreateId?: string,
+): string {
+  // An explicit second generation is a distinct paid create, even when the
+  // same plan is selected. The per-confirmation id remains stable for a
+  // double-click, lost response, and receipt adoption of that one create.
+  // Keep the composed backend idempotency key below its 160-char limit.
+  return explicitCreateId
+    ? `shot:${shotId}:${planFingerprint.slice(0, 16)}:${explicitCreateId}`
+    : `shot:${shotId}:${planFingerprint}`;
 }
 
 /** Read the committed receipt of one production command, if it exists. */
@@ -244,8 +255,20 @@ export async function submitShotExecution(
 export async function delegateShotExecutionToDirector(
   projectId: string,
   shotId: string,
-  prepared: Pick<PreparedShotExecution, "input" | "preview"> & { decisionId: string },
+  prepared: Pick<PreparedShotExecution, "input" | "preview"> & {
+    decisionId: string;
+    authorizationExpiresAt: string;
+  },
 ): Promise<DirectorDelegationRead> {
+  const compilerPreview = prepared.preview.compiler_contract_preview;
+  const compilerFingerprint = compilerPreview?.wire_fingerprint;
+  if (
+    compilerPreview?.readiness !== "contract_validated" ||
+    typeof compilerFingerprint !== "string" ||
+    !/^[0-9a-f]{64}$/.test(compilerFingerprint)
+  ) {
+    throw new Error("导演委托缺少有效的编译请求确认指纹，请重新预检。");
+  }
   const csrf = await fetchCsrf();
   const frozenInput = freezeExecutionInput(prepared.input);
   const acceptedApproximations = Array.isArray(prepared.preview.plan.accepted_approximations)
@@ -258,11 +281,12 @@ export async function delegateShotExecutionToDirector(
     `/api/v1/projects/${projectId}/director/runtime/shots/${shotId}/executions`,
     {
       decision_id: prepared.decisionId,
-      authorization_expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      authorization_expires_at: prepared.authorizationExpiresAt,
       max_steps: 6,
       execution: {
         ...frozenInput,
         plan_fingerprint: prepared.preview.plan_fingerprint,
+        compiler_wire_fingerprint: compilerFingerprint,
         accepted_approximations: acceptedApproximations,
       },
     },

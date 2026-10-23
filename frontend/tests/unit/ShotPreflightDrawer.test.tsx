@@ -5,6 +5,23 @@ import type { ShotExecutionPlanRead } from "../../src/features/shots/api";
 
 const mockPlan: ShotExecutionPlanRead = {
   plan_fingerprint: "11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff",
+  compiler_contract_preview: {
+    compile_level: "provider_contract",
+    readiness: "contract_validated",
+    transport_verified: false,
+    account_verified: false,
+    prompt_hash: "a".repeat(64),
+    semantic_hash: "b".repeat(64),
+    manifest_hash: "c".repeat(64),
+    reference_ids: [],
+    requested_options: { duration_seconds: 4 },
+    effective_options: { duration_seconds: 4 },
+    wire_fingerprint: "d".repeat(64),
+    redacted_wire: { model_id: "unit-video", wire_request: { duration: 4 } },
+    transformations: [],
+    errors: [],
+    warnings: [],
+  },
   plan: {
     supports_prompt_override: false,
     project_id: "00000000-0000-0000-0000-000000000001",
@@ -32,15 +49,82 @@ const mockPlan: ShotExecutionPlanRead = {
         mime_type: "image/png",
       },
     ],
-    duration_seconds: 4.5,
+    duration_seconds: 4,
     effective_options: {
       motion_bucket_id: 120,
+      duration_seconds: 4,
     },
     capability_gaps: [],
   },
 };
 
 describe("ShotPreflightDrawer", () => {
+  it("shows read-only compiler-mapped parameters without claiming wire readiness", () => {
+    const compiled: ShotExecutionPlanRead = {
+      ...mockPlan,
+      compiler_contract_preview: {
+        compile_level: "provider_contract",
+        readiness: "contract_validated",
+        transport_verified: false,
+        account_verified: false,
+        prompt_hash: "a".repeat(64),
+        semantic_hash: "b".repeat(64),
+        manifest_hash: "c".repeat(64),
+        reference_ids: [],
+        requested_options: { duration_seconds: 4 },
+        effective_options: { duration_seconds: 4 },
+        wire_fingerprint: "d".repeat(64),
+        redacted_wire: { model_id: "unit-video", wire_request: { duration: 4 } },
+        transformations: [],
+        errors: [],
+        warnings: ["PLACEHOLDER_TRANSPORT_NOT_VERIFIED"],
+      },
+    };
+    render(
+      <ShotPreflightDrawer
+        open
+        onClose={vi.fn()}
+        stage="video"
+        rawPrompt="Harbor"
+        plan={compiled}
+        isLoading={false}
+        onConfirmGenerate={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("preflight-compiler-contract-preview")).toHaveTextContent(
+      "真实素材字节与临时传输令牌仍由 Worker 核验",
+    );
+    expect(screen.getByTestId("preflight-compiler-options")).toHaveTextContent("duration_seconds");
+    const details = screen.getByTestId("preflight-redacted-wire-details");
+    expect(details.querySelector(".ant-collapse-item-active")).toBeNull();
+    fireEvent.click(screen.getByText("查看完整脱敏请求结构（含模型、提示词和引用槽位）"));
+    expect(details.querySelector(".ant-collapse-item-active")).not.toBeNull();
+    expect(screen.getByTestId("preflight-wire-fingerprint")).toHaveTextContent("d".repeat(64));
+    const wire = screen.getByTestId("preflight-redacted-wire");
+    expect(wire).toHaveTextContent('"duration": 4');
+    expect(wire).not.toHaveTextContent("https://");
+    expect(wire).not.toHaveTextContent("base64,");
+  });
+
+  it("blocks confirmation if the Compiler proof is absent", () => {
+    const incomplete = { ...mockPlan, compiler_contract_preview: null };
+    render(
+      <ShotPreflightDrawer
+        open
+        onClose={vi.fn()}
+        stage="video"
+        rawPrompt="Harbor"
+        plan={incomplete}
+        isLoading={false}
+        onConfirmGenerate={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("confirm-generate-button")).toBeDisabled();
+    expect(
+      screen.getByText("尚未生成可验证的编译请求指纹，不能提交付费生成。"),
+    ).toBeInTheDocument();
+  });
+
   it("renders prompt, parameter, and fingerprint sections when plan is loaded", () => {
     render(
       <ShotPreflightDrawer
@@ -64,11 +148,53 @@ describe("ShotPreflightDrawer", () => {
       screen.getByText("A cinematic wide shot of a misty harbor at dusk."),
     ).toBeInTheDocument();
     expect(screen.getByText("provider/mock-video-v1")).toBeInTheDocument();
-    expect(screen.getByText("4.5 秒")).toBeInTheDocument();
+    expect(screen.getByText("4 秒")).toBeInTheDocument();
+    expect(screen.getByTestId("preflight-plan-boundary")).toHaveTextContent(
+      "实际 Provider Compiler 编译的脱敏请求结构和确认指纹",
+    );
     expect(screen.getByText(mockPlan.plan_fingerprint)).toBeInTheDocument();
 
     const confirmBtn = screen.getByTestId("confirm-generate-button");
     expect(confirmBtn).not.toBeDisabled();
+  });
+
+  it("blocks video confirmation when duration or effective options are missing", () => {
+    const onConfirm = vi.fn();
+    const invalid = {
+      ...mockPlan,
+      plan: { ...mockPlan.plan, duration_seconds: 4, effective_options: { duration_seconds: 5 } },
+    };
+    render(
+      <ShotPreflightDrawer
+        open
+        onClose={vi.fn()}
+        stage="video"
+        rawPrompt="Harbor"
+        plan={invalid}
+        isLoading={false}
+        onConfirmGenerate={onConfirm}
+      />,
+    );
+    expect(screen.getByTestId("confirm-generate-button")).toBeDisabled();
+    expect(screen.getByText("生成时长与有效参数未能一致确认，请重新预检。")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("confirm-generate-button"));
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("blocks a plan belonging to a different execution stage", () => {
+    render(
+      <ShotPreflightDrawer
+        open
+        onClose={vi.fn()}
+        stage="image_keyframe"
+        rawPrompt="Harbor"
+        plan={mockPlan}
+        isLoading={false}
+        onConfirmGenerate={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("confirm-generate-button")).toBeDisabled();
+    expect(screen.getByText("执行阶段不一致，请重新预检。")).toBeInTheDocument();
   });
 
   it("blocks confirmation and offers save/recompute when draft is dirty", () => {

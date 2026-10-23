@@ -84,7 +84,6 @@ type ActionFeedback = {
 type PrepareOutcome = {
   stage: ShotExecutionStage;
   prepared: PreparedShotExecution;
-  execution?: ShotExecutionRead;
 };
 
 const STAGE_LABEL: Record<ShotExecutionStage, string> = {
@@ -159,6 +158,13 @@ function stablePlanIdentity(preview: ShotExecutionPlanRead): string {
     resolved_model: preview.plan.resolved_model,
     planned_references: preview.plan.planned_references,
     expected_shot_version: preview.plan.expected_shot_version,
+    duration_seconds: preview.plan.duration_seconds,
+    effective_options: preview.plan.effective_options,
+    prompt_override: preview.plan.prompt_override,
+    exact_controls: preview.plan.exact_controls,
+    approximate_controls: preview.plan.approximate_controls,
+    unsupported_controls: preview.plan.unsupported_controls,
+    semantic_request_preview: preview.plan.semantic_request_preview,
     connection_revision_id: preview.plan.connection_revision_id,
     credential_revision_id: preview.plan.credential_revision_id,
   });
@@ -193,7 +199,11 @@ export function ShotProductionActions({
     queryKey: queryKeys.asset.shotReferences(projectId, shot.id),
     queryFn: () => fetchShotReferences(projectId, shot.id),
   });
-  const delegationDecisionIds = useRef(new Map<string, string>());
+  const delegationDecisionIds = useRef(
+    new Map<string, { decisionId: string; authorizationExpiresAt: string }>(),
+  );
+  const preflightSequence = useRef(0);
+  const explicitCreateId = useRef(globalThis.crypto.randomUUID());
   const forStage = (stage: "image" | "video") =>
     references.filter((reference) => {
       const row = (Array.isArray(savedBindings.data) ? savedBindings.data : []).find(
@@ -276,6 +286,7 @@ export function ShotProductionActions({
   const [approximationsAccepted, setApproximationsAccepted] = useState(false);
 
   useEffect(() => {
+    preflightSequence.current += 1;
     setFeedback(null);
     setDisplayedPlan(null);
     setPendingApproximation(null);
@@ -379,11 +390,23 @@ export function ShotProductionActions({
       };
       return previewShotExecution(projectId, shot.id, input);
     },
-    onSuccess: (plan) => setDisplayedPlan(plan),
+    onMutate: () => ++preflightSequence.current,
+    onSuccess: (plan, _target, sequence) => {
+      if (
+        sequence !== preflightSequence.current ||
+        (plan.plan.shot_id && plan.plan.shot_id !== shot.id) ||
+        (plan.plan.expected_shot_version != null &&
+          plan.plan.expected_shot_version !== shot.version)
+      ) {
+        return;
+      }
+      setDisplayedPlan(plan);
+    },
   });
   useEffect(() => {
+    preflightSequence.current += 1;
     setDisplayedPlan(null);
-  }, [shot.version, dirty, references, videoMode, savedBindings.data, modelPreflight.data]);
+  }, [shot.version, dirty, references, videoMode]);
 
   async function refreshAfterExecution(result: ShotExecutionRead): Promise<void> {
     await Promise.all([
@@ -403,150 +426,76 @@ export function ShotProductionActions({
     await onExecuted?.(result);
   }
 
+  // Creating media is ALWAYS a two-action flow: preview the exact Compiler
+  // projection, then require a separate explicit confirmation in the drawer.
+  // Never persist an operation key or issue /executions from this mutation.
   const produce = useMutation<PrepareOutcome, unknown, ShotExecutionStage>({
     mutationFn: async (stage) => {
-      if (dirty) {
-        // The disabled attribute is the normal UI path; keep the same guard
-        // in the mutation so an imperative/event-level trigger cannot bypass
-        // the unsaved-design production gate.
-        throw new Error("请先保存镜头设计，再生成关键帧或视频。");
+      if (dirty || !referencesReady || !promptReferencesReady[stage]) {
+        throw new Error("请先保存镜头设计并处理未解析的素材引用，再生成。");
       }
       const input = executionInput(stage);
       const preview = await previewShotExecution(projectId, shot.id, input);
-      const prepared: PreparedShotExecution = {
-        input,
-        preview,
-        // Derived from the frozen plan, never from a random nonce: a retry of
-        // this exact plan keeps one command identity instead of billing again.
-        idempotencyKey: shotExecutionIdempotencyKey(shot.id, preview.plan_fingerprint),
-      };
-      if (planDelivery(preview) === "approximate") return { stage, prepared };
-      // Persist the operation identity before the request leaves the browser so
-      // a reload can still adopt this same command.
-      recordProductionOperation(
-        productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
-        {
-          operationKey: prepared.idempotencyKey,
-          planFingerprint: prepared.preview.plan_fingerprint,
-          stage,
-          recordedAt: new Date().toISOString(),
-          nodeRunId: null,
+      return {
+        stage,
+        prepared: {
+          input,
+          preview,
+          idempotencyKey: shotExecutionIdempotencyKey(shot.id, preview.plan_fingerprint),
         },
-      );
-      const execution = await submitShotExecution(projectId, shot.id, prepared);
-      return { stage, prepared, execution };
+      };
     },
-    onMutate: (stage) => {
+    onMutate: () => {
       setFeedback(null);
-      return { stage };
+      explicitCreateId.current = globalThis.crypto.randomUUID();
+      return ++preflightSequence.current;
     },
-    onSuccess: async ({ stage, prepared, execution }) => {
+    onSuccess: ({ stage, prepared }, _stage, sequence) => {
+      if (sequence !== preflightSequence.current) return;
       setDisplayedPlan(prepared.preview);
       setPlanFailure(null);
-      if (!execution) {
+      setApproximationsAccepted(false);
+      setPreflightDrawerStage(stage);
+      if (planDelivery(prepared.preview) === "approximate") {
         setPendingApproximation(prepared);
         setFeedback({ kind: "plan", stage, message: "approximate" });
-        return;
+      } else {
+        setPendingApproximation(null);
       }
-      setPendingApproximation(null);
-      if (submissionProvablyEnded(null, execution.status)) {
-        clearProductionOperation(
-          productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
-        );
-      }
-      setFeedback({
-        kind: "success",
-        stage,
-        message: execution.status,
-        nodeRunId: execution.node_run_id,
-      });
-      await refreshAfterExecution(execution);
     },
     onError: (error, stage) => {
-      // Preserve the backend's real message (not a client-side success or a
-      // guessed "no formal keyframe" state).  In particular, a video request
-      // without a formal keyframe is rejected by the Workbench plan builder.
-      const message = errorMessage(error);
-      if (submissionProvablyEnded(error)) {
-        clearProductionOperation(
-          productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
-        );
-      }
       setDisplayedPlan(null);
       setPendingApproximation(null);
-      setPlanFailure(/unsupported|capability gap/i.test(message) ? "unsupported" : null);
+      const message = errorMessage(error);
+      setPlanFailure(/unsupported|capability gap|不支持/i.test(message) ? "unsupported" : null);
       setFeedback({ kind: "error", stage, message });
     },
   });
 
+  // The secondary approximation action only requests a new accepted plan.
+  // The user still reviews its redacted Provider wire in the shared drawer
+  // before a separate explicit /executions submission.
   const confirmApproximation = useMutation({
     mutationFn: async (prepared: PreparedShotExecution) => {
-      const acceptedInput: ShotExecutionInput = {
+      const input: ShotExecutionInput = {
         ...prepared.input,
         accept_approximations: true,
       };
-      const acceptedPreview = await previewShotExecution(projectId, shot.id, acceptedInput);
+      const acceptedPreview = await previewShotExecution(projectId, shot.id, input);
       if (stablePlanIdentity(acceptedPreview) !== stablePlanIdentity(prepared.preview)) {
         throw new Error("模型、引用或创作意图在确认期间已变化，请重新生成并确认计划。");
       }
-      // The accepted plan is a different frozen plan, so it carries its own
-      // command identity; the discovery preview is never submitted.
-      const accepted: PreparedShotExecution = {
-        ...prepared,
-        input: acceptedInput,
-        preview: acceptedPreview,
-        idempotencyKey: shotExecutionIdempotencyKey(shot.id, acceptedPreview.plan_fingerprint),
-      };
-      recordProductionOperation(
-        productionOperationScope(
-          getSelectedWorkspaceId(),
-          projectId,
-          shot.id,
-          prepared.input.stage,
-        ),
-        {
-          operationKey: accepted.idempotencyKey,
-          planFingerprint: accepted.preview.plan_fingerprint,
-          stage: prepared.input.stage,
-          recordedAt: new Date().toISOString(),
-          nodeRunId: null,
-        },
-      );
-      return {
-        prepared: accepted,
-        execution: await submitShotExecution(projectId, shot.id, accepted),
-      };
+      return { stage: input.stage, preview: acceptedPreview };
     },
-    onSuccess: async ({ prepared, execution }) => {
-      setDisplayedPlan(prepared.preview);
+    onSuccess: ({ stage, preview }) => {
+      setDisplayedPlan(preview);
       setPendingApproximation(null);
       setPlanFailure(null);
-      if (submissionProvablyEnded(null, execution.status)) {
-        clearProductionOperation(
-          productionOperationScope(
-            getSelectedWorkspaceId(),
-            projectId,
-            shot.id,
-            prepared.input.stage,
-          ),
-        );
-      }
-      setFeedback({
-        kind: "success",
-        stage: prepared.input.stage,
-        message: execution.status,
-        nodeRunId: execution.node_run_id,
-      });
-      await refreshAfterExecution(execution);
+      setApproximationsAccepted(true);
+      setPreflightDrawerStage(stage);
     },
     onError: (error) => {
       const stage = pendingApproximation?.input.stage ?? "image_keyframe";
-      if (submissionProvablyEnded(error)) {
-        clearProductionOperation(
-          productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
-        );
-      }
-      setPendingApproximation(null);
       setFeedback({ kind: "error", stage, message: errorMessage(error) });
     },
   });
@@ -575,11 +524,22 @@ export function ShotProductionActions({
       const unacceptedInPlan = (plan.plan.accepted_approximations ?? []).length === 0;
       if (acceptApproximations && (hasWarningGaps || unacceptedInPlan)) {
         effectivePlan = await previewShotExecution(projectId, shot.id, input);
+        if (
+          stablePlanIdentity(effectivePlan) !== stablePlanIdentity(plan) ||
+          effectivePlan.compiler_contract_preview?.wire_fingerprint !==
+            plan.compiler_contract_preview?.wire_fingerprint
+        ) {
+          throw new Error("执行参数或编译请求在确认期间已变化，请重新预检。");
+        }
       }
       const prepared: PreparedShotExecution = {
         input,
         preview: effectivePlan,
-        idempotencyKey: shotExecutionIdempotencyKey(shot.id, effectivePlan.plan_fingerprint),
+        idempotencyKey: shotExecutionIdempotencyKey(
+          shot.id,
+          effectivePlan.plan_fingerprint,
+          explicitCreateId.current,
+        ),
       };
       recordProductionOperation(
         productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage),
@@ -635,16 +595,24 @@ export function ShotProductionActions({
       if (planDelivery(preview) !== "exact") {
         throw new Error("当前计划需要近似适配确认，请先使用手动生成入口检查并确认。");
       }
-      const decisionKey = `${shot.id}:${stage}:${preview.plan_fingerprint}`;
-      let decisionId = delegationDecisionIds.current.get(decisionKey);
-      if (!decisionId) {
-        decisionId = globalThis.crypto.randomUUID();
-        delegationDecisionIds.current.set(decisionKey, decisionId);
+      const decisionKey = [
+        shot.id,
+        stage,
+        preview.plan_fingerprint,
+        preview.compiler_contract_preview?.wire_fingerprint ?? "unverified",
+      ].join(":");
+      let frozenDecision = delegationDecisionIds.current.get(decisionKey);
+      if (!frozenDecision) {
+        frozenDecision = {
+          decisionId: globalThis.crypto.randomUUID(),
+          authorizationExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        };
+        delegationDecisionIds.current.set(decisionKey, frozenDecision);
       }
       const turn = await delegateShotExecutionToDirector(projectId, shot.id, {
         input,
         preview,
-        decisionId,
+        ...frozenDecision,
       });
       return { stage, turn, decisionKey };
     },
@@ -678,8 +646,23 @@ export function ShotProductionActions({
           : null;
   const keyframeStatus = activeStageStatus(trace, "image_keyframe");
   const videoStatus = activeStageStatus(trace, "video");
-  const keyframeOutcomeUnknown = stageOutcomeUnknown(trace, "image_keyframe");
-  const videoOutcomeUnknown = stageOutcomeUnknown(trace, "video");
+  // A lost browser response is not proof that the paid request was rejected.
+  // Until the durable command is reconciled with server trace/receipt, block
+  // another paid create even if the caller supplied an empty/stale trace.
+  const keyframeOutcomeUnknown =
+    stageOutcomeUnknown(trace, "image_keyframe") ||
+    Boolean(
+      readProductionOperation(
+        productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, "image_keyframe"),
+      ) && !keyframeStatus,
+    );
+  const videoOutcomeUnknown =
+    stageOutcomeUnknown(trace, "video") ||
+    Boolean(
+      readProductionOperation(
+        productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, "video"),
+      ) && !videoStatus,
+    );
   const keyframeQueue = stageQueueEstimate(trace, "image_keyframe");
   const videoQueue = stageQueueEstimate(trace, "video");
   const delivery = displayedPlan ? planDelivery(displayedPlan) : planFailure;
@@ -960,6 +943,7 @@ export function ShotProductionActions({
         data-testid="inspect-shot-plan"
         disabled={busy || dirty || !referencesReady || !promptReferencesReady[focusStage]}
         onClick={() => {
+          explicitCreateId.current = globalThis.crypto.randomUUID();
           setPreflightDrawerStage(focusStage);
           setApproximationsAccepted(false);
           inspectPlan.mutate({ stage: focusStage, acceptApproximations: false });
@@ -1165,7 +1149,7 @@ export function ShotProductionActions({
                 disabled={confirmApproximation.isPending}
                 onClick={() => confirmApproximation.mutate(pendingApproximation)}
               >
-                {confirmApproximation.isPending ? "正在重新校验…" : "确认近似适配并执行"}
+                {confirmApproximation.isPending ? "正在重新校验…" : "查看近似适配请求"}
               </Button>
             </div>
           )}
@@ -1305,8 +1289,6 @@ export function ShotProductionActions({
                 plan: displayedPlan,
                 acceptApproximations: approximationsAccepted,
               });
-            } else {
-              produce.mutate(preflightDrawerStage);
             }
             setPreflightDrawerStage(null);
           }

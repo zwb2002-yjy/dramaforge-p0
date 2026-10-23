@@ -181,6 +181,38 @@ export function ShotDesignPanel({
   } catch {
     // Keep invalid advanced JSON intact; structured controls must not erase it.
   }
+  // Timeline duration and requested Provider generation duration are different facts.
+  const generationSettings =
+    parsedDirectorState?.generation_settings &&
+    typeof parsedDirectorState.generation_settings === "object" &&
+    !Array.isArray(parsedDirectorState.generation_settings)
+      ? (parsedDirectorState.generation_settings as Record<string, unknown>)
+      : {};
+  const videoSettings =
+    generationSettings.video &&
+    typeof generationSettings.video === "object" &&
+    !Array.isArray(generationSettings.video)
+      ? (generationSettings.video as Record<string, unknown>)
+      : {};
+  const requestedVideoDuration = videoSettings.request_duration_seconds;
+  const updateVideoDuration = (raw: string) => {
+    if (!parsedDirectorState) return;
+    if (raw !== "" && (!Number.isInteger(Number(raw)) || Number(raw) < 1 || Number(raw) > 30)) {
+      return;
+    }
+    const video = { ...videoSettings };
+    if (raw === "") delete video.request_duration_seconds;
+    else video.request_duration_seconds = Number(raw);
+    const state = {
+      ...parsedDirectorState,
+      generation_settings: { ...generationSettings, video },
+    };
+    updateDraft({
+      ...draft,
+      director_state: state,
+      director_state_text: serializeDirectorState(state),
+    });
+  };
   const updateVoice = (voice: ShotVoiceSettingsValue) => {
     if (!parsedDirectorState) return;
     const state = { ...parsedDirectorState, voice };
@@ -399,7 +431,7 @@ export function ShotDesignPanel({
             />
           </Field>
           <Field>
-            时长
+            镜头时长（剪辑）
             <Input
               aria-label="时长（秒）"
               type="number"
@@ -411,6 +443,23 @@ export function ShotDesignPanel({
             />
           </Field>
         </div>
+        <Field>
+          视频生成时长（秒，按模型合同校验）
+          <Input
+            aria-label="视频生成时长（秒）"
+            type="number"
+            min="1"
+            max="30"
+            step="1"
+            placeholder="使用模型默认时长"
+            disabled={!parsedDirectorState}
+            value={typeof requestedVideoDuration === "number" ? requestedVideoDuration : ""}
+            onChange={(event) => updateVideoDuration(event.target.value)}
+          />
+        </Field>
+        <p className="df-shot-hint">
+          镜头时长用于剪辑；生成时长只有模型合同允许时才会生效，保存后可在执行预检中核对。
+        </p>
       </Disclosure>
 
       {message && (

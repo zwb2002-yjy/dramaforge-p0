@@ -760,7 +760,39 @@ describe("SceneWorkspace", () => {
         });
       }
       if (url.endsWith("/execution-plan")) {
-        return json({ plan: { accepted_approximations: [] }, plan_fingerprint: "a".repeat(64) });
+        const stage = String(body.stage);
+        const shotId = url.includes("/shot-2/") ? "shot-2" : "shot-1";
+        return json({
+          plan_fingerprint: "a".repeat(64),
+          compiler_contract_preview: {
+            compile_level: "provider_contract",
+            readiness: "contract_validated",
+            transport_verified: false,
+            account_verified: false,
+            wire_fingerprint: "b".repeat(64),
+            redacted_wire: { model_id: "agnes/agnes-image-2.1-flash" },
+            effective_options: stage === "video" ? { duration_seconds: 5 } : {},
+            errors: [],
+            warnings: [],
+          },
+          plan: {
+            project_id: "project-1",
+            shot_id: shotId,
+            expected_shot_version: 1,
+            stage,
+            mode_id: body.mode_id,
+            prompt: body.prompt,
+            resolved_model: {
+              status: "RESOLVED",
+              resolved_model_id: "agnes/agnes-image-2.1-flash",
+            },
+            planned_references: [],
+            capability_gaps: [],
+            accepted_approximations: [],
+            effective_options: stage === "video" ? { duration_seconds: 5 } : {},
+            duration_seconds: stage === "video" ? 5 : null,
+          },
+        });
       }
       if (url.endsWith("/executions")) {
         return json({
@@ -787,6 +819,13 @@ describe("SceneWorkspace", () => {
     const firstGenerate = await screen.findByTestId("generate-keyframe");
     await waitFor(() => expect(firstGenerate).toBeEnabled());
     fireEvent.click(firstGenerate);
+    const confirm = await screen.findByTestId("confirm-generate-button");
+    await waitFor(() => expect(confirm).toBeEnabled());
+    const executionWrites = calls.filter(
+      (call) => call.method === "POST" && call.url.endsWith("/executions"),
+    );
+    expect(executionWrites).toHaveLength(0);
+    fireEvent.click(confirm);
     await screen.findByTestId("shot-production-status");
     const firstPlan = calls.find(
       (call) => call.method === "POST" && call.url.endsWith("/execution-plan"),

@@ -22,7 +22,7 @@ export type ContinuityCheckItemKey =
 
 export type ChecklistValue = "unchecked" | "consistent" | "issue_found";
 
-export const CONTINUITY_CHECKLIST_ITEMS: readonly {
+const CONTINUITY_CHECKLIST_ITEMS: readonly {
   key: ContinuityCheckItemKey;
   label: string;
   desc: string;
