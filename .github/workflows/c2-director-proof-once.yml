@@ -1,0 +1,42 @@
+name: Verify C2 Director PostgreSQL proof once
+
+on:
+  push:
+    branches:
+      - agent/c2-director-proof-ci-fix-20261023
+    paths:
+      - .github/workflows/c2-director-proof-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: true
+      - name: Build backend quality image
+        run: docker compose -f docker-compose.quality.yml build backend-quality
+      - name: Verify PostgreSQL Director execution confirmation
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.quality.yml up -d --wait postgres-quality redis-quality
+          docker compose -f docker-compose.quality.yml run --rm backend-quality sh -ec '
+            uv run --directory backend ruff format --check tests/integration/test_director_runtime_flow_pg.py
+            uv run --directory backend ruff check tests/integration/test_director_runtime_flow_pg.py
+            uv run --directory backend pytest tests/integration/test_director_runtime_flow_pg.py -q --fail-on-skip
+          '
+      - name: Delete temporary workflow after passing tests
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/c2-director-proof-once.yml
+          git diff --cached --check
+          git commit -m "test(c2): validate PostgreSQL director proof and remove temporary gate"
+          git push origin "HEAD:agent/c2-director-proof-ci-fix-20261023"
+      - name: Cleanup
+        if: always()
+        run: docker compose -f docker-compose.quality.yml down --volumes --remove-orphans
