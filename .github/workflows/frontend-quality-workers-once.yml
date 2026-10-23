@@ -1,4 +1,4 @@
-name: Frontend quality command regression (one shot)
+name: Frontend quality and preview footer regression (one shot)
 
 on:
   push:
