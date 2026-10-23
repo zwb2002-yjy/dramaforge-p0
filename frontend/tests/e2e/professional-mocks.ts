@@ -654,9 +654,41 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
           409,
         );
       }
+      const stage = String(body.stage);
       return json(route, {
-        plan: { accepted_approximations: [] },
         plan_fingerprint: "a".repeat(64),
+        compiler_contract_preview: {
+          compile_level: "provider_contract",
+          readiness: "contract_validated",
+          transport_verified: false,
+          account_verified: false,
+          wire_fingerprint: "b".repeat(64),
+          redacted_wire: {
+            model_id: "provider/mock-v1",
+            operation: stage === "video" ? "video.generate" : "image.generate",
+            wire_request: {
+              prompt: stage === "video" ? state.videoPrompt : state.imagePrompt,
+              ...(stage === "video" ? { duration: 5 } : {}),
+            },
+          },
+          effective_options: stage === "video" ? { duration_seconds: 5 } : {},
+          errors: [],
+          warnings: ["MEDIA_BYTES_NOT_VERIFIED", "ACCOUNT_NOT_CHECKED"],
+        },
+        plan: {
+          project_id: PROJECT_ID,
+          shot_id: SHOT_ID,
+          expected_shot_version: state.shotVersion,
+          stage,
+          mode_id: body.mode_id,
+          prompt: stage === "video" ? state.videoPrompt : state.imagePrompt,
+          resolved_model: { status: "RESOLVED", resolved_model_id: "provider/mock-v1" },
+          planned_references: [],
+          capability_gaps: [],
+          accepted_approximations: [],
+          duration_seconds: stage === "video" ? 5 : null,
+          effective_options: stage === "video" ? { duration_seconds: 5 } : {},
+        },
       });
     }
     if (path.endsWith("/executions/receipt") && method === "GET") {
@@ -686,6 +718,9 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     }
     if (path.includes("/director/turns") && method === "GET") return json(route, []);
     if (path.endsWith("/executions") && method === "POST") {
+      if (body.compiler_wire_fingerprint !== "b".repeat(64)) {
+        return json(route, { code: "COMPILER_WIRE_CONFIRMATION_REQUIRED" }, 422);
+      }
       if (body.expected_shot_version !== state.shotVersion) {
         return json(
           route,
