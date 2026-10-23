@@ -255,7 +255,10 @@ export async function submitShotExecution(
 export async function delegateShotExecutionToDirector(
   projectId: string,
   shotId: string,
-  prepared: Pick<PreparedShotExecution, "input" | "preview"> & { decisionId: string },
+  prepared: Pick<PreparedShotExecution, "input" | "preview"> & {
+    decisionId: string;
+    authorizationExpiresAt: string;
+  },
 ): Promise<DirectorDelegationRead> {
   const compilerPreview = prepared.preview.compiler_contract_preview;
   const compilerFingerprint = compilerPreview?.wire_fingerprint;
@@ -278,7 +281,7 @@ export async function delegateShotExecutionToDirector(
     `/api/v1/projects/${projectId}/director/runtime/shots/${shotId}/executions`,
     {
       decision_id: prepared.decisionId,
-      authorization_expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      authorization_expires_at: prepared.authorizationExpiresAt,
       max_steps: 6,
       execution: {
         ...frozenInput,
