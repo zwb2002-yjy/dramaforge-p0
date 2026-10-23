@@ -789,9 +789,7 @@ describe("SceneWorkspace", () => {
     fireEvent.click(firstGenerate);
     await waitFor(() => {
       expect(
-        calls.filter(
-          (call) => call.method === "POST" && call.url.endsWith("/execution-plan"),
-        ),
+        calls.filter((call) => call.method === "POST" && call.url.endsWith("/execution-plan")),
       ).toHaveLength(1);
     });
     expect(screen.getByTestId("shot-preflight-drawer")).toBeInTheDocument();
