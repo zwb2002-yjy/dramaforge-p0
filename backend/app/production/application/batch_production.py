@@ -164,7 +164,7 @@ async def _prepare(
     scene_id: UUID | None,
 ) -> tuple[
     BatchProductionPreviewRead,
-    dict[UUID, tuple[WorkbenchExecutionInput, WorkbenchExecutionPlan]],
+    dict[UUID, tuple[WorkbenchExecutionInput, WorkbenchExecutionPlan, str]],
 ]:
     statement = select(Shot).where(Shot.project_id == project.id)
     if scene_id is not None:
@@ -198,7 +198,7 @@ async def _prepare(
         if str((row.input_snapshot or {}).get("node_key") or "") == node_key
     }
     service = WorkbenchExecutionService(session, user_id=user_id)
-    prepared: dict[UUID, tuple[WorkbenchExecutionInput, WorkbenchExecutionPlan]] = {}
+    prepared: dict[UUID, tuple[WorkbenchExecutionInput, WorkbenchExecutionPlan, str]] = {}
     items: list[BatchPreviewItemRead] = []
 
     def not_ready(shot: Shot, disposition: BatchDisposition, reason: str) -> None:
@@ -248,10 +248,20 @@ async def _prepare(
                 expected_shot_version=shot.version,
             )
             plan = await service.build_plan(project=project, execution_input=execution_input)
+            compiler = await service.preview_compiler_contract(project=project, plan=plan)
+            if (
+                compiler is None
+                or compiler.readiness != "contract_validated"
+                or compiler.wire_fingerprint is None
+            ):
+                raise ValidationAppError(
+                    "batch model Compiler proof is not ready",
+                    details={"code": "COMPILER_WIRE_CONFIRMATION_REQUIRED"},
+                )
         except Exception as exc:  # noqa: BLE001 - blockers belong in the preview
             not_ready(shot, "blocked", _reason(exc))
             continue
-        prepared[shot.id] = (execution_input, plan)
+        prepared[shot.id] = (execution_input, plan, compiler.wire_fingerprint)
         items.append(
             BatchPreviewItemRead(
                 shot_id=shot.id,
@@ -268,6 +278,11 @@ async def _prepare(
         "scene_id": str(scene_id) if scene_id else None,
         "stage": stage,
         "items": [item.model_dump(mode="json") for item in items],
+        # Bind invisible, immutable Compiler proof into the Owner-approved
+        # preview hash without exposing a second wire contract in the API.
+        "compiler_proofs": {
+            str(shot_id): proof for shot_id, (_input, _plan, proof) in prepared.items()
+        },
     }
     fingerprint = hashlib.sha256(
         json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":")).encode()
@@ -526,6 +541,26 @@ async def read_production_todos(
     )
 
 
+async def _recorded_batch_runs(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    field: Literal["batch_key", "preview_fingerprint"],
+    value: str,
+) -> list[NodeRun]:
+    """Read the frozen authorization journal without inventing a second table."""
+    column = NodeRun.input_snapshot["paid_authorization"][field].as_string()
+    return list(
+        (
+            await session.scalars(
+                select(NodeRun)
+                .where(NodeRun.project_id == project_id, column == value)
+                .order_by(NodeRun.created_at, NodeRun.id)
+            )
+        ).all()
+    )
+
+
 async def dispatch_batch_production(
     project_id: UUID,
     body: BatchProductionDispatchBody,
@@ -533,6 +568,45 @@ async def dispatch_batch_production(
     session: AsyncSession,
 ) -> BatchProductionDispatchRead:
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    # Ownership is authenticated by the session, not by owner_authorized's
+    # client-supplied acknowledgement. The project lock covers replay lookup,
+    # preview recomputation and acceptance in one serialized transaction.
+    await WorkbenchExecutionService(session, user_id=user.id).lock_command_scope(
+        project_id=project.id,
+    )
+    prior = await _recorded_batch_runs(
+        session, project_id=project.id, field="batch_key", value=body.batch_key,
+    )
+    if prior:
+        frozen = [(run.input_snapshot or {}).get("paid_authorization") for run in prior]
+        if not all(isinstance(item, dict) for item in frozen):
+            raise ConflictError(
+                "batch contains invalid frozen authorization facts",
+                details={"code": "BATCH_AUTHORIZATION_REPLAY_CONFLICT"},
+            )
+        verified = [item for item in frozen if isinstance(item, dict)]
+        if (
+            any(
+                item.get("preview_fingerprint") != body.preview_fingerprint
+                or item.get("stage") != body.stage
+                or item.get("authorized_by") != str(user.id)
+                or item.get("authorized_call_count") != len(prior)
+                for item in verified
+            )
+            or {item.get("call_index") for item in verified} != set(range(1, len(prior) + 1))
+            or len(prior) > body.max_provider_calls
+        ):
+            raise ConflictError(
+                "batch key has already been used for a different confirmation",
+                details={"code": "BATCH_AUTHORIZATION_REPLAY_CONFLICT"},
+            )
+        return BatchProductionDispatchRead(
+            preview_fingerprint=body.preview_fingerprint,
+            accepted_count=len(prior),
+            node_run_ids=[run.id for run in prior],
+            statuses=[run.status for run in prior],
+        )
+
     preview, prepared = await _prepare(
         session,
         project=project,
@@ -556,12 +630,27 @@ async def dispatch_batch_production(
                 "max_provider_calls": body.max_provider_calls,
             },
         )
+    # The same frozen preview is one confirmation, even if an API client
+    # changes batch_key. Reauthorization requires a genuinely new preview.
+    already_accepted = await _recorded_batch_runs(
+        session,
+        project_id=project.id,
+        field="preview_fingerprint",
+        value=preview.fingerprint,
+    )
+    if already_accepted:
+        raise ConflictError(
+            "this batch preview has already been authorized",
+            details={"code": "BATCH_PREVIEW_ALREADY_AUTHORIZED"},
+        )
     commands = ProductionCommands(session)
     run_ids: list[UUID] = []
     statuses: list[str] = []
     authorized_at = datetime.now(UTC).isoformat()
     authorized_count = len(prepared)
-    for call_index, (shot_id, (execution_input, plan)) in enumerate(prepared.items(), start=1):
+    for call_index, (shot_id, (execution_input, plan, compiler_proof)) in enumerate(
+        prepared.items(), start=1
+    ):
         if not plan.plan_fingerprint:
             raise ValidationAppError("batch plan has no fingerprint")
         receipt = await commands.submit_user_execution(
@@ -573,6 +662,7 @@ async def dispatch_batch_production(
                     exclude={"project_id", "shot_id", "experiment_branch_id"}
                 ),
                 plan_fingerprint=plan.plan_fingerprint,
+                compiler_wire_fingerprint=compiler_proof,
                 accepted_approximations=plan.accepted_approximations,
             ),
             command_key=f"batch:{body.batch_key}:{shot_id}",
@@ -587,9 +677,15 @@ async def dispatch_batch_production(
         # acknowledgement covers exactly this preview and operation count; it is
         # never open-ended or reusable consent. Pricing stays with the provider.
         snapshot = dict(run.input_snapshot or {})
+        if "paid_authorization" in snapshot:
+            raise ConflictError(
+                "run already has a frozen paid authorization",
+                details={"code": "BATCH_AUTHORIZATION_ALREADY_FROZEN"},
+            )
         snapshot["paid_authorization"] = {
             "kind": "batch_owner_authorization",
             "batch_key": body.batch_key,
+            "stage": body.stage,
             "preview_fingerprint": preview.fingerprint,
             "authorized_by": str(user.id),
             "authorized_at": authorized_at,
