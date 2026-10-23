@@ -804,8 +804,13 @@ describe("SceneWorkspace", () => {
     ]);
     // Preflight is read-only. No paid execution may occur before explicit
     // confirmation, even when the generated preview is incomplete.
-    // The Drawer footer is portaled outside its scrollable content region.
-    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    // Close through the named dialog so the test does not depend on AntD's
+    // locale-specific visual spacing of the footer's "取消" label.
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "本次发送核对" })).getByRole("button", {
+        name: "关闭",
+      }),
+    );
     expect(calls.filter((call) => call.url.endsWith("/executions"))).toHaveLength(0);
 
     fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
