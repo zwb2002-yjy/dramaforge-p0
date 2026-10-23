@@ -199,7 +199,9 @@ export function ShotProductionActions({
     queryKey: queryKeys.asset.shotReferences(projectId, shot.id),
     queryFn: () => fetchShotReferences(projectId, shot.id),
   });
-  const delegationDecisionIds = useRef(new Map<string, string>());
+  const delegationDecisionIds = useRef(
+    new Map<string, { decisionId: string; authorizationExpiresAt: string }>(),
+  );
   const preflightSequence = useRef(0);
   const explicitCreateId = useRef(globalThis.crypto.randomUUID());
   const forStage = (stage: "image" | "video") =>
@@ -594,15 +596,18 @@ export function ShotProductionActions({
         throw new Error("当前计划需要近似适配确认，请先使用手动生成入口检查并确认。");
       }
       const decisionKey = `${shot.id}:${stage}:${preview.plan_fingerprint}`;
-      let decisionId = delegationDecisionIds.current.get(decisionKey);
-      if (!decisionId) {
-        decisionId = globalThis.crypto.randomUUID();
-        delegationDecisionIds.current.set(decisionKey, decisionId);
+      let frozenDecision = delegationDecisionIds.current.get(decisionKey);
+      if (!frozenDecision) {
+        frozenDecision = {
+          decisionId: globalThis.crypto.randomUUID(),
+          authorizationExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        };
+        delegationDecisionIds.current.set(decisionKey, frozenDecision);
       }
       const turn = await delegateShotExecutionToDirector(projectId, shot.id, {
         input,
         preview,
-        decisionId,
+        ...frozenDecision,
       });
       return { stage, turn, decisionKey };
     },
