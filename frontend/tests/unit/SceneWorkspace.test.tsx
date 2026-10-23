@@ -804,11 +804,8 @@ describe("SceneWorkspace", () => {
     ]);
     // Preflight is read-only. No paid execution may occur before explicit
     // confirmation, even when the generated preview is incomplete.
-    fireEvent.click(
-      within(screen.getByTestId("shot-preflight-drawer")).getByRole("button", {
-        name: "取消",
-      }),
-    );
+    // The Drawer footer is portaled outside its scrollable content region.
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(calls.filter((call) => call.url.endsWith("/executions"))).toHaveLength(0);
 
     fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
