@@ -595,7 +595,7 @@ describe("SceneWorkspace", () => {
     });
   });
 
-  it("submits only the selected shot's resolved references", async () => {
+  it("previews only the selected shot's resolved references without paid submission", async () => {
     const shot2 = {
       ...SHOT_1,
       id: "shot-2",
@@ -787,13 +787,29 @@ describe("SceneWorkspace", () => {
     const firstGenerate = await screen.findByTestId("generate-keyframe");
     await waitFor(() => expect(firstGenerate).toBeEnabled());
     fireEvent.click(firstGenerate);
-    await screen.findByTestId("shot-production-status");
+    await waitFor(() => {
+      expect(
+        calls.filter(
+          (call) => call.method === "POST" && call.url.endsWith("/execution-plan"),
+        ),
+      ).toHaveLength(1);
+    });
+    expect(screen.getByTestId("shot-preflight-drawer")).toBeInTheDocument();
+    expect(calls.filter((call) => call.url.endsWith("/executions"))).toHaveLength(0);
     const firstPlan = calls.find(
       (call) => call.method === "POST" && call.url.endsWith("/execution-plan"),
     );
     expect(firstPlan?.body.references).toMatchObject([
       { binding_id: "binding-a", artifact_id: "artifact-a" },
     ]);
+    // Preflight is read-only. No paid execution may occur before explicit
+    // confirmation, even when the generated preview is incomplete.
+    fireEvent.click(
+      within(screen.getByTestId("shot-preflight-drawer")).getByRole("button", {
+        name: "取消",
+      }),
+    );
+    expect(calls.filter((call) => call.url.endsWith("/executions"))).toHaveLength(0);
 
     fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
     expect(screen.getByTestId("cinematic-canvas")).toHaveAttribute("data-shot-id", "shot-2");
@@ -832,6 +848,8 @@ describe("SceneWorkspace", () => {
     expect(secondPlan.body.references).toMatchObject([
       { binding_id: "binding-b", artifact_id: "artifact-b" },
     ]);
+    expect(screen.getByTestId("shot-preflight-drawer")).toBeInTheDocument();
+    expect(calls.filter((call) => call.url.endsWith("/executions"))).toHaveLength(0);
   });
 });
 
