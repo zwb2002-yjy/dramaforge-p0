@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
-
 from app.config import Settings
 from app.director.runtime.capabilities import DIRECTOR_BLOCKER_CHECKPOINT_NOT_CONFIGURED
 from app.director.runtime.start import DirectorRuntimeStartService
