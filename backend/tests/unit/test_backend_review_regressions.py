@@ -11,9 +11,9 @@ from uuid import uuid4
 import pytest
 
 from app.config import Settings
-from app.production.application import batch_production as batch
 from app.director.runtime.capabilities import DIRECTOR_BLOCKER_CHECKPOINT_NOT_CONFIGURED
 from app.director.runtime.start import DirectorRuntimeStartService
+from app.production.application import batch_production as batch
 from app.shared.errors import ConflictError
 from app.storage.minio_store import MinioObjectStore
 
