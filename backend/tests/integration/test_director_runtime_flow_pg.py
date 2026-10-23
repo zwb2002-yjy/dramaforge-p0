@@ -597,29 +597,23 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
             )
             invalid_decision = uuid4()
             with pytest.raises(ValidationAppError) as bad_wire:
-                await director_api.delegate_shot_execution_to_director(
-                    project_id=project.id,
-                    shot_id=shot.id,
-                    body=director_api.DirectorRuntimeDelegationBody(
-                        decision_id=invalid_decision,
-                        execution=body.model_copy(
-                            update={"compiler_wire_fingerprint": "0" * 64}
+                async with session.begin_nested():
+                    await director_api.delegate_shot_execution_to_director(
+                        project_id=project.id,
+                        shot_id=shot.id,
+                        body=director_api.DirectorRuntimeDelegationBody(
+                            decision_id=invalid_decision,
+                            execution=body.model_copy(
+                                update={"compiler_wire_fingerprint": "0" * 64}
+                            ),
+                            authorization_expires_at=expiry,
+                            max_steps=6,
                         ),
-                        authorization_expires_at=expiry,
-                        max_steps=6,
-                    ),
-                    user=actor,
-                    session=session,
-                    _csrf="controlled",
-                )
+                        user=actor,
+                        session=session,
+                        _csrf="controlled",
+                    )
             assert bad_wire.value.details["code"] == "COMPILER_WIRE_CONFIRMATION_REQUIRED"
-            await session.rollback()
-            await set_rls_context(
-                session,
-                user_id=actor.id,
-                workspace_id=project.workspace_id,
-                project_id=project.id,
-            )
             invalid_grant = await session.scalar(
                 select(ProductionCommandAuthorization.id).where(
                     ProductionCommandAuthorization.project_id == project.id,
