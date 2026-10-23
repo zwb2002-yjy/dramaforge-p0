@@ -595,7 +595,7 @@ describe("SceneWorkspace", () => {
     });
   });
 
-  it("submits only the selected shot's resolved references", async () => {
+  it("previews only selected-shot references without creating media before confirmation", async () => {
     const shot2 = {
       ...SHOT_1,
       id: "shot-2",
@@ -787,7 +787,10 @@ describe("SceneWorkspace", () => {
     const firstGenerate = await screen.findByTestId("generate-keyframe");
     await waitFor(() => expect(firstGenerate).toBeEnabled());
     fireEvent.click(firstGenerate);
-    await screen.findByTestId("shot-production-status");
+    await waitFor(() => {
+      expect(calls.filter((call) => call.method === "POST" && call.url.endsWith("/execution-plan"))).toHaveLength(1);
+    });
+    expect(calls.some((call) => call.method === "POST" && call.url.endsWith("/executions"))).toBe(false);
     const firstPlan = calls.find(
       (call) => call.method === "POST" && call.url.endsWith("/execution-plan"),
     );
@@ -832,6 +835,7 @@ describe("SceneWorkspace", () => {
     expect(secondPlan.body.references).toMatchObject([
       { binding_id: "binding-b", artifact_id: "artifact-b" },
     ]);
+    expect(calls.some((call) => call.method === "POST" && call.url.endsWith("/executions"))).toBe(false);
   });
 });
 
