@@ -1,4 +1,4 @@
-name: Frontend quality and preview footer regression (one shot)
+name: Frontend quality and named preview dialog regression (one shot)
 
 on:
   push:
