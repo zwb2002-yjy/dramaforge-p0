@@ -570,15 +570,18 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
                 requested_binding_id=binding.id,
                 expected_shot_version=shot.version,
             )
-            plan = await WorkbenchExecutionService(
-                session,
-                user_id=actor.id,
-            ).build_plan(project=project, execution_input=execution_input)
+            service = WorkbenchExecutionService(session, user_id=actor.id)
+            plan = await service.build_plan(project=project, execution_input=execution_input)
+            compiler_proof = await service.preview_compiler_contract(project=project, plan=plan)
+            assert compiler_proof is not None
+            assert compiler_proof.readiness == "contract_validated"
+            assert compiler_proof.wire_fingerprint is not None
             body = ExecutionBody(
                 **execution_input.model_dump(
                     exclude={"project_id", "shot_id", "experiment_branch_id"},
                 ),
                 plan_fingerprint=plan.plan_fingerprint,
+                compiler_wire_fingerprint=compiler_proof.wire_fingerprint,
                 accepted_approximations=plan.accepted_approximations,
             )
             decision_id = uuid4()
