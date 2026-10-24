@@ -1,8 +1,10 @@
+import { selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ShotProductionActions } from "../../src/features/shots/ShotProductionActions";
+import { queryKeys } from "../../src/lib/queryKeys";
 import {
   productionOperationScope,
   readProductionOperation,
@@ -58,7 +60,25 @@ function planResponse({
   const approximate = delivery === "approximate";
   return {
     plan_fingerprint: fingerprint,
+    compiler_contract_preview: {
+      compile_level: "provider_contract",
+      readiness: "contract_validated",
+      transport_verified: false,
+      account_verified: false,
+      prompt_hash: "9".repeat(64),
+      semantic_hash: "8".repeat(64),
+      manifest_hash: "7".repeat(64),
+      reference_ids: [],
+      requested_options: {},
+      effective_options: {},
+      wire_fingerprint: "e".repeat(64),
+      redacted_wire: { model_id: modelId, wire_request: { model: modelId } },
+      transformations: [],
+      errors: [],
+      warnings: [],
+    },
     plan: {
+      supports_prompt_override: false,
       plan_fingerprint: fingerprint,
       project_id: SHOT.project_id,
       shot_id: SHOT.id,
@@ -119,27 +139,366 @@ function renderActions(
   references: ShotExecutionReference[] = [],
   trace: unknown[] = [],
   onDirectorDelegated?: () => void,
+  referencesReady = true,
+  formalKeyframeId: string | null = null,
+  savedBindings: unknown[] = [],
 ) {
   const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
   });
-  render(
+  queryClient.setQueryData(queryKeys.asset.shotReferences(SHOT.project_id, SHOT.id), savedBindings);
+  queryClient.setQueryData(queryKeys.model.executionPreflight(SHOT.project_id), {
+    project_id: SHOT.project_id,
+    ready: true,
+    stages: [
+      {
+        stage: "image_keyframe",
+        slot: "visual.keyframe",
+        purpose: "keyframe",
+        ready: true,
+        source: "system_default",
+        requested_model_id: "agnes/agnes-image-2.1-flash",
+        resolved_model_id: "agnes/agnes-image-2.1-flash",
+        provider_model_binding_id: "33333333-3333-4333-8333-333333333333",
+        reason: null,
+      },
+      {
+        stage: "video",
+        slot: "video.shot",
+        purpose: "video",
+        ready: true,
+        source: "system_default",
+        requested_model_id: "agnes/agnes-video-v2.0",
+        resolved_model_id: "agnes/agnes-video-v2.0",
+        provider_model_binding_id: "44444444-4444-4444-8444-444444444444",
+        reason: null,
+      },
+    ],
+  });
+  const view = render(
     <QueryClientProvider client={queryClient}>
       <ShotProductionActions
         projectId={SHOT.project_id}
-        shot={SHOT}
+        shot={{ ...SHOT, formal_keyframe_artifact_id: formalKeyframeId }}
         references={references}
+        referencesReady={referencesReady}
         trace={trace}
         onDirectorDelegated={onDirectorDelegated}
       />
     </QueryClientProvider>,
   );
+  return { queryClient, ...view };
+}
+
+async function confirmCurrentPreflight(): Promise<void> {
+  const confirm = await screen.findByTestId("confirm-generate-button");
+  await waitFor(() => expect(confirm).toBeEnabled());
+  fireEvent.click(confirm);
+}
+
+async function confirmPreviewReady(): Promise<void> {
+  await waitFor(() => expect(screen.getByTestId("confirm-generate-button")).toBeEnabled());
+  expect(screen.getByTestId("preflight-wire-fingerprint")).toBeInTheDocument();
 }
 
 describe("ShotProductionActions", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     window.localStorage.clear();
+  });
+
+  it("allows text-only video without a formal keyframe when T2V preflight is ready", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/execution-models/preflight?video_mode=text_to_video")) {
+        return json({
+          project_id: SHOT.project_id,
+          ready: true,
+          stages: [
+            { stage: "image_keyframe", ready: true },
+            {
+              stage: "video",
+              ready: true,
+              resolved_model_id: "openai_compatible_media//models/MiniMax-H3-runtime",
+              source: "project_profile",
+            },
+          ],
+        });
+      }
+      return json({});
+    });
+    renderActions([], [], undefined, false);
+    // Without a formal frame the default next step is the frame itself.
+    expect(screen.queryByTestId("generate-video")).not.toBeInTheDocument();
+    await selectValue(screen.getByLabelText("视频方式"), "text_to_video");
+    await waitFor(() => expect(screen.getByTestId("generate-video")).toBeEnabled());
+    expect(screen.getByTestId("production-stage-indicator")).toHaveTextContent(
+      "视频生成 (仅用文字)",
+    );
+    expect(screen.queryByTestId("production-preflight-source-frame")).not.toBeInTheDocument();
+    expect(screen.getByTestId("delegate-video-to-director")).toBeDisabled();
+  });
+
+  it("offers Ref2VA without a formal keyframe and freezes selected references", async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      calls.push({ url, body });
+      if (url.includes("/execution-models/preflight?video_mode=omni_reference")) {
+        return json({
+          project_id: SHOT.project_id,
+          ready: true,
+          stages: [
+            { stage: "image_keyframe", ready: true },
+            {
+              stage: "video",
+              ready: true,
+              resolved_model_id: "openai_compatible_media/H3",
+              contract_display_name: "SGLang H3 多素材参考 (Ref2VA)",
+              model_revision: "v2",
+            },
+          ],
+        });
+      }
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) return json(planResponse());
+      if (url.endsWith("/executions")) {
+        return json({
+          node_run_id: "33333333-3333-4333-8333-333333333333",
+          status: "queued",
+          plan_fingerprint: "a".repeat(64),
+        });
+      }
+      return json({});
+    });
+    const reference: ShotExecutionReference = {
+      binding_id: "binding-1",
+      purpose: "action",
+      asset_version_id: "version-1",
+      artifact_id: "artifact-1",
+      resolution_mode: "current_formal",
+      mime_type: "video/mp4",
+      fingerprint: "hash-1",
+    };
+    renderActions([reference]);
+    await selectValue(screen.getByLabelText("视频方式"), "omni_reference");
+    await waitFor(() => expect(screen.getByTestId("generate-video")).toBeEnabled());
+    expect(screen.getByTestId("production-preflight-video")).toHaveTextContent(
+      "SGLang H3 多素材参考 (Ref2VA) · v2",
+    );
+    expect(screen.getByTestId("delegate-video-to-director")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("generate-video"));
+    await waitFor(() =>
+      expect(calls.some((call) => call.url.endsWith("/execution-plan"))).toBe(true),
+    );
+    const plan = calls.find((call) => call.url.endsWith("/execution-plan"));
+    expect(plan?.body.mode_id).toBe("omni_reference");
+    expect(plan?.body.references).toEqual([reference]);
+  });
+
+  it.each([
+    ["尾帧生视频", "last_frame", null],
+    ["首尾帧生视频", "first_last_frame", "formal-frame"],
+  ])("freezes the saved last frame for %s", async (label, mode, formalFrame) => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      calls.push({ url, body });
+      if (url.includes(`/execution-models/preflight?video_mode=${mode}`)) {
+        return json({
+          project_id: SHOT.project_id,
+          ready: true,
+          stages: [
+            { stage: "image_keyframe", ready: true },
+            { stage: "video", ready: true, resolved_model_id: "openai_compatible_media/H3" },
+          ],
+        });
+      }
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) return json(planResponse());
+      return json({});
+    });
+    const lastFrame: ShotExecutionReference = {
+      binding_id: "binding-last",
+      purpose: "last_frame",
+      asset_version_id: "version-last",
+      artifact_id: "artifact-last",
+      resolution_mode: "current_formal",
+      mime_type: "image/png",
+      fingerprint: "hash-last",
+    };
+    const unrelated: ShotExecutionReference = {
+      ...lastFrame,
+      binding_id: "binding-style",
+      purpose: "style",
+      artifact_id: "artifact-style",
+    };
+    renderActions([unrelated, lastFrame], [], undefined, true, formalFrame);
+    expect(label).toBeTruthy();
+    await selectValue(screen.getByLabelText("视频方式"), mode);
+    await waitFor(() => expect(screen.getByTestId("generate-video")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("generate-video"));
+    await waitFor(() =>
+      expect(calls.some((call) => call.url.endsWith("/execution-plan"))).toBe(true),
+    );
+    const plan = calls.find((call) => call.url.endsWith("/execution-plan"));
+    expect(plan?.body.mode_id).toBe(mode);
+    expect(plan?.body.references).toEqual([lastFrame]);
+  });
+
+  it("invalidates preflight when a saved binding's stage scope changes", async () => {
+    // N-09 (joint review): a binding refresh changes which references a plan
+    // carries; the displayed plan must be invalidated instead of surviving
+    // with a stale projection. The server re-verifies the fingerprint, this
+    // is about not offering a stale confirmation view.
+    const fetched: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      fetched.push(url);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) return json(planResponse());
+      return json({});
+    });
+    const reference: ShotExecutionReference = {
+      binding_id: "binding-1",
+      purpose: "identity",
+      asset_version_id: "version-1",
+      artifact_id: "artifact-1",
+      resolution_mode: "current_formal",
+      mime_type: "image/png",
+      fingerprint: "hash-1",
+    };
+    // Seed the saved bindings the way a completed fetch would (stage scope
+    // "both" keeps the reference in the image plan).
+    const bindingRow = {
+      id: "binding-1",
+      stage: "both",
+      purpose: "identity",
+      asset_id: "asset-1",
+      asset_version_id: "version-1",
+      artifact_id: "artifact-1",
+      resolution_mode: "current_formal",
+      label: "角色",
+      sort_order: 0,
+    };
+    const { queryClient } = renderActions([reference], [], undefined, true, null, [bindingRow]);
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await waitFor(() => expect(fetched.some((url) => url.endsWith("/execution-plan"))).toBe(true));
+    await waitFor(() =>
+      expect(screen.getByTestId("preflight-wire-fingerprint")).toBeInTheDocument(),
+    );
+
+    // Semantically identical binding data (new array identity, same scope):
+    // the drawer must stay open.
+    queryClient.setQueryData(queryKeys.asset.shotReferences(SHOT.project_id, SHOT.id), [
+      { ...bindingRow },
+    ]);
+    await waitFor(() =>
+      expect(screen.getByTestId("preflight-wire-fingerprint")).toBeInTheDocument(),
+    );
+
+    // The binding scope now excludes the image stage: the displayed plan is
+    // invalidated with the binding semantics.
+    queryClient.setQueryData(queryKeys.asset.shotReferences(SHOT.project_id, SHOT.id), [
+      { ...bindingRow, stage: "video" },
+    ]);
+    await waitFor(() =>
+      expect(screen.queryByTestId("preflight-wire-fingerprint")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("confirm-generate-button")).toBeDisabled();
+    expect(fetched.some((url) => url.endsWith("/executions"))).toBe(false);
+  });
+
+  it.each([
+    { provider_model_binding_id: "new-binding" },
+    { resolved_model_id: "other/image-model" },
+    { model_revision: "v3" },
+    { ready: false, reason: "MODEL_BINDING_MISSING" },
+  ])("invalidates preflight after model resolution changes: %j", async (change) => {
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith("/execution-plan")) return json(planResponse());
+      return json({});
+    });
+    const { queryClient } = renderActions();
+    fireEvent.click(screen.getByTestId("generate-keyframe"));
+    await confirmPreviewReady();
+    const key = queryKeys.model.executionPreflight(SHOT.project_id);
+    const current = queryClient.getQueryData<{ stages: Array<Record<string, unknown>> }>(key)!;
+    await act(async () => {
+      queryClient.setQueryData(key, {
+        ...current,
+        stages: current.stages.map((stage) => ({
+          ...stage,
+          contract_display_name: "Updated display name",
+        })),
+      });
+    });
+    expect(screen.getByTestId("confirm-generate-button")).toBeEnabled();
+    await act(async () => {
+      queryClient.setQueryData(key, {
+        ...current,
+        stages: current.stages.map((stage) =>
+          stage.stage === "image_keyframe" ? { ...stage, ...change } : stage,
+        ),
+      });
+    });
+    await waitFor(() => expect(screen.getByTestId("confirm-generate-button")).toBeDisabled());
+    expect(screen.queryByTestId("preflight-wire-fingerprint")).not.toBeInTheDocument();
+    expect(calls.some((url) => url.endsWith("/executions"))).toBe(false);
+    fireEvent.click(screen.getByTestId("inspect-shot-plan"));
+    await confirmPreviewReady();
+    expect(calls.filter((url) => url.endsWith("/execution-plan"))).toHaveLength(2);
+  });
+
+  it("keeps preflight for equivalent reference props after a parent render", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) =>
+      json(String(input).endsWith("/execution-plan") ? planResponse() : {}),
+    );
+    const { queryClient, rerender } = renderActions();
+    fireEvent.click(screen.getByTestId("generate-keyframe"));
+    await confirmPreviewReady();
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ShotProductionActions projectId={SHOT.project_id} shot={{ ...SHOT }} references={[]} />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByTestId("confirm-generate-button")).toBeEnabled();
+  });
+
+  it("discards a pending preflight response after a model change", async () => {
+    let resolvePreview!: (response: Response) => void;
+    const pendingPreview = new Promise<Response>((resolve) => {
+      resolvePreview = resolve;
+    });
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      calls.push(url);
+      return url.endsWith("/execution-plan") ? pendingPreview : json({});
+    });
+    const { queryClient } = renderActions();
+    fireEvent.click(screen.getByTestId("inspect-shot-plan"));
+    await waitFor(() => expect(calls.some((url) => url.endsWith("/execution-plan"))).toBe(true));
+    const key = queryKeys.model.executionPreflight(SHOT.project_id);
+    const current = queryClient.getQueryData<{ stages: Array<Record<string, unknown>> }>(key)!;
+    await act(async () => {
+      queryClient.setQueryData(key, {
+        ...current,
+        stages: current.stages.map((stage) => ({ ...stage, model_revision: "updated" })),
+      });
+    });
+    await act(async () => {
+      resolvePreview(await json(planResponse()));
+    });
+    await waitFor(() => expect(screen.getByTestId("inspect-shot-plan")).toBeEnabled());
+    expect(screen.getByTestId("confirm-generate-button")).toBeDisabled();
+    expect(screen.queryByTestId("preflight-wire-fingerprint")).not.toBeInTheDocument();
+    expect(calls.some((url) => url.endsWith("/executions"))).toBe(false);
   });
 
   it("delegates one exact frozen plan to the Director runtime", async () => {
@@ -176,11 +535,12 @@ describe("ShotProductionActions", () => {
         prompt: SHOT.image_prompt,
         expected_shot_version: SHOT.version,
         plan_fingerprint: "a".repeat(64),
+        compiler_wire_fingerprint: "e".repeat(64),
         accepted_approximations: [],
       },
     });
     expect(delegated?.body.authorization_expires_at).toEqual(expect.any(String));
-    expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已授权给导演执行");
+    expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已交给导演执行");
     expect(
       calls.some(
         (call) =>
@@ -188,6 +548,27 @@ describe("ShotProductionActions", () => {
           !call.url.includes("/director/runtime/"),
       ),
     ).toBe(false);
+  });
+
+  it("refuses Director delegation without a validated Compiler wire proof", async () => {
+    const calls: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.endsWith("/execution-plan")) {
+        return json({ ...planResponse(), compiler_contract_preview: null });
+      }
+      return json({});
+    });
+    renderActions();
+    fireEvent.click(screen.getByTestId("delegate-keyframe-to-director"));
+    await waitFor(() =>
+      expect(screen.getByTestId("shot-production-error")).toHaveTextContent(
+        "导演委托缺少有效的编译请求确认指纹",
+      ),
+    );
+    expect(calls.some((url) => url.includes("/director/runtime/shots/"))).toBe(false);
   });
 
   it("reuses the same Director decision after an uncertain response", async () => {
@@ -216,11 +597,15 @@ describe("ShotProductionActions", () => {
     expect(await screen.findByTestId("shot-production-error")).toHaveTextContent("response lost");
     fireEvent.click(screen.getByTestId("delegate-keyframe-to-director"));
     await waitFor(() =>
-      expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已授权给导演执行"),
+      expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已交给导演执行"),
     );
 
     expect(delegationBodies).toHaveLength(2);
     expect(delegationBodies[1]?.decision_id).toBe(delegationBodies[0]?.decision_id);
+    expect(delegationBodies[1]?.authorization_expires_at).toBe(
+      delegationBodies[0]?.authorization_expires_at,
+    );
+    expect(delegationBodies[0]?.authorization_expires_at).toEqual(expect.any(String));
   });
 
   it("freezes and dispatches the selected shot as an image keyframe", async () => {
@@ -250,7 +635,10 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await screen.findByTestId("confirm-generate-button");
+    expect(calls.filter((call) => call.url.endsWith("/executions"))).toHaveLength(0);
+    await confirmCurrentPreflight();
 
     await waitFor(() => expect(screen.getByTestId("shot-production-status")).toBeInTheDocument());
     const plan = calls.find((call) => call.url.endsWith("/execution-plan"));
@@ -274,45 +662,33 @@ describe("ShotProductionActions", () => {
       "data-delivery",
       "exact",
     );
-    expect(screen.getByTestId("shot-execution-plan-model")).toHaveTextContent(
+    expect(screen.getByTestId("shot-execution-plan-model")).toHaveTextContent("执行模型：");
+    // The stored `provider/model` id is contract data: the surface shows the
+    // catalogue display name (or a neutral phrase when it is unknown) and keeps
+    // the id inside the collapsed diagnostics block.
+    expect(screen.getByTestId("shot-execution-plan-model")).not.toHaveTextContent(
+      "agnes/agnes-image-2.1-flash",
+    );
+    expect(screen.getByTestId("shot-execution-plan-diagnostics")).toHaveTextContent(
       "agnes/agnes-image-2.1-flash",
     );
     expect(screen.getByTestId("shot-production-status")).toHaveTextContent("已排队");
   });
 
-  it("sends video through the backend formal-keyframe gate and surfaces its error", async () => {
-    const calls: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-      const url = String(input);
-      const method = init?.method ?? "GET";
-      const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
-      calls.push({ url, method, body });
-      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
-      if (url.endsWith("/execution-plan")) {
-        return json(
-          {
-            code: "VALIDATION_ERROR",
-            detail:
-              "shot has no formal keyframe artifact; select a formal keyframe before video generation",
-          },
-          422,
-        );
-      }
-      return json({});
-    });
-
+  it("leads with the frame and offers no video action before a formal keyframe exists", () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成视频" }));
-
-    const error = await screen.findByTestId("shot-production-error");
-    expect(error).toHaveTextContent("shot has no formal keyframe artifact");
-    expect(calls.filter((call) => call.url.endsWith("/executions"))).toHaveLength(0);
-    expect(calls.find((call) => call.url.endsWith("/execution-plan"))?.body).toMatchObject({
-      stage: "video",
-      prompt: SHOT.video_prompt,
-      mode_id: "first_frame",
-      expected_shot_version: SHOT.version,
-    });
+    expect(screen.getByTestId("shot-production-actions")).toHaveAttribute(
+      "data-next-action",
+      "generate_keyframe",
+    );
+    expect(screen.getByTestId("generate-keyframe")).toHaveTextContent("生成画面");
+    expect(screen.queryByRole("button", { name: "生成视频" })).not.toBeInTheDocument();
+    expect(screen.getByText("视频从正式画面开始，不会自动改用其他图片。")).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("/execution-plan"),
+      expect.anything(),
+    );
   });
 
   it("carries the same concrete references through plan and execution", async () => {
@@ -351,7 +727,8 @@ describe("ShotProductionActions", () => {
       fingerprint: "artifact-fingerprint",
     };
     renderActions([reference]);
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await confirmCurrentPreflight();
 
     await waitFor(() => expect(screen.getByTestId("shot-production-status")).toBeInTheDocument());
     const plan = calls.find((call) => call.url.endsWith("/execution-plan"));
@@ -392,12 +769,13 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
 
     const preview = await screen.findByTestId("shot-execution-plan-preview");
     expect(preview).toHaveAttribute("data-delivery", "approximate");
     expect(calls.filter((call) => call.url.endsWith("/executions"))).toHaveLength(0);
     fireEvent.click(screen.getByTestId("confirm-shot-execution-approximation"));
+    await confirmCurrentPreflight();
 
     await screen.findByTestId("shot-production-status");
     const previews = calls.filter((call) => call.url.endsWith("/execution-plan"));
@@ -434,7 +812,7 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
     fireEvent.click(await screen.findByTestId("confirm-shot-execution-approximation"));
 
     expect(await screen.findByTestId("shot-production-error")).toHaveTextContent(
@@ -462,7 +840,7 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
 
     expect(await screen.findByTestId("shot-execution-plan-preview")).toHaveAttribute(
       "data-delivery",
@@ -471,7 +849,7 @@ describe("ShotProductionActions", () => {
     expect(calls.filter((url) => url.endsWith("/executions"))).toHaveLength(0);
   });
 
-  it("reuses one command key when a production submission loses its response", async () => {
+  it("keeps an uncertain paid create in storage and refuses an automatic retry", async () => {
     const executions: Array<{ body: Record<string, unknown>; key: string | undefined }> = [];
     let attempts = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
@@ -499,18 +877,19 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await confirmCurrentPreflight();
     expect(await screen.findByTestId("shot-production-error")).toHaveTextContent("response lost");
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
-    await waitFor(() => expect(screen.getByTestId("shot-production-status")).toBeInTheDocument());
-
-    expect(executions).toHaveLength(2);
-    expect(executions[1]?.key).toBe(executions[0]?.key);
-    expect(executions[1]?.body).toEqual(executions[0]?.body);
-    expect(executions[1]?.key).toBe(`shot:${SHOT.id}:${"a".repeat(64)}`);
+    expect(executions).toHaveLength(1);
+    const stored = readProductionOperation(
+      productionOperationScope(null, SHOT.project_id, SHOT.id, "image_keyframe"),
+    );
+    expect(stored?.operationKey).toBe(executions[0]?.key);
+    expect(executions[0]?.key).toContain(`shot:${SHOT.id}:`);
+    expect(screen.getByTestId("shot-primary-unknown")).toBeDisabled();
   });
 
-  it("adopts the committed receipt instead of submitting a second media operation", async () => {
+  it("does not consult paid execution receipt or submit before the user confirms", async () => {
     const posted: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
@@ -533,26 +912,19 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
-
-    await waitFor(() =>
-      expect(screen.getByTestId("shot-production-status")).toHaveAttribute(
-        "data-status",
-        "running",
-      ),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await screen.findByTestId("confirm-generate-button");
     expect(posted).toHaveLength(0);
+    expect(screen.queryByTestId("shot-production-status")).not.toBeInTheDocument();
   });
 
-  it("gives a different frozen plan its own command identity", async () => {
+  it("gives repeated explicit creation of the same plan distinct command identities", async () => {
     const keys: Array<string | undefined> = [];
-    let previews = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       const url = String(input);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
       if (url.endsWith("/execution-plan")) {
-        previews += 1;
-        return json(planResponse({ fingerprint: (previews === 1 ? "a" : "b").repeat(64) }));
+        return json(planResponse({ fingerprint: "a".repeat(64) }));
       }
       if (url.includes("/executions/receipt")) {
         return json({ code: "NOT_FOUND", detail: "no receipt" }, 404);
@@ -564,20 +936,25 @@ describe("ShotProductionActions", () => {
           node_run_id: "33333333-3333-4333-8333-333333333333",
           graph_id: "44444444-4444-4444-8444-444444444444",
           graph_version_id: "55555555-5555-4555-8555-555555555555",
-          status: "queued",
-          plan_fingerprint: (previews === 1 ? "a" : "b").repeat(64),
+          // The second explicit create is offered only after the preceding
+          // operation has actually reached a terminal state.
+          status: "completed",
+          plan_fingerprint: "a".repeat(64),
         });
       }
       return json({});
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await confirmCurrentPreflight();
     await waitFor(() => expect(keys).toHaveLength(1));
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await confirmCurrentPreflight();
     await waitFor(() => expect(keys).toHaveLength(2));
 
     expect(keys[1]).not.toBe(keys[0]);
+    expect(keys.every((key) => key?.includes(SHOT.id))).toBe(true);
   });
 
   it("keeps the command key inside the backend idempotency column limit", () => {
@@ -587,6 +964,18 @@ describe("ShotProductionActions", () => {
     const key = shotExecutionIdempotencyKey(SHOT.id, "a".repeat(64));
     expect(`workbench:image_keyframe:${key}`.length).toBeLessThanOrEqual(160);
     expect(key).toBe(`shot:${SHOT.id}:${"a".repeat(64)}`);
+    const newCommand = shotExecutionIdempotencyKey(
+      SHOT.id,
+      "a".repeat(64),
+      "11111111-aaaa-4444-9999-111111111111",
+    );
+    expect(`workbench:image_keyframe:${newCommand}`.length).toBeLessThanOrEqual(160);
+    expect(newCommand).toBe(
+      shotExecutionIdempotencyKey(SHOT.id, "a".repeat(64), "11111111-aaaa-4444-9999-111111111111"),
+    );
+    expect(newCommand).not.toBe(
+      shotExecutionIdempotencyKey(SHOT.id, "a".repeat(64), "22222222-bbbb-4444-9999-222222222222"),
+    );
   });
 
   it("adopts the running operation after a page reload instead of resubmitting", async () => {
@@ -643,7 +1032,7 @@ describe("ShotProductionActions", () => {
     ).not.toBeNull();
   });
 
-  it("forgets a finished operation so a later open cannot adopt a stale receipt", async () => {
+  it("forgets a finished explicitly confirmed operation before a later open", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
@@ -664,7 +1053,8 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
+    await confirmCurrentPreflight();
 
     await waitFor(() =>
       expect(screen.getByTestId("shot-production-status")).toHaveAttribute(
@@ -692,15 +1082,15 @@ describe("ShotProductionActions", () => {
       ],
     );
 
-    expect(screen.getByTestId("generate-keyframe")).toBeDisabled();
-    expect(screen.getByTestId("generate-keyframe")).toHaveTextContent("提交结果待对账");
+    // The primary action reports the unknown state instead of offering a retry.
+    expect(screen.getByTestId("shot-primary-unknown")).toBeDisabled();
+    expect(screen.getByTestId("shot-primary-unknown")).toHaveTextContent("状态待同步");
+    expect(screen.queryByTestId("generate-keyframe")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("secondary-generate-keyframe")).not.toBeInTheDocument();
     expect(screen.getByTestId("delegate-keyframe-to-director")).toBeDisabled();
-    expect(screen.getByTestId("shot-production-outcome-unknown")).toHaveTextContent(
-      "按原操作键对账",
-    );
-    // The other stage is unaffected.
-    expect(screen.getByTestId("generate-video")).toBeEnabled();
-    expect(screen.queryByTestId("shot-production-running")).not.toBeInTheDocument();
+    expect(screen.getByTestId("shot-production-outcome-unknown")).toHaveTextContent("以免重复计费");
+    // Video remains blocked by the independent formal-keyframe prerequisite.
+    expect(screen.queryByTestId("generate-video")).not.toBeInTheDocument();
   });
 
   it("keeps AUTO unavailable with an explanation when the runtime engine is not enabled", async () => {
@@ -727,7 +1117,7 @@ describe("ShotProductionActions", () => {
     expect(screen.getByTestId("shot-production-director-blocked")).toHaveTextContent("legacy");
     // Manual generation stays available: MANUAL never depends on the Director.
     expect(screen.getByTestId("generate-keyframe")).toBeEnabled();
-    expect(screen.getByTestId("generate-video")).toBeEnabled();
+    expect(screen.queryByTestId("generate-video")).not.toBeInTheDocument();
   });
 
   it("keeps the AUTO path open when the runtime reports itself available", async () => {
@@ -810,20 +1200,21 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
 
     const suggestions = await screen.findByTestId("shot-execution-plan-suggestions");
-    expect(suggestions).toHaveTextContent("建议（尚未生效）");
-    expect(suggestions).toHaveTextContent("不会使用它们");
-    expect(suggestions).toHaveTextContent("不作为");
+    expect(suggestions).toHaveTextContent("本次不会使用");
     expect(screen.getByTestId("plan-suggestion-style:cinematic_realism_v1")).toHaveTextContent(
       "未使用",
     );
     expect(screen.getByTestId("plan-suggestion-genre:short_drama_romance_v1")).toHaveTextContent(
       "不参与执行计划",
     );
-    // Suggestions never become a capability gap or a blocking failure.
-    expect(screen.getByTestId("shot-production-status")).toBeInTheDocument();
+    // Suggestions are advisory: they neither block confirmation nor start a
+    // paid create without the explicit second click.
+    expect(screen.queryByTestId("shot-production-status")).not.toBeInTheDocument();
+    await confirmCurrentPreflight();
+    await waitFor(() => expect(screen.getByTestId("shot-production-status")).toBeInTheDocument());
   });
 
   it("does not claim suggestions when the plan has none", async () => {
@@ -844,7 +1235,7 @@ describe("ShotProductionActions", () => {
     });
 
     renderActions();
-    fireEvent.click(screen.getByRole("button", { name: "生成关键帧" }));
+    fireEvent.click(screen.getByRole("button", { name: "生成画面" }));
 
     await screen.findByTestId("shot-execution-plan-preview");
     expect(screen.queryByTestId("shot-execution-plan-suggestions")).not.toBeInTheDocument();
@@ -859,10 +1250,11 @@ describe("ShotProductionActions", () => {
       ],
     );
 
-    expect(screen.getByTestId("generate-keyframe")).toBeDisabled();
-    expect(screen.getByTestId("generate-keyframe")).toHaveTextContent("关键帧生成中");
-    expect(screen.getByTestId("generate-video")).toBeEnabled();
-    expect(screen.getByTestId("shot-production-running")).toHaveTextContent("不会重复提交");
+    // The running stage occupies the primary action; nothing can resubmit it.
+    expect(screen.getByTestId("shot-primary-running")).toBeDisabled();
+    expect(screen.getByTestId("shot-primary-running")).toHaveTextContent("画面生成中");
+    expect(screen.queryByTestId("generate-keyframe")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("generate-video")).not.toBeInTheDocument();
   });
 
   it("treats a newer terminal retry as effective over an older active attempt", () => {
@@ -875,7 +1267,7 @@ describe("ShotProductionActions", () => {
     );
 
     expect(screen.getByTestId("generate-keyframe")).toBeEnabled();
-    expect(screen.getByTestId("generate-keyframe")).toHaveTextContent("生成关键帧");
-    expect(screen.queryByTestId("shot-production-running")).not.toBeInTheDocument();
+    expect(screen.getByTestId("generate-keyframe")).toHaveTextContent("生成画面");
+    expect(screen.queryByTestId("shot-primary-running")).not.toBeInTheDocument();
   });
 });

@@ -162,20 +162,3 @@ ol.dense li {
   align-items: baseline;
   flex-wrap: wrap;
 }
-
-/* ---- Description List ---- */
-dl.summary {
-  display: grid;
-  grid-template-columns: 80px minmax(0, 1fr);
-  gap: var(--df-space-1) var(--df-space-3);
-  font-size: var(--df-text-sm);
-}
-
-dl.summary dt {
-  color: var(--df-text-muted);
-}
-
-dl.summary dd {
-  color: var(--df-text-primary);
-  overflow-wrap: anywhere;
-}

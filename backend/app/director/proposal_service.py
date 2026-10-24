@@ -108,6 +108,7 @@ class ProposalService:
                     command=item.command,
                     payload=item.payload,
                     expected_target_version=item.expected_target_version,
+                    command_key=f"proposal-item-{item.id}",
                 )
             except ProposalCommandError as exc:
                 if exc.details.get("code") == "PROPOSAL_STALE":
@@ -122,14 +123,18 @@ class ProposalService:
             result.accepted.append(item.id)
 
         if changed:
-            has_accepted = any(item.status == "accepted" for item in items)
-            proposal.status = "applied" if has_accepted else "decided"
-            proposal.decided_at = datetime.now(UTC)
-            await self._session.flush()
-            await append_production_notice(
-                self._session, project_id=project.id, actor_id=self._actor.id,
-                notice=ProposalDecided(proposal_id=proposal.id),
-            )
+            pending_items = [it for it in items if it.status == "pending"]
+            if not pending_items:
+                has_accepted = any(item.status == "accepted" for item in items)
+                proposal.status = "applied" if has_accepted else "decided"
+                proposal.decided_at = datetime.now(UTC)
+                await self._session.flush()
+                await append_production_notice(
+                    self._session, project_id=project.id, actor_id=self._actor.id,
+                    notice=ProposalDecided(proposal_id=proposal.id),
+                )
+            else:
+                await self._session.flush()
         return result
 
     async def mark_proposals_stale_for_shot(

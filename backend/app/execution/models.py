@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     BigInteger,
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
@@ -249,6 +250,19 @@ class NodeRun(Base):
         UniqueConstraint(
             "graph_node_id", "attempt_no", name="node_runs_graph_node_id_attempt_no_key"
         ),
+        CheckConstraint(
+            "(CAST(status AS TEXT) <> 'cached') OR reused_from_run_id IS NOT NULL",
+            name="ck_node_runs_cached_reused",
+        ),
+        CheckConstraint(
+            "(CAST(status AS TEXT) NOT IN ('completed', 'cached', 'completed_after_cancel')) "
+            "OR result_artifact_id IS NOT NULL",
+            name="ck_node_runs_completed_artifact",
+        ),
+        CheckConstraint(
+            "(CAST(status AS TEXT) <> 'cached') OR (provider_cost = 0 AND platform_cost = 0)",
+            name="ck_node_runs_cached_zero_cost",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -462,6 +476,16 @@ Index(
     "idx_node_runs_reused_from",
     NodeRun.__table__.c.reused_from_run_id,
     postgresql_where=text("reused_from_run_id IS NOT NULL"),
+)
+# Scheduler claim runs every second: status='queued' ORDER BY created_at, id.
+# The partial index serves the ordering directly and stays proportional to
+# queued rows instead of the whole table (backend-review 1.2).
+Index(
+    "idx_node_runs_queued_order",
+    NodeRun.__table__.c.created_at,
+    NodeRun.__table__.c.id,
+    postgresql_where=text("status = 'queued'"),
+    sqlite_where=text("status = 'queued'"),
 )
 Index("ix_provider_operations_connection_id", ProviderOperation.__table__.c.connection_id)
 Index(

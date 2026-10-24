@@ -211,6 +211,23 @@ async def issue_artifact_reference(
     )
 
 
+def runtime_reference_transport(compiler: object, manifest: object) -> str | None:
+    """The reference transport the selected compiler consumes for ``manifest``.
+
+    Compilers declare their transport as a class attribute; revisions whose
+    wire semantics differ per catalog contract (e.g. Agnes contract revisions
+    take public HTTPS URLs while legacy revisions embed bytes) override with
+    ``reference_transport_for(manifest)``. Returns ``None`` when undeclared.
+    """
+
+    method = getattr(compiler, "reference_transport_for", None)
+    if callable(method):
+        value = method(manifest)
+        return value if isinstance(value, str) else None
+    value = getattr(compiler, "reference_transport", None)
+    return value if isinstance(value, str) else None
+
+
 async def resolve_reference_for_runtime(
     session: AsyncSession,
     *,
@@ -222,18 +239,23 @@ async def resolve_reference_for_runtime(
     mime_type: str,
     fingerprint: str | None,
     provider_type: str,
+    reference_transport: str | None = None,
 ) -> ResolvedReference:
-    """Build the runtime reference using the selected provider's transport.
+    """Build the runtime reference using the compiler's declared transport.
 
     Transport-specific URL versus bytes policy belongs in the provider
-    delivery layer, not in the shared execution orchestration module.
+    delivery layer, not in the shared execution orchestration module. The
+    selected compiler's declaration decides (``runtime_reference_transport``);
+    callers that have not adopted it fail closed to the stored-bytes path.
     """
     from app.providers.runtime import ResolvedReference
 
-    if provider_type == "volcengine":
+    # Public-URL compilers (Ark, MiniMax, Agnes contract revisions) receive
+    # short-lived signed grants; every bytes compiler gets the stored bytes.
+    if reference_transport == "public_url":
         if artifact is None:
             raise ValidationAppError(
-                "Ark reference requires a bound image artifact",
+                "public-URL reference requires a bound image artifact",
                 details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
             )
         grant = await issue_artifact_reference(
@@ -248,6 +270,12 @@ async def resolve_reference_for_runtime(
             content_url=grant.url,
             mime_type=artifact.mime_type or mime_type,
             fingerprint=artifact.content_hash,
+            byte_size=artifact.byte_size,
+            duration_seconds=(
+                float(artifact.duration_seconds) if artifact.duration_seconds is not None else None
+            ),
+            width=artifact.width,
+            height=artifact.height,
         )
     if content_bytes is None:
         raise ValidationAppError(
@@ -260,6 +288,14 @@ async def resolve_reference_for_runtime(
         content_bytes=content_bytes,
         mime_type=mime_type,
         fingerprint=fingerprint,
+        byte_size=artifact.byte_size if artifact is not None else len(content_bytes),
+        duration_seconds=(
+            float(artifact.duration_seconds)
+            if artifact is not None and artifact.duration_seconds is not None
+            else None
+        ),
+        width=artifact.width if artifact is not None else None,
+        height=artifact.height if artifact is not None else None,
     )
 
 

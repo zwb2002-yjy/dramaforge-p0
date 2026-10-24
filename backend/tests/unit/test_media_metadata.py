@@ -8,7 +8,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
-from app.execution.product_path import _inspect_media_metadata
+from app.execution.media_io import _inspect_media_metadata
 from PIL import Image
 
 

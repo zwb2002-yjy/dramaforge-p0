@@ -61,7 +61,7 @@ function json(body: unknown, status = 200) {
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }),
   );
 }
-function mockApi(history: unknown[] = [job]) {
+function mockApi(history: unknown[] = [job], listStatus = 200) {
   const calls: string[] = [];
   vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     expect(init?.method ?? "GET").toBe("GET");
@@ -69,7 +69,10 @@ function mockApi(history: unknown[] = [job]) {
     calls.push(url);
     if (url.endsWith("/cut-1/final-films")) return json(history);
     if (url.endsWith("/final-films")) return json([]);
-    if (url.endsWith("/edit-sessions")) return json([session(), session("cut-2")]);
+    if (url.endsWith("/edit-sessions"))
+      return listStatus === 200
+        ? json([session(), session("cut-2")])
+        : json({ detail: "fixture read failure" }, listStatus);
     if (url.includes("/edit-sessions/")) return json(session(url.split("/").at(-1)));
     if (url.endsWith("/opencut-manifest"))
       return json({
@@ -93,6 +96,19 @@ function mount(sessionId?: string, onSelect = vi.fn()) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Editing recovery", () => {
+  it.each([
+    [401, "登录已失效，请重新登录。"],
+    [403, "无权读取此项目的剪辑，请检查项目权限。"],
+    [503, "剪辑列表加载失败"],
+  ])("keeps an actionable reason for a session list failure (%s)", async (status, message) => {
+    mockApi([], Number(status));
+    mount();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(String(message));
+    expect(within(alert).getByRole("button", { name: "重试会话列表" })).toBeEnabled();
+    const detail = within(alert).getByText("fixture read failure").closest(".ant-collapse");
+    expect(detail).not.toHaveAttribute("open");
+  });
   it("lists and explicitly reopens existing sessions without POST", async () => {
     const calls = mockApi();
     const { onSelect } = mount();
@@ -105,12 +121,14 @@ describe("Editing recovery", () => {
     const view = mount("cut-1");
     const player = await screen.findByTestId("final-film-player");
     expect(player).toHaveAttribute("src", "/api/v1/projects/p1/artifacts/film-1/content");
-    expect(await screen.findByText(/历史成片 · 时间线 v1（当前 v2）/)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "成片 · v1" })).toBeInTheDocument();
+    expect(screen.getByText("历史版本")).toBeInTheDocument();
+    expect(screen.getByText("当前 v2")).toBeInTheDocument();
     expect(screen.getByTestId("final-film-download")).toHaveAttribute(
       "href",
       "/api/v1/projects/p1/artifacts/film-1/content",
     );
-    expect(screen.getByTestId("final-film-no-subtitles")).toHaveTextContent("无字幕内容");
+    expect(screen.getByTestId("final-film-no-subtitles")).toHaveTextContent("无字幕");
     expect(screen.queryByTestId("final-film-subtitle-download")).not.toBeInTheDocument();
     view.rerender(view.view("cut-2"));
     await waitFor(() => expect(screen.queryByTestId("final-film-player")).not.toBeInTheDocument());
@@ -119,6 +137,7 @@ describe("Editing recovery", () => {
     mockApi();
     const { onSelect } = mount("cut-1");
     fireEvent.change(await screen.findByLabelText("镜头 1 时长"), { target: { value: "4" } });
+    fireEvent.click(screen.getByRole("button", { name: "切换已有剪辑" }));
     const target = screen.getByRole("button", { name: "继续剪辑 · Cut cut-2 · v2" });
     expect(target).toBeDisabled();
     fireEvent.click(target);
@@ -161,6 +180,7 @@ it("refreshes the session summary after saving a new timeline version", async ()
   });
   mount("cut-1");
   fireEvent.change(await screen.findByLabelText("镜头 1 时长"), { target: { value: "4.5" } });
+  fireEvent.click(screen.getByRole("button", { name: "切换已有剪辑" }));
   fireEvent.click(screen.getByRole("button", { name: "保存时间线" }));
   await waitFor(() =>
     expect(
@@ -186,6 +206,7 @@ it("does not show a late Final Film error in a different session", async () => {
         timeline_version: 2,
         shot_ids: [],
         node_run_ids: [],
+        preparation_fingerprint: "a".repeat(64),
         status: "queued",
       });
     if (url.endsWith("/final-film/render") && init?.method === "POST") {

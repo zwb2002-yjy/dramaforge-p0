@@ -16,6 +16,12 @@
 
 ## Task Scope
 
+- This project is unreleased and has no production business to preserve. Maintain
+  one current implementation per capability; remove replaced runtimes, transitional
+  writers, obsolete DTO aliases and speculative parallel schemas. Update all current
+  callers and tests directly. Retain data/evidence separately; do not silently adapt
+  an old execution into the new contract or re-submit a possibly billed operation.
+
 - Complete the requested outcome and relevant fixes; do not expand product
   scope, rewrite intended behavior to make a failing test pass, or create
   unrelated follow-up work.
@@ -40,9 +46,10 @@
 
 ## Git and Ownership
 
-- Routine integration happens on `dev`; `main` only advances through a
-  protected `dev -> main` PR. Only `@zwb2002-yjy` approves and merges; agents
-  never approve, merge, or record `MERGED`.
+- Routine integration happens on `dev`, currently in fast-development mode:
+  no dev PR CI and no dev ruleset, so Owner-authorized tasks may push or merge
+  into `dev` directly. `main` only advances through a protected `dev -> main`
+  PR; only `@zwb2002-yjy` approves and merges it, agents never do.
 - No force push, history rewrite, `reset --hard`, or `clean -fd`. Cleanup is
   limited to the current task's resources.
 - When a merge is explicitly authorized, inspect the final commit title, body,
@@ -50,10 +57,18 @@
   an explicit reviewed title and body; never accept automatically concatenated
   branch history or unverified `Co-authored-by` trailers. Preserve only verified,
   intended attribution, then inspect the resulting remote commit before proceeding.
-- Paid provider operations (probe, production, repair) require an explicit
-  positive budget and Owner authorization per operation; historical
-  authorization never extends to a new task. Never blind-retry a possibly
-  billed or `unknown_submission` call.
+- A new paid Provider create (production, repair, batch fill) must be
+  explicitly triggered by the Owner. A batch create binds the current preview
+  fingerprint and states the maximum number of Provider operations it may
+  create. Provider pricing and actual charges are managed by the provider
+  account; DramaForge keeps no money budget, balance or credits. Poll,
+  download, resume and recovery of an existing remote task reuse the facts
+  frozen at creation; they are not a new create, are never resubmitted and
+  never blind-retried, nor is any possibly billed or `unknown_submission`
+  call. Generation probes stay unavailable until a standalone Owner
+  paid-probe authorization contract exists. Agents run paid operations only
+  under Owner authorization for the current task; historical authorization
+  never extends to a new task.
 
 ## Image Evidence Handling
 

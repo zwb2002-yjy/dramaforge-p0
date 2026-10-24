@@ -17,8 +17,9 @@ class LocalEspeakAdapter:
     provider = "local_tts"
     model = "espeak-ng"
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, settings: Settings | None = None, *, rate_percent: int = 0) -> None:
         self._settings = settings or get_settings()
+        self._rate_percent = rate_percent
         self._tasks: dict[str, dict[str, Any]] = {}
         self.blobs: dict[str, bytes] = {}
 
@@ -35,6 +36,8 @@ class LocalEspeakAdapter:
                 "--stdout",
                 "-v",
                 self._settings.tts_voice,
+                "-s",
+                str(round(175 * (1 + self._rate_percent / 100))),
                 text,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -45,6 +48,8 @@ class LocalEspeakAdapter:
             self._tasks[task_id] = {"status": "failed", "error": message}
             return {"remote_task_id": task_id, "status": "failed"}
         except TimeoutError:
+            process.kill()
+            await process.wait()
             self._tasks[task_id] = {"status": "failed", "error": "TTS process timed out"}
             return {"remote_task_id": task_id, "status": "failed"}
 
@@ -74,16 +79,20 @@ class LocalEspeakAdapter:
         return {"amount": 0.0, "currency": "USD", "units": 0.0}
 
 
-def get_local_tts_adapter() -> LocalEspeakAdapter:
+def get_local_tts_adapter(
+    settings: Settings | None = None, *, rate_percent: int = 0
+) -> LocalEspeakAdapter:
     """Return local real TTS only when explicitly enabled and installed."""
-    settings = get_settings()
+    settings = settings or get_settings()
     if not settings.tts_enabled:
         raise ProviderNotConfiguredError(
             "provider_not_configured: local TTS disabled (TTS_ENABLED=false). "
             "Enable TTS_ENABLED and install the configured TTS_ENGINE."
         )
+    if settings.tts_engine != "espeak-ng":
+        raise ProviderNotConfiguredError("local TTS requires an explicit espeak-ng engine")
     if shutil.which(settings.tts_engine) is None:
         raise ProviderNotConfiguredError(
             f"provider_not_configured: TTS executable unavailable: {settings.tts_engine}"
         )
-    return LocalEspeakAdapter(settings)
+    return LocalEspeakAdapter(settings, rate_percent=rate_percent)

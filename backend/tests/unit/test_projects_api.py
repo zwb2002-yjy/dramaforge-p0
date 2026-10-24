@@ -126,10 +126,8 @@ def test_selected_workspace_blocks_same_owner_cross_workspace_project_access(
         json={"logline": "must not update", "tone": "", "audience": ""},
         headers={CSRF_HEADER: _csrf(client)},
     ).status_code == 404
-    assert client.post(
-        f"/api/v1/projects/{project_b_id}/dispatch",
-        headers={CSRF_HEADER: _csrf(client)},
-    ).status_code == 404
+    # Production reads retain workspace ACLs after public queue helpers retire.
+    assert client.get(f"/api/v1/projects/{project_b_id}/snapshot").status_code == 404
     assert client.post(
         f"/api/v1/projects/{project_b_id}/exports/{uuid4()}/download-grant",
         headers={CSRF_HEADER: _csrf(client)},
@@ -137,3 +135,4 @@ def test_selected_workspace_blocks_same_owner_cross_workspace_project_access(
 
     _select_workspace(client, workspace_b)
     assert client.get(f"/api/v1/projects/{project_b_id}").status_code == 200
+    assert client.get(f"/api/v1/projects/{project_b_id}/snapshot").status_code == 200

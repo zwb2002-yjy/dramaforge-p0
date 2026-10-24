@@ -31,12 +31,14 @@ from app.providers.models import (
     ProviderConnectionRevision,
     ProviderModelBinding,
 )
-from app.providers.registry import ProviderPlugin
 from app.security.models import EncryptedProviderCredential
 from app.shared.errors import NotFoundError, ValidationAppError
 
 if TYPE_CHECKING:
     from app.providers.model_resolution import ExecutionModelResolution
+    from app.providers.registry import ProviderPlugin
+
+PROVIDER_CONTENT_URI = "provider-content"
 
 
 class ProviderResumeToken(BaseModel):
@@ -49,6 +51,47 @@ class ProviderResumeToken(BaseModel):
     remote_secondary_id: str | None = None
     query_kind: str | None = None
     opaque_state: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+def require_resume_token_identity(
+    token: ProviderResumeToken,
+    *,
+    remote_task_id: str | None,
+    provider_type: str,
+    protocol_profile: str | None,
+    remote_secondary_id: str | None,
+) -> None:
+    """Validate persisted remote identity before constructing or calling a Runtime."""
+    if (
+        not remote_task_id
+        or token.remote_task_id != remote_task_id
+        or token.provider_type != provider_type
+        or token.protocol_profile != protocol_profile
+        or token.remote_secondary_id != remote_secondary_id
+    ):
+        raise ValidationAppError(
+            "恢复令牌与已提交任务身份不一致，必须人工核对",
+            details={"code": "RESUME_TOKEN_IDENTITY_MISMATCH"},
+        )
+
+
+def require_operation_identity(identity: ExecutionIdentitySnapshot, operation: Any) -> None:
+    """Audit and recovery share the exact persisted input/model identity check."""
+    for actual, expected in (
+        (operation.connection_id, identity.connection_id),
+        (operation.provider_connection_revision_id, identity.connection_revision_id),
+        (operation.credential_revision_id, identity.credential_revision_id),
+        (operation.model_binding_id, identity.provider_model_binding_id),
+        (operation.catalog_entry_id, identity.catalog_entry_id),
+        (operation.capability_manifest_hash, identity.manifest_hash),
+        (operation.actual_model, identity.invoke_model_value),
+        (operation.request_fingerprint, identity.request_fingerprint),
+    ):
+        if actual != expected:
+            raise ValidationAppError(
+                "已提交任务与冻结执行身份不一致，必须人工核对",
+                details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+            )
 
 
 class CompiledVideoRequest(BaseModel):
@@ -73,6 +116,30 @@ class CompiledImageRequest(BaseModel):
     safe_request_summary: dict[str, JsonValue] = Field(default_factory=dict)
     reference_artifact_ids: list[UUID] = Field(default_factory=list)
     reference_fingerprints: list[str] = Field(default_factory=list)
+
+
+def validate_compiled_submission(
+    request: CompiledImageRequest | CompiledVideoRequest,
+    *,
+    provider_type: str,
+    protocol_profile: str,
+    operation: Literal["image.generate", "video.generate"],
+) -> None:
+    """Check the existing JSON media seam before credentials reach the network.
+
+    This is not payload compilation or model selection. The compiler's chosen
+    wire model must match its envelope, and the envelope must target this runtime.
+    Never repair a mismatch by substituting a configured default or rebuilding
+    the body. Errors intentionally omit payloads and credential values.
+    """
+    if (request.provider_type, request.protocol_profile, request.operation) != (
+        provider_type,
+        protocol_profile,
+        operation,
+    ):
+        raise ValueError("compiled request does not match runtime provider/profile/operation")
+    if not request.model_id.strip() or request.wire_request.get("model") != request.model_id:
+        raise ValueError("compiled wire model does not match request model_id")
 
 
 class SubmissionResult(BaseModel):
@@ -112,9 +179,9 @@ class CostResult(BaseModel):
     amount: float | None = None
     currency: str = "USD"
     units: float = 1.0
-    cost_status: Literal[
-        "reported", "estimated_only", "not_reported", "reconciled"
-    ] = "not_reported"
+    cost_status: Literal["reported", "estimated_only", "not_reported", "reconciled"] = (
+        "not_reported"
+    )
 
     @model_validator(mode="after")
     def infer_reported_amount(self) -> CostResult:
@@ -135,6 +202,10 @@ class ResolvedReference:
     content_url: str | None = None
     mime_type: str = "image/png"
     fingerprint: str | None = None
+    byte_size: int | None = None
+    duration_seconds: float | None = None
+    width: int | None = None
+    height: int | None = None
 
 
 class VideoCompiler(Protocol):
@@ -233,9 +304,7 @@ class ProviderRuntimeResolver:
             binding=binding,
             catalog_entry=entry,
             model_id=(
-                f"{connection.provider_type}/{binding.model_id}"
-                if binding is not None
-                else None
+                f"{connection.provider_type}/{binding.model_id}" if binding is not None else None
             ),
             invoke_model_value=binding.invoke_model_value if binding is not None else None,
             manifest_hash=entry.contract_manifest_hash if entry is not None else None,
@@ -279,7 +348,7 @@ class ProviderRuntimeResolver:
             reasons.append("BINDING_CONNECTION_WORKSPACE_MISMATCH")
         if binding.catalog_entry_id != entry.id:
             reasons.append("BINDING_CATALOG_MISMATCH")
-        if entry.model_id != binding.model_id:
+        if entry.catalog_source != "protocol_contract" and entry.model_id != binding.model_id:
             reasons.append("CATALOG_MODEL_MISMATCH")
         if entry.provider_type != connection.provider_type:
             reasons.append("CATALOG_PROVIDER_MISMATCH")
@@ -293,6 +362,11 @@ class ProviderRuntimeResolver:
             reasons.append("MANIFEST_HASH_MISMATCH")
         if not binding.invoke_model_value:
             reasons.append("INVOKE_MODEL_VALUE_MISSING")
+        elif (
+            entry.catalog_source == "protocol_contract"
+            and binding.invoke_model_value != binding.model_id
+        ):
+            reasons.append("INVOKE_MODEL_IDENTITY_MISMATCH")
         if reasons:
             raise ValidationAppError(
                 "concrete provider model runtime identity is invalid",
@@ -369,9 +443,7 @@ class ProviderRuntimeResolver:
             credential_revision_id=credential_id,
             capability=resolution.capability.value,
             mode_id=resolution.mode_id or "resolved",
-            effective_options=cast(
-                dict[str, JsonValue], resolution.native_options
-            ),
+            effective_options=cast(dict[str, JsonValue], resolution.native_options),
             request_fingerprint="0" * 64,
         )
         return await self.resolve_runtime_for_identity(
@@ -395,21 +467,7 @@ class ProviderRuntimeResolver:
         and credential pointer are never used to build the runtime.
         """
         if operation is not None:
-            if operation.connection_id != identity.connection_id:
-                raise ValidationAppError(
-                    "operation and execution identity connection mismatch",
-                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
-                )
-            if operation.provider_connection_revision_id != identity.connection_revision_id:
-                raise ValidationAppError(
-                    "operation and execution identity revision mismatch",
-                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
-                )
-            if operation.actual_model != identity.invoke_model_value:
-                raise ValidationAppError(
-                    "operation and execution identity model mismatch",
-                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
-                )
+            require_operation_identity(identity, operation)
 
         revision = await self._session.scalar(
             select(ProviderConnectionRevision)
@@ -450,11 +508,15 @@ class ProviderRuntimeResolver:
             binding is None
             or entry is None
             or binding.catalog_entry_id != identity.catalog_entry_id
-            or binding.model_id != identity.resolved_model.rsplit("/", 1)[-1]
+            or identity.resolved_model != f"{entry.provider_type}/{binding.model_id}"
             or binding.invoke_model_value != identity.invoke_model_value
             or entry.provider_type != revision.provider_type
             or entry.protocol_profile != revision.protocol_profile
-            or entry.model_id != binding.model_id
+            or (entry.catalog_source != "protocol_contract" and entry.model_id != binding.model_id)
+            or (
+                entry.catalog_source == "protocol_contract"
+                and binding.invoke_model_value != binding.model_id
+            )
             or entry.model_revision != identity.model_revision
             or entry.contract_manifest_hash != identity.manifest_hash
         ):
@@ -532,6 +594,26 @@ class ProviderRuntimeResolver:
         settings: Any = None,
     ) -> ProviderRuntime:
         """Rebuild only the runtime for an existing frozen operation."""
+        from app.providers.execution_contract import execution_contract_gaps
+
+        gaps = execution_contract_gaps(identity.execution_contract)
+        if gaps:
+            raise ValidationAppError(
+                "历史任务的执行合同无法精确核验，请人工核对后恢复",
+                details={"code": gaps[0], "gaps": list(gaps)},
+            )
+        if (
+            operation is not None
+            and identity.execution_contract is not None
+            and (
+                identity.execution_contract.provider_type != operation.actual_provider
+                or identity.execution_contract.protocol_profile != operation.protocol_profile
+            )
+        ):
+            raise ValidationAppError(
+                "frozen execution contract does not match operation protocol",
+                details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+            )
         resolved = await self.resolve_runtime_for_identity(
             identity=identity,
             workspace_id=workspace_id,
@@ -539,24 +621,3 @@ class ProviderRuntimeResolver:
             settings=settings,
         )
         return resolved.runtime
-
-    async def resume_runtime(
-        self,
-        *,
-        plugin: ProviderPlugin,
-        connection: ProviderConnection,
-        settings: Any = None,
-    ) -> ProviderRuntime:
-        """Rebuild a runtime for polling/cancel/download from persisted state.
-        Never submits."""
-        if plugin.runtime_factory is None:
-            raise RuntimeError(
-                f"provider plugin {plugin.provider_type}/{plugin.protocol_profile} "
-                "has no unified runtime"
-            )
-        runtime = plugin.runtime_factory(
-            connection=connection,
-            settings=settings,
-            host=connection.base_url,
-        )
-        return cast(ProviderRuntime, runtime)

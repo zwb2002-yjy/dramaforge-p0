@@ -27,12 +27,13 @@ QUEUE_NAME = os.environ.get("DIRECTOR_QUEUE_NAME", "arq:director")
 async def startup(ctx: dict[str, Any]) -> None:
     load_all_models()
     settings = get_settings()
-    if settings.director_runtime_engine == "langgraph":
-        from app.director.runtime.checkpoint import verify_checkpoint_store
+    from app.director.runtime.checkpoint import verify_checkpoint_store
 
-        await verify_checkpoint_store(settings)
+    await verify_checkpoint_store(settings)
     ctx["director_consumer"] = DirectorEventConsumer(
-        get_session_factory(), ctx["redis"], consumer_name=f"{socket.gethostname()}:{os.getpid()}",
+        get_session_factory(),
+        ctx["redis"],
+        consumer_name=f"{socket.gethostname()}:{os.getpid()}",
     )
     await recover_interrupted_director_turns(ctx)
 
@@ -58,7 +59,9 @@ async def execute_director_runtime_wakeup(ctx: dict[str, Any], wakeup_id: str) -
             actor_id=wakeup.owner_user_id,
         )
         tools = DirectorDomainRuntimeTools(
-            factory, scope=scope, turn_id=wakeup.turn_id,
+            factory,
+            scope=scope,
+            turn_id=wakeup.turn_id,
         )
         return DirectorRuntimeExecutor(
             session,
@@ -90,8 +93,10 @@ async def dispatch_director_wakeups(ctx: dict[str, Any]) -> int:
     queue_scope = hashlib.sha256(QUEUE_NAME.encode()).hexdigest()[:12]
     for inbox_id in ids:
         await ctx["redis"].enqueue_job(
-            "execute_director_wakeup", str(inbox_id),
-            _job_id=f"director-wakeup:{queue_scope}:{inbox_id}", _queue_name=QUEUE_NAME,
+            "execute_director_wakeup",
+            str(inbox_id),
+            _job_id=f"director-wakeup:{queue_scope}:{inbox_id}",
+            _queue_name=QUEUE_NAME,
         )
     for wakeup_id in runtime_ids:
         await ctx["redis"].enqueue_job(
@@ -104,12 +109,17 @@ async def dispatch_director_wakeups(ctx: dict[str, Any]) -> int:
 
 
 class WorkerSettings:
-    functions = [execute_director_wakeup, execute_director_runtime_wakeup,
-                 reconcile_waiting_director_turns, recover_interrupted_director_turns]
+    functions = [
+        execute_director_wakeup,
+        execute_director_runtime_wakeup,
+        reconcile_waiting_director_turns,
+        recover_interrupted_director_turns,
+    ]
     on_startup = startup
     cron_jobs = [
-        cron(dispatch_director_wakeups, second=set(range(0, 60, 5)),
-             run_at_startup=True, unique=True),
+        cron(
+            dispatch_director_wakeups, second=set(range(0, 60, 5)), run_at_startup=True, unique=True
+        ),
         cron(reconcile_waiting_director_turns, second={7, 37}, run_at_startup=True, unique=True),
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)

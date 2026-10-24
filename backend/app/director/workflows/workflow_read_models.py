@@ -259,13 +259,26 @@ class SceneWorkflowView(BaseModel):
     shots: list[ShotWorkflowState] = Field(default_factory=list)
 
 
+class EpisodeWorkflowSummary(BaseModel):
+    """Episode totals shown by the project workflow overview."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    episode_id: UUID
+    episode_number: int
+    title: str
+    synopsis: str
+    scene_count: int
+    total_shots: int
+
+
 class WorkflowOverview(BaseModel):
     """Project-wide wire-visible workflow overview (episodes → scenes → shots)."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     project_id: UUID
-    episodes: list[dict[str, object]] = Field(default_factory=list)
+    episodes: list[EpisodeWorkflowSummary] = Field(default_factory=list)
     scenes: list[SceneWorkflowView] = Field(default_factory=list)
     total_shots: int = 0
     formal_shots: int = 0
@@ -348,15 +361,17 @@ def build_project_workflow_overview(
             and item.capability_assessment.status == "UNSUPPORTED"
         )
 
-    episodes: list[dict[str, object]] = []
+    episodes: list[EpisodeWorkflowSummary] = []
     for episode_id, meta in episode_meta.items():
         counts = episode_counts[episode_id]
         episodes.append(
-            {
-                **meta,
-                "scene_count": counts[0],
-                "total_shots": counts[1],
-            }
+            EpisodeWorkflowSummary.model_validate(
+                {
+                    **meta,
+                    "scene_count": counts[0],
+                    "total_shots": counts[1],
+                }
+            )
         )
 
     return WorkflowOverview(

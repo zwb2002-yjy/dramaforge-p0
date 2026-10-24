@@ -5,6 +5,8 @@
 .env.*
 !.env.example
 **/.venv
+backend/.venv/
+backend/.venv/**
 **/node_modules
 **/__pycache__
 **/.pytest_cache
@@ -19,6 +21,7 @@ docs
 *.sqlite
 *.db
 *.mp4
+!fixtures/playback/*.mp4
 *.zip
 *.onnx
 *.bin

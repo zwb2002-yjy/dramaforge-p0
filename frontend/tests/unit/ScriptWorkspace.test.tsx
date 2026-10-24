@@ -98,6 +98,79 @@ const GENERATED = {
   },
 };
 
+const DETAILED_PROPOSAL = {
+  ...PROPOSAL,
+  id: "proposal-detailed",
+  operations: [
+    {
+      id: "op-document",
+      command: "story.set_script_document",
+      action: "update",
+      key: "script_document",
+      expected_target_version: 1,
+      rationale: "记录已采用的故事草稿原文",
+      impact: "script_document",
+      payload: {
+        filename: "story-draft.md",
+        raw_text: GENERATED.draft_text,
+        content_hash: "b".repeat(64),
+        action: "update",
+      },
+    },
+    {
+      id: "op-episode-detailed",
+      command: "story.upsert_episode",
+      action: "update",
+      key: "episode:1",
+      expected_target_version: 1,
+      rationale: "Episode 结构",
+      impact: "episode:1",
+      payload: {
+        episode_number: 1,
+        title: "AI Draft",
+        synopsis: "Rain.",
+        action: "update",
+      },
+    },
+    {
+      id: "op-scene-detailed",
+      command: "story.upsert_scene",
+      action: "update",
+      key: "scene:1.1",
+      expected_target_version: 1,
+      rationale: "Scene 结构",
+      impact: "scene:1.1",
+      payload: {
+        episode_number: 1,
+        scene_number: 1,
+        location_name: "Station",
+        time_of_day: "night",
+        synopsis: "Rain.",
+        action: "update",
+      },
+    },
+    {
+      id: "op-shot-detailed",
+      command: "story.upsert_shot",
+      action: "update",
+      key: "shot:1.1.1",
+      expected_target_version: 1,
+      rationale: "Shot 结构",
+      impact: "shot:1.1.1",
+      payload: {
+        episode_number: 1,
+        scene_number: 1,
+        shot_number: 1,
+        shot_type: "medium",
+        visual_description: "Lin waits",
+        dialogue: "Do not wait.",
+        camera_move: "static",
+        action: "update",
+      },
+    },
+  ],
+};
+
 function json(body: unknown, status = 200): Promise<Response> {
   return Promise.resolve(
     new Response(JSON.stringify(body), {
@@ -141,7 +214,7 @@ describe("ScriptWorkspace proposal-first UI", () => {
     renderWorkspace();
     expect(await screen.findByTestId("script-empty")).toBeInTheDocument();
     expect(screen.getByTestId("story-proposal-composer")).toBeInTheDocument();
-    expect(screen.getByText("剧本提案")).toBeInTheDocument();
+    expect(screen.getByText("从一个故事开始")).toBeInTheDocument();
   });
 
   it("creates a proposal and renders the typed diff", async () => {
@@ -171,8 +244,13 @@ describe("ScriptWorkspace proposal-first UI", () => {
     // Scope to the proposal preview: the import panel also shows an Episode
     // example, so a page-wide text query would match two elements.
     const preview = screen.getByTestId("story-proposal-preview");
-    expect(within(preview).getByText(/Episode 1/)).toBeInTheDocument();
+    expect(within(preview).getByText("分集 1", { exact: true })).toBeInTheDocument();
     expect(within(preview).getByText(/待确认/)).toBeInTheDocument();
+    expect(screen.getByLabelText("故事方向")).toHaveValue("双人冲突");
+    expect(screen.getByLabelText("剧本文本")).toHaveValue(
+      "# Episode 1 — X\n## Scene 1 — Studio / day\nbody\n### Shot 1 — medium\nVisual: v\nDialogue: d",
+    );
+    expect(screen.queryByTestId("story-proposal-create")).not.toBeInTheDocument();
   });
 
   it("uses a brief to generate a model-backed draft and the same typed proposal preview", async () => {
@@ -205,6 +283,64 @@ describe("ScriptWorkspace proposal-first UI", () => {
       filename: "story-draft.md",
     });
     expect(screen.getAllByTestId(/story-operation-/)).toHaveLength(3);
+  });
+
+  it("keeps the imported Story visible and prevents a duplicate proposal for the generated draft", async () => {
+    let createCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/script")) return json({ document: DOC, episodes: EPISODES });
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf" });
+      if (url.endsWith("/story/proposals/generate") && init?.method === "POST") {
+        return json(
+          {
+            ...GENERATED,
+            proposal: {
+              ...DETAILED_PROPOSAL,
+              id: "proposal-generated",
+              operations: DETAILED_PROPOSAL.operations.map((operation, index) =>
+                index === 0 ? { ...operation, rationale: "模型生成的故事草稿" } : operation,
+              ),
+            },
+          },
+          201,
+        );
+      }
+      if (url.endsWith("/story/proposals") && init?.method === "POST") {
+        createCalls += 1;
+        return json(DETAILED_PROPOSAL, 201);
+      }
+      return json({});
+    });
+
+    renderWorkspace();
+    const currentStory = await screen.findByTestId("script-document");
+    expect(currentStory).toHaveTextContent("episode_script.md");
+
+    fireEvent.change(screen.getByLabelText("故事方向"), {
+      target: { value: "雨夜车站的克制告别" },
+    });
+    fireEvent.click(screen.getByTestId("story-proposal-generate"));
+    const preview = await screen.findByTestId("story-proposal-preview");
+    expect(screen.queryByTestId("story-proposal-create")).not.toBeInTheDocument();
+
+    expect(createCalls).toBe(0);
+    expect(screen.getByLabelText("故事方向")).toHaveValue("雨夜车站的克制告别");
+    expect(screen.getByLabelText("剧本文本")).toHaveValue(GENERATED.draft_text);
+    expect(currentStory).toHaveTextContent("episode_script.md");
+    expect(preview).toHaveTextContent("story-draft.md");
+    expect(preview).toHaveTextContent("采用后写入");
+    expect(preview).toHaveTextContent("AI Draft");
+    expect(preview).toHaveTextContent("Station");
+    expect(preview).toHaveTextContent("Lin waits");
+    expect(preview).toHaveTextContent("Do not wait.");
+    const draftPreview = screen.getByTestId("story-draft-preview");
+    expect(draftPreview.querySelector(".qc-script-raw")?.textContent).toBe(GENERATED.draft_text);
+
+    fireEvent.change(screen.getByLabelText("剧本文本"), {
+      target: { value: `${GENERATED.draft_text}\nEdited.` },
+    });
+    expect(screen.getByTestId("story-proposal-create")).toBeInTheDocument();
   });
 
   it("applies only the selected operations", async () => {
@@ -243,5 +379,179 @@ describe("ScriptWorkspace proposal-first UI", () => {
         decisions: [{ item_id: "op-1", decision: "accepted" }],
       });
     });
+  });
+});
+
+it("restores a persisted proposal after returning without generating or applying it", async () => {
+  const writes: string[] = [];
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = String(input);
+    if (init?.method === "POST") writes.push(url);
+    if (url.endsWith("/script")) return json(EMPTY);
+    if (url.endsWith("/story/proposals")) return json([PROPOSAL]);
+    return json({});
+  });
+  renderWorkspace();
+  fireEvent.click(await screen.findByText("继续处理已保存的提案"));
+  fireEvent.click(screen.getByRole("button", { name: "查看并确认提案" }));
+  expect(screen.getByTestId("story-proposal-preview")).toHaveTextContent("镜头");
+  expect(screen.getByTestId("story-proposal-apply-all")).toBeEnabled();
+  expect(writes).toEqual([]);
+});
+
+describe("ScriptWorkspace tree projection & hierarchical adoption (Slice C6)", () => {
+  const MULTI_SCENE_PROPOSAL = {
+    id: "proposal-multi-scene",
+    project_id: "project-1",
+    status: "pending",
+    summary: "Multi-scene proposal",
+    created_at: "2026-09-03T00:00:00Z",
+    operations: [
+      {
+        id: "op-ep-1",
+        command: "story.upsert_episode",
+        action: "create",
+        key: "episode:1",
+        expected_target_version: null,
+        rationale: "Episode 1",
+        impact: "episode:1",
+        payload: { episode_number: 1, title: "第一集 启程", action: "create" },
+      },
+      {
+        id: "op-sc-1",
+        command: "story.upsert_scene",
+        action: "create",
+        key: "scene:1.1",
+        expected_target_version: null,
+        rationale: "Scene 1",
+        impact: "scene:1.1",
+        payload: {
+          episode_number: 1,
+          scene_number: 1,
+          location_name: "大堂",
+          time_of_day: "day",
+          action: "create",
+        },
+      },
+      {
+        id: "op-sh-1",
+        command: "story.upsert_shot",
+        action: "create",
+        key: "shot:1.1.1",
+        expected_target_version: null,
+        rationale: "Shot 1",
+        impact: "shot:1.1.1",
+        payload: { episode_number: 1, scene_number: 1, shot_number: 1, action: "create" },
+      },
+      {
+        id: "op-sc-2",
+        command: "story.upsert_scene",
+        action: "create",
+        key: "scene:1.2",
+        expected_target_version: null,
+        rationale: "Scene 2",
+        impact: "scene:1.2",
+        payload: {
+          episode_number: 1,
+          scene_number: 2,
+          location_name: "后花园",
+          time_of_day: "night",
+          action: "create",
+        },
+      },
+      {
+        id: "op-sh-2",
+        command: "story.upsert_shot",
+        action: "create",
+        key: "shot:1.2.1",
+        expected_target_version: null,
+        rationale: "Shot 2",
+        impact: "shot:1.2.1",
+        payload: { episode_number: 1, scene_number: 2, shot_number: 1, action: "create" },
+      },
+    ],
+  };
+
+  it("projects proposal into Episode-Scene tree, allows switching active scene, and adopts current scene with parent dependency closure", async () => {
+    let applyBody: unknown;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/script")) return json(EMPTY);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf" });
+      if (url.endsWith("/story/proposals")) return json([MULTI_SCENE_PROPOSAL]);
+      if (url.endsWith("/story/proposals/proposal-multi-scene/apply") && init?.method === "POST") {
+        applyBody = init.body ? JSON.parse(String(init.body)) : null;
+        const decisions =
+          (applyBody as { decisions?: Array<{ item_id: string }> })?.decisions ?? [];
+        return json({ accepted: decisions.map((d) => d.item_id), rejected: [], failed: [] });
+      }
+      return json({});
+    });
+
+    renderWorkspace();
+    fireEvent.click(await screen.findByText("继续处理已保存的提案"));
+    fireEvent.click(screen.getByRole("button", { name: "查看并确认提案" }));
+
+    // Verify tree layout exists
+    expect(screen.getByTestId("story-proposal-tree-layout")).toBeInTheDocument();
+    expect(screen.getByTestId("story-proposal-tree-pane")).toBeInTheDocument();
+    expect(screen.getByTestId("story-proposal-detail-pane")).toBeInTheDocument();
+
+    // Scene 1 is active by default
+    expect(screen.getByText(/第 1 集 · 第 1 场/)).toBeInTheDocument();
+    expect(screen.getByTestId("scene-parent-dependency-box")).toBeInTheDocument();
+
+    // Click "采用当前场" button for Scene 1
+    const applyCurrentSceneBtn = screen.getByTestId("story-proposal-apply-current-scene");
+    fireEvent.click(applyCurrentSceneBtn);
+
+    await waitFor(() => {
+      expect(applyBody).toEqual({
+        decisions: [
+          { item_id: "op-ep-1", decision: "accepted" },
+          { item_id: "op-sc-1", decision: "accepted" },
+          { item_id: "op-sh-1", decision: "accepted" },
+        ],
+      });
+    });
+
+    // After scene 1 is adopted, active scene automatically shifts to Scene 2
+    expect(await screen.findByText(/第 1 集 · 第 2 场/)).toBeInTheDocument();
+    expect(screen.queryByTestId("scene-parent-dependency-box")).not.toBeInTheDocument();
+
+    // Click "采用当前场" for Scene 2
+    fireEvent.click(screen.getByTestId("story-proposal-apply-current-scene"));
+
+    await waitFor(() => {
+      expect(applyBody).toEqual({
+        decisions: [
+          { item_id: "op-sc-2", decision: "accepted" },
+          { item_id: "op-sh-2", decision: "accepted" },
+        ],
+      });
+    });
+  });
+
+  it("blocks single-scene adoption with explicit warning when parent episode dependency is toggled off", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/script")) return json(EMPTY);
+      if (url.endsWith("/story/proposals")) return json([MULTI_SCENE_PROPOSAL]);
+      return json({});
+    });
+
+    renderWorkspace();
+    fireEvent.click(await screen.findByText("继续处理已保存的提案"));
+    fireEvent.click(screen.getByRole("button", { name: "查看并确认提案" }));
+
+    // Toggle off parent episode dependency
+    const toggle = screen.getByTestId("include-parent-episode-toggle");
+    fireEvent.click(toggle);
+
+    // Orphan scene adoption should be explicitly blocked
+    expect(screen.getByTestId("orphan-scene-dependency-alert")).toHaveTextContent(
+      "无法单独采纳孤儿场景",
+    );
+    expect(screen.getByTestId("story-proposal-apply-current-scene")).toBeDisabled();
   });
 });

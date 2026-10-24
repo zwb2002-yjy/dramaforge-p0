@@ -2,11 +2,13 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { updateProjectCreativeProfile, type ProjectRead } from "../../lib/api";
+import { Field, Select, Alert } from "../../components/ui";
 
 export type CreativeAutonomy = "AUTO" | "ASSIST" | "MANUAL";
 
 type CreativeAutonomySwitcherProps = {
   project: ProjectRead;
+  compact?: boolean;
 };
 
 const AUTONOMY_OPTIONS: Array<{ value: CreativeAutonomy; label: string; hint: string }> = [
@@ -26,7 +28,10 @@ function errorMessage(error: unknown): string {
  * canonical CreativeProfile. It never migrates the Project, copies
  * Scene/Shot facts, or changes the execution/Runtime identity.
  */
-export function CreativeAutonomySwitcher({ project }: CreativeAutonomySwitcherProps) {
+export function CreativeAutonomySwitcher({
+  project,
+  compact = false,
+}: CreativeAutonomySwitcherProps) {
   const queryClient = useQueryClient();
   const profile = project.creative_profile;
   const [message, setMessage] = useState<string | null>(null);
@@ -52,51 +57,57 @@ export function CreativeAutonomySwitcher({ project }: CreativeAutonomySwitcherPr
 
   return (
     <section
-      className="qc-settings-band creative-autonomy-switcher"
+      className={
+        compact
+          ? "creative-autonomy-switcher compact"
+          : "qc-settings-band creative-autonomy-switcher"
+      }
       data-testid="creative-autonomy-switcher"
       data-project-id={project.id}
       data-autonomy={current}
       data-profile-version={profile.version}
     >
-      <header>
-        <h3>导演参与度</h3>
-        <p className="muted">
-          只改变导演行为策略与建议密度；不会迁移项目，也不改变场景、镜头或运行身份。
-        </p>
-      </header>
+      {!compact && (
+        <header>
+          <h3>导演参与度</h3>
+        </header>
+      )}
       <div className="creative-autonomy-controls">
-        <label>
-          当前策略
-          <select
+        <Field layout={compact ? "inline" : "stacked"}>
+          {compact ? "导演" : "当前策略"}
+          <Select
             data-testid="creative-autonomy-select"
             aria-label="导演参与度"
             value={current}
+            title={selected?.hint}
             disabled={update.isPending}
-            onChange={(event) => update.mutate(event.target.value as CreativeAutonomy)}
+            onChange={(event) => update.mutate(event as CreativeAutonomy)}
           >
             {AUTONOMY_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </select>
-        </label>
-        <p className="creative-autonomy-hint" data-testid="creative-autonomy-hint">
-          {selected ? `${selected.label}：${selected.hint}` : current}
-        </p>
+          </Select>
+        </Field>
+        {!compact && (
+          <p className="creative-autonomy-hint" data-testid="creative-autonomy-hint">
+            {selected ? `${selected.label}：${selected.hint}` : current}
+          </p>
+        )}
         {update.isPending && (
           <p className="muted" role="status">
             正在切换…
           </p>
         )}
         {message && (
-          <p
-            className={message.includes("失败") ? "flash err" : "flash ok"}
+          <Alert
+            type={message.includes("失败") ? "error" : "success"}
             data-testid="creative-autonomy-message"
             role={message.includes("失败") ? "alert" : "status"}
-          >
-            {message}
-          </p>
+            title={message}
+            showIcon
+          />
         )}
       </div>
     </section>

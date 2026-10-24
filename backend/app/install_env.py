@@ -17,6 +17,7 @@ from collections.abc import Callable
 GENERATORS: dict[str, Callable[[], str]] = {
     "POSTGRES_PASSWORD": lambda: secrets.token_urlsafe(32),
     "POSTGRES_APP_PASSWORD": lambda: secrets.token_urlsafe(32),
+    "DIRECTOR_CHECKPOINT_PASSWORD": lambda: secrets.token_urlsafe(32),
     "MINIO_ROOT_PASSWORD": lambda: secrets.token_urlsafe(32),
     "LITELLM_DB_PASSWORD": lambda: secrets.token_urlsafe(32),
     "SESSION_SECRET": lambda: secrets.token_urlsafe(48),
@@ -61,6 +62,10 @@ def render_new_env(
             "DATABASE_URL": (
                 "postgresql+asyncpg://dramaforge_app:"
                 f"{generated['POSTGRES_APP_PASSWORD']}@localhost:5432/dramaforge"
+            ),
+            "DIRECTOR_CHECKPOINT_DATABASE_URL": (
+                "postgresql://dramaforge_director_checkpoint:"
+                f"{generated['DIRECTOR_CHECKPOINT_PASSWORD']}@localhost:5432/dramaforge"
             ),
             "MINIO_SECRET_KEY": generated["MINIO_ROOT_PASSWORD"],
             "DRAMAFORGE_VERSION": version,

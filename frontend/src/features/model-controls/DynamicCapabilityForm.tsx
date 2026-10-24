@@ -1,3 +1,4 @@
+import { Field, Checkbox, Select, Textarea, Input, Slider } from "../../components/ui";
 /**
  * DynamicCapabilityForm (P4-03/MS8).
  *
@@ -11,11 +12,9 @@ import type { CapabilitySpecRead, ParameterSpecRead } from "../../lib/api";
 import { allowedValuesFor, uiComponentFor, type OptionValue } from "../../lib/manifestOptions";
 
 const EMPTY_SPEC: CapabilitySpecRead = {
-  capability: "",
-  input_slots: {},
-  common_options: {},
-  native_options: {},
-  constraints: { mutually_exclusive: [], requires: {}, conditional: [] },
+  capability: "image.generate",
+  minimum_total_references: 0,
+  auto_match_contract: false,
   transport_profile_id: "",
 };
 
@@ -36,7 +35,7 @@ function isDisabledByExclusiveGroup(
   keyName: string,
   values: Record<string, OptionValue>,
 ): boolean {
-  for (const group of spec.constraints.mutually_exclusive) {
+  for (const group of spec.constraints?.mutually_exclusive ?? []) {
     if (!group.includes(keyName)) continue;
     const occupied = group.find((member) => member !== keyName && values[member] !== undefined);
     if (occupied !== undefined) return true;
@@ -70,15 +69,15 @@ export function OptionField({
 
   if (component === "switch") {
     return (
-      <label className="flex items-center gap-2 text-sm">
-        <input
+      <Field className="flex items-center gap-2 text-sm">
+        <Checkbox
           type="checkbox"
           checked={Boolean(value)}
           disabled={effectiveDisabled}
           onChange={(event) => onChange(keyName, event.target.checked)}
         />
         {label}
-      </label>
+      </Field>
     );
   }
   if (component === "slider") {
@@ -87,13 +86,13 @@ export function OptionField({
     return (
       <div>
         {labelNode}
-        <input
-          type="range"
+        <Slider
+          ariaLabelForHandle={label}
           min={min}
           max={max}
           value={typeof value === "number" ? value : ((parameter.default as number) ?? min)}
           disabled={effectiveDisabled}
-          onChange={(event) => onChange(keyName, Number(event.target.value))}
+          onChange={(value) => onChange(keyName, value)}
           className="w-full"
         />
       </div>
@@ -104,10 +103,10 @@ export function OptionField({
     return (
       <div>
         {labelNode}
-        <select
+        <Select
           value={String(value ?? "")}
           disabled={effectiveDisabled}
-          onChange={(event) => onChange(keyName, event.target.value)}
+          onChange={(event) => onChange(keyName, event)}
           className={baseClass}
         >
           <option value="">（默认）</option>
@@ -116,7 +115,7 @@ export function OptionField({
               {String(option)}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
     );
   }
@@ -124,7 +123,7 @@ export function OptionField({
     return (
       <div>
         {labelNode}
-        <textarea
+        <Textarea
           value={String(value ?? "")}
           disabled={effectiveDisabled}
           onChange={(event) => onChange(keyName, event.target.value)}
@@ -138,7 +137,7 @@ export function OptionField({
     return (
       <div>
         {labelNode}
-        <input
+        <Input
           type="number"
           value={typeof value === "number" ? value : ""}
           disabled={effectiveDisabled}
@@ -151,7 +150,7 @@ export function OptionField({
   return (
     <div>
       {labelNode}
-      <input
+      <Input
         type="text"
         value={String(value ?? "")}
         disabled={effectiveDisabled}
@@ -176,11 +175,12 @@ export function DynamicCapabilityForm({
   onChange,
   optionKeys,
 }: DynamicCapabilityFormProps) {
-  const keys = optionKeys ?? Object.keys(spec.common_options);
+  const commonOptions = spec.common_options ?? {};
+  const keys = optionKeys ?? Object.keys(commonOptions);
   return (
     <div className="space-y-3" data-testid="dynamic-capability-form">
       {keys.map((key) => {
-        const parameter = spec.common_options[key];
+        const parameter = commonOptions[key];
         if (!parameter) return null;
         return (
           <OptionField

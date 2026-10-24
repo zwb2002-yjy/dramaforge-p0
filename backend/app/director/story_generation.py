@@ -13,6 +13,7 @@ from app.access.models import Project, User
 from app.assets.models import Episode, Scene, ScriptDocument, Shot
 from app.assets.script_import import parse_script_markdown
 from app.config import get_settings
+from app.director.runtime.capabilities import require_director_runtime_available
 from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.story_proposal import StoryProposalResult, create_story_proposal
 from app.director.text_transport import (
@@ -176,6 +177,7 @@ class StoryGenerationService:
         actor: User,
         request: StoryGenerationRequest,
     ) -> GeneratedStoryProposal:
+        require_director_runtime_available(get_settings())
         context, versions = await self._story_context(project)
         text_result = await self._text_transport.generate_structured(
             project=project,
@@ -202,6 +204,10 @@ class StoryGenerationService:
                 "current_story": context,
             },
             output_type=StoryDraftCandidate,
+            # Rejecting one generated draft rejects that Proposal, not the
+            # user's reusable Story brief. A new explicit Generate action owns
+            # a new request key and may ask the model for another draft.
+            allow_rejected_context_retry=True,
         )
         _current_context, current_versions = await self._story_context(project)
         if current_versions != versions:
@@ -250,6 +256,7 @@ class StoryGenerationService:
         await self._text_transport.mark_awaiting_user(
             text_result.turn,
             proposal_id=proposal.proposal.id,
+            allow_rejected_context_retry=True,
         )
         await DirectorRuntimeStartService(
             self._session, settings=get_settings(),

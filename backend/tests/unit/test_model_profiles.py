@@ -257,6 +257,104 @@ async def test_simple_mode_maps_groups_to_slots(session: AsyncSession, world, se
     assert parsed[ModelSlot.VIDEO_SHOT].model_id == TEST_VIDEO_I2V
 
 
+async def test_simple_mode_keeps_same_model_parameters_and_disabled_state(
+    session: AsyncSession, world, service
+) -> None:
+    profile = await service.create(
+        workspace_id=world["workspace"].id,
+        actor_id=world["user"].id,
+        name="方案",
+        bindings={
+            ModelSlot.VIDEO_SHOT: _binding(
+                ModelSlot.VIDEO_SHOT, TEST_VIDEO_I2V, native_options={"duration": 8}, enabled=False
+            )
+        },
+    )
+    original = dict(profile.bindings)
+    updated = await service.apply_simple_mode(
+        profile_id=profile.id,
+        actor_id=world["user"].id,
+        expected_version=1,
+        selection=SimpleModeSelection(video_model_id=TEST_VIDEO_I2V),
+    )
+    assert updated.bindings == original
+    assert updated.version == 1
+
+
+@pytest.mark.parametrize("operation", ["simple", "update"])
+async def test_editing_image_keeps_unavailable_text_without_revalidating_it(
+    session: AsyncSession, world, service, operation: str
+) -> None:
+    profile = await service.create(
+        workspace_id=world["workspace"].id,
+        actor_id=world["user"].id,
+        name="方案",
+        bindings={ModelSlot.PLANNING_SCRIPT: _binding(ModelSlot.PLANNING_SCRIPT, TEST_TEXT_A)},
+    )
+    # Model discovery no longer exposes this id after its credential changes.
+    stale = {"model_id": "litellm/changed-connection/chat", "native_options": {}, "enabled": True}
+    profile.bindings = {"planning.script": stale}
+    await session.flush()
+    if operation == "simple":
+        updated = await service.apply_simple_mode(
+            profile_id=profile.id,
+            actor_id=world["user"].id,
+            expected_version=1,
+            selection=SimpleModeSelection(image_model_id=TEST_IMAGE_A),
+        )
+    else:
+        updated = await service.update(
+            profile_id=profile.id,
+            actor_id=world["user"].id,
+            expected_version=1,
+            bindings={
+                ModelSlot.PLANNING_SCRIPT: _binding(ModelSlot.PLANNING_SCRIPT, stale["model_id"]),
+                ModelSlot.VISUAL_KEYFRAME: _binding(ModelSlot.VISUAL_KEYFRAME, TEST_IMAGE_A),
+            },
+        )
+    parsed = parse_bindings(updated.bindings)
+    assert parsed[ModelSlot.PLANNING_SCRIPT].model_id == stale["model_id"]
+    assert parsed[ModelSlot.VISUAL_KEYFRAME].model_id == TEST_IMAGE_A
+    assert updated.version == 2
+
+    # Retaining a saved unavailable model does not admit a new unknown choice.
+    with pytest.raises(Exception) as error:
+        await service.apply_simple_mode(
+            profile_id=profile.id,
+            actor_id=world["user"].id,
+            expected_version=2,
+            selection=SimpleModeSelection(video_model_id="unknown/new-choice"),
+        )
+    assert error.value.details["code"] == MODEL_PROFILE_MODEL_NOT_FOUND
+    assert updated.version == 2
+
+
+async def test_simple_mode_empty_patch_is_version_checked_without_writing(
+    session: AsyncSession, world, service
+) -> None:
+    profile = await service.create(
+        workspace_id=world["workspace"].id,
+        actor_id=world["user"].id,
+        name="方案",
+        bindings={},
+    )
+    updated = await service.apply_simple_mode(
+        profile_id=profile.id,
+        actor_id=world["user"].id,
+        expected_version=1,
+        selection=SimpleModeSelection(),
+    )
+    assert updated.version == 1
+    with pytest.raises(Exception) as error:
+        await service.apply_simple_mode(
+            profile_id=profile.id,
+            actor_id=world["user"].id,
+            expected_version=0,
+            selection=SimpleModeSelection(),
+        )
+    assert error.value.details["code"] == MODEL_PROFILE_VERSION_CONFLICT
+
+
 async def test_copy_from_snapshots_workspace_default(session: AsyncSession, world, service) -> None:
     workspace_default = await service.create(
         workspace_id=world["workspace"].id,

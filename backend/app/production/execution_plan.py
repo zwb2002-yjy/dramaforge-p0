@@ -150,7 +150,7 @@ class WorkbenchExecutionPlan(BaseModel):
     )
     project_id: UUID
     shot_id: UUID
-    shot_experiment_id: UUID | None = None
+    experiment_branch_id: UUID | None = None
     stage: PlanStage
     prompt: str = Field(min_length=1)
     semantic_intent: dict[str, JsonValue] = Field(default_factory=dict)
@@ -171,6 +171,10 @@ class WorkbenchExecutionPlan(BaseModel):
     translation_report: TranslationReport | None = None
     accepted_approximations: list[str] = Field(default_factory=list)
     expected_shot_version: int | None = None
+    duration_seconds: float | None = None
+    prompt_override: str | None = None
+    effective_options: dict[str, JsonValue] = Field(default_factory=dict)
+    supports_prompt_override: bool = False
 
     def freeze(self) -> WorkbenchExecutionPlan:
         """Return a copy with a deterministic ``plan_fingerprint``.
@@ -180,9 +184,7 @@ class WorkbenchExecutionPlan(BaseModel):
         if self.plan_fingerprint is not None:
             return self
         payload = self.model_dump(mode="json", exclude={"plan_fingerprint"})
-        return self.model_copy(
-            update={"plan_fingerprint": fingerprint_plan(payload)}
-        )
+        return self.model_copy(update={"plan_fingerprint": fingerprint_plan(payload)})
 
     @property
     def reference_counts(self) -> dict[str, int]:

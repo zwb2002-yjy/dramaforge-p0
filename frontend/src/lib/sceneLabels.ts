@@ -17,6 +17,11 @@ const TIME_OF_DAY_LABELS: Record<string, string> = {
 
 export function timeOfDayLabel(value: string | null | undefined): string {
   if (!value?.trim()) return "—";
-  const normalized = value.trim().toLowerCase().replaceAll(/[_-]+/g, " ");
-  return TIME_OF_DAY_LABELS[normalized] ?? value.trim();
+  const raw = value.trim();
+  const normalized = raw.toLowerCase().replaceAll(/[_-]+/g, " ");
+  const known = TIME_OF_DAY_LABELS[normalized];
+  if (known) return known;
+  // Chinese wording written by a creator passes through; an ASCII token is a
+  // stored contract value and must not reach an ordinary surface.
+  return /^\p{ASCII}+$/u.test(raw) ? "时段待确认" : raw;
 }

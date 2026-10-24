@@ -1,0 +1,45 @@
+{
+  "manifest_version": "2026-08-13",
+  "provider_type": "minimax",
+  "protocol_profile": "minimax_cn_v1",
+  "model_id": "image-01",
+  "model_revision": "v3",
+  "media_kind": "image",
+  "display_name": "MiniMax Image 01",
+  "lifecycle": "active",
+  "catalog_source": "official_static",
+  "documented_at": "2026-08-13",
+  "operations": {
+    "image.generate": {
+      "operation": "image.generate",
+      "capabilities": [
+        "image.i2i"
+      ],
+      "output_constraints": {
+        "size": "1024x1024",
+        "aspect_ratio": "1:1",
+        "response_format": "url",
+        "n": 1
+      },
+      "reference_constraints": {
+        "reference_image": {
+          "min": 1,
+          "max": 1
+        }
+      },
+      "exclusive_groups": []
+    }
+  },
+  "option_schema": {
+    "namespace": "",
+    "options": {}
+  },
+  "implementation_status": "contract_tested",
+  "evidence": {
+    "current_contract": {
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit",
+      "checked_at": "2026-10-07"
+    }
+  }
+}

@@ -42,6 +42,14 @@ class ImageToVideoRequest(_VideoCommon):
     native_options: dict[str, Any] = Field(default_factory=dict)
 
 
+class LastFrameVideoRequest(_VideoCommon):
+    """Video generated toward one fixed last frame."""
+
+    prompt: str
+    last_frame: ArtifactRef
+    native_options: dict[str, Any] = Field(default_factory=dict)
+
+
 class FirstLastFrameVideoRequest(_VideoCommon):
     """Video generated between two fixed frames (``video.first_last_frame``)."""
 

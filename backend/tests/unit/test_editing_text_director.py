@@ -32,6 +32,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 MODEL_ID = "litellm/controlled-editing"
+pytestmark = pytest.mark.usefixtures("configured_director_runtime")
 
 
 @pytest.fixture

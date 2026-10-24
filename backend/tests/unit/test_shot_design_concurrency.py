@@ -117,12 +117,75 @@ def test_shot_design_patch_requires_project_ownership(client: TestClient) -> Non
         },
     )
     assert intruder.status_code in {200, 201}, intruder.text
-    client.headers["X-Workspace-Id"] = str(
-        client.get("/api/v1/workspaces").json()[0]["id"]
-    )
+    client.headers["X-Workspace-Id"] = str(client.get("/api/v1/workspaces").json()[0]["id"])
     response = client.patch(
         f"/api/v1/projects/{project_id}/shots/{shot_id}/design",
         json={"expected_version": 1, "image_prompt": "stolen"},
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert response.status_code == 404, response.text
+
+
+def test_voice_options_are_project_scoped_and_do_not_probe(client: TestClient, monkeypatch) -> None:
+    project_id, _shot_id = _project_with_shot(client)
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Reading speech choices must not start a provider")
+
+    monkeypatch.setattr("app.providers.voice_runtime.get_voice_adapter", unexpected)
+    response = client.get(f"/api/v1/projects/{project_id}/voice-options")
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["engine"] == "edge-tts"
+    assert data["status"] == "disabled"
+    assert {voice["id"] for voice in data["voices"]} == {
+        "zh-CN-XiaoxiaoNeural",
+        "zh-CN-YunxiNeural",
+    }
+    assert "未联网验证" in data["service_notice"]
+    assert client.get(f"/api/v1/projects/{uuid4()}/voice-options").status_code == 404
+    del client.headers["X-Workspace-Id"]
+    assert client.get(f"/api/v1/projects/{project_id}/voice-options").status_code in {400, 403, 422}
+
+
+def test_saved_voice_is_validated_and_retained_without_generating(
+    client: TestClient, monkeypatch
+) -> None:
+    project_id, shot_id = _project_with_shot(client)
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Saving a voice is not a speech generation gate")
+
+    monkeypatch.setattr("app.providers.voice_runtime.get_voice_adapter", unexpected)
+    path = f"/api/v1/projects/{project_id}/shots/{shot_id}/design"
+    response = client.patch(
+        path,
+        json={
+            "expected_version": 1,
+            "director_state": {"voice": {"voice_id": "zh-CN-YunxiNeural", "rate_percent": -10}},
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["director_state"]["voice"] == {
+        "voice_id": "zh-CN-YunxiNeural",
+        "rate_percent": -10,
+    }
+    invalid = client.patch(
+        path,
+        json={
+            "expected_version": response.json()["version"],
+            "director_state": {"voice": {"voice_id": "cmn", "rate_percent": 0}},
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert invalid.status_code == 422, invalid.text
+    excessive = client.patch(
+        path,
+        json={
+            "expected_version": response.json()["version"],
+            "director_state": {"voice": {"rate_percent": 31}},
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert excessive.status_code == 422, excessive.text
