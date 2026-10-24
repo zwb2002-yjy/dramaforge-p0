@@ -477,6 +477,16 @@ Index(
     NodeRun.__table__.c.reused_from_run_id,
     postgresql_where=text("reused_from_run_id IS NOT NULL"),
 )
+# Scheduler claim runs every second: status='queued' ORDER BY created_at, id.
+# The partial index serves the ordering directly and stays proportional to
+# queued rows instead of the whole table (backend-review 1.2).
+Index(
+    "idx_node_runs_queued_order",
+    NodeRun.__table__.c.created_at,
+    NodeRun.__table__.c.id,
+    postgresql_where=text("status = 'queued'"),
+    sqlite_where=text("status = 'queued'"),
+)
 Index("ix_provider_operations_connection_id", ProviderOperation.__table__.c.connection_id)
 Index(
     "ix_provider_operations_connection_revision_id",
