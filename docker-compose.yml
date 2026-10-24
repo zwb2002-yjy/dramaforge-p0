@@ -6,6 +6,10 @@ x-dramaforge-release:
 services:
   postgres:
     image: postgres:15-alpine
+    # Six DramaForge processes plus the director checkpoint pools share this
+    # instance; per-role pool ceilings (DB_POOL_SIZE/DB_MAX_OVERFLOW below)
+    # stay well under this budget (backend-review 1.4).
+    command: ["postgres", "-c", "max_connections=160"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-dramaforge}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}
@@ -129,6 +133,8 @@ services:
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
+      DB_POOL_SIZE: ${API_DB_POOL_SIZE:-20}
+      DB_MAX_OVERFLOW: ${API_DB_MAX_OVERFLOW:-10}
       DIRECTOR_RUNTIME_ENGINE: langgraph
       DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
@@ -282,6 +288,8 @@ services:
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
+      DB_POOL_SIZE: ${DISPATCHER_DB_POOL_SIZE:-3}
+      DB_MAX_OVERFLOW: ${DISPATCHER_DB_MAX_OVERFLOW:-2}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -319,6 +327,8 @@ services:
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
+      DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${WORKER_DB_MAX_OVERFLOW:-5}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}
@@ -388,6 +398,8 @@ services:
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
+      DB_POOL_SIZE: ${DIRECTOR_WORKER_DB_POOL_SIZE:-4}
+      DB_MAX_OVERFLOW: ${DIRECTOR_WORKER_DB_MAX_OVERFLOW:-2}
       DIRECTOR_RUNTIME_ENGINE: langgraph
       DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       REDIS_URL: redis://redis:6379/0
@@ -425,6 +437,8 @@ services:
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
+      DB_POOL_SIZE: ${HEAVY_DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${HEAVY_DB_MAX_OVERFLOW:-5}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-dramaforge}

@@ -57,11 +57,21 @@ def get_engine(settings: Settings | None = None) -> AsyncEngine:
     global _engine, _session_factory
     if _engine is None:
         cfg = settings or get_settings()
-        _engine = create_async_engine(
-            cfg.database_url,
-            pool_pre_ping=True,
-            connect_args={"ssl": cfg.database_ssl},
-        )
+        engine_kwargs: dict[str, object] = {
+            "pool_pre_ping": True,
+            "connect_args": {"ssl": cfg.database_ssl},
+        }
+        if cfg.database_url.startswith("postgresql"):
+            # Pool sizing only applies to the shared PostgreSQL; SQLite test
+            # engines (StaticPool / memory) do not accept these arguments
+            # (backend-review 1.4: each container states its own ceiling).
+            engine_kwargs.update(
+                pool_size=cfg.db_pool_size,
+                max_overflow=cfg.db_max_overflow,
+                pool_timeout=cfg.db_pool_timeout_seconds,
+                pool_recycle=cfg.db_pool_recycle_seconds,
+            )
+        _engine = create_async_engine(cfg.database_url, **engine_kwargs)
         _session_factory = async_sessionmaker(
             _engine,
             class_=AsyncSession,

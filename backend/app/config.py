@@ -61,6 +61,35 @@ class Settings(BaseSettings):
         default=False,
         description="Enable TLS for PostgreSQL connections; local Compose defaults to false",
     )
+    # Connection-pool sizing per process (backend-review 1.4): every container
+    # shares one PostgreSQL, so each role states its own ceiling. The Compose
+    # services set these per role (api 20+10, worker-default 10+5,
+    # worker-heavy 5+5, dispatcher 3+2); the sum stays well under the
+    # PostgreSQL max_connections budget.
+    db_pool_size: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Steady pool connections per process engine",
+    )
+    db_max_overflow: int = Field(
+        default=10,
+        ge=0,
+        le=50,
+        description="Burst connections allowed beyond db_pool_size",
+    )
+    db_pool_timeout_seconds: int = Field(
+        default=30,
+        ge=1,
+        le=300,
+        description="Seconds a checkout waits for a free connection before failing",
+    )
+    db_pool_recycle_seconds: int = Field(
+        default=1800,
+        ge=30,
+        le=86400,
+        description="Recycle connections older than this to survive idle resets",
+    )
     director_runtime_engine: Literal["langgraph"] = Field(
         default="langgraph",
         description="The single durable Director execution engine",
