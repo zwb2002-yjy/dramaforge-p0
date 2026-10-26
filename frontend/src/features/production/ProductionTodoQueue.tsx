@@ -5,12 +5,12 @@ import type { ReactNode } from "react";
 
 import { queryKeys } from "../../lib/queryKeys";
 import { reviewTargetHref } from "../review/reviewTarget";
-import { fetchProductionTodos, type ProductionTodo } from "./batchApi";
+import { batchReasonLabel, fetchProductionTodos, type ProductionTodo } from "./batchApi";
 
 const CATEGORY_LABEL: Record<ProductionTodo["category"], string> = {
   not_generated: "尚未生成",
   generating: "生成中 / 已排队",
-  awaiting_review: "已有候选，待审片",
+  awaiting_review: "候选待处理",
   awaiting_formal: "已通过，待设为正式",
   failed: "失败待处理",
 };
@@ -24,8 +24,10 @@ function TodoLink({
   item: ProductionTodo;
   children: ReactNode;
 }) {
-  const review = item.category === "awaiting_review" || item.category === "awaiting_formal";
-  if (item.category === "awaiting_review" && item.artifact_id) {
+  const rejected = item.detail === "CANDIDATE_REJECTED";
+  const review =
+    !rejected && (item.category === "awaiting_review" || item.category === "awaiting_formal");
+  if (!rejected && item.category === "awaiting_review" && item.artifact_id) {
     return (
       <a
         href={reviewTargetHref(projectId, {
@@ -103,7 +105,11 @@ export function ProductionTodoQueue({ projectId }: { projectId: string }) {
               {items.slice(0, 20).map((item) => {
                 const label = `镜头 ${item.shot_number} · ${
                   item.stage === "image_keyframe" ? "关键帧" : "视频"
-                } · ${CATEGORY_LABEL[item.category]}`;
+                } · ${
+                  item.detail === "CANDIDATE_REJECTED"
+                    ? batchReasonLabel(item.detail)
+                    : CATEGORY_LABEL[item.category]
+                }`;
                 return (
                   <li key={`${item.stage}:${item.shot_id}`}>
                     <TodoLink projectId={projectId} item={item}>

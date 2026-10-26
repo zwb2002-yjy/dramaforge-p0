@@ -116,9 +116,16 @@ def test_a_typed_candidate_or_unknown_schema_cannot_inherit_old_execution_qualif
 
 def test_retired_and_protocol_contracts_report_product_closed_without_changing_frozen_facts():
     loaded = ModelCatalogLoader().load()
-    for model_id, reason in (
-        ("agnes-video-v2.0", "MODEL_LIFECYCLE_INACTIVE"),
-        ("@contract/agnes-video-openai-async-v2", "DYNAMIC_MODEL_CAPABILITY_UNVERIFIED"),
+    # (model_id, new_create_blocker, raw lifecycle). agnes-video-v2.0 and the
+    # schema-1 agnes-video-openai-async-v2 contract are retired through
+    # catalog publication events: manifest bytes and hashes stay frozen,
+    # only publication permission changes. The contract entry was never
+    # executable (no AgnesVideoCompiler branch accepts its dialect); the
+    # typed schema-2 revision path is the current 2.5-async representation.
+    for model_id, reason, raw_lifecycle in (
+        ("agnes-video-v2.0", "MODEL_LIFECYCLE_INACTIVE", "active"),
+        ("@contract/agnes-video-openai-async-v2", "MODEL_LIFECYCLE_INACTIVE", "active"),
+        ("@contract/openai-image-v1", "DYNAMIC_MODEL_CAPABILITY_UNVERIFIED", "active"),
     ):
         item = next(
             item
@@ -126,7 +133,7 @@ def test_retired_and_protocol_contracts_report_product_closed_without_changing_f
             if item.identity[2] == model_id and item.as_dict().get("schema_version", "1") == "1"
         )
         raw = item.as_dict()
-        assert raw["lifecycle"] == "active"
+        assert raw["lifecycle"] == raw_lifecycle
         blocker = catalog_new_create_blocker(
             *item.identity,
             item.manifest_hash,

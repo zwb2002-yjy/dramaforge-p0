@@ -23,6 +23,76 @@ def _csrf(client: TestClient) -> str:
     return str(client.get("/api/v1/auth/csrf").json()["csrf_token"])
 
 
+@pytest.mark.parametrize("operation", ["probe", "text"])
+async def test_workspace_connection_egress_blocks_private_dns_before_socket(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    from unittest.mock import AsyncMock
+
+    import httpx
+    from app.providers.errors import ProviderError
+    from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
+    from app.providers.registry import ModelRegistry
+
+    monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
+    monkeypatch.setenv("BYOK_KEYRING", f"v1:{Fernet.generate_key().decode('ascii')}")
+    clear_settings_cache()
+    user, workspace = await _seed_owner(session)
+    service = ProviderConnectionService(session)
+    connection = await service.create_connection(
+        workspace_id=workspace.id,
+        actor=user,
+        display_name="Egress fixture",
+        api_key="synthetic-egress-fixture",
+        enabled=True,
+        provider_type="litellm",
+        protocol_profile="openai_chat_v1",
+        base_url="https://provider.example.test/v1",
+    )
+    resolved_hosts: list[str] = []
+
+    async def resolve(host: str, port: int) -> list[str]:
+        resolved_hosts.append(host)
+        return ["10.0.0.5"]
+
+    connect = AsyncMock(side_effect=AssertionError("private destination reached socket backend"))
+    monkeypatch.setattr("app.providers.egress._resolve_addresses", resolve)
+    monkeypatch.setattr("httpcore._backends.auto.AutoBackend.connect_tcp", connect)
+    if operation == "probe":
+        evidence = await service.probe(
+            workspace_id=workspace.id,
+            connection_id=connection.id,
+            actor=user,
+            capability="auth_models",
+        )
+        assert evidence.status == "failed"
+        assert evidence.error_code == "PROVIDER_UNAVAILABLE"
+    else:
+
+        async def catalog(*args, **kwargs):
+            return httpx.Response(200, json={"data": [{"id": "chat"}]})
+
+        with monkeypatch.context() as catalog_patch:
+            catalog_patch.setattr(httpx.AsyncClient, "get", catalog)
+            await service.probe(
+                workspace_id=workspace.id,
+                connection_id=connection.id,
+                actor=user,
+                capability="auth_models",
+            )
+        registry = await workspace_model_registry(
+            session, workspace_id=workspace.id, base_registry=ModelRegistry()
+        )
+        registered = registry.get_or_none(f"litellm/{connection.id}/chat")
+        assert registered is not None
+        with pytest.raises(ProviderError, match="PROVIDER_EGRESS_PRIVATE_NOT_AUTHORIZED"):
+            await registered.adapter._client.chat_completion(
+                model="chat", payload={"messages": [{"role": "user", "content": "fixture"}]}
+            )
+    assert resolved_hosts == ["provider.example.test"]
+    connect.assert_not_awaited()
+
+
 def _register_and_select_workspace(client: TestClient) -> str:
     response = client.post(
         "/api/v1/auth/register",

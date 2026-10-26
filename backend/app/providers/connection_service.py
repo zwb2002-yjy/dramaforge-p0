@@ -532,8 +532,13 @@ class ProviderConnectionService:
                 details={"code": "PROBE_RATE_LIMITED"},
             )
         cfg = await self._probe_settings(connection, binding, revision=probe_revision)
+        # Probes carry credentials to the same destinations as runtimes, so
+        # they use the same connection-time egress guard.
+        from app.providers.egress import guarded_provider_transport
+
+        probe_transport = guarded_provider_transport(settings=cfg)
         client = (
-            plugin.build_client(cfg, host=probe_revision.base_url)
+            plugin.build_client(cfg, host=probe_revision.base_url, transport=probe_transport)
             if capability != "auth_models"
             else None
         )
@@ -598,7 +603,9 @@ class ProviderConnectionService:
                     from app.providers.litellm_gateway.client import normalize_models_url
 
                     models_url = normalize_models_url(probe_revision.base_url)
-                async with httpx.AsyncClient(timeout=30.0) as http:
+                async with httpx.AsyncClient(
+                    timeout=30.0, transport=probe_transport
+                ) as http:
                     response = await http.get(
                         models_url,
                         headers={

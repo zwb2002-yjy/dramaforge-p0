@@ -67,14 +67,19 @@ def _uuid_of(value: str) -> UUID:
 
 
 def _bridge_for(provider_type: str, media: str) -> ProviderAdapterBridge:
-    seed = active_manifests_for(provider_type=provider_type)
-    raw = seed[0] if media == "image" else seed[1]
+    # Translation is schema-level, so retired manifests are valid fixtures;
+    # the active catalog must not be indexed positionally (the agnes active
+    # list is image-only since the schema-1 video contract retired).
     if provider_type == "agnes" and media == "video":
         raw = next(
             item.as_dict()
             for item in ModelCatalogLoader().load()
             if item.identity[2] == "agnes-video-v2.0"
         )
+    else:
+        seed = active_manifests_for(provider_type=provider_type)
+        media_index = 0 if media == "image" else 1
+        raw = seed[media_index]
     manifest = ModelCapabilityManifest.model_validate(raw)
     transport_id = (
         "ark-image-v1"
@@ -315,14 +320,16 @@ def _runtime_bridge(
     provider_type: str, media: str, *, resolver: object | None = None
 ) -> tuple[ProviderAdapterBridge, _FakeRuntime]:
     """Bridge with a wired fake runtime (so create/poll actually execute)."""
-    seed = active_manifests_for(provider_type=provider_type)
-    raw = seed[0] if media == "image" else seed[1]
     if provider_type == "agnes" and media == "video":
         raw = next(
             item.as_dict()
             for item in ModelCatalogLoader().load()
             if item.identity[2] == "agnes-video-v2.0"
         )
+    else:
+        seed = active_manifests_for(provider_type=provider_type)
+        media_index = 0 if media == "image" else 1
+        raw = seed[media_index]
     manifest = ModelCapabilityManifest.model_validate(raw)
     transport_id = (
         "ark-image-v1"
@@ -391,8 +398,12 @@ class _RecordingVideoCompiler:
 def _ordered_bridge(
     *, runtime: _FakeRuntime | None = None, resolver: object | None = None
 ) -> tuple[ProviderAdapterBridge, _RecordingVideoCompiler, _FakeRuntime | None]:
-    seed = active_manifests_for(provider_type="agnes")
-    manifest = ModelCapabilityManifest.model_validate(seed[1])
+    raw = next(
+        item.as_dict()
+        for item in ModelCatalogLoader().load()
+        if item.identity[2] == "agnes-video-v2.0"
+    )
+    manifest = ModelCapabilityManifest.model_validate(raw)
     v3 = to_v3_model_manifest(manifest, transport_profile_id="agnes-video-v1")
     compiler = _RecordingVideoCompiler()
     bridge = ProviderAdapterBridge(

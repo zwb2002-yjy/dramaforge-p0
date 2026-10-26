@@ -77,7 +77,10 @@ Provider 特定的 reference URL/bytes 决策在 provider delivery 层内部。
 Workbench plan，dispatch 核对 preview fingerprint 后逐项调用
 `ProductionCommands.submit_user_execution`。它不创建第二套队列或执行事实。「补齐」只处理
 缺少该环节正式产物、成功候选和在途任务的镜头；已有正式产物、已有候选或正在生成的镜头记为 skipped。
-成功候选沿用 NodeRun + Artifact 与审片准入事实，分别归入待审片或待选正式版本，不能由「补齐」隐式再次生成；
+成功候选沿用 NodeRun + Artifact 与审片准入事实，区分待审片、已拒绝和待选正式版本，不能由「补齐」隐式再次生成。
+全部候选已拒绝时返回 `CANDIDATE_REJECTED`，界面提供定位镜头生成工具的入口；重新生成仍须单独预览和确认；
+制作待办优先选择已通过候选，其次待审候选，详情与 Artifact 目标取自同一个候选，
+不会因最新候选已被拒绝而遮住仍可处理的较早候选。
 预检失败记为 blocked，dispatch 只消费 ready。批量提交要求 Owner 确认本次 preview
 fingerprint 与允许新建的 Provider 操作数（`max_provider_calls`）；授权随每个 NodeRun 快照
 持久化，不能继承到下一批，也不能绕过 unknown-submission 防重。供应商价格与实际收费由
@@ -101,7 +104,7 @@ fingerprint 与允许新建的 Provider 操作数（`max_provider_calls`）；�
   Formal 检查点、cancellation-requested Provider 工作。
 - 真实远端任务重启恢复：同一远端任务恢复时零额外 create。
 - 新媒体提交在既有 ExecutionIdentitySnapshot 上冻结精确执行实现指纹与产品策略内容/
-  Hash；指纹固定协议/Runtime 所属源码、媒体物化代码、锁定依赖和 Python 版本。
+  Hash；指纹固定协议/Runtime（含凭证 egress 与目标分类）源码、媒体物化代码、锁定依赖和 Python 版本。
   恢复缺少该合同、实现版本失配或策略快照损坏时阻断并要求人工核对，不能用当前
   Connection 或最新 Handler 推导历史事实。原请求和旧 Manifest Hash 保留不变。
 - `unknown_submission` 不能自动重发；恢复不重新执行当前 Create 资格门。新 Create

@@ -158,6 +158,19 @@ function BatchFillDialog({
               <li key={group.reason}>
                 <span>{group.reason}</span>
                 <span className="df-num">{group.items.length}</span>
+                {group.items
+                  .filter((item) => item.reason === "CANDIDATE_REJECTED")
+                  .map((item) => (
+                    <Link
+                      key={item.shot_id}
+                      to="/projects/$projectId/scenes/$sceneId"
+                      params={{ projectId, sceneId: item.scene_id }}
+                      search={{ shotId: item.shot_id, tool: "generate" }}
+                      onClick={onClose}
+                    >
+                      重新生成镜头 {item.shot_number}
+                    </Link>
+                  ))}
               </li>
             ))}
           </ul>

@@ -326,6 +326,36 @@ evidence 仍保留；429、超时与空目录不单独撤销既有认证。用�
 文本连接的免费目录读取与 LiteLLM 文本客户端复用 `normalize_models_url`，接受带或
 不带 `/v1` 的 Base URL，不再重复拼接版本段。
 
+## 连接目标的两道 egress 门（当前实现）
+
+工作空间提供的 `base_url` 决定凭证流向，验证分两层（实现：`host_guard.py`、
+`egress.py`）：
+
+1. **写入时静态门**：连接 create/patch 校验 scheme、内嵌凭证、metadata 主机与
+   IP 字面量分类。私有/回环地址需 `PROVIDER_BASE_URL_ALLOW_PRIVATE`；明文 HTTP
+   仅允许 `PROVIDER_TRUSTED_HTTP_NETWORKS` 声明网段内的 IP 字面量（整地址空间
+   条目在启动时拒绝）。硬禁止类别（链路本地、组播、未指定、保留、共享/CGNAT）
+   先于私有许可判定，且不可被任何开关放行。
+2. **连接时 egress 门**：每次请求在连接池前重新执行 URL 策略，旧连接也不能
+   绕过 HTTPS/可信 HTTP 限制。媒体 Runtime、工作空间文本连接与探测的每条 TCP 连接先解析目标、
+   对全部解析地址分类，再与已验证地址建连（地址固定，防 DNS 重绑定）；任一
+   解析地址不合格即整体失败，凭证不离开进程。保存于旧策略下的连接在每个新
+   socket 上重新校验。
+   DNS 与 TCP 地址尝试共用连接超时；全量地址通过校验后，只有在尚未取得连接、
+   尚未发送 HTTP 请求时，才可尝试同次解析中的其他已验证地址，不重新解析或重发请求。
+
+由运维直接配置的内部 LiteLLM Proxy 地址保持其独立部署信任边界；工作空间文本
+连接使用以上 egress 门。测试 `test_v1_preview_matrix.py` 从活跃目录和模式声明
+检查回归用例覆盖，分别断言编译成功、缺少参考和不支持的输入，并要求每个活跃
+模型至少有一个成功用例。此矩阵不覆盖所有参数取值或全部素材组合，也不证明账号、
+网络和真实生成可用。
+
+`@contract/agnes-video-openai-async-v2` 已通过目录发布事件退役：没有任何
+AgnesVideoCompiler 分支接受该 schema-1 方言（2.5 输出约束且无 input_contracts），
+该条目从未可执行；同一 2.5 异步线协议的当前表示是 typed schema-2 修订
+（preview `agnes-video-2.5`，带 input_contracts 与产品策略）。重新激活需要
+经验证的合同 fixture 与编译器方言决策，不允许翻转生命周期。
+
 ## 不可绕过的规则
 
 1. **无静默回退**：选择 X 不静默运行 Y；unsupported input fail-closed 且不

@@ -60,6 +60,8 @@ def implementation_fingerprint(provider_type: str, protocol_profile: str) -> str
         Path(__file__).with_name("transport_registry.py"),
         Path(__file__).with_name("registry.py"),
         Path(__file__).with_name("workspace_credentials.py"),
+        Path(__file__).with_name("egress.py"),
+        Path(__file__).with_name("host_guard.py"),
         root / "app/execution/provider_execution.py",
         root / "app/execution/media_io.py",
         root / "app/config.py",

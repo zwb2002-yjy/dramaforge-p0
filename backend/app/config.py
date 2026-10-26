@@ -1,5 +1,6 @@
 """Application configuration loaded from environment variables."""
 
+import ipaddress
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal, Self
@@ -189,6 +190,19 @@ class Settings(BaseSettings):
         default=False,
         description="Authorize private/loopback provider base_urls for self-hosted deployments",
     )
+    # Scoped plaintext-HTTP trust for provider base_urls (joint-review
+    # follow-up: local model deployments must not require a global security
+    # downgrade). Declaring a network authorizes, for exactly those
+    # addresses: http:// base_urls (IP literals at write time) and
+    # connection-time egress. Link-local, multicast, unspecified and
+    # reserved addresses stay blocked even when a network claims them.
+    provider_trusted_http_networks: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        description=(
+            "Comma-separated IPv4/IPv6 CIDRs authorized for plaintext HTTP "
+            "provider base_urls, e.g. PROVIDER_TRUSTED_HTTP_NETWORKS=172.18.6.0/24"
+        ),
+    )
 
     # Generic OpenAI-compatible media protocol. This is a protocol connection,
     # not a supplier-specific plugin: the workspace supplies URL + key and picks
@@ -234,13 +248,39 @@ class Settings(BaseSettings):
     tts_voice: str = "zh-CN-XiaoxiaoNeural"
     tts_proxy: str | None = Field(default=None, repr=False, exclude=True)
 
-    @field_validator("cors_origins", "litellm_logical_models", mode="before")
+    @field_validator(
+        "cors_origins", "litellm_logical_models", "provider_trusted_http_networks", mode="before"
+    )
     @classmethod
     def split_csv_lists(cls, value: object) -> object:
         if isinstance(value, str):
             items = [part.strip() for part in value.split(",") if part.strip()]
             return items
         return value
+
+    @field_validator("provider_trusted_http_networks", mode="after")
+    @classmethod
+    def validate_trusted_http_networks(cls, value: list[str]) -> list[str]:
+        """Canonicalize and bound the plaintext-HTTP trust scope.
+
+        A whole-address-space network would silently turn the scoped policy
+        into a global "any HTTP destination" downgrade, so /0 is rejected.
+        """
+
+        canonical: list[str] = []
+        for entry in value:
+            try:
+                network = ipaddress.ip_network(entry, strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    f"PROVIDER_TRUSTED_HTTP_NETWORKS entry is not a valid network: {entry}"
+                ) from exc
+            if network.prefixlen == 0:
+                raise ValueError(
+                    "PROVIDER_TRUSTED_HTTP_NETWORKS must not cover the whole address space"
+                )
+            canonical.append(network.with_prefixlen)
+        return canonical
 
     @model_validator(mode="after")
     def validate_production_secrets(self) -> Self:
@@ -278,6 +318,12 @@ class Settings(BaseSettings):
     def minimax_configured(self) -> bool:
         """True when MiniMax BYOK is present and its profile is enabled."""
         return bool(self.minimax_enabled and self.minimax_api_key.strip())
+
+    def provider_trusted_network_objects(
+        self,
+    ) -> tuple["ipaddress.IPv4Network | ipaddress.IPv6Network", ...]:
+        """Parsed, canonical trusted networks for the scoped HTTP policy."""
+        return tuple(ipaddress.ip_network(entry) for entry in self.provider_trusted_http_networks)
 
 
 @lru_cache

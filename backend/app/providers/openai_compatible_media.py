@@ -877,9 +877,10 @@ class OpenAICompatibleMediaRuntime:
         self._configured()
         async with httpx.AsyncClient(
             timeout=self._settings.openai_compatible_media_timeout_seconds,
+            transport=self._client._transport,
         ) as client:
             response = await client.delete(
-                f"{self._client._host}/videos/{resume.remote_task_id}",
+                f"{self._client._host}/videos/{quote(resume.remote_task_id, safe='')}",
                 headers=self._client._headers(),
             )
         return CancelResult(status="cancelled" if response.status_code < 400 else "failed")

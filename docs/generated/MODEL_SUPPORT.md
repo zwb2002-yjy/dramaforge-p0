@@ -6,8 +6,8 @@ A documented preview cannot execute. A verified Binding is workspace-specific.
 
 | Provider | Model / revision | Lifecycle | Media | References | Duration | Resolution / size | Account | Executable | Certified |
 |---|---|---|---|---|---|---|---|---|---|
-| agnes | `@contract/agnes-video-openai-async-v2` / `knowledge-2026-10-13-r1` | preview | video | unknown | typed candidate | see Manifest | not checked | no (not implemented) | not checked |
-| agnes | `@contract/agnes-video-openai-async-v2` / `v2` | active | video | first_frame ≤ 1 | 5 | 720P | workspace-specific | no (DYNAMIC_MODEL_CAPABILITY_UNVERIFIED) | workspace-specific |
+| agnes | `@contract/agnes-video-openai-async-v2` / `knowledge-2026-10-13-r1` | retired | video | unknown | typed candidate | see Manifest | not checked | no (not implemented) | not checked |
+| agnes | `@contract/agnes-video-openai-async-v2` / `v2` | retired | video | first_frame ≤ 1 | 5 | 720P | workspace-specific | no (MODEL_LIFECYCLE_INACTIVE) | workspace-specific |
 | agnes | `agnes-image-2.1-flash` / `knowledge-2026-10-13-r1` | preview | image | reference_image (unknown) | typed candidate | see Manifest | not checked | no (not implemented) | not checked |
 | agnes | `agnes-image-2.1-flash` / `v3` | active | image | reference_image ≤ 1 | — | 1K | workspace-specific | no (MODEL_OFFICIAL_EVIDENCE_GAP) | workspace-specific |
 | agnes | `agnes-image-2.5-flash` / `2026-09-28-candidate` | preview | image | reference_image (limit unverified) | — | 1K, 2K, 3K, 4K | workspace-specific | no (MODEL_LIFECYCLE_INACTIVE) | workspace-specific |

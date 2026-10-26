@@ -14,6 +14,20 @@
     "reviewed_statement": "Agnes Video V2.0（已下线）"
   },
   {
+    "event_id": "agnes-video-openai-async-v2-compiler-mismatch-retirement-20261026",
+    "provider_type": "agnes",
+    "protocol_profile": "agnes_cn_v1",
+    "model_id": "@contract/agnes-video-openai-async-v2",
+    "lifecycle": "retired",
+    "reviewed_at": "2026-10-26T04:00:00Z",
+    "reviewed_by": "Codex repository compiler review (2026-10-26)",
+    "reason": "No AgnesVideoCompiler branch accepts this schema-1 protocol_contract dialect (2.5 output constraints without input_contracts): the entry was never executable and must not present as a selectable capability. The typed schema-2 revision path (preview agnes-video-2.5 with input_contracts + product policy) is the current representation of the same 2.5 async wire; re-activation requires a verified contract fixture plus a compiler dialect decision, never a lifecycle flip.",
+    "source_url": "repository:backend/app/providers/model_catalog/agnes/11-agnes-video-openai-async-v2.json",
+    "source_locator": "test_retired_agnes_video_contract_remains_blocked_and_absent_from_active_catalog",
+    "captured_content_sha256": "c1ff27ef577b047ee5319d0ff2a0c112dfb12bb9519e8d28925258f432ccd25b",
+    "reviewed_statement": "Catalog file sha256 c1ff27ef577b047ee5319d0ff2a0c112dfb12bb9519e8d28925258f432ccd25b and canonical manifest sha256 a9bdcc31a87f7daced274a3f8271683029de83d3b9717223f65757feb22fe6c2 stay frozen; only publication permission changes."
+  },
+  {
     "event_id": "official-field-evidence-gap-dee74a67d40756264a3b",
     "provider_type": "agnes",
     "protocol_profile": "agnes_cn_v1",

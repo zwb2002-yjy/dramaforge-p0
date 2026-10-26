@@ -266,6 +266,76 @@ def test_artifact_byte_ranges_are_scoped_and_support_native_seeking(api) -> None
     )
 
 
+def test_artifact_range_fails_closed_on_metadata_inconsistency(api) -> None:
+    """Metadata-driven Content-Range must never describe bytes that are absent."""
+
+    from app.storage.minio_store import get_object_store
+
+    client, factory = api
+    _register(client)
+    project_id = _create_project(client, name="Range metadata")
+    _run(factory, _seed_formal_facts(factory, project_id))
+
+    async def artifact_id_with_bytes(data: bytes, byte_size: int) -> str:
+        async with factory() as db:
+            artifact = await db.scalar(
+                select(Artifact).where(
+                    Artifact.project_id == UUID(project_id), Artifact.artifact_type == "video"
+                )
+            )
+            assert artifact is not None
+            artifact.byte_size = byte_size
+            await get_object_store().put_bytes(
+                object_key=artifact.object_key, data=data, mime_type="video/mp4"
+            )
+            await db.commit()
+            return str(artifact.id)
+
+    def artifact_path(data: bytes, byte_size: int) -> str:
+        artifact_id = _run(factory, artifact_id_with_bytes(data, byte_size))
+        return f"/api/v1/projects/{project_id}/artifacts/{artifact_id}/content"
+
+    # byte_size larger than the stored object: the promised segment cannot
+    # exist; the route must fail closed instead of serving a lying 206.
+    path = artifact_path(b"0123456789", byte_size=100)
+    response = client.get(path, headers={"Range": "bytes=0-99"})
+    assert response.status_code == 422, response.text
+    assert "ARTIFACT_SIZE_MISMATCH" in response.text
+    # A fully out-of-range offset under overstated metadata fails the same way.
+    response = client.get(path, headers={"Range": "bytes=20-40"})
+    assert response.status_code == 422
+    assert "ARTIFACT_SIZE_MISMATCH" in response.text
+    # Without a Range header the object is still served whole (metadata is
+    # only the range authority).
+    response = client.get(path)
+    assert response.status_code == 200 and response.content == b"0123456789"
+
+    # Zero metadata cannot claim an empty object when stored bytes exist.
+    path = artifact_path(b"0123456789", byte_size=0)
+    response = client.get(path, headers={"Range": "bytes=0-4"})
+    assert response.status_code == 422
+    assert "ARTIFACT_SIZE_MISMATCH" in response.text
+    response = client.get(path)
+    assert response.status_code == 200 and response.content == b"0123456789"
+
+    # Understated metadata must not emit a false total in Content-Range.
+    path = artifact_path(b"0123456789", byte_size=5)
+    response = client.get(path, headers={"Range": "bytes=0-4"})
+    assert response.status_code == 422
+    assert "ARTIFACT_SIZE_MISMATCH" in response.text
+
+    # Even a small satisfiable slice exposes overstated metadata.
+    path = artifact_path(b"0123456789", byte_size=100)
+    response = client.get(path, headers={"Range": "bytes=0-4"})
+    assert response.status_code == 422
+    assert "ARTIFACT_SIZE_MISMATCH" in response.text
+
+    path = artifact_path(b"", byte_size=0)
+    response = client.get(path, headers={"Range": "bytes=0-4"})
+    assert response.status_code == 416
+    assert response.headers["Content-Range"] == "bytes */0"
+
+
 def _register(client: TestClient) -> str:
     registered = client.post(
         "/api/v1/auth/register",

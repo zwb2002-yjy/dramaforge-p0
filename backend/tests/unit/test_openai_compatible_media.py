@@ -26,6 +26,7 @@ from app.providers.openai_compatible_media import (
 from app.providers.runtime import (
     CompiledImageRequest,
     CompiledVideoRequest,
+    ProviderResumeToken,
     ResolvedReference,
 )
 
@@ -38,6 +39,38 @@ def _settings() -> Settings:
         openai_compatible_media_image_model="image-model",
         openai_compatible_media_video_model="video-model",
     )
+
+
+async def test_cancel_sends_once_through_injected_transport_and_encodes_task_id(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200)
+
+    # An ignored transport must fail in-process, never reach a real network.
+    monkeypatch.setattr(
+        httpx.AsyncHTTPTransport,
+        "handle_async_request",
+        AsyncMock(side_effect=AssertionError("cancel ignored injected transport")),
+    )
+    runtime = OpenAICompatibleMediaRuntime(
+        settings=_settings(), transport=httpx.MockTransport(handler)
+    )
+    result = await runtime.cancel_video(
+        ProviderResumeToken(
+            provider_type="openai_compatible_media",
+            protocol_profile=OPENAI_MEDIA_PROFILE,
+            remote_task_id="../remote?task",
+        )
+    )
+    assert result.status == "cancelled"
+    assert len(seen) == 1
+    assert seen[0].method == "DELETE"
+    assert seen[0].url.raw_path == b"/v1/videos/..%2Fremote%3Ftask"
+    assert seen[0].headers["Authorization"] == "Bearer test-key"
 
 
 def _manifest(model_id: str, revision: str | None = None) -> ModelCapabilityManifest:

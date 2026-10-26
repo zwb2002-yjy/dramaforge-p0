@@ -464,3 +464,154 @@ def test_batch_fill_skips_candidates_formal_and_active_shots(batch_api) -> None:
             assert batch_runs[0].input_snapshot["shot_id"] == shot_ids[3]
 
     asyncio.run(assert_no_paid_operations())
+
+
+@pytest.mark.parametrize("with_pending", [False, True])
+def test_batch_fill_reports_rejected_candidates_honestly(batch_api, with_pending) -> None:
+    """A human-rejected candidate stays skipped (fill never re-pays), but the
+    reason must state the rejection instead of claiming review is pending."""
+    from datetime import UTC, datetime, timedelta
+
+    from app.access.models import Project, User
+    from app.assets.models import Shot
+    from app.execution.models import GraphNode, NodeRun
+    from app.production.models import ProductionGraph
+    from app.production.review_gate import record_human_decision
+    from tests.unit.test_formal_selection import _make_keyframe_artifact
+
+    client, factory = batch_api
+    workspace_id = _register(client)
+    project_id, _ = _seed_project(client, factory, workspace_id, shots=2)
+    path = f"/api/v1/projects/{project_id}/batch-production"
+    before = client.get(f"{path}/preview", params={"stage": "image_keyframe"}).json()
+    assert before["ready_count"] == 2
+
+    async def seed_rejected_candidate():
+        async with factory() as session:
+            project = await session.get(Project, UUID(project_id))
+            owner = await session.scalar(select(User))
+            shots = list((await session.scalars(select(Shot).order_by(Shot.shot_number))).all())
+            pending = (
+                await _make_keyframe_artifact(
+                    session, project=project, shot_id=shots[0].id, user=owner, attempt_no=1
+                )
+                if with_pending
+                else None
+            )
+            if pending is not None:
+                pending.created_at = datetime.now(UTC) - timedelta(seconds=10)
+            artifact = await _make_keyframe_artifact(
+                session,
+                project=project,
+                shot_id=shots[0].id,
+                user=owner,
+                attempt_no=2 if with_pending else 1,
+            )
+            artifact.created_at = datetime.now(UTC)
+            # The identity review run that carries the human rejection.
+            graph = await session.scalar(
+                select(ProductionGraph).where(
+                    ProductionGraph.project_id == project.id,
+                    ProductionGraph.scope_type == "shot",
+                    ProductionGraph.scope_entity_id == shots[0].id,
+                )
+            )
+            assert graph is not None and graph.current_version_id is not None
+            node = await session.scalar(
+                select(GraphNode).where(
+                    GraphNode.graph_version_id == graph.current_version_id,
+                    GraphNode.node_key == "identity_review",
+                )
+            )
+            if node is None:
+                node = GraphNode(
+                    graph_version_id=graph.current_version_id,
+                    node_key="identity_review",
+                    node_type="identity_review",
+                    display_name="identity_review",
+                    cacheable=False,
+                )
+                session.add(node)
+                await session.flush()
+            run = NodeRun(
+                project_id=project.id,
+                graph_version_id=graph.current_version_id,
+                graph_node_id=node.id,
+                attempt_no=1,
+                idempotency_key=f"review-{uuid4().hex}",
+                input_hash=uuid4().hex * 2,
+                input_snapshot={
+                    "shot_id": str(shots[0].id),
+                    "node_key": "identity_review",
+                    "upstream_artifact_id": str(artifact.id),
+                },
+                status="needs_human",
+                created_by=owner.id,
+            )
+            session.add(run)
+            await session.flush()
+            from app.execution.models import Artifact
+
+            evidence = Artifact(
+                project_id=project.id,
+                artifact_type="image",
+                storage_state="available",
+                object_key=f"review/{uuid4().hex}",
+                content_hash=uuid4().hex * 2,
+                mime_type="image/png",
+                byte_size=1,
+                produced_by_run_id=run.id,
+            )
+            session.add(evidence)
+            await session.flush()
+            run.result_artifact_id = evidence.id
+            await session.flush()
+            await record_human_decision(
+                session,
+                project_id=project.id,
+                shot_id=shots[0].id,
+                artifact_id=artifact.id,
+                review_node_run_id=run.id,
+                review_kind="identity",
+                decision="rejected",
+                reason="人物脸部崩坏。",
+                actor_id=owner.id,
+                shot_version=shots[0].version,
+                request_key=f"review:{uuid4().hex}",
+            )
+            await session.commit()
+            return [str(shot.id) for shot in shots], str(pending.id) if pending else None
+
+    shot_ids, pending_id = asyncio.run(seed_rejected_candidate())
+    preview = client.get(f"{path}/preview", params={"stage": "image_keyframe"}).json()
+    items = {item["shot_id"]: item for item in preview["items"]}
+    rejected = items[shot_ids[0]]
+    assert rejected["disposition"] == "skipped"
+    assert rejected["reason"] == (
+        "CANDIDATE_AWAITING_REVIEW" if with_pending else "CANDIDATE_REJECTED"
+    )
+    assert items[shot_ids[1]]["disposition"] == "ready"
+    todos = client.get(f"/api/v1/projects/{project_id}/production-todos").json()
+    todo_details = {item["shot_id"]: item for item in todos["items"]}
+    if with_pending:
+        assert todo_details[shot_ids[0]]["category"] == "awaiting_review"
+        assert todo_details[shot_ids[0]]["artifact_id"] == pending_id
+        assert todo_details[shot_ids[0]]["detail"] != "REVIEW_DECISION_REJECTED"
+    else:
+        assert todo_details[shot_ids[0]]["detail"] == "CANDIDATE_REJECTED"
+
+    # Dispatch with the current preview: the rejected shot is not re-created.
+    dispatched = client.post(
+        path, headers={CSRF_HEADER: _csrf(client)}, json=_batch_dispatch_body(preview)
+    )
+    assert dispatched.status_code == 200, dispatched.text
+    assert dispatched.json()["accepted_count"] == 1
+
+    async def assert_rejected_shot_not_regenerated():
+        async with factory() as session:
+            runs = list((await session.scalars(select(NodeRun))).all())
+            batch_runs = [run for run in runs if run.input_snapshot.get("paid_authorization")]
+            assert len(batch_runs) == 1
+            assert batch_runs[0].input_snapshot["shot_id"] == shot_ids[1]
+
+    asyncio.run(assert_rejected_shot_not_regenerated())

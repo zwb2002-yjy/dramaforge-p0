@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_publication import catalog_new_create_blocker
+from app.providers.egress import guarded_provider_transport
 from app.providers.litellm_adapter import LiteLLMModelAdapter
 from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
 from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
@@ -92,7 +93,14 @@ async def workspace_model_registry(
                 }
             )
             if registry.get_or_none(manifest.id) is None:
-                registry.register(manifest, LiteLLMModelAdapter(manifest, settings=settings))
+                registry.register(
+                    manifest,
+                    LiteLLMModelAdapter(
+                        manifest,
+                        settings=settings,
+                        transport=guarded_provider_transport(settings=settings),
+                    ),
+                )
     bound_media = (
         await session.execute(
             select(ProviderModelBinding, ProviderConnection, ModelCatalogEntry)

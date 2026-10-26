@@ -44,7 +44,9 @@ def test_in_memory_policy_mutation_is_rejected():
     assert execution_contract_gaps(contract) == ("EXECUTION_POLICY_SNAPSHOT_INVALID",)
 
 
-@pytest.mark.parametrize("dependency", ["registry.py", "workspace_credentials.py"])
+@pytest.mark.parametrize(
+    "dependency", ["registry.py", "workspace_credentials.py", "egress.py", "host_guard.py"]
+)
 def test_authentication_source_change_invalidates_frozen_handler(monkeypatch, dependency):
     from pathlib import Path
 

@@ -9,6 +9,8 @@ from io import BytesIO
 from threading import Lock
 from typing import Protocol, cast
 
+from minio.error import S3Error
+
 from app.config import Settings, get_settings
 
 
@@ -27,6 +29,8 @@ class ObjectStore(Protocol):
 
     async def get_bytes(self, *, object_key: str) -> bytes: ...
 
+    async def get_size(self, *, object_key: str) -> int: ...
+
     async def get_range(self, *, object_key: str, offset: int, length: int) -> bytes: ...
 
     async def delete_bytes(self, *, object_key: str) -> None: ...
@@ -40,6 +44,10 @@ class _MinioResponse(Protocol):
     def close(self) -> None: ...
 
     def release_conn(self) -> None: ...
+
+
+class _MinioObjectInfo(Protocol):
+    size: int
 
 
 class _MinioClient(Protocol):
@@ -66,6 +74,8 @@ class _MinioClient(Protocol):
 
     def remove_object(self, bucket_name: str, object_name: str) -> None: ...
 
+    def stat_object(self, bucket_name: str, object_name: str) -> _MinioObjectInfo: ...
+
 
 class InMemoryObjectStore:
     """Process-wide test/dev store (shared singleton via get_object_store)."""
@@ -89,10 +99,18 @@ class InMemoryObjectStore:
             raise KeyError(object_key)
         return self._objects[object_key]
 
+    async def get_size(self, *, object_key: str) -> int:
+        return len(self._objects[object_key])
+
     async def get_range(self, *, object_key: str, offset: int, length: int) -> bytes:
         if object_key not in self._objects:
             raise KeyError(object_key)
-        return self._objects[object_key][offset : offset + length]
+        if offset < 0 or length <= 0:
+            raise IndexError("invalid range offset or length")
+        data = self._objects[object_key]
+        if offset >= len(data):
+            raise IndexError("range offset is beyond stored bytes")
+        return data[offset : offset + length]
 
     async def delete_bytes(self, *, object_key: str) -> None:
         self._objects.pop(object_key, None)
@@ -183,12 +201,29 @@ class MinioObjectStore:
 
     def _get_bytes_sync(self, *, object_key: str) -> bytes:
         client = self._ensure_client()
-        response = client.get_object(self._settings.minio_bucket, object_key)
+        try:
+            response = client.get_object(self._settings.minio_bucket, object_key)
+        except S3Error as exc:
+            if exc.code == "NoSuchKey":
+                raise KeyError(object_key) from exc
+            raise
         try:
             return response.read()
         finally:
             response.close()
             response.release_conn()
+
+    async def get_size(self, *, object_key: str) -> int:
+        return await asyncio.to_thread(self._get_size_sync, object_key=object_key)
+
+    def _get_size_sync(self, *, object_key: str) -> int:
+        client = self._ensure_client()
+        try:
+            return client.stat_object(self._settings.minio_bucket, object_key).size
+        except S3Error as exc:
+            if exc.code == "NoSuchKey":
+                raise KeyError(object_key) from exc
+            raise
 
     async def get_range(self, *, object_key: str, offset: int, length: int) -> bytes:
         return await asyncio.to_thread(
@@ -198,10 +233,19 @@ class MinioObjectStore:
     def _get_range_sync(self, *, object_key: str, offset: int, length: int) -> bytes:
         # Native object-store range read: a media seek fetches only the
         # requested segment instead of the whole object (backend-review 1.3).
+        if offset < 0 or length <= 0:
+            raise IndexError("invalid range offset or length")
         client = self._ensure_client()
-        response = client.get_object(
-            self._settings.minio_bucket, object_key, offset=offset, length=length
-        )
+        try:
+            response = client.get_object(
+                self._settings.minio_bucket, object_key, offset=offset, length=length
+            )
+        except S3Error as exc:
+            if exc.code == "NoSuchKey":
+                raise KeyError(object_key) from exc
+            if exc.code == "InvalidRange":
+                raise IndexError("range offset is beyond stored bytes") from exc
+            raise
         try:
             return response.read()
         finally:

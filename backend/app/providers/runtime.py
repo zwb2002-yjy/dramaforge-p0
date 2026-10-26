@@ -280,10 +280,19 @@ class ProviderRuntimeResolver:
                 f"provider plugin {plugin.provider_type}/{plugin.protocol_profile} "
                 "has no unified runtime/compiler"
             )
+        from app.config import Settings as _Settings
+        from app.providers.egress import guarded_provider_transport
+
+        # Connection-time SSRF closure (joint-review P1): every runtime
+        # socket resolves and validates its destination before credentials
+        # leave the process; the factory's transport parameter keeps test
+        # doubles working when they are injected directly.
+        egress_settings = settings if isinstance(settings, _Settings) else None
         runtime = plugin.runtime_factory(
             connection=connection,
             settings=settings,
             host=connection.base_url,
+            transport=guarded_provider_transport(settings=egress_settings),
         )
         image_compiler, video_compiler = plugin.compiler_factory()
         if binding is not None and not binding.invoke_model_value:

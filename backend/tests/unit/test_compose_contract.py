@@ -78,6 +78,9 @@ def test_compose_defines_required_boot0_services() -> None:
     assert services["frontend"]["read_only"] is True
     assert services["frontend"]["cap_drop"] == ["ALL"]
     for name in ("api", "dispatcher", "worker-default", "worker-heavy", "worker-director"):
+        env = services[name]["environment"]
+        assert env["PROVIDER_BASE_URL_ALLOW_PRIVATE"] == "${PROVIDER_BASE_URL_ALLOW_PRIVATE:-false}"
+        assert env["PROVIDER_TRUSTED_HTTP_NETWORKS"] == "${PROVIDER_TRUSTED_HTTP_NETWORKS:-}"
         condition = services[name]["depends_on"]["database-bootstrap"]["condition"]
         assert condition == "service_completed_successfully"
         assert services[name]["depends_on"]["postgres"]["condition"] == "service_healthy"

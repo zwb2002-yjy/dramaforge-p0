@@ -27,6 +27,13 @@ from app.providers.runtime import (
 )
 from app.providers.workbench_contract import select_workbench_contract
 
+LEGACY_WORKBENCH_MODES: dict[str, frozenset[str]] = {
+    "image": frozenset({"text_to_image"}),
+    "video": frozenset(
+        {"text_to_video", "first_frame", "last_frame", "first_last_frame", "omni_reference"}
+    ),
+}
+
 
 def _preview_placeholder_bytes(index: int) -> bytes:
     """Deterministic, ordinal-distinct placeholder for bytes-transport compilers.
@@ -325,17 +332,7 @@ async def preview_compile(
             # accepts (text_to_video/first_frame/last_frame/
             # first_last_frame/omni_reference) — a text_to_video preview was
             # previously misrejected as MODE_UNSUPPORTED.
-            workbench_modes = (
-                {"text_to_image"}
-                if isinstance(intent, ImageGenerationIntent)
-                else {
-                    "text_to_video",
-                    "first_frame",
-                    "last_frame",
-                    "first_last_frame",
-                    "omni_reference",
-                }
-            )
+            workbench_modes = LEGACY_WORKBENCH_MODES[manifest.media_kind]
             if intent.mode_id not in {None, "default", "explicit_binding"} | workbench_modes:
                 errors.append("MODE_UNSUPPORTED")
     if not invoke_model_value.strip():

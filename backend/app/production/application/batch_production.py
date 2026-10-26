@@ -236,11 +236,19 @@ async def _prepare(
             if candidate.get("stage") == stage
         ]
         if stage_candidates:
-            reason = (
-                "CANDIDATE_AWAITING_FORMAL"
-                if any(candidate.get("review_allowed") is True for candidate in stage_candidates)
-                else "CANDIDATE_AWAITING_REVIEW"
-            )
+            # "补齐" only fills gaps, so a stage holding any candidate stays
+            # skipped — including human-rejected ones: replacing a rejected
+            # artifact is a paid create and must stay an explicit single
+            # create decision, never an implicit batch overwrite. The reason
+            # distinguishes what the user is actually looking at.
+            if any(candidate.get("review_allowed") is True for candidate in stage_candidates):
+                reason = "CANDIDATE_AWAITING_FORMAL"
+            elif all(
+                candidate.get("review_decision") == "rejected" for candidate in stage_candidates
+            ):
+                reason = "CANDIDATE_REJECTED"
+            else:
+                reason = "CANDIDATE_AWAITING_REVIEW"
             not_ready(shot, "skipped", reason)
             continue
         if stage == "video" and shot.formal_keyframe_artifact_id is None:
@@ -372,6 +380,23 @@ async def read_production_todos(
             for candidate in candidates.get(shot.id, [])
             if candidate.get("stage") == stage
         ]
+        selected_candidate = next(
+            (
+                candidate
+                for candidate in stage_candidates
+                if candidate.get("review_allowed") is True
+            ),
+            None,
+        )
+        if selected_candidate is None:
+            selected_candidate = next(
+                (
+                    candidate
+                    for candidate in stage_candidates
+                    if candidate.get("review_decision") != "rejected"
+                ),
+                stage_candidates[0] if stage_candidates else None,
+            )
         category: Literal[
             "not_generated",
             "generating",
@@ -382,12 +407,15 @@ async def read_production_todos(
         if latest is not None and latest.status in {"queued", "running", "cancel_requested"}:
             category = "generating"
             detail = latest.status
-        elif any(candidate.get("review_allowed") is True for candidate in stage_candidates):
+        elif selected_candidate is not None and selected_candidate.get("review_allowed") is True:
             category = "awaiting_formal"
             detail = "REVIEW_APPROVED"
-        elif stage_candidates:
+        elif selected_candidate is not None:
             category = "awaiting_review"
-            detail = str(stage_candidates[0].get("review_blocked_reason") or "REVIEW_REQUIRED")
+            if selected_candidate.get("review_decision") == "rejected":
+                detail = "CANDIDATE_REJECTED"
+            else:
+                detail = str(selected_candidate.get("review_blocked_reason") or "REVIEW_REQUIRED")
         elif latest is not None and latest.status in {
             "failed",
             "blocked",
@@ -409,8 +437,8 @@ async def read_production_todos(
                 stage=stage,
                 detail=detail,
                 artifact_id=(
-                    UUID(str(stage_candidates[0]["artifact_id"]))
-                    if stage_candidates and stage_candidates[0].get("artifact_id")
+                    UUID(str(selected_candidate["artifact_id"]))
+                    if selected_candidate is not None and selected_candidate.get("artifact_id")
                     else None
                 ),
             )

@@ -127,22 +127,63 @@ internet deployment.
 
 Workspace-supplied Provider connections send their encrypted credentials to
 the configured `base_url` (connection create/patch and probes carry the key).
-Two operator settings govern this boundary:
+The boundary is layered — write-time static validation, then connection-time
+egress enforcement:
 
 - `PROVIDER_BASE_URL_ALLOW_PRIVATE` (default `false`): connection base URLs
   must be public HTTPS origins. Private/loopback IP literals are rejected
   unless an operator explicitly sets this to `true` for an authenticated
-  self-hosted private deployment. Link-local, multicast, unspecified and
-  cloud-metadata destinations are rejected regardless — they are
-  credential-exfiltration primitives, not private deployments. Hostname
-  (non-literal) targets are checked statically at write time; no DNS
-  resolution is required to create or edit a connection.
+  self-hosted private deployment. Link-local, multicast, unspecified,
+  reserved and shared (CGNAT) destinations are rejected regardless — they
+  are credential-exfiltration primitives, not private deployments. Reserved
+  addresses that Python also classifies as private (for example `240.0.0.1`)
+  stay blocked even when private deployments are authorized.
+- `PROVIDER_TRUSTED_HTTP_NETWORKS` (default empty): scoped plaintext-HTTP
+  trust for local model deployments, e.g.
+  `PROVIDER_TRUSTED_HTTP_NETWORKS=172.18.6.0/24` then a connection
+  `base_url` of `http://172.18.6.80:30020`. HTTP is accepted only for IP
+  literals inside a declared network; a whole-address-space entry (`/0`) is
+  rejected at startup. Named hosts over HTTP are rejected — terminate TLS on
+  a reverse proxy, or address the service by IP. This is deliberately a
+  separate, narrower trust than the global private opt-in above.
+- Connection-time egress enforcement: every provider TCP connection (probe,
+  submit, poll, cancel) resolves its destination, classifies every resolved
+  address with the same rules, and opens the socket against one validated
+  address. A hostname that resolves to a private or reserved target fails
+  closed before credentials leave the process; DNS-rebinding cannot redirect
+  an in-flight connection because the socket is pinned to the validated
+  address. Connections saved under an earlier policy are re-validated on
+  every new socket.
+  DNS resolution and TCP attempts share the connect timeout. If an address
+  cannot establish a socket, other addresses in the same validated answer
+  set may be tried before any HTTP bytes are sent; no request is replayed.
+  Every request also rechecks the URL before entering the pool, including old
+  stored URLs; the private opt-in alone cannot authorize plaintext HTTP.
+  Workspace text connections use this guard too. The operator-configured
+  internal LiteLLM Proxy URL retains its separate deployment trust boundary.
 - `REFERENCE_PUBLIC_BASE_URL` (default empty): public HTTPS API origin used
   for short-lived signed Provider references. Models whose wire contract
   consumes public URLs (Ark, MiniMax, Agnes video contract revisions) issue
   these grants from the Worker; without this setting those reference-bearing
   generations fail closed with `REFERENCE_DELIVERY_NOT_CONFIGURED` instead of
   silently degrading.
+
+## PostgreSQL connection budget
+
+`docker-compose.yml` sets `max_connections=160` on PostgreSQL and sizes each
+service role's engine pool explicitly: api `DB_POOL_SIZE=20` +
+`DB_MAX_OVERFLOW=10`, dispatcher `3+2`, worker-default `10+5`,
+worker-director `4+2`, worker-heavy `5+5`. At one process per listed role,
+the application engine ceilings sum to 66. The remaining capacity must also
+cover Director checkpoint pools, migrations, maintenance, PostgreSQL reserved
+slots and every other client; `160` is a deployment setting, not a general
+capacity guarantee.
+
+Scaling changes the arithmetic: every additional API or Worker replica, a
+larger checkpoint pool, or extra administrative clients (analytics, manual
+`psql` sessions) consumes from the same `max_connections` budget. Recompute
+the per-role values (and raise `max_connections`) before adding replicas —
+exhaustion surfaces as pool checkout timeouts, not as queue backlog.
 
 ## Health and lifecycle
 

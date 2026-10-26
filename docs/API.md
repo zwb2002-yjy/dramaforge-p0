@@ -189,8 +189,11 @@ evidence, never an approval.
   selected/default voice or silence, as in Final Film rendering.
 - Authenticated Artifact content supports single HTTP byte ranges (206 and
   `Content-Range`) for native seek; invalid ranges return 416. Project ownership
-  is checked before delivery. The current ObjectStore still reads whole bytes
-  internally; range delivery does not establish bounded-memory streaming.
+  is checked before delivery. MinIO uses native offset/length reads and a
+  metadata-only stat to compare the stored total with Artifact.byte_size.
+  A mismatch (including zero metadata for nonempty bytes) returns 422 with
+  `ARTIFACT_SIZE_MISMATCH`; a short range read fails the same way. Only the
+  requested segment is buffered; full responses still buffer the entire object.
 - `GET …/creative-capabilities/catalog` projects Genre, Style, Shot Language,
   Quality Policy, Skills, and staged strategies from the backend registries;
   the same registries validate Freeze requests.

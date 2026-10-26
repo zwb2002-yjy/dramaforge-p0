@@ -7,8 +7,10 @@ import {
 } from "@tanstack/react-router";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 
 import { BatchFillActions } from "../../src/features/production/BatchFillActions";
+import { ProductionTodoQueue } from "../../src/features/production/ProductionTodoQueue";
 
 const PROJECT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const SCENE_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -53,7 +55,9 @@ function preview(stage: string, items: Item[], fingerprint = "a".repeat(64)) {
   };
 }
 
-function renderActions() {
+function renderActions(
+  content: ReactNode = <BatchFillActions projectId={PROJECT_ID} sceneId={SCENE_ID} />,
+) {
   const router = createRouter({
     routeTree: createRootRoute(),
     history: createMemoryHistory({ initialEntries: ["/"] }),
@@ -63,15 +67,43 @@ function renderActions() {
   });
   return render(
     <RouterContextProvider router={router}>
-      <QueryClientProvider client={client}>
-        <BatchFillActions projectId={PROJECT_ID} sceneId={SCENE_ID} />
-      </QueryClientProvider>
+      <QueryClientProvider client={client}>{content}</QueryClientProvider>
     </RouterContextProvider>,
   );
 }
 
 describe("BatchFillActions", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("routes rejected candidates to generation and pending candidates to review", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      json({
+        items: [
+          {
+            ...item(1, "skipped"),
+            category: "awaiting_review",
+            stage: "image_keyframe",
+            detail: "CANDIDATE_REJECTED",
+            artifact_id: "rejected-artifact",
+          },
+          {
+            ...item(2, "skipped"),
+            category: "awaiting_review",
+            stage: "image_keyframe",
+            detail: "REVIEW_REQUIRED",
+            artifact_id: "pending-artifact",
+          },
+        ],
+        counts: { awaiting_review: 2 },
+      }),
+    );
+    renderActions(<ProductionTodoQueue projectId={PROJECT_ID} />);
+    const rejected = await screen.findByRole("link", { name: /镜头 1.*候选已被拒绝/ });
+    expect(rejected).toHaveAttribute("href", expect.stringContaining("tool=generate"));
+    const pending = await screen.findByRole("link", { name: /镜头 2.*候选待处理/ });
+    expect(pending).toHaveAttribute("href", expect.stringContaining("pending-artifact"));
+    expect(pending.getAttribute("href")).not.toContain("tool=generate");
+  });
 
   it("shows fill counts and authorizes exactly the ready operations without money fields", async () => {
     const writes: Record<string, unknown>[] = [];
@@ -90,6 +122,7 @@ describe("BatchFillActions", () => {
                 item(5, "blocked", "MODEL_BINDING_MISSING"),
                 item(6, "skipped", "CANDIDATE_AWAITING_REVIEW"),
                 item(7, "skipped", "CANDIDATE_AWAITING_FORMAL"),
+                item(8, "skipped", "CANDIDATE_REJECTED"),
               ])
             : preview(stage, [item(1, "skipped", "ALREADY_FORMAL")]),
         );
@@ -118,6 +151,10 @@ describe("BatchFillActions", () => {
     expect(within(dialog).getByText("正在生成")).toBeVisible();
     expect(within(dialog).getByText("已有候选，待审片")).toBeVisible();
     expect(within(dialog).getByText("审片已通过，待选正式版本")).toBeVisible();
+    expect(within(dialog).getByText("候选已被拒绝，重新生成需单独发起")).toBeVisible();
+    const regenerate = within(dialog).getByRole("link", { name: "重新生成镜头 8" });
+    expect(regenerate).toHaveAttribute("href", expect.stringContaining("tool=generate"));
+    expect(writes).toHaveLength(0);
     expect(within(dialog).getByText("未选择模型")).toBeVisible();
     expect(within(dialog).getByRole("link", { name: "镜头 5" })).toBeVisible();
     expect(within(dialog).getByRole("link", { name: "去设置模型" })).toBeVisible();

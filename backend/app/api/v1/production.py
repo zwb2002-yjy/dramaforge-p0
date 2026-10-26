@@ -90,6 +90,23 @@ async def get_artifact_content(
     range_header = request.headers.get("range")
     if_range = request.headers.get("if-range")
     if range_header and (if_range is None or if_range == etag):
+        # A HEAD/stat checks the total without fetching the full object. A
+        # successful small slice alone cannot detect overstated/understated
+        # database metadata and would produce a false Content-Range total.
+        try:
+            stored_total = await store.get_size(object_key=art.object_key)
+        except KeyError as exc:
+            raise NotFoundError("artifact bytes not in object store") from exc
+        if total != stored_total:
+            raise ValidationAppError(
+                "artifact metadata does not match stored bytes",
+                details={
+                    "code": "ARTIFACT_SIZE_MISMATCH",
+                    "artifact_id": str(artifact_id),
+                    "metadata_byte_size": total,
+                    "stored_byte_size": stored_total,
+                },
+            )
         try:
             start, end = byte_range(range_header, total)
         except ValueError:
@@ -105,6 +122,30 @@ async def get_artifact_content(
             )
         except KeyError as exc:
             raise NotFoundError("artifact bytes not in object store") from exc
+        except IndexError as exc:
+            raise ValidationAppError(
+                "artifact metadata does not match stored bytes",
+                details={
+                    "code": "ARTIFACT_SIZE_MISMATCH",
+                    "artifact_id": str(artifact_id),
+                    "metadata_byte_size": total,
+                    "segment_start": start,
+                },
+            ) from exc
+        if len(segment) != end - start + 1:
+            # The response length is computed from Artifact.byte_size; serving
+            # a short segment would emit a 206 with a lying Content-Range.
+            # Fail closed on the metadata inconsistency instead.
+            raise ValidationAppError(
+                "artifact metadata does not match stored bytes",
+                details={
+                    "code": "ARTIFACT_SIZE_MISMATCH",
+                    "artifact_id": str(artifact_id),
+                    "metadata_byte_size": total,
+                    "segment_start": start,
+                    "segment_length": len(segment),
+                },
+            )
         return Response(
             content=segment,
             media_type=media,

@@ -534,15 +534,13 @@ async def test_nonpaid_existing_task_poll_remains_explicit_and_binding_scoped(
 ) -> None:
     from datetime import date
 
-    from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
+    from app.providers.catalog_loader import hash_manifest
     from app.providers.catalog_models import ModelCatalogEntry
+    from tests.unit.model_infra_fixture import unit_video_manifest
 
     actor, workspace, service, connection, _ = await _seed(session)
-    manifest = next(
-        item
-        for item in CATALOG_MODELS
-        if item["provider_type"] == "agnes" and item["media_kind"] == "video"
-    )
+    # Poll authorization is independent of which supplier models are active.
+    manifest = unit_video_manifest()
     session.add(
         ModelCatalogEntry(
             provider_type=manifest["provider_type"],

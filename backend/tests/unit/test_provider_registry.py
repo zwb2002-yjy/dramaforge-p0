@@ -169,7 +169,7 @@ def _fake_plugin() -> ProviderPlugin:
         capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
         paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
         model_list_path="/v1/models",
-        client_factory=lambda settings, host: _FakeClient(settings, host),
+        client_factory=lambda settings, host, transport: _FakeClient(settings, host),
     )
 
 

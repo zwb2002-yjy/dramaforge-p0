@@ -17,14 +17,18 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+import httpx
+
 from app.config import Settings
 from app.providers.adapter import ModelAdapter
 from app.providers.capabilities import Capability, capability_satisfied
 from app.providers.manifest import ModelManifest
 
-# (settings, host) -> protocol client. The client exposes the create/poll surface
-# used by capability probes (create_image / create_video / poll_video).
-ClientFactory = Callable[[Settings, str | None], Any]
+# (settings, host, transport) -> protocol client. The client exposes the
+# create/poll surface used by capability probes (create_image /
+# create_video / poll_video). ``transport`` is the connection-time egress
+# guard (None keeps the client's own default transport for tests).
+ClientFactory = Callable[[Settings, str | None, httpx.AsyncBaseTransport | None], Any]
 
 
 @dataclass(frozen=True)
@@ -69,13 +73,19 @@ class ProviderPlugin:
     def prefix(self) -> str:
         return self.settings_prefix or self.provider_type
 
-    def build_client(self, settings: Settings, *, host: str | None = None) -> Any:
+    def build_client(
+        self,
+        settings: Settings,
+        *,
+        host: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> Any:
         if self.client_factory is None:
             raise NotImplementedError(
                 f"provider plugin {self.provider_type}/{self.protocol_profile} "
                 "has no protocol client implementation"
             )
-        return self.client_factory(settings, host)
+        return self.client_factory(settings, host, transport)
 
 
 _registry: dict[tuple[str, str], ProviderPlugin] = {}
@@ -109,28 +119,36 @@ def implemented_plugins() -> list[ProviderPlugin]:
     )
 
 
-def _agnes_hub_client(settings: Settings, host: str | None) -> Any:
+def _agnes_hub_client(
+    settings: Settings, host: str | None, transport: httpx.AsyncBaseTransport | None = None
+) -> Any:
     from app.providers.agnes import AgnesHubClient
 
-    return AgnesHubClient(settings, host=host)
+    return AgnesHubClient(settings, transport=transport, host=host)
 
 
-def _ark_hub_client(settings: Settings, host: str | None) -> Any:
+def _ark_hub_client(
+    settings: Settings, host: str | None, transport: httpx.AsyncBaseTransport | None = None
+) -> Any:
     from app.providers.volcengine import ArkHubClient
 
-    return ArkHubClient(settings, host=host)
+    return ArkHubClient(settings, transport=transport, host=host)
 
 
-def _openai_compatible_media_client(settings: Settings, host: str | None) -> Any:
+def _openai_compatible_media_client(
+    settings: Settings, host: str | None, transport: httpx.AsyncBaseTransport | None = None
+) -> Any:
     from app.providers.openai_compatible_media import OpenAICompatibleMediaClient
 
-    return OpenAICompatibleMediaClient(settings, host=host)
+    return OpenAICompatibleMediaClient(settings, host, transport=transport)
 
 
-def _minimax_hub_client(settings: Settings, host: str | None) -> Any:
+def _minimax_hub_client(
+    settings: Settings, host: str | None, transport: httpx.AsyncBaseTransport | None = None
+) -> Any:
     from app.providers.minimax import MiniMaxHubClient
 
-    return MiniMaxHubClient(settings, host=host)
+    return MiniMaxHubClient(settings, transport=transport, host=host)
 
 
 def _register_defaults() -> None:

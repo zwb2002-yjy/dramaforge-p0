@@ -10,6 +10,7 @@ const BATCH_REASON_LABELS: Record<string, string> = {
   STAGE_ALREADY_ACTIVE: "正在生成",
   CANDIDATE_AWAITING_REVIEW: "已有候选，待审片",
   CANDIDATE_AWAITING_FORMAL: "审片已通过，待选正式版本",
+  CANDIDATE_REJECTED: "候选已被拒绝，重新生成需单独发起",
   FORMAL_KEYFRAME_REQUIRED: "缺少正式画面",
   NO_FORMAL_KEYFRAME: "缺少正式画面",
   SHOT_PROMPT_REQUIRED: "缺少画面描述",

@@ -134,6 +134,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
       DB_POOL_SIZE: ${API_DB_POOL_SIZE:-20}
+      PROVIDER_BASE_URL_ALLOW_PRIVATE: ${PROVIDER_BASE_URL_ALLOW_PRIVATE:-false}
+      PROVIDER_TRUSTED_HTTP_NETWORKS: ${PROVIDER_TRUSTED_HTTP_NETWORKS:-}
       DB_MAX_OVERFLOW: ${API_DB_MAX_OVERFLOW:-10}
       DIRECTOR_RUNTIME_ENGINE: langgraph
       DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
@@ -289,6 +291,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
       DB_POOL_SIZE: ${DISPATCHER_DB_POOL_SIZE:-3}
+      PROVIDER_BASE_URL_ALLOW_PRIVATE: ${PROVIDER_BASE_URL_ALLOW_PRIVATE:-false}
+      PROVIDER_TRUSTED_HTTP_NETWORKS: ${PROVIDER_TRUSTED_HTTP_NETWORKS:-}
       DB_MAX_OVERFLOW: ${DISPATCHER_DB_MAX_OVERFLOW:-2}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
@@ -328,6 +332,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
       DB_POOL_SIZE: ${WORKER_DB_POOL_SIZE:-10}
+      PROVIDER_BASE_URL_ALLOW_PRIVATE: ${PROVIDER_BASE_URL_ALLOW_PRIVATE:-false}
+      PROVIDER_TRUSTED_HTTP_NETWORKS: ${PROVIDER_TRUSTED_HTTP_NETWORKS:-}
       DB_MAX_OVERFLOW: ${WORKER_DB_MAX_OVERFLOW:-5}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
@@ -399,6 +405,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
       DB_POOL_SIZE: ${DIRECTOR_WORKER_DB_POOL_SIZE:-4}
+      PROVIDER_BASE_URL_ALLOW_PRIVATE: ${PROVIDER_BASE_URL_ALLOW_PRIVATE:-false}
+      PROVIDER_TRUSTED_HTTP_NETWORKS: ${PROVIDER_TRUSTED_HTTP_NETWORKS:-}
       DB_MAX_OVERFLOW: ${DIRECTOR_WORKER_DB_MAX_OVERFLOW:-2}
       DIRECTOR_RUNTIME_ENGINE: langgraph
       DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://${DIRECTOR_CHECKPOINT_USER:-dramaforge_director_checkpoint}:${DIRECTOR_CHECKPOINT_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
@@ -438,6 +446,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
       DB_POOL_SIZE: ${HEAVY_DB_POOL_SIZE:-5}
+      PROVIDER_BASE_URL_ALLOW_PRIVATE: ${PROVIDER_BASE_URL_ALLOW_PRIVATE:-false}
+      PROVIDER_TRUSTED_HTTP_NETWORKS: ${PROVIDER_TRUSTED_HTTP_NETWORKS:-}
       DB_MAX_OVERFLOW: ${HEAVY_DB_MAX_OVERFLOW:-5}
       REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: http://minio:9000
