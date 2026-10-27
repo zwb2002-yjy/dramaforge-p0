@@ -208,6 +208,7 @@ class Settings(BaseSettings):
     # not a supplier-specific plugin: the workspace supplies URL + key and picks
     # discovered image/video model ids from the UI.
     openai_compatible_media_enabled: bool = False
+    openai_compatible_media_auth_mode: str = Field(default="bearer", pattern="^(bearer|none)$")
     openai_compatible_media_api_key: str = Field(
         default="", description="Workspace BYOK for OpenAI-compatible image/video APIs"
     )

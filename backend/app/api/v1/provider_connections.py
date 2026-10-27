@@ -80,6 +80,8 @@ class ProviderPluginRead(BaseModel):
     # need a catalog contract match and a model binding before execution.
     kind: Literal["media", "text"]
     implemented: bool
+    auth_modes: list[str] = Field(default_factory=lambda: ["bearer"])
+    manual_model_ids: bool = False
     paid_capabilities: list[str]
     capabilities: list[str]
     model_list_path: str
@@ -158,6 +160,8 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
                 default_base_url=plugin.default_base_url,
                 kind="text" if plugin.provider_type == "litellm" else "media",
                 implemented=plugin.implemented,
+                auth_modes=sorted(plugin.auth_modes),
+                manual_model_ids=plugin.manual_model_ids,
                 paid_capabilities=sorted(plugin.paid_capabilities),
                 capabilities=sorted(
                     set(plugin.capability_purposes)
@@ -176,7 +180,8 @@ class ConnectionCreate(BaseModel):
     display_name: str = Field(default="", max_length=120)
     protocol_profile: str = Field(default="agnes_cn_v1", min_length=1, max_length=80)
     base_url: str | None = Field(default=None, max_length=240)
-    api_key: SecretStr = Field(min_length=1, max_length=4096)
+    api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
+    auth_mode: Literal["bearer", "none"] = "bearer"
     enabled: bool = True
 
 
@@ -197,6 +202,7 @@ class ConnectionRead(BaseModel):
     display_name: str
     base_url: str
     protocol_profile: str
+    auth_mode: Literal["bearer", "none"] = "bearer"
     enabled: bool
     credential_configured: bool
     credential_key_version: str | None
@@ -322,6 +328,7 @@ async def _connection_read(
         display_name=connection.display_name,
         base_url=connection.base_url,
         protocol_profile=connection.protocol_profile,
+        auth_mode=connection.auth_mode,
         enabled=connection.enabled,
         credential_configured=credential_version is not None,
         credential_key_version=credential_version,
@@ -532,7 +539,8 @@ async def create_connection(
         workspace_id=workspace_id,
         actor=user,
         display_name=body.display_name,
-        api_key=body.api_key.get_secret_value(),
+        api_key=body.api_key.get_secret_value() if body.api_key else None,
+        auth_mode=body.auth_mode,
         enabled=body.enabled,
         provider_type=body.provider_type,
         protocol_profile=body.protocol_profile,

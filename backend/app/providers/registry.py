@@ -40,6 +40,9 @@ class ProviderPlugin:
     # Whether the protocol client is implemented. Catalog-only plugins cannot be
     # used to create connections or run probes.
     implemented: bool = False
+    auth_modes: frozenset[str] = frozenset({"bearer"})
+    manual_model_ids: bool = False
+    base_url_normalizer: Callable[[str], str] | None = None
     # BYOK credential slot key; defaults to provider_type.
     credential_provider_key: str | None = None
     # Settings field prefix (``<prefix>_enabled/api_key/base_url/...``); defaults
@@ -151,6 +154,19 @@ def _minimax_hub_client(
     return MiniMaxHubClient(settings, transport=transport, host=host)
 
 
+def _openai_images_client(
+    settings: Settings, host: str | None, transport: httpx.AsyncBaseTransport | None = None
+) -> Any:
+    from app.providers.openai_compatible_media import (
+        OPENAI_IMAGES_PROFILE,
+        OpenAICompatibleMediaClient,
+    )
+
+    return OpenAICompatibleMediaClient(
+        settings, host, transport=transport, protocol_profile=OPENAI_IMAGES_PROFILE
+    )
+
+
 def _register_defaults() -> None:
     from app.providers.agnes import (
         AGNES_CN_HOST,
@@ -160,10 +176,14 @@ def _register_defaults() -> None:
     )
     from app.providers.catalog_loader import active_manifests_for
     from app.providers.openai_compatible_media import (
+        OPENAI_IMAGES_PROFILE,
         OPENAI_MEDIA_DEFAULT_HOST,
         OPENAI_MEDIA_PROFILE,
         _openai_compatible_media_compiler_factory,
         _openai_compatible_media_runtime_factory,
+        _openai_images_compiler_factory,
+        _openai_images_runtime_factory,
+        normalize_images_base_url,
     )
 
     register_plugin(
@@ -190,6 +210,32 @@ def _register_defaults() -> None:
     register_plugin(
         ProviderPlugin(
             provider_type="openai_compatible_media",
+            protocol_profile=OPENAI_IMAGES_PROFILE,
+            display_name="通用 Images 文生图（同步）",
+            default_base_url="",
+            implemented=True,
+            auth_modes=frozenset({"bearer", "none"}),
+            manual_model_ids=True,
+            base_url_normalizer=normalize_images_base_url,
+            availability_list_scope="positive_only",
+            settings_prefix="openai_compatible_media",
+            credential_provider_key="openai_compatible_media",
+            capability_purposes={"image_t2i": "keyframe"},
+            paid_capabilities=frozenset({"image_t2i"}),
+            model_list_path="/models",
+            client_factory=_openai_images_client,
+            catalog_manifests=tuple(
+                m
+                for m in active_manifests_for(provider_type="openai_compatible_media")
+                if m["protocol_profile"] == OPENAI_IMAGES_PROFILE
+            ),
+            runtime_factory=_openai_images_runtime_factory,
+            compiler_factory=_openai_images_compiler_factory,
+        )
+    )
+    register_plugin(
+        ProviderPlugin(
+            provider_type="openai_compatible_media",
             protocol_profile=OPENAI_MEDIA_PROFILE,
             display_name="OpenAI 兼容图像 / 视频",
             default_base_url=OPENAI_MEDIA_DEFAULT_HOST,
@@ -201,7 +247,11 @@ def _register_defaults() -> None:
             image_i2i_probe_transport="bytes",
             model_list_path="/models",
             client_factory=_openai_compatible_media_client,
-            catalog_manifests=tuple(active_manifests_for(provider_type="openai_compatible_media")),
+            catalog_manifests=tuple(
+                m
+                for m in active_manifests_for(provider_type="openai_compatible_media")
+                if m["protocol_profile"] == OPENAI_MEDIA_PROFILE
+            ),
             runtime_factory=_openai_compatible_media_runtime_factory,
             compiler_factory=_openai_compatible_media_compiler_factory,
         )

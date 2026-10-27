@@ -32,7 +32,7 @@ class ModelAvailabilityObservation:
     workspace_id: UUID
     connection_id: UUID
     connection_revision_id: UUID
-    credential_revision_id: UUID
+    credential_revision_id: UUID | None
     remote_model_id: str
     verifier_kind: str
     status: AvailabilityStatus

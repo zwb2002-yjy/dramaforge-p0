@@ -46,6 +46,7 @@ function contract(
 }
 
 const MEDIA_PLUGIN: ProviderPluginRead = {
+  manual_model_ids: false,
   provider_type: "volcengine",
   protocol_profile: "ark_cn_v1",
   display_name: "火山方舟",
@@ -87,6 +88,7 @@ function connection(overrides: Record<string, unknown> = {}) {
     display_name: "火山方舟",
     base_url: "https://ark.example.test",
     protocol_profile: "ark_cn_v1",
+    auth_mode: "bearer" as const,
     enabled: true,
     credential_configured: true,
     credential_key_version: "v1",

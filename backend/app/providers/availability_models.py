@@ -33,8 +33,8 @@ class ProviderAvailabilityEvidence(Base):
     connection_revision_id: Mapped[UUID] = mapped_column(
         ForeignKey("provider_connection_revisions.id", ondelete="RESTRICT"), nullable=False
     )
-    credential_revision_id: Mapped[UUID] = mapped_column(
-        ForeignKey("encrypted_provider_credentials.id", ondelete="RESTRICT"), nullable=False
+    credential_revision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("encrypted_provider_credentials.id", ondelete="RESTRICT"), nullable=True
     )
     remote_model_id: Mapped[str] = mapped_column(String(240), nullable=False)
     verifier_kind: Mapped[str] = mapped_column(String(60), nullable=False)
@@ -56,6 +56,7 @@ class ProviderModelAvailability(Base):
             "credential_revision_id",
             "remote_model_id",
             name="uq_provider_model_availability_identity",
+            postgresql_nulls_not_distinct=True,
         ),
         CheckConstraint(
             "effective_status IN ('visible','not_checked','not_visible','auth_failed',"
@@ -74,8 +75,8 @@ class ProviderModelAvailability(Base):
     connection_revision_id: Mapped[UUID] = mapped_column(
         ForeignKey("provider_connection_revisions.id", ondelete="RESTRICT"), nullable=False
     )
-    credential_revision_id: Mapped[UUID] = mapped_column(
-        ForeignKey("encrypted_provider_credentials.id", ondelete="RESTRICT"), nullable=False
+    credential_revision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("encrypted_provider_credentials.id", ondelete="RESTRICT"), nullable=True
     )
     remote_model_id: Mapped[str] = mapped_column(String(240), nullable=False)
     effective_status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_checked")

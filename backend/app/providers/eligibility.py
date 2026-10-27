@@ -145,8 +145,6 @@ async def evaluate_candidate(
         )
         if lifecycle != "active":
             _issues_add(issues, "MODEL_LIFECYCLE_INACTIVE", lifecycle)
-        if catalog_entry.catalog_source == "protocol_contract":
-            _issues_add(issues, "DYNAMIC_MODEL_CAPABILITY_UNVERIFIED")
         blocker = catalog_new_create_blocker(
             catalog_entry.provider_type,
             catalog_entry.protocol_profile,

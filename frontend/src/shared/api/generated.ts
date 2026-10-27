@@ -3540,11 +3540,14 @@ export interface components {
             protocol_profile: string;
             /** Base Url */
             base_url?: string | null;
+            /** Api Key */
+            api_key?: string | null;
             /**
-             * Api Key
-             * Format: password
+             * Auth Mode
+             * @default bearer
+             * @enum {string}
              */
-            api_key: string;
+            auth_mode: "bearer" | "none";
             /**
              * Enabled
              * @default true
@@ -3580,6 +3583,12 @@ export interface components {
             base_url: string;
             /** Protocol Profile */
             protocol_profile: string;
+            /**
+             * Auth Mode
+             * @default bearer
+             * @enum {string}
+             */
+            auth_mode: "bearer" | "none";
             /** Enabled */
             enabled: boolean;
             /** Credential Configured */
@@ -6624,6 +6633,13 @@ export interface components {
             kind: "media" | "text";
             /** Implemented */
             implemented: boolean;
+            /** Auth Modes */
+            auth_modes?: string[];
+            /**
+             * Manual Model Ids
+             * @default false
+             */
+            manual_model_ids: boolean;
             /** Paid Capabilities */
             paid_capabilities: string[];
             /** Capabilities */

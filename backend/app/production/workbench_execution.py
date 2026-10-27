@@ -1232,7 +1232,7 @@ class WorkbenchExecutionService:
             if current_revision is not None:
                 connection_revision_id = current_revision.id
                 credential_revision_id = current_revision.credential_revision_id
-        if connection_revision_id is None or credential_revision_id is None:
+        if connection_revision_id is None:
             raise WorkbenchExecutionError("resolved provider connection revision is unavailable")
         # Carry the immutable revision identity with the typed model
         # resolution.  The worker must be able to reconstruct the exact
@@ -1351,9 +1351,6 @@ class WorkbenchExecutionService:
             matched_input_contract = operation_manifest.input_contracts.get(effective_mode_id)
             resolution = resolution.model_copy(update={"mode_id": effective_mode_id})
 
-        # The Worker compiles the project's aspect ratio into the actual request.
-        # Reject a fixed or enumerated output mismatch in the read-only preview,
-        # before a queued run can turn a predictable contract error into a failure.
         spec = v3_manifest.capability_specs.get(capability)
         mode_spec: InputModeSpec | None = None
         if spec is not None:
@@ -1361,21 +1358,6 @@ class WorkbenchExecutionService:
                 mode_spec = spec.mode_spec(effective_mode_id)
             except ValueError:
                 mode_spec = None
-            if mode_spec is not None:
-                ratio_spec = mode_spec.common_options.get("aspect_ratio")
-                if ratio_spec is not None and ratio_spec.enum != ["adaptive"]:
-                    try:
-                        validate_parameter("aspect_ratio", project.aspect_ratio, ratio_spec)
-                    except ProviderError as exc:
-                        raise WorkbenchExecutionError(
-                            "Selected model cannot output project aspect ratio "
-                            f"{project.aspect_ratio}",
-                            details={
-                                "code": "MODEL_OUTPUT_ASPECT_RATIO_UNSUPPORTED",
-                                "aspect_ratio": project.aspect_ratio,
-                                "supported": ratio_spec.enum,
-                            },
-                        ) from exc
 
         compiled = compile_references(
             manifest=v3_manifest,
@@ -1462,6 +1444,25 @@ class WorkbenchExecutionService:
             effective_options[k] = cast(JsonValue, v)
         for k, v in user_native_options.items():
             effective_options[k] = cast(JsonValue, v)
+
+        selected_ratio = str(effective_options.get("aspect_ratio") or project.aspect_ratio)
+        # Validate the same explicit ratio that preview and the Worker compile.
+        # Reject a fixed or enumerated output mismatch in the read-only preview,
+        # before a queued run can turn a predictable contract error into a failure.
+        if mode_spec is not None:
+            ratio_spec = mode_spec.common_options.get("aspect_ratio")
+            if ratio_spec is not None and ratio_spec.enum != ["adaptive"]:
+                try:
+                    validate_parameter("aspect_ratio", selected_ratio, ratio_spec)
+                except ProviderError as exc:
+                    raise WorkbenchExecutionError(
+                        f"Selected model cannot output project aspect ratio {selected_ratio}",
+                        details={
+                            "code": "MODEL_OUTPUT_ASPECT_RATIO_UNSUPPORTED",
+                            "aspect_ratio": selected_ratio,
+                            "supported": ratio_spec.enum,
+                        },
+                    ) from exc
 
         plan_duration: float | None = None
         if execution_input.stage == "video":
@@ -1699,7 +1700,10 @@ class WorkbenchExecutionService:
         manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
         options = plan.effective_options
         ratio = str(options.get("aspect_ratio") or project.aspect_ratio)
-        if ratio not in {"9:16", "16:9"}:
+        allowed_ratios = (
+            {"9:16", "16:9", "1:1"} if plan.stage == "image_keyframe" else {"9:16", "16:9"}
+        )
+        if ratio not in allowed_ratios:
             return None
         seed_value = options.get("seed")
         seed = (
@@ -1763,7 +1767,7 @@ class WorkbenchExecutionService:
             intent = ImageGenerationIntent(
                 prompt=plan.prompt,
                 size=str(size) if size is not None else None,
-                aspect_ratio=cast(Literal["9:16", "16:9"], ratio),
+                aspect_ratio=cast(Literal["9:16", "16:9", "1:1"], ratio),
                 seed=seed,
                 reference_artifact_ids=[ref.artifact_id for ref in references],
                 reference_fingerprint=references[0].fingerprint if references else None,
@@ -1999,7 +2003,9 @@ class WorkbenchExecutionService:
             "model_binding_id": str(plan.resolved_model.provider_model_binding_id),
             "capability_manifest_hash": plan.resolved_model.manifest_hash,
             "connection_revision_id": str(plan.connection_revision_id),
-            "credential_revision_id": str(plan.credential_revision_id),
+            "credential_revision_id": str(plan.credential_revision_id)
+            if plan.credential_revision_id
+            else None,
             "execution_model_resolution": plan.resolved_model.model_dump(mode="json"),
             "selection_plan": {
                 "purpose": "keyframe" if plan.stage == "image_keyframe" else "video",

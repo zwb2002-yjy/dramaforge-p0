@@ -246,14 +246,25 @@ Protocol/DTO，以及无调用方的 `providers/openai.py`、`providers/fake.py`
   Agnes、企业网关或其他满足该协议合同的模型 ID。媒体远端 ID 由工作空间的
   `ProviderModelBinding` 保存并在执行身份中冻结；文本目前另有动态 registry 与逻辑
   profile 绑定。Compiler 或 Runtime 不能用默认模型替换已选模型。
-- `auth_models` 是不付费的显式探测：使用当前连接 revision 的 URL / 加密 Key 读取
-  插件声明的模型目录路径，把账号实际返回的 ID 保存在不可变 evidence。目录读取本身
-  不验证生成能力。当前媒体要求另选本地能力合同；文本动态 registry 则把所有返回 ID
-  注册为 `text.generate`，尚未区分目录中的非 Chat 模型，属于待修正缺口。
-- `openai_media_v1` 是当前通用媒体协议合同：图像使用 `/images/generations` /
-  `/images/edits`，视频使用异步 `/videos` + `/videos/{id}` 轮询。设置页让用户先选
-  账号发现的模型，再显式选择图像或视频能力合同；合同描述请求形状与参考槽位，
-  远端模型 ID 由 Compiler 写入最终 wire request。
+- `auth_models` 是只读目录探测：使用当前连接修订的 URL 与认证方式读取精确远端 ID，
+  不证明生成、参考素材或高级参数可用。新文本执行只接受已通过内部 Proxy 管理登记的
+  冻结引用；历史静态别名及直连目录不再成为新文本模型。
+- `openai_media_v1` 保留已有媒体合同及历史 resume 的解析。新同步图片使用独立版本
+  `openai_images_v2`，在同一 Catalog/Binding 体系选择 `@contract/openai-images-v2 / v1`，
+  远端 ID 手填或目录发现，不能按模型名称推断能力。管理员 API 允许先保存手填绑定，
+  但无精确目录证据时保持未验证，不能 Create。维护命令 `sync_model_catalog --apply`
+  发布已有受控合同；应用不上传任意能力 JSON，也不新增运行时目录表。
+- 首版 Images 合同只支持非空 prompt（最多 4096 字符）、单张 `1024x1024` 文生图；
+  方图通过镜头已保存的 `common_options.aspect_ratio=1:1` 显式选择。未选时沿用项目画幅，
+  不匹配即在预览阻断。没有图像编辑、参考图、seed 或隐式尺寸近似。
+  接受 `data[0].b64_json`、同连接 origin 的 `data[0].url` 或二进制 PNG/JPEG/WebP，
+  限 24 MiB HTTP 响应、16 MiB 图像、1024 方图单帧，验证后归一为 PNG 入现有 Artifact。
+  URL 不跟重定向，认证只发向被冻结的同源连接；任意文件路径及外部 URL 拒绝。
+  同步结果不发明远端 task ID，不 poll；收到响应后丢失本地结果须人工核验，不能重发。
+- `auth_mode=bearer` 仍要求真实凭证修订；只有显式支持的媒体协议可选 `none`，其连接、
+  修订与执行身份保留明确 NULL，不创建假 Key、不发送 Authorization。两者均覆盖进程
+  默认认证配置。明文 LAN 仍受精确部署白名单和出站保护；无 Key 不等于开放任意内网。
+  `408/429/5xx`、传输中断与不认识的成功返回一律保留未知提交状态，不能自动创建重试。
 - SGLang H3 的 `@contract/sglang-h3-t2v-v1` 是独立的 `video.t2v` 合同：零图片
   输入，`t2va` 任务，经 `/v1/videos` multipart 提交、按任务 ID 轮询并读取
   `/content`。这不是 MiniMax 云 API `minimax_cn_v1` 的首帧合同。工作空间保存

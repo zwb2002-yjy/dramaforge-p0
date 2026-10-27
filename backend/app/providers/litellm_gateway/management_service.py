@@ -102,6 +102,8 @@ class GatewayModelService:
         return hmac.new(self.settings.session_secret.encode(), body, hashlib.sha256).hexdigest()
 
     async def _require_gateway_identity(self, connection: ProviderConnection) -> None:
+        if connection.credential_id is None:
+            raise ConflictError("managed text connection has no data credential")
         reference = GatewayReference.model_validate(connection.gateway_ref)
 
         def root(value: str) -> str:

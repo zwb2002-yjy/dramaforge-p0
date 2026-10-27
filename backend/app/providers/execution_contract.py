@@ -56,6 +56,7 @@ def implementation_fingerprint(provider_type: str, protocol_profile: str) -> str
         Path(__file__).with_name("execution_identity.py"),
         Path(__file__).with_name("manifest.py"),
         Path(__file__).with_name("runtime.py"),
+        Path(__file__).with_name("image_results.py"),
         Path(__file__).with_name("transport.py"),
         Path(__file__).with_name("transport_registry.py"),
         Path(__file__).with_name("registry.py"),
