@@ -34,6 +34,10 @@ class ProviderConnection(Base):
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     base_url: Mapped[str] = mapped_column(String(240), nullable=False)
     protocol_profile: Mapped[str] = mapped_column(String(80), nullable=False)
+    # Non-secret Proxy reference/management state. Upstream URL/Key live only in Proxy DB.
+    gateway_ref: Mapped[dict[str, object] | None] = mapped_column(
+        JSON(none_as_null=True), nullable=True
+    )
     credential_id: Mapped[UUID] = mapped_column(
         ForeignKey("encrypted_provider_credentials.id", ondelete="RESTRICT"),
         nullable=False,
@@ -86,6 +90,9 @@ class ProviderConnectionRevision(Base):
     revision_no: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
     provider_type: Mapped[str] = mapped_column(String(40), nullable=False)
     protocol_profile: Mapped[str] = mapped_column(String(80), nullable=False)
+    gateway_ref: Mapped[dict[str, object] | None] = mapped_column(
+        JSON(none_as_null=True), nullable=True
+    )
     base_url: Mapped[str] = mapped_column(String(240), nullable=False)
     credential_revision_id: Mapped[UUID] = mapped_column(
         ForeignKey(

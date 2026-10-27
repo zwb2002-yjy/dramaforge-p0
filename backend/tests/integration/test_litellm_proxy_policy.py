@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -302,3 +304,152 @@ def test_data_key_cannot_manage_models_or_cross_model_scope(proxy: httpx.Client)
         headers=headers,
     )
     assert result.status_code == 200, result.text
+
+
+def test_managed_reference_cannot_change_target_and_stale_key_revision_is_rejected(
+    proxy: httpx.Client,
+) -> None:
+    identifier, workspace, connection = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
+    alias = "df-" + uuid.UUID(identifier).hex
+    params = {
+        "model": f"openai/{identifier}",
+        "api_base": "http://litellm-mock-quality:9000/success/v1",
+        "api_key": "synthetic-managed-key",
+        "max_retries": 0,
+    }
+    config_hash = hashlib.sha256(
+        json.dumps(
+            {"model": params["model"], "api_base": params["api_base"]},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    info = {
+        "id": identifier,
+        "df_managed": True,
+        "df_workspace_id": workspace,
+        "df_connection_id": connection,
+        "df_config_hash": config_hash,
+        "df_key_revision": 1,
+        "df_request_id": str(uuid.uuid4()),
+        "df_contract_profile": "chat_text_v1",
+    }
+    created = proxy.post(
+        "/model/new", json={"model_name": alias, "litellm_params": params, "model_info": info}
+    )
+    assert created.status_code == 200, created.text
+    frozen = {
+        "deployment_id": identifier,
+        "workspace_id": workspace,
+        "connection_id": connection,
+        "config_hash": config_hash,
+        "key_revision": 1,
+    }
+    payload = {
+        "model": alias,
+        "messages": [{"role": "user", "content": "synthetic"}],
+        "metadata": {"dramaforge_execution": frozen},
+    }
+    assert proxy.post("/v1/chat/completions", json=payload).status_code == 200
+    for change in (
+        {"model": "openai/another-weight"},
+        {"api_base": "http://litellm-mock-quality:9000/other/v1"},
+    ):
+        result = proxy.post(
+            "/model/update", json={"model_info": {"id": identifier}, "litellm_params": change}
+        )
+        assert result.status_code == 409
+    assert (
+        proxy.patch(
+            f"/model/{identifier}/update", json={"litellm_params": {"model": "openai/other"}}
+        ).status_code
+        == 409
+    )
+    assert proxy.post("/model/delete", json={"id": identifier}).status_code == 409
+    invalid = {
+        **payload,
+        "metadata": {"dramaforge_execution": {**frozen, "workspace_id": str(uuid.uuid4())}},
+    }
+    assert proxy.post("/v1/chat/completions", json=invalid).status_code == 409
+    assert event_count(identifier) == 1
+    rotated = proxy.patch(
+        f"/model/{identifier}/update",
+        json={
+            "model_info": {
+                "id": identifier,
+                "df_key_revision": 2,
+                "df_request_id": str(uuid.uuid4()),
+            },
+            "litellm_params": {"api_key": "synthetic-key-two"},
+        },
+    )
+    assert rotated.status_code == 200, rotated.text
+    assert proxy.post("/v1/chat/completions", json=payload).status_code == 409
+    assert event_count(identifier) == 1
+    payload["metadata"]["dramaforge_execution"] = {**frozen, "key_revision": 2}
+    result = proxy.post("/v1/chat/completions", json=payload)
+    assert result.status_code == 200, result.text
+    assert event_count(identifier) == 2
+
+
+def test_bootstrap_uses_scoped_keys_without_secret_output_and_is_idempotent(
+    proxy: httpx.Client,
+) -> None:
+    import sys
+
+    script = Path(__file__).resolve().parents[3] / "infra/litellm/bootstrap_keys.py"
+    data_key, admin_key = "sk-quality-bootstrap-data-key", "sk-quality-bootstrap-model-admin-key-v4"
+    env = {
+        **os.environ,
+        "LITELLM_MASTER_KEY": MASTER,
+        "LITELLM_API_KEY": data_key,
+        "LITELLM_MODEL_ADMIN_KEY": admin_key,
+        "LITELLM_BOOTSTRAP_PROXY_URL": str(proxy.base_url).rstrip("/"),
+    }
+    for _ in range(2):
+        completed = subprocess.run(
+            [sys.executable, str(script)], env=env, capture_output=True, text=True, check=True
+        )
+        assert data_key not in completed.stdout + completed.stderr
+        assert admin_key not in completed.stdout + completed.stderr
+    admin_headers = {"Authorization": "Bearer " + admin_key}
+    data_headers = {"Authorization": "Bearer " + data_key}
+    assert proxy.get("/model/info", headers=admin_headers).status_code == 200
+    assert (
+        proxy.post("/key/generate", json={"models": []}, headers=admin_headers).status_code == 403
+    )
+    assert proxy.get("/v1/models", headers=data_headers).status_code == 200
+    _, identifier = deployment(proxy)
+    updated = proxy.patch(
+        f"/model/{identifier}/update",
+        json={
+            "model_info": {"id": identifier},
+            "litellm_params": {"api_key": "synthetic-scoped-update"},
+        },
+        headers=admin_headers,
+    )
+    assert updated.status_code == 200, updated.text
+    assert (
+        proxy.post(
+            "/model/new",
+            json={"model_name": "denied", "litellm_params": {"model": "openai/denied"}},
+            headers=data_headers,
+        ).status_code
+        == 403
+    )
+
+
+def test_legacy_patch_cannot_promote_or_collide_with_reserved_managed_identity(
+    proxy: httpx.Client,
+) -> None:
+    _, identifier = deployment(proxy)
+    for body in (
+        {"model_name": "df-" + uuid.uuid4().hex},
+        {"model_info": {"id": identifier, "df_managed": True}},
+    ):
+        response = proxy.patch(f"/model/{identifier}/update", json=body)
+        assert response.status_code == 409
+    other, other_id = deployment(proxy)
+    response = proxy.patch(f"/model/{identifier}/update", json={"model_name": other})
+    assert response.status_code == 409
+    assert event_count(identifier) == event_count(other_id) == 0

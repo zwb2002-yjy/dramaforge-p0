@@ -318,19 +318,35 @@ describe("AddProviderDialog", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("已添加 1 个，1 个未添加");
   });
 
-  it("lists discovered text models for a LiteLLM gateway without creating bindings", async () => {
+  it("saves an explicit text-model reference without claiming discovery or generation passed", async () => {
+    const saved = connection({
+      provider_type: "litellm",
+      protocol_profile: "openai_chat_v1",
+      base_url: "http://litellm:4000",
+      verification_status: "gateway_registered",
+      gateway_ref: {
+        deployment_id: "00000000-0000-4000-8000-000000000001",
+        remote_model_id: "physical-chat",
+        alias: "df-00000000000040008000000000000001",
+        key_revision: 1,
+        state: "ready",
+      },
+    });
     const calls = mockApi(({ method, url }) => {
-      if (method === "POST" && url.endsWith("/provider-connections"))
-        return json(
-          connection({ provider_type: "litellm", protocol_profile: "openai_chat_v1" }),
-          201,
-        );
-      if (method === "POST" && url.endsWith("/probes"))
-        return json(probe("passed", ["script-quality", "fast-chat"]));
+      if (method === "POST" && url.endsWith("/provider-connections/gateway"))
+        return json(saved, 201);
+      if (url.endsWith("/gateway/configuration"))
+        return json({
+          base_url: "https://my-text.test/v1",
+          model_id: "physical-chat",
+          deployment_id: "00000000-0000-4000-8000-000000000001",
+          key_revision: 1,
+          contract_profile: "chat_text_v1",
+        });
       return undefined;
     });
     wrap(<AddProviderDialog workspaceId={WS} plugins={[TEXT_PLUGIN]} onClose={() => undefined} />);
-    const dialog = await screen.findByRole("dialog", { name: "添加供应商" });
+    const dialog = await screen.findByRole("dialog", { name: "添加 LLM 配置" });
     await waitFor(() => expect(dialog).toBeVisible());
     await waitFor(() => expect(dialog).toBeVisible());
     expect(within(dialog).getByLabelText("服务地址")).toHaveValue("");
@@ -338,16 +354,22 @@ describe("AddProviderDialog", () => {
       target: { value: "https://my-text.test/v1" },
     });
     fireEvent.change(within(dialog).getByLabelText("API Key"), { target: { value: "sk-gw" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "连接并读取模型" }));
-    expect(await screen.findByText("已发现 2 个文本模型")).toBeVisible();
-    expect(screen.getByText("script-quality")).toBeVisible();
+    fireEvent.change(within(dialog).getByLabelText("真实模型 ID"), {
+      target: { value: "physical-chat" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存 LLM 配置" }));
+    expect(await screen.findByText("配置已核验，上游生成尚未验证。")).toBeVisible();
+    expect(within(dialog).getByLabelText("API Key")).toHaveValue("");
     expect(calls.some((call) => call.url.endsWith("/model-bindings"))).toBe(false);
+    expect(calls.some((call) => call.url.endsWith("/probes"))).toBe(false);
     expect(
-      calls.find((call) => call.method === "POST" && call.url.endsWith("/provider-connections"))
-        ?.body,
+      calls.find(
+        (call) => call.method === "POST" && call.url.endsWith("/provider-connections/gateway"),
+      )?.body,
     ).toMatchObject({
-      provider_type: "litellm",
       base_url: "https://my-text.test/v1",
+      model_id: "physical-chat",
+      contract_profile: "chat_text_v1",
       api_key: "sk-gw",
     });
   });
@@ -387,7 +409,7 @@ describe("ProviderList", () => {
     expect(screen.getByLabelText("服务地址")).toHaveValue("http://local.test:30020/v1");
     expect(screen.queryByText("seedream-4")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "选择 文本服务" }));
-    const text = screen.getByRole("region", { name: "配置 文本服务" });
+    const text = screen.getByRole("region", { name: "LLM 配置" });
     expect(within(text).getByLabelText("API Key")).toHaveValue("");
   });
 

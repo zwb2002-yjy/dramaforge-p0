@@ -2,7 +2,7 @@
 
 Status: current
 Date: 2026-10-27
-Alembic head: 20261024_0088
+Alembic head: 20261027_0089
 
 当前 Alembic 入口跨越 0084 前强制检查已存在的两张实验表和十张旧模型保障表，锁表后
 非空即阻断升级；事务回滚保留原数据和迁移版本。空库初始化中历史迁移生成的静态目录副本
@@ -132,6 +132,7 @@ Migration 20260902_0051 removes:
 | 20261008_0086 | Remove the retired `audio.tts` key from `production_model_profiles.bindings`; voice execution remains owned by frozen `voice_execution` facts. |
 | 20261008_0087 | Remove workspace-entered Binding pricing and the constant `fallback_policy`; catalog pricing is informational only and historical ProviderOperation receipts are preserved. |
 | 20261024_0088 | Add partial indexes for unpublished outbox events, pending Director wakeups and queued NodeRuns; no execution identity or historical rows are rewritten. |
+| 20261027_0089 | Add nullable non-secret `gateway_ref` JSON to existing connections and immutable revisions. Submitted/unknown management writes reconcile by fixed ID. Downgrade refuses any written reference; restore a verified snapshot with retained secrets instead of dropping history. |
 | 20261007_0083 | Merge the model-system and local-media migration histories into one head without rewriting either branch. |
 
 No canonical Project, Shot, Artifact, ProviderOperation, or EditSession is
@@ -140,7 +141,7 @@ tag data before enforcing the canonical constraints.
 
 ## Schema invariants
 
-- Alembic has one head: 20261024_0088 (verify with `alembic heads` on the candidate).
+- Alembic has one head: 20261027_0089 (verify with `alembic heads` on the candidate).
 - Metadata registration is centralized in app/shared/model_registry.py.
 - ProviderOperation is NodeRun-owned only.
 - Identity reference resolution is explicit and version-pinned.

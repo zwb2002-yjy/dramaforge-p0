@@ -18,6 +18,7 @@ from typing import Any
 
 from app.config import Settings, get_settings
 from app.providers.capabilities import Capability
+from app.providers.litellm_gateway.management import is_managed_alias
 from app.providers.manifest import (
     CapabilitySpec,
     ModelManifest,
@@ -86,6 +87,8 @@ def register_litellm_logical_models(
     aliases = [a for a in cfg.litellm_logical_models if a and a.strip()]
     registered: list[str] = []
     for alias in aliases:
+        if is_managed_alias(alias.strip()):
+            continue  # Managed references are visible only through their owned connection.
         model_id = f"{LITELLM_LOGICAL_PREFIX}{alias.strip()}"
         if registry.get_or_none(model_id) is not None:
             continue
@@ -137,6 +140,8 @@ class LiteLLMModelCatalogSyncService:
             return []
         newly: list[str] = []
         for alias in aliases:
+            if is_managed_alias(alias):
+                continue
             model_id = f"{LITELLM_LOGICAL_PREFIX}{alias}"
             if target.get_or_none(model_id) is not None:
                 continue

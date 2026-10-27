@@ -2,7 +2,7 @@
 
 Status: current
 Source: backend/app/api/v1 and generated OpenAPI
-Updated: 2026-10-07
+Updated: 2026-10-27
 Migration authority: [DATA_MODEL.md](DATA_MODEL.md)
 （入口见 [CURRENT.md](CURRENT.md)）
 
@@ -21,6 +21,23 @@ Migration authority: [DATA_MODEL.md](DATA_MODEL.md)
 - `backend/app/api/v1/router.py` owns router registration and exposes `/status`.
 
 ## Route ownership
+
+LLM management uses the owned workspace connection surface; writes require CSRF:
+
+| Method | Workspace-relative path | Contract |
+|---|---|---|
+| POST | `/provider-connections/gateway` | `GatewayModelWrite`; one durable request ID, upstream model ID/URL/Key; returns a non-secret connection reference |
+| PUT | `/provider-connections/{id}/gateway` | New immutable target version; old references remain readable |
+| PUT | `/provider-connections/{id}/gateway/credential` | `GatewayKeyWrite`; same model/alias, new upstream Key revision |
+| POST | `/provider-connections/{id}/gateway/reconcile` | Read back exact Proxy deployment ID; never repeats submission |
+| GET | `/provider-connections/{id}/gateway/configuration` | Read current URL/model from Proxy authority; never returns Key |
+
+The prefix is `/api/v1/workspaces/{workspace_id}`. Pending/unknown writes return
+202 and explicit `gateway_ref.state`; ready means configuration identity matched,
+not upstream authentication or live generation acceptance. Global Proxy URL/data
+credential changes require an explicit data-plane migration. Validation Problem
+Details retain error locations/types/messages, excluding submitted inputs and
+exception contexts so invalid passwords and Keys are not echoed.
 
 素材引用仍使用 `ShotReferenceBinding` 的 CRUD 与 `references/resolve`。
 解析结果明确返回 `binding_id`、`stage`、Artifact ID、真实 MIME 和内容指纹；前端不从名字或

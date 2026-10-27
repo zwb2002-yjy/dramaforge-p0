@@ -143,6 +143,59 @@ export type CsrfResponse = components["schemas"]["CsrfRead"];
 export type UserRead = components["schemas"]["UserRead"];
 export type WorkspaceRead = components["schemas"]["WorkspaceRead"];
 export type ProviderConnectionRead = components["schemas"]["ConnectionRead"];
+export type GatewayModelWrite = components["schemas"]["GatewayModelWrite"];
+export type GatewayConfigurationRead = components["schemas"]["GatewayConfigurationRead"];
+
+export async function saveGatewayModel(
+  workspaceId: string,
+  input: GatewayModelWrite,
+  connectionId?: string,
+): Promise<ProviderConnectionRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    connectionId ? "PUT" : "POST",
+    `/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId ? `${connectionId}/gateway` : "gateway"}`,
+    input,
+    csrf,
+  );
+}
+
+export function getGatewayConfiguration(
+  workspaceId: string,
+  connectionId: string,
+): Promise<GatewayConfigurationRead> {
+  return apiGet(
+    `/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}/gateway/configuration`,
+  );
+}
+
+export async function reconcileGatewayModel(
+  workspaceId: string,
+  connectionId: string,
+): Promise<ProviderConnectionRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}/gateway/reconcile`,
+    {},
+    csrf,
+  );
+}
+
+export async function rotateGatewayCredential(
+  workspaceId: string,
+  connectionId: string,
+  requestId: string,
+  apiKey: string,
+): Promise<ProviderConnectionRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "PUT",
+    `/api/v1/workspaces/${workspaceId}/provider-connections/${connectionId}/gateway/credential`,
+    { request_id: requestId, api_key: apiKey },
+    csrf,
+  );
+}
 export type ProviderPluginModelRead = components["schemas"]["ProviderPluginModelRead"];
 export type ProviderPluginRead = components["schemas"]["ProviderPluginRead"];
 

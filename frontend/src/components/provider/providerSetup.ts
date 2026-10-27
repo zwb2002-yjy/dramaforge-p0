@@ -65,6 +65,11 @@ export function connectionStatus(connection: ProviderConnectionRead): {
   label: string;
 } {
   if (!connection.enabled) return { tone: "idle", label: "已停用" };
+  if (connection.gateway_ref)
+    return {
+      tone: "warn",
+      label: connection.gateway_ref.state === "ready" ? "配置已核验" : "配置待核验",
+    };
   if (!connection.credential_configured) return { tone: "warn", label: "缺少 Key" };
   if (connection.verification_status === "failed") return { tone: "err", label: "认证失败" };
   if (connection.verification_status === "verified") return { tone: "ok", label: "已连接" };

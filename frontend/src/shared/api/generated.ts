@@ -1750,6 +1750,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/provider-connections/gateway": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Register Gateway Model */
+        post: operations["register_gateway_model_api_v1_workspaces__workspace_id__provider_connections_gateway_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/gateway": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace Gateway Model Version */
+        put: operations["replace_gateway_model_version_api_v1_workspaces__workspace_id__provider_connections__connection_id__gateway_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/gateway/credential": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Rotate Gateway Model Key */
+        put: operations["rotate_gateway_model_key_api_v1_workspaces__workspace_id__provider_connections__connection_id__gateway_credential_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/gateway/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reconcile Gateway Model */
+        post: operations["reconcile_gateway_model_api_v1_workspaces__workspace_id__provider_connections__connection_id__gateway_reconcile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/gateway/configuration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Gateway Model Configuration */
+        get: operations["read_gateway_model_configuration_api_v1_workspaces__workspace_id__provider_connections__connection_id__gateway_configuration_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/provider-connections": {
         parameters: {
             query?: never;
@@ -3510,6 +3595,7 @@ export interface components {
              * Format: uuid
              */
             connection_revision_id: string;
+            gateway_ref?: components["schemas"]["GatewayReference"] | null;
         };
         /** ConsistencyRiskRead */
         ConsistencyRiskRead: {
@@ -4925,6 +5011,118 @@ export interface components {
             accepted_proposal?: {
                 [key: string]: unknown;
             };
+        };
+        /** GatewayConfigurationRead */
+        GatewayConfigurationRead: {
+            /** Base Url */
+            base_url: string;
+            /** Model Id */
+            model_id: string;
+            /**
+             * Deployment Id
+             * Format: uuid
+             */
+            deployment_id: string;
+            /** Key Revision */
+            key_revision: number;
+            /**
+             * Contract Profile
+             * @constant
+             */
+            contract_profile: "chat_text_v1";
+        };
+        /** GatewayKeyWrite */
+        GatewayKeyWrite: {
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /**
+             * Api Key
+             * Format: password
+             */
+            api_key: string;
+        };
+        /** GatewayModelWrite */
+        GatewayModelWrite: {
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /** Display Name */
+            display_name: string;
+            /** Base Url */
+            base_url: string;
+            /** Model Id */
+            model_id: string;
+            /**
+             * Api Key
+             * Format: password
+             */
+            api_key: string;
+            /**
+             * Contract Profile
+             * @default chat_text_v1
+             * @constant
+             */
+            contract_profile: "chat_text_v1";
+        };
+        /** GatewayReference */
+        GatewayReference: {
+            /**
+             * Deployment Id
+             * Format: uuid
+             */
+            deployment_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * Connection Id
+             * Format: uuid
+             */
+            connection_id: string;
+            /** Alias */
+            alias: string;
+            /** Remote Model Id */
+            remote_model_id: string;
+            /** Config Hash */
+            config_hash: string;
+            /**
+             * Key Revision
+             * @default 1
+             */
+            key_revision: number;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /** Request Fingerprint */
+            request_fingerprint: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "reserved" | "submission_started" | "ready" | "unknown" | "rejected";
+            /**
+             * Operation
+             * @default create
+             * @enum {string}
+             */
+            operation: "create" | "rotate_key";
+            /**
+             * Contract Profile
+             * @default chat_text_v1
+             * @constant
+             */
+            contract_profile: "chat_text_v1";
+            /** Error Code */
+            error_code?: string | null;
         };
         /** GeneratedStoryProposalRead */
         GeneratedStoryProposalRead: {
@@ -12973,6 +13171,215 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProviderPluginRead"][];
+                };
+            };
+        };
+    };
+    register_gateway_model_api_v1_workspaces__workspace_id__provider_connections_gateway_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GatewayModelWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_gateway_model_version_api_v1_workspaces__workspace_id__provider_connections__connection_id__gateway_put: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                connection_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GatewayModelWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotate_gateway_model_key_api_v1_workspaces__workspace_id__provider_connections__connection_id__gateway_credential_put: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                connection_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GatewayKeyWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconcile_gateway_model_api_v1_workspaces__workspace_id__provider_connections__connection_id__gateway_reconcile_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                connection_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_gateway_model_configuration_api_v1_workspaces__workspace_id__provider_connections__connection_id__gateway_configuration_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                connection_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GatewayConfigurationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

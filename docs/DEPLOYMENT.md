@@ -243,7 +243,12 @@ existing ciphertext. The single-worker pinned Proxy rejects duplicate YAML/DB
 aliases, request-level transport overrides and shadow calls; HTTPX, requests and
 aiohttp do not follow redirects. Prisma's local control channel uses fixed
 port 4001 rather than a broad loopback port grant. Admin and data keys remain
-separate; model-management business integration is a subsequent gate.
+separate. The one-shot trusted `litellm-bootstrap` provisions restricted service
+keys without upstream calls or secret output. Only the API receives the model
+management key; generation workers do not. The API keeps existing workspace
+ownership/RLS and CSRF enforcement, while the Proxy enforces immutable managed
+targets and monotonic credential revisions. This is restricted credentials in
+the same API process, not full management-process isolation.
 
 Named volumes `postgres_data`, `minio_data`, and `litellm_db_data` contain
 persistent state. `docker compose down` preserves them; do not use `--volumes`

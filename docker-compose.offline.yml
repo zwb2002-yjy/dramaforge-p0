@@ -1,4 +1,6 @@
 services:
+  litellm-bootstrap:
+    pull_policy: never
   litellm-network:
     pull_policy: never
   postgres:

@@ -100,6 +100,7 @@ jobs:
       LITELLM_MASTER_KEY: sk-release-compose-master-key
       LITELLM_SALT_KEY: sk-release-compose-stable-salt
       LITELLM_API_KEY: sk-release-compose-data-key
+      LITELLM_MODEL_ADMIN_KEY: sk-release-compose-model-admin-key
       SESSION_SECRET: release-compose-session-secret-32-characters
       WORKER_TOKEN: release-compose-worker-token-32-characters
       BYOK_FERNET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
@@ -146,12 +147,6 @@ jobs:
           DRAMAFORGE_FRONTEND_IMAGE: ${{ steps.image.outputs.frontend }}:${{ steps.image.outputs.tag }}
         run: |
           docker compose up -d --wait
-          docker compose exec -T -e "PROXY_DATA_KEY=$LITELLM_API_KEY" litellm python -c '
-          import json, os, urllib.request
-          body = json.dumps({"key": os.environ["PROXY_DATA_KEY"], "key_type": "llm_api", "models": ["script-quality", "script-fast"]}).encode()
-          request = urllib.request.Request("http://127.0.0.1:4000/key/generate", data=body, headers={"Content-Type": "application/json", "Authorization": "Bearer " + os.environ["LITELLM_MASTER_KEY"]})
-          assert urllib.request.urlopen(request).status == 200
-          '
           curl --fail --show-error --retry 10 --retry-delay 2 http://127.0.0.1:8080/gateway-health
       - name: Capture Compose diagnostics
         if: failure()
@@ -327,6 +322,8 @@ jobs:
           cp infra/litellm/proxy_policy.py "$offline_dir/infra/litellm/proxy_policy.py"
           cp infra/litellm/transport_policy.py "$online_dir/infra/litellm/transport_policy.py"
           cp infra/litellm/transport_policy.py "$offline_dir/infra/litellm/transport_policy.py"
+          cp infra/litellm/bootstrap_keys.py "$online_dir/infra/litellm/bootstrap_keys.py"
+          cp infra/litellm/bootstrap_keys.py "$offline_dir/infra/litellm/bootstrap_keys.py"
 
           cat > "$online_dir/release.env" <<EOF
           DRAMAFORGE_VERSION=$VERSION

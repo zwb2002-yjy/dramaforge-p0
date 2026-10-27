@@ -162,6 +162,8 @@ export const queryKeys = {
   },
 
   provider: {
+    gateway: (workspaceId: string, connectionId: string | null | undefined, revision?: string) =>
+      ["provider-gateway", workspaceId, connectionId, revision] as const,
     connections: (workspaceId: string | null) => ["provider-connections", workspaceId] as const,
     plugins: () => ["provider-plugins"] as const,
     probes: (workspaceId: string | null, connectionId: string | null | undefined) =>

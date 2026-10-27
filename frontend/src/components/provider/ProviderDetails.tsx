@@ -16,6 +16,7 @@ import {
 import { queryKeys } from "../../lib/queryKeys";
 import { Button, Disclosure, Field, Input } from "../ui";
 import { ModelPicker } from "./ModelPicker";
+import { GatewayModelEditor } from "./GatewayModelEditor";
 import { ModelKnowledgePanel } from "./ModelKnowledgePanel";
 import { createBlockerLabel } from "./modelKnowledge";
 import { useModelActivation } from "./useModelActivation";
@@ -46,7 +47,13 @@ function bindingStatus(
 }
 
 /** Configure the selected connection inline; discovery remains explicit. */
-export function ProviderDetails({
+export function ProviderDetails(props: Parameters<typeof LegacyProviderDetails>[0]) {
+  if (props.connection.gateway_ref)
+    return <GatewayModelEditor workspaceId={props.workspaceId} connection={props.connection} />;
+  return <LegacyProviderDetails {...props} />;
+}
+
+function LegacyProviderDetails({
   workspaceId,
   connection,
   plugin,

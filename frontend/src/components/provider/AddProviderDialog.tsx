@@ -14,6 +14,7 @@ import {
 import { queryKeys } from "../../lib/queryKeys";
 import { Button, Dialog, Field, Input } from "../ui";
 import { ModelPicker } from "./ModelPicker";
+import { GatewayModelEditor } from "./GatewayModelEditor";
 import { bindingBatchMessage, createBindings } from "./providerBindings";
 import {
   catalogFailureText,
@@ -31,7 +32,27 @@ type Phase = "connect" | "models";
  * to use. Text gateways expose discovered models directly; media vendors bind
  * each ticked model to its catalog contract. Nothing generates media here.
  */
-export function AddProviderDialog({
+export function AddProviderDialog(props: Parameters<typeof MediaProviderDialog>[0]) {
+  const installed = props.plugins.filter((plugin) => plugin.implemented);
+  if (installed.length && installed.every((plugin) => plugin.kind === "text"))
+    return (
+      <GatewayModelEditor
+        workspaceId={props.workspaceId}
+        inline={props.inline}
+        onClose={props.onClose}
+        onConnectionCreated={props.onConnectionCreated}
+        onBusyChange={props.onBusyChange}
+      />
+    );
+  return (
+    <MediaProviderDialog
+      {...props}
+      plugins={props.plugins.filter((plugin) => plugin.kind !== "text")}
+    />
+  );
+}
+
+function MediaProviderDialog({
   workspaceId,
   plugins,
   inline = false,

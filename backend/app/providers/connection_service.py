@@ -195,6 +195,7 @@ class ProviderConnectionService:
             revision_no=(latest.revision_no + 1) if latest is not None else 1,
             provider_type=connection.provider_type,
             protocol_profile=connection.protocol_profile,
+            gateway_ref=dict(connection.gateway_ref) if connection.gateway_ref else None,
             base_url=connection.base_url,
             credential_revision_id=credential.id,
         )
@@ -253,6 +254,10 @@ class ProviderConnectionService:
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
         )
+        if connection.gateway_ref is not None and (
+            base_url is not None or protocol_profile is not None
+        ):
+            raise ValidationAppError("managed LLM targets require a new Proxy deployment version")
         if display_name is not None:
             connection.display_name = display_name.strip() or connection.display_name
         if enabled is not None:
@@ -335,6 +340,8 @@ class ProviderConnectionService:
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
         )
+        if connection.gateway_ref is not None:
+            raise ValidationAppError("rotate the upstream key through Proxy model management")
         plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
         secret = api_key.strip()
         if not secret:
@@ -470,6 +477,13 @@ class ProviderConnectionService:
         remote_task_id: str | None = None,
         remote_query_kind: str | None = None,
     ) -> ProviderCapabilityEvidence:
+        scoped_connection = await self.get_connection(
+            workspace_id=workspace_id, connection_id=connection_id
+        )
+        if scoped_connection.gateway_ref is not None:
+            raise ValidationAppError(
+                "verify the exact Proxy reference; discovery is not upstream authentication"
+            )
         if capability not in _CAPABILITIES:
             raise ValidationAppError("unsupported Provider capability")
         connection = await self.get_connection(
@@ -603,9 +617,7 @@ class ProviderConnectionService:
                     from app.providers.litellm_gateway.client import normalize_models_url
 
                     models_url = normalize_models_url(probe_revision.base_url)
-                async with httpx.AsyncClient(
-                    timeout=30.0, transport=probe_transport
-                ) as http:
+                async with httpx.AsyncClient(timeout=30.0, transport=probe_transport) as http:
                     response = await http.get(
                         models_url,
                         headers={
@@ -1093,7 +1105,8 @@ class ProviderConnectionService:
         if (
             effective_publication_lifecycle(
                 entry.provider_type, entry.protocol_profile, entry.model_id, entry.lifecycle
-            ) != "active"
+            )
+            != "active"
             or entry.provider_type != plugin.provider_type
             or entry.protocol_profile != plugin.protocol_profile
             or entry.media_kind != media_type

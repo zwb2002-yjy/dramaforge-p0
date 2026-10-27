@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, Field, SecretStr
 from sqlalchemy import select
 
@@ -33,6 +33,13 @@ from app.providers.knowledge_projection import (
     knowledge_for_model,
     project_model_knowledge,
 )
+from app.providers.litellm_gateway.management import (
+    GatewayConfigurationRead,
+    GatewayKeyWrite,
+    GatewayModelWrite,
+    GatewayReference,
+)
+from app.providers.litellm_gateway.management_service import GatewayModelService
 from app.providers.manifest import ModelCapabilityManifest, read_catalog_manifest
 from app.providers.models import (
     ProjectProviderBinding,
@@ -42,7 +49,7 @@ from app.providers.models import (
     ProviderQualityEvidence,
 )
 from app.providers.registry import list_plugins
-from app.shared.errors import NotFoundError
+from app.shared.errors import NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["provider-connections"])
 
@@ -196,6 +203,7 @@ class ConnectionRead(BaseModel):
     verification_status: str
     verified_at: datetime | None
     connection_revision_id: UUID
+    gateway_ref: GatewayReference | None = None
 
 
 class ProbeRequest(BaseModel):
@@ -320,6 +328,9 @@ async def _connection_read(
         verification_status=connection.verification_status,
         verified_at=connection.verified_at,
         connection_revision_id=revision.id,
+        gateway_ref=GatewayReference.model_validate(connection.gateway_ref)
+        if connection.gateway_ref
+        else None,
     )
 
 
@@ -377,6 +388,126 @@ def _quality_read(evidence: ProviderQualityEvidence) -> QualityEvidenceRead:
 
 
 @router.post(
+    "/workspaces/{workspace_id}/provider-connections/gateway",
+    response_model=ConnectionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def register_gateway_model(
+    workspace_id: UUID,
+    body: GatewayModelWrite,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+    response: Response,
+    _: CsrfDep,
+) -> ConnectionRead:
+    if workspace.id != workspace_id:
+        raise NotFoundError("workspace not found")
+    connection = await GatewayModelService(session).register(
+        workspace_id=workspace_id, actor=user, body=body
+    )
+    if GatewayReference.model_validate(connection.gateway_ref).state != "ready":
+        response.status_code = status.HTTP_202_ACCEPTED
+    return await _connection_read(ProviderConnectionService(session), connection)
+
+
+@router.put(
+    "/workspaces/{workspace_id}/provider-connections/{connection_id}/gateway",
+    response_model=ConnectionRead,
+)
+async def replace_gateway_model_version(
+    workspace_id: UUID,
+    connection_id: UUID,
+    body: GatewayModelWrite,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+    response: Response,
+    _: CsrfDep,
+) -> ConnectionRead:
+    if workspace.id != workspace_id:
+        raise NotFoundError("workspace not found")
+    connection = await GatewayModelService(session).register(
+        workspace_id=workspace_id,
+        actor=user,
+        body=body,
+        connection_id=connection_id,
+    )
+    if GatewayReference.model_validate(connection.gateway_ref).state != "ready":
+        response.status_code = status.HTTP_202_ACCEPTED
+    return await _connection_read(ProviderConnectionService(session), connection)
+
+
+@router.put(
+    "/workspaces/{workspace_id}/provider-connections/{connection_id}/gateway/credential",
+    response_model=ConnectionRead,
+)
+async def rotate_gateway_model_key(
+    workspace_id: UUID,
+    connection_id: UUID,
+    body: GatewayKeyWrite,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+    response: Response,
+    _: CsrfDep,
+) -> ConnectionRead:
+    if workspace.id != workspace_id:
+        raise NotFoundError("workspace not found")
+    connection = await GatewayModelService(session).rotate_key(
+        workspace_id=workspace_id,
+        actor=user,
+        connection_id=connection_id,
+        body=body,
+    )
+    if GatewayReference.model_validate(connection.gateway_ref).state != "ready":
+        response.status_code = status.HTTP_202_ACCEPTED
+    return await _connection_read(ProviderConnectionService(session), connection)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/provider-connections/{connection_id}/gateway/reconcile",
+    response_model=ConnectionRead,
+)
+async def reconcile_gateway_model(
+    workspace_id: UUID,
+    connection_id: UUID,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> ConnectionRead:
+    if workspace.id != workspace_id:
+        raise NotFoundError("workspace not found")
+    connection = await GatewayModelService(session).reconcile(
+        workspace_id=workspace_id,
+        actor=user,
+        connection_id=connection_id,
+    )
+    return await _connection_read(ProviderConnectionService(session), connection)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/provider-connections/{connection_id}/gateway/configuration",
+    response_model=GatewayConfigurationRead,
+)
+async def read_gateway_model_configuration(
+    workspace_id: UUID,
+    connection_id: UUID,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+) -> GatewayConfigurationRead:
+    if workspace.id != workspace_id:
+        raise NotFoundError("workspace not found")
+    return await GatewayModelService(session).configuration(
+        workspace_id=workspace_id,
+        actor=user,
+        connection_id=connection_id,
+    )
+
+
+@router.post(
     "/workspaces/{workspace_id}/provider-connections",
     response_model=ConnectionRead,
     status_code=status.HTTP_201_CREATED,
@@ -391,6 +522,11 @@ async def create_connection(
 ) -> ConnectionRead:
     if workspace.id != workspace_id:
         raise NotFoundError("workspace not found")
+    if body.provider_type == "litellm":
+        raise ValidationAppError(
+            "new LLM configurations require Proxy model management",
+            details={"code": "LLM_PROXY_MANAGEMENT_REQUIRED"},
+        )
     service = ProviderConnectionService(session)
     connection = await service.create_connection(
         workspace_id=workspace_id,

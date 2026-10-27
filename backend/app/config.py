@@ -218,7 +218,7 @@ class Settings(BaseSettings):
     # LiteLLM Gateway backend (spec §24–§26, §113; fix spec §3/§22). Text models
     # registered in the V3 registry with ``backend.kind="litellm"`` submit
     # through this OpenAI-compatible gateway. ``LITELLM_API_KEY`` is the
-    # DramaForge Virtual/Master key used to call the gateway — NOT an upstream
+    # DramaForge restricted data key used to call the gateway — NOT an upstream
     # provider key (fix spec §22/§57).
     litellm_gateway_url: str = Field(
         default="",
@@ -227,7 +227,10 @@ class Settings(BaseSettings):
             "(fix spec §19/§20 — adapter always appends /v1/chat/completions)"
         ),
     )
-    litellm_api_key: str = Field(default="", description="LiteLLM Gateway API key")
+    litellm_api_key: str = Field(
+        default="", repr=False, exclude=True, description="LiteLLM data key"
+    )
+    litellm_model_admin_key: str = Field(default="", repr=False, exclude=True)
     # Logical alias the ``litellm/script-quality`` bootstrap bridge sends to the
     # gateway (fix spec §32/§33). DramaForge
     # requests the logical group, the LiteLLM Router picks the deployment.

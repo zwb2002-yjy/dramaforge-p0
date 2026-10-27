@@ -19,6 +19,8 @@ GENERATORS = {
     "WORKER_TOKEN": lambda: secrets.token_urlsafe(48),
     "BYOK_FERNET_KEY": lambda: base64.urlsafe_b64encode(secrets.token_bytes(32)).decode(),
     "LITELLM_MASTER_KEY": lambda: f"sk-{secrets.token_urlsafe(40)}",
+    "LITELLM_API_KEY": lambda: f"sk-{secrets.token_urlsafe(40)}",
+    "LITELLM_MODEL_ADMIN_KEY": lambda: f"sk-{secrets.token_urlsafe(40)}",
     "LITELLM_SALT_KEY": lambda: f"sk-{secrets.token_urlsafe(40)}",
 }
 
