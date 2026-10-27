@@ -1,17 +1,14 @@
 """Generic LiteLLM ModelAdapter (spec §24–§28, §113; fix spec §66–§71).
 
-A single adapter that submits any capability through a LiteLLM Gateway's
-OpenAI-compatible HTTP surface. It is *generic*: the wire behavior comes from the
-model's :class:`ModelBackendBinding` (gateway_model, api_mode) carried in the
-manifest metadata — there is one adapter, not per-provider text/image/video
-adapters. P0 wires ``text.generate`` (``api_mode="chat"``); image/video gateway
-modes are reserved for the LiteLLM media plan.
+A single text adapter uses the internal Proxy's Chat HTTP surface. Its fixed
+alias and execution reference come from the selected manifest. Media retains
+the existing Compiler/Runtime path and does not use the LLM Proxy.
 
 The adapter is a V3 *semantic* adapter: it maps ``TextGenerateRequest`` →
 OpenAI-compatible payload → ``ProviderCreateResult``. ALL HTTP to the official
 LiteLLM Proxy runs through :class:`LiteLLMGatewayClient` (spec §67) — the
-adapter never opens an httpx session and never retries: LiteLLM's Router owns
-provider/deployment retry/fallback/cooldown (spec §5/§95), and a read timeout
+adapter never opens an httpx session or retries. The client permits only one
+proven pre-send DF→Proxy retry, with no Proxy→upstream retry or fallback. A read timeout
 after submit escalates to ``SUBMIT_UNKNOWN`` because the request may have been
 billed (spec §64/§65).
 
@@ -145,6 +142,17 @@ class LiteLLMModelAdapter:
             from app.providers.model_profiles.errors import profile_model_not_configured
 
             raise profile_model_not_configured(self.model_id)
+        reference = self.manifest.metadata.get("gateway_reference")
+        if (
+            isinstance(reference, dict)
+            and context.workspace_id
+            and reference.get("workspace_id") != context.workspace_id
+        ):
+            from app.providers.errors import InvalidOptionCombinationError
+
+            raise InvalidOptionCombinationError(
+                "text execution workspace does not own the model reference"
+            )
         payload, _ = self._build_payload(capability, request)
         self.calls.append({"op": "create", "capability": str(capability), "attempt": 1})
         try:
@@ -167,6 +175,11 @@ class LiteLLMModelAdapter:
                     provider_metadata={
                         "error_code": str(ProviderErrorCode.SUBMISSION_OUTCOME_UNKNOWN),
                         "error": exc.message,
+                        **{
+                            k: exc.details[k]
+                            for k in ("df_proxy_transport_attempts", "df_proxy_failure_phase")
+                            if exc.details and k in exc.details
+                        },
                     },
                 )
             if isinstance(exc, ProviderError):
@@ -177,6 +190,11 @@ class LiteLLMModelAdapter:
                     provider_metadata={
                         "error_code": str(exc.code),
                         "error": exc.message,
+                        **{
+                            k: exc.details[k]
+                            for k in ("df_proxy_transport_attempts", "df_proxy_failure_phase")
+                            if exc.details and k in exc.details
+                        },
                     },
                 )
             return ProviderCreateResult(
@@ -252,6 +270,31 @@ class LiteLLMModelAdapter:
         if request.response_format:
             payload["response_format"] = request.response_format
         payload.update(request.native_options)
+        forbidden = {
+            "api_base",
+            "base_url",
+            "api_key",
+            "extra_headers",
+            "headers",
+            "custom_llm_provider",
+            "model",
+            "extra_body",
+            "metadata",
+            "stream",
+            "num_retries",
+            "max_retries",
+            "fallbacks",
+            "mock_response",
+        }
+        if forbidden.intersection(request.native_options):
+            from app.providers.errors import InvalidOptionCombinationError
+
+            raise InvalidOptionCombinationError(
+                "text options cannot override transport or execution identity"
+            )
+        reference = self.manifest.metadata.get("gateway_reference")
+        if isinstance(reference, dict):
+            payload["metadata"] = {"dramaforge_execution": dict(reference)}
         # The gateway model comes from the manifest's ModelBackendBinding; the
         # client injects it as the wire ``model`` (spec §71). DramaForge never
         # hardcodes an upstream provider model here.

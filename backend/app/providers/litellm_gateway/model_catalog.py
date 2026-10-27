@@ -1,15 +1,8 @@
 """LiteLLM model discovery + logical alias sync (spec §35–§42, F8/F9).
 
-``GET /v1/models`` exposes the gateway's configured logical aliases. A
-discovered alias becomes a DramaForge V3 model ``litellm/<alias>`` with
-``backend.gateway_model=<alias>`` and ``text.generate`` capability (spec §39:
-plain LLM aliases default to TEXT_GENERATE; image/video/tts capabilities are
-never guessed — media needs an explicit manifest, spec §83).
-
-The same builder registers the *static* logical aliases configured in
-``Settings.litellm_logical_models``, so a Profile can bind ``litellm/script-quality``
-before the gateway is reachable (deterministic) while discovery keeps the
-catalog in sync with the gateway afterwards (TTL-cached, best-effort).
+Discovery exposes visibility only, without capability or executable adapter.
+The Chat manifest builder is used for explicit managed contracts and retained
+legacy descriptions. Workspace production excludes static and legacy aliases.
 """
 
 from __future__ import annotations
@@ -119,16 +112,12 @@ class LiteLLMModelCatalogSyncService:
         self._settings = settings or get_settings()
         self._registry = registry
 
-    async def sync(
-        self, registry: ModelRegistry | None = None
-    ) -> list[str]:
+    async def sync(self, registry: ModelRegistry | None = None) -> list[str]:
         """Discover aliases and register missing ones as ``litellm/<alias>``.
 
         Returns the list of newly registered model ids. Raises nothing for
         gateway errors — callers decide whether to surface ``unavailable``.
         """
-        from app.providers.litellm_adapter import LiteLLMModelAdapter
-
         target = registry or self._registry
         if target is None:
             from app.providers.model_profiles.service import default_model_registry
@@ -146,6 +135,8 @@ class LiteLLMModelCatalogSyncService:
             if target.get_or_none(model_id) is not None:
                 continue
             manifest = litellm_logical_manifest(alias)
-            target.register(manifest, LiteLLMModelAdapter(manifest))
+            # Discovery proves visibility only; no inferred Chat capability or adapter.
+            manifest = manifest.model_copy(update={"capability_specs": {}})
+            target.register(manifest)
             newly.append(model_id)
         return newly

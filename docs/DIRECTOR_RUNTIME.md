@@ -101,6 +101,9 @@ Director Runtime 是**独立于生产执行的编排 runtime**：它驱动导演
 
 - 可恢复轮次通过数据库函数/授权（迁移 20260908_0057–0060）跨进程重启恢复，
   复用经校验的 invocation 结果，不重复付费调用。
+  文本模型解析冻结版本化 Proxy 部署引用；已 prepared 但尚无 Invocation 的旧请求
+  要求显式重建和新请求键，不能重启后重新绑定模型。传输尝试次数与失败阶段持久化于
+  Invocation 摘要，独立于业务 schema repair 次数。
 - 唤醒重放由 `wakeup_replay.py` 与 worker 启动恢复承担。
 - Assistant 边界：Shot 建议为非持久响应；editing 建议持久化
   DirectorProposal/DirectorProposalItem 并只能经 typed command registry 应用。

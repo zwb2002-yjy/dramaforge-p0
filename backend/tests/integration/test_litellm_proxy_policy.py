@@ -275,7 +275,7 @@ async def test_requests_and_aiohttp_cannot_follow_same_origin_redirect() -> None
 
 
 def test_data_key_cannot_manage_models_or_cross_model_scope(proxy: httpx.Client) -> None:
-    alias, _ = deployment(proxy)
+    alias, identifier = deployment(proxy)
     other, _ = deployment(proxy)
     created = proxy.post("/key/generate", json={"models": [alias], "key_type": "llm_api"})
     assert created.status_code == 200
@@ -303,10 +303,11 @@ def test_data_key_cannot_manage_models_or_cross_model_scope(proxy: httpx.Client)
         },
         headers=headers,
     )
-    assert result.status_code == 200, result.text
+    assert result.status_code == 409, result.text
+    assert event_count(identifier) == 0
 
 
-def test_managed_reference_cannot_change_target_and_stale_key_revision_is_rejected(
+async def test_managed_reference_cannot_change_target_and_stale_key_revision_is_rejected(
     proxy: httpx.Client,
 ) -> None:
     identifier, workspace, connection = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
@@ -350,7 +351,31 @@ def test_managed_reference_cannot_change_target_and_stale_key_revision_is_reject
         "messages": [{"role": "user", "content": "synthetic"}],
         "metadata": {"dramaforge_execution": frozen},
     }
-    assert proxy.post("/v1/chat/completions", json=payload).status_code == 200
+    from app.config import Settings
+    from app.providers.capabilities import Capability
+    from app.providers.contracts.common import ExecutionContext
+    from app.providers.contracts.text import TextGenerateRequest, TextMessage
+    from app.providers.litellm_adapter import LiteLLMModelAdapter
+    from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
+
+    key = proxy.post("/key/generate", json={"models": [alias], "key_type": "llm_api"})
+    assert key.status_code == 200
+    manifest = litellm_logical_manifest(alias)
+    manifest.metadata["gateway_reference"] = frozen
+    adapter = LiteLLMModelAdapter(
+        manifest,
+        settings=Settings(
+            _env_file=None,
+            litellm_gateway_url=str(proxy.base_url),
+            litellm_api_key=key.json()["key"],
+        ),
+    )
+    result = await adapter.create(
+        Capability.TEXT_GENERATE,
+        TextGenerateRequest(messages=[TextMessage(role="user", content="synthetic")]),
+        ExecutionContext(trace_id="canary"),
+    )
+    assert result.status.value == "succeeded", result.provider_metadata
     for change in (
         {"model": "openai/another-weight"},
         {"api_base": "http://litellm-mock-quality:9000/other/v1"},

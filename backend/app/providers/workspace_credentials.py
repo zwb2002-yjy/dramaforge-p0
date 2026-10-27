@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hmac
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, get_settings
@@ -77,24 +79,39 @@ async def runtime_text_gateway_settings(
     connection: ProviderConnection,
     settings: Settings | None = None,
 ) -> Settings:
-    """Resolve a workspace text gateway without exposing its stored key."""
-    if (
-        connection.provider_type != "litellm"
-        or connection.protocol_profile != "openai_chat_v1"
-    ):
+    """Resolve only a managed reference to the configured internal Proxy.
+
+    Historical direct connections are readable by the data layer but cannot
+    become a new transport target or silently inherit a new process credential.
+    """
+    if connection.provider_type != "litellm" or connection.protocol_profile != "openai_chat_v1":
         raise WorkspaceCredentialConfigurationError()
     cfg = settings or get_settings()
+    from app.providers.litellm_gateway.management import GatewayReference
+
+    if connection.gateway_ref is None:
+        raise WorkspaceCredentialConfigurationError()
+    reference = GatewayReference.model_validate(connection.gateway_ref)
+    if (
+        reference.state != "ready"
+        or reference.workspace_id != connection.workspace_id
+        or reference.connection_id != connection.id
+        or connection.base_url.rstrip("/") != cfg.litellm_gateway_url.rstrip("/")
+    ):
+        raise WorkspaceCredentialConfigurationError()
     credential = await read_credential_by_id(
         session,
         workspace_id=connection.workspace_id,
         credential_id=connection.credential_id,
         keyring=configured_byok_keyring(cfg),
     )
-    if credential is None:
+    if credential is None or not hmac.compare_digest(
+        credential.encode(), cfg.litellm_api_key.encode()
+    ):
         raise WorkspaceCredentialConfigurationError()
     return cfg.model_copy(
         update={
-            "litellm_gateway_url": connection.base_url,
+            "litellm_gateway_url": cfg.litellm_gateway_url,
             "litellm_api_key": credential,
         }
     )

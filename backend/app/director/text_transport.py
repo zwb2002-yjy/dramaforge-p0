@@ -283,6 +283,9 @@ class DirectorTextRuntimeAdapter:
                 "provider_id": registered.adapter.provider_id,
                 "manifest_version": registered.manifest.manifest_version,
                 "backend": _safe_json(backend) if isinstance(backend, dict) else {},
+                "gateway_reference": _safe_json(
+                    registered.manifest.metadata.get("gateway_reference", {})
+                ),
                 "native_options": _safe_json(resolved.native_options),
             }
         except Exception as exc:  # noqa: BLE001 - persist explicit resolution failure
@@ -749,6 +752,8 @@ class DirectorTextRuntimeAdapter:
             "request_id": evidence[0]["provider_request_id"],
             "litellm_model_name": evidence[0]["actual_model"],
             "output_text_hash": evidence[0]["output_text_hash"],
+            "df_proxy_transport_attempts": evidence[0].get("df_proxy_transport_attempts"),
+            "df_proxy_failure_phase": evidence[0].get("df_proxy_failure_phase"),
         }
         await self._commit_and_restore_scope(turn)
         return result
@@ -786,6 +791,8 @@ class DirectorTextRuntimeAdapter:
             "provider_cost": _safe_json(provider_cost),
             "output_text_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
             "error_code": metadata.get("error_code"),
+            "df_proxy_transport_attempts": metadata.get("df_proxy_transport_attempts"),
+            "df_proxy_failure_phase": metadata.get("df_proxy_failure_phase"),
         }
         attempts.append(attempt)
         return text
@@ -913,9 +920,12 @@ class DirectorTextRuntimeAdapter:
         journal = InvocationService(self._session)
         invocations = await journal.list_for_turn(project_id=turn.project_id, turn_id=turn.id)
         if not invocations and turn.transport_status == "prepared":
-            # The process stopped before the invocation reservation committed;
-            # no Provider request was authorized, so rebuilding is safe.
-            return None
+            # No create has happened, but a persisted execution must not silently
+            # rebind to another deployment/revision after a restart.
+            raise ConflictError(
+                "Prepared text execution requires an explicit rebuild and new request key",
+                details={"code": "DIRECTOR_TEXT_REQUIRES_REVIEW", "turn_id": str(turn.id)},
+            )
         completed = [row for row in invocations if row.status == "completed"]
         if completed:
             restored = completed[-1]
@@ -1025,6 +1035,8 @@ class DirectorTextRuntimeAdapter:
             ),
             "output_text_hash": summary.get("output_text_hash"),
             "error_code": invocation.error_code,
+            "df_proxy_transport_attempts": summary.get("df_proxy_transport_attempts"),
+            "df_proxy_failure_phase": summary.get("df_proxy_failure_phase"),
         }
 
     @staticmethod

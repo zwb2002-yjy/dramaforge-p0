@@ -201,8 +201,9 @@ class ModelInspectionService:
             assert slot is not None
             if Capability.TEXT_GENERATE not in MODEL_SLOT_DEFINITIONS[slot].required_capabilities:
                 raise ValidationAppError("use stage for a current media binding")
-            registry = default_model_registry()
-            resolution_text = await ModelBindingResolver(self._session, registry).resolve(
+            resolution_text, registry = await ModelBindingResolver(
+                self._session
+            ).resolve_with_registry(
                 workspace_id=project.workspace_id,
                 project_id=project.id,
                 slot=slot,

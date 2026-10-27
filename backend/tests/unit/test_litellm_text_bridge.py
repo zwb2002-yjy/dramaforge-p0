@@ -290,11 +290,12 @@ async def test_resolver_returns_system_text_model(
     """The default registry's system default for text.generate is the LiteLLM
     text model (spec §15 system-default tier)."""
     resolver = ModelBindingResolver(session)
-    resolved = await resolver.resolve(
-        workspace_id=uuid4(),
-        project_id=None,
-        slot=ModelSlot.PLANNING_SCRIPT,
-        capability=Capability.TEXT_GENERATE,
-    )
-    assert resolved.source == "system_default"
-    assert resolved.model_id == "litellm/script-quality"
+    from app.shared.errors import ValidationAppError
+
+    with pytest.raises(ValidationAppError):
+        await resolver.resolve(
+            workspace_id=uuid4(),
+            project_id=None,
+            slot=ModelSlot.PLANNING_SCRIPT,
+            capability=Capability.TEXT_GENERATE,
+        )

@@ -34,6 +34,11 @@ class DefaultModelSelector:
         if not candidates:
             raise UnsupportedCapabilityError(capability)
         if capability == Capability.TEXT_GENERATE:
+            managed = [m for m in candidates if m.manifest.metadata.get("gateway_reference")]
+            if managed:
+                if len(managed) != 1:
+                    raise UnknownModelError("explicit text model selection is required")
+                return managed[0]
             from app.config import get_settings
 
             configured = f"litellm/{get_settings().litellm_text_gateway_model}"

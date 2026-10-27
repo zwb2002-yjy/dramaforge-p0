@@ -161,6 +161,7 @@ async def test_query_and_preview_reject_cross_project_or_stale_inputs(
 
 async def test_query_current_media_binding_and_text_slot_are_distinct(
     session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.providers.model_profiles.slots import ModelSlot
     from app.providers.models import ProjectProviderBinding
@@ -181,10 +182,45 @@ async def test_query_current_media_binding_and_text_slot_are_distinct(
     assert report.selection == "current_binding"
     assert report.binding_id == binding.id
     assert report.report.model_id == "agnes/unit-agnes-video"
+    from uuid import uuid4
+
+    import httpx
+    from app.config import get_settings
+    from app.providers.litellm_gateway.management import GatewayManagementClient, GatewayModelWrite
+    from app.providers.litellm_gateway.management_service import GatewayModelService
+    from cryptography.fernet import Fernet
+    from test_gateway_model_management import ProxyFixture
+
+    cfg = get_settings().model_copy(
+        update={
+            "litellm_gateway_url": "http://proxy.internal:4000",
+            "litellm_api_key": "synthetic-data",
+            "litellm_model_admin_key": "restricted-model-admin",
+            "byok_fernet_key": Fernet.generate_key().decode(),
+            "byok_keyring": "",
+        }
+    )
+    manager = GatewayModelService(
+        session,
+        settings=cfg,
+        client=GatewayManagementClient(cfg, transport=httpx.MockTransport(ProxyFixture().handle)),
+    )
+    connection = await manager.register(
+        workspace_id=project.workspace_id,
+        actor=actor,
+        body=GatewayModelWrite(
+            request_id=uuid4(),
+            display_name="Inspection text",
+            base_url="https://physical.example/v1",
+            model_id="inspected-chat",
+            api_key="synthetic-upstream",
+        ),
+    )
+    monkeypatch.setattr("app.providers.workspace_credentials.get_settings", lambda: cfg)
     text = await service.get_model_capabilities(
         project_id=project.id,
         slot=ModelSlot.PLANNING_SCRIPT,
     )
     assert text.selection == "text_slot"
-    assert text.report.model_id.startswith("litellm/")
+    assert text.report.model_id == f"litellm/{connection.id}/{connection.gateway_ref['alias']}"
     assert text.report.controls["tool_calling"] == "unknown"

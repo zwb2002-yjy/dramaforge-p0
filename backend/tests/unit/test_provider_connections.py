@@ -30,7 +30,6 @@ async def test_workspace_connection_egress_blocks_private_dns_before_socket(
     from unittest.mock import AsyncMock
 
     import httpx
-    from app.providers.errors import ProviderError
     from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
     from app.providers.registry import ModelRegistry
 
@@ -84,12 +83,8 @@ async def test_workspace_connection_egress_blocks_private_dns_before_socket(
             session, workspace_id=workspace.id, base_registry=ModelRegistry()
         )
         registered = registry.get_or_none(f"litellm/{connection.id}/chat")
-        assert registered is not None
-        with pytest.raises(ProviderError, match="PROVIDER_EGRESS_PRIVATE_NOT_AUTHORIZED"):
-            await registered.adapter._client.chat_completion(
-                model="chat", payload={"messages": [{"role": "user", "content": "fixture"}]}
-            )
-    assert resolved_hosts == ["provider.example.test"]
+        assert registered is None  # Historical discovery cannot open a new direct text path.
+    assert resolved_hosts == (["provider.example.test"] if operation == "probe" else [])
     connect.assert_not_awaited()
 
 
@@ -249,26 +244,22 @@ async def test_text_catalog_uses_the_same_normalized_url_and_own_key_as_litellm(
     assert (
         await _connection_read(service, renamed)
     ).connection_revision_id == original.connection_revision_id
-    changed = await service.update_connection(
-        workspace_id=workspace.id,
-        connection_id=connection.id,
-        actor=user,
-        base_url="https://other-text.example.test/v1",
-        display_name=None,
-        enabled=None,
-    )
-    changed_read = await _connection_read(service, changed)
-    assert changed_read.connection_revision_id != historical.connection_revision_id
-    assert changed_read.verification_status == "unverified"
-    rotated = await service.update_credential(
-        workspace_id=workspace.id,
-        connection_id=connection.id,
-        actor=user,
-        api_key="rotated-fixture",
-    )
-    assert (
-        await _connection_read(service, rotated)
-    ).connection_revision_id != changed_read.connection_revision_id
+    with pytest.raises(ValidationAppError, match="Proxy"):
+        await service.update_connection(
+            workspace_id=workspace.id,
+            connection_id=connection.id,
+            actor=user,
+            base_url="https://other-text.example.test/v1",
+            display_name=None,
+            enabled=None,
+        )
+    with pytest.raises(ValidationAppError, match="Proxy"):
+        await service.update_credential(
+            workspace_id=workspace.id,
+            connection_id=connection.id,
+            actor=user,
+            api_key="rotated-fixture",
+        )
     assert _probe_read(evidence) == historical
     assert len(requests) == 1
 
@@ -325,7 +316,7 @@ async def test_text_registry_uses_current_auth_projection_and_preserves_evidence
 
     passed = await probe()
     assert passed.status == "passed"
-    assert await registered()
+    assert not await registered()
     passed.tested_at -= timedelta(minutes=1)
     await session.flush()
     response = (
@@ -337,14 +328,14 @@ async def test_text_registry_uses_current_auth_projection_and_preserves_evidence
     assert failed.status == "failed"
     revoked = failure in {401, 403}
     assert connection.verification_status == ("failed" if revoked else "verified")
-    assert await registered() is not revoked
+    assert not await registered()
     history = list(await session.scalars(select(ProviderCapabilityEvidence)))
     assert {item.id for item in history} == {passed.id, failed.id}
     failed.tested_at -= timedelta(minutes=1)
     await session.flush()
     response = httpx.Response(200, json={"data": [{"id": "chat"}]})
     assert (await probe()).status == "passed"
-    assert await registered()
+    assert not await registered()
 
 
 @pytest.mark.asyncio
@@ -396,21 +387,12 @@ async def test_same_named_text_models_keep_connection_and_credentials_separate(
         workspace_id=workspace.id,
         base_registry=ModelRegistry(),
     )
-    models = [registry.get(f"litellm/{connection.id}/same-model") for connection in connections]
-    assert models[0].manifest.id != models[1].manifest.id
+    assert registry.list_models() == []
     assert connections[0].credential_id != connections[1].credential_id
-    assert all(model.manifest.model_name == "same-model" for model in models)
-    assert {model.manifest.metadata["connection_id"] for model in models} == {
-        str(connection.id) for connection in connections
+    assert {c.base_url for c in connections} == {
+        "https://a.example.test/v1",
+        "https://b.example.test/v1",
     }
-    # The same alias on two connections stays distinguishable in pickers.
-    assert {model.manifest.display_name.rsplit(" · ", 1)[-1] for model in models} == {"a", "b"}
-    for label, model in zip(("a", "b"), models, strict=True):
-        # The adapter receives this text connection's settings, never the
-        # selected media provider's address or credential.
-        assert model.adapter is not None
-        assert model.adapter._settings.litellm_gateway_url == f"https://{label}.example.test/v1"
-        assert model.adapter._settings.litellm_api_key == f"secret-{label}"
 
 
 @pytest.mark.asyncio

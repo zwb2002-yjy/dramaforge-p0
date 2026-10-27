@@ -18,7 +18,27 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 
 @pytest.fixture()
-def api() -> Iterator[tuple[TestClient, Any]]:
+def api(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[TestClient, Any]]:
+    import httpx
+    from app.providers.litellm_gateway.management import GatewayManagementClient
+    from app.providers.litellm_gateway.management_service import GatewayModelService
+    from cryptography.fernet import Fernet
+    from test_gateway_model_management import ProxyFixture
+
+    monkeypatch.setenv("LITELLM_GATEWAY_URL", "http://proxy.internal:4000")
+    monkeypatch.setenv("LITELLM_API_KEY", "synthetic-internal-data-key")
+    monkeypatch.setenv("LITELLM_MODEL_ADMIN_KEY", "restricted-model-admin")
+    monkeypatch.setenv("BYOK_FERNET_KEY", Fernet.generate_key().decode())
+    remote = ProxyFixture()
+    monkeypatch.setattr(
+        GatewayModelService,
+        "client",
+        property(
+            lambda self: GatewayManagementClient(
+                get_settings(), transport=httpx.MockTransport(remote.handle)
+            )
+        ),
+    )
     clear_settings_cache()
     from sqlalchemy.pool import StaticPool
 
@@ -78,6 +98,23 @@ def _register(client: TestClient) -> str:
     return workspace_id
 
 
+def _managed_text(client: TestClient, workspace_id: str) -> str:
+    response = client.post(
+        f"/api/v1/workspaces/{workspace_id}/provider-connections/gateway",
+        json={
+            "request_id": str(uuid4()),
+            "display_name": "Profile text",
+            "base_url": "https://physical.example/v1",
+            "model_id": "profile-chat",
+            "api_key": "synthetic-upstream",
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert response.status_code == 201, response.text
+    row = response.json()
+    return f"litellm/{row['id']}/{row['gateway_ref']['alias']}"
+
+
 def _create_project(client: TestClient, workspace_id: str) -> str:
     project = client.post(
         "/api/v1/projects",
@@ -112,11 +149,12 @@ def test_model_slots_api(api: tuple[TestClient, Any]) -> None:
 def test_workspace_profile_crud_and_simple_mode(api: tuple[TestClient, Any]) -> None:
     client, _ = api
     workspace_id = _register(client)
+    text_id = _managed_text(client, workspace_id)
     created = client.post(
         f"/api/v1/workspaces/{workspace_id}/model-profiles",
         json={
             "name": "默认方案",
-            "bindings": {"planning.script": {"model_id": "litellm/script-quality"}},
+            "bindings": {"planning.script": {"model_id": text_id}},
             "is_default": True,
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -124,13 +162,13 @@ def test_workspace_profile_crud_and_simple_mode(api: tuple[TestClient, Any]) -> 
     assert created.status_code == 201, created.text
     profile = created.json()
     assert profile["version"] == 1
-    assert profile["bindings"]["planning.script"]["model_id"] == "litellm/script-quality"
+    assert profile["bindings"]["planning.script"]["model_id"] == text_id
 
     # simple mode batch patch (LLM / Image / Video → slot groups)
     simple = client.post(
         f"/api/v1/workspaces/{workspace_id}/model-profiles/{profile['id']}/simple-mode",
         json={
-            "llm_model_id": "litellm/script-quality",
+            "llm_model_id": text_id,
             "expected_version": 1,
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -138,8 +176,8 @@ def test_workspace_profile_crud_and_simple_mode(api: tuple[TestClient, Any]) -> 
     assert simple.status_code == 200, simple.text
     updated = simple.json()
     assert updated["version"] == 2
-    assert updated["bindings"]["planning.brief"]["model_id"] == "litellm/script-quality"
-    assert updated["bindings"]["planning.script"]["model_id"] == "litellm/script-quality"
+    assert updated["bindings"]["planning.brief"]["model_id"] == text_id
+    assert updated["bindings"]["planning.script"]["model_id"] == text_id
 
     # version conflict
     conflict = client.put(
@@ -192,12 +230,13 @@ def test_effective_bindings_and_generation_slot_resolution(
 ) -> None:
     client, factory = api
     workspace_id = _register(client)
+    text_id = _managed_text(client, workspace_id)
     project_id = _create_project(client, workspace_id)
     client.post(
         f"/api/v1/workspaces/{workspace_id}/model-profiles",
         json={
             "name": "默认方案",
-            "bindings": {"planning.script": {"model_id": "litellm/script-quality"}},
+            "bindings": {"planning.script": {"model_id": text_id}},
             "is_default": True,
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -206,7 +245,7 @@ def test_effective_bindings_and_generation_slot_resolution(
     effective = client.get(f"/api/v1/projects/{project_id}/model-bindings/effective")
     assert effective.status_code == 200, effective.text
     keyframe = next(b for b in effective.json() if b["slot"] == "planning.script")
-    assert keyframe["model_id"] == "litellm/script-quality"
+    assert keyframe["model_id"] == text_id
     assert keyframe["source"] == "workspace_profile"
 
     # A logical profile selection is not yet an executable provider binding.
@@ -260,14 +299,20 @@ def test_effective_preview_retains_saved_workspace_media_and_text_identities(
 ) -> None:
     import httpx
     from app.access.models import Project, User
-    from app.providers.connection_service import ProviderConnectionService
+    from app.config import get_settings
+    from app.providers.litellm_gateway.management import GatewayManagementClient, GatewayModelWrite
+    from app.providers.litellm_gateway.management_service import GatewayModelService
     from app.providers.models import ProviderModelBinding
     from cryptography.fernet import Fernet
     from model_infra_fixture import seed_model_infra
     from sqlalchemy import select
+    from test_gateway_model_management import ProxyFixture
 
     monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
     monkeypatch.setenv("BYOK_KEYRING", f"v1:{Fernet.generate_key().decode('ascii')}")
+    monkeypatch.setenv("LITELLM_GATEWAY_URL", "http://proxy.internal:4000")
+    monkeypatch.setenv("LITELLM_API_KEY", "synthetic-internal-data-key")
+    monkeypatch.setenv("LITELLM_MODEL_ADMIN_KEY", "restricted-model-admin")
     clear_settings_cache()
     client, factory = api
     workspace_id = _register(client)
@@ -293,25 +338,25 @@ def test_effective_preview_retains_saved_workspace_media_and_text_identities(
                 }
                 for item in media
             }
-            service = ProviderConnectionService(session)
-            connection = await service.create_connection(
-                workspace_id=project.workspace_id,
-                actor=user,
-                display_name="Preview text",
-                api_key="test-only-key",
-                enabled=True,
-                provider_type="litellm",
-                protocol_profile="openai_chat_v1",
-                base_url="https://preview.example.test/v1",
+            service = GatewayModelService(
+                session,
+                client=GatewayManagementClient(
+                    get_settings(), transport=httpx.MockTransport(ProxyFixture().handle)
+                ),
             )
-            await service.probe(
+            connection = await service.register(
                 workspace_id=project.workspace_id,
-                connection_id=connection.id,
                 actor=user,
-                capability="auth_models",
+                body=GatewayModelWrite(
+                    request_id=uuid4(),
+                    display_name="Preview text",
+                    api_key="test-only-upstream-key",
+                    model_id="preview-chat",
+                    base_url="https://preview.example.test/v1",
+                ),
             )
             bindings["planning.script"] = {
-                "model_id": f"litellm/{connection.id}/preview-chat"
+                "model_id": f"litellm/{connection.id}/{connection.gateway_ref['alias']}"
             }
             await session.commit()
             return bindings
@@ -481,12 +526,13 @@ def test_batch_dispatch_contract_bounds_operation_count_without_money() -> None:
 def test_project_profile_snapshot_on_first_write(api: tuple[TestClient, Any]) -> None:
     client, _ = api
     workspace_id = _register(client)
+    text_id = _managed_text(client, workspace_id)
     project_id = _create_project(client, workspace_id)
     client.post(
         f"/api/v1/workspaces/{workspace_id}/model-profiles",
         json={
             "name": "默认方案",
-            "bindings": {"planning.script": {"model_id": "litellm/script-quality"}},
+            "bindings": {"planning.script": {"model_id": text_id}},
             "is_default": True,
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -500,7 +546,7 @@ def test_project_profile_snapshot_on_first_write(api: tuple[TestClient, Any]) ->
     assert put.status_code == 200, put.text
     profile = put.json()
     assert profile["project_id"] == project_id
-    assert profile["bindings"]["planning.script"]["model_id"] == "litellm/script-quality"
+    assert profile["bindings"]["planning.script"]["model_id"] == text_id
 
     got = client.get(f"/api/v1/projects/{project_id}/model-profile")
     assert got.status_code == 200, got.text

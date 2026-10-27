@@ -223,12 +223,22 @@ async def test_missing_checkpoint_rejects_before_text_call_or_turn_write(
 
     async def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
-        candidate = _valid_candidate(request) if entrypoint == "suggestion" else {
-            "base_shot_version": shot.version, "scope": "shot", "category": "CAMERA_MOTION",
-            "current_state": "Static", "suggested_change": "Keep static", "reason": "Restraint",
-            "expected_effect": "Stillness", "risk": "Less movement", "affected_facts": [],
-            "typed_operations": [],
-        }
+        candidate = (
+            _valid_candidate(request)
+            if entrypoint == "suggestion"
+            else {
+                "base_shot_version": shot.version,
+                "scope": "shot",
+                "category": "CAMERA_MOTION",
+                "current_state": "Static",
+                "suggested_change": "Keep static",
+                "reason": "Restraint",
+                "expected_effect": "Stillness",
+                "risk": "Less movement",
+                "affected_facts": [],
+                "typed_operations": [],
+            }
+        )
         return httpx.Response(
             200, json={"choices": [{"message": {"content": json.dumps(candidate)}}]}
         )
@@ -243,10 +253,13 @@ async def test_missing_checkpoint_rejects_before_text_call_or_turn_write(
             )
         else:
             await DirectorRecommendationService(session, text_transport=transport).recommend(
-                project_id=project.id, actor=user,
+                project_id=project.id,
+                actor=user,
                 request=DirectorRecommendationRequest(
-                    scene_id=scene.id, shot_id=shot.id,
-                    expected_shot_version=shot.version, request_key="missing-checkpoint",
+                    scene_id=scene.id,
+                    shot_id=shot.id,
+                    expected_shot_version=shot.version,
+                    request_key="missing-checkpoint",
                 ),
             )
     assert exc.value.details["code"] == "DIRECTOR_CHECKPOINT_NOT_CONFIGURED"
@@ -778,3 +791,89 @@ async def test_manual_blocks_proactive_text_but_preserves_explicit_user_requests
         request=_request(scene, shot, key="manual:explicit"),
     )
     assert len(calls) == 1
+
+
+async def test_prepared_text_without_invocation_requires_explicit_rebuild(session):
+    from sqlalchemy import delete
+
+    user, project, scene, shot, _ = await _seed(session)
+    sent = []
+
+    async def handler(request):
+        sent.append(request)
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}]}
+        )
+
+    service = ShotDirectorSuggestionService(
+        session, text_transport=DirectorTextTransport(session, registry=_registry(handler))
+    )
+    request = _request(scene, shot, key="prepared-historical-text")
+    first = await service.suggest(project_id=project.id, actor=user, request=request)
+    turn_id = first.director_evidence.turn_id
+    await session.execute(delete(DirectorInvocation).where(DirectorInvocation.turn_id == turn_id))
+    await session.execute(
+        update(DirectorTurn)
+        .where(DirectorTurn.id == turn_id)
+        .values(
+            status="thinking", transport_status="prepared", output_hash=None, output_snapshot={}
+        )
+    )
+    await session.commit()
+    with pytest.raises(ConflictError) as error:
+        await service.suggest(project_id=project.id, actor=user, request=request)
+    assert error.value.details["code"] == "DIRECTOR_TEXT_REQUIRES_REVIEW"
+    assert len(sent) == 1
+
+
+@pytest.mark.parametrize("outcome", ["pre_send", "possible_send", "success_after_retry"])
+async def test_transport_attempt_evidence_is_durable_and_separate_from_schema_repair(
+    session, outcome
+):
+    user, project, scene, shot, _ = await _seed(session)
+    calls = 0
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        if outcome == "pre_send" or (outcome == "success_after_retry" and calls == 1):
+            raise httpx.ConnectError("synthetic pre-send", request=request)
+        if outcome == "possible_send":
+            raise httpx.ReadTimeout("synthetic response loss", request=request)
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}]}
+        )
+
+    service = ShotDirectorSuggestionService(
+        session, text_transport=DirectorTextTransport(session, registry=_registry(handler))
+    )
+    request = _request(scene, shot, key="transport-evidence:" + outcome)
+    if outcome == "success_after_retry":
+        await service.suggest(project_id=project.id, actor=user, request=request)
+    else:
+        with pytest.raises(ValidationAppError):
+            await service.suggest(project_id=project.id, actor=user, request=request)
+    invocation = (await session.scalars(select(DirectorInvocation))).one()
+    expected = 1 if outcome == "possible_send" else 2
+    assert calls == expected
+    assert invocation.response_summary["df_proxy_transport_attempts"] == expected
+    assert (
+        invocation.response_summary["df_proxy_failure_phase"]
+        == {
+            "pre_send": "df_proxy_pre_send",
+            "possible_send": "df_proxy_possible_send",
+            "success_after_retry": None,
+        }[outcome]
+    )
+    assert invocation.invocation_key == "text:primary:1"
+    if outcome == "success_after_retry":
+        await service.suggest(project_id=project.id, actor=user, request=request)
+    else:
+        await _assert_stored_failure(service, project, user, request)
+    assert calls == expected
+
+
+async def _assert_stored_failure(service, project, user, request):
+    with pytest.raises(ConflictError) as error:
+        await service.suggest(project_id=project.id, actor=user, request=request)
+    assert error.value.details["code"] == "DIRECTOR_TURN_NOT_REUSABLE"

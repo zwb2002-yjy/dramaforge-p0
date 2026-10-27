@@ -539,21 +539,17 @@ class ProductionModelProfileService:
             .all()
         )
         configured: set[str] = set(rows)
-        # The LiteLLM gateway is configured via settings, not a ProviderConnection
-        # (spec §113), so its text model must not display as unconfigured.
-        from app.config import get_settings
-
-        settings = get_settings()
-        litellm_configured = bool(
-            settings.litellm_gateway_url.strip() and settings.litellm_api_key.strip()
-        )
         result: dict[str, BindingRead] = {}
         for slot, binding in bindings.items():
             model = self._registry.get_or_none(binding.model_id)
             provider_id = model.manifest.provider_id if model is not None else ""
             display_name = model.manifest.display_name if model is not None else binding.model_id
             is_configured = (
-                ("litellm" in configured or litellm_configured)
+                (
+                    model is not None
+                    and model.adapter is not None
+                    and not model.manifest.metadata.get("new_create_blocker")
+                )
                 if provider_id == "litellm"
                 else provider_id in configured
             )

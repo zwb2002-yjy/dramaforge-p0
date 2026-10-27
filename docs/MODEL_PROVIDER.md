@@ -217,8 +217,8 @@ OpenAI 兼容 Chat 连接，发现的别名直接成为 `litellm/{connection_id}
 
 媒体由统一的 Compiler 构造请求、Provider Runtime 执行；`ModelAdapter` 复用这些合同。
 文本由 `litellm_adapter.py` 的 `LiteLLMModelAdapter` 构造 Chat 请求，经
-`LiteLLMGatewayClient` 提交。默认 Compose 包含官方 LiteLLM Proxy；文本连接界面也接受
-OpenAI 兼容端点，不代表配置任意 URL 后都会先经过本地 Proxy。
+`LiteLLMGatewayClient` 向唯一内部 Proxy 提交；上游兼容端点由受限管理 API 写入 Proxy DB，
+工作空间的 URL 不再作为新文本生产请求的直接目标。
 固定契约 fixture 在 `fixtures/providers/contracts/`（由
 `backend/tests/unit/test_provider_catalog.py` 校验）。
 
@@ -325,26 +325,21 @@ BF16 或量化权重只要由同一 SGLang H3 协议提供相同分区能力，�
 
 ## 文本凭证边界
 
-文本设置页使用工作空间级 `litellm/openai_chat_v1` 连接保存 URL / Key 的加密 revision。
-`workspace_registry.py` 先复制进程静态模型，仅在连接当前认证投影为 `verified` 时，
-为当前 connection / credential revision 的成功目录 evidence 中模型注册
-`litellm/<connection-UUID>/<remote-model-id>` 动态 adapter。当前 401/403 撤销资格，历史成功
-evidence 仍保留；429、超时与空目录不单独撤销既有认证。用户在工作空间 / 项目模型方案中
-选择具体模型；生效预览也加载这一空间 registry，保留具体 Binding 与文本连接身份。
-媒体 BYOK 同样使用 `ProviderConnection` 及其不可变 credential revision。
+新文本连接保存内部 Proxy 数据凭据及非秘密 `gateway_ref`，上游 Key 仅由 Proxy 持有。
+仅 `gateway_registered` 且当前 Revision 与 ready 引用一致时注册
+`litellm/<connection-UUID>/<versioned-alias>`。每次请求携带固定部署 UUID、工作空间、
+连接、配置哈希及 Key 修订；Proxy 在同一锁中检查并执行，Key 轮换使旧冻结修订显式失败。
+多条可用文本连接必须显式选择；不按列表排序改用其他模型。目录发现仅提供可见性，
+不授予 Chat、工具、流式或结构化输出能力。`chat_text_v1` 是管理员显式选定的保守 Chat 合同。
 
-**当前实现限制**：静态 `script-quality` / `script-fast` 等模型仍使用部署级
-`LITELLM_GATEWAY_URL` / `LITELLM_API_KEY`；发现同名 alias 时连接身份仍独立注册，
-不会把该静态 adapter 改绑到工作空间连接。配置摘要仍把部署环境视为文本已配置
-的来源之一。此调用路径存在来源混淆风险，不能据此声称已经发生凭证泄漏，也不能把
-“工作空间 URL / Key 已保存”当作所有文本模型均使用它的证明。
+历史直连和静态 `script-quality` / `script-fast` 不参与新生产注册；已有 Profile 不自动改绑。
+历史结果、凭据与修订继续可读。已 prepared 且未提交的持久文本执行要求人工重建并使用
+新请求键，不在重启时重新解析新模型。已提交但未知的 Invocation 继续禁止重放。
 
-目标是工作空间、显式部署连接及历史模型各有明确来源，选择后不静默切换；具体迁移与
-验收见下文 MP-01、MP-09。经 LiteLLM Proxy 的文本请求由 Proxy 路由上游；直接连接
-兼容端点的请求不由本地 Proxy 接管。两者共用文本 HTTP 合同。
-
-文本连接的免费目录读取与 LiteLLM 文本客户端复用 `normalize_models_url`，接受带或
-不带 `/v1` 的 Base URL，不再重复拼接版本段。
+仅 DF→Proxy 的 ConnectError、ConnectTimeout、PoolTimeout 能证明本次尚未发送，最多
+同一 URL/部署重试一次；429/503/408、读写错误、响应丢失不自动重发。Proxy→上游重试为零。
+`df_proxy_transport_attempts` 与 Proxy 回执重试数分开记录。当前客户端不开放 SSE；业务
+JSON 修复仍单独记录 Invocation，不能由传输错误触发。
 
 ## 连接目标的两道 egress 门（当前实现）
 
@@ -536,7 +531,7 @@ create。能力边界细节见 [PRODUCTION_RUNTIME.md](PRODUCTION_RUNTIME.md)。
 
 | 当前实现 | 对目标的缺口 | 代码依据 |
 | --- | --- | --- |
-| 文本发现统一注册 Chat 能力，同名静态 alias 不替换 adapter | 目录分类及空间/部署来源尚不满足 MP-03、MP-09 | `litellm_gateway/workspace_registry.py`、`litellm_gateway/model_catalog.py` |
+| 文本发现仅可见；新文本生产只使用空间拥有的版本化 Proxy 引用，静态/历史直连不参与新执行 | 真实上游能力与账号实测仍须独立证据 | `litellm_gateway/workspace_registry.py`、`litellm_gateway/model_catalog.py` |
 | Workbench 已在 execution-plan 返回只读 Compiler 脱敏 wire 投影及确认指纹，受理和 Worker 在付费提交前复核同源编译；创意上下文仍经既有 Prompt 组装 | 临时素材传输值仅在 Worker 晚绑定；尚无真实账号/付费发送端到端证明，Prompt 策略及跨供应商映射证据仍需统一 | `providers/compile_preview.py`、`production/workbench_execution.py`、`production/application/commands.py`、`execution/media_submission.py` |
 | 编译器摘要字段形状不同，执行层从摘要顶层读取生效参数 | wire 已有参数仍可能在统一转换记录中缺失 | `providers/minimax.py::MiniMaxVideoCompiler`、`providers/openai_compatible_media.py`、`execution/media_submission.py` |
 | ProbeRequest 只有布尔付费确认，后端拒绝派发计费探测 | 受控首次验证授权尚未交付 | `api/v1/provider_connections.py::ProbeRequest`、`connection_service.py::probe` |
@@ -802,23 +797,22 @@ Key 已配置”。空间模型与部署 alias 同名不共享 adapter 身份。
 可用；关闭空间连接时部署连接的授权状态不受伪造。迁移 fixture 的歧义项只读可见，
 新执行阻止。真实验证对比供应商回执可提供的实际身份，缺失则标未确认而非推断。
 
-### MP-10 保留单一文本 HTTP 合同，LiteLLM Proxy 可选
+### MP-10 单一文本 HTTP 合同，内部 LiteLLM Proxy 必经
 
 **规范**：沿用 `LiteLLMModelAdapter` / `LiteLLMGatewayClient` 的文本 HTTP 合同；
-用户可显式选择兼容 Chat 端点或已部署的 LiteLLM Proxy。Proxy 负责其上游适配和所
+管理员通过受限服务端入口将兼容 Chat 端点登记到内部 Proxy。Proxy 负责其上游适配和所
 配置的配额/路由能力；DramaForge 负责空间身份、提案、授权与生产记录。不为此改造
 增加进程内 litellm SDK，也不同时维护 SDK 与 Proxy 两条选择规则。
 
-**边界**：默认 Compose 当前启用 Proxy 和其数据库；目标是将本地 Proxy 作为明确
-可选的部署能力，并按当前未发布合同直接更新部署。直接兼容端点不要求额外启动本地
-Proxy/数据库，Proxy 停止不影响项目浏览、手工编辑与明确使用直连的请求。直连仅
-支持已经声明的 Chat 协议；Responses、原生鉴权、工具调用或媒体 endpoint 不会因
+**边界**：Compose 启用唯一 Proxy 和其数据库；所有新 LLM 请求必须经过它。
+Proxy 停止不影响项目浏览、手工编辑，文本生成明确不可用，不回退直连。当前仅
+支持已声明的 Chat 合同；Responses、原生鉴权、工具调用或媒体 endpoint 不会因
 接入 LiteLLM 自动变成已支持能力。媒体继续按自身 compiler/runtime 与异步合同执行。
 不得复活退役的 `TEXT_LLM_*` 配置。部署配置细节由 [DEPLOYMENT.md](DEPLOYMENT.md)
 维护，资源验收见 [PRODUCTION_RUNTIME.md](PRODUCTION_RUNTIME.md)。
 
-**验收**：离线同一文本语义请求经直连和 Proxy fixture 都保留选定模型及错误语义；
-可选 Proxy 未启动时，浏览/编辑和直连测试通过，显式 Proxy 请求返回服务不可达且
+**验收**：受控 fixture 经过真实锁定 Proxy 保留选定的部署引用及错误语义；
+Proxy 未启动时，浏览/编辑可用，文本请求返回服务不可达且
 不回退。依赖检查确认未引入 SDK；部署迁移不移除旧实例的有效凭证/模型配置。
 真实 Proxy 集成测试与真实上游模型实测分开记结果，mock upstream 不能冒称付费
 供应商已通过。

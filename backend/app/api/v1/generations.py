@@ -139,7 +139,10 @@ async def list_models(
                 else bool(model.manifest.metadata.get("binding_id"))
             ),
             available=(
-                (bool(model.manifest.metadata.get("connection_id")) or litellm_configured)
+                (
+                    (bool(model.manifest.metadata.get("connection_id")) or litellm_configured)
+                    and not model.manifest.metadata.get("new_create_blocker")
+                )
                 if model.manifest.provider_id == "litellm"
                 else bool(model.manifest.metadata.get("binding_id"))
                 and bool(model.manifest.metadata.get("account_verified"))

@@ -7,21 +7,24 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.providers.capabilities import Capability
 from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_publication import catalog_new_create_blocker
-from app.providers.egress import guarded_provider_transport
 from app.providers.litellm_adapter import LiteLLMModelAdapter
+from app.providers.litellm_gateway.management import GatewayReference
 from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
 from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
 from app.providers.models import (
-    ProviderCapabilityEvidence,
     ProviderConnection,
     ProviderConnectionRevision,
     ProviderModelBinding,
 )
 from app.providers.registry import ModelRegistry
-from app.providers.workspace_credentials import runtime_text_gateway_settings
+from app.providers.workspace_credentials import (
+    WorkspaceCredentialConfigurationError,
+    runtime_text_gateway_settings,
+)
 
 
 async def workspace_model_registry(
@@ -37,6 +40,8 @@ async def workspace_model_registry(
     """
     registry = ModelRegistry()
     for installed in base_registry.list_models():
+        if Capability.TEXT_GENERATE in installed.manifest.capability_specs:
+            continue  # Legacy/static text identities remain historical, never new production.
         registry.register(installed.manifest, installed.adapter)
     connections = list(
         (
@@ -46,7 +51,8 @@ async def workspace_model_registry(
                     ProviderConnection.provider_type == "litellm",
                     ProviderConnection.protocol_profile == "openai_chat_v1",
                     ProviderConnection.enabled.is_(True),
-                    ProviderConnection.verification_status == "verified",
+                    ProviderConnection.verification_status == "gateway_registered",
+                    ProviderConnection.gateway_ref.is_not(None),
                 )
             )
         ).all()
@@ -58,31 +64,26 @@ async def workspace_model_registry(
             .order_by(ProviderConnectionRevision.revision_no.desc())
             .limit(1)
         )
-        if revision is None:
+        reference = GatewayReference.model_validate(connection.gateway_ref)
+        if (
+            revision is None
+            or reference.state != "ready"
+            or revision.gateway_ref != connection.gateway_ref
+        ):
             continue
-        evidence = await session.scalar(
-            select(ProviderCapabilityEvidence)
-            .where(
-                ProviderCapabilityEvidence.connection_id == connection.id,
-                ProviderCapabilityEvidence.capability == "auth_models",
-                ProviderCapabilityEvidence.status == "passed",
-                ProviderCapabilityEvidence.connection_revision_id == revision.id,
-                ProviderCapabilityEvidence.credential_revision == connection.credential_revision,
-            )
-            .order_by(ProviderCapabilityEvidence.tested_at.desc())
-            .limit(1)
-        )
-        if evidence is None:
-            continue
-        settings = await runtime_text_gateway_settings(session, connection=connection)
-        for alias in evidence.discovered_model_ids or []:
+        try:
+            settings = await runtime_text_gateway_settings(session, connection=connection)
+        except WorkspaceCredentialConfigurationError:
+            settings = None  # Surface this model as unavailable without blocking media/browsing.
+        for alias in (reference.alias,):
             logical = litellm_logical_manifest(alias)
             manifest = logical.model_copy(
                 update={
                     "id": f"litellm/{connection.id}/{alias}",
                     # Several text connections may expose the same alias; the
                     # connection name keeps their choices distinguishable.
-                    "display_name": f"{logical.display_name} · {connection.display_name}",
+                    "display_name": f"{reference.remote_model_id} · {connection.display_name}",
+                    "model_name": reference.remote_model_id,
                 }
             )
             manifest.metadata.update(
@@ -90,6 +91,9 @@ async def workspace_model_registry(
                     "connection_id": str(connection.id),
                     "connection_revision_id": str(revision.id),
                     "credential_revision_id": str(revision.credential_revision_id),
+                    "gateway_reference": reference.execution_reference(),
+                    "contract_profile": reference.contract_profile,
+                    "new_create_blocker": None if settings else "GATEWAY_DATA_PLANE_CHANGED",
                 }
             )
             if registry.get_or_none(manifest.id) is None:
@@ -98,8 +102,9 @@ async def workspace_model_registry(
                     LiteLLMModelAdapter(
                         manifest,
                         settings=settings,
-                        transport=guarded_provider_transport(settings=settings),
-                    ),
+                    )
+                    if settings
+                    else None,
                 )
     bound_media = (
         await session.execute(

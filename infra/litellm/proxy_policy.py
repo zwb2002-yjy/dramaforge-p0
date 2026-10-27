@@ -91,6 +91,14 @@ def _install_creation_boundary():
         async with model_lock(identifier):
             entry = _deployment(identifier)
             info = entry.get("model_info", {})
+            if not info.get("df_managed"):
+                import hmac
+                import os
+                # Retained aliases require a separately held trusted recovery
+                # context. Ordinary generation keys only execute managed refs.
+                bearer = request.headers.get("authorization", "").removeprefix("Bearer ")
+                if not hmac.compare_digest(bearer, os.environ.get("LITELLM_MASTER_KEY", "")):
+                    raise HTTPException(409, "Legacy model requires an explicit managed migration")
             if info.get("df_managed"):
                 metadata = body.get("metadata", {})
                 if not isinstance(metadata, dict) or not isinstance(metadata.get("dramaforge_execution", {}), dict):

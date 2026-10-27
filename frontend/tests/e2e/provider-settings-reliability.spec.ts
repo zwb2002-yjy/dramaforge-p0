@@ -230,7 +230,7 @@ test("text model management uses one explicit reference and preserves workspace 
       error_code: null,
     },
   };
-  const modelId = `litellm/${textConnection.id}/my-chat`;
+  const modelId = `litellm/${textConnection.id}/${textConnection.gateway_ref.alias}`;
   const creates: Record<string, unknown>[] = [];
   const saves: Record<string, unknown>[] = [];
   let connected = false;

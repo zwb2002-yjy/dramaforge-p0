@@ -254,7 +254,7 @@ class ProviderConnectionService:
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
         )
-        if connection.gateway_ref is not None and (
+        if connection.provider_type == "litellm" and (
             base_url is not None or protocol_profile is not None
         ):
             raise ValidationAppError("managed LLM targets require a new Proxy deployment version")
@@ -340,7 +340,7 @@ class ProviderConnectionService:
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
         )
-        if connection.gateway_ref is not None:
+        if connection.provider_type == "litellm":
             raise ValidationAppError("rotate the upstream key through Proxy model management")
         plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
         secret = api_key.strip()
