@@ -3,6 +3,7 @@ import { Check } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import {
+  ApiError,
   createProviderConnection,
   runProviderProbe,
   updateProviderConnection,
@@ -12,7 +13,7 @@ import {
   type ProviderProbeRead,
 } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
-import { Button, Dialog, Field, Input } from "../ui";
+import { Button, Dialog, Field, Input, Select } from "../ui";
 import { ModelPicker } from "./ModelPicker";
 import { GatewayModelEditor } from "./GatewayModelEditor";
 import { bindingBatchMessage, createBindings } from "./providerBindings";
@@ -20,7 +21,7 @@ import {
   catalogFailureText,
   probeErrorText,
   providerLabel,
-  isLocalServiceUrl,
+  pluginKey,
   type ModelChoice,
 } from "./providerSetup";
 
@@ -37,6 +38,7 @@ export function AddProviderDialog(props: Parameters<typeof MediaProviderDialog>[
   if (installed.length && installed.every((plugin) => plugin.kind === "text"))
     return (
       <GatewayModelEditor
+        defaultName={props.custom ? "" : undefined}
         workspaceId={props.workspaceId}
         inline={props.inline}
         onClose={props.onClose}
@@ -78,10 +80,13 @@ function MediaProviderDialog({
         .sort((left, right) => (left.kind === right.kind ? 0 : left.kind === "media" ? -1 : 1)),
     [plugins],
   );
-  const plugin = ordered[0] ?? null;
+  const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
+  const plugin = ordered.find((item) => pluginKey(item) === selectedProfile) ?? ordered[0] ?? null;
   const [name, setName] = useState<string | null>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
+  const [requestedAuth, setRequestedAuth] = useState<"bearer" | "none">("bearer");
+  const [unknownSave, setUnknownSave] = useState(false);
   const [connection, setConnection] = useState<ProviderConnectionRead | null>(null);
   const [catalog, setCatalog] = useState<ProviderProbeRead | null>(null);
   const [phase, setPhase] = useState<Phase>("connect");
@@ -95,7 +100,7 @@ function MediaProviderDialog({
     connection?.base_url ??
     (custom || plugin?.kind === "text" ? "" : plugin?.default_base_url) ??
     "";
-  const localMiniMax = plugin?.provider_type === "minimax" && isLocalServiceUrl(urlValue);
+  const authMode = connection?.auth_mode ?? requestedAuth;
   const finish = () => (inline ? onClose(connection?.id) : setOpen(false));
 
   const refresh = async () => {
@@ -109,19 +114,39 @@ function MediaProviderDialog({
 
   const connect = useMutation({
     retry: false,
-    mutationFn: async () => {
+    mutationFn: async (manual: boolean) => {
       if (!plugin) throw new Error("请选择供应商");
-      if (localMiniMax) throw new Error("本地 MiniMax 请使用 OpenAI 兼容服务。");
       if (!urlValue.trim()) throw new Error("请填写服务地址");
       let saved = connection;
       if (!saved) {
-        if (!apiKey.trim()) throw new Error("请填写 API Key");
-        saved = await createProviderConnection(workspaceId, apiKey, {
-          provider_type: plugin.provider_type,
-          protocol_profile: plugin.protocol_profile,
-          display_name: nameValue.trim() || plugin.display_name,
-          base_url: urlValue.trim(),
-        });
+        if (unknownSave) throw new Error("保存结果待核验，请关闭并刷新连接列表。");
+        if (authMode === "bearer" && !apiKey.trim()) throw new Error("请填写 API Key");
+        setUnknownSave(true);
+        try {
+          saved = await createProviderConnection(
+            workspaceId,
+            authMode === "none" ? undefined : apiKey,
+            {
+              provider_type: plugin.provider_type,
+              protocol_profile: plugin.protocol_profile,
+              display_name: nameValue.trim() || plugin.display_name,
+              base_url: urlValue.trim(),
+              auth_mode: authMode,
+            },
+          );
+          setUnknownSave(false);
+        } catch (cause) {
+          if (
+            cause instanceof ApiError &&
+            cause.status >= 400 &&
+            cause.status < 500 &&
+            cause.status !== 408
+          ) {
+            setUnknownSave(false);
+            throw cause;
+          }
+          throw new Error("连接保存结果未知，请关闭并刷新连接列表核对后再操作。");
+        }
         onConnectionCreated?.(saved);
       } else {
         const patch: { display_name?: string; base_url?: string } = {};
@@ -140,7 +165,7 @@ function MediaProviderDialog({
       setApiKey("");
       setName(null);
       setUrl(null);
-      return runProviderProbe(workspaceId, saved.id, { capability: "auth_models" });
+      return manual ? null : runProviderProbe(workspaceId, saved.id, { capability: "auth_models" });
     },
     onMutate: () => {
       setError(null);
@@ -149,7 +174,10 @@ function MediaProviderDialog({
     onSettled: () => onBusyChange?.(false),
     onSuccess: async (probe) => {
       await refresh();
-      if (probe.status === "passed") {
+      if (probe === null) {
+        setCatalog(null);
+        setPhase("models");
+      } else if (probe.status === "passed") {
         setCatalog(probe);
         setPhase("models");
       } else {
@@ -191,6 +219,12 @@ function MediaProviderDialog({
   });
 
   const busy = connect.isPending || addModels.isPending;
+  const canConnect =
+    !busy &&
+    !unknownSave &&
+    !!plugin &&
+    !!urlValue.trim() &&
+    (!!connection || authMode === "none" || !!apiKey.trim());
   const isText = plugin?.kind === "text";
   const discoveredIds = catalog?.discovered_model_ids ?? [];
 
@@ -206,13 +240,16 @@ function MediaProviderDialog({
           tone="primary"
           data-testid="add-provider-connect"
           title="只读取模型列表，不产生生成费用"
-          disabled={
-            busy || !plugin || localMiniMax || !urlValue.trim() || (!connection && !apiKey.trim())
-          }
-          onClick={() => connect.mutate()}
+          disabled={!canConnect}
+          onClick={() => connect.mutate(false)}
         >
           {connect.isPending ? "正在连接…" : "连接并读取模型"}
         </Button>
+        {plugin?.manual_model_ids && (
+          <Button disabled={!canConnect} onClick={() => connect.mutate(true)}>
+            保存并手填模型
+          </Button>
+        )}
       </>
     ) : isText ? (
       <Button tone="primary" onClick={finish}>
@@ -244,14 +281,36 @@ function MediaProviderDialog({
               onKeyDown={(event) => {
                 if (event.key !== "Enter" || !(event.target instanceof HTMLInputElement)) return;
                 event.preventDefault();
-                if (!busy && !localMiniMax && urlValue.trim() && (connection || apiKey.trim()))
-                  connect.mutate();
+                if (canConnect) connect.mutate(false);
               }}
             >
               {inline && (
                 <header>
                   <h3>连接配置</h3>
                 </header>
+              )}
+              {ordered.length > 1 && (
+                <Field>
+                  调用协议
+                  <Select
+                    aria-label="调用协议"
+                    value={pluginKey(plugin)}
+                    disabled={busy || !!connection || unknownSave}
+                    onChange={(value) => {
+                      setSelectedProfile(value);
+                      setRequestedAuth("bearer");
+                      setApiKey("");
+                      setUrl(null);
+                      setChoices(new Map());
+                    }}
+                  >
+                    {ordered.map((item) => (
+                      <option key={pluginKey(item)} value={pluginKey(item)}>
+                        {item.display_name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
               )}
               <Field>
                 名称
@@ -274,19 +333,42 @@ function MediaProviderDialog({
                   onChange={(event) => setUrl(event.target.value)}
                 />
               </Field>
-              <Field>
-                API Key
-                <Input
-                  aria-label="API Key"
-                  type="password"
-                  autoComplete="new-password"
-                  value={apiKey}
-                  disabled={busy}
-                  placeholder={connection ? "已保存，留空不更换" : "粘贴密钥"}
-                  onChange={(event) => setApiKey(event.target.value)}
-                />
-              </Field>
-              {localMiniMax && <p role="alert">本地 MiniMax 请使用 OpenAI 兼容服务。</p>}
+              {(plugin.auth_modes ?? ["bearer"]).includes("none") && (
+                <Field>
+                  认证方式
+                  <Select
+                    aria-label="认证方式"
+                    value={authMode}
+                    disabled={busy || !!connection || unknownSave}
+                    onChange={(value) => {
+                      setRequestedAuth(value as "bearer" | "none");
+                      setApiKey("");
+                    }}
+                  >
+                    {(plugin.auth_modes ?? ["bearer"]).map((mode) => (
+                      <option key={mode} value={mode}>
+                        {mode === "none" ? "无需 Key" : "Bearer Key"}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
+              {authMode === "none" ? (
+                <p className="muted">无需 Key。目录读取不证明生成能力。</p>
+              ) : (
+                <Field>
+                  API Key
+                  <Input
+                    aria-label="API Key"
+                    type="password"
+                    autoComplete="new-password"
+                    value={apiKey}
+                    disabled={busy}
+                    placeholder={connection ? "已保存，留空不更换" : "粘贴密钥"}
+                    onChange={(event) => setApiKey(event.target.value)}
+                  />
+                </Field>
+              )}
             </div>
           ) : (
             <p className="muted">当前没有可添加的供应商。</p>

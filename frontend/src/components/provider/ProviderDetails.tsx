@@ -43,7 +43,7 @@ function bindingStatus(
   if (contract.new_create_blocker)
     return { tone: "warn", label: createBlockerLabel(contract.new_create_blocker) };
   if (!binding.account_verified) return { tone: "warn", label: "待验证" };
-  return { tone: "ok", label: "可用" };
+  return { tone: "ok", label: "目录可见" };
 }
 
 /** Configure the selected connection inline; discovery remains explicit. */
@@ -241,7 +241,7 @@ function LegacyProviderDetails({
           </Button>
         </div>
 
-        {picking && plugin && catalog ? (
+        {picking && plugin && (catalog || plugin.manual_model_ids) ? (
           <>
             <ModelPicker
               plugin={plugin}
@@ -305,23 +305,31 @@ function LegacyProviderDetails({
                   </Button>
                 </div>
               )}
-              <div className="df-manage-key">
-                <Field>
-                  API Key
-                  <Input
-                    aria-label="更换 API Key"
-                    type="password"
-                    autoComplete="new-password"
-                    value={apiKey}
-                    disabled={busy}
-                    placeholder={connection.credential_configured ? "已保存" : "输入 API Key"}
-                    onChange={(event) => setApiKey(event.target.value)}
-                  />
-                </Field>
-                <Button disabled={busy || !apiKey.trim()} onClick={() => rotateKey.mutate()}>
-                  更换 Key
-                </Button>
-              </div>
+              <p className="muted">
+                协议：{plugin?.display_name ?? connection.protocol_profile}
+                。目录认证与生成产物分别核验。
+              </p>
+              {connection.auth_mode === "none" ? (
+                <p className="muted">认证方式：无需 Key</p>
+              ) : (
+                <div className="df-manage-key">
+                  <Field>
+                    API Key
+                    <Input
+                      aria-label="更换 API Key"
+                      type="password"
+                      autoComplete="new-password"
+                      value={apiKey}
+                      disabled={busy}
+                      placeholder={connection.credential_configured ? "已保存" : "输入 API Key"}
+                      onChange={(event) => setApiKey(event.target.value)}
+                    />
+                  </Field>
+                  <Button disabled={busy || !apiKey.trim()} onClick={() => rotateKey.mutate()}>
+                    更换 Key
+                  </Button>
+                </div>
+              )}
             </section>
 
             <section className="df-manage-section" aria-label="模型">
@@ -345,6 +353,11 @@ function LegacyProviderDetails({
                   )}
                   {readCatalog.isPending ? "正在读取…" : isText ? "重新读取" : "添加模型"}
                 </Button>
+                {plugin?.manual_model_ids && (
+                  <Button disabled={busy || !connection.enabled} onClick={() => setPicking(true)}>
+                    手填模型
+                  </Button>
+                )}
               </header>
               {isText ? (
                 discoveredIds.length ? (
@@ -379,6 +392,20 @@ function LegacyProviderDetails({
                         <Icon size={16} aria-hidden="true" />
                         <span className="df-model-name">
                           <strong>{binding.model_id}</strong>
+                          <span className="df-model-facts">
+                            <span>
+                              {binding.contract_tested ? "协议合同已检验" : "协议合同待核验"}
+                            </span>
+                            <span>{binding.account_verified ? "当前目录可见" : "目录未验证"}</span>
+                            <span>
+                              {binding.generation_evidence?.connection_revision_id ===
+                                connection.connection_revision_id &&
+                              binding.generation_evidence.verified
+                                ? "生成产物已记录"
+                                : "真实生成待验证"}
+                            </span>
+                            <span>{binding.quality_gated ? "已有质量证据" : "质量未认证"}</span>
+                          </span>
                         </span>
                         <span className={`df-status ${state.tone}`}>{state.label}</span>
                         {activationButton(

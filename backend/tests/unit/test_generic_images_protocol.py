@@ -255,6 +255,12 @@ def test_admin_api_registers_two_models_without_catalog_or_code_changes(api, mon
         )
         assert manual.status_code == 201, manual.text
         assert manual.json()["account_verified"] is False
+        saved_bindings = client.get(root + f"/{row['id']}/model-bindings")
+        assert saved_bindings.status_code == 200, saved_bindings.text
+        assert saved_bindings.json()[0]["generation_evidence"] == {
+            "connection_revision_id": row["connection_revision_id"],
+            "verified": False,
+        }
         probed = client.post(
             root + f"/{row['id']}/probes",
             json={"capability": "auth_models"},
@@ -416,6 +422,10 @@ async def test_two_configured_models_produce_separate_artifacts_through_the_cano
             "red" if label == "alpha" else "blue"
         )
         await execute_media_node_run(session, node_run_id=run.id, store=store)
+        revision_id, generation_ids = await service.generation_verified_bindings(
+            workspace_id=project.workspace_id, connection_id=connection.id
+        )
+        assert revision_id == plan.connection_revision_id and generation_ids == {binding.id}
         # A lost synchronous response remains unrecoverable, but a deliberate
         # no-auth identity must never be reported as a missing encrypted key.
         from app.execution.provider_recovery_audit import inspect_provider_operation
@@ -430,6 +440,25 @@ async def test_two_configured_models_produce_separate_artifacts_through_the_cano
         assert "RESUME_TOKEN_UNAVAILABLE" in audit.blockers
         assert audit.as_dict()["provider_calls"] == 0
         assert not session.new and not session.dirty and not session.deleted
+        _, generation_ids = await service.generation_verified_bindings(
+            workspace_id=project.workspace_id, connection_id=connection.id
+        )
+        assert not generation_ids
+        # A successful old operation is retained, but cannot certify a newly
+        # edited endpoint under the same mutable connection ID.
+        operation.status = "succeeded"
+        await service.update_connection(
+            workspace_id=project.workspace_id,
+            connection_id=connection.id,
+            actor=owner,
+            display_name=None,
+            enabled=None,
+            base_url=f"https://new-{label}.test/v1",
+        )
+        changed_revision, generation_ids = await service.generation_verified_bindings(
+            workspace_id=project.workspace_id, connection_id=connection.id
+        )
+        assert changed_revision != revision_id and not generation_ids
         artifacts.append(artifact)
         bindings.append(binding)
     assert len(sent) == 2 and {json.loads(r.content)["model"] for r in sent} == {
@@ -484,3 +513,27 @@ async def test_frozen_bearer_connection_overrides_process_no_auth(session, monke
             assert resolved.openai_compatible_media_api_key == "frozen-fixture-key"
     finally:
         clear_settings_cache()
+
+
+async def test_historical_binding_list_does_not_invent_a_missing_revision(session):
+    from app.providers.connection_service import ProviderConnectionService
+    from app.providers.models import ProviderConnectionRevision
+    from sqlalchemy import select
+    from tests.unit.test_workbench_execution import _seed
+
+    project, binding, _ = await _seed(session)
+    # Only this isolated fixture is deliberately missing a historical fact.
+    revision = (await session.scalars(select(ProviderConnectionRevision))).one()
+    await session.delete(revision)
+    await session.flush()
+    service = ProviderConnectionService(session)
+    revision_id, verified = await service.generation_verified_bindings(
+        workspace_id=project.workspace_id, connection_id=binding.connection_id
+    )
+    assert revision_id is None and not verified
+    rows = await service.list_model_bindings(
+        workspace_id=project.workspace_id, connection_id=binding.connection_id
+    )
+    assert [row.id for row in rows] == [binding.id]
+    assert not list(await session.scalars(select(ProviderConnectionRevision)))
+    assert not session.new and not session.dirty and not session.deleted

@@ -156,6 +156,95 @@ async function connectWith(plugins: ProviderPluginRead[], key = "sk-test") {
 describe("AddProviderDialog", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("selects an implemented protocol and saves no-key manual models under one contract", async () => {
+    const images = {
+      ...COMPAT_PLUGIN,
+      protocol_profile: "openai_images_v2",
+      display_name: "同步 Images",
+      auth_modes: ["bearer", "none"],
+      manual_model_ids: true,
+      models: [contract("c-images", "@contract/images-fixture", "image", "单张方图")],
+    };
+    const calls = mockApi(({ method, url }) => {
+      if (method === "POST" && url.endsWith("/provider-connections"))
+        return json(
+          connection({
+            provider_type: "openai_compatible_media",
+            protocol_profile: images.protocol_profile,
+            auth_mode: "none",
+            credential_configured: false,
+            credential_key_version: null,
+          }),
+          201,
+        );
+      if (method === "POST" && url.endsWith("/model-bindings")) return json({ id: url }, 201);
+      return undefined;
+    });
+    wrap(
+      <AddProviderDialog
+        workspaceId={WS}
+        custom
+        plugins={[COMPAT_PLUGIN, images]}
+        onClose={() => undefined}
+      />,
+    );
+    const dialog = await screen.findByRole("dialog");
+    await selectValue(
+      within(dialog).getByLabelText("调用协议"),
+      "openai_compatible_media/openai_images_v2",
+    );
+    fireEvent.change(within(dialog).getByLabelText("服务地址"), {
+      target: { value: "https://images.test/v1" },
+    });
+    await selectValue(within(dialog).getByLabelText("认证方式"), "none");
+    expect(within(dialog).queryByLabelText("API Key")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "保存并手填模型" }));
+    const picker = await screen.findByTestId("provider-model-picker");
+    for (const id of ["model-alpha", "model-beta"]) {
+      fireEvent.change(within(picker).getByLabelText("手填模型 ID"), { target: { value: id } });
+      fireEvent.click(within(picker).getByRole("button", { name: "加入模型列表" }));
+      await selectValue(within(picker).getByLabelText(`${id} 调用方式`), "c-images");
+      fireEvent.click(within(picker).getByRole("checkbox", { name: `使用 ${id}` }));
+    }
+    fireEvent.click(screen.getByRole("button", { name: "添加 2 个模型" }));
+    await waitFor(() =>
+      expect(calls.filter((call) => call.url.endsWith("/model-bindings"))).toHaveLength(2),
+    );
+    const created = calls.filter(
+      (call) => call.url.endsWith("/provider-connections") && call.method === "POST",
+    );
+    expect(created).toHaveLength(1);
+    expect(created[0].body).toMatchObject({
+      auth_mode: "none",
+      protocol_profile: "openai_images_v2",
+    });
+    expect(created[0].body).not.toHaveProperty("api_key");
+    expect(calls.filter((call) => call.url.endsWith("/probes"))).toHaveLength(0);
+    const bindings = calls.filter((call) => call.url.endsWith("/model-bindings"));
+    expect(bindings.map((call) => call.body)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ model_id: "model-alpha", capability_contract_id: "c-images" }),
+        expect.objectContaining({ model_id: "model-beta", capability_contract_id: "c-images" }),
+      ]),
+    );
+  });
+
+  it("blocks duplicate connection creation after an uncertain save response", async () => {
+    const calls = mockApi(({ method, url }) => {
+      if (method === "POST" && url.endsWith("/provider-connections"))
+        return Promise.reject(new TypeError("connection reset after save"));
+      return undefined;
+    });
+    const dialog = await connectWith([MEDIA_PLUGIN]);
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("连接保存结果未知");
+    const submit = within(dialog).getByRole("button", { name: "连接并读取模型" });
+    expect(submit).toBeDisabled();
+    fireEvent.click(submit);
+    expect(
+      calls.filter((call) => call.url.endsWith("/provider-connections") && call.method === "POST"),
+    ).toHaveLength(1);
+  });
+
   it("adds a local service as custom without a vendor category selector", async () => {
     mockApi(() => undefined);
     wrap(
@@ -545,6 +634,52 @@ describe("ProviderList", () => {
 });
 
 describe("ProviderDetails model revisions", () => {
+  it.each([
+    ["revision-1", true, "生成产物已记录"],
+    ["old-revision", true, "真实生成待验证"],
+    ["revision-1", false, "真实生成待验证"],
+  ] as const)(
+    "separates no-key directory and generation evidence for %s / %s",
+    async (revision, verified, label) => {
+      mockApi(({ url }) => {
+        if (url.endsWith("/model-bindings"))
+          return json([
+            {
+              id: "image-binding",
+              connection_id: CONN,
+              model_id: "configured-image",
+              media_type: "image",
+              purpose: "keyframe",
+              enabled: true,
+              documented: true,
+              contract_tested: true,
+              account_verified: true,
+              quality_gated: false,
+              catalog_entry_id: "c-image",
+              generation_evidence: { connection_revision_id: revision, verified },
+            },
+          ]);
+        return undefined;
+      });
+      wrap(
+        <ProviderDetails
+          workspaceId={WS}
+          connection={connection({
+            auth_mode: "none",
+            credential_configured: false,
+            verification_status: "verified",
+          })}
+          plugin={MEDIA_PLUGIN}
+        />,
+      );
+      expect(await screen.findByText(label, { exact: true })).toBeVisible();
+      expect(screen.getByText("协议合同已检验", { exact: true })).toBeVisible();
+      expect(screen.getByText("质量未认证", { exact: true })).toBeVisible();
+      expect(screen.getByText("认证方式：无需 Key", { exact: true })).toBeVisible();
+      expect(screen.queryByLabelText("更换 API Key")).toBeNull();
+      expect(screen.queryByText("缺少 Key", { exact: true })).toBeNull();
+    },
+  );
   afterEach(() => vi.restoreAllMocks());
 
   it.each(["address", "key"])(

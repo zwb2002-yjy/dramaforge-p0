@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 
 import type { ProviderPluginModelRead, ProviderPluginRead } from "../../lib/api";
-import { Checkbox, Disclosure, Field, Input, Select } from "../ui";
+import { Button, Checkbox, Disclosure, Field, Input, Select } from "../ui";
 import {
   MEDIA_LABEL,
   choiceKey,
@@ -40,10 +40,12 @@ export function ModelPicker({
   disabled?: boolean;
 }) {
   const [filter, setFilter] = useState("");
+  const [manualId, setManualId] = useState("");
+  const [manualIds, setManualIds] = useState<string[]>([]);
   const [mapped, setMapped] = useState<Record<string, string>>({});
   const discovered = useMemo(
-    () => discoveredModels(plugin, discoveredIds),
-    [plugin, discoveredIds],
+    () => discoveredModels(plugin, [...new Set([...(discoveredIds ?? []), ...manualIds])]),
+    [plugin, discoveredIds, manualIds],
   );
   const protocols = useMemo(() => protocolContracts(plugin), [plugin]);
   const needle = filter.trim().toLocaleLowerCase();
@@ -103,6 +105,32 @@ export function ModelPicker({
   const total = rows.length + unmatched.length;
   return (
     <div className="df-model-picker" data-testid="provider-model-picker">
+      {plugin.manual_model_ids && (
+        <section aria-label="手填模型">
+          <Field>
+            模型 ID
+            <Input
+              aria-label="手填模型 ID"
+              value={manualId}
+              maxLength={160}
+              disabled={disabled}
+              onChange={(event) => setManualId(event.target.value)}
+            />
+          </Field>
+          <Button
+            disabled={disabled || !manualId.trim()}
+            onClick={() => {
+              setManualIds((current) => [...new Set([...current, manualId.trim()])]);
+              setManualId("");
+            }}
+          >
+            加入模型列表
+          </Button>
+          <p className="muted">
+            手填仅保存配置；请显式选择已检验的调用合同。目录与生成证据不足时保持未验证。
+          </p>
+        </section>
+      )}
       {total > 10 && (
         <Input
           aria-label="搜索模型"

@@ -5157,6 +5157,16 @@ export interface components {
             /** Warnings */
             warnings?: string[];
         };
+        /** GenerationEvidenceRead */
+        GenerationEvidenceRead: {
+            /**
+             * Connection Revision Id
+             * Format: uuid
+             */
+            connection_revision_id: string;
+            /** Verified */
+            verified: boolean;
+        };
         /** GenerationSnapshotRead */
         GenerationSnapshotRead: {
             /**
@@ -5422,6 +5432,7 @@ export interface components {
             remote_resource_id: string | null;
             /** Invoke Model Value */
             invoke_model_value: string | null;
+            generation_evidence?: components["schemas"]["GenerationEvidenceRead"] | null;
         };
         /** ModelCandidateRead */
         ModelCandidateRead: {

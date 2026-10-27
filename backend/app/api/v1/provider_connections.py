@@ -251,6 +251,11 @@ class ModelBindingCreate(BaseModel):
     enabled: bool = True
 
 
+class GenerationEvidenceRead(BaseModel):
+    connection_revision_id: UUID
+    verified: bool
+
+
 class ModelBindingRead(BaseModel):
     id: UUID
     connection_id: UUID
@@ -267,6 +272,7 @@ class ModelBindingRead(BaseModel):
     remote_resource_kind: str | None
     remote_resource_id: str | None
     invoke_model_value: str | None
+    generation_evidence: GenerationEvidenceRead | None = None
 
 
 class ProjectBindingWrite(BaseModel):
@@ -360,7 +366,9 @@ def _probe_read(evidence: ProviderCapabilityEvidence) -> ProbeRead:
     )
 
 
-def _model_read(binding: ProviderModelBinding) -> ModelBindingRead:
+def _model_read(
+    binding: ProviderModelBinding, *, generation_evidence: GenerationEvidenceRead | None = None
+) -> ModelBindingRead:
     return ModelBindingRead(
         id=binding.id,
         connection_id=binding.connection_id,
@@ -377,6 +385,7 @@ def _model_read(binding: ProviderModelBinding) -> ModelBindingRead:
         remote_resource_kind=binding.remote_resource_kind,
         remote_resource_id=binding.remote_resource_id,
         invoke_model_value=binding.invoke_model_value,
+        generation_evidence=generation_evidence,
     )
 
 
@@ -736,10 +745,24 @@ async def list_model_bindings(
 ) -> list[ModelBindingRead]:
     if workspace.id != workspace_id:
         raise NotFoundError("workspace not found")
-    bindings = await ProviderConnectionService(session).list_model_bindings(
+    service = ProviderConnectionService(session)
+    bindings = await service.list_model_bindings(
         workspace_id=workspace_id, connection_id=connection_id
     )
-    return [_model_read(binding) for binding in bindings]
+    revision_id, verified_ids = await service.generation_verified_bindings(
+        workspace_id=workspace_id, connection_id=connection_id
+    )
+    return [
+        _model_read(
+            binding,
+            generation_evidence=GenerationEvidenceRead(
+                connection_revision_id=revision_id, verified=binding.id in verified_ids
+            )
+            if revision_id is not None
+            else None,
+        )
+        for binding in bindings
+    ]
 
 
 @router.post(

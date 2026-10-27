@@ -485,6 +485,9 @@ test("adding models reads the free catalog, then binds only the ticked exact ide
       capability_contract_id: model.catalog_entry_id,
     },
   ]);
-  await expect(dialog.getByTestId("provider-model-binding-fixture")).toContainText("可用");
+  await expect(dialog.getByTestId("provider-model-binding-fixture")).toContainText("目录可见");
+  await expect(dialog.getByTestId("provider-model-binding-fixture")).toContainText(
+    "真实生成待验证",
+  );
   expect(writes.filter((path) => !/\/(probes|model-bindings)$/.test(path))).toEqual([]);
 });

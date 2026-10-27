@@ -106,6 +106,12 @@ provider evidence and media are retained; no old interface or recovery route is 
 - GET /provider-plugins retains exact catalog revisions and adds optional typed `knowledge`
   with field evidence, referenced sources, implementation/product/account distinctions and
   `new_create_blocker`. Knowledge never substitutes the selected Binding revision.
+- Connection model-bindings GET adds nullable `generation_evidence` with the exact
+  `connection_revision_id` and `verified` result. This proves a successful matching
+  unified ProviderOperation/NodeRun and a retained available Artifact record, not
+  browser playback or quality approval. Directory and probe flags cannot substitute it.
+  The workspace read traverses only request-visible projects under ordinary project RLS
+  and restores its original project context; it creates no execution or privileged reader.
 - GET /models reports `available=false` and `availability_reason` for blocked bindings while
   preserving their connection/configuration facts; directory visibility does not qualify a contract.
 - GET /projects/{project_id}/model-capabilities: exactly one explicit model_id, current media

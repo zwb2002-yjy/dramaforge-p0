@@ -11,7 +11,7 @@ from uuid import UUID
 
 import httpx
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
@@ -1265,6 +1265,92 @@ class ProviderConnectionService:
                 error_code=None,
             )
         return binding
+
+    async def generation_verified_bindings(
+        self, *, workspace_id: UUID, connection_id: UUID
+    ) -> tuple[UUID | None, set[UUID]]:
+        """Read successful, materialized results on this exact current revision.
+
+        Directory/probe/quality flags never substitute actual production facts.
+        Reuse project RLS for each owned project; no separate truth writer or privileged reader.
+        """
+        connection = await self.get_connection(
+            workspace_id=workspace_id, connection_id=connection_id
+        )
+        revision = await self._session.scalar(
+            select(ProviderConnectionRevision)
+            .where(ProviderConnectionRevision.connection_id == connection.id)
+            .order_by(ProviderConnectionRevision.revision_no.desc())
+            .limit(1)
+        )
+        if revision is None:
+            # Historical configuration remains readable; do not manufacture a
+            # revision or certify its generation identity while listing it.
+            return None, set()
+        statement = (
+            select(ProviderModelBinding.id)
+            .join(ProviderOperation, ProviderOperation.model_binding_id == ProviderModelBinding.id)
+            .join(NodeRun, NodeRun.id == ProviderOperation.node_run_id)
+            .join(Project, Project.id == NodeRun.project_id)
+            .join(Artifact, Artifact.id == NodeRun.result_artifact_id)
+            .where(
+                ProviderModelBinding.workspace_id == workspace_id,
+                ProviderModelBinding.connection_id == connection_id,
+                Project.workspace_id == workspace_id,
+                Artifact.project_id == Project.id,
+                Project.deleted_at.is_(None),
+                Artifact.produced_by_run_id == NodeRun.id,
+                Artifact.storage_state == "available",
+                Artifact.deleted_at.is_(None),
+                Artifact.byte_size > 0,
+                NodeRun.status.in_({"completed", "completed_after_cancel"}),
+                ProviderOperation.status == "succeeded",
+                ProviderOperation.execution_path_version == "unified-v1",
+                ProviderOperation.connection_id == connection_id,
+                ProviderOperation.provider_connection_revision_id == revision.id,
+                ProviderOperation.credential_revision_id.is_not_distinct_from(
+                    revision.credential_revision_id
+                ),
+                ProviderOperation.actual_provider == revision.provider_type,
+                ProviderOperation.protocol_profile == revision.protocol_profile,
+                ProviderOperation.actual_model == ProviderModelBinding.invoke_model_value,
+                ProviderOperation.catalog_entry_id == ProviderModelBinding.catalog_entry_id,
+                ProviderOperation.capability_manifest_hash
+                == ProviderModelBinding.capability_manifest_hash,
+            )
+            .distinct()
+        )
+        if self._session.get_bind().dialect.name != "postgresql":
+            return revision.id, set(await self._session.scalars(statement))
+        # Production facts are project-scoped even on a workspace settings page.
+        # Enumerate only projects already visible to this request's user/workspace
+        # and vary only project_id; never replace its user/workspace or bypass RLS.
+        project_ids = list(
+            await self._session.scalars(
+                select(Project.id).where(
+                    Project.workspace_id == workspace_id, Project.deleted_at.is_(None)
+                )
+            )
+        )
+        original_project = await self._session.scalar(
+            text("SELECT current_setting('app.current_project_id', true)")
+        )
+        verified: set[UUID] = set()
+        try:
+            for project_id in project_ids:
+                await self._session.execute(
+                    text("SELECT set_config('app.current_project_id', :project, true)"),
+                    {"project": str(project_id)},
+                )
+                verified.update(
+                    await self._session.scalars(statement.where(Project.id == project_id))
+                )
+        finally:
+            await self._session.execute(
+                text("SELECT set_config('app.current_project_id', :project, true)"),
+                {"project": original_project or ""},
+            )
+        return revision.id, verified
 
     async def list_capability_evidence(
         self,

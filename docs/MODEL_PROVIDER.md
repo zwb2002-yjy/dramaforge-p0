@@ -265,6 +265,10 @@ Protocol/DTO，以及无调用方的 `providers/openai.py`、`providers/fake.py`
   修订与执行身份保留明确 NULL，不创建假 Key、不发送 Authorization。两者均覆盖进程
   默认认证配置。明文 LAN 仍受精确部署白名单和出站保护；无 Key 不等于开放任意内网。
   `408/429/5xx`、传输中断与不认识的成功返回一律保留未知提交状态，不能自动创建重试。
+- 设置页仅列已实现的协议，支持的无认证/手填方式由插件元数据驱动；保存手填 ID 不等于
+  认证或生成验证。模型列表分别展示目录、合同、生成产物和质量事实。当前修订的生成
+  记录由现有成功 ProviderOperation → 完成 NodeRun → 可用 Artifact 只读投影，精确匹配
+  连接/凭据/绑定/目录 Hash；它不是浏览器预览通过或画质认证，也不替代独立 LIVE 验收。
 - SGLang H3 的 `@contract/sglang-h3-t2v-v1` 是独立的 `video.t2v` 合同：零图片
   输入，`t2va` 任务，经 `/v1/videos` multipart 提交、按任务 ID 轮询并读取
   `/content`。这不是 MiniMax 云 API `minimax_cn_v1` 的首帧合同。工作空间保存

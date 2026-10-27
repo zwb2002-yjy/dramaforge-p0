@@ -320,6 +320,13 @@
 .df-model-list li:last-child {
   border-bottom: 0;
 }
+.df-model-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--df-space-2);
+  color: var(--df-text-muted);
+  font-size: var(--df-font-size-caption);
+}
 .df-model-list li > svg {
   flex: none;
   color: var(--df-text-muted);
