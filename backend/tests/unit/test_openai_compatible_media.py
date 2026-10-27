@@ -219,6 +219,42 @@ async def test_text_video_contract_compiles_without_a_first_frame() -> None:
     assert request.safe_request_summary["reference_count"] == 0
 
 
+@pytest.mark.parametrize("duration", [0, 4, 6, 15])
+async def test_registered_sglang_text_contract_retains_its_five_second_limit(duration):
+    intent = VideoGenerationIntentV1(
+        prompt="A quiet street at dawn",
+        mode_id="text_to_video",
+        output=VideoOutputIntent(duration_seconds=duration),
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    with pytest.raises(ValueError, match="5-second"):
+        await OpenAICompatibleVideoCompiler().compile(
+            intent,
+            _manifest("@contract/sglang-h3-t2v-v1"),
+            [],
+            invoke_model_value="arbitrary-configured-model",
+        )
+
+
+@pytest.mark.parametrize(
+    "contract",
+    [
+        "@contract/sglang-h3-t2v-v1",
+        "@contract/sglang-h3-ref2va-v1",
+        "@contract/sglang-h3-fl2va-v1",
+    ],
+)
+def test_unknown_sglang_contract_revision_never_inherits_a_task_by_name(contract):
+    manifest = _manifest(contract).model_copy(update={"model_revision": "unknown"})
+    intent = VideoGenerationIntentV1(
+        prompt="synthetic",
+        mode_id="text_to_video",
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    with pytest.raises(ValueError, match="no registered compiler"):
+        OpenAICompatibleVideoCompiler().validate(intent, manifest)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("mode", "roles", "task", "frame_indices"),

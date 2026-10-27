@@ -500,6 +500,8 @@ class OpenAICompatibleVideoCompiler:
         text_only = intent.mode_id == "text_to_video"
         reference_mode = intent.mode_id == "omni_reference"
         wire_contract = self._wire_contract(model)
+        if wire_contract is None and model.model_id in {key[0] for key in self._wire_contracts}:
+            raise ValueError("SGLang contract revision has no registered compiler")
         fl2va = wire_contract == "fl2va"
         frame_modes = {"first_frame", "last_frame", "first_last_frame"}
         if reference_mode:
@@ -538,7 +540,7 @@ class OpenAICompatibleVideoCompiler:
             raise ValueError("OpenAI-compatible video contract does not support native audio")
         if (reference_mode or fl2va) and intent.output.generate_audio is False:
             raise ValueError("SGLang H3 generates native audio; it cannot be disabled")
-        if (reference_mode or fl2va) and (intent.output.duration_seconds or 5) != 5:
+        if wire_contract is not None and intent.output.duration_seconds not in {None, 5}:
             raise ValueError("SGLang H3 contract supports 5-second output")
         if (reference_mode or fl2va) and intent.output.aspect_ratio not in {None, "9:16", "16:9"}:
             raise ValueError("SGLang H3 contract requires 9:16 or 16:9")
