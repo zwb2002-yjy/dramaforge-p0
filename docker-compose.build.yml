@@ -11,6 +11,9 @@ services:
   api:
     <<: *backend-build
 
+  litellm-network:
+    <<: *backend-build
+
   dispatcher:
     <<: *backend-build
 

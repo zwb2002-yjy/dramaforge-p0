@@ -193,7 +193,7 @@ def test_development_override_exposes_infrastructure_debug_ports_only() -> None:
     assert services["postgres"]["ports"] == ["5432:5432"]
     assert services["redis"]["ports"] == ["6379:6379"]
     assert services["minio"]["ports"] == ["9000:9000", "9001:9001"]
-    assert services["litellm"]["ports"] == ["4000:4000"]
+    assert services["litellm-network"]["ports"] == ["4000:4000"]
     assert "frontend" not in services
 
 
@@ -294,6 +294,23 @@ def test_frontend_html_cannot_cache_old_chunk_entrypoints() -> None:
 def test_retired_text_settings_are_not_deployment_inputs() -> None:
     for filename in ("docker-compose.yml", "docker-compose.quality.yml", ".env.example"):
         assert "TEXT_LLM_" not in (REPO_ROOT / filename).read_text(encoding="utf-8")
+
+
+def test_proxy_owns_a_restricted_network_namespace_and_persistent_salt() -> None:
+    services = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]
+    proxy = services["litellm"]
+    guard = services["litellm-network"]
+    assert proxy["network_mode"] == "service:litellm-network"
+    assert proxy["cap_drop"] == ["ALL"]
+    assert guard["cap_add"] == ["NET_ADMIN"]
+    assert guard["read_only"] is True
+    assert proxy["environment"]["LITELLM_SALT_KEY"].startswith("${LITELLM_SALT_KEY:?")
+    assert proxy["environment"]["STORE_MODEL_IN_DB"] == "True"
+    assert "@sha256:" in proxy["image"]
+    assert "HTTP_PROXY" not in proxy["environment"]
+    for name in ("api", "worker-default", "worker-heavy", "worker-director"):
+        assert "LITELLM_MASTER_KEY" not in services[name]["environment"]
+        assert "LITELLM_SALT_KEY" not in services[name]["environment"]
 
 
 def test_provider_forbidden_processes_disable_canonical_text_gateway() -> None:

@@ -53,10 +53,9 @@ services:
     restart: unless-stopped
 
   # LiteLLM Proxy (fix spec §4.1/§6/§11). Official BerriAI image, pinned. The
-  # Proxy is DramaForge's unified LLM scheduler: it owns Router load-balancing /
-  # retry / fallback / cost / virtual keys. DramaForge talks to it over HTTP
-  # (never installs the litellm SDK). LiteLLM down does NOT block DramaForge
-  # startup (fix spec §13/§122) — api/workers have no hard depends_on here.
+  # Fixed LLM deployments, no automatic replay or cross-model fallback.
+  # DramaForge uses HTTP, never the LiteLLM SDK. Proxy failure does not gate
+  # API/media startup; only Proxy shares the isolated egress namespace.
   litellm-db:
     image: postgres:15-alpine
     environment:
@@ -73,11 +72,42 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  litellm-network:
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
+    user: "0:0"
+    entrypoint: ["python", "-m", "app.providers.litellm_gateway.network_guard"]
+    environment:
+      LITELLM_EGRESS_ALLOWED_ORIGINS: ${LITELLM_EGRESS_ALLOWED_ORIGINS:-[]}
+      LITELLM_EGRESS_TRUSTED_NETWORKS: ${LITELLM_EGRESS_TRUSTED_NETWORKS:-[]}
+      LITELLM_DB_HOST: litellm-db
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; assert Path('/tmp/egress-ready').exists()"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    networks:
+      default:
+        aliases: [litellm]
+    restart: unless-stopped
+
   litellm:
-    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.96.0}
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.96.0@sha256:90d8de0ea6fbb3cad145d1019d00a0149ae400b1e18e2011a60f1988f143f672}
+    network_mode: service:litellm-network
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     environment:
       DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:?Run python scripts/init_env.py first}@litellm-db:5432/litellm
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Run python scripts/init_env.py first}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?Set and preserve a stable LiteLLM salt before DB model writes}
+      STORE_MODEL_IN_DB: "True"
+      ENFORCE_PRISMA_MIGRATION_CHECK: "true"
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      PYTHONPATH: /etc/dramaforge-litellm
       # Deployment env for the logical aliases in infra/litellm/config.yaml.
       # Empty values are valid (config loads); an alias is usable only when its
       # api_base+api_key (or mock_response) are set. Never commit real keys.
@@ -89,13 +119,13 @@ services:
       LITELLM_SCRIPT_FAST_API_BASE: ${LITELLM_SCRIPT_FAST_API_BASE:-}
       LITELLM_SCRIPT_FAST_API_KEY: ${LITELLM_SCRIPT_FAST_API_KEY:-}
       LITELLM_SCRIPT_FAST_MOCK_RESPONSE: ${LITELLM_SCRIPT_FAST_MOCK_RESPONSE:-}
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1},postgres,redis,minio,litellm,litellm-db,api,dispatcher,worker-default,worker-heavy,frontend
     volumes:
       - ./infra/litellm/config.yaml:/app/config.yaml:ro
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
+      - ./infra/litellm:/etc/dramaforge-litellm:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
     depends_on:
+      litellm-network:
+        condition: service_healthy
       litellm-db:
         condition: service_healthy
     healthcheck:

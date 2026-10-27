@@ -98,7 +98,8 @@ jobs:
       MINIO_ROOT_PASSWORD: release-compose-minio-password
       LITELLM_DB_PASSWORD: release-compose-litellm-db-password
       LITELLM_MASTER_KEY: sk-release-compose-master-key
-      LITELLM_API_KEY: sk-release-compose-master-key
+      LITELLM_SALT_KEY: sk-release-compose-stable-salt
+      LITELLM_API_KEY: sk-release-compose-data-key
       SESSION_SECRET: release-compose-session-secret-32-characters
       WORKER_TOKEN: release-compose-worker-token-32-characters
       BYOK_FERNET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
@@ -145,6 +146,12 @@ jobs:
           DRAMAFORGE_FRONTEND_IMAGE: ${{ steps.image.outputs.frontend }}:${{ steps.image.outputs.tag }}
         run: |
           docker compose up -d --wait
+          docker compose exec -T -e "PROXY_DATA_KEY=$LITELLM_API_KEY" litellm python -c '
+          import json, os, urllib.request
+          body = json.dumps({"key": os.environ["PROXY_DATA_KEY"], "key_type": "llm_api", "models": ["script-quality", "script-fast"]}).encode()
+          request = urllib.request.Request("http://127.0.0.1:4000/key/generate", data=body, headers={"Content-Type": "application/json", "Authorization": "Bearer " + os.environ["LITELLM_MASTER_KEY"]})
+          assert urllib.request.urlopen(request).status == 200
+          '
           curl --fail --show-error --retry 10 --retry-delay 2 http://127.0.0.1:8080/gateway-health
       - name: Capture Compose diagnostics
         if: failure()
@@ -316,6 +323,10 @@ jobs:
           done
           cp infra/litellm/config.yaml "$online_dir/infra/litellm/config.yaml"
           cp infra/litellm/config.yaml "$offline_dir/infra/litellm/config.yaml"
+          cp infra/litellm/proxy_policy.py "$online_dir/infra/litellm/proxy_policy.py"
+          cp infra/litellm/proxy_policy.py "$offline_dir/infra/litellm/proxy_policy.py"
+          cp infra/litellm/transport_policy.py "$online_dir/infra/litellm/transport_policy.py"
+          cp infra/litellm/transport_policy.py "$offline_dir/infra/litellm/transport_policy.py"
 
           cat > "$online_dir/release.env" <<EOF
           DRAMAFORGE_VERSION=$VERSION
@@ -341,7 +352,7 @@ jobs:
             "postgres:15-alpine"
             "redis:7-alpine"
             "quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z"
-            "ghcr.io/berriai/litellm:v1.96.0"
+            "ghcr.io/berriai/litellm:v1.96.0@sha256:90d8de0ea6fbb3cad145d1019d00a0149ae400b1e18e2011a60f1988f143f672"
           )
           for expected in "${expected_images[@]}"; do
             printf '%s\n' "${runtime_images[@]}" | grep -Fqx "$expected" || {

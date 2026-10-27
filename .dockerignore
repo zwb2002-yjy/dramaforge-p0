@@ -17,6 +17,8 @@ backend/.venv/**
 **/dist
 **/build
 tmp
+# Retained local cleanup evidence is not application source.
+dsh-purge
 docs
 *.sqlite
 *.db

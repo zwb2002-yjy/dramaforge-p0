@@ -1,4 +1,6 @@
 services:
+  litellm-network:
+    pull_policy: never
   postgres:
     pull_policy: never
   redis:

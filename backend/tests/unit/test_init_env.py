@@ -30,6 +30,8 @@ def test_render_env_generates_unique_valid_secrets() -> None:
     assert len(values["SESSION_SECRET"]) >= 48
     assert len(values["WORKER_TOKEN"]) >= 48
     assert values["LITELLM_MASTER_KEY"].startswith("sk-")
+    assert values["LITELLM_SALT_KEY"].startswith("sk-")
+    assert values["LITELLM_SALT_KEY"] != values["LITELLM_MASTER_KEY"]
     assert values["POSTGRES_APP_PASSWORD"] in values["DATABASE_URL"]
     assert values["POSTGRES_PASSWORD"] not in values["DATABASE_URL"]
     assert values["DRAMAFORGE_SOURCE_COMMIT"]

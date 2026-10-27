@@ -226,6 +226,25 @@ is **queue-level liveness, not per-process readiness**: another worker on the sa
 queue can maintain the heartbeat. Check worker logs and actual job progress when
 diagnosing an individual process.
 
+The LiteLLM process shares the network namespace of `litellm-network`, which
+reuses the backend image and has only the NET_ADMIN capability required to
+install its own default-deny rules. The Proxy has no capabilities. This does
+not alter the host firewall or media workers. Exact authorized origins and
+trusted private/plaintext CIDRs come from `LITELLM_EGRESS_ALLOWED_ORIGINS` and
+`LITELLM_EGRESS_TRUSTED_NETWORKS` JSON lists; defaults allow no model upstream.
+All DNS answers are validated and pinned to IP/port rules until the namespace
+is recreated. Recreate the guard and Proxy together when grants or DNS change.
+Development publishes port 4000 on the namespace owner, never the shared Proxy.
+
+Keep `LITELLM_SALT_KEY` stable with the Proxy DB backup. For an old database
+encrypted using the Master fallback, preserve and verify the original effective
+salt before enabling DB management. Never generate a replacement salt over
+existing ciphertext. The single-worker pinned Proxy rejects duplicate YAML/DB
+aliases, request-level transport overrides and shadow calls; HTTPX, requests and
+aiohttp do not follow redirects. Prisma's local control channel uses fixed
+port 4001 rather than a broad loopback port grant. Admin and data keys remain
+separate; model-management business integration is a subsequent gate.
+
 Named volumes `postgres_data`, `minio_data`, and `litellm_db_data` contain
 persistent state. `docker compose down` preserves them; do not use `--volumes`
 unless permanent data deletion is intended and backups have been verified.

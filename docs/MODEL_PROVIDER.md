@@ -135,6 +135,14 @@ api/v1/model_inspection.py 提供。预览复用原compiler，使用占位refere
 
 ## 分层
 
+Proxy 部署已锁定 LiteLLM 1.96.0 的镜像 digest，并开启 DB 模型持久性。其独立网络
+namespace 对目的 IP/端口默认拒绝，模型上游需要显式网络授权；不影响媒体网络。
+当前请求禁止自动重放、跨模型 fallback、HTTP 重定向及请求级目标/凭据覆盖；同名
+YAML/DB 创建会被拒绝。Master/SALT 不传给 API 或 Worker。详见
+[部署边界](DEPLOYMENT.md) 和 [Proxy 配置](../infra/litellm/README.md)。
+这部分基础设施不表示工作区文本直连已完成 G2 切换，也不把可变 Proxy UUID 当成
+不可变模型修订；旧记录、凭据与正式素材保持原样。
+
 | 层                                         | 位置                                                                            | 职责                                                                                              |
 | ------------------------------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | ProviderPlugin + ModelCatalogEntry         | backend/app/providers（registry、catalog_*）                                    | 只读插件契约：供应商名称、Base URL、协议、模型 ID、能力列表；前端不写死任何供应商事实             |

@@ -62,7 +62,7 @@ services:
       - ${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}:/contract:ro
 
   litellm-quality:
-    image: ghcr.io/berriai/litellm:v1.96.0
+    image: ghcr.io/berriai/litellm:v1.96.0@sha256:90d8de0ea6fbb3cad145d1019d00a0149ae400b1e18e2011a60f1988f143f672
     environment:
       LITELLM_MASTER_KEY: sk-integration-test-master-key
     volumes:
@@ -76,11 +76,87 @@ services:
 
   litellm-integration-quality:
     image: dramaforge-backend-quality:local
+    network_mode: service:litellm-policy-network-quality
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
     depends_on:
       litellm-quality:
+        condition: service_healthy
+      litellm-policy-quality:
         condition: service_healthy
     environment:
       APP_ENV: test
       LITELLM_INTEGRATION_REQUIRED: "1"
       LITELLM_INTEGRATION_URL: http://litellm-quality:4000
-    command: ["sh", "-c", "set -eu; uv run --directory backend pytest tests/integration/test_litellm_real_proxy.py -q -rs --fail-on-skip"]
+      LITELLM_POLICY_URL: http://127.0.0.1:4000
+      LITELLM_MOCK_URL: http://litellm-mock-quality:9000
+    command: ["sh", "-c", "set -eu; uv run --directory backend pytest tests/integration/test_litellm_real_proxy.py tests/integration/test_litellm_proxy_policy.py -q -rs --fail-on-skip"]
+
+  litellm-db-quality:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: quality-litellm-db-password
+      POSTGRES_DB: litellm
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  litellm-mock-quality:
+    image: dramaforge-backend-quality:local
+    command: ["python", "backend/tests/fixtures/mock_llm_server.py"]
+
+  litellm-policy-network-quality:
+    image: dramaforge-backend-quality:local
+    user: "0:0"
+    entrypoint: ["python", "-m", "app.providers.litellm_gateway.network_guard"]
+    environment:
+      LITELLM_EGRESS_ALLOWED_ORIGINS: '["http://litellm-mock-quality:9000","http://litellm-quality:4000"]'
+      LITELLM_EGRESS_TRUSTED_NETWORKS: '["172.16.0.0/12","192.168.0.0/16","10.0.0.0/8"]'
+      LITELLM_DB_HOST: litellm-db-quality
+      PYTHONPATH: /workspace/backend
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pathlib import Path; assert Path('/tmp/egress-ready').exists()"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    depends_on:
+      litellm-mock-quality:
+        condition: service_started
+      litellm-quality:
+        condition: service_healthy
+      litellm-db-quality:
+        condition: service_healthy
+    networks:
+      default:
+        aliases: [litellm-policy-quality]
+
+  litellm-policy-quality:
+    image: ghcr.io/berriai/litellm:v1.96.0@sha256:90d8de0ea6fbb3cad145d1019d00a0149ae400b1e18e2011a60f1988f143f672
+    network_mode: service:litellm-policy-network-quality
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      DATABASE_URL: postgresql://litellm:quality-litellm-db-password@litellm-db-quality:5432/litellm
+      LITELLM_MASTER_KEY: sk-quality-policy-master-key
+      LITELLM_SALT_KEY: sk-quality-policy-stable-salt
+      STORE_MODEL_IN_DB: "True"
+      ENFORCE_PRISMA_MIGRATION_CHECK: "true"
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      PYTHONPATH: /etc/dramaforge-litellm
+    volumes:
+      - ./infra/litellm:/etc/dramaforge-litellm:ro
+    command: ["--config", "/etc/dramaforge-litellm/policy-quality-config.yaml", "--port", "4000", "--num_workers", "1"]
+    depends_on:
+      litellm-policy-network-quality:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness')"]
+      interval: 3s
+      timeout: 3s
+      retries: 40

@@ -33,7 +33,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_doc
 - PostgreSQL `alembic upgrade head` / `alembic check` 与集成测试；
 - OpenAPI 导出与 generated client 检查；
 - 前端 format / lint / typecheck / Vitest / 生产构建 / 生产路由注册检查 / Playwright E2E；
-- LiteLLM 集成（固定官方 Proxy 镜像 + 确定性 mock 模型，无外部 Provider 调用）。
+- LiteLLM 集成（固定 digest 官方 Proxy + 独立数据库、内核 namespace ACL、计数 Mock
+  上游；覆盖重试覆盖、同名创建竞争、凭据覆盖、重定向及 metadata 拒绝，无外部 Provider 调用）。
+
+`scripts/check_litellm_runtime_contract.py` 对同一 synthetic quality stack 自动演练 Proxy
+DB 备份/恢复与 guard/Proxy namespace 重建，保留同一部署 ID、SALT 和上游请求计数证据。
+它只允许专属 quality 服务和合成管理 Key，所有数据库/Provider 请求仍在容器内执行；
+宿主 Python 仅用标准库编排 Docker，不提供应用测试依赖。证据必须写入新的 `tmp/` 目录。
 
 本地完整质量门与 GitHub Full Gate 共用 `docker-compose.quality.yml`，不维护第二套
 测试实现。当前 dev 处于快速开发模式，PR CI 只监听 `main`（见 RELEASE.md）；
