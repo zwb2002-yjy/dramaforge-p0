@@ -545,7 +545,8 @@ def test_batch_fill_reports_rejected_candidates_honestly(batch_api, with_pending
                     "node_key": "identity_review",
                     "upstream_artifact_id": str(artifact.id),
                 },
-                status="needs_human",
+                status="queued",
+                output_summary={"status": "needs_human"},
                 created_by=owner.id,
             )
             session.add(run)
@@ -565,6 +566,7 @@ def test_batch_fill_reports_rejected_candidates_honestly(batch_api, with_pending
             session.add(evidence)
             await session.flush()
             run.result_artifact_id = evidence.id
+            run.status = "completed"
             await session.flush()
             await record_human_decision(
                 session,

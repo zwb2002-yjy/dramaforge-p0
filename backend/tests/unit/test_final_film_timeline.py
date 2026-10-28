@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncGenerator
 from decimal import Decimal
 from uuid import uuid4
@@ -279,6 +280,7 @@ async def _seed_renderable_final_film(
                 "nodes": [
                     {"key": "video", "type": "video"},
                     {"key": "composite", "type": "composite"},
+                    {"key": "video_drift_review", "type": "video_review"},
                 ],
                 "edges": [],
             },
@@ -295,7 +297,7 @@ async def _seed_renderable_final_film(
             .all()
         )
         composite_node = next(node for node in nodes if node.node_key == "composite")
-        video_node = next(node for node in nodes if node.node_key == "video")
+        review_node = next(node for node in nodes if node.node_key == "video_drift_review")
 
         video_stored = await store.put_bytes(
             object_key=f"projects/{project.id}/test/video-{index}.mp4",
@@ -400,10 +402,28 @@ async def _seed_renderable_final_film(
         shot.formal_composite_artifact_id = composite_artifact.id
         # Delivery requires a stored human decision for the exact clip Artifact,
         # so this fixture records one exactly like the product flow does.
+        review_stored = await store.put_bytes(
+            object_key=f"projects/{project.id}/test/review-{index}.json",
+            data=json.dumps(
+                {"status": "needs_human", "artifact_id": str(video_artifact.id)}
+            ).encode(),
+            mime_type="application/json",
+        )
+        review_artifact = Artifact(
+            project_id=project.id,
+            artifact_type="document",
+            storage_state="available",
+            object_key=review_stored.object_key,
+            content_hash=review_stored.content_hash,
+            mime_type=review_stored.mime_type,
+            byte_size=review_stored.byte_size,
+        )
+        session.add(review_artifact)
+        await session.flush()
         review_run = NodeRun(
             project_id=project.id,
             graph_version_id=graph.current_version_id,
-            graph_node_id=video_node.id,
+            graph_node_id=review_node.id,
             idempotency_key=f"video-drift-review-{uuid4().hex}",
             input_hash=uuid4().hex * 2,
             input_snapshot={
@@ -413,11 +433,12 @@ async def _seed_renderable_final_film(
             },
             output_summary={"status": "needs_human"},
             status="completed",
-            result_artifact_id=voice_artifact.id,
+            result_artifact_id=review_artifact.id,
             created_by=user.id,
         )
         session.add(review_run)
         await session.flush()
+        review_artifact.produced_by_run_id = review_run.id
         await record_human_decision(
             session,
             project_id=project.id,
