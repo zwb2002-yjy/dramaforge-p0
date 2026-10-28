@@ -353,6 +353,7 @@ Editing 继续使用既有 EditSession timeline 和乐观版本。预览和导�
 | video-frames / 视频采样证据 | 需要，人工审片需比较时间上的变化 | 已由相邻镜头对照消费首/末帧；下节仍含待完成的深入审片目标 |
 | 项目 dispatch / NodeRun enqueue HTTP | 需要生成/修复/恢复，不需要控制队列 | 退役这两个 HTTP helper；保留内部 scheduler 与 Worker 调用，使用既有 executions/receipt、repairs、maintenance recovery |
 | worker/tick、provider-reference token、status/metrics | Worker、Provider、运维需要，不是创作页面 | 保留；不为了制造消费者而增加前端按钮 |
+| per-shot director-board `GET`/`PUT` | 当前创作链无前端消费者 | 端点与 `director_board_states` 存储暂保留；前端 helper 已退役（见 FRONTEND_WORKBENCH），是否清退由后端领域单独裁定 |
 | TEXT_LLM_* 与旧文本凭证写面 | 需要文本模型，不需要旧凭证入口 | 当前文本 HTTP adapter 消费部署配置或空间连接；沿用 ProviderConnection 与模型选择，不恢复旧环境变量/写面；来源隔离缺口见 MODEL_PROVIDER |
 | 旧实验 ORM / DTO | 需要隔离实验，但不需要旧生产轨 | 当前 ExperimentBranch；旧表仅历史映射，不重新给 UI 提供旧入口 |
 

@@ -248,7 +248,9 @@ def test_artifact_byte_ranges_are_scoped_and_support_native_seeking(api) -> None
             assert response.status_code == 206
             assert response.content == content
             assert response.headers["Content-Range"] == expected_range
-        assert full_reads == [], "range requests must not read the whole object"
+        complete = client.get(path)
+        assert complete.status_code == 200 and complete.content == b"0123456789"
+        assert full_reads == [], "content delivery must stream instead of materializing the object"
     finally:
         store.get_bytes = original_get_bytes  # type: ignore[method-assign]
 
@@ -898,7 +900,9 @@ def test_editing_director_suggestion_http_fails_closed_for_request_scope_stale_a
     )
     assert foreign.status_code == 404, foreign.text
 
-    assert client.post("/api/v1/auth/logout").status_code == 204
+    assert (
+        client.post("/api/v1/auth/logout", headers={CSRF_HEADER: _csrf(client)}).status_code == 204
+    )
     registered = client.post(
         "/api/v1/auth/register",
         json={

@@ -88,8 +88,12 @@ class RedisStreamPublisher(StreamPublisher):
                 )
                 for key, value in payload.items()
             }
-            msg_id = await client.xadd(f"dramaforge:stream:{topic}", fields)
-            self.messages.append((topic, {**payload, "_stream_id": msg_id}))
+            msg_id = await client.xadd(
+                f"dramaforge:stream:{topic}",
+                fields,
+                maxlen=10_000,
+                approximate=True,
+            )
             return str(msg_id)
         except Exception as exc:
             # APP_ENV=test only: allow in-memory publisher for unit tests without Redis.
@@ -117,7 +121,7 @@ class NodeRunScheduler:
         publisher: StreamPublisher | None = None,
     ) -> None:
         self._session = session
-        self._dispatcher = OutboxDispatcher(session, publisher=publisher)
+        self._dispatcher = OutboxDispatcher(session, publisher=publisher, sse_hub=None)
         self.enqueued_job_ids: list[str] = []
 
     async def dispatch_pending(
@@ -175,6 +179,15 @@ class NodeRunScheduler:
                     workspace_id=node_run_scope.workspace_id,
                     project_id=node_run_scope.project_id,
                 )
+                candidate = await self._session.scalar(
+                    select(NodeRun)
+                    .where(NodeRun.id == run_id, NodeRun.status == "queued")
+                    .with_for_update(skip_locked=True)
+                    .execution_options(populate_existing=True)
+                )
+                if candidate is None:
+                    await self._session.rollback()
+                    continue
                 job_id = await self._enqueue_node_run(run_id)
                 await self._session.commit()
                 self.enqueued_job_ids.append(job_id)
@@ -286,8 +299,7 @@ class NodeRunScheduler:
         """Enqueue on Redis/Arq. Fail closed — never return local:* as success."""
         import asyncio
 
-        from arq import create_pool
-        from arq.connections import RedisSettings
+        from app.runtime.queue_pool import queue_pool
 
         settings = get_settings()
         run = await self._session.get(NodeRun, node_run_id)
@@ -315,25 +327,16 @@ class NodeRunScheduler:
         )
 
         async def _arq() -> str:
-            redis_settings = RedisSettings.from_dsn(settings.redis_url)
-            # Fail fast in broken/missing Redis environments (unit tests, local misconfig).
-            redis_settings.conn_timeout = 1
-            redis_settings.conn_retries = 0
-            redis_settings.conn_retry_delay = 0
-            redis = await create_pool(redis_settings)
-            try:
-                job = await redis.enqueue_job(
-                    "execute_node_run",
-                    str(node_run_id),
-                    _job_id=stable_job_id,
-                    _queue_name=queue_name,
-                )
-                if job is None:
-                    # Already enqueued with same job id — treat as success (idempotent)
-                    return stable_job_id
-                return str(job.job_id)
-            finally:
-                await redis.close()
+            redis = await queue_pool(settings.redis_url)
+            job = await redis.enqueue_job(
+                "execute_node_run",
+                str(node_run_id),
+                _job_id=stable_job_id,
+                _queue_name=queue_name,
+            )
+            if job is None:
+                return stable_job_id
+            return str(job.job_id)
 
         try:
             return await asyncio.wait_for(_arq(), timeout=8.0)

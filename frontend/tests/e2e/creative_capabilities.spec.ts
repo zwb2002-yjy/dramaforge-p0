@@ -147,7 +147,6 @@ async function installMock(
     if (path.endsWith("/models")) return json(route, []);
     if (path.endsWith("/opencut-manifest"))
       return json(route, { schema_version: "v1", tracks: [], shots: [] });
-    if (path.endsWith("/director-board") && method === "GET") return json(route, null);
     if (path.endsWith("/annotations") && method === "GET") return json(route, []);
     return json(route, {});
   });

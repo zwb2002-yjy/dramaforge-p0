@@ -20,7 +20,7 @@ from app.director.recommendation import (
 )
 from app.director.suggestion import ShotDirectorSuggestionRequest, ShotDirectorSuggestionService
 from app.director.text_model import CapabilityTextModel
-from app.director.text_transport import DirectorTextTransport
+from app.director.text_transport import DirectorTextRuntimeAdapter
 from app.director.turn_models import DirectorTurn
 from app.execution.models import Artifact, NodeRun
 from app.providers.contracts.common import ExecutionContext, GenerationStatus
@@ -243,7 +243,7 @@ async def test_missing_checkpoint_rejects_before_text_call_or_turn_write(
             200, json={"choices": [{"message": {"content": json.dumps(candidate)}}]}
         )
 
-    transport = DirectorTextTransport(session, registry=_registry(handler))
+    transport = DirectorTextRuntimeAdapter(session, registry=_registry(handler))
     with pytest.raises(ConflictError) as exc:
         if entrypoint == "suggestion":
             await ShotDirectorSuggestionService(session, text_transport=transport).suggest(
@@ -292,7 +292,7 @@ async def test_same_model_uses_distinct_shot_context_and_persists_exact_evidence
             },
         )
 
-    text_transport = DirectorTextTransport(session, registry=_registry(handler))
+    text_transport = DirectorTextRuntimeAdapter(session, registry=_registry(handler))
     service = ShotDirectorSuggestionService(session, text_transport=text_transport)
     first = await service.suggest(
         project_id=project.id,
@@ -357,7 +357,7 @@ async def test_request_key_replays_stored_result_without_second_model_call(
 
     service = ShotDirectorSuggestionService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     )
     request = _request(scene, shot, key="shot-turn:idempotent")
     first = await service.suggest(project_id=project.id, actor=user, request=request)
@@ -396,7 +396,7 @@ async def test_completed_invocation_recovers_interrupted_turn_without_second_mod
 
     service = ShotDirectorSuggestionService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     )
     request = _request(scene, shot, key="shot-turn:journal-recovery")
     first = await service.suggest(project_id=project.id, actor=user, request=request)
@@ -474,7 +474,7 @@ async def test_proactive_recommendation_uses_the_same_real_text_bridge(
 
     result = await DirectorRecommendationService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     ).recommend(
         project_id=project.id,
         actor=user,
@@ -517,7 +517,7 @@ async def test_schema_repair_is_same_model_and_bounded_to_one_attempt(
 
     result = await ShotDirectorSuggestionService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     ).suggest(
         project_id=project.id,
         actor=user,
@@ -570,7 +570,7 @@ async def test_second_invalid_or_forbidden_output_fails_without_rule_fallback(
     with pytest.raises(ValidationAppError) as raised:
         await ShotDirectorSuggestionService(
             session,
-            text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+            text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
         ).suggest(
             project_id=project.id,
             actor=user,
@@ -600,7 +600,7 @@ async def test_unconfigured_model_fails_explicitly_and_records_failed_turn(
     with pytest.raises(ValidationAppError) as raised:
         await ShotDirectorSuggestionService(
             session,
-            text_transport=DirectorTextTransport(
+            text_transport=DirectorTextRuntimeAdapter(
                 session, registry=_registry(must_not_call, configured=False)
             ),
         ).suggest(
@@ -634,7 +634,7 @@ async def test_reusing_request_key_for_changed_context_fails_closed(
 
     service = ShotDirectorSuggestionService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     )
     key = "shot-turn:reused"
     await service.suggest(
@@ -679,7 +679,7 @@ async def test_shot_changed_in_another_transaction_marks_late_result_stale(tmp_p
         with pytest.raises(ConflictError) as raised:
             await ShotDirectorSuggestionService(
                 session,
-                text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+                text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
             ).suggest(
                 project_id=project.id,
                 actor=user,
@@ -716,7 +716,7 @@ async def test_rejected_context_new_request_key_never_calls_text_provider(sessio
             },
         )
 
-    bridge = DirectorTextTransport(session, registry=_registry(handler))
+    bridge = DirectorTextRuntimeAdapter(session, registry=_registry(handler))
     service = ShotDirectorSuggestionService(session, text_transport=bridge)
     result = await service.suggest(
         project_id=project.id,
@@ -770,7 +770,7 @@ async def test_manual_blocks_proactive_text_but_preserves_explicit_user_requests
             },
         )
 
-    bridge = DirectorTextTransport(session, registry=_registry(handler))
+    bridge = DirectorTextRuntimeAdapter(session, registry=_registry(handler))
     with pytest.raises(ValidationAppError) as disabled:
         await DirectorRecommendationService(session, text_transport=bridge).recommend(
             project_id=project.id,
@@ -806,7 +806,7 @@ async def test_prepared_text_without_invocation_requires_explicit_rebuild(sessio
         )
 
     service = ShotDirectorSuggestionService(
-        session, text_transport=DirectorTextTransport(session, registry=_registry(handler))
+        session, text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler))
     )
     request = _request(scene, shot, key="prepared-historical-text")
     first = await service.suggest(project_id=project.id, actor=user, request=request)
@@ -845,7 +845,7 @@ async def test_transport_attempt_evidence_is_durable_and_separate_from_schema_re
         )
 
     service = ShotDirectorSuggestionService(
-        session, text_transport=DirectorTextTransport(session, registry=_registry(handler))
+        session, text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler))
     )
     request = _request(scene, shot, key="transport-evidence:" + outcome)
     if outcome == "success_after_retry":

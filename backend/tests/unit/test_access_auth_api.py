@@ -81,11 +81,18 @@ def test_register_creates_one_owned_default_workspace_and_login_roundtrip(
     assert workspaces.json()[0]["name"] == "\u6211\u7684\u521b\u4f5c\u7a7a\u95f4"
 
     assert client.get("/api/v1/auth/me").json()["id"] == user["id"]
-    assert client.post("/api/v1/auth/logout").status_code == 204
+    assert client.post("/api/v1/auth/logout").status_code == 403
+    assert client.get("/api/v1/auth/me").status_code == 200
+    assert (
+        client.post("/api/v1/auth/logout", headers={CSRF_HEADER: _csrf(client)}).status_code == 204
+    )
     assert client.get("/api/v1/auth/me").status_code == 401
-    assert client.post(
-        "/api/v1/auth/login", json={"email": "alice@example.com", "password": "password123"}
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/auth/login", json={"email": "alice@example.com", "password": "password123"}
+        ).status_code
+        == 200
+    )
 
 
 def test_secure_cookie_is_explicit_and_not_implied_by_production(
@@ -122,9 +129,12 @@ def test_workspace_create_rename_and_empty_delete_require_csrf(client: TestClien
     )
     assert renamed.status_code == 200
     assert renamed.json()["name"] == "Renamed"
-    assert client.delete(
-        f"/api/v1/workspaces/{workspace_id}", headers={CSRF_HEADER: _csrf(client)}
-    ).status_code == 204
+    assert (
+        client.delete(
+            f"/api/v1/workspaces/{workspace_id}", headers={CSRF_HEADER: _csrf(client)}
+        ).status_code
+        == 204
+    )
 
 
 def test_other_user_cannot_read_rename_or_delete_workspace(client: TestClient) -> None:
@@ -137,14 +147,20 @@ def test_other_user_cannot_read_rename_or_delete_workspace(client: TestClient) -
 
     _register(client, "intruder@example.com")
     assert client.get(f"/api/v1/workspaces/{workspace_id}").status_code == 403
-    assert client.patch(
-        f"/api/v1/workspaces/{workspace_id}",
-        json={"name": "Stolen"},
-        headers={CSRF_HEADER: _csrf(client)},
-    ).status_code == 403
-    assert client.delete(
-        f"/api/v1/workspaces/{workspace_id}", headers={CSRF_HEADER: _csrf(client)}
-    ).status_code == 403
+    assert (
+        client.patch(
+            f"/api/v1/workspaces/{workspace_id}",
+            json={"name": "Stolen"},
+            headers={CSRF_HEADER: _csrf(client)},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.delete(
+            f"/api/v1/workspaces/{workspace_id}", headers={CSRF_HEADER: _csrf(client)}
+        ).status_code
+        == 403
+    )
 
 
 def test_access_migration_contains_owned_workspaces_only() -> None:
@@ -152,8 +168,7 @@ def test_access_migration_contains_owned_workspaces_only() -> None:
 
     versions = Path(__file__).resolve().parents[2] / "alembic" / "versions"
     migration_text = "\n".join(
-        path.read_text(encoding="utf-8-sig")
-        for path in versions.glob("*.py")
+        path.read_text(encoding="utf-8-sig") for path in versions.glob("*.py")
     ).lower()
     for name in (
         "workspaces",

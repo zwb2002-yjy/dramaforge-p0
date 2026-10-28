@@ -34,7 +34,7 @@ from app.assets.schemas import ShotDirectorState
 from app.config import get_settings
 from app.director.runtime.capabilities import require_director_runtime_available
 from app.director.runtime.start import DirectorRuntimeStartService
-from app.director.text_transport import DirectorInvocationEvidence, DirectorTextTransport
+from app.director.text_transport import DirectorInvocationEvidence, DirectorTextRuntimeAdapter
 from app.providers.model_profiles.slots import ModelSlot
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
@@ -231,11 +231,11 @@ class ShotDirectorSuggestionService:
         session: AsyncSession,
         *,
         transport: ShotDirectorSuggestionTransport | None = None,
-        text_transport: DirectorTextTransport | None = None,
+        text_transport: DirectorTextRuntimeAdapter | None = None,
     ) -> None:
         self._session = session
         self._transport = transport
-        self._text_transport = text_transport or DirectorTextTransport(session)
+        self._text_transport = text_transport or DirectorTextRuntimeAdapter(session)
 
     async def suggest(
         self,
@@ -430,7 +430,8 @@ class ShotDirectorSuggestionService:
                 )
             await self._text_transport.mark_awaiting_user(text_result.turn)
             await DirectorRuntimeStartService(
-                self._session, settings=get_settings(),
+                self._session,
+                settings=get_settings(),
             ).accept_existing_detached_turn(
                 project=project,
                 actor=actor,

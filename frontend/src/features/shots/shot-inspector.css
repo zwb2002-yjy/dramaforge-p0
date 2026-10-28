@@ -19,7 +19,7 @@
 /* ---- Inspector ---- */
 .df-inspector {
   position: sticky;
-  --df-inspector-topbar-height: var(--df-project-topbar-height, var(--df-topbar-h));
+  --df-inspector-topbar-height: var(--df-project-topbar-height);
   top: calc(var(--df-inspector-topbar-height) + var(--df-space-3));
   display: grid;
   grid-template-columns: minmax(0, 1fr);

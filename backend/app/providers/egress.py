@@ -237,6 +237,10 @@ class GuardedProviderTransport(httpx.AsyncHTTPTransport):
             ) from exc
         return await super().handle_async_request(request)
 
+    @property
+    def settings(self) -> Settings:
+        return self._settings
+
 
 def guarded_provider_transport(
     *,

@@ -20,6 +20,10 @@ Provider 接入契约见 [adr/0005-provider-plugin-driven-configuration.md](adr/
 
 ## 当前唯一模型执行系统
 
+Director 送入文本模型的上下文快照最多 512 KiB（UTF-8 字节）。超限在创建 Turn 和
+模型调用前返回 `DIRECTOR_CONTEXT_TOO_LARGE`，要求缩小请求范围；不静默截断或改写
+冻结上下文。输出 token 上限另行约束输出，不能替代该输入限制。
+
 来源登记、不可变来源快照和追加检查记录集中在
 `backend/app/providers/model_sources/` 的三个 JSON 文件。来源目录只保存 URL、精确适用
 范围及证据元数据，不能定义能力或替代 Manifest。原二十份捕获保持 `unreviewed`；

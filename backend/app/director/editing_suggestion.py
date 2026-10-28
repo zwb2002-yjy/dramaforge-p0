@@ -37,7 +37,7 @@ from app.director.proposal_creation import ProposalItemDraft, create_proposal
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.runtime.capabilities import require_director_runtime_available
 from app.director.runtime.start import DirectorRuntimeStartService
-from app.director.text_transport import DirectorInvocationEvidence, DirectorTextTransport
+from app.director.text_transport import DirectorInvocationEvidence, DirectorTextRuntimeAdapter
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
 from app.editing.adapter import EditingAdapter
@@ -387,11 +387,11 @@ class EditingDirectorSuggestionService:
         session: AsyncSession,
         *,
         transport: EditingDirectorSuggestionTransport | None = None,
-        text_transport: DirectorTextTransport | None = None,
+        text_transport: DirectorTextRuntimeAdapter | None = None,
     ) -> None:
         self._session = session
         self._transport = transport
-        self._text_transport = text_transport or DirectorTextTransport(session)
+        self._text_transport = text_transport or DirectorTextRuntimeAdapter(session)
 
     async def suggest(
         self,
@@ -409,7 +409,8 @@ class EditingDirectorSuggestionService:
             await DirectorTurnService(self._session).require_proactive_authorization(
                 project_id=project.id,
             )
-            if proactive else None
+            if proactive
+            else None
         )
         adapter = EditingAdapter(self._session)
         edit_session = await adapter.load_timeline(
@@ -601,19 +602,21 @@ class EditingDirectorSuggestionService:
                 scope_type="edit_session",
                 scope_entity_id=edit_session.id,
                 created_by=actor.id,
-                items=[ProposalItemDraft(
-                    command="edit_session.apply_timeline_plan",
-                    payload={
-                        "edit_session_id": str(edit_session.id),
-                        "plan": candidate.plan.model_dump(mode="json"),
-                    },
-                    expected_target_version=context.session_version,
-                    rationale=candidate.rationale,
-                    benefit=candidate.benefit,
-                    cost=candidate.cost,
-                    risk=candidate.risk,
-                    impact=candidate.impact,
-                )],
+                items=[
+                    ProposalItemDraft(
+                        command="edit_session.apply_timeline_plan",
+                        payload={
+                            "edit_session_id": str(edit_session.id),
+                            "plan": candidate.plan.model_dump(mode="json"),
+                        },
+                        expected_target_version=context.session_version,
+                        rationale=candidate.rationale,
+                        benefit=candidate.benefit,
+                        cost=candidate.cost,
+                        risk=candidate.risk,
+                        impact=candidate.impact,
+                    )
+                ],
             )
             item = items[0]
         except Exception as exc:  # noqa: BLE001 - keep text evidence durable
@@ -642,7 +645,8 @@ class EditingDirectorSuggestionService:
                 proposal_id=proposal.id,
             )
             await DirectorRuntimeStartService(
-                self._session, settings=get_settings(),
+                self._session,
+                settings=get_settings(),
             ).accept_existing_new_turn(
                 project=project,
                 actor=actor,

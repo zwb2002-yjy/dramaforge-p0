@@ -796,33 +796,6 @@ export type OpenCutManifestRead = components["schemas"]["OpenCutManifest"];
 export function fetchOpenCutManifest(projectId: string): Promise<OpenCutManifestRead> {
   return apiGet(`/api/v1/projects/${projectId}/opencut-manifest`);
 }
-export type DirectorBoardRead = components["schemas"]["DirectorBoardRead"];
-export function fetchDirectorBoard(
-  projectId: string,
-  shotId: string,
-): Promise<DirectorBoardRead | null> {
-  return apiGet(`/api/v1/projects/${projectId}/shots/${shotId}/director-board`);
-}
-
-export async function saveDirectorBoard(
-  projectId: string,
-  shotId: string,
-  input: {
-    expected_version?: number | null;
-    mode: "2d" | "rough_3d";
-    camera: Record<string, unknown>;
-    characters: Array<Record<string, unknown>>;
-    scene: Record<string, unknown>;
-  },
-): Promise<DirectorBoardRead> {
-  const csrf = await fetchCsrf();
-  return apiSend(
-    "PUT",
-    `/api/v1/projects/${projectId}/shots/${shotId}/director-board`,
-    input,
-    csrf,
-  );
-}
 export type ShotRead = components["schemas"]["ShotRead"];
 export function fetchProjectShots(projectId: string): Promise<ShotRead[]> {
   return apiGetList<ShotRead>(`/api/v1/projects/${projectId}/shots`);

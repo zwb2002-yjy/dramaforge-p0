@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 from app.config import get_settings
 from app.storage.minio_store import MinioObjectStore
+from fastapi.responses import StreamingResponse
 
 
 class _BucketClient:
@@ -60,6 +63,82 @@ async def test_minio_size_check_is_metadata_only_and_range_stays_native() -> Non
     )
     response.close.assert_called_once()
     response.release_conn.assert_called_once()
+
+
+async def test_minio_stream_uses_one_get_bounded_reads_and_closes_on_early_exit():
+    store = MinioObjectStore(get_settings())
+    response = Mock()
+    response.read.side_effect = [b"x" * 65536, b"remaining"]
+    client = Mock()
+    client.get_object.return_value = response
+    store._client = client
+    stream = store.iter_bytes(object_key="large.mp4", length=1024 * 1024)
+    assert len(await anext(stream)) == 65536
+    response.read.assert_called_once_with(65536)
+    await stream.aclose()
+    client.get_object.assert_called_once()
+    response.close.assert_called_once()
+    response.release_conn.assert_called_once()
+
+
+@pytest.mark.parametrize("blocked_phase", ["open", "read"])
+async def test_minio_stream_disconnect_releases_inflight_response(blocked_phase):
+    store = MinioObjectStore(get_settings())
+    started, release = Event(), Event()
+    io_finished = Event()
+    closed_before_io_finished = []
+    response = Mock()
+
+    def block():
+        started.set()
+        assert release.wait(2), "test did not release storage IO"
+        io_finished.set()
+
+    def open_response(*args, **kwargs):
+        if blocked_phase == "open":
+            block()
+        return response
+
+    def read(_size):
+        if blocked_phase == "read":
+            block()
+        return b""
+
+    response.read.side_effect = read
+    response.close.side_effect = lambda: closed_before_io_finished.append(not io_finished.is_set())
+    client = Mock()
+    client.get_object.side_effect = open_response
+    store._client = client
+    stream = StreamingResponse(store.iter_bytes(object_key="disconnect.mp4"))
+
+    async def receive():
+        while not started.is_set():
+            await asyncio.sleep(0.001)
+        return {"type": "http.disconnect"}
+
+    async def send(_message):
+        pass
+
+    async def finish_io():
+        while not started.is_set():
+            await asyncio.sleep(0.001)
+        await asyncio.sleep(0.02)
+        release.set()
+
+    finishing = asyncio.create_task(finish_io())
+    try:
+        await asyncio.wait_for(
+            stream({"type": "http", "asgi": {"spec_version": "2.3"}}, receive, send),
+            timeout=2,
+        )
+        await finishing
+        await asyncio.to_thread(lambda: None)
+        response.close.assert_called_once()
+        response.release_conn.assert_called_once()
+        assert closed_before_io_finished == [False]
+    finally:
+        release.set()
+        await finishing
 
 
 @pytest.mark.parametrize("operation", ["get_size", "get_bytes", "get_range"])

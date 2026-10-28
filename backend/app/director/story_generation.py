@@ -18,7 +18,7 @@ from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.story_proposal import StoryProposalResult, create_story_proposal
 from app.director.text_transport import (
     DirectorInvocationEvidence,
-    DirectorTextTransport,
+    DirectorTextRuntimeAdapter,
     StructuredDirectorTextResult,
 )
 from app.director.turn_models import DirectorTurn
@@ -165,10 +165,10 @@ class StoryGenerationService:
         self,
         session: AsyncSession,
         *,
-        text_transport: DirectorTextTransport | None = None,
+        text_transport: DirectorTextRuntimeAdapter | None = None,
     ) -> None:
         self._session = session
-        self._text_transport = text_transport or DirectorTextTransport(session)
+        self._text_transport = text_transport or DirectorTextRuntimeAdapter(session)
 
     async def generate_proposal(
         self,
@@ -259,7 +259,8 @@ class StoryGenerationService:
             allow_rejected_context_retry=True,
         )
         await DirectorRuntimeStartService(
-            self._session, settings=get_settings(),
+            self._session,
+            settings=get_settings(),
         ).accept_existing_new_turn(
             project=project,
             actor=actor,

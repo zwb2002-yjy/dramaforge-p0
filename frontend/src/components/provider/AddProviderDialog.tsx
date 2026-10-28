@@ -38,6 +38,7 @@ export function AddProviderDialog(props: Parameters<typeof MediaProviderDialog>[
     return (
       <GatewayModelEditor
         workspaceId={props.workspaceId}
+        defaultName={props.custom ? "" : "文本服务"}
         inline={props.inline}
         onClose={props.onClose}
         onConnectionCreated={props.onConnectionCreated}

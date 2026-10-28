@@ -88,6 +88,18 @@ fingerprint 与允许新建的 Provider 操作数（`max_provider_calls`）；�
 
 ## Workers 与队列
 
+Final Film 在短事务中读取所有输入 Artifact 元数据，事务外下载、渲染和上传。
+上传前先在 ProviderOperation 的 request_summary 中提交本次对象键清单；
+MP4/SRT 与 Export 仍在一个终态事务中发布。dispatcher 每分钟最多检查 50 个
+待回收操作，回收终态或超过 31 分钟的中断上传；已有 Artifact 引用的对象保留，
+删除失败留在清单中重试并累计 cleanup failure 指标。超时或取消不代表存储写入已结束，
+无法确认上传完成的操作保留对象键，后续扫描继续回收迟到对象；只有上传全部成功返回后
+才允许清空已处理的键。扫描按最近回收时间轮转，避免未确认的操作阻塞其它回收。
+该回收不发起 Provider Create。
+Artifact 内容端点对整文件及大 Range 使用 64 KiB 分块流式读取，并在响应结束或
+断连时释放存储连接。Arq 入队连接池按进程事件循环复用，候选运行使用 SKIP LOCKED
+重新确认 queued 状态；Redis 事件流按约 10,000 条保留，快照读取仍是当前事实来源。
+
 | 服务 | 队列 | 职责 |
 |---|---|---|
 | worker-default | `dramaforge:default` | 媒体、review、continuity 作业 |

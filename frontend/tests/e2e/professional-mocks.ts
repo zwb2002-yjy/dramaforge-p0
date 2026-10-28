@@ -2,7 +2,7 @@
  * Shared Playwright API mock for the professional V1 E2E suites (P10-07).
  *
  * Mirrors the professional pages' API surface: scene workspace, production
- * snapshot/shots, workbench assets/experiments/review/director board/OpenCut,
+ * snapshot/shots, workbench assets/experiments/review/OpenCut,
  * change proposals, and professional shot dispatch. No backend required.
  */
 import type { Page, Route } from "@playwright/test";
@@ -73,7 +73,6 @@ export type ProfessionalMockState = {
   annotations: Array<Record<string, unknown>>;
   revisions: Array<Record<string, unknown>>;
   proposals: Array<Record<string, unknown>>;
-  board: Record<string, unknown> | null;
   shotVersion: number;
   formalKeyframeArtifactId: string | null;
   formalVideoArtifactId: string | null;
@@ -420,7 +419,6 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     annotations: [],
     revisions: [],
     proposals: [],
-    board: null,
     shotVersion: 1,
     formalKeyframeArtifactId: null,
     formalVideoArtifactId: null,
@@ -1038,20 +1036,6 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       };
       state.annotations.push(annotation);
       return json(route, annotation, 201);
-    }
-    if (path.endsWith("/director-board") && method === "GET") return json(route, state.board);
-    if (path.endsWith("/director-board") && method === "PUT") {
-      state.board = {
-        id: "board-1",
-        shot_id: SHOT_ID,
-        mode: body.mode,
-        camera: body.camera,
-        characters: body.characters,
-        scene: body.scene,
-        version: 1,
-        updated_at: new Date().toISOString(),
-      };
-      return json(route, state.board);
     }
     if (path === "/api/v1/projects/" + PROJECT_ID + "/opencut-manifest") {
       if (method !== "GET") throw new Error("formal OpenCut manifest must use GET");

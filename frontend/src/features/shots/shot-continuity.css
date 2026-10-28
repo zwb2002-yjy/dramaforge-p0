@@ -8,9 +8,9 @@
   display: grid;
   gap: var(--df-space-4);
   padding: var(--df-space-4);
-  background: var(--df-surface-raised, #18191c);
-  border: 1px solid var(--df-border, #333);
-  border-radius: var(--df-radius-container, 8px);
+  background: var(--df-surface-raised);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-container);
 }
 
 .shot-continuity-grid {
@@ -25,15 +25,15 @@
   gap: var(--df-space-2);
   margin: 0;
   padding: var(--df-space-3);
-  border: 1px solid var(--df-border, #333);
-  border-radius: var(--df-radius-container, 8px);
-  background: var(--df-surface-base, #1e1f22);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-container);
+  background: var(--df-surface-1b);
 }
 
 .shot-continuity-item figcaption {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--df-text-primary, #fff);
+  color: var(--df-text-primary);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -42,7 +42,7 @@
 .shot-continuity-extra-meta {
   font-size: 0.75rem;
   font-weight: normal;
-  color: var(--df-text-secondary, #999);
+  color: var(--df-text-secondary);
 }
 
 .shot-continuity-item img,
@@ -50,8 +50,8 @@
   width: 100%;
   aspect-ratio: 16 / 9;
   object-fit: contain;
-  background: var(--df-surface-screen, #000);
-  border-radius: var(--df-radius-subtle, 4px);
+  background: var(--df-surface-screen);
+  border-radius: var(--df-radius-container);
 }
 
 .shot-continuity-references .shot-continuity-ref-list {
@@ -67,9 +67,9 @@
   align-items: center;
   gap: var(--df-space-2);
   padding: var(--df-space-2);
-  background: var(--df-surface-overlay, #2b2d31);
-  border-radius: var(--df-radius-subtle, 4px);
-  border: 1px solid var(--df-border, #333);
+  background: var(--df-surface-overlay);
+  border-radius: var(--df-radius-control);
+  border: 1px solid var(--df-border);
 }
 
 .shot-continuity-ref-thumb {
@@ -85,8 +85,8 @@
   display: grid;
   place-items: center;
   font-size: 0.75rem;
-  color: var(--df-text-secondary, #999);
-  background: var(--df-surface-screen, #000);
+  color: var(--df-text-secondary);
+  background: var(--df-surface-screen);
   border-radius: 4px;
 }
 
@@ -99,7 +99,7 @@
 }
 
 .shot-continuity-ref-info strong {
-  color: var(--df-text-primary, #fff);
+  color: var(--df-text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -108,21 +108,21 @@
 .shot-continuity-note {
   margin: 0;
   font-size: 0.8rem;
-  color: var(--df-text-secondary, #999);
+  color: var(--df-text-secondary);
 }
 
 /* 2. Narrative Comparison */
 .shot-continuity-narrative {
   display: grid;
   gap: var(--df-space-2);
-  border-top: 1px solid var(--df-border, #333);
+  border-top: 1px solid var(--df-border);
   padding-top: var(--df-space-3);
 }
 
 .shot-continuity-narrative h4 {
   margin: 0;
   font-size: 0.95rem;
-  color: var(--df-text-primary, #fff);
+  color: var(--df-text-primary);
 }
 
 .shot-continuity-narrative-grid {
@@ -133,19 +133,19 @@
 
 .shot-continuity-narrative-col {
   padding: var(--df-space-3);
-  background: var(--df-surface-base, #1e1f22);
-  border: 1px solid var(--df-border, #333);
-  border-radius: var(--df-radius-container, 8px);
+  background: var(--df-surface-1b);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-container);
 }
 
 .shot-continuity-narrative-col.current {
-  border-color: var(--df-primary, #4a90e2);
+  border-color: var(--df-verdigris);
 }
 
 .shot-continuity-narrative-col h5 {
   margin: 0 0 var(--df-space-2) 0;
   font-size: 0.85rem;
-  color: var(--df-text-primary, #fff);
+  color: var(--df-text-primary);
 }
 
 .shot-continuity-narrative-col dl {
@@ -156,13 +156,13 @@
 }
 
 .shot-continuity-narrative-col dt {
-  color: var(--df-text-secondary, #999);
+  color: var(--df-text-secondary);
   font-size: 0.75rem;
 }
 
 .shot-continuity-narrative-col dd {
   margin: 0;
-  color: var(--df-text-primary, #eee);
+  color: var(--df-text-primary);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -171,20 +171,20 @@
 .shot-continuity-checklist {
   display: grid;
   gap: var(--df-space-3);
-  border-top: 1px solid var(--df-border, #333);
+  border-top: 1px solid var(--df-border);
   padding-top: var(--df-space-3);
 }
 
 .shot-continuity-checklist-header h4 {
   margin: 0 0 4px 0;
   font-size: 0.95rem;
-  color: var(--df-text-primary, #fff);
+  color: var(--df-text-primary);
 }
 
 .shot-continuity-checklist-desc {
   margin: 0;
   font-size: 0.8rem;
-  color: var(--df-text-secondary, #999);
+  color: var(--df-text-secondary);
 }
 
 .shot-continuity-checklist-table {
@@ -198,9 +198,9 @@
   justify-content: space-between;
   align-items: center;
   padding: var(--df-space-2) var(--df-space-3);
-  background: var(--df-surface-base, #1e1f22);
-  border: 1px solid var(--df-border, #333);
-  border-radius: var(--df-radius-subtle, 4px);
+  background: var(--df-surface-1b);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-control);
 }
 
 .shot-continuity-check-label {
@@ -211,12 +211,12 @@
 
 .shot-continuity-check-label strong {
   font-size: 0.85rem;
-  color: var(--df-text-primary, #fff);
+  color: var(--df-text-primary);
 }
 
 .shot-continuity-check-label small {
   font-size: 0.75rem;
-  color: var(--df-text-secondary, #999);
+  color: var(--df-text-secondary);
 }
 
 .shot-continuity-check-actions {
@@ -229,7 +229,7 @@
   align-items: center;
   gap: 4px;
   font-size: 0.8rem;
-  color: var(--df-text-secondary, #aaa);
+  color: var(--df-text-secondary);
   padding: 4px 8px;
   border-radius: 4px;
   border: 1px solid transparent;
@@ -237,9 +237,9 @@
 }
 
 .shot-continuity-radio-label.selected {
-  color: var(--df-text-primary, #fff);
-  background: var(--df-surface-overlay, #2b2d31);
-  border-color: var(--df-primary, #4a90e2);
+  color: var(--df-text-primary);
+  background: var(--df-surface-overlay);
+  border-color: var(--df-verdigris);
 }
 
 .shot-continuity-checklist-footer {
@@ -253,20 +253,20 @@
   display: grid;
   gap: var(--df-space-3);
   padding: var(--df-space-4);
-  background: var(--df-surface-base, #1e1f22);
-  border: 1px solid var(--df-border, #444);
-  border-radius: var(--df-radius-container, 8px);
+  background: var(--df-surface-1b);
+  border: 1px solid var(--df-border);
+  border-radius: var(--df-radius-container);
 }
 
 .shot-continuity-issue-form h4 {
   margin: 0;
   font-size: 0.95rem;
-  color: var(--df-text-primary, #fff);
+  color: var(--df-text-primary);
 }
 
 .shot-continuity-evidence-binding {
   font-size: 0.8rem;
-  color: var(--df-text-secondary, #aaa);
+  color: var(--df-text-secondary);
 }
 
 .shot-continuity-severity-radios {
@@ -285,20 +285,20 @@
   width: 180px;
   padding: 6px 10px;
   font-size: 0.85rem;
-  background: var(--df-surface-screen, #000);
-  border: 1px solid var(--df-border, #444);
+  background: var(--df-surface-screen);
+  border: 1px solid var(--df-border);
   border-radius: 4px;
   color: #fff;
 }
 
 .shot-continuity-static-frame {
   font-size: 0.85rem;
-  color: var(--df-text-secondary, #aaa);
+  color: var(--df-text-secondary);
 }
 
 .shot-continuity-involved-items {
   font-size: 0.85rem;
-  color: var(--df-primary, #4a90e2);
+  color: var(--df-verdigris);
   font-weight: 500;
 }
 
@@ -316,7 +316,7 @@
 .shot-continuity-review-link a.button-like {
   display: inline-block;
   padding: 8px 16px;
-  background: var(--df-primary, #4a90e2);
+  background: var(--df-verdigris);
   color: #fff;
   border-radius: 4px;
   text-decoration: none;
@@ -326,8 +326,8 @@
 
 .shot-continuity-repair-scope-card {
   padding: var(--df-space-3);
-  background: var(--df-surface-overlay, #2b2d31);
-  border: 1px solid var(--df-border, #444);
+  background: var(--df-surface-overlay);
+  border: 1px solid var(--df-border);
   border-radius: 6px;
   font-size: 0.85rem;
 }
@@ -335,7 +335,7 @@
 .shot-continuity-repair-scope-card h5 {
   margin: 0 0 var(--df-space-2) 0;
   font-size: 0.9rem;
-  color: var(--df-text-primary, #fff);
+  color: var(--df-text-primary);
 }
 
 .shot-continuity-repair-scope-card ul {
@@ -343,7 +343,7 @@
   padding-left: 20px;
   display: grid;
   gap: 6px;
-  color: var(--df-text-secondary, #ccc);
+  color: var(--df-text-secondary);
 }
 
 @media (max-width: 1199px) {

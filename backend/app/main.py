@@ -37,6 +37,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await asyncio.gather(bridge_task, return_exceptions=True)
         if bridge is not None:
             await bridge.close()
+        from app.runtime.resources import close_runtime_resources
+
+        await close_runtime_resources()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

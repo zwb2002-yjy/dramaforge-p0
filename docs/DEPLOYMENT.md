@@ -125,6 +125,20 @@ internet deployment.
 
 ## Provider connection security boundary
 
+DramaForge Provider HTTP clients (including poll/cancel) connect directly with
+`trust_env=False`; `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` do not route these
+calls. These variables are available to Proxy-side upstream access and build
+tools. `PROVIDER_TRUSTED_HTTP_NETWORKS` authorizes only declared private HTTP
+endpoints; it does not configure a forward proxy. HTTP connection pools belong
+to the API/worker event loop and close at shutdown. Headers and cookies remain
+local to each request client.
+
+The public Nginx gateway limits login and registration together to five requests
+per minute per remote address, allowing a burst of five, and returns 429 on
+excess requests. `/metrics` is available on the internal API listener; Nginx
+does not forward it. `/worker/tick` requires development mode and the worker
+token; production and test reject it.
+
 Workspace-supplied Provider connections send their encrypted credentials to
 the configured `base_url` (connection create/patch and probes carry the key).
 The boundary is layered — write-time static validation, then connection-time

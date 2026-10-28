@@ -20,7 +20,7 @@ from app.director.story_generation import (
     StoryGenerationService,
     render_story_markdown,
 )
-from app.director.text_transport import DirectorTextTransport
+from app.director.text_transport import DirectorTextRuntimeAdapter
 from app.director.turn_models import DirectorTurn
 from app.providers.litellm_adapter import LiteLLMModelAdapter
 from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
@@ -226,7 +226,7 @@ async def test_brief_generates_parser_compatible_proposal_without_canonical_writ
     before = await _counts(session, project.id)
     result = await StoryGenerationService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     ).generate_proposal(
         project=project,
         actor=user,
@@ -278,7 +278,7 @@ async def test_story_generation_accepts_parameter_wrapped_structured_output(
 
     result = await StoryGenerationService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     ).generate_proposal(
         project=project,
         actor=user,
@@ -307,7 +307,7 @@ async def test_same_request_reuses_turn_and_proposal_then_changed_brief_conflict
 
     service = StoryGenerationService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     )
     request = _request(key="story-turn:idempotent")
     first = await service.generate_proposal(project=project, actor=user, request=request)
@@ -343,7 +343,7 @@ async def test_partial_decisions_apply_only_selected_generated_story_items(
 
     generated = await StoryGenerationService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     ).generate_proposal(
         project=project,
         actor=user,
@@ -405,7 +405,7 @@ async def test_rejected_generated_story_can_be_regenerated_from_the_same_brief(
 
     service = StoryGenerationService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     )
     first = await service.generate_proposal(
         project=project,
@@ -459,7 +459,7 @@ async def test_malicious_or_invalid_story_output_fails_after_one_repair(
     with pytest.raises(ValidationAppError) as raised:
         await StoryGenerationService(
             session,
-            text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+            text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
         ).generate_proposal(
             project=project,
             actor=user,
@@ -493,7 +493,7 @@ async def test_unconfigured_script_model_records_failure_and_manual_path_remains
     with pytest.raises(ValidationAppError) as raised:
         await StoryGenerationService(
             session,
-            text_transport=DirectorTextTransport(
+            text_transport=DirectorTextRuntimeAdapter(
                 session, registry=_registry(must_not_call, configured=False)
             ),
         ).generate_proposal(
@@ -535,7 +535,7 @@ async def test_parser_failure_after_model_success_is_persisted(
     with pytest.raises(ValidationAppError) as raised:
         await StoryGenerationService(
             session,
-            text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+            text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
         ).generate_proposal(
             project=project,
             actor=user,
@@ -585,7 +585,7 @@ async def test_story_changed_in_another_transaction_marks_generation_stale(tmp_p
         with pytest.raises(ConflictError) as raised:
             await StoryGenerationService(
                 session,
-                text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+                text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
             ).generate_proposal(
                 project=project,
                 actor=user,
@@ -656,7 +656,7 @@ async def test_generate_route_rebinds_transaction_scope_before_reading_items(
 
     service = StoryGenerationService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     )
     monkeypatch.setattr(route, "StoryGenerationService", lambda _session: service)
 

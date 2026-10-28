@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import tempfile
+from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import select
 
 from app.access.projects import ProjectService
@@ -87,6 +90,27 @@ async def get_artifact_content(
     etag = f'"{art.content_hash}"'
     headers = {"Accept-Ranges": "bytes", "ETag": etag, "Cache-Control": "private, max-age=0"}
     total = art.byte_size or 0
+    object_key = art.object_key
+    # Authorization/metadata are settled before any object IO or response stream.
+    await session.commit()
+    try:
+        stored_total = await store.get_size(object_key=object_key)
+    except KeyError as exc:
+        raise NotFoundError("artifact bytes not in object store") from exc
+    if (
+        request.headers.get("range")
+        and request.headers.get("if-range", etag) == etag
+        and total != stored_total
+    ):
+        raise ValidationAppError(
+            "artifact metadata does not match stored bytes",
+            details={
+                "code": "ARTIFACT_SIZE_MISMATCH",
+                "artifact_id": str(artifact_id),
+                "metadata_byte_size": total,
+                "stored_byte_size": stored_total,
+            },
+        )
     range_header = request.headers.get("range")
     if_range = request.headers.get("if-range")
     if range_header and (if_range is None or if_range == etag):
@@ -94,24 +118,21 @@ async def get_artifact_content(
         # successful small slice alone cannot detect overstated/understated
         # database metadata and would produce a false Content-Range total.
         try:
-            stored_total = await store.get_size(object_key=art.object_key)
-        except KeyError as exc:
-            raise NotFoundError("artifact bytes not in object store") from exc
-        if total != stored_total:
-            raise ValidationAppError(
-                "artifact metadata does not match stored bytes",
-                details={
-                    "code": "ARTIFACT_SIZE_MISMATCH",
-                    "artifact_id": str(artifact_id),
-                    "metadata_byte_size": total,
-                    "stored_byte_size": stored_total,
-                },
-            )
-        try:
             start, end = byte_range(range_header, total)
         except ValueError:
             return Response(
                 status_code=416, headers={**headers, "Content-Range": f"bytes */{total}"}
+            )
+        if end - start + 1 > 64 * 1024:
+            return StreamingResponse(
+                store.iter_bytes(object_key=object_key, offset=start, length=end - start + 1),
+                media_type=media,
+                status_code=206,
+                headers={
+                    **headers,
+                    "Content-Range": f"bytes {start}-{end}/{total}",
+                    "Content-Length": str(end - start + 1),
+                },
             )
         # Range requests read only the requested segment from the object
         # store; a media seek must not pull the whole object first
@@ -152,11 +173,11 @@ async def get_artifact_content(
             status_code=206,
             headers={**headers, "Content-Range": f"bytes {start}-{end}/{total}"},
         )
-    try:
-        data = await store.get_bytes(object_key=art.object_key)
-    except KeyError as exc:
-        raise NotFoundError("artifact bytes not in object store") from exc
-    return Response(content=data, media_type=media, headers=headers)
+    return StreamingResponse(
+        store.iter_bytes(object_key=object_key, length=stored_total),
+        media_type=media,
+        headers={**headers, "Content-Length": str(stored_total)},
+    )
 
 
 @router.get("/projects/{project_id}/artifacts/{artifact_id}/video-frames/{role}")
@@ -184,9 +205,16 @@ async def get_artifact_video_frame(
         or not artifact.mime_type.startswith("video/")
     ):
         raise NotFoundError("video Artifact not found")
+    object_key = artifact.object_key
+    await session.commit()
     try:
-        video = await get_object_store().get_bytes(object_key=artifact.object_key)
-        sample = next(item for item in extract_video_samples(video) if item.role == role)
+        with tempfile.TemporaryDirectory(prefix="dramaforge-review-frame-") as directory:
+            path = Path(directory) / "source.mp4"
+            with path.open("wb") as output:
+                async for chunk in get_object_store().iter_bytes(object_key=object_key):
+                    await asyncio.to_thread(output.write, chunk)
+            samples = await asyncio.to_thread(extract_video_samples, path)
+            sample = next(item for item in samples if item.role == role)
     except (KeyError, StopIteration, ValueError) as exc:
         raise ValidationAppError(
             "video frame evidence could not be decoded",

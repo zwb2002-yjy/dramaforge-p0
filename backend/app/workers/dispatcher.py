@@ -15,6 +15,7 @@ from app.shared.model_registry import load_all_models
 logger = logging.getLogger(__name__)
 POLL_SECONDS = float(os.getenv("OUTBOX_DISPATCH_INTERVAL_SECONDS", "1"))
 PROVIDER_RECOVERY_POLL_SECONDS = 60.0
+FINAL_FILM_CLEANUP_TIMEOUT_SECONDS = 20.0
 
 # This resident process writes OutboxEvent rows directly. Register every ORM
 # model before SQLAlchemy compiles the cross-domain foreign keys during flush.
@@ -58,6 +59,10 @@ async def _recover_providers_forever() -> None:
         tick_started = loop.time()
         try:
             counts = await recover_interrupted_provider_jobs(state)
+            from app.production.final_film_uploads import sweep_final_film_uploads
+
+            async with asyncio.timeout(FINAL_FILM_CLEANUP_TIMEOUT_SECONDS):
+                await sweep_final_film_uploads()
             if any(counts.values()):
                 logger.info("provider_recovery %s", counts)
         except asyncio.CancelledError:
@@ -70,9 +75,14 @@ async def _recover_providers_forever() -> None:
 async def run_forever() -> None:
     """Own both bounded scheduling loops in the existing resident dispatcher."""
     worker_id = f"outbox-dispatcher:{socket.gethostname()}"
-    async with asyncio.TaskGroup() as tasks:
-        tasks.create_task(_dispatch_forever(worker_id=worker_id), name="outbox-dispatch")
-        tasks.create_task(_recover_providers_forever(), name="provider-recovery")
+    from app.runtime.resources import close_runtime_resources
+
+    try:
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(_dispatch_forever(worker_id=worker_id), name="outbox-dispatch")
+            tasks.create_task(_recover_providers_forever(), name="provider-recovery")
+    finally:
+        await close_runtime_resources()
 
 
 def main() -> int:

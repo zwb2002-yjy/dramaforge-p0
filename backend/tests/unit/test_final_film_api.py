@@ -140,7 +140,9 @@ def test_final_film_routes_fail_closed_for_stale_timeline_and_non_owner(
     assert stale.status_code == 422, stale.text
     assert stale.json()["details"]["code"] == "TIMELINE_VERSION_MISMATCH"
 
-    assert client.post("/api/v1/auth/logout").status_code == 204
+    assert (
+        client.post("/api/v1/auth/logout", headers={CSRF_HEADER: _csrf(client)}).status_code == 204
+    )
     registered = client.post(
         "/api/v1/auth/register",
         json={
@@ -189,6 +191,8 @@ def test_final_film_history_empty_and_wrong_session_are_read_only(api: Any) -> N
     assert asyncio.run(_count_rows(factory, project_id)) == before
     missing = client.get(f"/api/v1/projects/{project_id}/edit-sessions/{uuid4()}/final-films")
     assert missing.status_code == 404
-    assert client.post("/api/v1/auth/logout").status_code == 204
+    assert (
+        client.post("/api/v1/auth/logout", headers={CSRF_HEADER: _csrf(client)}).status_code == 204
+    )
     _register(client)
     assert client.get(url).status_code == 404

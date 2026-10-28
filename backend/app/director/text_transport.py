@@ -1060,14 +1060,12 @@ class DirectorTextRuntimeAdapter:
         )
 
 
-DirectorTextTransport = DirectorTextRuntimeAdapter
 # Compatibility name retained while callers migrate to the Director runtime.
 
 
 __all__ = [
     "DirectorInvocationEvidence",
     "DirectorTextRuntimeAdapter",
-    "DirectorTextTransport",
     "StructuredDirectorTextResult",
     "canonical_json",
     "content_hash",

@@ -25,7 +25,6 @@ const SHOT_FACTS = new Set([
   "repairs",
   "repair-plan",
   "director-turns",
-  "director-board",
 ]);
 const FORMAL_FACTS = new Set([
   "opencut-manifest",

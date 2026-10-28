@@ -16,6 +16,7 @@ from sqlalchemy import text
 from app.config import get_settings
 from app.director.event_consumer import DirectorEventConsumer
 from app.director.wakeup import process_director_wakeup
+from app.runtime.resources import shutdown_runtime_resources
 from app.shared.db import get_session_factory
 from app.shared.model_registry import load_all_models
 from app.workers.jobs import reconcile_waiting_director_turns, recover_interrupted_director_turns
@@ -109,6 +110,8 @@ async def dispatch_director_wakeups(ctx: dict[str, Any]) -> int:
 
 
 class WorkerSettings:
+    on_shutdown = shutdown_runtime_resources
+
     functions = [
         execute_director_wakeup,
         execute_director_runtime_wakeup,

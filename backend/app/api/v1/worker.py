@@ -31,6 +31,8 @@ async def worker_tick(
 ) -> WorkerTickResponse:
     """Process queued NodeRuns (Adapter allowed). Requires worker token."""
     settings = get_settings()
+    if settings.app_env != "development":
+        raise ForbiddenError("worker tick is only available in development")
     expected = settings.worker_token.strip()
     if not expected:
         raise ForbiddenError("worker tick is disabled because WORKER_TOKEN is not configured")

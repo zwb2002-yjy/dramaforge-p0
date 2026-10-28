@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from io import BytesIO
 from threading import Lock
 from typing import Protocol, cast
 
+from anyio import CancelScope
 from minio.error import S3Error
 
 from app.config import Settings, get_settings
@@ -23,9 +25,7 @@ class StoredObject:
 
 
 class ObjectStore(Protocol):
-    async def put_bytes(
-        self, *, object_key: str, data: bytes, mime_type: str
-    ) -> StoredObject: ...
+    async def put_bytes(self, *, object_key: str, data: bytes, mime_type: str) -> StoredObject: ...
 
     async def get_bytes(self, *, object_key: str) -> bytes: ...
 
@@ -33,13 +33,21 @@ class ObjectStore(Protocol):
 
     async def get_range(self, *, object_key: str, offset: int, length: int) -> bytes: ...
 
+    def iter_bytes(
+        self,
+        *,
+        object_key: str,
+        offset: int = 0,
+        length: int | None = None,
+    ) -> AsyncIterator[bytes]: ...
+
     async def delete_bytes(self, *, object_key: str) -> None: ...
 
     def clear(self) -> None: ...
 
 
 class _MinioResponse(Protocol):
-    def read(self) -> bytes: ...
+    def read(self, amt: int | None = None) -> bytes: ...
 
     def close(self) -> None: ...
 
@@ -83,9 +91,7 @@ class InMemoryObjectStore:
     def __init__(self) -> None:
         self._objects: dict[str, bytes] = {}
 
-    async def put_bytes(
-        self, *, object_key: str, data: bytes, mime_type: str
-    ) -> StoredObject:
+    async def put_bytes(self, *, object_key: str, data: bytes, mime_type: str) -> StoredObject:
         self._objects[object_key] = data
         return StoredObject(
             object_key=object_key,
@@ -115,6 +121,18 @@ class InMemoryObjectStore:
     async def delete_bytes(self, *, object_key: str) -> None:
         self._objects.pop(object_key, None)
 
+    async def iter_bytes(
+        self,
+        *,
+        object_key: str,
+        offset: int = 0,
+        length: int | None = None,
+    ) -> AsyncIterator[bytes]:
+        data = self._objects[object_key]
+        end = len(data) if length is None else min(len(data), offset + length)
+        for start in range(offset, end, 64 * 1024):
+            yield data[start : min(start + 64 * 1024, end)]
+
     def clear(self) -> None:
         self._objects.clear()
 
@@ -141,9 +159,7 @@ class MinioObjectStore:
                 return self._client
             from minio import Minio
 
-            endpoint = self._settings.minio_endpoint.replace("http://", "").replace(
-                "https://", ""
-            )
+            endpoint = self._settings.minio_endpoint.replace("http://", "").replace("https://", "")
             secure = self._settings.minio_endpoint.startswith("https://")
             client = cast(
                 _MinioClient,
@@ -170,16 +186,12 @@ class MinioObjectStore:
             if not client.bucket_exists(bucket):
                 raise
 
-    async def put_bytes(
-        self, *, object_key: str, data: bytes, mime_type: str
-    ) -> StoredObject:
+    async def put_bytes(self, *, object_key: str, data: bytes, mime_type: str) -> StoredObject:
         return await asyncio.to_thread(
             self._put_bytes_sync, object_key=object_key, data=data, mime_type=mime_type
         )
 
-    def _put_bytes_sync(
-        self, *, object_key: str, data: bytes, mime_type: str
-    ) -> StoredObject:
+    def _put_bytes_sync(self, *, object_key: str, data: bytes, mime_type: str) -> StoredObject:
         client = self._ensure_client()
         content_hash = hashlib.sha256(data).hexdigest()
         client.put_object(
@@ -254,6 +266,66 @@ class MinioObjectStore:
 
     async def delete_bytes(self, *, object_key: str) -> None:
         await asyncio.to_thread(self._delete_bytes_sync, object_key=object_key)
+
+    async def iter_bytes(
+        self,
+        *,
+        object_key: str,
+        offset: int = 0,
+        length: int | None = None,
+    ) -> AsyncIterator[bytes]:
+        # One GET per response, bounded reads, and guaranteed connection release
+        # on completion or client disconnect. The synchronous SDK stays off-loop.
+        def open_response() -> _MinioResponse:
+            return self._ensure_client().get_object(
+                self._settings.minio_bucket,
+                object_key,
+                offset=offset,
+                length=length,
+            )
+
+        opening = asyncio.create_task(asyncio.to_thread(open_response))
+        try:
+            response = await asyncio.shield(opening)
+        except asyncio.CancelledError:
+            # A cancelled request can still finish opening in its worker thread.
+            # Starlette's cancellation scope keeps cancelling every await unless
+            # cleanup is shielded from that scope as well as asyncio cancellation.
+            with CancelScope(shield=True):
+                response = await opening
+                try:
+                    await asyncio.to_thread(response.close)
+                finally:
+                    await asyncio.to_thread(response.release_conn)
+            raise
+        try:
+            remaining = length
+            while remaining is None or remaining > 0:
+                size = 64 * 1024 if remaining is None else min(64 * 1024, remaining)
+                # Shield the blocking read so closing on cancellation never races
+                # a thread that is still reading the same response.
+                read = asyncio.create_task(asyncio.to_thread(response.read, size))
+                try:
+                    chunk = await asyncio.shield(read)
+                except asyncio.CancelledError:
+                    with CancelScope(shield=True):
+                        await read
+                    raise
+                if not chunk:
+                    break
+                if remaining is not None:
+                    remaining -= len(chunk)
+                yield chunk
+        finally:
+
+            def close_response() -> None:
+                try:
+                    response.close()
+                finally:
+                    response.release_conn()
+
+            with CancelScope(shield=True):
+                await asyncio.shield(asyncio.to_thread(close_response))
 
     def _delete_bytes_sync(self, *, object_key: str) -> None:
         client = self._ensure_client()

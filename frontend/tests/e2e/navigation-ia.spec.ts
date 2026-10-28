@@ -548,7 +548,7 @@ test("model settings activate models inside providers and add custom connections
   await expect(page.getByRole("heading", { name: "供应商" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "默认模型" })).toHaveCount(0);
   await expect(page.getByLabel("文本模型")).toHaveCount(0);
-  await expect(page.getByRole("region", { name: "配置 文本服务" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "LLM 配置" })).toBeVisible();
 
   await page.getByTestId("add-provider").click();
   const dialog = page.getByTestId("add-provider-dialog");

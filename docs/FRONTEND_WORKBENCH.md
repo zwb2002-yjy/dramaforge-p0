@@ -303,7 +303,14 @@ WorkstationShell：全局项目入口、工作空间切换、设置、全局导�
 - `useEditingDirector` 拥有建议请求、版本失效、持久拒绝和修复路由生命周期；不隐式
   Apply 或 Save。
 - 产品运行时无 `projectId === "demo"` 特判；测试 Project 使用普通 fixture/UUID。
-- 已删除无消费者的 ModelPicker、uiStore、DirectorBoard 前端 helper 与 change-proposals 客户端。
+- 已删除无消费者的退役表面（可核对路径）：旧默认模型下拉 `ModelPicker`（现存的
+  `src/components/provider/ModelPicker.tsx` 是「勾选精确合同建 Binding」的现行实现，
+  有真实消费者，不是退役对象）、`uiStore`、`lib/api.ts` 的
+  `fetchDirectorBoard`/`saveDirectorBoard`/`DirectorBoardRead` 与
+  `queryKeys.director.board`、`productionInvalidation` 的 `director-board` 条目、
+  change-proposals 客户端。后端
+  `GET/PUT /projects/{pid}/shots/{sid}/director-board` 端点保留但无前端消费者
+  （保留声明见 `docs/API.md`），退役与否由后端领域单独裁定。
 
 ## 返修的可恢复交互
 

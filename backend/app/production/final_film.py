@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from contextlib import suppress
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
@@ -51,6 +51,19 @@ _DONE = frozenset({"completed", "cached", "completed_after_cancel"})
 _PENDING = frozenset({"queued", "running", "cancel_requested"})
 _FINAL_FILM_GRAPH_KEY = "final_film_assembly"
 _FINAL_FILM_FORMAT = "dramaforge-final-film-v1"
+logger = logging.getLogger(__name__)
+
+
+async def _cleanup_uploads(session: AsyncSession, *, run_id: UUID, store: ObjectStore) -> None:
+    from app.production.final_film_uploads import cleanup_final_film_uploads
+    from app.shared.observability import FINAL_FILM_CLEANUP_FAILURES
+
+    try:
+        await cleanup_final_film_uploads(session, node_run_id=run_id, store=store)
+    except Exception:
+        await session.rollback()
+        FINAL_FILM_CLEANUP_FAILURES.inc()
+        logger.warning("final_film_cleanup_deferred run=%s", run_id, exc_info=True)
 
 
 class FinalFilmPrepareBody(BaseModel):
@@ -677,14 +690,14 @@ def _snapshot_refs(snapshot: dict[str, object]) -> list[_TimelineRef]:
 
 
 async def _read_artifact_bytes(
-    session: AsyncSession,
+    artifacts: dict[UUID, Artifact],
     store: ObjectStore,
     artifact_id: UUID,
     *,
     project_id: UUID,
     artifact_type: str,
 ) -> tuple[Artifact, bytes]:
-    artifact = await session.get(Artifact, artifact_id)
+    artifact = artifacts.get(artifact_id)
     if (
         artifact is None
         or artifact.project_id != project_id
@@ -1435,8 +1448,39 @@ async def execute_final_film_node_run(
     stored = None
     subtitle_stored = None
     delivery_committed = False
+    uploads_finished = False
     run_id, operation_id = run.id, operation.id
     try:
+        # Resolve all immutable metadata in one short transaction. Reading an
+        # Artifact lazily inside the media loop would reopen a transaction for
+        # the entire download/render/upload interval.
+        input_ids = {ref.artifact_id for ref, _, _, _ in resolved}
+        for ref, _, _, media in resolved:
+            voice = media.get("voice")
+            audio_id = ref.audio_id or (
+                UUID(str(voice["artifact_id"]))
+                if isinstance(voice, dict) and voice.get("artifact_id")
+                else None
+            )
+            if audio_id is not None and not bool(ref.raw_clip.get("muted")):
+                input_ids.add(audio_id)
+        timeline_snapshot = snapshot.get("timeline")
+        metadata = timeline_snapshot.get("metadata") if isinstance(timeline_snapshot, dict) else {}
+        music_id = metadata.get("music_artifact_id") if isinstance(metadata, dict) else None
+        if music_id:
+            input_ids.add(UUID(str(music_id)))
+        artifacts = {
+            artifact.id: artifact
+            for artifact in (
+                await session.scalars(
+                    select(Artifact).where(
+                        Artifact.id.in_(input_ids),
+                        Artifact.project_id == run.project_id,
+                    )
+                )
+            ).all()
+        }
+        await session.commit()
         timeline_clips: list[TimelineRenderClip] = []
         formal_lineage: list[dict[str, Any]] = []
         frozen_references = snapshot.get("formal_references")
@@ -1447,7 +1491,7 @@ async def execute_final_film_node_run(
         }
         for ref, composite_run, composite_artifact, media in resolved:
             _video_artifact, video_bytes = await _read_artifact_bytes(
-                session,
+                artifacts,
                 obj_store,
                 ref.artifact_id,
                 project_id=run.project_id,
@@ -1463,7 +1507,7 @@ async def execute_final_film_node_run(
             audio_bytes = None
             if selected_audio_id is not None and not bool(ref.raw_clip.get("muted")):
                 _audio_artifact, audio_bytes = await _read_artifact_bytes(
-                    session,
+                    artifacts,
                     obj_store,
                     selected_audio_id,
                     project_id=run.project_id,
@@ -1525,14 +1569,10 @@ async def execute_final_film_node_run(
                     },
                 }
             )
-        run.input_snapshot = {**snapshot, "formal_references": formal_lineage}
-        timeline_snapshot = snapshot.get("timeline")
-        metadata = timeline_snapshot.get("metadata") if isinstance(timeline_snapshot, dict) else {}
-        music_id = metadata.get("music_artifact_id") if isinstance(metadata, dict) else None
         music_bytes = None
         if music_id:
             _music_artifact, music_bytes = await _read_artifact_bytes(
-                session,
+                artifacts,
                 obj_store,
                 UUID(str(music_id)),
                 project_id=run.project_id,
@@ -1602,12 +1642,40 @@ async def execute_final_film_node_run(
         duration = Decimal(str(float((probe.get("format") or {}).get("duration") or 0))).quantize(
             Decimal("0.001")
         )
-        object_key = f"projects/{run.project_id}/final-film/{run.id}.mp4"
+        # Persist the intended keys BEFORE the first upload. A process kill at
+        # any upload boundary leaves a recoverable journal, including a failed
+        # write that reached MinIO before raising locally.
+        upload_prefix = f"projects/{run.project_id}/final-film/{run.id}/{uuid4()}"
+        object_key = f"{upload_prefix}.mp4"
+        subtitle_key = f"{upload_prefix}.srt"
+        await set_node_run_rls_context(session, node_run_id=run_id)
+        operation.request_summary = {
+            **(operation.request_summary or {}),
+            "upload_objects": [object_key] + ([subtitle_key] if rendered.subtitle_data else []),
+            "uploads_finished": False,
+        }
+        await session.commit()
         stored = await obj_store.put_bytes(
             object_key=object_key,
             data=rendered.data,
             mime_type="video/mp4",
         )
+        if rendered.subtitle_data:
+            subtitle_stored = await obj_store.put_bytes(
+                object_key=subtitle_key,
+                data=rendered.subtitle_data,
+                mime_type="application/x-subrip",
+            )
+        uploads_finished = True
+        await set_node_run_rls_context(session, node_run_id=run_id)
+        await session.refresh(operation, with_for_update=True)
+        if operation.status != "submission_started":
+            raise ValidationAppError(
+                "Final Film attempt is no longer active",
+                details={"code": "FINAL_FILM_ATTEMPT_EXPIRED"},
+            )
+        operation.request_summary = {**operation.request_summary, "uploads_finished": True}
+        run.input_snapshot = {**snapshot, "formal_references": formal_lineage}
         artifact = await get_or_create_artifact(
             session,
             project_id=run.project_id,
@@ -1625,12 +1693,7 @@ async def execute_final_film_node_run(
             allow_cross_run_reuse=True,
         )
         subtitle_artifact = None
-        if rendered.subtitle_data:
-            subtitle_stored = await obj_store.put_bytes(
-                object_key=f"projects/{run.project_id}/final-film/{run.id}.srt",
-                data=rendered.subtitle_data,
-                mime_type="application/x-subrip",
-            )
+        if subtitle_stored is not None:
             subtitle_artifact = await get_or_create_artifact(
                 session,
                 project_id=run.project_id,
@@ -1728,7 +1791,7 @@ async def execute_final_film_node_run(
             )
         await session.commit()
         delivery_committed = True
-        return ExecuteNodeResult(
+        result = ExecuteNodeResult(
             node_run_id=run.id,
             artifact_id=artifact.id,
             object_key=artifact.object_key,
@@ -1738,6 +1801,8 @@ async def execute_final_film_node_run(
             provider_operation_id=operation.id,
             node_type=node.node_type,
         )
+        await _cleanup_uploads(session, run_id=run_id, store=obj_store)
+        return result
     except Exception as exc:
         if delivery_committed:
             raise
@@ -1749,12 +1814,8 @@ async def execute_final_film_node_run(
         operation = await session.get(ProviderOperation, operation_id, populate_existing=True)
         if operation is None:
             raise
-        if subtitle_stored is not None:
-            with suppress(Exception):
-                await obj_store.delete_bytes(object_key=subtitle_stored.object_key)
-        if stored is not None:
-            with suppress(Exception):
-                await obj_store.delete_bytes(object_key=stored.object_key)
+        if uploads_finished:
+            operation.request_summary = {**operation.request_summary, "uploads_finished": True}
         operation.status = "failed"
         operation.error_code = (
             exc.details.get("code")
@@ -1768,6 +1829,7 @@ async def execute_final_film_node_run(
         run.error_summary = operation.error_summary
         run.finished_at = datetime.now(UTC)
         await session.commit()
+        await _cleanup_uploads(session, run_id=run_id, store=obj_store)
         raise
 
 

@@ -141,9 +141,7 @@ export function GatewayModelEditor({
   });
   const busy =
     save.isPending || reconcile.isPending || toggle.isPending || usage.activate.isPending;
-  const logicalModelId = row?.gateway_ref
-    ? `litellm/${row.id}/${row.gateway_ref.alias}`
-    : "";
+  const logicalModelId = row?.gateway_ref ? `litellm/${row.id}/${row.gateway_ref.alias}` : "";
   const active = usage.isActive("llm", logicalModelId);
   const actions = (
     <>

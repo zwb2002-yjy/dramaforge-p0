@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 from app.access.models import Project, User, Workspace
 from app.assets.models import Episode, Scene, Shot
-from app.director.text_transport import DirectorTextTransport
+from app.director.text_transport import DirectorTextRuntimeAdapter
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
 from app.execution.models import NodeRun
@@ -317,7 +317,7 @@ async def test_user_shot_save_marks_active_turn_stale_and_late_state_cannot_revi
     assert turn.status == "stale"
     assert turn.wait_reason == "context_changed"
     with pytest.raises(ValidationAppError):
-        await DirectorTextTransport(session).mark_awaiting_user(turn)
+        await DirectorTextRuntimeAdapter(session).mark_awaiting_user(turn)
     await session.refresh(turn)
     assert turn.status == "stale"
     assert updated.video_prompt == "new user-owned video prompt"

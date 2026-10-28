@@ -71,6 +71,167 @@ async def _seed_project(session: AsyncSession) -> tuple[Project, User]:
     return project, user
 
 
+async def test_final_film_releases_transaction_at_every_io_boundary(session, monkeypatch):
+    monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
+    project, user, edit, _shots, _videos = await _seed_renderable_final_film(session)
+    queued = await queue_final_film_render(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+        idempotency_key="io-boundaries",
+        name="Final",
+    )
+    run = await session.get(NodeRun, queued.node_run_id)
+    run.status = "running"
+    await session.commit()
+    node = await session.get(GraphNode, run.graph_node_id)
+    store = get_object_store()
+    original_get, original_put = store.get_bytes, store.put_bytes
+    original_render = render_timeline
+    boundaries = []
+
+    async def read(**kwargs):
+        assert not session.in_transaction(), "input download holds a transaction"
+        boundaries.append("read")
+        return await original_get(**kwargs)
+
+    async def write(**kwargs):
+        assert not session.in_transaction(), "output upload holds a transaction"
+        boundaries.append("write")
+        return await original_put(**kwargs)
+
+    async def render(*args, **kwargs):
+        assert not session.in_transaction(), "ffmpeg holds a transaction"
+        boundaries.append("render")
+        return await original_render(*args, **kwargs)
+
+    monkeypatch.setattr(store, "get_bytes", read)
+    monkeypatch.setattr(store, "put_bytes", write)
+    monkeypatch.setattr("app.production.timeline_renderer.render_timeline", render)
+    await execute_final_film_node_run(session, run=run, node=node, obj_store=store)
+    assert {"read", "render", "write"} <= set(boundaries)
+
+
+async def test_crashed_upload_is_journaled_and_cleanup_failure_is_retried(session, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from app.production.final_film_uploads import cleanup_final_film_uploads
+
+    class ProcessKilled(BaseException):
+        pass
+
+    monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
+    project, user, edit, _shots, _videos = await _seed_renderable_final_film(session)
+    queued = await queue_final_film_render(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+        idempotency_key="crashed-upload",
+        name="Final",
+    )
+    run = await session.get(NodeRun, queued.node_run_id)
+    run.status = "running"
+    await session.commit()
+    node = await session.get(GraphNode, run.graph_node_id)
+    store = get_object_store()
+    original_put = store.put_bytes
+
+    async def kill_after_remote_write(**kwargs):
+        await original_put(**kwargs)
+        raise ProcessKilled()
+
+    monkeypatch.setattr(store, "put_bytes", kill_after_remote_write)
+    with pytest.raises(ProcessKilled):
+        await execute_final_film_node_run(session, run=run, node=node, obj_store=store)
+    operation = await session.scalar(
+        select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+    )
+    run_id = run.id
+    keys = operation.request_summary["upload_objects"]
+    assert keys and await store.get_bytes(object_key=keys[0])
+    # A still-active upload is never collected.
+    assert await cleanup_final_film_uploads(session, node_run_id=run_id, store=store) == 0
+    await session.refresh(operation)
+    operation.submitted_at = datetime.now(UTC) - timedelta(minutes=32)
+    await session.commit()
+    original_delete = store.delete_bytes
+
+    async def fail_delete(**kwargs):
+        assert not session.in_transaction()
+        raise OSError("storage unavailable")
+
+    monkeypatch.setattr(store, "delete_bytes", fail_delete)
+    assert await cleanup_final_film_uploads(session, node_run_id=run_id, store=store) == 0
+    assert operation.request_summary["upload_objects"] == keys
+    await session.refresh(run)
+    assert run.status == "failed"
+    monkeypatch.setattr(store, "delete_bytes", original_delete)
+    assert await cleanup_final_film_uploads(session, node_run_id=run_id, store=store) == len(keys)
+    # A killed caller cannot attest that an in-flight remote PUT has stopped.
+    assert operation.request_summary["upload_objects"] == keys
+    with pytest.raises(KeyError):
+        await store.get_bytes(object_key=keys[0])
+    await original_put(object_key=keys[0], data=b"late bytes", mime_type="video/mp4")
+    await cleanup_final_film_uploads(session, node_run_id=run_id, store=store)
+    with pytest.raises(KeyError):
+        await store.get_bytes(object_key=keys[0])
+    assert operation.request_summary["upload_objects"] == keys
+
+
+async def test_late_upload_after_cleanup_cannot_escape_reclamation(session, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from app.production.final_film_uploads import cleanup_final_film_uploads
+
+    monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
+    project, user, edit, _shots, _videos = await _seed_renderable_final_film(session)
+    project_id = project.id
+    queued = await queue_final_film_render(
+        session,
+        project_id=project_id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+        idempotency_key="late-upload",
+        name="Final",
+    )
+    run_id = queued.node_run_id
+    run = await session.get(NodeRun, run_id)
+    run.status = "running"
+    await session.commit()
+    node = await session.get(GraphNode, run.graph_node_id)
+    store = get_object_store()
+    original_put = store.put_bytes
+    input_keys = set(store.keys())
+    factory = async_sessionmaker(session.bind, expire_on_commit=False)
+
+    async def late_put(**kwargs):
+        async with factory() as cleanup_session:
+            operation = await cleanup_session.scalar(
+                select(ProviderOperation).where(ProviderOperation.node_run_id == run_id)
+            )
+            operation.submitted_at = datetime.now(UTC) - timedelta(minutes=32)
+            await cleanup_session.commit()
+            await cleanup_final_film_uploads(cleanup_session, node_run_id=run_id, store=store)
+        return await original_put(**kwargs)
+
+    monkeypatch.setattr(store, "put_bytes", late_put)
+    with pytest.raises(ValidationAppError) as failure:
+        await execute_final_film_node_run(session, run=run, node=node, obj_store=store)
+    assert failure.value.details["code"] == "FINAL_FILM_ATTEMPT_EXPIRED"
+    assert set(store.keys()) == input_keys, "late upload escaped the cleanup journal"
+    assert await session.scalar(select(Export).where(Export.project_id == project_id)) is None
+    operation = await session.scalar(
+        select(ProviderOperation).where(ProviderOperation.node_run_id == run_id)
+    )
+    assert operation.request_summary["uploads_finished"] is True
+    assert operation.request_summary["upload_objects"] == []
+
+
 async def _seed_renderable_final_film(
     session: AsyncSession,
     *,

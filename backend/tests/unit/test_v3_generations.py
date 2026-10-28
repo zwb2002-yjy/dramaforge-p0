@@ -106,17 +106,51 @@ class TestReadSurface:
         # Unbound catalog models are installed metadata, never workspace choices.
         assert all(item["source"] == "installed" for item in models)
 
-    def test_litellm_models_use_gateway_configuration(self, api: tuple[TestClient, Any]) -> None:
+    def test_litellm_models_use_gateway_configuration(
+        self,
+        api: tuple[TestClient, Any],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import httpx
+        from app.providers.litellm_gateway.management import GatewayManagementClient
+        from app.providers.litellm_gateway.management_service import GatewayModelService
+        from cryptography.fernet import Fernet
+        from test_gateway_model_management import ProxyFixture, model
+
         client, _ = api
-        _register(client)
+        workspace_id = _register(client)
         gateway_settings = get_settings().model_copy(
             update={
                 "litellm_gateway_url": "http://litellm.test",
                 "litellm_api_key": "gateway-key",
+                "litellm_model_admin_key": "restricted-model-admin",
+                "byok_fernet_key": Fernet.generate_key().decode(),
+                "byok_keyring": "",
             }
         )
         client.app.dependency_overrides[settings_dep] = lambda: gateway_settings
+        monkeypatch.setattr(
+            "app.providers.workspace_credentials.get_settings", lambda: gateway_settings
+        )
+        monkeypatch.setattr(
+            "app.providers.litellm_gateway.management_service.get_settings",
+            lambda: gateway_settings,
+        )
+        proxy = ProxyFixture()
+        management = GatewayManagementClient(
+            gateway_settings, transport=httpx.MockTransport(proxy.handle)
+        )
+        monkeypatch.setattr(GatewayModelService, "client", property(lambda self: management))
         try:
+            before = client.get("/api/v1/models", params={"capability": "text.generate"})
+            assert before.status_code == 200
+            assert before.json() == [], "process configuration cannot create a workspace model"
+            registered = client.post(
+                f"/api/v1/workspaces/{workspace_id}/provider-connections/gateway",
+                json=model().model_dump(mode="json"),
+                headers={"X-CSRF-Token": _csrf(client)},
+            )
+            assert registered.status_code == 201, registered.text
             response = client.get("/api/v1/models", params={"capability": "text.generate"})
         finally:
             client.app.dependency_overrides.pop(settings_dep, None)
@@ -125,9 +159,9 @@ class TestReadSurface:
         litellm = [item for item in models if item["provider_id"] == "litellm"]
         assert litellm
         assert all(item["configured"] and item["available"] for item in litellm)
-        # Process-level gateway aliases are a bootstrap fallback, not a second
-        # product-level text model identity next to workspace connections.
-        assert all(item["source"] == "installed" for item in litellm)
+        assert all(item["source"] == "workspace" for item in litellm)
+        assert all(registered.json()["id"] in item["id"] for item in litellm)
+        assert proxy.creates == 1
 
     def test_provider_plugins_list_text_gateway_as_text_kind(
         self, api: tuple[TestClient, Any]

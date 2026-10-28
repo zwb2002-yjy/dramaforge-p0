@@ -30,6 +30,8 @@ from uuid import uuid4
 import httpx
 
 from app.config import Settings, get_settings
+from app.providers.egress import guarded_provider_transport
+from app.providers.http_client import provider_http_client
 
 ARK_CN_PROFILE = "ark_cn_v1"
 ARK_CN_HOST = "https://ark.cn-beijing.volces.com/api/v3"
@@ -145,7 +147,7 @@ async def _post_json(
     timeout: float,
     transport: httpx.AsyncBaseTransport | None,
 ) -> httpx.Response:
-    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+    async with provider_http_client(timeout=timeout, transport=transport) as client:
         return await client.post(f"{host}{path}", headers=headers, json=body)
 
 
@@ -157,7 +159,7 @@ async def _get_json(
     timeout: float,
     transport: httpx.AsyncBaseTransport | None,
 ) -> httpx.Response:
-    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+    async with provider_http_client(timeout=timeout, transport=transport) as client:
         return await client.get(f"{host}{path}", headers=headers)
 
 
@@ -237,7 +239,7 @@ class ArkHubClient:
         host: str | None = None,
     ) -> None:
         self._settings = settings or get_settings()
-        self._transport = transport
+        self._transport = transport or guarded_provider_transport(settings=self._settings)
         self._host = (host or self._settings.volcengine_base_url).strip().rstrip("/")
         self._key = self._settings.volcengine_api_key.strip()
         self._image_model = self._settings.volcengine_image_model
@@ -509,7 +511,7 @@ class ArkHubClient:
 
     async def cancel(self, remote_task_id: str) -> dict[str, Any]:
         try:
-            async with httpx.AsyncClient(
+            async with provider_http_client(
                 timeout=30.0,
                 transport=self._transport,
             ) as client:
@@ -990,7 +992,7 @@ class ArkRuntime:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._settings = settings or get_settings()
-        self._transport = transport
+        self._transport = transport or guarded_provider_transport(settings=self._settings)
         self._host = (host or self._settings.volcengine_base_url).strip().rstrip("/")
         self._key = self._settings.volcengine_api_key.strip()
         self._enabled = self._settings.volcengine_enabled
@@ -1184,7 +1186,7 @@ class ArkRuntime:
         from app.providers.runtime import CancelResult
 
         try:
-            async with httpx.AsyncClient(timeout=30.0, transport=self._transport) as client:
+            async with provider_http_client(timeout=30.0, transport=self._transport) as client:
                 await client.delete(
                     f"{self._host}{ARK_VIDEO_CREATE_PATH}/{resume.remote_task_id}",
                     headers=self._headers(),

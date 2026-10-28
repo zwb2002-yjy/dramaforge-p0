@@ -33,6 +33,8 @@ import httpx
 from pydantic import JsonValue
 
 from app.config import Settings, get_settings
+from app.providers.egress import guarded_provider_transport
+from app.providers.http_client import provider_http_client
 from app.providers.manifest import ModelCapabilityManifest
 from app.providers.runtime import (
     PROVIDER_CONTENT_URI,
@@ -168,7 +170,7 @@ class OpenAICompatibleMediaClient:
         self._settings = cfg
         self._key = cfg.openai_compatible_media_api_key.strip()
         self._host = _base_url(host or cfg.openai_compatible_media_base_url)
-        self._transport = transport
+        self._transport = transport or guarded_provider_transport(settings=self._settings)
         self._image_model = cfg.openai_compatible_media_image_model.strip()
         self._video_model = cfg.openai_compatible_media_video_model.strip()
 
@@ -224,7 +226,7 @@ class OpenAICompatibleMediaClient:
         image_bytes: bytes | None,
         image_mime: str,
     ) -> httpx.Response:
-        async with httpx.AsyncClient(
+        async with provider_http_client(
             timeout=self._settings.openai_compatible_media_timeout_seconds,
             transport=self._transport,
         ) as client:
@@ -288,7 +290,7 @@ class OpenAICompatibleMediaClient:
         *,
         multipart_text: bool = False,
     ) -> httpx.Response:
-        async with httpx.AsyncClient(
+        async with provider_http_client(
             timeout=self._settings.openai_compatible_media_timeout_seconds,
             transport=self._transport,
         ) as client:
@@ -315,7 +317,7 @@ class OpenAICompatibleMediaClient:
     async def poll_video(self, remote_task_id: str, **_: Any) -> dict[str, Any]:
         if not self.configured():
             raise RuntimeError("OpenAI-compatible media connection is not configured")
-        async with httpx.AsyncClient(
+        async with provider_http_client(
             timeout=self._settings.openai_compatible_media_timeout_seconds,
             transport=self._transport,
         ) as client:
@@ -856,10 +858,9 @@ class OpenAICompatibleMediaRuntime:
         self._configured()
         url = f"{self._client._host}/videos/{quote(resume.remote_task_id, safe='')}/content"
         async with (
-            httpx.AsyncClient(
+            provider_http_client(
                 timeout=self._settings.openai_compatible_media_timeout_seconds,
                 transport=self._client._transport,
-                follow_redirects=False,
             ) as client,
             client.stream("GET", url, headers=self._client._headers()) as response,
         ):
@@ -875,7 +876,7 @@ class OpenAICompatibleMediaRuntime:
 
     async def cancel_video(self, resume: ProviderResumeToken) -> CancelResult:
         self._configured()
-        async with httpx.AsyncClient(
+        async with provider_http_client(
             timeout=self._settings.openai_compatible_media_timeout_seconds,
             transport=self._client._transport,
         ) as client:

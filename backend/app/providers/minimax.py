@@ -26,6 +26,8 @@ import httpx
 from pydantic import JsonValue
 
 from app.config import Settings, get_settings
+from app.providers.egress import guarded_provider_transport
+from app.providers.http_client import provider_http_client
 
 MINIMAX_CN_PROFILE = "minimax_cn_v1"
 MINIMAX_CN_HOST = "https://api.minimaxi.com"
@@ -184,7 +186,7 @@ async def _post_json(
     timeout: float,
     transport: httpx.AsyncBaseTransport | None,
 ) -> httpx.Response:
-    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+    async with provider_http_client(timeout=timeout, transport=transport) as client:
         return await client.post(f"{host}{path}", headers=headers, json=body)
 
 
@@ -196,7 +198,7 @@ async def _get_json(
     timeout: float,
     transport: httpx.AsyncBaseTransport | None,
 ) -> httpx.Response:
-    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+    async with provider_http_client(timeout=timeout, transport=transport) as client:
         return await client.get(f"{host}{path}", headers=headers)
 
 
@@ -231,7 +233,7 @@ class MiniMaxHubClient:
         host: str | None = None,
     ) -> None:
         self._settings = settings or get_settings()
-        self._transport = transport
+        self._transport = transport or guarded_provider_transport(settings=self._settings)
         self._host = (host or self._settings.minimax_base_url).strip().rstrip("/")
         self._key = self._settings.minimax_api_key.strip()
         self._image_model = self._settings.minimax_image_model
@@ -435,7 +437,7 @@ class MiniMaxHubClient:
         if not self.configured():
             raise RuntimeError("MiniMax connection is not configured")
         try:
-            async with httpx.AsyncClient(timeout=30.0, transport=self._transport) as client:
+            async with provider_http_client(timeout=30.0, transport=self._transport) as client:
                 response = await client.delete(
                     f"{self._host}{MINIMAX_VIDEO_CANCEL_PATH.format(task_id=remote_task_id)}",
                     headers=self._headers(),
@@ -955,7 +957,7 @@ class MiniMaxRuntime:
         self._host = (host or self._settings.minimax_base_url).strip().rstrip("/")
         self._key = self._settings.minimax_api_key.strip()
         self._enabled = self._settings.minimax_enabled
-        self._transport = transport
+        self._transport = transport or guarded_provider_transport(settings=self._settings)
 
     def _configured(self) -> bool:
         return bool(self._enabled and self._key)
@@ -1131,7 +1133,7 @@ class MiniMaxRuntime:
         if not self._configured():
             raise RuntimeError("MiniMax connection is not configured")
         try:
-            async with httpx.AsyncClient(timeout=30.0, transport=self._transport) as client:
+            async with provider_http_client(timeout=30.0, transport=self._transport) as client:
                 await client.delete(
                     f"{self._host}{MINIMAX_VIDEO_CANCEL_PATH.format(task_id=resume.remote_task_id)}",
                     headers=self._headers(),

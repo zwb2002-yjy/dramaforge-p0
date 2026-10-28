@@ -23,6 +23,8 @@ import httpx
 from pydantic import JsonValue
 
 from app.config import Settings, get_settings
+from app.providers.egress import guarded_provider_transport
+from app.providers.http_client import provider_http_client
 
 AGNES_CN_PROFILE = "agnes_cn_v1"
 AGNES_CN_HOST = "https://api.agnes-ai.cn"
@@ -199,7 +201,7 @@ async def _post_json(
     timeout: float,
     transport: httpx.AsyncBaseTransport | None,
 ) -> httpx.Response:
-    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+    async with provider_http_client(timeout=timeout, transport=transport) as client:
         return await client.post(f"{host}{path}", headers=headers, json=body)
 
 
@@ -212,7 +214,7 @@ async def _get_json(
     timeout: float,
     transport: httpx.AsyncBaseTransport | None,
 ) -> httpx.Response:
-    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+    async with provider_http_client(timeout=timeout, transport=transport) as client:
         return await client.get(f"{host}{path}", headers=headers, params=params)
 
 
@@ -312,7 +314,7 @@ class AgnesHubClient:
         host: str | None = None,
     ) -> None:
         self._settings = settings or get_settings()
-        self._transport = transport
+        self._transport = transport or guarded_provider_transport(settings=self._settings)
         self._host = normalize_agnes_host(host or self._settings.agnes_base_url)
         self._key = self._settings.agnes_api_key.strip()
         self._image_model = self._settings.agnes_image_model
@@ -628,27 +630,6 @@ class AgnesHubClient:
                 "artifact_uri": task.get("artifact_uri"),
             }
         return {"status": "failed", "error_code": "PROVIDER_TASK_UNKNOWN"}
-
-    async def wait_video(
-        self,
-        remote_task_id: str,
-        *,
-        timeout_s: float = 1_620.0,
-        interval_s: float = 5.0,
-    ) -> dict[str, Any]:
-        deadline = asyncio.get_running_loop().time() + timeout_s
-        last: dict[str, Any] = {"status": "queued"}
-        while asyncio.get_running_loop().time() < deadline:
-            last = await self.poll_video(remote_task_id)
-            if last.get("status") in {"succeeded", "failed", "cancelled"}:
-                return last
-            await asyncio.sleep(interval_s)
-        return {
-            **last,
-            "status": "running",
-            "error_code": "PROVIDER_POLL_TRANSIENT",
-            "poll_timeout": True,
-        }
 
     async def cancel(self, remote_task_id: str) -> dict[str, Any]:
         if remote_task_id in self._tasks:
@@ -1215,7 +1196,7 @@ class AgnesRuntime:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._settings = settings or get_settings()
-        self._transport = transport
+        self._transport = transport or guarded_provider_transport(settings=self._settings)
         self._host = normalize_agnes_host(host or self._settings.agnes_base_url)
         self._key = self._settings.agnes_api_key.strip()
         self._enabled = self._settings.agnes_enabled

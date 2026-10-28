@@ -486,7 +486,6 @@ describe("Workstation shell", () => {
       if (url.includes("/opencut-manifest"))
         return json({ schema_version: "opencut-manifest-v2", tracks: [], shots: [] });
       if (url.includes("/annotations")) return json([]);
-      if (url.includes("/director-board")) return json(null);
       if (url.includes("/production-summary"))
         return json({
           project_id: "project-1",

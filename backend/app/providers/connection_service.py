@@ -28,6 +28,7 @@ from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_publication import effective_publication_lifecycle
 from app.providers.catalog_service import ModelCatalogService
 from app.providers.host_guard import validate_provider_base_url
+from app.providers.http_client import provider_http_client
 from app.providers.manifest import (
     ModelCapabilityManifest,
     has_reproducible_contract_evidence,
@@ -617,7 +618,7 @@ class ProviderConnectionService:
                     from app.providers.litellm_gateway.client import normalize_models_url
 
                     models_url = normalize_models_url(probe_revision.base_url)
-                async with httpx.AsyncClient(timeout=30.0, transport=probe_transport) as http:
+                async with provider_http_client(timeout=30.0, transport=probe_transport) as http:
                     response = await http.get(
                         models_url,
                         headers={

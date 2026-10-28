@@ -63,7 +63,6 @@ test("professional edit: formal manifest → persisted session → proposal-only
     experiments: clone(state.experiments),
     annotations: clone(state.annotations),
     revisions: clone(state.revisions),
-    board: clone(state.board),
   };
 
   // The production monitor consumes the current formal OpenCut v2 contract.
@@ -281,6 +280,5 @@ test("professional edit: formal manifest → persisted session → proposal-only
     experiments: state.experiments,
     annotations: state.annotations,
     revisions: state.revisions,
-    board: state.board,
   }).toEqual(initialProductionFacts);
 });

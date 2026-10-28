@@ -1229,7 +1229,7 @@ code {
   margin: 1.15rem 0 1.25rem;
   border: 1px solid var(--border);
   border-radius: var(--df-radius-container-lg);
-  background: var(--df-surface-1, var(--panel));
+  background: var(--df-surface-1);
   overflow: hidden;
   box-shadow: var(--df-surface-tier-raised-shadow);
 }
@@ -1276,7 +1276,7 @@ code {
 .workbench-tabs button.active,
 .assistant-mode-switch button.active {
   color: var(--text);
-  background: var(--df-surface-3, var(--panel-2));
+  background: var(--df-surface-3);
 }
 .fact-source-badge {
   border: 1px solid var(--df-success-border);
@@ -1393,7 +1393,7 @@ code {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  background: var(--df-surface-1, var(--panel));
+  background: var(--df-surface-1);
 }
 .canvas-stage {
   padding: 1rem;

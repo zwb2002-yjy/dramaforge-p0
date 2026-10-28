@@ -38,6 +38,7 @@
   --df-warning: #c69a57;
   --df-warning-dim: rgba(198, 154, 87, 0.15);
   --df-warning-border: rgba(198, 154, 87, 0.38);
+  --df-warning-text: #e2c491;
   --df-danger: #c85f55;
   --df-danger-dim: rgba(200, 95, 85, 0.15);
   --df-danger-border: rgba(200, 95, 85, 0.4);
@@ -217,6 +218,9 @@
   --df-stage-guide-width: 52rem;
   --df-journey-step-size: 2rem;
   --df-topbar-h: 56px;
+  /* Static first-paint ceiling for the project shell topbar; the shell injects
+     the measured height at runtime, so the workbench must not depend on JS. */
+  --df-project-topbar-height: var(--df-topbar-h);
   --df-form-field-min: 14rem; /* model/settings form column minimum */
   --df-sidebar-w: 216px;
   --df-inspector-w: 320px;
