@@ -222,6 +222,8 @@ def test_artifact_byte_ranges_are_scoped_and_support_native_seeking(api) -> None
             await get_object_store().put_bytes(
                 object_key=artifact.object_key, data=b"0123456789", mime_type="video/mp4"
             )
+            artifact.storage_state = "available"
+            await db.commit()
             return str(artifact.id)
 
     artifact_id = _run(factory, store_content())
@@ -287,6 +289,7 @@ def test_artifact_range_fails_closed_on_metadata_inconsistency(api) -> None:
             )
             assert artifact is not None
             artifact.byte_size = byte_size
+            artifact.storage_state = "available"
             await get_object_store().put_bytes(
                 object_key=artifact.object_key, data=data, mime_type="video/mp4"
             )
