@@ -90,7 +90,10 @@ services:
       LITELLM_INTEGRATION_URL: http://litellm-quality:4000
       LITELLM_POLICY_URL: http://127.0.0.1:4000
       LITELLM_MOCK_URL: http://litellm-mock-quality:9000
-    command: ["sh", "-c", "set -eu; uv run --directory backend pytest tests/integration/test_litellm_real_proxy.py tests/integration/test_litellm_proxy_policy.py -q -rs --fail-on-skip"]
+    # Dependencies and the editable project are installed while building the
+    # image. Runtime shares the restricted Proxy namespace: never re-sync or
+    # try to fetch build dependencies after the egress guard is active.
+    command: ["sh", "-c", "set -eu; uv run --offline --no-sync --directory backend pytest tests/integration/test_litellm_real_proxy.py tests/integration/test_litellm_proxy_policy.py -q -rs --fail-on-skip"]
 
   litellm-db-quality:
     image: postgres:15-alpine

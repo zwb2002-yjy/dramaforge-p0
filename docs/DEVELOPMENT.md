@@ -41,6 +41,10 @@ DB 备份/恢复与 guard/Proxy namespace 重建，保留同一部署 ID、SALT 
 它只允许专属 quality 服务和合成管理 Key，所有数据库/Provider 请求仍在容器内执行；
 宿主 Python 仅用标准库编排 Docker，不提供应用测试依赖。证据必须写入新的 `tmp/` 目录。
 
+LiteLLM 集成进程共享受限网络命名空间，使用镜像构建阶段已安装的锁定依赖与本地包。
+运行命令必须保留 `uv run --offline --no-sync`，避免源码时间戳触发隔离构建并请求 PyPI；
+依赖或源码变化应重建质量镜像，不能通过放宽出网 ACL 修复依赖准备问题。
+
 本地完整质量门与 GitHub Full Gate 共用 `docker-compose.quality.yml`，不维护第二套
 测试实现。当前 dev 处于快速开发模式，PR CI 只监听 `main`（见 RELEASE.md）；
 所有指向 `main` 的 PR（包括 docs-only）及手动 dispatch 仍执行完整质量和安全门。
