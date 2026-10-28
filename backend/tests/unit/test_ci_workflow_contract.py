@@ -241,3 +241,24 @@ def test_scheduled_security_workflow_has_no_pr_or_push_duplication() -> None:
         "scheduled-filesystem-scan",
     ):
         assert _job(workflow, job)
+
+
+def test_litellm_isolated_integration_reuses_built_environment_without_network_sync() -> None:
+    """Network-isolated integration must never trigger uv/build-isolation downloads."""
+    import yaml
+
+    quality_compose = (
+        Path(__file__).resolve().parents[3] / "docker-compose.quality.yml"
+    )
+    services = yaml.safe_load(quality_compose.read_text(encoding="utf-8"))["services"]
+    integration = services["litellm-integration-quality"]
+    assert integration["image"] == services["backend-quality"]["image"]
+    assert integration["network_mode"] == "service:litellm-policy-network-quality"
+    command = integration["command"]
+    assert command[:2] == ["sh", "-c"]
+    assert "cd /workspace/backend;" in command[2]
+    assert ".venv/bin/pytest tests/integration/test_litellm_real_proxy.py" in command[2]
+    assert "test_litellm_proxy_policy.py" in command[2]
+    assert "--fail-on-skip" in command[2]
+    assert "uv run" not in command[2]
+    assert "uv sync" not in command[2]

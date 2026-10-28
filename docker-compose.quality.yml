@@ -90,7 +90,9 @@ services:
       LITELLM_INTEGRATION_URL: http://litellm-quality:4000
       LITELLM_POLICY_URL: http://127.0.0.1:4000
       LITELLM_MOCK_URL: http://litellm-mock-quality:9000
-    command: ["sh", "-c", "set -eu; uv run --directory backend pytest tests/integration/test_litellm_real_proxy.py tests/integration/test_litellm_proxy_policy.py -q -rs --fail-on-skip"]
+    # Dependencies and the editable backend are installed while building the quality image.
+    # Run that frozen environment directly: this container intentionally has no PyPI egress.
+    command: ["sh", "-c", "set -eu; cd /workspace/backend; .venv/bin/pytest tests/integration/test_litellm_real_proxy.py tests/integration/test_litellm_proxy_policy.py -q -rs --fail-on-skip"]
 
   litellm-db-quality:
     image: postgres:15-alpine
