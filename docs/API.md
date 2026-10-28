@@ -97,9 +97,21 @@ provider evidence and media are retained; no old interface or recovery route is 
 
 ## Read-only Model Capability / Prompt Compiler
 
+- Provider connection create accepts `auth_mode=bearer|none` (default bearer).
+  Bearer requires an API key; none accepts no key and is available only for explicitly
+  supported media profiles. Read responses expose the mode and credential presence, never
+  the key. Plugins expose `auth_modes` and `manual_model_ids` for the existing form.
+  A manual remote ID plus a published generic contract saves an unverified binding;
+  a successful exact-ID directory observation is required before new Create.
 - GET /provider-plugins retains exact catalog revisions and adds optional typed `knowledge`
   with field evidence, referenced sources, implementation/product/account distinctions and
   `new_create_blocker`. Knowledge never substitutes the selected Binding revision.
+- Connection model-bindings GET adds nullable `generation_evidence` with the exact
+  `connection_revision_id` and `verified` result. This proves a successful matching
+  unified ProviderOperation/NodeRun and a retained available Artifact record, not
+  browser playback or quality approval. Directory and probe flags cannot substitute it.
+  The workspace read traverses only request-visible projects under ordinary project RLS
+  and restores its original project context; it creates no execution or privileged reader.
 - GET /models reports `available=false` and `availability_reason` for blocked bindings while
   preserving their connection/configuration facts; directory visibility does not qualify a contract.
 - GET /projects/{project_id}/model-capabilities: exactly one explicit model_id, current media

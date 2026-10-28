@@ -157,6 +157,7 @@ export const fixtureKnowledgeModel: ProviderPluginModelRead = {
 };
 
 export const fixtureKnowledgePlugin: ProviderPluginRead = {
+  manual_model_ids: false,
   provider_type: "fixture",
   protocol_profile: "fixture_v1",
   display_name: "Fixture Provider",

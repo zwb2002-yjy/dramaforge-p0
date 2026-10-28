@@ -128,6 +128,46 @@ async def test_protocol_client_uses_openai_compatible_image_and_video_shapes() -
     assert seen[1].headers["content-type"].startswith("multipart/form-data")
 
 
+@pytest.mark.parametrize("surface", ["client", "runtime"])
+async def test_generations_array_response_cannot_be_adopted_as_videos_contract(surface):
+    """Observed /videos/generations dialect is not the installed /videos profile."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        assert request.method == "POST" and request.url.path == "/v1/videos"
+        return httpx.Response(
+            200,
+            json={
+                "created": 1793118562,
+                "data": [{"id": "remote-video", "url": "/v1/videos/remote-video/content"}],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    if surface == "client":
+        result = await OpenAICompatibleMediaClient(_settings(), transport=transport).create_video(
+            prompt="synthetic motion"
+        )
+        assert result["status"] == "failed"
+        assert result.get("remote_task_id") is None
+    else:
+        runtime = OpenAICompatibleMediaRuntime(settings=_settings(), transport=transport)
+        submitted = await runtime.submit_video(
+            CompiledVideoRequest(
+                provider_type="openai_compatible_media",
+                protocol_profile=OPENAI_MEDIA_PROFILE,
+                model_id="configured-video",
+                operation="video.generate",
+                wire_request={"model": "configured-video", "prompt": "synthetic motion"},
+                request_schema_version="1",
+            )
+        )
+        assert submitted.status == "failed"
+        assert submitted.remote_task_id is submitted.resume_token is None
+    assert len(seen) == 1  # No alternate path, fake resume, poll or retry.
+
+
 @pytest.mark.asyncio
 async def test_local_video_poll_uses_connection_content_even_with_https_output_url() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -217,6 +257,42 @@ async def test_text_video_contract_compiles_without_a_first_frame() -> None:
     assert request.wire_request["model"] == "/models/MiniMax-H3-runtime"
     assert request.reference_artifact_ids == []
     assert request.safe_request_summary["reference_count"] == 0
+
+
+@pytest.mark.parametrize("duration", [0, 4, 6, 15])
+async def test_registered_sglang_text_contract_retains_its_five_second_limit(duration):
+    intent = VideoGenerationIntentV1(
+        prompt="A quiet street at dawn",
+        mode_id="text_to_video",
+        output=VideoOutputIntent(duration_seconds=duration),
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    with pytest.raises(ValueError, match="5-second"):
+        await OpenAICompatibleVideoCompiler().compile(
+            intent,
+            _manifest("@contract/sglang-h3-t2v-v1"),
+            [],
+            invoke_model_value="arbitrary-configured-model",
+        )
+
+
+@pytest.mark.parametrize(
+    "contract",
+    [
+        "@contract/sglang-h3-t2v-v1",
+        "@contract/sglang-h3-ref2va-v1",
+        "@contract/sglang-h3-fl2va-v1",
+    ],
+)
+def test_unknown_sglang_contract_revision_never_inherits_a_task_by_name(contract):
+    manifest = _manifest(contract).model_copy(update={"model_revision": "unknown"})
+    intent = VideoGenerationIntentV1(
+        prompt="synthetic",
+        mode_id="text_to_video",
+        selection=ModelSelectionIntent(mode="explicit_binding"),
+    )
+    with pytest.raises(ValueError, match="no registered compiler"):
+        OpenAICompatibleVideoCompiler().validate(intent, manifest)
 
 
 @pytest.mark.asyncio

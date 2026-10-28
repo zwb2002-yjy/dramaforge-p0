@@ -175,6 +175,7 @@ async def _execute_unified_media_node_run(
     )
     from app.providers.runtime import (
         CompiledImageRequest,
+        CostResult,
         PollResult,
         ProviderResumeToken,
         ProviderRuntime,
@@ -417,7 +418,12 @@ async def _execute_unified_media_node_run(
             )
             raise ValidationAppError(f"PROVIDER_CREATE_FAILED: {error_text}")
         remote = str(result.remote_task_id or "")
-        if not remote:
+        synchronous_image = (
+            isinstance(compiled, CompiledImageRequest)
+            and result.status == "succeeded"
+            and (result.artifact_uri is not None or result.artifact_bytes is not None)
+        )
+        if not remote and not synchronous_image:
             op.status = "failed"
             op.error_code = "PROVIDER_RESPONSE_INVALID"
             op.error_summary = "provider create response has no remote task id"
@@ -429,9 +435,9 @@ async def _execute_unified_media_node_run(
                 error_summary=op.error_summary,
             )
             raise ValidationAppError("PROVIDER_RESPONSE_INVALID")
-        op.provider_operation_id = remote
+        op.provider_operation_id = remote or None
         op.remote_secondary_id = result.remote_secondary_id
-        op.status = "submitted"
+        op.status = "submission_started" if synchronous_image and not remote else "submitted"
         if result.resume_token is not None:
             op.resume_token = result.resume_token.model_dump(mode="json")
             resume = result.resume_token
@@ -440,11 +446,6 @@ async def _execute_unified_media_node_run(
             "query_kind": result.query_kind,
         }
         # Synchronous image submissions already carry the result URL; no poll.
-        synchronous_image = (
-            isinstance(compiled, CompiledImageRequest)
-            and result.status == "succeeded"
-            and result.artifact_uri is not None
-        )
         op.request_summary = {
             **op.request_summary,
             **result.request_summary,
@@ -457,19 +458,21 @@ async def _execute_unified_media_node_run(
 
     if runtime is None:
         raise ValidationAppError("unified runtime was not resolved")
-    if resume is None:
+    if resume is None and not synchronous_image:
         raise ValidationAppError("unified operation has no resume token")
-    require_resume_token_identity(
-        resume,
-        remote_task_id=op.provider_operation_id,
-        provider_type=op.actual_provider,
-        protocol_profile=op.protocol_profile,
-        remote_secondary_id=op.remote_secondary_id,
-    )
+    if resume is not None:
+        require_resume_token_identity(
+            resume,
+            remote_task_id=op.provider_operation_id,
+            provider_type=op.actual_provider,
+            protocol_profile=op.protocol_profile,
+            remote_secondary_id=op.remote_secondary_id,
+        )
 
     # Poll loop (resume token driven). Synchronous image submissions already
     # carry the result URL and skip polling entirely.
     if not synchronous_image:
+        assert resume is not None
         _cancel_requested, cancel_confirmed = await _request_remote_cancellation_once(
             session,
             run=run,
@@ -562,11 +565,17 @@ async def _execute_unified_media_node_run(
                 sleep_s = max(sleep_s, float(poll_retry_after))
             await asyncio.sleep(min(sleep_s, remaining))
     else:
-        assert result is not None and result.artifact_uri is not None
+        assert result is not None and (
+            result.artifact_uri is not None or result.artifact_bytes is not None
+        )
         poll = PollResult(status="succeeded", artifact_uri=result.artifact_uri)
         poll_count = 0
 
-    cost = await runtime.fetch_cost(resume)
+    cost = (
+        await runtime.fetch_cost(resume)
+        if resume is not None
+        else CostResult(cost_status="not_reported")
+    )
     status = str(poll.status)
     cost_amount = getattr(cost, "amount", None)
     cost_status = str(getattr(cost, "cost_status", "not_reported"))
@@ -579,7 +588,7 @@ async def _execute_unified_media_node_run(
         "create_status": create_status,
         "final_status": status,
         "poll_count": poll_count,
-        "query_kind": resume.query_kind,
+        "query_kind": resume.query_kind if resume else None,
         "provider_reported_cost": (str(op.provider_cost) if op.provider_cost is not None else None),
         "cost_status": cost_status,
     }
@@ -599,8 +608,13 @@ async def _execute_unified_media_node_run(
 
     op.status = "succeeded"
     op.completed_at = datetime.now(UTC)
-    uri: object = poll.artifact_uri
+    uri: object = (
+        result.artifact_bytes
+        if synchronous_image and result and result.artifact_bytes is not None
+        else poll.artifact_uri
+    )
     if uri == PROVIDER_CONTENT_URI:
+        assert resume is not None
         fetch_artifact = getattr(runtime, "fetch_artifact", None)
         if not callable(fetch_artifact):
             raise ValidationAppError("PROVIDER_MEDIA_MISSING: runtime cannot fetch content")

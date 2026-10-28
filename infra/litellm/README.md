@@ -3,7 +3,8 @@
 当前模型与凭证权威见 [MODEL_PROVIDER.md](../../docs/MODEL_PROVIDER.md)，部署边界见
 [DEPLOYMENT.md](../../docs/DEPLOYMENT.md)。本目录维护可选的官方 LiteLLM Proxy 配置，
 不是第三个产品 Runtime。DramaForge 不安装 `litellm` SDK，通过 OpenAI-compatible
-Chat HTTP 合同访问 Proxy 或用户明确配置的兼容文本端点；配置外部 URL 不自动经过本地 Proxy。
+Chat HTTP 合同访问部署指定的内部 Proxy。新文本执行只接受工作区拥有的版本化受管引用；
+用户填写的上游地址仅由管理接口登记到 Proxy，不成为应用的直连目标。
 
 ## 配置与身份
 
@@ -35,8 +36,9 @@ DNS 的全部答案在启动时检查，规则固定 IP/端口；DNS 改变后�
 Proxy namespace 来核验新地址。仅数据库、Docker DNS、存活检查有必要的控制面例外。
 
 Proxy 的 HTTPX/requests/aiohttp 发送禁止跟随重定向，回调强制当前请求 retries=0、无 fallback，并拒绝
-同一 alias 下的多个部署。未证明安全的 SDK/Router 重试保持关闭；有限 pre-send 重试
-只允许后续在明确的发送边界实现。未知结果不能因 429/503/408 而自动重发。
+同一 alias 下的多个部署。SDK/Router 自动重试保持关闭；DramaForge 客户端只在明确
+未发送 HTTP 请求的 DF→Proxy 连接失败时，允许对同一部署再尝试一次。Proxy→上游仍为
+零重试；429/503/408、写入后断连、读超时和流中断都不能触发自动重发。
 
 锁定 Prisma 0.11.0 的本地查询引擎固定使用 4001 控制端口，避免随机开放回环端口。
 Proxy 固定单 worker；创建模型在原授权依赖之后串行检查 YAML/DB alias 冲突，拒绝
@@ -88,5 +90,7 @@ docker compose exec litellm python -c "import urllib.request; print(urllib.reque
 ## 产品边界
 
 图像/视频由 `backend/app/providers/` 的统一 Compiler 与 Provider Runtime 执行，
-不是 LiteLLM 媒体 Fork 的待接入路径。静态文本别名、工作空间文本连接和媒体 Binding
-的来源/修订分别冻结，不以兼容协议或相同名称推断它们是同一个模型。
+不是 LiteLLM 媒体 Fork 的待接入路径。静态文本别名与历史直连记录仅保留读取、身份解码
+和受控恢复所需的原配置，不参与新文本生产；缺少原身份的旧任务明确受阻，不能自动
+换成受管模型。删除旧别名或凭据前，须证明历史引用及回滚所需数据已获得明确处理。
+媒体 Binding 的来源/修订独立冻结，不以兼容协议或相同名称推断同一模型。

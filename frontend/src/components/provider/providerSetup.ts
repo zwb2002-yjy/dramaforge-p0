@@ -70,9 +70,14 @@ export function connectionStatus(connection: ProviderConnectionRead): {
       tone: "warn",
       label: connection.gateway_ref.state === "ready" ? "配置已核验" : "配置待核验",
     };
-  if (!connection.credential_configured) return { tone: "warn", label: "缺少 Key" };
+  if (connection.auth_mode !== "none" && !connection.credential_configured)
+    return { tone: "warn", label: "缺少 Key" };
   if (connection.verification_status === "failed") return { tone: "err", label: "认证失败" };
-  if (connection.verification_status === "verified") return { tone: "ok", label: "已连接" };
+  if (connection.verification_status === "verified")
+    return {
+      tone: "ok",
+      label: connection.auth_mode === "none" ? "目录已读取（无需 Key）" : "已连接",
+    };
   return { tone: "warn", label: "待验证" };
 }
 

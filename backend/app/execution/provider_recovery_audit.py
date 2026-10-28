@@ -115,6 +115,8 @@ async def inspect_provider_operation(
             or revision.credential_revision_id != identity.credential_revision_id
             or revision.provider_type != operation.actual_provider
             or revision.protocol_profile != operation.protocol_profile
+            or revision.auth_mode
+            != ("none" if identity.credential_revision_id is None else "bearer")
         ):
             gaps.append("EXECUTION_PROTOCOL_MISMATCH")
         binding = await session.get(ProviderModelBinding, identity.provider_model_binding_id)
@@ -132,15 +134,30 @@ async def inspect_provider_operation(
             or hash_manifest(entry.capability_manifest_json) != identity.manifest_hash
         ):
             gaps.append("EXECUTION_IDENTITY_MODEL_UNAVAILABLE")
-        credential = (
-            await session.execute(
-                select(
-                    EncryptedProviderCredential.id, EncryptedProviderCredential.workspace_id
-                ).where(EncryptedProviderCredential.id == identity.credential_revision_id)
-            )
-        ).first()
-        if credential is None or credential.workspace_id != workspace_id:
-            gaps.append("EXECUTION_IDENTITY_CREDENTIAL_UNAVAILABLE")
+        if identity.credential_revision_id is None:
+            from app.providers.registry import get_plugin
+
+            try:
+                supported = (
+                    "none"
+                    in get_plugin(
+                        operation.actual_provider, operation.protocol_profile or ""
+                    ).auth_modes
+                )
+            except LookupError:
+                supported = False
+            if revision is None or revision.auth_mode != "none" or not supported:
+                gaps.append("EXECUTION_IDENTITY_CREDENTIAL_UNAVAILABLE")
+        else:
+            credential = (
+                await session.execute(
+                    select(
+                        EncryptedProviderCredential.id, EncryptedProviderCredential.workspace_id
+                    ).where(EncryptedProviderCredential.id == identity.credential_revision_id)
+                )
+            ).first()
+            if credential is None or credential.workspace_id != workspace_id:
+                gaps.append("EXECUTION_IDENTITY_CREDENTIAL_UNAVAILABLE")
     try:
         resume = ProviderResumeToken.model_validate(operation.resume_token)
     except ValueError:

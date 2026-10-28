@@ -11,7 +11,7 @@ from uuid import UUID
 
 import httpx
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
@@ -93,28 +93,40 @@ class ProviderConnectionService:
         workspace_id: UUID,
         actor: User,
         display_name: str,
-        api_key: str,
+        api_key: str | None,
         enabled: bool,
         provider_type: str = "agnes",
         protocol_profile: str = "agnes_cn_v1",
         base_url: str | None = None,
+        auth_mode: str = "bearer",
     ) -> ProviderConnection:
         plugin = _resolve_plugin(provider_type, protocol_profile)
-        secret = api_key.strip()
-        if not secret:
+        secret = (api_key or "").strip()
+        if auth_mode not in plugin.auth_modes or (auth_mode == "none" and secret):
+            raise ValidationAppError("authentication mode is not supported by this protocol")
+        if auth_mode == "bearer" and not secret:
             raise ValidationAppError("api_key must not be empty")
         host = (base_url or plugin.default_base_url).strip().rstrip("/")
+        if plugin.base_url_normalizer:
+            try:
+                host = plugin.base_url_normalizer(host)
+            except ValueError as exc:
+                raise ValidationAppError("base_url does not match the selected protocol") from exc
         if not host:
             raise ValidationAppError("base_url must not be empty")
         # Credential egress gate: the probe and every runtime call send the
         # encrypted key to this destination (backend-review §1.7 / V6).
         validate_provider_base_url(host, settings=get_settings())
-        credential = await store_credential(
-            self._session,
-            workspace_id=workspace_id,
-            provider=plugin.credential_key,
-            plaintext=secret,
-            keyring=configured_byok_keyring(),
+        credential = (
+            await store_credential(
+                self._session,
+                workspace_id=workspace_id,
+                provider=plugin.credential_key,
+                plaintext=secret,
+                keyring=configured_byok_keyring(),
+            )
+            if auth_mode == "bearer"
+            else None
         )
         connection = ProviderConnection(
             workspace_id=workspace_id,
@@ -122,8 +134,9 @@ class ProviderConnectionService:
             display_name=display_name.strip() or plugin.display_name,
             base_url=host,
             protocol_profile=protocol_profile,
-            credential_id=credential.id,
-            credential_revision=credential.revision_no,
+            auth_mode=auth_mode,
+            credential_id=credential.id if credential else None,
+            credential_revision=credential.revision_no if credential else 0,
             enabled=enabled,
             verification_status="unverified",
             created_by=actor.id,
@@ -179,7 +192,12 @@ class ProviderConnectionService:
                 EncryptedProviderCredential.workspace_id == connection.workspace_id,
             )
         )
-        if credential is None or credential.provider != plugin.credential_key:
+        no_auth = (
+            connection.auth_mode == "none"
+            and connection.credential_id is None
+            and "none" in plugin.auth_modes
+        )
+        if not no_auth and (credential is None or credential.provider != plugin.credential_key):
             raise ValidationAppError(
                 "provider connection credential revision is invalid",
                 details={"code": "PROVIDER_CONNECTION_CREDENTIAL_INVALID"},
@@ -196,9 +214,10 @@ class ProviderConnectionService:
             revision_no=(latest.revision_no + 1) if latest is not None else 1,
             provider_type=connection.provider_type,
             protocol_profile=connection.protocol_profile,
+            auth_mode=connection.auth_mode,
             gateway_ref=dict(connection.gateway_ref) if connection.gateway_ref else None,
             base_url=connection.base_url,
-            credential_revision_id=credential.id,
+            credential_revision_id=credential.id if credential else None,
         )
         self._session.add(revision)
         await self._session.flush()
@@ -285,6 +304,14 @@ class ProviderConnectionService:
                 execution_changed = True
         if base_url is not None:
             host = base_url.strip().rstrip("/")
+            plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
+            if plugin.base_url_normalizer:
+                try:
+                    host = plugin.base_url_normalizer(host)
+                except ValueError as exc:
+                    raise ValidationAppError(
+                        "base_url does not match the selected protocol"
+                    ) from exc
             if not host:
                 raise ValidationAppError("base_url must not be empty")
             # Same credential egress gate on updates (backend-review §1.7).
@@ -341,6 +368,10 @@ class ProviderConnectionService:
         connection = await self.get_connection(
             workspace_id=workspace_id, connection_id=connection_id
         )
+        if connection.auth_mode == "none":
+            raise ValidationAppError(
+                "no-auth connection has no key; create a new bearer connection"
+            )
         if connection.provider_type == "litellm":
             raise ValidationAppError("rotate the upstream key through Proxy model management")
         plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
@@ -376,6 +407,18 @@ class ProviderConnectionService:
         base_url = revision.base_url if revision else connection.base_url
         enabled = connection.enabled
         plugin = _resolve_plugin(provider_type, profile)
+        auth_mode = revision.auth_mode if revision else connection.auth_mode
+        if auth_mode == "none" and credential_id is None and "none" in plugin.auth_modes:
+            return get_settings().model_copy(
+                update={
+                    f"{plugin.prefix}_enabled": enabled,
+                    f"{plugin.prefix}_api_key": "",
+                    f"{plugin.prefix}_base_url": base_url,
+                    f"{plugin.prefix}_auth_mode": "none",
+                }
+            )
+        if credential_id is None:
+            raise ValidationAppError("bearer credential revision is missing")
         secret = await read_credential_by_id(
             self._session,
             workspace_id=connection.workspace_id,
@@ -393,6 +436,11 @@ class ProviderConnectionService:
                 f"{prefix}_enabled": enabled,
                 f"{prefix}_api_key": secret,
                 f"{prefix}_base_url": base_url,
+                **(
+                    {f"{prefix}_auth_mode": "bearer"}
+                    if hasattr(get_settings(), f"{prefix}_auth_mode")
+                    else {}
+                ),
             }
         )
 
@@ -621,7 +669,9 @@ class ProviderConnectionService:
                 async with provider_http_client(timeout=30.0, transport=probe_transport) as http:
                     response = await http.get(
                         models_url,
-                        headers={
+                        headers={}
+                        if probe_revision.auth_mode == "none"
+                        else {
                             "Authorization": f"Bearer {getattr(cfg, f'{plugin.prefix}_api_key')}"
                         },
                     )
@@ -1149,7 +1199,12 @@ class ProviderConnectionService:
             .order_by(ProviderCapabilityEvidence.tested_at.desc())
         )
         discovered = bool(evidence and model_id in (evidence.discovered_model_ids or []))
-        if capability_contract_id is not None and entry.model_id != model_id and not discovered:
+        if (
+            capability_contract_id is not None
+            and entry.model_id != model_id
+            and not discovered
+            and not plugin.manual_model_ids
+        ):
             raise ValidationAppError(
                 "model was not returned by the current connection discovery",
                 details={"code": "MODEL_NOT_DISCOVERED"},
@@ -1197,7 +1252,104 @@ class ProviderConnectionService:
         )
         self._session.add(binding)
         await self._session.flush()
+        if discovered and connection.verification_status == "verified" and plugin.manual_model_ids:
+            await self._record_model_list_availability(
+                workspace_id=workspace_id,
+                connection=connection,
+                plugin=plugin,
+                revision=revision,
+                listed_model_ids=set(evidence.discovered_model_ids or []) if evidence else set(),
+                catalog_received=True,
+                http_status=200,
+                error_code=None,
+            )
         return binding
+
+    async def generation_verified_bindings(
+        self, *, workspace_id: UUID, connection_id: UUID
+    ) -> tuple[UUID | None, set[UUID]]:
+        """Read successful, materialized results on this exact current revision.
+
+        Directory/probe/quality flags never substitute actual production facts.
+        Reuse project RLS for each owned project; no separate truth writer or privileged reader.
+        """
+        connection = await self.get_connection(
+            workspace_id=workspace_id, connection_id=connection_id
+        )
+        revision = await self._session.scalar(
+            select(ProviderConnectionRevision)
+            .where(ProviderConnectionRevision.connection_id == connection.id)
+            .order_by(ProviderConnectionRevision.revision_no.desc())
+            .limit(1)
+        )
+        if revision is None:
+            # Historical configuration remains readable; do not manufacture a
+            # revision or certify its generation identity while listing it.
+            return None, set()
+        statement = (
+            select(ProviderModelBinding.id)
+            .join(ProviderOperation, ProviderOperation.model_binding_id == ProviderModelBinding.id)
+            .join(NodeRun, NodeRun.id == ProviderOperation.node_run_id)
+            .join(Project, Project.id == NodeRun.project_id)
+            .join(Artifact, Artifact.id == NodeRun.result_artifact_id)
+            .where(
+                ProviderModelBinding.workspace_id == workspace_id,
+                ProviderModelBinding.connection_id == connection_id,
+                Project.workspace_id == workspace_id,
+                Artifact.project_id == Project.id,
+                Project.deleted_at.is_(None),
+                Artifact.produced_by_run_id == NodeRun.id,
+                Artifact.storage_state == "available",
+                Artifact.deleted_at.is_(None),
+                Artifact.byte_size > 0,
+                NodeRun.status.in_({"completed", "completed_after_cancel"}),
+                ProviderOperation.status == "succeeded",
+                ProviderOperation.execution_path_version == "unified-v1",
+                ProviderOperation.connection_id == connection_id,
+                ProviderOperation.provider_connection_revision_id == revision.id,
+                ProviderOperation.credential_revision_id.is_not_distinct_from(
+                    revision.credential_revision_id
+                ),
+                ProviderOperation.actual_provider == revision.provider_type,
+                ProviderOperation.protocol_profile == revision.protocol_profile,
+                ProviderOperation.actual_model == ProviderModelBinding.invoke_model_value,
+                ProviderOperation.catalog_entry_id == ProviderModelBinding.catalog_entry_id,
+                ProviderOperation.capability_manifest_hash
+                == ProviderModelBinding.capability_manifest_hash,
+            )
+            .distinct()
+        )
+        if self._session.get_bind().dialect.name != "postgresql":
+            return revision.id, set(await self._session.scalars(statement))
+        # Production facts are project-scoped even on a workspace settings page.
+        # Enumerate only projects already visible to this request's user/workspace
+        # and vary only project_id; never replace its user/workspace or bypass RLS.
+        project_ids = list(
+            await self._session.scalars(
+                select(Project.id).where(
+                    Project.workspace_id == workspace_id, Project.deleted_at.is_(None)
+                )
+            )
+        )
+        original_project = await self._session.scalar(
+            text("SELECT current_setting('app.current_project_id', true)")
+        )
+        verified: set[UUID] = set()
+        try:
+            for project_id in project_ids:
+                await self._session.execute(
+                    text("SELECT set_config('app.current_project_id', :project, true)"),
+                    {"project": str(project_id)},
+                )
+                verified.update(
+                    await self._session.scalars(statement.where(Project.id == project_id))
+                )
+        finally:
+            await self._session.execute(
+                text("SELECT set_config('app.current_project_id', :project, true)"),
+                {"project": original_project or ""},
+            )
+        return revision.id, verified
 
     async def list_capability_evidence(
         self,

@@ -163,15 +163,19 @@ for (const action of [
     }));
     await page.goto(`/projects/${PROJECT_ID}/edit?sessionId=${EDIT_SESSION_ID}`);
     const source = page.locator(".editing-source-preview video");
+    // preload=metadata only promises metadata before the explicit play action.
     await expect
       .poll(() => source.evaluate((video: HTMLVideoElement) => video.readyState))
-      .toBeGreaterThanOrEqual(2);
+      .toBeGreaterThanOrEqual(1);
     const original = (await source.elementHandle())!;
     await source.evaluate(async (video: HTMLVideoElement) => {
       video.muted = true;
       video.loop = true;
       await video.play();
     });
+    await expect
+      .poll(() => source.evaluate((video: HTMLVideoElement) => video.readyState))
+      .toBeGreaterThanOrEqual(2);
     await expect(
       page.getByRole("spinbutton", { name: "时间线播放头（秒）", exact: true }),
     ).not.toHaveAttribute("aria-valuenow", "0");
@@ -257,6 +261,8 @@ test("one timeline play action compiles and continuously plays three clips, then
     subtitle: `连续字幕 ${index + 1}`,
   }));
   await page.goto(`/projects/${PROJECT_ID}/edit?sessionId=${EDIT_SESSION_ID}`);
+  await expect(page.getByTestId("edit-session-editor")).toBeVisible();
+  await expect(page.getByTestId("editing-timeline-play")).toBeEnabled();
   await page.getByTestId("editing-timeline-play").click({ timeout: 2000 });
   const player = page.getByTestId("editing-composition-player");
   await expect(player).toHaveAttribute("data-clip-id", "continuous-0");

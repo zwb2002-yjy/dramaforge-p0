@@ -161,6 +161,7 @@ async def paused(*args, **kwargs):
     print("checkpoint-ready", flush=True)
     await asyncio.Event().wait()
 wakeup_module._enqueue_runtime_event = paused
+print("worker-ready", flush=True)
 async def main():
     engine = create_async_engine(
         os.environ["DATABASE_URL"],
@@ -186,6 +187,10 @@ asyncio.run(main())
                 stderr=asyncio.subprocess.PIPE,
             )
             try:
+                # Cold dependency/model loading is setup, not inbox delivery.
+                # Keep the original 15s delivery deadline once the worker is ready.
+                bootstrapped = await asyncio.wait_for(child.stdout.readline(), 60)
+                assert bootstrapped.strip() == b"worker-ready"
                 ready = await asyncio.wait_for(child.stdout.readline(), 15)
                 assert ready.strip() == b"checkpoint-ready"
                 child.kill()

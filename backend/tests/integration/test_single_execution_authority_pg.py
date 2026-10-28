@@ -10,7 +10,9 @@ from uuid import uuid4
 import asyncpg
 import pytest
 from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
+from app.providers.catalog_sync import sync_model_catalog
 from pg_support import alembic_head
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from test_director_turn_lifecycle_pg import (
     _admin_url,
     _async_url,
@@ -36,6 +38,15 @@ async def test_current_schema_has_one_model_authority_and_rejects_downgrade() ->
             text=True,
         )
         assert upgrade.returncode == 0, upgrade.stderr
+        # Schema migration and publication of current file-backed contracts are
+        # separate maintenance steps; the application role cannot publish them.
+        engine = create_async_engine(_async_url(dbname))
+        try:
+            async with async_sessionmaker(engine, expire_on_commit=False)() as maintenance:
+                await sync_model_catalog(maintenance, apply=True)
+                await maintenance.commit()
+        finally:
+            await engine.dispose()
         connection = await asyncpg.connect(_admin_url().rsplit("/", 1)[0] + f"/{dbname}")
         try:
             assert (

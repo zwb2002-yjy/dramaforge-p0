@@ -216,12 +216,13 @@ export function listProviderConnections(workspaceId: string): Promise<ProviderCo
 
 export async function createProviderConnection(
   workspaceId: string,
-  apiKey: string,
+  apiKey: string | undefined,
   input: {
     provider_type: string;
     display_name: string;
     protocol_profile: string;
     base_url?: string;
+    auth_mode?: "bearer" | "none";
   } = {
     provider_type: "agnes",
     display_name: "Agnes 中国站",

@@ -27,7 +27,6 @@ import json
 from collections.abc import Mapping
 from typing import Any, cast
 from urllib.parse import quote, urlsplit
-from uuid import uuid4
 
 import httpx
 from pydantic import JsonValue
@@ -50,6 +49,7 @@ from app.providers.runtime import (
 
 OPENAI_MEDIA_PROVIDER = "openai_compatible_media"
 OPENAI_MEDIA_PROFILE = "openai_media_v1"
+OPENAI_IMAGES_PROFILE = "openai_images_v2"
 OPENAI_MEDIA_DEFAULT_HOST = "https://api.openai.com/v1"
 
 
@@ -58,6 +58,16 @@ def _base_url(host: str) -> str:
     if not value:
         raise ValueError("OpenAI-compatible media base URL is empty")
     return value if value.endswith("/v1") else f"{value}/v1"
+
+
+def normalize_images_base_url(host: str) -> str:
+    value = host.strip().rstrip("/")
+    if value.endswith("/images/generations"):
+        value = value[: -len("/images/generations")]
+        if not urlsplit(value).path:
+            raise ValueError("Images operation URL requires an explicit API base prefix")
+        return value
+    return value if urlsplit(value).path else f"{value}/v1"
 
 
 def _json_object(response: httpx.Response) -> dict[str, Any]:
@@ -165,19 +175,36 @@ class OpenAICompatibleMediaClient:
         host: str | None = None,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        protocol_profile: str = OPENAI_MEDIA_PROFILE,
     ) -> None:
         cfg = settings or get_settings()
         self._settings = cfg
+        self.protocol_profile = protocol_profile
         self._key = cfg.openai_compatible_media_api_key.strip()
-        self._host = _base_url(host or cfg.openai_compatible_media_base_url)
+        normalize = (
+            normalize_images_base_url if protocol_profile == OPENAI_IMAGES_PROFILE else _base_url
+        )
+        self._host = normalize(host or cfg.openai_compatible_media_base_url)
         self._transport = transport or guarded_provider_transport(settings=self._settings)
         self._image_model = cfg.openai_compatible_media_image_model.strip()
         self._video_model = cfg.openai_compatible_media_video_model.strip()
 
     def configured(self) -> bool:
-        return bool(self._key and self._settings.openai_compatible_media_enabled)
+        return bool(
+            self._settings.openai_compatible_media_enabled
+            and (
+                self._key
+                or self.protocol_profile == OPENAI_IMAGES_PROFILE
+                and self._settings.openai_compatible_media_auth_mode == "none"
+            )
+        )
 
     def _headers(self) -> dict[str, str]:
+        if (
+            self.protocol_profile == OPENAI_IMAGES_PROFILE
+            and self._settings.openai_compatible_media_auth_mode == "none"
+        ):
+            return {}
         return {"Authorization": f"Bearer {self._key}"}
 
     async def create_image(
@@ -215,7 +242,7 @@ class OpenAICompatibleMediaClient:
             }
         return {
             "status": "succeeded",
-            "remote_task_id": f"openai-image-{uuid4()}",
+            "remote_task_id": None,
             "artifact_uri": image_url,
             "http_status": response.status_code,
         }
@@ -226,6 +253,22 @@ class OpenAICompatibleMediaClient:
         image_bytes: bytes | None,
         image_mime: str,
     ) -> httpx.Response:
+        if self.protocol_profile == OPENAI_IMAGES_PROFILE:
+            from app.providers.image_results import bounded_response
+
+            if image_bytes is not None:
+                raise ValueError("this Images profile has no image-edit contract")
+            async with provider_http_client(
+                timeout=self._settings.openai_compatible_media_timeout_seconds,
+                transport=self._transport,
+            ) as client:
+                return await bounded_response(
+                    client,
+                    "POST",
+                    f"{self._host}/images/generations",
+                    headers=self._headers(),
+                    json=payload,
+                )
         async with provider_http_client(
             timeout=self._settings.openai_compatible_media_timeout_seconds,
             transport=self._transport,
@@ -353,10 +396,24 @@ class OpenAICompatibleImageCompiler:
     # that already hold a public URL, which the Workbench Worker is not.
     reference_transport = "bytes"
 
+    def __init__(self, protocol_profile: str = OPENAI_MEDIA_PROFILE):
+        self.protocol_profile = protocol_profile
+
     def validate(self, intent: Any, model: ModelCapabilityManifest) -> None:
         operation = model.operations.get("image.generate")
         if operation is None:
             raise ValueError("model does not support image.generate")
+        if model.protocol_profile != self.protocol_profile:
+            raise ValueError("image contract does not match this compiler")
+        if self.protocol_profile == OPENAI_IMAGES_PROFILE and (
+            intent.single_reference_id() is not None
+            or intent.size not in {None, "1024x1024"}
+            or intent.aspect_ratio not in {None, "1:1"}
+            or intent.seed is not None
+            or not intent.prompt.strip()
+            or len(intent.prompt) > 4096
+        ):
+            raise ValueError("Images v2 supports only one 1024x1024 text-to-image output")
         required = "image.i2i" if intent.single_reference_id() is not None else "image.t2i"
         if required not in operation.capabilities:
             raise ValueError(f"model does not support {required}")
@@ -373,6 +430,8 @@ class OpenAICompatibleImageCompiler:
         invoke_model_value: str,
     ) -> CompiledImageRequest:
         self.validate(intent, model)
+        if self.protocol_profile == OPENAI_IMAGES_PROFILE and references:
+            raise ValueError("Images v2 does not accept reference media")
         resolved = [ref for ref in references if ref.role == "reference_image"]
         if len(resolved) > 1:
             raise ValueError("OpenAI-compatible image compiler accepts one reference_image")
@@ -388,7 +447,9 @@ class OpenAICompatibleImageCompiler:
             "n": 1,
             "response_format": "url",
         }
-        if intent.aspect_ratio is not None:
+        if self.protocol_profile == OPENAI_IMAGES_PROFILE:
+            body.pop("response_format")
+        if intent.aspect_ratio is not None and self.protocol_profile != OPENAI_IMAGES_PROFILE:
             body["aspect_ratio"] = intent.aspect_ratio
         if ref is not None:
             if ref.content_bytes is not None:
@@ -406,7 +467,7 @@ class OpenAICompatibleImageCompiler:
         }
         return CompiledImageRequest(
             provider_type=OPENAI_MEDIA_PROVIDER,
-            protocol_profile=OPENAI_MEDIA_PROFILE,
+            protocol_profile=self.protocol_profile,
             model_id=invoke_model_value,
             operation="image.generate",
             wire_request=body,
@@ -421,6 +482,16 @@ class OpenAICompatibleVideoCompiler:
     # Same as the image compiler: every reference-consuming branch of this
     # family (FL2VA / Ref2VA / first-frame I2V) requires stored bytes.
     reference_transport = "bytes"
+    # Trusted catalog-contract compiler registrations. Remote model names never
+    # select a wire task; unknown revisions cannot inherit advanced H3 modes.
+    _wire_contracts = {
+        ("@contract/sglang-h3-t2v-v1", "v2"): "t2va",
+        ("@contract/sglang-h3-ref2va-v1", "v3"): "ref2va",
+        ("@contract/sglang-h3-fl2va-v1", "v2"): "fl2va",
+    }
+
+    def _wire_contract(self, model: ModelCapabilityManifest) -> str | None:
+        return self._wire_contracts.get((model.model_id, model.model_revision))
 
     def validate(self, intent: Any, model: ModelCapabilityManifest) -> None:
         operation = model.operations.get("video.generate")
@@ -428,7 +499,10 @@ class OpenAICompatibleVideoCompiler:
             raise ValueError("model does not support video.generate")
         text_only = intent.mode_id == "text_to_video"
         reference_mode = intent.mode_id == "omni_reference"
-        fl2va = model.model_id == "@contract/sglang-h3-fl2va-v1"
+        wire_contract = self._wire_contract(model)
+        if wire_contract is None and model.model_id in {key[0] for key in self._wire_contracts}:
+            raise ValueError("SGLang contract revision has no registered compiler")
+        fl2va = wire_contract == "fl2va"
         frame_modes = {"first_frame", "last_frame", "first_last_frame"}
         if reference_mode:
             if not any(
@@ -452,12 +526,9 @@ class OpenAICompatibleVideoCompiler:
             )
             if not set(required) <= set(operation.capabilities):
                 raise ValueError(f"model does not support {required}")
-        if text_only and model.model_id not in {
-            "@contract/sglang-h3-t2v-v1",
-            "@contract/sglang-h3-fl2va-v1",
-        }:
+        if text_only and wire_contract not in {"t2va", "fl2va"}:
             raise ValueError("text_to_video requires the SGLang H3 T2VA contract")
-        if reference_mode and model.model_id != "@contract/sglang-h3-ref2va-v1":
+        if reference_mode and wire_contract != "ref2va":
             raise ValueError("omni_reference requires the SGLang H3 Ref2VA contract")
         if intent.mode_id in {"last_frame", "first_last_frame"} and not fl2va:
             raise ValueError("last-frame generation requires the SGLang H3 FL2VA contract")
@@ -469,7 +540,7 @@ class OpenAICompatibleVideoCompiler:
             raise ValueError("OpenAI-compatible video contract does not support native audio")
         if (reference_mode or fl2va) and intent.output.generate_audio is False:
             raise ValueError("SGLang H3 generates native audio; it cannot be disabled")
-        if (reference_mode or fl2va) and (intent.output.duration_seconds or 5) != 5:
+        if wire_contract is not None and intent.output.duration_seconds not in {None, 5}:
             raise ValueError("SGLang H3 contract supports 5-second output")
         if (reference_mode or fl2va) and intent.output.aspect_ratio not in {None, "9:16", "16:9"}:
             raise ValueError("SGLang H3 contract requires 9:16 or 16:9")
@@ -483,7 +554,7 @@ class OpenAICompatibleVideoCompiler:
         invoke_model_value: str,
     ) -> CompiledVideoRequest:
         self.validate(intent, model)
-        if model.model_id == "@contract/sglang-h3-fl2va-v1":
+        if self._wire_contract(model) == "fl2va":
             expected_roles = {
                 "text_to_video": [],
                 "first_frame": ["first_frame"],
@@ -713,12 +784,15 @@ class OpenAICompatibleMediaRuntime:
         settings: Settings | None = None,
         host: str | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        protocol_profile: str = OPENAI_MEDIA_PROFILE,
     ) -> None:
+        self.protocol_profile = protocol_profile
         self._settings = settings or get_settings()
         self._client = OpenAICompatibleMediaClient(
             self._settings,
             host=host or getattr(connection, "base_url", None),
             transport=transport,
+            protocol_profile=protocol_profile,
         )
 
     def _configured(self) -> None:
@@ -743,6 +817,60 @@ class OpenAICompatibleMediaRuntime:
                 raise ValueError("compiled image reference is not valid base64") from exc
         else:
             image_bytes = None
+        if self.protocol_profile == OPENAI_IMAGES_PROFILE:
+            from app.providers.image_results import image_result
+
+            if (
+                set(payload) != {"model", "prompt", "size", "n"}
+                or payload.get("size") != "1024x1024"
+                or type(payload.get("n")) is not int
+                or payload.get("n") != 1
+                or not isinstance(payload.get("prompt"), str)
+                or not str(payload["prompt"]).strip()
+                or len(str(payload["prompt"])) > 4096
+            ):
+                return SubmissionResult(
+                    status="failed",
+                    error_code="PROVIDER_REQUEST_REJECTED",
+                    request_summary=request.safe_request_summary,
+                )
+
+            try:
+                response = await self._client._post_image(payload, image_bytes, image_mime)
+                if response.status_code >= 400:
+                    uncertain = response.status_code in {408, 429} or response.status_code >= 500
+                    return SubmissionResult(
+                        status="unknown_submission" if uncertain else "failed",
+                        error_code="PROVIDER_SUBMISSION_UNKNOWN"
+                        if uncertain
+                        else _error_code(response.status_code),
+                        http_status=response.status_code,
+                        request_summary=request.safe_request_summary,
+                    )
+                async with provider_http_client(
+                    timeout=self._settings.openai_compatible_media_timeout_seconds,
+                    transport=self._client._transport,
+                ) as client:
+                    content = await image_result(
+                        response,
+                        origin=self._client._host,
+                        client=client,
+                        headers=self._client._headers(),
+                    )
+                return SubmissionResult(
+                    status="succeeded",
+                    artifact_bytes=content,
+                    http_status=response.status_code,
+                    request_summary=request.safe_request_summary,
+                    request_fingerprint=_fingerprint(request.wire_request),
+                )
+            except (httpx.HTTPError, ValueError) as exc:
+                return SubmissionResult(
+                    status="unknown_submission",
+                    error_code="PROVIDER_PROTOCOL_MISMATCH",
+                    error=type(exc).__name__,
+                    request_summary=request.safe_request_summary,
+                )
         try:
             response = await self._client._post_image(payload, image_bytes, image_mime)
         except httpx.TransportError as exc:
@@ -766,7 +894,6 @@ class OpenAICompatibleMediaRuntime:
             )
         return SubmissionResult(
             status="succeeded",
-            remote_task_id=f"openai-image-{uuid4()}",
             artifact_uri=url,
             http_status=response.status_code,
             request_fingerprint=_fingerprint(request.wire_request),
@@ -910,3 +1037,11 @@ def _openai_compatible_media_compiler_factory() -> tuple[
     OpenAICompatibleImageCompiler, OpenAICompatibleVideoCompiler
 ]:
     return OpenAICompatibleImageCompiler(), OpenAICompatibleVideoCompiler()
+
+
+def _openai_images_runtime_factory(**kwargs: Any) -> OpenAICompatibleMediaRuntime:
+    return OpenAICompatibleMediaRuntime(protocol_profile=OPENAI_IMAGES_PROFILE, **kwargs)
+
+
+def _openai_images_compiler_factory() -> tuple[OpenAICompatibleImageCompiler, None]:
+    return OpenAICompatibleImageCompiler(OPENAI_IMAGES_PROFILE), None

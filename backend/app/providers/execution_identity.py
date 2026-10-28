@@ -81,7 +81,9 @@ class ExecutionIdentitySnapshot(BaseModel):
     # Design §9 names this same field ``provider_connection_revision_id``;
     # retain both spellings in the JSON contract while enforcing one identity.
     provider_connection_revision_id: UUID | None = None
-    credential_revision_id: UUID
+    # Explicit null is valid only when the referenced immutable connection
+    # revision declares auth_mode=none; Runtime validates that relation.
+    credential_revision_id: UUID | None
 
     capability: str = Field(min_length=1, max_length=120)
     mode_id: str = Field(min_length=1, max_length=120)
@@ -141,6 +143,7 @@ class FrozenProviderConnection:
     provider_type: str
     protocol_profile: str
     base_url: str
-    credential_id: UUID
+    credential_id: UUID | None
     credential_revision: int
     enabled: bool = True
+    auth_mode: str = "bearer"

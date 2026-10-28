@@ -156,6 +156,7 @@ class SubmissionResult(BaseModel):
     request_summary: dict[str, JsonValue] = Field(default_factory=dict)
     resume_token: ProviderResumeToken | None = None
     artifact_uri: str | None = None
+    artifact_bytes: bytes | None = Field(default=None, exclude=True, repr=False)
     error_code: str | None = None
     error: str | None = None
     retry_after_seconds: float | None = None
@@ -433,7 +434,7 @@ class ProviderRuntimeResolver:
             )
         revision_id = connection_revision_id or resolution.provider_connection_revision_id
         credential_id = credential_revision_id or resolution.credential_revision_id
-        if revision_id is None or credential_id is None:
+        if revision_id is None:
             raise ValidationAppError(
                 "frozen execution model has no connection revision",
                 details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
@@ -495,7 +496,9 @@ class ProviderRuntimeResolver:
                 "frozen provider connection revision is unavailable",
                 details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
             )
-        if revision.credential_revision_id != identity.credential_revision_id:
+        if revision.credential_revision_id != identity.credential_revision_id or (
+            revision.auth_mode != ("none" if identity.credential_revision_id is None else "bearer")
+        ):
             raise ValidationAppError(
                 "frozen connection and credential revisions do not match",
                 details={"code": "EXECUTION_IDENTITY_MISMATCH"},
@@ -539,7 +542,7 @@ class ProviderRuntimeResolver:
                 EncryptedProviderCredential.workspace_id == workspace_id,
             )
         )
-        if credential is None:
+        if credential is None and revision.auth_mode != "none":
             raise ValidationAppError(
                 "frozen credential revision is unavailable",
                 details={"code": "EXECUTION_IDENTITY_CREDENTIAL_UNAVAILABLE"},
@@ -554,7 +557,9 @@ class ProviderRuntimeResolver:
                 "frozen provider plugin is unavailable",
                 details={"code": "PROVIDER_PLUGIN_UNKNOWN"},
             ) from exc
-        if credential.provider != plugin.credential_key:
+        if revision.auth_mode not in plugin.auth_modes or (
+            credential is not None and credential.provider != plugin.credential_key
+        ):
             raise ValidationAppError(
                 "frozen credential provider does not match connection protocol",
                 details={"code": "EXECUTION_IDENTITY_CREDENTIAL_MISMATCH"},
@@ -578,7 +583,8 @@ class ProviderRuntimeResolver:
             protocol_profile=revision.protocol_profile,
             base_url=revision.base_url,
             credential_id=revision.credential_revision_id,
-            credential_revision=credential.revision_no,
+            credential_revision=credential.revision_no if credential else 0,
+            auth_mode=revision.auth_mode,
             enabled=True,
         )
         frozen_settings = await runtime_connection_settings(

@@ -52,6 +52,19 @@ async def runtime_connection_settings(
 
     cfg = settings or get_settings()
     plugin = get_plugin(connection.provider_type, connection.protocol_profile)
+    if getattr(connection, "auth_mode", "bearer") == "none":
+        if "none" not in plugin.auth_modes or connection.credential_id is not None:
+            raise WorkspaceCredentialConfigurationError()
+        return cfg.model_copy(
+            update={
+                f"{plugin.prefix}_enabled": True,
+                f"{plugin.prefix}_api_key": "",
+                f"{plugin.prefix}_base_url": connection.base_url,
+                f"{plugin.prefix}_auth_mode": "none",
+            }
+        )
+    if connection.credential_id is None:
+        raise WorkspaceCredentialConfigurationError()
     credential = await read_credential_by_id(
         session,
         workspace_id=connection.workspace_id,
@@ -69,6 +82,7 @@ async def runtime_connection_settings(
             f"{prefix}_enabled": True,
             f"{prefix}_api_key": credential,
             f"{prefix}_base_url": connection.base_url,
+            **({f"{prefix}_auth_mode": "bearer"} if hasattr(cfg, f"{prefix}_auth_mode") else {}),
         }
     )
 
@@ -84,7 +98,11 @@ async def runtime_text_gateway_settings(
     Historical direct connections are readable by the data layer but cannot
     become a new transport target or silently inherit a new process credential.
     """
-    if connection.provider_type != "litellm" or connection.protocol_profile != "openai_chat_v1":
+    if (
+        connection.provider_type != "litellm"
+        or connection.protocol_profile != "openai_chat_v1"
+        or connection.credential_id is None
+    ):
         raise WorkspaceCredentialConfigurationError()
     cfg = settings or get_settings()
     from app.providers.litellm_gateway.management import GatewayReference

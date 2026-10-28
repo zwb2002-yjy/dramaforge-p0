@@ -124,7 +124,21 @@ def catalog_new_create_blocker(
     ):
         return "MODEL_LIFECYCLE_INACTIVE"
     if catalog_source == "protocol_contract":
-        return "DYNAMIC_MODEL_CAPABILITY_UNVERIFIED"
+        from app.providers.catalog_loader import hash_manifest
+        from app.providers.registry import get_plugin
+
+        try:
+            plugin = get_plugin(provider_type, protocol_profile)
+        except LookupError:
+            return "DYNAMIC_MODEL_CAPABILITY_UNVERIFIED"
+        if not plugin.manual_model_ids or not any(
+            item["model_id"] == model_id
+            and item["model_revision"] == model_revision
+            and hash_manifest(item) == contract_manifest_hash
+            and item.get("implementation_status") == "contract_tested"
+            for item in plugin.catalog_manifests
+        ):
+            return "DYNAMIC_MODEL_CAPABILITY_UNVERIFIED"
     matching = [
         event
         for event in publication_events()

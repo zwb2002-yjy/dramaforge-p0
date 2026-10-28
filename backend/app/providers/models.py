@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -25,6 +26,14 @@ from app.shared.base import Base
 
 class ProviderConnection(Base):
     __tablename__ = "provider_connections"
+    __table_args__ = (
+        CheckConstraint(
+            "(auth_mode = 'bearer' AND credential_id IS NOT NULL) OR "
+            "(auth_mode = 'none' AND credential_id IS NULL "
+            "AND provider_type = 'openai_compatible_media')",
+            name="ck_provider_connections_auth_mode",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     workspace_id: Mapped[UUID] = mapped_column(
@@ -34,13 +43,16 @@ class ProviderConnection(Base):
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
     base_url: Mapped[str] = mapped_column(String(240), nullable=False)
     protocol_profile: Mapped[str] = mapped_column(String(80), nullable=False)
+    auth_mode: Mapped[Literal["bearer", "none"]] = mapped_column(
+        String(20), nullable=False, default="bearer", server_default="bearer"
+    )
     # Non-secret Proxy reference/management state. Upstream URL/Key live only in Proxy DB.
     gateway_ref: Mapped[dict[str, object] | None] = mapped_column(
         JSON(none_as_null=True), nullable=True
     )
-    credential_id: Mapped[UUID] = mapped_column(
+    credential_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("encrypted_provider_credentials.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
     )
     credential_revision: Mapped[int] = mapped_column(nullable=False, default=1)
     enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
@@ -67,6 +79,12 @@ class ProviderConnectionRevision(Base):
 
     __tablename__ = "provider_connection_revisions"
     __table_args__ = (
+        CheckConstraint(
+            "(auth_mode = 'bearer' AND credential_revision_id IS NOT NULL) OR "
+            "(auth_mode = 'none' AND credential_revision_id IS NULL "
+            "AND provider_type = 'openai_compatible_media')",
+            name="ck_provider_connection_revisions_auth_mode",
+        ),
         UniqueConstraint(
             "connection_id",
             "revision_no",
@@ -90,17 +108,20 @@ class ProviderConnectionRevision(Base):
     revision_no: Mapped[int] = mapped_column(nullable=False, default=1, server_default="1")
     provider_type: Mapped[str] = mapped_column(String(40), nullable=False)
     protocol_profile: Mapped[str] = mapped_column(String(80), nullable=False)
+    auth_mode: Mapped[Literal["bearer", "none"]] = mapped_column(
+        String(20), nullable=False, default="bearer", server_default="bearer"
+    )
     gateway_ref: Mapped[dict[str, object] | None] = mapped_column(
         JSON(none_as_null=True), nullable=True
     )
     base_url: Mapped[str] = mapped_column(String(240), nullable=False)
-    credential_revision_id: Mapped[UUID] = mapped_column(
+    credential_revision_id: Mapped[UUID | None] = mapped_column(
         ForeignKey(
             "encrypted_provider_credentials.id",
             name="fk_provider_connection_revision_credential",
             ondelete="RESTRICT",
         ),
-        nullable=False,
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

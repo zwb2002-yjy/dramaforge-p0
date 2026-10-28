@@ -149,15 +149,16 @@ LiteLLM DB 可修改。连接自身保存固定 Proxy 地址及其数据面凭�
 配置写入先提交持久标记；响应丢失或本地回写失败后仅按精确 ID 查询，不再次创建。
 全局 Proxy URL/数据 Key 变化时旧连接失败关闭，必须显式迁移数据面身份，不能静默采用新部署。
 受管连接不走旧凭据写入/发现接口；其保留命名空间不进入全局发现 Registry。
-本阶段管理入口已具备；生产文本调用的单向切换及旧入口退役仍须按后续 Gate 验收。
+新文本生产 Registry 只接纳当前工作区的 ready 受管引用；旧直连及静态别名不再作为
+新执行目标。历史 Profile 不自动改绑，无法解析原身份的旧计划明确受阻。
 
 Proxy 部署已锁定 LiteLLM 1.96.0 的镜像 digest，并开启 DB 模型持久性。其独立网络
 namespace 对目的 IP/端口默认拒绝，模型上游需要显式网络授权；不影响媒体网络。
 当前请求禁止自动重放、跨模型 fallback、HTTP 重定向及请求级目标/凭据覆盖；同名
 YAML/DB 创建会被拒绝。Master/SALT 不传给 API 或 Worker。详见
 [部署边界](DEPLOYMENT.md) 和 [Proxy 配置](../infra/litellm/README.md)。
-这部分基础设施不表示工作区文本直连已完成 G2 切换，也不把可变 Proxy UUID 当成
-不可变模型修订；旧记录、凭据与正式素材保持原样。
+可变 Proxy UUID 不能单独充当不可变模型修订；请求同时携带冻结配置指纹和 Key 修订，
+在 Proxy 内校验目标。旧记录、凭据与正式素材保持原样。
 
 | 层                                         | 位置                                                                            | 职责                                                                                              |
 | ------------------------------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
@@ -169,7 +170,7 @@ YAML/DB 创建会被拒绝。Master/SALT 不传给 API 或 Worker。详见
 | TransportProfile                           | providers/transport.py, transport_registry.py                                   | 不可变协议事实声明（endpoint、认证方式、编码、poll/cancel），不含凭证与业务 payload               |
 | Compiler / Runtime                         | providers/adapters_v2.py, runtime.py 与各 Provider 实现                         | Compiler 唯一构造 wire_request；Runtime 校验身份后原样提交并负责认证、网络、poll/resume           |
 | Reference delivery                         | providers/reference_delivery.py, reference_roles.py                             | 严格参考槽位校验、有序多参考传输（不做 `dict[role, artifact]`）、URL/bytes 决策                   |
-| 文本通道                                   | providers/litellm_adapter.py + providers/litellm_gateway + infra/litellm           | OpenAI 兼容 Chat HTTP 客户端，可连接官方 LiteLLM Proxy 或兼容端点；DramaForge 不安装 litellm SDK |
+| 文本通道                                   | providers/litellm_adapter.py + providers/litellm_gateway + infra/litellm           | OpenAI 兼容 Chat HTTP 客户端；新业务只连接部署指定的内部 Proxy，不直连上游；DramaForge 不安装 litellm SDK |
 
 当前媒体模型合同来自 `backend/app/providers/model_catalog/` 的版本化 JSON，
 `catalog_loader.py` 统一加载、校验和计算 hash，active 清单只是派生视图。
@@ -250,14 +251,29 @@ Protocol/DTO，以及无调用方的 `providers/openai.py`、`providers/fake.py`
   Agnes、企业网关或其他满足该协议合同的模型 ID。媒体远端 ID 由工作空间的
   `ProviderModelBinding` 保存并在执行身份中冻结；文本目前另有动态 registry 与逻辑
   profile 绑定。Compiler 或 Runtime 不能用默认模型替换已选模型。
-- `auth_models` 是不付费的显式探测：使用当前连接 revision 的 URL / 加密 Key 读取
-  插件声明的模型目录路径，把账号实际返回的 ID 保存在不可变 evidence。目录读取本身
-  不验证生成能力。当前媒体要求另选本地能力合同；文本动态 registry 则把所有返回 ID
-  注册为 `text.generate`，尚未区分目录中的非 Chat 模型，属于待修正缺口。
-- `openai_media_v1` 是当前通用媒体协议合同：图像使用 `/images/generations` /
-  `/images/edits`，视频使用异步 `/videos` + `/videos/{id}` 轮询。设置页让用户先选
-  账号发现的模型，再显式选择图像或视频能力合同；合同描述请求形状与参考槽位，
-  远端模型 ID 由 Compiler 写入最终 wire request。
+- `auth_models` 是只读目录探测：使用当前连接修订的 URL 与认证方式读取精确远端 ID，
+  不证明生成、参考素材或高级参数可用。新文本执行只接受已通过内部 Proxy 管理登记的
+  冻结引用；历史静态别名及直连目录不再成为新文本模型。
+- `openai_media_v1` 保留已有媒体合同及历史 resume 的解析。新同步图片使用独立版本
+  `openai_images_v2`，在同一 Catalog/Binding 体系选择 `@contract/openai-images-v2 / v1`，
+  远端 ID 手填或目录发现，不能按模型名称推断能力。管理员 API 允许先保存手填绑定，
+  但无精确目录证据时保持未验证，不能 Create。维护命令 `sync_model_catalog --apply`
+  发布已有受控合同；应用不上传任意能力 JSON，也不新增运行时目录表。
+- 首版 Images 合同只支持非空 prompt（最多 4096 字符）、单张 `1024x1024` 文生图；
+  方图通过镜头已保存的 `common_options.aspect_ratio=1:1` 显式选择。未选时沿用项目画幅，
+  不匹配即在预览阻断。没有图像编辑、参考图、seed 或隐式尺寸近似。
+  接受 `data[0].b64_json`、同连接 origin 的 `data[0].url` 或二进制 PNG/JPEG/WebP，
+  限 24 MiB HTTP 响应、16 MiB 图像、1024 方图单帧，验证后归一为 PNG 入现有 Artifact。
+  URL 不跟重定向，认证只发向被冻结的同源连接；任意文件路径及外部 URL 拒绝。
+  同步结果不发明远端 task ID，不 poll；收到响应后丢失本地结果须人工核验，不能重发。
+- `auth_mode=bearer` 仍要求真实凭证修订；只有显式支持的媒体协议可选 `none`，其连接、
+  修订与执行身份保留明确 NULL，不创建假 Key、不发送 Authorization。两者均覆盖进程
+  默认认证配置。明文 LAN 仍受精确部署白名单和出站保护；无 Key 不等于开放任意内网。
+  `408/429/5xx`、传输中断与不认识的成功返回一律保留未知提交状态，不能自动创建重试。
+- 设置页仅列已实现的协议，支持的无认证/手填方式由插件元数据驱动；保存手填 ID 不等于
+  认证或生成验证。模型列表分别展示目录、合同、生成产物和质量事实。当前修订的生成
+  记录由现有成功 ProviderOperation → 完成 NodeRun → 可用 Artifact 只读投影，精确匹配
+  连接/凭据/绑定/目录 Hash；它不是浏览器预览通过或画质认证，也不替代独立 LIVE 验收。
 - SGLang H3 的 `@contract/sglang-h3-t2v-v1` 是独立的 `video.t2v` 合同：零图片
   输入，`t2va` 任务，经 `/v1/videos` multipart 提交、按任务 ID 轮询并读取
   `/content`。这不是 MiniMax 云 API `minimax_cn_v1` 的首帧合同。工作空间保存
@@ -280,6 +296,9 @@ Protocol/DTO，以及无调用方的 `providers/openai.py`、`providers/fake.py`
   图片 data URI。固定 5 秒、768 短边、原生音频、`9:16`/`16:9`，经 JSON
   `/v1/videos` 提交并按同一连接轮询/下载。能力、请求体、绑定的精确目录 ID 和
   连接修订均进入冻结执行身份；绝不按模型名称猜分区或把 Ref2VA 参考图当首帧。
+  T2VA、FL2VA、Ref2VA 的可编译修订由受控注册决定，统一只接受已检验的 5 秒输出；
+  未注册修订明确拒绝，不继承其他修订的 task。现有远端任务仅按原身份恢复，未知实现
+  保留显式阻断；合同测试不代表某个真实实例、权重分区或音视频质量已验收。
 - Ref2VA 的不可变 `v2` 目录修订沿用相同合同 ID，扩展到最多 9 图、3 视频、
   3 音频且总数不超过 12；至少一份参考素材。输入按已保存顺序编码，图片只是
   语义参考，不是画面端点。旧 `v1` 每类最多一份的合同与已有绑定保持原样。

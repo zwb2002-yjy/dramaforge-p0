@@ -15,8 +15,9 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   timeout: 30_000,
   // Let the full single-worker suite finish on slower CI and local Docker hosts.
-  // Individual tests keep their strict timeout; this only bounds the whole run.
-  globalTimeout: process.env.P0_REAL_UI === "1" ? 2_800_000 : 900_000,
+  // The 201-case suite can exceed 15 minutes on Docker Desktop even with no
+  // failed case. Keep individual tests strict; allow the whole run 30 minutes.
+  globalTimeout: process.env.P0_REAL_UI === "1" ? 2_800_000 : 1_800_000,
   reporter: [["list"]],
   use: {
     baseURL: `http://127.0.0.1:${e2ePort}`,

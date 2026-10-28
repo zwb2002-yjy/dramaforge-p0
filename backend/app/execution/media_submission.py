@@ -220,8 +220,10 @@ async def prepare_media_submission(
             or project.aspect_ratio
             or ""
         )
-        image_ratio: Literal["9:16", "16:9"] | None = (
-            "9:16" if raw_ratio == "9:16" else "16:9" if raw_ratio == "16:9" else None
+        image_ratio: Literal["9:16", "16:9", "1:1"] | None = (
+            cast(Literal["9:16", "16:9", "1:1"], raw_ratio)
+            if raw_ratio in {"9:16", "16:9", "1:1"}
+            else None
         )
         if image_ratio is None:
             raise ValidationAppError(
@@ -507,7 +509,6 @@ async def prepare_media_submission(
                 or frozen_resolution.provider_connection_id is None
                 or frozen_resolution.catalog_entry_id is None
                 or frozen_resolution.provider_connection_revision_id is None
-                or frozen_resolution.credential_revision_id is None
                 or workbench_plan.connection_revision_id
                 != frozen_resolution.provider_connection_revision_id
                 or workbench_plan.credential_revision_id != frozen_resolution.credential_revision_id

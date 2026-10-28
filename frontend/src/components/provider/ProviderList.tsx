@@ -65,6 +65,7 @@ export function ProviderList({
     )
       continue;
     if (
+      !(setupBusy && selectedId === pluginKey(plugin)) &&
       allConnections.some(
         (item) =>
           item.id !== setupConnectionId && item.enabled && pluginKey(item) === pluginKey(plugin),
@@ -211,7 +212,13 @@ export function ProviderList({
                 inline
                 workspaceId={workspaceId}
                 plugins={[selected.plugin]}
-                onBusyChange={setSetupBusy}
+                onBusyChange={(busy) => {
+                  setSetupBusy(busy);
+                  // A background list read can see a committed connection
+                  // before its save response. Keep this editor mounted until
+                  // it accepts that response and the user finishes setup.
+                  if (busy) setSelectedId(selected.key);
+                }}
                 onConnectionCreated={(connection) => {
                   setSetupConnectionId(connection.id);
                   queryClient.setQueryData<ProviderConnectionRead[]>(

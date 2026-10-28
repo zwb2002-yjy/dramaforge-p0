@@ -60,11 +60,6 @@ async def require_frozen_create_admission(
         raise ValidationAppError(
             "当前模型不允许新建请求", details={"code": "MODEL_CREATE_NOT_ALLOWED"}
         )
-    if entry.catalog_source == "protocol_contract":
-        raise ValidationAppError(
-            "动态模型只有协议合同，缺少精确型号能力确认，暂不允许新建请求",
-            details={"code": "DYNAMIC_MODEL_CAPABILITY_UNVERIFIED"},
-        )
     blocker = catalog_new_create_blocker(
         entry.provider_type,
         entry.protocol_profile,

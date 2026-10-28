@@ -254,6 +254,12 @@ runpy.run_module('app.workers.healthcheck', run_name='__main__')
     )
     assert time.monotonic() - start < 5
     assert result.returncode == 1
-    assert "ConnectionError" in result.stderr
+    # The existing deadline covers dependency loading as well as the socket.
+    # A busy host may expire before connect; both outcomes must fail closed
+    # within the unchanged wall-clock bound above.
+    assert result.stderr.strip() in {
+        "Health check failed: ConnectionError",
+        "Health check failed: TimeoutError",
+    }
     assert "AssertionError" not in result.stderr
     assert "successful" not in result.stdout

@@ -26,6 +26,7 @@ A documented preview cannot execute. A verified Binding is workspace-specific.
 | minimax | `image-01` / `knowledge-2026-10-13-r1` | preview | image | reference_image (unknown) | typed candidate | see Manifest | not checked | no (not implemented) | not checked |
 | minimax | `image-01` / `v2` | preview | image | reference_image ≤ 1 | — | 1:1, 16:9, 4:3, 3:2, 2:3, 3:4, 9:16, 21:9 | workspace-specific | no (MODEL_LIFECYCLE_INACTIVE) | workspace-specific |
 | minimax | `image-01` / `v3` | active | image | reference_image ≤ 1 | — | 1024x1024 | workspace-specific | no (MODEL_OFFICIAL_EVIDENCE_GAP) | workspace-specific |
+| openai_compatible_media | `@contract/openai-images-v2` / `v1` | active | image | none documented | — | 1024x1024 | workspace-specific | no | workspace-specific |
 | openai_compatible_media | `@contract/openai-image-v1` / `v2` | active | image | reference_image ≤ 1 | — | 1024x1024 | workspace-specific | no (DYNAMIC_MODEL_CAPABILITY_UNVERIFIED) | workspace-specific |
 | openai_compatible_media | `@contract/openai-video-v1` / `v2` | active | video | first_frame ≤ 1 | 5 | 720x1280 | workspace-specific | no (DYNAMIC_MODEL_CAPABILITY_UNVERIFIED) | workspace-specific |
 | openai_compatible_media | `@contract/sglang-h3-fl2va-v1` / `v2` | active | video | first_frame ≤ 1, last_frame ≤ 1 | — | — | workspace-specific | no (DYNAMIC_MODEL_CAPABILITY_UNVERIFIED) | workspace-specific |
