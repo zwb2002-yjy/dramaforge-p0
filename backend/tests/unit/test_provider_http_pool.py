@@ -53,3 +53,26 @@ async def test_default_provider_client_blocks_private_destination():
                 await client.get("http://169.254.169.254/latest/meta-data")
     finally:
         await close_provider_http_pools()
+
+
+async def test_default_transport_factory_is_called_only_once_per_policy(monkeypatch):
+    import app.providers.http_client as module
+
+    await close_provider_http_pools()
+    original_factory = module.guarded_provider_transport
+    creations = 0
+
+    def counting_factory(*, settings):
+        nonlocal creations
+        creations += 1
+        return original_factory(settings=settings)
+
+    monkeypatch.setattr(module, "guarded_provider_transport", counting_factory)
+    cfg = Settings(app_env="test", provider_trusted_http_networks=["127.0.0.0/8"])
+    try:
+        for _ in range(5):
+            async with provider_http_client(timeout=1, settings=cfg):
+                pass
+        assert creations == 1
+    finally:
+        await close_provider_http_pools()

@@ -7,7 +7,7 @@ from weakref import WeakKeyDictionary
 
 import httpx
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.providers.egress import GuardedProviderTransport, guarded_provider_transport
 
 _pools: WeakKeyDictionary[
@@ -40,8 +40,15 @@ def provider_http_client(
     never stored on the shared object. Environment proxies are always disabled.
     """
     if transport is None:
-        transport = guarded_provider_transport(settings=settings)
-    if isinstance(transport, GuardedProviderTransport):
+        # Resolve the pool key before constructing a transport. The common
+        # request path must not allocate and discard an unused HTTP pool.
+        cfg = settings or get_settings()
+        key = (cfg.provider_base_url_allow_private, tuple(cfg.provider_trusted_http_networks))
+        pools = _pools.setdefault(asyncio.get_running_loop(), {})
+        if key not in pools:
+            pools[key] = guarded_provider_transport(settings=cfg)
+        transport = _BorrowedTransport(pools[key])
+    elif isinstance(transport, GuardedProviderTransport):
         cfg = transport.settings
         key = (cfg.provider_base_url_allow_private, tuple(cfg.provider_trusted_http_networks))
         pools = _pools.setdefault(asyncio.get_running_loop(), {})
