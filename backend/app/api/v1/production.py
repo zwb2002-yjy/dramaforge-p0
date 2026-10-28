@@ -83,7 +83,12 @@ async def get_artifact_content(
 
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     art = await session.get(Artifact, artifact_id)
-    if art is None or art.project_id != project_id:
+    if (
+        art is None
+        or art.project_id != project_id
+        or art.storage_state != "available"
+        or art.deleted_at is not None
+    ):
         raise NotFoundError("artifact not found")
     store = get_object_store()
     media = art.mime_type or "application/octet-stream"
@@ -202,6 +207,8 @@ async def get_artifact_video_frame(
     if (
         artifact is None
         or artifact.project_id != project_id
+        or artifact.storage_state != "available"
+        or artifact.deleted_at is not None
         or not artifact.mime_type.startswith("video/")
     ):
         raise NotFoundError("video Artifact not found")
