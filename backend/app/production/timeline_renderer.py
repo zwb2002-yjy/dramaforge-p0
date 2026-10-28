@@ -22,6 +22,7 @@ from app.production.timeline_subtitles import (
     TimelineTimingError,
     build_timeline_subtitles,
 )
+from app.storage.media_process import media_process_command
 
 
 class TimelineRenderError(RuntimeError):
@@ -48,7 +49,7 @@ def _quote_subtitle_path(path: Path) -> str:
 
 async def _run(command: list[str], *, timeout: float) -> tuple[bytes, bytes]:
     process = await asyncio.create_subprocess_exec(
-        *command,
+        *media_process_command(command),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -358,7 +359,7 @@ async def render_timeline(
     if get_settings().app_env == "test":
         return _test_render(clips, lineage=lineage, output_path=output_path)
 
-    with tempfile.TemporaryDirectory(prefix="dramaforge-timeline-") as temp:
+    with tempfile.TemporaryDirectory(prefix="timeline-", dir=output_path.parent) as temp:
         directory = Path(temp)
         paths = [
             await _render_clip(clip, directory=directory, index=index)

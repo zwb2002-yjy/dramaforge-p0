@@ -269,10 +269,20 @@ dispatcher 的独立恢复扫描不等于正常轮询已释放媒体槽。
   MinIO上传读取文件句柄，单文件multipart并发固定为1；内存ObjectStore仅供测试/开发。
   图片解码的bytes入口只允许经过20MiB传输上限校验的图片。成片与合成渲染接收路径、
   输出路径，并在上传结束后释放作业文件，不将所有镜头或输出MP4重新聚合成bytes。
+- **强杀回收**：临时文件置于专属根目录，每个作业持有系统文件锁直到下载、编码和
+  上传结束；Worker启动只回收带有效所有权标记且能取得锁的目录，拒绝目录/标记软链。
+  成功交付后的本地清理失败仅记录并留待回收，不改写已提交Artifact。Linux容器内
+  FFmpeg/ffprobe在独立启动器中绑定`PR_SET_PDEATHSIG=SIGKILL`，并检查父进程竞态；
+  Worker被强杀时编码进程随之退出，不使用多线程Worker中的Python preexec_fn。
+  非Linux宿主的原生编码路径未取得这项容器生命周期验收。
 - **可重复传输验证**：`docker-compose.quality.yml`的`media-resource-quality`
   使用真实证书校验的HTTPS与真实MinIO SDK，分别采样256MiB单路/4路并发下载、
   上传及流式读回，核验哈希；5ms采样，显式4vCPU/8GiB限制，Provider create为0。
   该阶段不含解码/编码资源和真实供应商生成；运行证据仍须随候选源码重新取得。
+- **故障证明**：`test_final_film_faults_pg.py`使用真实PostgreSQL和MinIO，覆盖PUT后
+  SIGKILL、写入成功后TCP响应丢失、并发清理与另一成片导出、并发同键排队及完成回放。
+  保留既有上传journal；未知写入的键在删除成功后仍保留可发现性，成功Artifact的对象
+  不被删除。这些用例使用明确的合成渲染，仅证明持久化/清理，不替代真实FFmpeg交付证明。
 
 - **需求**：远端下载、存储上传及必要的 Provider 参考上传使用受限缓冲和流式/文件句柄
   传递，避免整文件累积、重复转换 bytes 或以 base64 常驻内存。传输过程中累计实际

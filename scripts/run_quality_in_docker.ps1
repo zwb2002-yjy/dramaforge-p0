@@ -14,10 +14,10 @@ try {
     # Start the stateful test dependencies independently. Waiting for their
     # health state avoids the Windows Compose wait/abort behavior that can keep
     # a completed dependency process attached after backend-quality exits.
-    docker compose -f docker-compose.quality.yml up -d postgres-quality redis-quality
+    docker compose -f docker-compose.quality.yml up -d postgres-quality redis-quality minio-quality
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-    foreach ($service in @("postgres-quality", "redis-quality")) {
+    foreach ($service in @("postgres-quality", "redis-quality", "minio-quality")) {
         $dependencyContainer = (docker compose -f docker-compose.quality.yml ps -q $service).Trim()
         if ([string]::IsNullOrWhiteSpace($dependencyContainer)) {
             throw "$service container was not created"

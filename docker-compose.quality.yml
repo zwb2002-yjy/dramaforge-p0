@@ -29,6 +29,8 @@ services:
         condition: service_healthy
       redis-quality:
         condition: service_healthy
+      minio-quality:
+        condition: service_healthy
     environment:
       APP_ENV: test
       DATABASE_URL: postgresql+asyncpg://dramaforge:quality-postgres-password@postgres-quality:5432/dramaforge
@@ -45,6 +47,10 @@ services:
       TEST_PG_PASSWORD: quality-postgres-password
       TEST_DIRECTOR_REDIS_URL: redis://redis-quality:6379/0
       PUBLIC_REGISTRATION_ENABLED: "true"
+      MINIO_ENDPOINT: http://minio-quality:9000
+      MINIO_ACCESS_KEY: quality-minio-user
+      MINIO_SECRET_KEY: quality-minio-password
+      MINIO_BUCKET: quality-final-film
     volumes:
       - ${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}:/contract
 

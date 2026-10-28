@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -39,6 +38,7 @@ from app.runtime.scheduler import NodeRunScheduler
 from app.shared.errors import NotFoundError, ProviderTaskPendingError, ValidationAppError
 from app.storage.materialized import MaterializedFile, MediaTransferError, materialize_stream
 from app.storage.minio_store import ObjectStore
+from app.storage.scratch import OwnedMediaDirectory
 
 if TYPE_CHECKING:
     from app.execution.product_path import ExecuteNodeResult
@@ -1464,8 +1464,8 @@ async def execute_final_film_node_run(
     delivery_committed = False
     uploads_finished = False
     run_id, operation_id = run.id, operation.id
-    scratch = tempfile.TemporaryDirectory(prefix=f"dramaforge-final-film-{run_id}-")
-    directory = Path(scratch.name)
+    scratch = OwnedMediaDirectory(operation_id=run_id)
+    directory = scratch.path
     media_cache: dict[UUID, MaterializedFile] = {}
     try:
         # Resolve all immutable metadata in one short transaction. Reading an

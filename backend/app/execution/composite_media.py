@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.execution.branches import branch_priority
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.storage.materialized import materialize_stream
+from app.storage.media_process import media_process_command
 from app.storage.minio_store import ObjectStore
 
 _SUCCESS_STATUSES = frozenset({"completed", "cached", "completed_after_cancel"})
@@ -301,14 +302,18 @@ async def _render_with_ffmpeg(inputs: CompositeInputs, *, output_path: Path) -> 
 
     async def media_duration(path: Path) -> float:
         probe = await asyncio.create_subprocess_exec(
-            ffprobe,
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(path),
+            *media_process_command(
+                [
+                    ffprobe,
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(path),
+                ]
+            ),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -338,30 +343,34 @@ async def _render_with_ffmpeg(inputs: CompositeInputs, *, output_path: Path) -> 
         subtitle_path.as_posix().replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
     )
     process = await asyncio.create_subprocess_exec(
-        ffmpeg,
-        "-y",
-        "-i",
-        str(video_path),
-        "-i",
-        str(voice_path),
-        "-vf",
-        f"subtitles=filename='{subtitle_filter_path}'",
-        "-map",
-        "0:v:0",
-        "-map",
-        "1:a:0",
-        "-af",
-        audio_filter,
-        "-c:v",
-        "libx264",
-        "-c:a",
-        "aac",
-        "-metadata",
-        f"comment=dramaforge-composite-lineage:{lineage_fingerprint}",
-        "-shortest",
-        "-movflags",
-        "+faststart",
-        str(output_path),
+        *media_process_command(
+            [
+                ffmpeg,
+                "-y",
+                "-i",
+                str(video_path),
+                "-i",
+                str(voice_path),
+                "-vf",
+                f"subtitles=filename='{subtitle_filter_path}'",
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-af",
+                audio_filter,
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "aac",
+                "-metadata",
+                f"comment=dramaforge-composite-lineage:{lineage_fingerprint}",
+                "-shortest",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ]
+        ),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )

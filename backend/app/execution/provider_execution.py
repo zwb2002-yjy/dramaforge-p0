@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import math
-import tempfile
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -45,6 +44,7 @@ from app.shared.errors import (
     ValidationAppError,
 )
 from app.storage.minio_store import ObjectStore
+from app.storage.scratch import OwnedMediaDirectory
 
 POLL_OBSERVATION_TIMEOUT_SECONDS = 30.0
 MAX_POLL_ERROR_BACKOFF_SECONDS = 300.0
@@ -681,7 +681,7 @@ async def _execute_unified_media_node_run(
         if synchronous_image and result and result.artifact_bytes is not None
         else poll.artifact_uri
     )
-    with tempfile.TemporaryDirectory(prefix=f"dramaforge-provider-{run.id}-") as scratch:
+    with OwnedMediaDirectory(operation_id=run.id) as scratch:
         destination = Path(scratch) / "result.media"
         if uri == PROVIDER_CONTENT_URI:
             assert resume is not None

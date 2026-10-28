@@ -24,6 +24,7 @@ from app.shared.errors import (
     ProviderTaskPendingError,
 )
 from app.shared.model_registry import load_all_models
+from app.storage.scratch import sweep_owned_media
 
 # Ensure full MetaData / FK graph is registered in worker process (SQLAlchemy
 # needs all related tables present when compiling FLUSH).
@@ -57,6 +58,7 @@ def _worker_failure_code(exc: Exception) -> str:
 
 async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> dict[str, int]:
     """Compatibility startup entry; the resident dispatcher owns periodic scans."""
+    await asyncio.to_thread(sweep_owned_media)
     return await _recover_provider_jobs(ctx, session_factory=get_session_factory())
 
 

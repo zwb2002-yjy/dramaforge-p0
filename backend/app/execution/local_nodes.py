@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
@@ -23,6 +22,7 @@ from app.shared.errors import (
     ValidationAppError,
 )
 from app.storage.minio_store import ObjectStore
+from app.storage.scratch import OwnedMediaDirectory
 
 
 async def _complete_composite_node(
@@ -41,7 +41,7 @@ async def _complete_composite_node(
         resolve_composite_inputs,
     )
 
-    with tempfile.TemporaryDirectory(prefix=f"dramaforge-composite-{run.id}-") as scratch:
+    with OwnedMediaDirectory(operation_id=run.id) as scratch:
         try:
             inputs = await resolve_composite_inputs(
                 session, run=run, store=obj_store, directory=Path(scratch)
@@ -263,7 +263,7 @@ async def _complete_pure_node(
                     store=obj_store,
                     artifact_type="image",
                 )
-                with tempfile.TemporaryDirectory(prefix=f"dramaforge-review-{run.id}-") as scratch:
+                with OwnedMediaDirectory(operation_id=run.id) as scratch:
                     video_artifact, video = await _read_bound_artifact_file(
                         session,
                         run=run,

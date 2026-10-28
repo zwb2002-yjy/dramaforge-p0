@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from uuid import UUID
 
@@ -16,6 +15,7 @@ from app.shared.errors import (
 )
 from app.storage.materialized import MaterializedFile, MediaTransferError, materialize_stream
 from app.storage.minio_store import ObjectStore
+from app.storage.scratch import OwnedMediaDirectory
 
 
 def _artifact_snapshot(artifact: Artifact, *, prefix: str) -> dict[str, object]:
@@ -223,7 +223,7 @@ async def _read_bound_artifact(
     """Only bounded images are decoded in memory; videos stay file-backed."""
     if artifact_type != "image":
         raise ValueError("Only image inputs may be materialized as bytes")
-    with tempfile.TemporaryDirectory(prefix="dramaforge-bound-image-") as scratch:
+    with OwnedMediaDirectory(operation_id=run.id) as scratch:
         artifact, media = await _read_bound_artifact_file(
             session,
             run=run,
