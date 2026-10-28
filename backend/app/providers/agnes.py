@@ -944,6 +944,7 @@ class AgnesVideoCompiler:
     wire request (first-frame I2V) using the same body builder as the HubClient."""
 
     workbench_option_fields = frozenset({"duration_seconds", "resolution", "aspect_ratio"})
+    workbench_fixed_duration_seconds = _AGNES_VIDEO_DURATION_SECONDS
 
     reference_transport = "bytes"
 

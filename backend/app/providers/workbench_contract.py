@@ -23,17 +23,31 @@ VIDEO_UI_MODES = frozenset(
 )
 
 
-def implemented_workbench_options(manifest: ModelCapabilityManifest) -> frozenset[str]:
-    """Compiler-owned writable subset; catalog declarations cannot enable fields."""
+def _workbench_compiler(manifest: ModelCapabilityManifest) -> object | None:
     from app.providers.registry import get_plugin
 
     plugin = get_plugin(manifest.provider_type, manifest.protocol_profile)
     if not plugin.implemented or plugin.compiler_factory is None:
-        return frozenset()
+        return None
     image, video = plugin.compiler_factory()
-    compiler = image if manifest.media_kind == "image" else video
+    compiler: object = image if manifest.media_kind == "image" else video
+    return compiler
+
+
+def implemented_workbench_options(manifest: ModelCapabilityManifest) -> frozenset[str]:
+    """Compiler-owned writable subset; catalog declarations cannot enable fields."""
+    compiler = _workbench_compiler(manifest)
     fields: frozenset[str] = getattr(compiler, "workbench_option_fields", frozenset())
     return frozenset(fields)
+
+
+def workbench_fixed_duration(manifest: ModelCapabilityManifest) -> int | None:
+    """Only a legacy Compiler's explicit product default may fill a duration gap."""
+    operation = manifest.operations.get("video.generate")
+    if manifest.media_kind != "video" or operation is None or operation.input_contracts:
+        return None
+    value = getattr(_workbench_compiler(manifest), "workbench_fixed_duration_seconds", None)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
 def workbench_ui_mode(*, media_kind: str, mode_id: str) -> str:

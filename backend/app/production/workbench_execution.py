@@ -68,6 +68,7 @@ from app.providers.workbench_contract import (
     implemented_workbench_options,
     select_workbench_contract,
     validate_mode_roles,
+    workbench_fixed_duration,
     workbench_ui_mode,
 )
 from app.shared.enums import GraphStatus
@@ -1547,15 +1548,9 @@ class WorkbenchExecutionService:
                         details={"code": "MODEL_DURATION_UNSUPPORTED"},
                     )
                 option_sources["duration_seconds"] = "contract_default"
-            elif (
-                capability_manifest.provider_type == "agnes"
-                and capability_manifest.protocol_profile == "agnes_cn_v1"
-                and operation_manifest is not None
-                and not operation_manifest.input_contracts
-            ):
-                # The installed legacy Agnes compiler has an explicit fixed 5s
-                # product contract. No other protocol inherits this default.
-                plan_duration = 5.0
+            elif (fixed_duration := workbench_fixed_duration(capability_manifest)) is not None:
+                # Compiler-owned explicit default; there is no generic fallback.
+                plan_duration = float(fixed_duration)
                 option_sources["duration_seconds"] = "compiler_fixed_default"
             else:
                 raise WorkbenchExecutionError(

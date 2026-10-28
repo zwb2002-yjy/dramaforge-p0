@@ -38,6 +38,7 @@ from app.providers.models import ProviderConnection
 from app.providers.workbench_contract import (
     implemented_workbench_options,
     select_workbench_contract,
+    workbench_fixed_duration,
     workbench_ui_mode,
 )
 from app.shared.errors import NotFoundError, ValidationAppError
@@ -278,6 +279,10 @@ class ModelInspectionService:
                     reason = "fixed_value"
                 inherited = parameter.default
                 source = "contract_default"
+                if name == "duration_seconds" and inherited is None and not fixed:
+                    inherited = workbench_fixed_duration(catalog)
+                    if inherited is not None:
+                        source = "compiler_fixed_default"
                 if name == "aspect_ratio" and inherited is None:
                     inherited, source = project.aspect_ratio, "project"
                 elif fixed and inherited is None:
