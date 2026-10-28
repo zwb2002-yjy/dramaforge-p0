@@ -51,3 +51,19 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+
+  backend-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build reviewed backend quality image
+        run: docker compose -f docker-compose.quality.yml build backend-quality
+      - name: Run full backend unit, PostgreSQL, migration and API gates
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.quality.yml up \
+            --no-build --abort-on-container-exit --exit-code-from backend-quality \
+            postgres-quality backend-quality
+      - name: Remove backend quality containers and volumes
+        if: always()
+        run: docker compose -f docker-compose.quality.yml down --volumes --remove-orphans
