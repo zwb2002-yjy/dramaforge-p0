@@ -1,8 +1,4 @@
-"""Select the product-open input contract for the existing shot Workbench.
-
-The product path requires a Formal first frame for video. Provider reference
-contracts remain visible in the catalog but are not opened by this path.
-"""
+"""Map the Workbench input mode to exactly one declared reference contract."""
 
 from __future__ import annotations
 
@@ -12,6 +8,7 @@ from dataclasses import dataclass
 from fnmatch import fnmatch
 
 from app.providers.capability_resolver import ProductCapabilityPolicy
+from app.providers.intents import IMAGE_INTENT_OPTION_FIELDS, VIDEO_INTENT_OPTION_FIELDS
 from app.providers.manifest import InputContractSpec, OperationManifest
 
 
@@ -19,6 +16,48 @@ from app.providers.manifest import InputContractSpec, OperationManifest
 class WorkbenchContractSelection:
     contract_id: str
     policy: ProductCapabilityPolicy
+
+
+VIDEO_UI_MODES = frozenset(
+    {"text_to_video", "first_frame", "last_frame", "first_last_frame", "omni_reference"}
+)
+
+
+def workbench_ui_mode(*, media_kind: str, mode_id: str) -> str:
+    """Only explicit, established legacy entry names may map to a UI mode."""
+    if media_kind == "image" and mode_id in {"explicit_binding", "text_to_image"}:
+        return "text_to_image"
+    if media_kind == "video":
+        if mode_id in {"explicit_binding", "image_to_video"}:
+            return "first_frame"
+        if mode_id in VIDEO_UI_MODES:
+            return mode_id
+    raise ValueError(f"Workbench input mode is not supported: {mode_id}")
+
+
+def validate_mode_roles(*, media_kind: str, ui_mode_id: str, roles: Sequence[str]) -> None:
+    if media_kind == "image":
+        valid = all(role == "reference_image" for role in roles)
+    else:
+        expected = {
+            "text_to_video": [],
+            "first_frame": ["first_frame"],
+            "last_frame": ["last_frame"],
+            "first_last_frame": ["first_frame", "last_frame"],
+        }
+        valid = (
+            bool(roles)
+            and all(
+                role in {"reference_image", "reference_video", "reference_audio"} for role in roles
+            )
+            if ui_mode_id == "omni_reference"
+            else list(roles) == expected.get(ui_mode_id)
+        )
+    if not valid:
+        raise ValueError(
+            f"输入素材与 {ui_mode_id} 模式不匹配；需要首帧的模式必须使用 Formal 首帧，"
+            "请核对素材角色和顺序"
+        )
 
 
 def _accepts_references(
@@ -41,8 +80,10 @@ def _accepts_references(
             return False
     for role, mime_type in references:
         slot = contract.input_slots[role]
-        if mime_type is not None and slot.media_types and not any(
-            fnmatch(mime_type.lower(), pattern.lower()) for pattern in slot.media_types
+        if (
+            mime_type is not None
+            and slot.media_types
+            and not any(fnmatch(mime_type.lower(), pattern.lower()) for pattern in slot.media_types)
         ):
             return False
     return True
@@ -53,22 +94,18 @@ def select_workbench_contract(
     operation: OperationManifest,
     media_kind: str,
     references: Sequence[tuple[str, str | None]],
+    ui_mode_id: str | None = None,
 ) -> WorkbenchContractSelection:
     """Fail closed on non-mainchain roles or ambiguous provider contracts."""
     roles = [role for role, _ in references]
     if media_kind == "video":
-        if "first_frame" not in roles:
-            raise ValueError("当前视频主链缺少 Formal 首帧")
-        if roles != ["first_frame"]:
-            raise ValueError(
-                "当前视频主链必须使用 Formal 首帧；其他参考素材与首帧合同冲突，"
-                "请先移除这些参考素材"
-            )
-        allowed_options = frozenset({"aspect_ratio", "duration_seconds"})
+        selected_mode = workbench_ui_mode(media_kind="video", mode_id=ui_mode_id or "first_frame")
+        validate_mode_roles(media_kind="video", ui_mode_id=selected_mode, roles=roles)
+        allowed_options = VIDEO_INTENT_OPTION_FIELDS
     elif media_kind == "image":
         if any(role != "reference_image" for role in roles):
             raise ValueError("当前关键帧主链仅接受合同声明的参考图片")
-        allowed_options = frozenset({"aspect_ratio"})
+        allowed_options = IMAGE_INTENT_OPTION_FIELDS
     else:
         raise ValueError(f"unsupported Workbench media kind: {media_kind}")
     matches = [
@@ -78,8 +115,7 @@ def select_workbench_contract(
     ]
     if len(matches) != 1:
         raise ValueError(
-            "Workbench inputs must match exactly one model input contract "
-            f"(matched {len(matches)})"
+            f"Workbench inputs must match exactly one model input contract (matched {len(matches)})"
         )
     return WorkbenchContractSelection(
         contract_id=matches[0],

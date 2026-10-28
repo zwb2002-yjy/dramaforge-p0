@@ -30,6 +30,8 @@ ResolutionSource = Literal[
     "request_override",
     "project_profile",
     "workspace_profile",
+    "legacy_project_binding",
+    # Read historical frozen resolutions without changing their identity.
     "system_default",
 ]
 ResolutionStatus = Literal["RESOLVED", "UNAVAILABLE"]
@@ -183,7 +185,7 @@ class ExecutionModelResolver:
             )
 
         # An explicitly saved project binding is used only when neither profile
-        # declares this slot. It is labelled system_default and never acts as a
+        # declares this slot. It is labelled legacy_project_binding and never acts as a
         # fallback after a higher-priority model was selected.
         project_binding = await self._session.scalar(
             select(ProjectProviderBinding).where(
@@ -203,7 +205,7 @@ class ExecutionModelResolver:
         return self._resolution_for(
             concrete=concrete,
             requested_model_id=self._model_identity(concrete),
-            source="system_default",
+            source="legacy_project_binding",
             capability=capability,
             mode_id=mode_id,
             native_options={},

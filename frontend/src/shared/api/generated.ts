@@ -4519,7 +4519,7 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "request_override" | "project_profile" | "workspace_profile" | "system_default";
+            source: "request_override" | "project_profile" | "workspace_profile" | "legacy_project_binding" | "system_default";
             /**
              * Status
              * @enum {string}
@@ -8649,6 +8649,10 @@ export interface components {
             };
             /** Mode Id */
             mode_id: string;
+            /** Ui Mode Id */
+            ui_mode_id?: string | null;
+            /** Input Contract Id */
+            input_contract_id?: string | null;
             resolved_model: components["schemas"]["ExecutionModelResolution"];
             capability: components["schemas"]["Capability"];
             /** Planned References */
@@ -8683,6 +8687,16 @@ export interface components {
             /** Effective Options */
             effective_options?: {
                 [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Option Sources */
+            option_sources?: {
+                [key: string]: string;
+            };
+            /** Requested Options */
+            requested_options?: {
+                [key: string]: {
+                    [key: string]: components["schemas"]["JsonValue"];
+                };
             };
             /**
              * Supports Prompt Override

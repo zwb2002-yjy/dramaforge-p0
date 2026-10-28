@@ -15,6 +15,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.providers.reference_roles import ReferenceRoleValue
 
+IMAGE_INTENT_OPTION_FIELDS = frozenset({"size", "aspect_ratio", "seed"})
+VIDEO_INTENT_OPTION_FIELDS = frozenset(
+    {"aspect_ratio", "duration_seconds", "resolution", "generate_audio", "seed"}
+)
+
 
 class VideoOutputIntent(BaseModel):
     aspect_ratio: Literal["9:16", "16:9", "1:1", "adaptive"] | None = None

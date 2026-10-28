@@ -119,7 +119,10 @@ provider evidence and media are retained; no old interface or recovery route is 
   Known blocked current bindings remain inspectable with their original Hash and blocker.
 - POST /projects/{project_id}/shots/{shot_id}/compile-preview: ExecutionPlanBody with a current
   shot version, saved creative inputs only; refuses model-supplied approximation acceptance.
-  Calls existing compilers with placeholder references, never a Provider or production writer.
+  Reuses the execution-plan compiler service and the Worker's single frozen Plan-to-Intent
+  conversion, including Profile/Shot options and the resolved input contract. Plan/Wire hashes
+  and effective options match execution-plan; diagnostics omit the prompt-bearing redacted Wire.
+  Uses placeholder references, never a Provider or production writer.
 - GET /projects/{project_id}/shots/{shot_id}/generations/{run_id}/snapshot: safe requested /
   planned / compiled / observed evidence from the exact authorized run, no raw payload or secrets.
 

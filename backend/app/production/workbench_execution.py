@@ -39,6 +39,7 @@ from app.execution.shot_pipeline import (
 from app.production.execution_plan import (
     PendingSuggestion,
     WorkbenchExecutionPlan,
+    generation_intent_from_plan,
 )
 from app.production.formal_selection import require_formal_keyframe
 from app.production.models import GraphVersion, ProductionGraph, ShotReferenceBinding
@@ -51,13 +52,11 @@ from app.production.service import GraphService
 from app.providers.capabilities import Capability
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.compile_preview import CompilePreview, PreviewReference, preview_compile
+from app.providers.effective_options import resolve_generation_options
 from app.providers.errors import ProviderError
 from app.providers.intents import (
-    ArtifactReferenceIntent,
-    ImageGenerationIntent,
-    ModelSelectionIntent,
-    VideoGenerationIntentV1,
-    VideoOutputIntent,
+    IMAGE_INTENT_OPTION_FIELDS,
+    VIDEO_INTENT_OPTION_FIELDS,
 )
 from app.providers.manifest import (
     InputModeSpec,
@@ -69,7 +68,11 @@ from app.providers.model_profiles.slots import ModelSlot
 from app.providers.model_resolution import ExecutionModelResolver
 from app.providers.models import ProviderConnection, ProviderConnectionRevision
 from app.providers.validator import validate_parameter
-from app.providers.workbench_contract import select_workbench_contract
+from app.providers.workbench_contract import (
+    select_workbench_contract,
+    validate_mode_roles,
+    workbench_ui_mode,
+)
 from app.shared.enums import GraphStatus
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
@@ -1158,6 +1161,15 @@ class WorkbenchExecutionService:
             references=list(execution_input.references),
         )
         slot, capability, purpose, _node_key = _STAGE_CONTRACT[execution_input.stage]
+        try:
+            ui_mode_id = workbench_ui_mode(
+                media_kind="video" if execution_input.stage == "video" else "image",
+                mode_id=execution_input.mode_id,
+            )
+        except ValueError as exc:
+            raise WorkbenchExecutionError(
+                str(exc), details={"code": "MODEL_INPUT_MODE_UNSUPPORTED"}
+            ) from exc
         text_video = execution_input.stage == "video" and execution_input.mode_id == "text_to_video"
         last_frame_video = (
             execution_input.stage == "video" and execution_input.mode_id == "last_frame"
@@ -1334,6 +1346,7 @@ class WorkbenchExecutionService:
         )
         operation_manifest = capability_manifest.operations.get(operation_key)
         matched_input_contract = None
+        input_contract_id = None
         if operation_manifest is not None and operation_manifest.input_contracts:
             try:
                 selected_contract = select_workbench_contract(
@@ -1342,12 +1355,14 @@ class WorkbenchExecutionService:
                     references=[
                         (PURPOSE_TO_ROLE.get(ref.purpose, ""), ref.mime_type) for ref in references
                     ],
+                    ui_mode_id=ui_mode_id,
                 )
             except ValueError as exc:
                 raise WorkbenchExecutionError(
                     str(exc), details={"code": "MODEL_INPUT_COMBINATION_UNSUPPORTED"}
                 ) from exc
             effective_mode_id = selected_contract.contract_id
+            input_contract_id = selected_contract.contract_id
             matched_input_contract = operation_manifest.input_contracts.get(effective_mode_id)
             resolution = resolution.model_copy(update={"mode_id": effective_mode_id})
 
@@ -1356,8 +1371,11 @@ class WorkbenchExecutionService:
         if spec is not None:
             try:
                 mode_spec = spec.mode_spec(effective_mode_id)
-            except ValueError:
-                mode_spec = None
+            except ValueError as exc:
+                raise WorkbenchExecutionError(
+                    "Model input contract is not declared",
+                    details={"code": "MODEL_INPUT_MODE_UNSUPPORTED"},
+                ) from exc
 
         compiled = compile_references(
             manifest=v3_manifest,
@@ -1413,39 +1431,25 @@ class WorkbenchExecutionService:
         user_common_options = _mapping(stage_settings.get("common_options"))
         user_native_options = _mapping(stage_settings.get("native_options"))
 
-        # MP-05: Check conflicting values for the same key between common and native options
-        common_keys = set(user_common_options.keys())
-        native_keys = set(user_native_options.keys())
-        for k in common_keys.intersection(native_keys):
-            if user_common_options[k] != user_native_options[k]:
-                raise WorkbenchExecutionError(
-                    f"Option '{k}' has conflicting values in common_options and native_options",
-                    details={"code": "MODEL_OPTION_CONFLICT", "option": k},
-                )
-
-        # MP-05: Reject undeclared options and validate option values
-        user_all_options = {**user_common_options, **user_native_options}
-        for k, v in user_all_options.items():
-            if k not in declared_all_options:
-                raise WorkbenchExecutionError(
-                    f"Model contract does not declare option '{k}'",
-                    details={"code": "MODEL_OPTION_UNDECLARED", "option": k},
-                )
-            try:
-                validate_parameter(k, v, declared_all_options[k])
-            except ProviderError as exc:
-                raise WorkbenchExecutionError(
-                    str(exc),
-                    details={"code": "MODEL_OPTION_INVALID", "option": k, "error": str(exc)},
-                ) from exc
-
-        effective_options: dict[str, JsonValue] = {}
-        for k, v in user_common_options.items():
-            effective_options[k] = cast(JsonValue, v)
-        for k, v in user_native_options.items():
-            effective_options[k] = cast(JsonValue, v)
+        try:
+            merged_options = resolve_generation_options(
+                declared=declared_all_options,
+                profile_options=resolution.native_options,
+                profile_source=resolution.source,
+                common_options=user_common_options,
+                native_options=user_native_options,
+                allowed_options=VIDEO_INTENT_OPTION_FIELDS
+                if execution_input.stage == "video"
+                else IMAGE_INTENT_OPTION_FIELDS,
+            )
+        except ValidationAppError as exc:
+            raise WorkbenchExecutionError(str(exc), details=exc.details) from exc
+        effective_options = merged_options.values
+        option_sources = merged_options.sources
 
         selected_ratio = str(effective_options.get("aspect_ratio") or project.aspect_ratio)
+        effective_options["aspect_ratio"] = selected_ratio
+        option_sources.setdefault("aspect_ratio", "project")
         # Validate the same explicit ratio that preview and the Worker compile.
         # Reject a fixed or enumerated output mismatch in the read-only preview,
         # before a queued run can turn a predictable contract error into a failure.
@@ -1468,7 +1472,6 @@ class WorkbenchExecutionService:
         if execution_input.stage == "video":
             # Shot.duration_seconds owns editing; the saved stage-specific setting
             # is the explicit generation request, not a timeline fallback.
-            plan_duration = 5.0
             requested_duration = stage_settings.get("request_duration_seconds")
             duration_options = [
                 value
@@ -1480,11 +1483,15 @@ class WorkbenchExecutionService:
                 )
                 if value is not None
             ]
-            if requested_duration is None and duration_options:
-                requested_duration = duration_options[0]
             duration_spec = declared_all_options.get(
                 "duration_seconds"
             ) or declared_all_options.get("duration")
+            if requested_duration is None:
+                requested_duration = effective_options.get(
+                    "duration_seconds", effective_options.get("duration")
+                )
+            elif not duration_options:
+                option_sources["duration_seconds"] = "shot_duration"
             if requested_duration is not None:
                 if duration_spec is None:
                     raise WorkbenchExecutionError(
@@ -1511,9 +1518,18 @@ class WorkbenchExecutionService:
                         details={"code": "MODEL_DURATION_UNSUPPORTED"},
                     )
                 plan_duration = req_d
-            elif duration_spec is not None and duration_spec.default is not None:
+            elif duration_spec is not None and (
+                duration_spec.default is not None
+                or duration_spec.enum is not None
+                and len(duration_spec.enum) == 1
+            ):
                 try:
-                    plan_duration = float(str(duration_spec.default))
+                    default_duration = (
+                        duration_spec.default
+                        if duration_spec.default is not None
+                        else (duration_spec.enum or [None])[0]
+                    )
+                    plan_duration = float(str(default_duration))
                 except (ValueError, TypeError, OverflowError) as exc:
                     raise WorkbenchExecutionError(
                         "Model contract has an invalid default video duration",
@@ -1528,6 +1544,22 @@ class WorkbenchExecutionService:
                         "Model contract has an unsupported default video duration",
                         details={"code": "MODEL_DURATION_UNSUPPORTED"},
                     )
+                option_sources["duration_seconds"] = "contract_default"
+            elif (
+                capability_manifest.provider_type == "agnes"
+                and capability_manifest.protocol_profile == "agnes_cn_v1"
+                and operation_manifest is not None
+                and not operation_manifest.input_contracts
+            ):
+                # The installed legacy Agnes compiler has an explicit fixed 5s
+                # product contract. No other protocol inherits this default.
+                plan_duration = 5.0
+                option_sources["duration_seconds"] = "compiler_fixed_default"
+            else:
+                raise WorkbenchExecutionError(
+                    "Selected model has no explicit video duration default",
+                    details={"code": "MODEL_DURATION_REQUIRED"},
+                )
             # Both integer and numeric contracts accept whole seconds; validating a
             # float (4.0) against an integer contract wrongly rejects a valid 4s.
             # Check implicit defaults too: never freeze an unsupported 5s fallback.
@@ -1540,6 +1572,11 @@ class WorkbenchExecutionService:
                         details={"code": "MODEL_DURATION_UNSUPPORTED"},
                     ) from exc
             effective_options["duration_seconds"] = int(plan_duration)
+            if stage_settings.get("request_duration_seconds") is not None:
+                option_sources["duration_seconds"] = "shot_duration"
+                merged_options.requested["shot_duration"] = {
+                    "duration_seconds": cast(JsonValue, stage_settings["request_duration_seconds"])
+                }
 
         supports_prompt_override = False
         if (
@@ -1637,6 +1674,8 @@ class WorkbenchExecutionService:
             prompt=prompt,
             semantic_intent=semantic_intent,
             mode_id=effective_mode_id,
+            ui_mode_id=ui_mode_id,
+            input_contract_id=input_contract_id,
             resolved_model=resolution,
             capability=capability,
             planned_references=compiled.planned_references,
@@ -1653,6 +1692,8 @@ class WorkbenchExecutionService:
             duration_seconds=plan_duration,
             prompt_override=prompt_override,
             effective_options=effective_options,
+            option_sources=option_sources,
+            requested_options=merged_options.requested,
             supports_prompt_override=supports_prompt_override,
         ).freeze()
 
@@ -1666,6 +1707,17 @@ class WorkbenchExecutionService:
         if blocking_gaps:
             reasons = "; ".join(gap.reason for gap in blocking_gaps)
             raise WorkbenchExecutionError(f"workbench plan has capability gaps: {reasons}")
+        if execution_input.stage == "video":
+            try:
+                validate_mode_roles(
+                    media_kind="video",
+                    ui_mode_id=ui_mode_id,
+                    roles=[ref.role or "" for ref in plan.planned_references],
+                )
+            except ValueError as exc:
+                raise WorkbenchExecutionError(
+                    str(exc), details={"code": "MODEL_INPUT_COMBINATION_UNSUPPORTED"}
+                ) from exc
         return plan
 
     async def preview_compiler_contract(
@@ -1698,23 +1750,6 @@ class WorkbenchExecutionService:
         if entry is None or entry.contract_manifest_hash != identity.manifest_hash:
             return None
         manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
-        options = plan.effective_options
-        ratio = str(options.get("aspect_ratio") or project.aspect_ratio)
-        allowed_ratios = (
-            {"9:16", "16:9", "1:1"} if plan.stage == "image_keyframe" else {"9:16", "16:9"}
-        )
-        if ratio not in allowed_ratios:
-            return None
-        seed_value = options.get("seed")
-        seed = (
-            int(seed_value)
-            if isinstance(seed_value, int) and not isinstance(seed_value, bool)
-            else None
-        )
-        selection = ModelSelectionIntent(
-            mode="explicit_binding",
-            model_binding_id=identity.provider_model_binding_id,
-        )
         references = [
             PreviewReference(
                 role=cast(Any, ref.role),
@@ -1727,60 +1762,13 @@ class WorkbenchExecutionService:
         ]
         if len(references) != len(plan.planned_references):
             return None
-        if plan.stage == "video":
-            duration = plan.duration_seconds
-            if duration is None or not float(duration).is_integer() or duration <= 0:
-                return None
-            resolution = options.get("resolution")
-            intent: ImageGenerationIntent | VideoGenerationIntentV1 = VideoGenerationIntentV1(
-                prompt=plan.prompt,
-                output=VideoOutputIntent(
-                    aspect_ratio=cast(Literal["9:16", "16:9"], ratio),
-                    duration_seconds=int(duration),
-                    resolution=str(resolution) if resolution is not None else None,
-                    generate_audio=(
-                        bool(options["generate_audio"])
-                        if options.get("generate_audio") is not None
-                        else None
-                    ),
-                    seed=seed,
-                ),
-                mode_id=(
-                    "text_to_video"
-                    if plan.mode_id == "text_to_video"
-                    else "omni_reference"
-                    if plan.mode_id == "omni_reference"
-                    else "last_frame"
-                    if plan.mode_id == "last_frame"
-                    else "first_last_frame"
-                    if plan.mode_id == "first_last_frame"
-                    else "first_frame"
-                ),
-                references=[
-                    ArtifactReferenceIntent(artifact_id=ref.artifact_id, role=ref.role)
-                    for ref in references
-                ],
-                selection=selection,
-            )
-        else:
-            size = options.get("size")
-            intent = ImageGenerationIntent(
-                prompt=plan.prompt,
-                size=str(size) if size is not None else None,
-                aspect_ratio=cast(Literal["9:16", "16:9", "1:1"], ratio),
-                seed=seed,
-                reference_artifact_ids=[ref.artifact_id for ref in references],
-                reference_fingerprint=references[0].fingerprint if references else None,
-                reference_mime=references[0].mime_type if references else None,
-                mode_id=plan.mode_id,
-                selection=selection,
-            )
+        intent = generation_intent_from_plan(plan, fallback_aspect_ratio=project.aspect_ratio)
         return await preview_compile(
             manifest=manifest,
             invoke_model_value=identity.invoke_model_value,
             intent=intent,
             references=references,
-            expected_mode_id=plan.mode_id,
+            expected_mode_id=plan.input_contract_id,
             include_redacted_wire=True,
         )
 
@@ -2027,9 +2015,12 @@ class WorkbenchExecutionService:
             "plan": {"prompt": plan.prompt},
         }
         if plan.stage == "video":
-            snapshot["duration_seconds"] = (
-                plan.duration_seconds if plan.duration_seconds is not None else 5
-            )
+            if plan.duration_seconds is None:
+                raise WorkbenchExecutionError(
+                    "Execution plan has no frozen video duration",
+                    details={"code": "MODEL_DURATION_REQUIRED"},
+                )
+            snapshot["duration_seconds"] = plan.duration_seconds
             snapshot["aspect_ratio"] = project.aspect_ratio
         if plan.effective_options:
             snapshot["options"] = plan.effective_options

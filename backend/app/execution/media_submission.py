@@ -21,10 +21,14 @@ from app.execution.run_state import (
     UNIFIED_PATH_VERSION,
     _commit_terminal_failure,
 )
-from app.production.execution_plan import WorkbenchExecutionPlan
+from app.production.execution_plan import WorkbenchExecutionPlan, generation_intent_from_plan
 from app.providers.capability_resolver import ProductCapabilityPolicy
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.compile_preview import compiled_wire_evidence
+from app.providers.compiled_options import (
+    compiled_generation_evidence,
+    uncompiled_requested_options,
+)
 from app.providers.create_admission import require_frozen_create_admission
 from app.providers.execution_contract import execution_contract_gaps, freeze_execution_contract
 from app.providers.execution_identity import (
@@ -58,7 +62,6 @@ from app.providers.runtime import (
     ResolvedReference,
 )
 from app.providers.selection import SelectionPlan
-from app.providers.translation import RequestTransformation
 from app.providers.workbench_contract import select_workbench_contract
 from app.shared.db import set_node_run_rls_context
 from app.shared.errors import (
@@ -166,22 +169,31 @@ async def prepare_media_submission(
                 "frozen model binding is invalid",
                 details={"code": "MODEL_BINDING_INVALID"},
             ) from exc
+    canonical_intent = (
+        generation_intent_from_plan(
+            workbench_plan,
+            fallback_aspect_ratio=str(snap.get("aspect_ratio") or project.aspect_ratio),
+        )
+        if workbench_plan is not None
+        else None
+    )
+    workbench_mode = canonical_intent.mode_id if canonical_intent is not None else None
     first_frame: Artifact | None = None
     frame_bytes: bytes | None = None
     text_video = node_type == "video" and (
-        (workbench_plan is not None and workbench_plan.mode_id == "text_to_video")
+        (workbench_mode == "text_to_video")
         or (frozen_identity is not None and frozen_identity.mode_id == "text_to_video")
     )
     reference_video = node_type == "video" and (
-        (workbench_plan is not None and workbench_plan.mode_id == "omni_reference")
+        (workbench_mode == "omni_reference")
         or (frozen_identity is not None and frozen_identity.mode_id == "omni_reference")
     )
     last_frame_video = node_type == "video" and (
-        (workbench_plan is not None and workbench_plan.mode_id == "last_frame")
+        (workbench_mode == "last_frame")
         or (frozen_identity is not None and frozen_identity.mode_id == "last_frame")
     )
     first_last_video = node_type == "video" and (
-        (workbench_plan is not None and workbench_plan.mode_id == "first_last_frame")
+        (workbench_mode == "first_last_frame")
         or (frozen_identity is not None and frozen_identity.mode_id == "first_last_frame")
     )
     image_intent: ImageGenerationIntent | None = None
@@ -214,65 +226,71 @@ async def prepare_media_submission(
                 reference_uuid = UUID(str(canonical_artifact_id))
             except (TypeError, ValueError, AttributeError):
                 reference_uuid = None
-        raw_ratio = str(
-            effective_opts.get("aspect_ratio")
-            or snap.get("aspect_ratio")
-            or project.aspect_ratio
-            or ""
-        )
-        image_ratio: Literal["9:16", "16:9", "1:1"] | None = (
-            cast(Literal["9:16", "16:9", "1:1"], raw_ratio)
-            if raw_ratio in {"9:16", "16:9", "1:1"}
-            else None
-        )
-        if image_ratio is None:
-            raise ValidationAppError(
-                "unified image request has an unsupported aspect ratio",
-                details={"code": "ASPECT_RATIO_UNSUPPORTED", "aspect_ratio": raw_ratio},
+        if isinstance(canonical_intent, ImageGenerationIntent):
+            image_intent = canonical_intent
+        else:
+            raw_ratio = str(
+                effective_opts.get("aspect_ratio")
+                or snap.get("aspect_ratio")
+                or project.aspect_ratio
+                or ""
             )
-        image_size = str(effective_opts["size"]) if effective_opts.get("size") is not None else None
-        image_seed: int | None = None
-        if effective_opts.get("seed") is not None:
-            try:
-                image_seed = int(str(effective_opts["seed"]))
-            except (ValueError, TypeError) as exc:
-                raise ValidationAppError(
-                    "invalid image seed", details={"code": "MODEL_OPTION_INVALID", "option": "seed"}
-                ) from exc
-        image_intent = ImageGenerationIntent(
-            prompt=prompt,
-            size=image_size,
-            aspect_ratio=image_ratio,
-            seed=image_seed,
-            reference_artifact_ids=[
-                reference.artifact_id
-                for reference in workbench_planned_references
-                if reference.role == "reference_image"
-                and reference.artifact_id is not None
-                and reference.delivery != "unsupported"
-            ]
-            if workbench_plan is not None
-            else [reference_uuid]
-            if reference_uuid is not None
-            else [],
-            reference_fingerprint=(
-                workbench_image_reference.fingerprint
-                if workbench_image_reference is not None
-                else hashlib.sha256(canonical_image_bytes).hexdigest()
-                if canonical_image_bytes is not None
+            image_ratio: Literal["9:16", "16:9", "1:1"] | None = (
+                cast(Literal["9:16", "16:9", "1:1"], raw_ratio)
+                if raw_ratio in {"9:16", "16:9", "1:1"}
                 else None
-            ),
-            reference_mime=(
-                workbench_image_reference.mime_type
-                if workbench_image_reference is not None
-                else str(snap.get("canonical_mime_type") or "image/png")
-            ),
-            mode_id=workbench_plan.mode_id if workbench_plan is not None else None,
-            selection=ModelSelectionIntent(
-                mode="explicit_binding",
-                model_binding_id=frozen_binding_id,
-            ),
-        )
+            )
+            if image_ratio is None:
+                raise ValidationAppError(
+                    "unified image request has an unsupported aspect ratio",
+                    details={"code": "ASPECT_RATIO_UNSUPPORTED", "aspect_ratio": raw_ratio},
+                )
+            image_size = (
+                str(effective_opts["size"]) if effective_opts.get("size") is not None else None
+            )
+            image_seed: int | None = None
+            if effective_opts.get("seed") is not None:
+                try:
+                    image_seed = int(str(effective_opts["seed"]))
+                except (ValueError, TypeError) as exc:
+                    raise ValidationAppError(
+                        "invalid image seed",
+                        details={"code": "MODEL_OPTION_INVALID", "option": "seed"},
+                    ) from exc
+            image_intent = ImageGenerationIntent(
+                prompt=prompt,
+                size=image_size,
+                aspect_ratio=image_ratio,
+                seed=image_seed,
+                reference_artifact_ids=[
+                    reference.artifact_id
+                    for reference in workbench_planned_references
+                    if reference.role == "reference_image"
+                    and reference.artifact_id is not None
+                    and reference.delivery != "unsupported"
+                ]
+                if workbench_plan is not None
+                else [reference_uuid]
+                if reference_uuid is not None
+                else [],
+                reference_fingerprint=(
+                    workbench_image_reference.fingerprint
+                    if workbench_image_reference is not None
+                    else hashlib.sha256(canonical_image_bytes).hexdigest()
+                    if canonical_image_bytes is not None
+                    else None
+                ),
+                reference_mime=(
+                    workbench_image_reference.mime_type
+                    if workbench_image_reference is not None
+                    else str(snap.get("canonical_mime_type") or "image/png")
+                ),
+                mode_id=workbench_plan.mode_id if workbench_plan is not None else None,
+                selection=ModelSelectionIntent(
+                    mode="explicit_binding",
+                    model_binding_id=frozen_binding_id,
+                ),
+            )
     else:
         if not (text_video or reference_video or last_frame_video):
             first_frame = await approved_first_frame_for_video(session, video_run=run)
@@ -285,132 +303,146 @@ async def prepare_media_submission(
                     "UPSTREAM_ARTIFACT_MISSING: approved first-frame bytes "
                     "unavailable for video I2V"
                 )
-        raw_duration = effective_opts.get("duration_seconds")
-        if raw_duration is None:
-            raw_duration = snap.get("duration_seconds")
-        try:
-            parsed_duration = float(str(raw_duration))
-        except (TypeError, ValueError, OverflowError) as exc:
-            raise ValidationAppError(
-                "unified video request has no valid duration",
-                details={"code": "DURATION_REQUIRED"},
-            ) from exc
-        if (
-            isinstance(raw_duration, bool)
-            or not math.isfinite(parsed_duration)
-            or parsed_duration <= 0
-            or not parsed_duration.is_integer()
-        ):
-            raise ValidationAppError(
-                "unified video duration cannot be rounded or silently substituted",
-                details={"code": "MODEL_DURATION_UNSUPPORTED"},
+        if isinstance(canonical_intent, VideoGenerationIntentV1):
+            video_intent = canonical_intent
+            planned_first = next(
+                (ref for ref in video_intent.references if ref.role == "first_frame"), None
             )
-        duration_seconds = int(parsed_duration)
-        raw_ratio = str(
-            effective_opts.get("aspect_ratio")
-            or snap.get("aspect_ratio")
-            or project.aspect_ratio
-            or ""
-        )
-        video_ratio: Literal["9:16", "16:9"] | None = (
-            "9:16" if raw_ratio == "9:16" else "16:9" if raw_ratio == "16:9" else None
-        )
-        if video_ratio is None:
-            raise ValidationAppError(
-                "unified video request has an unsupported aspect ratio",
-                details={"code": "ASPECT_RATIO_UNSUPPORTED", "aspect_ratio": raw_ratio},
-            )
-        video_resolution = (
-            str(effective_opts["resolution"])
-            if effective_opts.get("resolution") is not None
-            else None
-        )
-        video_audio = (
-            bool(effective_opts["generate_audio"])
-            if effective_opts.get("generate_audio") is not None
-            else None
-        )
-        video_seed: int | None = None
-        if effective_opts.get("seed") is not None:
-            try:
-                video_seed = int(str(effective_opts["seed"]))
-            except (ValueError, TypeError) as exc:
+            if planned_first is not None and (
+                first_frame is None or planned_first.artifact_id != first_frame.id
+            ):
                 raise ValidationAppError(
-                    "invalid video seed", details={"code": "MODEL_OPTION_INVALID", "option": "seed"}
+                    "Frozen first frame differs from the Formal snapshot",
+                    details={"code": "FORMAL_KEYFRAME_SNAPSHOT_MISMATCH"},
+                )
+        else:
+            raw_duration = effective_opts.get("duration_seconds")
+            if raw_duration is None:
+                raw_duration = snap.get("duration_seconds")
+            try:
+                parsed_duration = float(str(raw_duration))
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValidationAppError(
+                    "unified video request has no valid duration",
+                    details={"code": "DURATION_REQUIRED"},
                 ) from exc
-        planned_video_references = [
-            reference
-            for reference in workbench_planned_references
-            if reference.artifact_id is not None
-            and reference.role is not None
-            and reference.delivery != "unsupported"
-        ]
-        planned_first_frame = next(
-            (
+            if (
+                isinstance(raw_duration, bool)
+                or not math.isfinite(parsed_duration)
+                or parsed_duration <= 0
+                or not parsed_duration.is_integer()
+            ):
+                raise ValidationAppError(
+                    "unified video duration cannot be rounded or silently substituted",
+                    details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                )
+            duration_seconds = int(parsed_duration)
+            raw_ratio = str(
+                effective_opts.get("aspect_ratio")
+                or snap.get("aspect_ratio")
+                or project.aspect_ratio
+                or ""
+            )
+            video_ratio: Literal["9:16", "16:9"] | None = (
+                "9:16" if raw_ratio == "9:16" else "16:9" if raw_ratio == "16:9" else None
+            )
+            if video_ratio is None:
+                raise ValidationAppError(
+                    "unified video request has an unsupported aspect ratio",
+                    details={"code": "ASPECT_RATIO_UNSUPPORTED", "aspect_ratio": raw_ratio},
+                )
+            video_resolution = (
+                str(effective_opts["resolution"])
+                if effective_opts.get("resolution") is not None
+                else None
+            )
+            video_audio = (
+                bool(effective_opts["generate_audio"])
+                if effective_opts.get("generate_audio") is not None
+                else None
+            )
+            video_seed: int | None = None
+            if effective_opts.get("seed") is not None:
+                try:
+                    video_seed = int(str(effective_opts["seed"]))
+                except (ValueError, TypeError) as exc:
+                    raise ValidationAppError(
+                        "invalid video seed",
+                        details={"code": "MODEL_OPTION_INVALID", "option": "seed"},
+                    ) from exc
+            planned_video_references = [
                 reference
-                for reference in planned_video_references
-                if reference.role == "first_frame"
-            ),
-            None,
-        )
-        if planned_first_frame is not None and (
-            first_frame is None or planned_first_frame.artifact_id != first_frame.id
-        ):
-            raise ValidationAppError(
-                "frozen Workbench first_frame does not match the formal keyframe",
-                details={"code": "FORMAL_KEYFRAME_SNAPSHOT_MISMATCH"},
-            )
-        intent_references = [
-            ArtifactReferenceIntent(
-                artifact_id=cast(UUID, reference.artifact_id),
-                role=cast(
-                    Literal[
-                        "first_frame",
-                        "last_frame",
-                        "reference_image",
-                        "reference_video",
-                        "reference_audio",
-                    ],
-                    reference.role,
+                for reference in workbench_planned_references
+                if reference.artifact_id is not None
+                and reference.role is not None
+                and reference.delivery != "unsupported"
+            ]
+            planned_first_frame = next(
+                (
+                    reference
+                    for reference in planned_video_references
+                    if reference.role == "first_frame"
                 ),
-                required=True,
+                None,
             )
-            for reference in planned_video_references
-        ]
-        if not intent_references and not (text_video or reference_video or last_frame_video):
-            assert first_frame is not None
+            if planned_first_frame is not None and (
+                first_frame is None or planned_first_frame.artifact_id != first_frame.id
+            ):
+                raise ValidationAppError(
+                    "frozen Workbench first_frame does not match the formal keyframe",
+                    details={"code": "FORMAL_KEYFRAME_SNAPSHOT_MISMATCH"},
+                )
             intent_references = [
                 ArtifactReferenceIntent(
-                    artifact_id=first_frame.id,
-                    role="first_frame",
+                    artifact_id=cast(UUID, reference.artifact_id),
+                    role=cast(
+                        Literal[
+                            "first_frame",
+                            "last_frame",
+                            "reference_image",
+                            "reference_video",
+                            "reference_audio",
+                        ],
+                        reference.role,
+                    ),
                     required=True,
                 )
+                for reference in planned_video_references
             ]
-        video_mode_id = "first_frame"
-        if text_video:
-            video_mode_id = "text_to_video"
-        elif reference_video:
-            video_mode_id = "omni_reference"
-        elif last_frame_video:
-            video_mode_id = "last_frame"
-        elif first_last_video:
-            video_mode_id = "first_last_frame"
-        video_intent = VideoGenerationIntentV1(
-            prompt=prompt,
-            mode_id=video_mode_id,
-            output=VideoOutputIntent(
-                aspect_ratio=video_ratio,
-                duration_seconds=duration_seconds,
-                resolution=video_resolution,
-                generate_audio=video_audio,
-                seed=video_seed,
-            ),
-            references=intent_references,
-            selection=ModelSelectionIntent(
-                mode="explicit_binding",
-                model_binding_id=frozen_binding_id,
-            ),
-        )
+            if not intent_references and not (text_video or reference_video or last_frame_video):
+                assert first_frame is not None
+                intent_references = [
+                    ArtifactReferenceIntent(
+                        artifact_id=first_frame.id,
+                        role="first_frame",
+                        required=True,
+                    )
+                ]
+            video_mode_id = "first_frame"
+            if text_video:
+                video_mode_id = "text_to_video"
+            elif reference_video:
+                video_mode_id = "omni_reference"
+            elif last_frame_video:
+                video_mode_id = "last_frame"
+            elif first_last_video:
+                video_mode_id = "first_last_frame"
+            video_intent = VideoGenerationIntentV1(
+                prompt=prompt,
+                mode_id=video_mode_id,
+                output=VideoOutputIntent(
+                    aspect_ratio=video_ratio,
+                    duration_seconds=duration_seconds,
+                    resolution=video_resolution,
+                    generate_audio=video_audio,
+                    seed=video_seed,
+                ),
+                references=intent_references,
+                selection=ModelSelectionIntent(
+                    mode="explicit_binding",
+                    model_binding_id=frozen_binding_id,
+                ),
+            )
 
     raw_frozen_selection = (
         op.selection_plan
@@ -882,6 +914,7 @@ async def prepare_media_submission(
                     operation=image_operation,
                     media_kind="image",
                     references=[(ref.role, ref.mime_type) for ref in refs],
+                    ui_mode_id=image_intent.mode_id,
                 )
             except ValueError as exc:
                 raise ValidationAppError(
@@ -890,7 +923,8 @@ async def prepare_media_submission(
             applied_policy = selected_contract.policy
             if (
                 workbench_plan is not None
-                and workbench_plan.mode_id != selected_contract.contract_id
+                and (workbench_plan.input_contract_id or workbench_plan.mode_id)
+                != selected_contract.contract_id
             ):
                 raise ValidationAppError(
                     "frozen Workbench input contract does not match resolved references",
@@ -973,6 +1007,7 @@ async def prepare_media_submission(
                     operation=video_operation,
                     media_kind="video",
                     references=[(ref.role, ref.mime_type) for ref in video_references],
+                    ui_mode_id=video_intent.mode_id,
                 )
             except ValueError as exc:
                 raise ValidationAppError(
@@ -981,17 +1016,13 @@ async def prepare_media_submission(
             applied_policy = selected_contract.policy
             if (
                 workbench_plan is not None
-                and workbench_plan.mode_id != selected_contract.contract_id
+                and (workbench_plan.input_contract_id or workbench_plan.mode_id)
+                != selected_contract.contract_id
             ):
                 raise ValidationAppError(
                     "frozen Workbench input contract does not match resolved references",
                     details={"code": "EXECUTION_PLAN_INVALID"},
                 )
-            # The existing product does not request native audio output. Its
-            # frozen false default is not a Provider option on all new models.
-            video_intent = video_intent.model_copy(
-                update={"output": video_intent.output.model_copy(update={"generate_audio": None})}
-            )
             compiled = await cast(Any, video_compiler).compile(
                 video_intent,
                 manifest,
@@ -1048,48 +1079,30 @@ async def prepare_media_submission(
         f"{kind}:{prompt}:{compiled.model_dump_json()}".encode()
     ).hexdigest()
     prompt_fingerprint = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-    if image_intent is not None:
-        requested_options: dict[str, object] = {
+    requested_options: dict[str, JsonValue] = (
+        {
             "size": image_intent.size,
             "aspect_ratio": image_intent.aspect_ratio,
             "seed": image_intent.seed,
-            **effective_opts,
         }
-        effective_options: dict[str, object] = {
-            "size": compiled.safe_request_summary.get("size") or image_intent.size,
-            "aspect_ratio": compiled.safe_request_summary.get("aspect_ratio")
-            or image_intent.aspect_ratio,
-            "seed": image_intent.seed,
-        }
-        for k, v in effective_opts.items():
-            if k not in effective_options:
-                effective_options[k] = v
-    else:
-        assert video_intent is not None
-        requested_options = {
-            "aspect_ratio": video_intent.output.aspect_ratio,
-            "duration_seconds": video_intent.output.duration_seconds,
-            "resolution": video_intent.output.resolution,
-            "generate_audio": video_intent.output.generate_audio,
-            "seed": video_intent.output.seed,
-            **effective_opts,
-        }
-        effective_options = {
-            "aspect_ratio": compiled.safe_request_summary.get("aspect_ratio")
-            or video_intent.output.aspect_ratio,
-            "duration_seconds": compiled.safe_request_summary.get("duration_seconds")
-            or video_intent.output.duration_seconds,
-            "resolution": compiled.safe_request_summary.get("resolution")
-            or video_intent.output.resolution,
-            "frame_rate": compiled.safe_request_summary.get("frame_rate"),
-            "num_frames": compiled.safe_request_summary.get("num_frames"),
-            "generate_audio": compiled.safe_request_summary.get("native_audio")
-            or video_intent.output.generate_audio,
-            "seed": video_intent.output.seed,
-        }
-        for k, v in effective_opts.items():
-            if k not in effective_options:
-                effective_options[k] = v
+        if image_intent is not None
+        else video_intent.output.model_dump(mode="json")
+        if video_intent is not None
+        else {}
+    )
+    try:
+        effective_options, option_changes = compiled_generation_evidence(compiled)
+    except ValueError as exc:
+        raise ValidationAppError(
+            "Compiler option evidence is invalid",
+            details={"code": "COMPILER_TRANSLATION_EVIDENCE_INVALID"},
+        ) from exc
+    uncompiled = uncompiled_requested_options(requested_options, effective_options, option_changes)
+    if uncompiled:
+        raise ValidationAppError(
+            "Requested options did not reach the compiler Wire",
+            details={"code": "MODEL_OPTION_NOT_COMPILED", "options": uncompiled},
+        )
     effective_request = {
         "operation": compiled.operation,
         "model_id": compiled.model_id,
@@ -1098,19 +1111,7 @@ async def prepare_media_submission(
         "reference_artifact_ids": [str(value) for value in compiled.reference_artifact_ids],
         "reference_fingerprints": list(compiled.reference_fingerprints),
     }
-    raw_transformations = compiled.safe_request_summary.get("translation_transformations")
-    if raw_transformations is None:
-        transformations: list[dict[str, object]] = []
-    elif isinstance(raw_transformations, list):
-        transformations = [
-            RequestTransformation.model_validate(item).model_dump(mode="json")
-            for item in raw_transformations
-        ]
-    else:
-        raise ValidationAppError(
-            "compiler returned malformed translation evidence",
-            details={"code": "COMPILER_TRANSLATION_EVIDENCE_INVALID"},
-        )
+    transformations = [item.model_dump(mode="json") for item in option_changes]
     translation_report = {
         "requested_options": requested_options,
         "effective_options": effective_options,
@@ -1161,7 +1162,7 @@ async def prepare_media_submission(
             credential_revision_id=connection_revision.credential_revision_id,
             capability=plan.execution_model_resolution.capability.value,
             mode_id=plan.mode_id,
-            effective_options=cast(dict[str, JsonValue], effective_options),
+            effective_options=effective_options,
             resolved_references=identity_references,
             translation_report=cast(dict[str, JsonValue], translation_report),
             request_fingerprint=fingerprint,
@@ -1201,7 +1202,7 @@ async def prepare_media_submission(
             credential_revision_id=frozen_identity.credential_revision_id,
             capability=frozen_identity.capability,
             mode_id=frozen_identity.mode_id,
-            effective_options=cast(dict[str, JsonValue], effective_options),
+            effective_options=effective_options,
             resolved_references=identity_references,
             translation_report=cast(dict[str, JsonValue], translation_report),
             request_fingerprint=fingerprint,

@@ -71,6 +71,21 @@ Connection/Credential revision、严格 Compiler 和 ExecutionIdentitySnapshot�
 
 - 新媒体 Create 只接受当前 active、合同可复现且通过账号验证的具体 Binding。
 - Media Profile 可以引用 `binding:<UUID>`，同名模型不再按更新时间或供应商名字选第一条。
+- 工作台参数按合同默认、已选 Profile、Shot common/native 覆盖顺序归并；Plan 冻结
+  `requested_options`、`effective_options` 与逐字段 `option_sources`。缺失或 null 继承，
+  0/false 保留，同层重复冲突与非法/未声明字段在排队前拒绝。视频生成时长独立于剪辑时长，
+  必须显式提供、来自合同合法默认/固定值，或来自已实施的旧 Agnes 固定 5 秒合同；
+  其它协议不再继承通用 5 秒猜测。历史项目绑定来源标为 `legacy_project_binding`，
+  旧冻结快照的来源值保持原样。
+- Plan 的 `ui_mode_id` 表示用户输入模式，`input_contract_id` 表示匹配的 typed 合同；
+  `mode_id` 保留现有已解析模式/合同标识，供冻结引用合同使用。只有首帧与首尾帧模式要求
+  本 Shot Formal 首帧；文本、尾帧、全能参考按自己的有序角色与合同校验。未知模式、
+  多义合同、错误顺序和多余素材拒绝，候选 V2 合同仍不自动开放生产。
+- `execution-plan`、诊断 `compile-preview` 和 Worker 共用唯一冻结 Plan→Intent 转换。
+  两种预览的 Plan/Wire 指纹及有效参数一致；诊断视图不返回原始 Prompt/Wire。
+  逐字段有效参数来自实际 Wire 与经过校验的编译器转换证据，不回填原请求伪造生效；
+  声明了却没有 Intent 字段或未进入 Wire/明确转换的参数阻断新执行。执行实现指纹同时
+  覆盖转换、Wire 投影与媒体提交代码，历史执行实现失配保持阻断，不重解释或重发。
 - 文本统一为 `litellm/<logical-alias>`；连接发现的模型使用
   `litellm/<connection-UUID>/<remote-model-id>`，不同地址与凭证不会互相覆盖。
 - 单一文本请求是非空 messages 列表；图片素材是有序 reference_artifact_ids 列表。

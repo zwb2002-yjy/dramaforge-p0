@@ -11,7 +11,6 @@ submissions use the DB-bound frozen runtime; catalog adapters have no runtime.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
@@ -21,6 +20,9 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from app.providers.capabilities import Capability
+from app.providers.compiled_options import (
+    compiler_option_evidence as _compiler_translation_evidence,
+)
 from app.providers.contracts.common import (
     ExecutionContext,
     GenerationStatus,
@@ -49,7 +51,6 @@ from app.providers.runtime import (
 )
 from app.providers.translation import (
     EffectiveRequest,
-    RequestTransformation,
     TranslationReport,
     TranslationResult,
 )
@@ -86,95 +87,6 @@ def submission_status_to_v3(status: str) -> GenerationStatus:
 
 
 ArtifactResolver = Callable[[list[tuple[str, ResolvedArtifact]]], list[ResolvedReference]]
-
-_COMPILER_AUDIT_OPTION_FIELDS = frozenset(
-    {"aspect_ratio", "duration_seconds", "resolution", "generate_audio", "seed", "size"}
-)
-_COMPILER_AUDIT_REASON_CODES = frozenset(
-    {
-        "provider_inherits_aspect_ratio_from_first_frame",
-        "provider_applies_documented_default",
-        "frozen_manifest_native_size_tier",
-    }
-)
-
-
-def _compiler_translation_evidence(
-    compiled: object,
-) -> tuple[dict[str, Any] | None, list[RequestTransformation]]:
-    """Read a deliberately small, secret-free compiler audit envelope.
-
-    Existing compilers which do not publish the envelope retain their current
-    translation behavior.  A compiler which does publish it must conform to
-    this allowlisted scalar schema; malformed or unexpected data fails closed.
-    """
-    summary = getattr(compiled, "safe_request_summary", None)
-    if not isinstance(summary, dict):
-        return None, []
-    has_effective = "effective_common_options" in summary
-    has_transformations = "translation_transformations" in summary
-    if not has_effective and not has_transformations:
-        return None, []
-    if not has_effective or not has_transformations:
-        raise ValueError("compiler translation evidence is incomplete")
-
-    raw_effective = summary["effective_common_options"]
-    raw_transformations = summary["translation_transformations"]
-    if not isinstance(raw_effective, dict) or not isinstance(raw_transformations, list):
-        raise ValueError("compiler translation evidence has an invalid schema")
-
-    def safe_value(field: str, value: object) -> bool:
-        if value is None:
-            return True
-        if field in {"aspect_ratio", "resolution", "size"}:
-            return isinstance(value, str) and 0 < len(value) <= 32
-        if field == "duration_seconds":
-            return (
-                not isinstance(value, bool)
-                and isinstance(value, int | float)
-                and math.isfinite(value)
-                and 0 < value <= 3600
-            )
-        if field == "generate_audio":
-            return isinstance(value, bool)
-        if field == "seed":
-            return (
-                not isinstance(value, bool) and isinstance(value, int) and -(2**63) <= value < 2**63
-            )
-        return False
-
-    effective: dict[str, Any] = {}
-    for key, value in raw_effective.items():
-        if (
-            not isinstance(key, str)
-            or key not in _COMPILER_AUDIT_OPTION_FIELDS
-            or not safe_value(key, value)
-        ):
-            raise ValueError("compiler effective options are not safe common options")
-        effective[key] = value
-
-    transformations: list[RequestTransformation] = []
-    for raw in raw_transformations:
-        if not isinstance(raw, dict) or set(raw) != {
-            "field",
-            "from_value",
-            "to_value",
-            "reason",
-        }:
-            raise ValueError("compiler transformation has an invalid schema")
-        field = raw["field"]
-        reason = raw["reason"]
-        if (
-            not isinstance(field, str)
-            or field not in _COMPILER_AUDIT_OPTION_FIELDS
-            or not isinstance(reason, str)
-            or reason not in _COMPILER_AUDIT_REASON_CODES
-            or not safe_value(field, raw["from_value"])
-            or not safe_value(field, raw["to_value"])
-        ):
-            raise ValueError("compiler transformation is not safe audit evidence")
-        transformations.append(RequestTransformation.model_validate(raw))
-    return effective, transformations
 
 
 def _uuid(value: str) -> UUID:

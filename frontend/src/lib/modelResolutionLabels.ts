@@ -2,6 +2,7 @@ const MODEL_SOURCE_LABELS: Record<string, string> = {
   project_profile: "项目模型方案",
   workspace_profile: "工作空间默认方案",
   system_default: "项目供应商绑定",
+  legacy_project_binding: "历史项目绑定（兼容配置）",
   request_override: "本次请求显式指定",
 };
 

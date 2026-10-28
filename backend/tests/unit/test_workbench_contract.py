@@ -41,6 +41,73 @@ def test_formal_contract_selected_without_a_user_mode() -> None:
 
 
 @pytest.mark.parametrize(
+    "mode, roles, contract_id",
+    [
+        ("text_to_video", [], "text"),
+        ("first_frame", ["first_frame"], "frame"),
+        ("last_frame", ["last_frame"], "frame"),
+        ("first_last_frame", ["first_frame", "last_frame"], "frame"),
+        ("omni_reference", ["reference_video", "reference_image", "reference_image"], "reference"),
+    ],
+)
+def test_ui_mode_maps_to_contract_without_becoming_the_contract_id(mode, roles, contract_id):
+    operation = OperationManifest(
+        operation="video.generate",
+        capabilities=["video.t2v", "video.i2v.first_frame"],
+        input_contracts={
+            "text": InputContractSpec(maximum_total_references=0),
+            "frame": InputContractSpec(
+                input_slots={
+                    role: {"maximum": 1, "media_types": ["image/*"]}
+                    for role in ("first_frame", "last_frame")
+                },
+                minimum_total_references=1,
+                maximum_total_references=2,
+            ),
+            "reference": InputContractSpec(
+                input_slots={
+                    "reference_video": {"maximum": 1, "media_types": ["video/*"]},
+                    "reference_image": {"maximum": 3, "media_types": ["image/*"]},
+                },
+                minimum_total_references=1,
+            ),
+        },
+    )
+    selected = select_workbench_contract(
+        operation=operation,
+        media_kind="video",
+        ui_mode_id=mode,
+        references=[
+            (role, "video/mp4" if role == "reference_video" else "image/png") for role in roles
+        ],
+    )
+    assert selected.contract_id == contract_id
+    assert selected.contract_id != mode
+    with pytest.raises(ValueError):
+        select_workbench_contract(
+            operation=operation,
+            media_kind="video",
+            ui_mode_id=mode,
+            references=[("first_frame", "video/mp4")],
+        )
+
+
+def test_unknown_mode_and_reversed_frames_fail_closed():
+    for mode, refs in [
+        ("typo", [("first_frame", "image/png")]),
+        ("first_last_frame", [("last_frame", "image/png"), ("first_frame", "image/png")]),
+        ("text_to_video", [("first_frame", "image/png")]),
+    ]:
+        with pytest.raises(ValueError):
+            select_workbench_contract(
+                operation=_video_operation(),
+                media_kind="video",
+                ui_mode_id=mode,
+                references=refs,
+            )
+
+
+@pytest.mark.parametrize(
     "references",
     [
         [],

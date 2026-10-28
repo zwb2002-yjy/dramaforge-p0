@@ -27,14 +27,7 @@ from app.providers.capability_inspection import (
 )
 from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.compile_preview import CompilePreview, PreviewReference, preview_compile
-from app.providers.intents import (
-    ArtifactReferenceIntent,
-    ImageGenerationIntent,
-    ModelSelectionIntent,
-    VideoGenerationIntentV1,
-    VideoOutputIntent,
-)
+from app.providers.compile_preview import CompilePreview, PreviewReference
 from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
 from app.providers.model_profiles.resolver import ModelBindingResolver
 from app.providers.model_profiles.service import default_model_registry
@@ -269,55 +262,17 @@ class ModelInspectionService:
                         }
                     )
                 )
-            selection = ModelSelectionIntent(
-                mode="explicit_binding",
-                model_binding_id=plan.resolved_model.provider_model_binding_id,
-            )
-            intent: ImageGenerationIntent | VideoGenerationIntentV1
-            if request.stage == "image_keyframe":
-                ref = refs[0] if refs else None
-                intent = ImageGenerationIntent.model_validate(
-                    {
-                        "prompt": plan.prompt,
-                        "aspect_ratio": project.aspect_ratio,
-                        "selection": selection,
-                        "mode_id": plan.mode_id,
-                        "reference_artifact_ids": [r.artifact_id for r in refs],
-                        "reference_fingerprint": ref.fingerprint if ref else None,
-                        "reference_mime": ref.mime_type if ref else None,
-                    }
-                )
-            else:
-                # The canonical Workbench NodeRun currently freezes five seconds
-                # and the project ratio, not arbitrary caller-supplied output controls.
-                intent = VideoGenerationIntentV1(
-                    prompt=plan.prompt,
-                    selection=selection,
-                    mode_id=plan.mode_id,
-                    references=[
-                        ArtifactReferenceIntent(artifact_id=r.artifact_id, role=r.role)
-                        for r in refs
-                    ],
-                    output=VideoOutputIntent.model_validate(
-                        {
-                            "aspect_ratio": project.aspect_ratio,
-                            "duration_seconds": 5,
-                            "generate_audio": False,
-                        }
-                    ),
-                )
-            if not plan.resolved_model.invoke_model_value:
-                raise ValidationAppError("frozen invoke model is missing")
-            if plan.resolved_model.native_options:
+            compilation = await WorkbenchExecutionService(
+                self._session, user_id=self._actor.id
+            ).preview_compiler_contract(project=project, plan=plan)
+            if compilation is None:
                 raise ValidationAppError(
-                    "native options are not supported by this preview contract"
+                    "Execution plan cannot produce compiler evidence",
+                    details={"code": "COMPILER_PREVIEW_UNAVAILABLE"},
                 )
-            compilation = await preview_compile(
-                manifest=catalog,
-                intent=intent,
-                references=refs,
-                invoke_model_value=plan.resolved_model.invoke_model_value,
-            )
+            # Diagnostics expose the same compiler identity/options, while the
+            # authorized execution-plan view owns prompt and redacted Wire UI.
+            compilation = compilation.model_copy(update={"redacted_wire": {}})
             if plan.capability_gaps:
                 compilation = compilation.model_copy(
                     update={

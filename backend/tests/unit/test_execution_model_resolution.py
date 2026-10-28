@@ -292,7 +292,7 @@ async def test_project_slot_absent_inherits_workspace_slot(session: AsyncSession
 
 
 @pytest.mark.asyncio
-async def test_no_profile_uses_legacy_binding_only_as_system_default(session: AsyncSession) -> None:
+async def test_no_profile_reports_legacy_binding_source(session: AsyncSession) -> None:
     project, binding, user = await _seed(session)
     session.add(
         ProjectProviderBinding(
@@ -307,7 +307,7 @@ async def test_no_profile_uses_legacy_binding_only_as_system_default(session: As
     await session.flush()
     result = await _resolve(session, project)
     assert result.status == "RESOLVED"
-    assert result.source == "system_default"
+    assert result.source == "legacy_project_binding"
     assert result.provider_model_binding_id == binding.id
 
 

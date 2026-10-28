@@ -15,6 +15,10 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from app.providers.catalog_loader import hash_manifest
+from app.providers.compiled_options import (
+    compiled_generation_evidence,
+    uncompiled_requested_options,
+)
 from app.providers.intents import ImageGenerationIntent, VideoGenerationIntentV1
 from app.providers.manifest import ModelCapabilityManifest
 from app.providers.normalizer import normalize_image, normalize_video
@@ -93,6 +97,7 @@ def _reference_errors(
     intent: ImageGenerationIntent | VideoGenerationIntentV1,
     manifest: ModelCapabilityManifest,
     references: list[PreviewReference],
+    contract_id: str | None = None,
 ) -> list[str]:
     expected = (
         [("reference_image", reference_id) for reference_id in intent.selected_reference_ids()]
@@ -118,7 +123,7 @@ def _reference_errors(
     counts: Counter[str] = Counter(ref.role for ref in references)
     if spec is not None and spec.modes:
         try:
-            mode = spec.mode_spec(intent.mode_id)
+            mode = spec.mode_spec(contract_id or intent.mode_id)
         except ValueError:
             return ["MODE_UNSUPPORTED"]
         if any(role not in mode.input_slots for role in counts):
@@ -157,34 +162,6 @@ def _reference_errors(
     ):
         return ["REFERENCE_MEDIA_UNSUPPORTED"]
     return []
-
-
-def _effective_options(wire: dict[str, JsonValue]) -> dict[str, JsonValue]:
-    """Only compiler-controlled scalar fields; never prompt/reference/raw payload."""
-    allowed = {
-        "size",
-        "ratio",
-        "aspect_ratio",
-        "duration",
-        "resolution",
-        "seed",
-        "width",
-        "height",
-        "num_frames",
-        "frame_rate",
-        "generate_audio",
-        "n",
-        "watermark",
-        "aigc_watermark",
-        "prompt_optimizer",
-    }
-    return {
-        (
-            "aspect_ratio" if key == "ratio" else "duration_seconds" if key == "duration" else key
-        ): value
-        for key, value in wire.items()
-        if key in allowed and isinstance(value, (str, int, float, bool))
-    }
 
 
 def compiled_wire_evidence(
@@ -306,7 +283,7 @@ async def preview_compile(
         "reference_ids": [ref.artifact_id for ref in references],
         "requested_options": requested,
     }
-    errors = _reference_errors(intent, manifest, references)
+    errors = _reference_errors(intent, manifest, references, expected_mode_id)
     from app.providers.capabilities import Capability
     from app.providers.manifest import to_v3_model_manifest
 
@@ -321,7 +298,7 @@ async def preview_compile(
     if spec is not None:
         if spec.modes:
             try:
-                spec.mode_spec(intent.mode_id)
+                spec.mode_spec(expected_mode_id or intent.mode_id)
             except ValueError:
                 errors.append("MODE_UNSUPPORTED")
         else:
@@ -382,9 +359,7 @@ async def preview_compile(
                 artifact_id=ref.artifact_id,
                 mime_type=ref.mime_type,
                 fingerprint=ref.fingerprint,
-                content_bytes=(
-                    _preview_placeholder_bytes(index) if transport == "bytes" else None
-                ),
+                content_bytes=(_preview_placeholder_bytes(index) if transport == "bytes" else None),
                 content_url=(
                     f"https://preview.invalid/{ref.artifact_id}"
                     if transport == "public_url"
@@ -398,14 +373,11 @@ async def preview_compile(
                 operation=operation,
                 media_kind="image" if isinstance(intent, ImageGenerationIntent) else "video",
                 references=[(ref.role, ref.mime_type) for ref in resolved],
+                ui_mode_id=intent.mode_id,
             )
             if expected_mode_id is not None and selected.contract_id != expected_mode_id:
                 return CompilePreview(
                     readiness="blocked", errors=["CONTRACT_MODE_MISMATCH"], **common
-                )
-            if isinstance(intent, VideoGenerationIntentV1):
-                intent = intent.model_copy(
-                    update={"output": intent.output.model_copy(update={"generate_audio": None})}
                 )
             from typing import Any, cast
 
@@ -428,11 +400,18 @@ async def preview_compile(
                 readiness="blocked", errors=["REFERENCE_IDENTITY_MISMATCH"], **common
             )
         fingerprint, redacted_wire = compiled_wire_evidence(compiled, resolved)
-        effective = _effective_options(compiled.wire_request)
+        effective, option_changes = compiled_generation_evidence(compiled)
+        uncompiled = uncompiled_requested_options(requested, effective, option_changes)
+        if uncompiled:
+            return CompilePreview(
+                readiness="blocked",
+                errors=["MODEL_OPTION_NOT_COMPILED"],
+                warnings=[f"UNCOMPILED_OPTION:{name}" for name in uncompiled],
+                **common,
+            )
         transformations = [
-            f"{key}:compiler_mapped"
-            for key, value in requested.items()
-            if value is not None and effective.get(key) != value
+            f"{item.field}:{item.from_value}->{item.to_value}:{item.reason}"
+            for item in option_changes
         ]
         return CompilePreview(
             readiness="contract_validated",

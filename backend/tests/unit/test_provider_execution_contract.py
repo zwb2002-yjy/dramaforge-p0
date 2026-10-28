@@ -46,9 +46,21 @@ def test_in_memory_policy_mutation_is_rejected():
 
 @pytest.mark.parametrize(
     "dependency",
-    ["registry.py", "workspace_credentials.py", "egress.py", "host_guard.py", "http_client.py"],
+    [
+        "registry.py",
+        "workspace_credentials.py",
+        "egress.py",
+        "host_guard.py",
+        "http_client.py",
+        "compiled_options.py",
+        "compile_preview.py",
+        "intents.py",
+        "workbench_contract.py",
+        "media_submission.py",
+        "execution_plan.py",
+    ],
 )
-def test_authentication_source_change_invalidates_frozen_handler(monkeypatch, dependency):
+def test_execution_source_change_invalidates_frozen_handler(monkeypatch, dependency):
     from pathlib import Path
 
     contract = _contract()

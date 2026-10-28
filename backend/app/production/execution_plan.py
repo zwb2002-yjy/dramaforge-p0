@@ -29,8 +29,19 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from app.providers.capabilities import Capability
+from app.providers.intents import (
+    IMAGE_INTENT_OPTION_FIELDS,
+    VIDEO_INTENT_OPTION_FIELDS,
+    ArtifactReferenceIntent,
+    ImageGenerationIntent,
+    ModelSelectionIntent,
+    VideoGenerationIntentV1,
+    VideoOutputIntent,
+)
 from app.providers.model_resolution import ExecutionModelResolution
 from app.providers.translation import TranslationReport
+from app.providers.workbench_contract import workbench_ui_mode
+from app.shared.errors import ValidationAppError
 
 PlanDelivery = Literal["exact", "approximate", "unsupported"]
 PlanStage = Literal["image_keyframe", "video"]
@@ -155,6 +166,8 @@ class WorkbenchExecutionPlan(BaseModel):
     prompt: str = Field(min_length=1)
     semantic_intent: dict[str, JsonValue] = Field(default_factory=dict)
     mode_id: str = Field(min_length=1, max_length=120)
+    ui_mode_id: str | None = None
+    input_contract_id: str | None = None
     resolved_model: ExecutionModelResolution
     capability: Capability
     planned_references: list[PlannedReference] = Field(default_factory=list)
@@ -174,6 +187,8 @@ class WorkbenchExecutionPlan(BaseModel):
     duration_seconds: float | None = None
     prompt_override: str | None = None
     effective_options: dict[str, JsonValue] = Field(default_factory=dict)
+    option_sources: dict[str, str] = Field(default_factory=dict)
+    requested_options: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     supports_prompt_override: bool = False
 
     def freeze(self) -> WorkbenchExecutionPlan:
@@ -193,3 +208,90 @@ class WorkbenchExecutionPlan(BaseModel):
         for reference in self.planned_references:
             counts[reference.delivery] = counts.get(reference.delivery, 0) + 1
         return counts
+
+
+def generation_intent_from_plan(
+    plan: WorkbenchExecutionPlan, *, fallback_aspect_ratio: str
+) -> ImageGenerationIntent | VideoGenerationIntentV1:
+    """The only conversion of frozen Workbench choices to compiler input.
+
+    The fallback is for historical snapshots lacking a frozen ratio; callers
+    pass their saved snapshot value. New plans always freeze aspect_ratio.
+    No model/profile/credential is resolved here, and no unknown mode defaults.
+    """
+    import math
+
+    options = plan.effective_options
+    allowed = VIDEO_INTENT_OPTION_FIELDS if plan.stage == "video" else IMAGE_INTENT_OPTION_FIELDS
+    unsupported = sorted(set(options) - allowed)
+    if unsupported:
+        raise ValidationAppError(
+            "Frozen options have no implemented compiler intent fields",
+            details={"code": "MODEL_OPTION_NOT_IMPLEMENTED", "options": unsupported},
+        )
+    try:
+        mode = plan.ui_mode_id or workbench_ui_mode(
+            media_kind="video" if plan.stage == "video" else "image",
+            mode_id=plan.mode_id,
+        )
+        selection = ModelSelectionIntent(
+            mode="explicit_binding",
+            model_binding_id=plan.resolved_model.provider_model_binding_id,
+        )
+        references = [
+            reference
+            for reference in plan.planned_references
+            if reference.delivery != "unsupported"
+        ]
+        ratio = options.get("aspect_ratio", fallback_aspect_ratio)
+        if plan.stage == "image_keyframe":
+            return ImageGenerationIntent.model_validate(
+                {
+                    "prompt": plan.prompt,
+                    "selection": selection,
+                    "mode_id": mode,
+                    **options,
+                    "aspect_ratio": ratio,
+                    "reference_artifact_ids": [ref.artifact_id for ref in references],
+                    "reference_fingerprint": references[0].fingerprint if references else None,
+                    "reference_mime": references[0].mime_type if references else None,
+                },
+                strict=True,
+            )
+        duration = plan.duration_seconds
+        if (
+            duration is None
+            or not math.isfinite(duration)
+            or duration <= 0
+            or not duration.is_integer()
+        ):
+            raise ValueError("video duration must be frozen whole seconds")
+        if options.get("duration_seconds", duration) != duration:
+            raise ValueError("frozen duration conflicts with effective options")
+        return VideoGenerationIntentV1(
+            prompt=plan.prompt,
+            selection=selection,
+            mode_id=mode,
+            references=[
+                ArtifactReferenceIntent.model_validate(
+                    {
+                        "artifact_id": ref.artifact_id,
+                        "role": ref.role,
+                    }
+                )
+                for ref in references
+            ],
+            output=VideoOutputIntent.model_validate(
+                {
+                    **options,
+                    "aspect_ratio": ratio,
+                    "duration_seconds": int(duration),
+                },
+                strict=True,
+            ),
+        )
+    except ValueError as exc:
+        raise ValidationAppError(
+            "Frozen execution plan cannot be compiled",
+            details={"code": "EXECUTION_PLAN_INVALID"},
+        ) from exc

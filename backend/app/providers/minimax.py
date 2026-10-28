@@ -738,6 +738,7 @@ class MiniMaxVideoCompiler:
                 "resolution": "2K",
                 "generate_audio": True,
             }
+            summary["translation_transformations"] = []
             return CompiledVideoRequest(
                 provider_type="minimax",
                 protocol_profile=MINIMAX_CN_PROFILE,

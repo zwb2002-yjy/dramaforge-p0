@@ -1033,6 +1033,7 @@ async def test_new_contract_auto_matches_formal_and_rejects_reference_conflict(
         "formal_frame": {
             "input_slots": {"first_frame": {"minimum": 1, "maximum": 1}},
             "minimum_total_references": 1,
+            "common_options": {"duration_seconds": {"type": "integer", "enum": [5], "default": 5}},
         },
         "reference_video": {
             "input_slots": {"reference_video": {"maximum": 3}},
@@ -1772,7 +1773,9 @@ def _video_manifest_with_contract() -> dict:
             },
             "common_options": {
                 "motion_bucket_id": {"type": "integer", "minimum": 1, "maximum": 255},
-                "duration_seconds": {"type": "number", "enum": [4.0, 5.0]},
+                "duration_seconds": {"type": "number", "enum": [4.0, 5.0], "default": 5},
+                "aspect_ratio": {"type": "string", "enum": ["9:16", "16:9"]},
+                "resolution": {"type": "string", "enum": ["720p", "1080p"]},
                 "prompt_override": {"type": "string"},
             },
             "native_options": {
@@ -1796,8 +1799,8 @@ async def test_generation_settings_flow_into_plan_and_node_run(
             "video": {
                 "mode_id": "image_to_video",
                 "request_duration_seconds": 4.0,
-                "common_options": {"motion_bucket_id": 127},
-                "native_options": {"fps": 24},
+                "common_options": {"aspect_ratio": "9:16"},
+                "native_options": {"resolution": "720p"},
                 "prompt_override": "cinematic camera pan, hero on the cliff",
             },
         }
@@ -1818,8 +1821,8 @@ async def test_generation_settings_flow_into_plan_and_node_run(
 
     assert plan.duration_seconds == 4.0
     assert plan.effective_options == {
-        "motion_bucket_id": 127,
-        "fps": 24,
+        "aspect_ratio": "9:16",
+        "resolution": "720p",
         "duration_seconds": 4.0,
     }
     assert plan.prompt == "cinematic camera pan, hero on the cliff"
@@ -1832,8 +1835,8 @@ async def test_generation_settings_flow_into_plan_and_node_run(
     )
     assert run.input_snapshot["duration_seconds"] == 4.0
     assert run.input_snapshot["options"] == {
-        "motion_bucket_id": 127,
-        "fps": 24,
+        "aspect_ratio": "9:16",
+        "resolution": "720p",
         "duration_seconds": 4.0,
     }
     assert run.input_snapshot["prompt_override"] == "cinematic camera pan, hero on the cliff"
@@ -2097,7 +2100,13 @@ async def test_compiler_contract_preview_is_side_effect_free_for_text_video(
     # A pure no-reference semantic plan uses the actual compiler preview
     # function, never the paid provider runtime.
     text_plan = plan.model_copy(
-        update={"mode_id": "text_to_video", "planned_references": [], "capability_gaps": []}
+        update={
+            "mode_id": "text_to_video",
+            "ui_mode_id": "text_to_video",
+            "input_contract_id": None,
+            "planned_references": [],
+            "capability_gaps": [],
+        }
     )
     seen: list[VideoGenerationIntentV1] = []
 
