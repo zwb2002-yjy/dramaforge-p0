@@ -86,7 +86,8 @@ function HomePage() {
   const health = useQuery({
     queryKey: queryKeys.health(),
     queryFn: fetchHealth,
-    refetchInterval: 8_000,
+    refetchInterval: (query) => (query.state.status === "error" ? 60000 : false),
+    staleTime: 30000,
     retry: 1,
   });
   const bootstrapStatus = useQuery({

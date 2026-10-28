@@ -113,7 +113,7 @@ export async function installShotJourneyMock(page: Page) {
           {
             ...scene,
             project_id: PROJECT_ID,
-            shot_count: 3,
+            shot_count: shots.length,
             formal_keyframe_count: shots.filter((shot) => shot.formal_keyframe_artifact_id).length,
             formal_video_count: shots.filter((shot) => shot.formal_video_artifact_id).length,
             risk_count: 0,

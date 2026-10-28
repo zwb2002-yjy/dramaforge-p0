@@ -657,9 +657,15 @@ export async function createProject(input: {
 export type ProjectSnapshot = components["schemas"]["ProjectSnapshot"];
 export type ExecutionTraceRead = components["schemas"]["ExecutionTraceRead"];
 
-export function fetchExecutionTrace(projectId: string, runId: string): Promise<ExecutionTraceRead> {
+export function fetchExecutionTrace(
+  projectId: string,
+  runId: string,
+  signal?: AbortSignal,
+): Promise<ExecutionTraceRead> {
   return apiGet(
     `/api/v1/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/trace`,
+    undefined,
+    signal,
   );
 }
 

@@ -6,6 +6,7 @@ import { Button, Disclosure, ExternalLink, Field, Select } from "../../component
 import { queryKeys } from "../../lib/queryKeys";
 import { ApiError, getExecutionModelPreflight, listModels } from "../../lib/api";
 import { ShotPreflightDrawer } from "./ShotPreflightDrawer";
+import { receiptCopy } from "./receiptCopy";
 import {
   capabilityGapReason,
   capabilityGapSeverityLabel,
@@ -283,6 +284,14 @@ export function ShotProductionActions({
   // working action.
   const directorDelegateBlocked = directorCapabilities?.runtime_turns_available === false;
   const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
+  const [receiptCheck, setReceiptCheck] = useState(0);
+  const receiptScope = `${workspaceId}:${projectId}:${shot.id}`;
+  const [receiptState, setReceiptState] = useState<{
+    scope: string;
+    stages: Partial<Record<ShotExecutionStage, "checking" | "unknown" | "failed">>;
+  }>({ scope: receiptScope, stages: {} });
+  const receiptIssues =
+    receiptState.scope === receiptScope ? Object.values(receiptState.stages) : [];
   const [displayedPlan, setDisplayedPlan] = useState<ShotExecutionPlanRead | null>(null);
   const [pendingApproximation, setPendingApproximation] = useState<PreparedShotExecution | null>(
     null,
@@ -311,14 +320,33 @@ export function ShotProductionActions({
    */
   useEffect(() => {
     let cancelled = false;
+    setReceiptState({ scope: receiptScope, stages: {} });
     const stages: ShotExecutionStage[] = ["image_keyframe", "video"];
+    const updateReceipt = (
+      stage: ShotExecutionStage,
+      state?: "checking" | "unknown" | "failed",
+    ) => {
+      if (cancelled) return;
+      setReceiptState((previous) => {
+        const next = previous.scope === receiptScope ? { ...previous.stages } : {};
+        if (state) next[stage] = state;
+        else delete next[stage];
+        return { scope: receiptScope, stages: next };
+      });
+    };
     for (const stage of stages) {
       const scope = productionOperationScope(getSelectedWorkspaceId(), projectId, shot.id, stage);
       const operation = readProductionOperation(scope);
       if (!operation) continue;
+      updateReceipt(stage, "checking");
       void fetchShotExecutionReceipt(projectId, shot.id, stage, operation.operationKey)
         .then((receipt) => {
-          if (cancelled || !receipt) return;
+          if (cancelled) return;
+          if (!receipt) {
+            updateReceipt(stage, "unknown");
+            return;
+          }
+          updateReceipt(stage);
           if (TERMINAL_EXECUTION_STATUSES.has(receipt.status)) {
             clearProductionOperation(scope);
           }
@@ -330,13 +358,13 @@ export function ShotProductionActions({
           });
         })
         .catch(() => {
-          // Recovery stays best effort; the action buttons surface real errors.
+          updateReceipt(stage, "failed");
         });
     }
     return () => {
       cancelled = true;
     };
-  }, [projectId, shot.id]);
+  }, [projectId, shot.id, workspaceId, receiptScope, receiptCheck]);
 
   function executionInput(stage: ShotExecutionStage): ShotExecutionInput {
     const configuredPrompt =
@@ -940,6 +968,26 @@ export function ShotProductionActions({
       data-shot-id={shot.id}
       data-next-action={next.kind}
     >
+      {receiptIssues.length > 0 && (
+        <div
+          role={receiptIssues.includes("failed") ? "alert" : "status"}
+          data-testid="receipt-reconciliation"
+        >
+          <p>
+            {receiptIssues.includes("checking")
+              ? receiptCopy.checking
+              : receiptIssues.includes("failed")
+                ? receiptCopy.failed
+                : receiptCopy.unknown}
+          </p>
+          <Button
+            disabled={receiptIssues.includes("checking")}
+            onClick={() => setReceiptCheck((value) => value + 1)}
+          >
+            {receiptCopy.retry}
+          </Button>
+        </div>
+      )}
       <dl
         className="df-shot-facts"
         data-testid="shot-production-preflight"

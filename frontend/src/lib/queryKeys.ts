@@ -45,6 +45,8 @@ export const queryKeys = {
       ["shot-workbench", projectId, shotId] as const,
     productionTrace: (projectId: string, shotId: string | null | undefined) =>
       ["shot-production-trace", projectId, shotId] as const,
+    executionTrace: (projectId: string | undefined, shotId: string, runId: string | null) =>
+      ["execution-trace", projectId, shotId, runId] as const,
     review: (projectId: string) => ["review-shots", projectId] as const,
     reviewWorkbench: (projectId: string, shotId: string | null | undefined) =>
       ["review-shot-workbench", projectId, shotId] as const,

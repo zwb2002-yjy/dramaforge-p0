@@ -1,6 +1,65 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installProfessionalMock, PROJECT_ID, SCENE_ID, SHOT_ID } from "./professional-mocks";
 
+test("hidden panels perform no reads for 60 seconds and retain an advanced draft", async ({
+  page,
+}) => {
+  await installProgressMock(page);
+  const reads = { experiments: 0, candidates: 0, workflow: 0, creative: 0, todos: 0 };
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith("/experiments")) reads.experiments += 1;
+    if (path.endsWith("/model-candidates")) reads.candidates += 1;
+    if (path.endsWith("/workflow-overview")) reads.workflow += 1;
+    if (path.includes("/creative-capabilities/")) reads.creative += 1;
+    if (path.endsWith("/production-todos")) reads.todos += 1;
+  });
+  await page.route("**/creative-capabilities/catalog", (route) =>
+    route.fulfill({
+      json: {
+        genres: [
+          { key: "noir", display_name: "黑色故事" },
+          { key: "comedy", display_name: "喜剧" },
+        ],
+        styles: [],
+        shot_languages: [],
+        quality_policies: [],
+        skills: [],
+      },
+    }),
+  );
+  await page.route("**/creative-capabilities/provenance?**", (route) =>
+    route.fulfill({
+      json: {
+        target: "scene",
+        creative_capabilities: { genre: { key: "noir" } },
+      },
+    }),
+  );
+  await page.goto(`/projects/${PROJECT_ID}/production`);
+  await expect(page.getByTestId("production-next-step")).toBeVisible();
+  await page.clock.install();
+  await page.clock.fastForward(60000);
+  expect(reads.experiments).toBe(0);
+  expect(reads.candidates).toBe(0);
+  expect(reads.workflow).toBe(0);
+  expect(reads.creative).toBe(0);
+  await page.getByRole("tab", { name: "导演手法", exact: true }).click();
+  const panel = page.getByTestId("creative-capabilities-panel").filter({ visible: true });
+  const genre = panel.getByRole("combobox").first();
+  await genre.click();
+  await page.getByRole("option", { name: "喜剧", exact: true }).click();
+  await expect(panel).toContainText("喜剧");
+  await page.getByRole("tab", { name: "作品进度", exact: true }).click();
+  const hiddenReads = reads.creative;
+  await page.clock.fastForward(60000);
+  expect(reads.creative).toBe(hiddenReads);
+  expect(reads.experiments).toBe(0);
+  await page.getByRole("tab", { name: "导演手法", exact: true }).click();
+  await expect(panel).toContainText("喜剧");
+  await expect.poll(() => reads.creative).toBeGreaterThan(hiddenReads);
+});
+
 async function installProgressMock(page: Page) {
   await page.addInitScript(() => {
     const sources: EventTarget[] = [];

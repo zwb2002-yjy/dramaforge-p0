@@ -505,6 +505,9 @@ describe("Workstation shell", () => {
 
     renderApp("/projects/project-1/production");
 
+    await screen.findByTestId("production-mode");
+    expect(screen.queryByTestId("professional-workbench")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "版本尝试" }));
     const workbench = await screen.findByTestId("professional-workbench");
     expect(workbench).toBeInTheDocument();
     expect(workbench).toHaveTextContent("尝试不同版本");

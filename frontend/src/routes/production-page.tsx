@@ -45,19 +45,17 @@ export function ProductionPage({
     queryKey: queryKeys.production.summary(projectId),
     queryFn: ({ signal }) => fetchProductionSummary(projectId, signal),
     enabled: Boolean(projectId),
-    refetchInterval: (query) => ((query.state.data?.running_runs ?? 0) > 0 ? 4000 : 30000),
+    refetchInterval: (query) => ((query.state.data?.running_runs ?? 0) > 0 ? 10000 : false),
   });
   const shots = useQuery({
     queryKey: queryKeys.shot.list(projectId),
     queryFn: () => fetchProjectShots(projectId),
     enabled: Boolean(projectId),
-    refetchInterval: 30000,
   });
   const scenes = useQuery({
     queryKey: queryKeys.scene.list(projectId),
     queryFn: () => fetchScenes(projectId),
     enabled: Boolean(projectId),
-    refetchInterval: 30000,
   });
 
   const revisionShotId = selectedShotId ?? shots.data?.[0]?.id ?? null;
@@ -71,11 +69,12 @@ export function ProductionPage({
   const experiments = useQuery({
     queryKey: queryKeys.experiment.list(projectId),
     queryFn: () => fetchExperiments(projectId),
-    enabled: Boolean(projectId),
+    enabled: Boolean(projectId) && view === "experiments",
   });
   const availableModels = useQuery({
     queryKey: queryKeys.model.catalog(workspaceId),
     queryFn: ({ signal }) => listModels(undefined, workspaceId, signal),
+    enabled: view === "experiments",
   });
   // Eligibility is per stage: an image model has a keyframe binding, a video
   // model has a video binding, and an experiment may branch either stage. Both
@@ -83,12 +82,12 @@ export function ProductionPage({
   const keyframeCandidates = useQuery({
     queryKey: queryKeys.model.candidates(projectId, "image.generate"),
     queryFn: () => listModelCandidates(projectId, "image.generate"),
-    enabled: Boolean(projectId),
+    enabled: Boolean(projectId) && view === "experiments",
   });
   const videoCandidates = useQuery({
     queryKey: queryKeys.model.candidates(projectId, "video.generate"),
     queryFn: () => listModelCandidates(projectId, "video.generate"),
-    enabled: Boolean(projectId),
+    enabled: Boolean(projectId) && view === "experiments",
   });
 
   return (
@@ -104,7 +103,6 @@ export function ProductionPage({
         items={copy.views.map((item) => ({
           key: item.id,
           label: item.label,
-          forceRender: true,
           children: {
             progress: (
               <section>
@@ -126,13 +124,13 @@ export function ProductionPage({
                     void summary.refetch();
                   }}
                 />
-                <ProductionTodoQueue projectId={projectId} />
-                <ProductionHistoryPanel projectId={projectId} />
+                <ProductionTodoQueue projectId={projectId} active={view === "progress"} />
+                <ProductionHistoryPanel projectId={projectId} active={view === "progress"} />
               </section>
             ),
             workflow: (
               <section>
-                <WorkflowNavigator projectId={projectId} />
+                <WorkflowNavigator projectId={projectId} active={view === "workflow"} />
               </section>
             ),
             advanced: (
@@ -166,6 +164,7 @@ export function ProductionPage({
                       <CreativeCapabilitiesPanel
                         projectId={projectId}
                         sceneId={sceneCapabilityId}
+                        active={view === "advanced" && overrideScope === "scene"}
                         scope="scene"
                       />
                     </section>
@@ -192,6 +191,7 @@ export function ProductionPage({
                         projectId={projectId}
                         sceneId={selectedSceneId}
                         shotId={revisionShotId}
+                        active={view === "advanced" && overrideScope === "shot"}
                       />
                     </section>
                   )}

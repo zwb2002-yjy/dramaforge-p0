@@ -112,6 +112,7 @@ function SceneWorkflowGroup({ scene }: { scene: SceneWorkflowViewRead }) {
 }
 
 export type WorkflowNavigatorProps = {
+  active?: boolean;
   projectId: string;
 };
 
@@ -122,11 +123,11 @@ export type WorkflowNavigatorProps = {
  * multi-subject capability assessment (EXACT / APPROXIMATE / UNSUPPORTED).
  * No provider call and no mutation is performed here.
  */
-export function WorkflowNavigator({ projectId }: WorkflowNavigatorProps) {
+export function WorkflowNavigator({ projectId, active = true }: WorkflowNavigatorProps) {
   const overview = useQuery({
     queryKey: queryKeys.production.workflowOverview(projectId),
     queryFn: () => fetchWorkflowOverview(projectId),
-    enabled: Boolean(projectId),
+    enabled: active && Boolean(projectId),
   });
   const data = overview.data as WorkflowOverviewRead | undefined;
   const episodes = data?.episodes ?? [];

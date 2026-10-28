@@ -20,6 +20,7 @@ const PROJECT_FACTS = new Set([
 const SHOT_FACTS = new Set([
   "shot-workbench",
   "shot-production-trace",
+  "execution-trace",
   "review-shot-workbench",
   "review-summary",
   "repairs",

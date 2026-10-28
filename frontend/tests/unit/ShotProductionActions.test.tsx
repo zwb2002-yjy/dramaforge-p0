@@ -207,6 +207,58 @@ describe("ShotProductionActions", () => {
     window.localStorage.clear();
   });
 
+  it.each(["network", "not_found"])(
+    "keeps the original operation when receipt is %s and only rechecks on request",
+    async (failure) => {
+      const key = shotExecutionIdempotencyKey(SHOT.id, "a".repeat(64));
+      const scope = productionOperationScope(null, SHOT.project_id, SHOT.id, "image_keyframe");
+      recordProductionOperation(scope, {
+        operationKey: key,
+        planFingerprint: "a".repeat(64),
+        stage: "image_keyframe",
+        recordedAt: new Date().toISOString(),
+        nodeRunId: null,
+      });
+      const receiptKeys: string[] = [];
+      const posts: string[] = [];
+      vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+        const url = String(input);
+        if (init?.method === "POST") posts.push(url);
+        if (url.includes("/executions/receipt")) {
+          receiptKeys.push(
+            new URL(url, "http://localhost").searchParams.get("idempotency_key") ?? "",
+          );
+          if (receiptKeys.length === 1)
+            return failure === "network"
+              ? Promise.reject(new TypeError("offline"))
+              : json({ code: "NOT_FOUND" }, 404);
+          return json({
+            node_run_id: "existing-run",
+            status: "running",
+            plan_fingerprint: "a".repeat(64),
+          });
+        }
+        return json({});
+      });
+      renderActions();
+      const issue = await screen.findByTestId("receipt-reconciliation");
+      await waitFor(() =>
+        expect(issue).toHaveTextContent(failure === "network" ? "回执读取失败" : "暂时无法确认"),
+      );
+      expect(readProductionOperation(scope)?.operationKey).toBe(key);
+      expect(screen.getByTestId("shot-primary-unknown")).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: "重新核对状态" }));
+      await waitFor(() =>
+        expect(screen.getByTestId("shot-production-status")).toHaveAttribute(
+          "data-status",
+          "running",
+        ),
+      );
+      expect(receiptKeys).toEqual([key, key]);
+      expect(posts).toEqual([]);
+    },
+  );
+
   it("allows text-only video without a formal keyframe when T2V preflight is ready", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);

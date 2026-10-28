@@ -1,12 +1,15 @@
-import { Disclosure } from "../../components/ui";
-import { useEffect, useState } from "react";
+import { Button, Disclosure } from "../../components/ui";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { queryKeys } from "../../lib/queryKeys";
 
-import { fetchExecutionTrace, type ExecutionTraceRead } from "../../lib/api";
+import { fetchExecutionTrace } from "../../lib/api";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
 import { shotStatusLabel } from "../../lib/shotLabels";
 import { zhNode } from "../../lib/zh";
 import { ShotProductionTrace } from "./ShotProductionTrace";
 import type { ShotLite } from "./api";
+import { shotDetailsCopy as copy } from "./shotDetailsCopy";
 
 type ShotDetailsBodyProps = {
   projectId?: string;
@@ -20,39 +23,22 @@ type ShotDetailsBodyProps = {
  * facts themselves are unchanged.
  */
 export function ShotDetailsBody({ projectId, shot, trace }: ShotDetailsBodyProps) {
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [traceDetail, setTraceDetail] = useState<ExecutionTraceRead | null>(null);
-  const [traceDetailLoading, setTraceDetailLoading] = useState(false);
-  const [traceDetailError, setTraceDetailError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setSelectedRunId(null);
-    setTraceDetail(null);
-    setTraceDetailError(null);
-  }, [shot.id]);
-
-  useEffect(() => {
-    if (!projectId || !selectedRunId) return;
-    let active = true;
-    setTraceDetailLoading(true);
-    setTraceDetailError(null);
-    void fetchExecutionTrace(projectId, selectedRunId)
-      .then((detail) => {
-        if (active) setTraceDetail(detail);
-      })
-      .catch((cause: unknown) => {
-        if (active) {
-          setTraceDetail(null);
-          setTraceDetailError(cause instanceof Error ? cause.message : "完整执行证据读取失败");
-        }
-      })
-      .finally(() => {
-        if (active) setTraceDetailLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [projectId, selectedRunId]);
+  const [selection, setSelection] = useState<{ shotId: string; runId: string } | null>(null);
+  const selectedRunId = selection?.shotId === shot.id ? selection.runId : null;
+  const detail = useQuery({
+    queryKey: queryKeys.shot.executionTrace(projectId, shot.id, selectedRunId),
+    queryFn: ({ signal }) => fetchExecutionTrace(projectId!, selectedRunId!, signal),
+    enabled: Boolean(projectId && selectedRunId),
+    retry: false,
+  });
+  const traceDetail = selectedRunId ? detail.data : undefined;
+  const traceDetailLoading = Boolean(selectedRunId && detail.isPending);
+  const traceDetailError =
+    selectedRunId && detail.error
+      ? detail.error instanceof Error
+        ? detail.error.message
+        : copy.unknownError
+      : null;
 
   return (
     <div className="df-shot-details" data-testid="shot-details-sheet" data-shot-id={shot.id}>
@@ -69,16 +55,17 @@ export function ShotDetailsBody({ projectId, shot, trace }: ShotDetailsBodyProps
       <ShotProductionTrace
         shotId={shot.id}
         trace={trace}
-        onSelectRun={projectId ? setSelectedRunId : undefined}
+        onSelectRun={projectId ? (runId) => setSelection({ shotId: shot.id, runId }) : undefined}
       />
       {traceDetailLoading && (
         <p className="muted" role="status">
-          正在读取执行记录…
+          {copy.loading}
         </p>
       )}
       {traceDetailError && (
         <div className="df-shot-hint err" data-testid="execution-trace-error" role="alert">
-          <p>执行记录读取失败，可以稍后重试。</p>
+          <p>{copy.failed}</p>
+          <Button onClick={() => void detail.refetch()}>{copy.retry}</Button>
           <Disclosure
             compact
             className="editing-diagnostics"

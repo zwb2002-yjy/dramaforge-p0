@@ -12,6 +12,7 @@ import {
 } from "./workflow-api";
 
 export type CreativeCapabilitiesPanelProps = {
+  active?: boolean;
   projectId: string;
   sceneId?: string | null;
   shotId?: string | null;
@@ -37,6 +38,7 @@ export function CreativeCapabilitiesPanel({
   sceneId,
   shotId,
   scope = "shot",
+  active = true,
 }: CreativeCapabilitiesPanelProps) {
   const qc = useQueryClient();
   const [genre, setGenre] = useState("");
@@ -52,7 +54,7 @@ export function CreativeCapabilitiesPanel({
   const catalog = useQuery({
     queryKey: queryKeys.production.creativeCatalog(projectId),
     queryFn: () => fetchCreativeCapabilityCatalog(projectId),
-    enabled: Boolean(projectId),
+    enabled: active && Boolean(projectId),
   });
   const provenance = useQuery({
     queryKey: queryKeys.production.provenance(projectId, targetId, targetScope),
@@ -63,7 +65,7 @@ export function CreativeCapabilitiesPanel({
           ? { scene_id: sceneId ?? undefined }
           : { shot_id: shotId ?? undefined },
       ),
-    enabled: Boolean(projectId) && Boolean(targetId),
+    enabled: active && Boolean(projectId) && Boolean(targetId),
   });
   const prov = provenance.data?.creative_capabilities ?? {};
   // A Scene freeze is inherited by its Shots; showing where the displayed

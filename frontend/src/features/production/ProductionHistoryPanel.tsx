@@ -17,11 +17,17 @@ import { zhNode } from "../../lib/zh";
 import { fetchArtifactHistory, fetchRunHistory } from "./api";
 
 /** History is explicit and paged: mounting a monitor never downloads it. */
-export function ProductionHistoryPanel({ projectId }: { projectId: string }) {
-  return <ProjectHistory key={projectId} projectId={projectId} />;
+export function ProductionHistoryPanel({
+  projectId,
+  active = true,
+}: {
+  projectId: string;
+  active?: boolean;
+}) {
+  return <ProjectHistory key={projectId} projectId={projectId} active={active} />;
 }
 
-function ProjectHistory({ projectId }: { projectId: string }) {
+function ProjectHistory({ projectId, active }: { projectId: string; active: boolean }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<"runs" | "artifacts">("runs");
@@ -31,12 +37,12 @@ function ProjectHistory({ projectId }: { projectId: string }) {
   const runs = useQuery({
     queryKey: [...queryKeys.production.runHistory(projectId), cursor],
     queryFn: ({ signal }) => fetchRunHistory(projectId, cursor, signal),
-    enabled: open && kind === "runs" && Boolean(projectId),
+    enabled: active && open && kind === "runs" && Boolean(projectId),
   });
   const artifacts = useQuery({
     queryKey: [...queryKeys.production.artifactHistory(projectId), cursor],
     queryFn: ({ signal }) => fetchArtifactHistory(projectId, cursor, signal),
-    enabled: open && kind === "artifacts" && Boolean(projectId),
+    enabled: active && open && kind === "artifacts" && Boolean(projectId),
   });
   const current = kind === "runs" ? runs : artifacts;
   function changeKind(next: "runs" | "artifacts") {

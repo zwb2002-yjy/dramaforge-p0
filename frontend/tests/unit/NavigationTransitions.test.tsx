@@ -93,7 +93,7 @@ it("waits for an expired recovery cache read and reports its failure before redi
 it("keeps the Settings entry reachable from a Project route", async () => {
   mockFetch();
   const router = renderAt("/projects/project-1/production");
-  await screen.findByTestId("professional-workbench");
+  await screen.findByTestId("production-mode");
 
   fireEvent.click(screen.getByRole("link", { name: "设置" }));
 
@@ -104,7 +104,7 @@ it("keeps the Settings entry reachable from a Project route", async () => {
 it("keeps the Project Lobby entry reachable from a Project route", async () => {
   mockFetch();
   const router = renderAt("/projects/project-1/production");
-  await screen.findByTestId("professional-workbench");
+  await screen.findByTestId("production-mode");
 
   fireEvent.click(screen.getByRole("link", { name: "我的项目" }));
 

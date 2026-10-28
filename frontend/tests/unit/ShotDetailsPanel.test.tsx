@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
 import { ShotDetailsBody } from "../../src/features/shots/ShotDetailsPanel";
@@ -27,10 +28,12 @@ const SHOT = {
 describe("ShotDetailsPanel", () => {
   it("surfaces shot metadata and production trace on demand", () => {
     render(
-      <ShotDetailsBody
-        shot={SHOT}
-        trace={[{ node_run_id: "run-1", node_key: "keyframe", status: "completed" }]}
-      />,
+      <QueryClientProvider client={new QueryClient()}>
+        <ShotDetailsBody
+          shot={SHOT}
+          trace={[{ node_run_id: "run-1", node_key: "keyframe", status: "completed" }]}
+        />
+      </QueryClientProvider>,
     );
 
     const sheet = screen.getByTestId("shot-details-sheet");

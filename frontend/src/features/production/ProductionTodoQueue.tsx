@@ -56,12 +56,23 @@ function TodoLink({
   );
 }
 
-export function ProductionTodoQueue({ projectId }: { projectId: string }) {
+export function ProductionTodoQueue({
+  projectId,
+  active = true,
+}: {
+  projectId: string;
+  active?: boolean;
+}) {
   const query = useQuery({
     queryKey: queryKeys.production.todos(projectId),
     queryFn: () => fetchProductionTodos(projectId),
-    enabled: Boolean(projectId),
-    refetchInterval: 10_000,
+    enabled: active && Boolean(projectId),
+    refetchInterval: (query) =>
+      active &&
+      Array.isArray(query.state.data?.items) &&
+      query.state.data.items.some((item) => item.category === "generating")
+        ? 15000
+        : false,
   });
   const items = Array.isArray(query.data?.items) ? query.data.items : [];
   const counts =

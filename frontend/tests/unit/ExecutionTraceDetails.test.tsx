@@ -65,7 +65,13 @@ describe("Execution trace details", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "查看完整证据" }));
-    await waitFor(() => expect(fetchExecutionTrace).toHaveBeenCalledWith("project-1", "run-1"));
+    await waitFor(() =>
+      expect(fetchExecutionTrace).toHaveBeenCalledWith(
+        "project-1",
+        "run-1",
+        expect.any(AbortSignal),
+      ),
+    );
     expect(await screen.findByTestId("execution-trace-detail")).toHaveTextContent(
       "agnes-video-v2.0",
     );

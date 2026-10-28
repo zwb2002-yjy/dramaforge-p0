@@ -41,6 +41,12 @@ frontend/src/
 ```
 
 - 服务端状态只存在于 TanStack Query；Zustand 只保存布局/选择类 UI 状态。
+- 路由提供中文加载、错误恢复及404入口；部署后的旧chunk失败可显式重试或重载。
+  回执读取失败/暂不存在显示“待核对”，只按原Idempotency-Key查询，不重新生成或提交。
+  执行详情Query绑定Project/Shot/Run并传递AbortSignal；切镜头立即隐藏旧详情，晚到响应
+  不能覆盖当前对象。制作页非活跃页签不读取专属资源，访问过的配置草稿保持挂载；
+  隐藏后禁用查询，重新打开按失效状态补读。生产事实主要由SSE失效通知刷新，
+  运行中的共享摘要/活跃待办才作降频补偿，空闲列表和首页健康状态不作秒级轮询。
 - `frontend/src/shared/api/generated.ts` 由 OpenAPI 生成，不手改
   （`npm run api:generate` / `api:check`）。
 - HTTP response/request 形状一律用 `components["schemas"][...]` 引用生成类型；
