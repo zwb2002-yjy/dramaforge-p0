@@ -1,0 +1,69 @@
+name: Review Fix Verification (temporary)
+
+on:
+  push:
+    branches:
+      - codex/review-115a4fb-fixes-20261028
+
+permissions:
+  contents: write
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Regenerate canonical locked dependencies
+        run: uv lock --directory backend
+      - name: Commit resolver-canonical lock to this verification branch
+        run: |
+          if ! git diff --quiet -- backend/uv.lock; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add backend/uv.lock
+            git commit -m "fix(deps): canonical uv lock for patched dependency graph"
+            git push origin HEAD:refs/heads/codex/review-115a4fb-fixes-20261028
+          fi
+      - name: Verify locked dependency graph
+        run: uv lock --check --directory backend
+      - name: Install reproducible Python dependencies
+        run: uv sync --locked --extra dev --directory backend
+      - name: Verify changed Python code
+        run: |
+          uv run --directory backend ruff check app/api/v1/production.py app/providers/http_client.py tests/unit/test_provider_http_pool.py tests/unit/test_final_film_api.py
+          uv run --directory backend mypy app
+          uv run --directory backend ruff format --check app/api/v1/production.py app/providers/http_client.py tests/unit/test_provider_http_pool.py tests/unit/test_final_film_api.py
+          uv run --directory backend pytest tests/unit/test_provider_http_pool.py tests/unit/test_final_film_api.py tests/unit/test_editing_api.py -q
+      - name: Audit patched production Python dependencies
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace/backend \
+            python:3.14-slim-bookworm \
+            sh -ec 'pip install --no-cache-dir uv pip-audit; uv export --locked --no-dev --no-emit-project --output-file /tmp/requirements-audit.txt; pip-audit --requirement /tmp/requirements-audit.txt'
+      - name: Trivy filesystem scan (diagnostic)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+  backend-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build reviewed backend quality image
+        run: docker compose -f docker-compose.quality.yml build backend-quality
+      - name: Run full backend unit, PostgreSQL, migration and API gates
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.quality.yml up \
+            --no-build --abort-on-container-exit --exit-code-from backend-quality \
+            postgres-quality backend-quality
+      - name: Remove backend quality containers and volumes
+        if: always()
+        run: docker compose -f docker-compose.quality.yml down --volumes --remove-orphans
