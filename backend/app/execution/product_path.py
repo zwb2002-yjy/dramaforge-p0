@@ -23,6 +23,7 @@ from app.execution.provider_execution import (
 from app.execution.run_state import UNIFIED_PATH_VERSION as UNIFIED_PATH_VERSION
 from app.execution.run_state import ExecuteNodeResult as ExecuteNodeResult
 from app.execution.run_state import _commit_terminal_failure, _completed_result
+from app.execution.scheduling import due_node_runs, node_run_is_due
 from app.shared.db import set_node_run_rls_context
 from app.shared.errors import (
     NodeRunAlreadyClaimedError,
@@ -57,17 +58,29 @@ async def claim_media_node_run(
     """Durably claim a queued NodeRun before any Provider side effect."""
     from datetime import UTC, datetime
 
-    run = await session.get(NodeRun, node_run_id)
+    run = await session.scalar(
+        select(NodeRun)
+        .where(NodeRun.id == node_run_id)
+        .with_for_update(skip_locked=True)
+        .execution_options(populate_existing=True)
+    )
     if run is None:
-        raise ValidationAppError("node_run not found")
+        raise NodeRunAlreadyClaimedError()
     if run.status in {"completed", "cached", "completed_after_cancel"}:
         return run
+    if not node_run_is_due(run, now=datetime.now(UTC)):
+        raise NodeRunAlreadyClaimedError()
 
     claimed = await session.execute(
         update(NodeRun)
-        .where(NodeRun.id == node_run_id, NodeRun.status == "queued")
-        .values(status="running", started_at=datetime.now(UTC))
+        .where(NodeRun.id == node_run_id, due_node_runs(datetime.now(UTC)))
+        .values(
+            status="cancel_requested" if run.status == "cancel_requested" else "running",
+            started_at=datetime.now(UTC),
+            next_attempt_at=None,
+        )
         .returning(NodeRun.id)
+        .execution_options(synchronize_session="fetch")
     )
     if claimed.scalar_one_or_none() is None:
         await session.refresh(run)
@@ -84,6 +97,13 @@ async def claim_media_node_run(
                 )
             )
             if resumable is not None:
+                from app.runtime.provider_recovery import provider_attempt_is_active
+
+                if provider_attempt_is_active(run.started_at, now=datetime.now(UTC)):
+                    raise NodeRunAlreadyClaimedError()
+                run.started_at = datetime.now(UTC)
+                await session.commit()
+                await set_node_run_rls_context(session, node_run_id=run.id)
                 return run
             raise NodeRunAlreadyClaimedError()
         raise ValidationAppError(f"node_run cannot execute from status={run.status}")
@@ -122,11 +142,14 @@ async def execute_media_node_run(
             raise ValidationAppError(f"claimed node_run cannot execute from status={run.status}")
     else:
         now = datetime.now(UTC)
+        if not node_run_is_due(run, now=now):
+            raise NodeRunAlreadyClaimedError()
         claimed = await session.execute(
             update(NodeRun)
-            .where(NodeRun.id == node_run_id, NodeRun.status == "queued")
-            .values(status="running", started_at=now)
+            .where(NodeRun.id == node_run_id, due_node_runs(now))
+            .values(status="running", started_at=now, next_attempt_at=None)
             .returning(NodeRun.id)
+            .execution_options(synchronize_session="fetch")
         )
         if claimed.scalar_one_or_none() is None:
             await session.refresh(run)
@@ -135,6 +158,7 @@ async def execute_media_node_run(
             if run.status == "running":
                 raise NodeRunAlreadyClaimedError()
             raise ValidationAppError(f"node_run cannot execute from status={run.status}")
+        await session.refresh(run)
 
     obj_store = store or get_object_store()
     if node.node_key == "final_film_assembly":

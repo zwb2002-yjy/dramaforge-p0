@@ -295,6 +295,7 @@ class NodeRun(Base):
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancellation_requested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

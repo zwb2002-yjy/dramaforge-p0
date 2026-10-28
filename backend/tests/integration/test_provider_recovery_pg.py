@@ -16,6 +16,7 @@ from app.events.models import OutboxEvent
 from app.execution.models import GraphNode, NodeRun, ProviderOperation
 from app.production.models import GraphVersion, ProductionGraph
 from app.shared.db import (
+    list_queued_node_run_rls_scopes,
     list_resumable_provider_node_run_rls_scopes,
     set_node_run_rls_context,
     set_rls_context,
@@ -28,21 +29,147 @@ from test_director_turn_lifecycle_pg import pytestmark as pytestmark
 from tests.unit.test_provider_recovery import Queue
 
 
+async def test_short_poll_due_scope_and_overlapping_workers_share_one_remote(monkeypatch):
+    from app.events.outbox import StreamPublisher
+    from app.execution.provider_execution import _defer_remote_poll
+    from app.production.run_control import ProductionRunControl
+    from app.runtime.scheduler import NodeRunScheduler
+
+    dbname = f"dramaforge_short_poll_{uuid4().hex[:8]}"
+    await _create_database(dbname)
+    admin = create_async_engine(_async_url(dbname))
+    app = create_async_engine(
+        _async_url(dbname),
+        connect_args={"server_settings": {"role": "dramaforge_app"}},
+    )
+    active = None
+    try:
+        _alembic(dbname)
+        admin_factory = async_sessionmaker(admin, expire_on_commit=False)
+        factory = async_sessionmaker(app, expire_on_commit=False)
+        async with admin_factory() as session:
+            user, project, (run_id,) = await _seed(session, first_id=1, count=1)
+            _, _, (foreign_id,) = await _seed(session, first_id=2, count=1)
+            run = await session.get(NodeRun, run_id)
+            run.status, run.started_at = "queued", None
+            run.next_attempt_at = datetime.now(UTC) + timedelta(hours=1)
+            frozen = dict(run.input_snapshot)
+            run.output_summary = {"status": "provider_pending", "provider_poll_sequence": 1}
+            await session.commit()
+            acl = (
+                await session.execute(
+                    text(
+                        "SELECT p.prosecdef, p.proowner::regrole::text AS owner, "
+                        "EXISTS (SELECT 1 FROM aclexplode(p.proacl) a "
+                        "WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE') AS public_execute "
+                        "FROM pg_proc p WHERE p.oid = "
+                        "'app.queued_node_run_contexts(integer,uuid,text)'::regprocedure"
+                    )
+                )
+            ).one()
+            assert acl.prosecdef and acl.owner == "dramaforge_worker_resolver"
+            assert not acl.public_execute
+        async with factory() as session:
+            assert await list_queued_node_run_rls_scopes(session, limit=50) == []
+            await set_node_run_rls_context(session, node_run_id=run_id)
+            assert await session.get(NodeRun, foreign_id) is None
+        queue = Queue()
+
+        async def pool(*args, **kwargs):
+            return queue
+
+        monkeypatch.setattr("arq.create_pool", pool)
+        monkeypatch.setattr(jobs, "get_session_factory", lambda: factory)
+        assert (await jobs.execute_node_run({}, str(run_id)))["status"] == "not_due"
+        async with admin_factory() as session:
+            (await session.get(NodeRun, run_id)).next_attempt_at = datetime.now(UTC) - timedelta(
+                seconds=1
+            )
+            await session.commit()
+        entered, release = asyncio.Event(), asyncio.Event()
+        observations = []
+
+        async def observe(session, *, node_run_id, **kwargs):
+            run = await session.get(NodeRun, node_run_id)
+            operation = await session.scalar(
+                select(ProviderOperation).where(
+                    ProviderOperation.node_run_id == node_run_id,
+                )
+            )
+            observations.append(operation.provider_operation_id)
+            assert run.input_snapshot == frozen
+            entered.set()
+            await release.wait()
+            operation.last_polled_at, operation.status = datetime.now(UTC), "running"
+            await _defer_remote_poll(
+                session,
+                run=run,
+                operation=operation,
+                delay_seconds=60,
+                expected_started_at=run.started_at,
+            )
+
+        monkeypatch.setattr("app.execution.product_path.execute_media_node_run", observe)
+        async with factory() as session:
+            await NodeRunScheduler(session, publisher=StreamPublisher()).dispatch_pending()
+        active = asyncio.create_task(jobs.execute_node_run({}, str(run_id)))
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        assert (await jobs.execute_node_run({}, str(run_id)))["status"] == "already_claimed"
+        release.set()
+        assert (await active)["status"] == "provider_pending"
+        active = None
+        assert (await jobs.execute_node_run({}, str(run_id)))["status"] == "not_due"
+        async with factory() as session:
+            assert await list_queued_node_run_rls_scopes(session, limit=50) == []
+            await set_node_run_rls_context(session, node_run_id=run_id)
+            run = await session.get(NodeRun, run_id)
+            assert run.started_at is None and run.input_snapshot == frozen
+            events = (await session.scalars(select(OutboxEvent))).all()
+            assert len(events) == 1
+            assert events[0].payload["dispatch_generation"] == ":poll-2"
+            assert events[0].next_attempt_at == run.next_attempt_at
+            assert len((await session.scalars(select(ProviderOperation))).all()) == 1
+            await ProductionRunControl(session).request_cancel(project=project, run_id=run_id)
+            await session.commit()
+        async with factory() as session:
+            scopes = await list_queued_node_run_rls_scopes(session, limit=50)
+            assert [item[0] for item in scopes] == [run_id]
+            await NodeRunScheduler(session, publisher=StreamPublisher()).dispatch_pending()
+        assert observations == [f"remote-{run_id}"]
+        assert len(queue.admitted) == 2  # old completed Arq key does not suppress the wakeup
+    finally:
+        if active is not None:
+            active.cancel()
+            await asyncio.gather(active, return_exceptions=True)
+        await app.dispose()
+        await admin.dispose()
+        await _drop_database(dbname)
+
+
 async def _seed(session, *, first_id, count, age=timedelta(hours=2), remote=True):
-    user = User(email=f"provider-recovery-{uuid4()}@example.com", display_name="Owner",
-                password_hash="x")
+    user = User(
+        email=f"provider-recovery-{uuid4()}@example.com", display_name="Owner", password_hash="x"
+    )
     session.add(user)
     await session.flush()
     workspace = Workspace(owner_user_id=user.id, name="Recovery")
     session.add(workspace)
     await session.flush()
-    project = Project(workspace_id=workspace.id, name="Recovery", stage="draft",
-                      aspect_ratio="16:9", budget_limit=0)
+    project = Project(
+        workspace_id=workspace.id,
+        name="Recovery",
+        stage="draft",
+        aspect_ratio="16:9",
+        budget_limit=0,
+    )
     session.add(project)
     await session.flush()
     graph = ProductionGraph(
-        project_id=project.id, scope_type="project", scope_entity_id=project.id,
-        template_key="recovery-test", created_by=user.id,
+        project_id=project.id,
+        scope_type="project",
+        scope_entity_id=project.id,
+        template_key="recovery-test",
+        created_by=user.id,
     )
     session.add(graph)
     await session.flush()
@@ -50,7 +177,10 @@ async def _seed(session, *, first_id, count, age=timedelta(hours=2), remote=True
     session.add(version)
     await session.flush()
     node = GraphNode(
-        graph_version_id=version.id, node_key="video", node_type="video", display_name="Video",
+        graph_version_id=version.id,
+        node_key="video",
+        node_type="video",
+        display_name="Video",
     )
     session.add(node)
     await session.flush()
@@ -58,21 +188,35 @@ async def _seed(session, *, first_id, count, age=timedelta(hours=2), remote=True
     ids = []
     for number in range(count):
         run = NodeRun(
-            id=UUID(int=first_id + number), project_id=project.id, graph_version_id=version.id,
-            graph_node_id=node.id, attempt_no=number + 1, idempotency_key=f"recovery:{number}",
-            input_hash="b" * 64, status="running", created_by=user.id,
-            input_snapshot={"source_commit": "historical-release"}, started_at=old, created_at=old,
+            id=UUID(int=first_id + number),
+            project_id=project.id,
+            graph_version_id=version.id,
+            graph_node_id=node.id,
+            attempt_no=number + 1,
+            idempotency_key=f"recovery:{number}",
+            input_hash="b" * 64,
+            status="running",
+            created_by=user.id,
+            input_snapshot={"source_commit": "historical-release"},
+            started_at=old,
+            created_at=old,
         )
         session.add(run)
         await session.flush()
-        session.add(ProviderOperation(
-            node_run_id=run.id, actual_provider="test", actual_model="test-video",
-            operation_kind="video", request_fingerprint="c" * 64,
-            execution_path_version="unified-v1",
-            status="submitted" if remote else "submission_started",
-            provider_operation_id=f"remote-{run.id}" if remote else None,
-            created_at=old, submitted_at=old if remote else None,
-        ))
+        session.add(
+            ProviderOperation(
+                node_run_id=run.id,
+                actual_provider="test",
+                actual_model="test-video",
+                operation_kind="video",
+                request_fingerprint="c" * 64,
+                execution_path_version="unified-v1",
+                status="submitted" if remote else "submission_started",
+                provider_operation_id=f"remote-{run.id}" if remote else None,
+                created_at=old,
+                submitted_at=old if remote else None,
+            )
+        )
         ids.append(run.id)
     await session.commit()
     return user, project, ids
@@ -86,7 +230,8 @@ async def test_periodic_recovery_rls_paging_locks_and_worker_lease(monkeypatch):
     # Session-level role survives commits, unlike SET LOCAL ROLE. Each worker
     # transaction must still reapply the persisted owner's SET LOCAL app.*.
     app = create_async_engine(
-        _async_url(dbname), connect_args={"server_settings": {"role": "dramaforge_app"}},
+        _async_url(dbname),
+        connect_args={"server_settings": {"role": "dramaforge_app"}},
     )
     try:
         _alembic(dbname)
@@ -98,12 +243,17 @@ async def test_periodic_recovery_rls_paging_locks_and_worker_lease(monkeypatch):
             _, _, fresh_ids = await _seed(session, first_id=1, count=1, age=timedelta(minutes=1))
             _, _, unknown_ids = await _seed(session, first_id=2, count=1, remote=False)
             signature = "app.resumable_provider_node_run_contexts(integer,text,uuid,timestamptz)"
-            acl = (await session.execute(text(
-                "SELECT p.prosecdef, p.proowner::regrole::text AS owner, p.proconfig, "
-                "EXISTS (SELECT 1 FROM aclexplode(p.proacl) a "
-                "WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE') AS public_execute "
-                "FROM pg_proc p WHERE p.oid = CAST(:signature AS regprocedure)"
-            ), {"signature": signature})).one()
+            acl = (
+                await session.execute(
+                    text(
+                        "SELECT p.prosecdef, p.proowner::regrole::text AS owner, p.proconfig, "
+                        "EXISTS (SELECT 1 FROM aclexplode(p.proacl) a "
+                        "WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE') AS public_execute "
+                        "FROM pg_proc p WHERE p.oid = CAST(:signature AS regprocedure)"
+                    ),
+                    {"signature": signature},
+                )
+            ).one()
             assert acl.prosecdef is True
             assert acl.owner == "dramaforge_worker_resolver"
             assert acl.public_execute is False
@@ -114,12 +264,17 @@ async def test_periodic_recovery_rls_paging_locks_and_worker_lease(monkeypatch):
             assert list(await session.scalars(select(NodeRun.id))) == []
             # Caller cannot lift the 50-row cap or the 31-minute safety floor.
             scopes = await list_resumable_provider_node_run_rls_scopes(
-                session, limit=500, stale_before=datetime.now(UTC) + timedelta(hours=1),
+                session,
+                limit=500,
+                stale_before=datetime.now(UTC) + timedelta(hours=1),
             )
             assert len(scopes) == 50
             assert fresh_ids[0] not in {run_id for run_id, _ in scopes}
             await set_rls_context(
-                session, user_id=user.id, workspace_id=project.workspace_id, project_id=project.id,
+                session,
+                user_id=user.id,
+                workspace_id=project.workspace_id,
+                project_id=project.id,
             )
             assert await session.get(NodeRun, foreign_ids[0]) is None
             assert len(list(await session.scalars(select(NodeRun.id)))) == 120
@@ -150,9 +305,13 @@ async def test_periodic_recovery_rls_paging_locks_and_worker_lease(monkeypatch):
             jobs.recover_interrupted_provider_jobs({}),
         )
         async with admin_factory() as session:
-            events = list(await session.scalars(select(OutboxEvent).where(
-                OutboxEvent.topic == "node_run.enqueue",
-            )))
+            events = list(
+                await session.scalars(
+                    select(OutboxEvent).where(
+                        OutboxEvent.topic == "node_run.enqueue",
+                    )
+                )
+            )
             assert len(events) == 121
             assert (await session.get(NodeRun, fresh_ids[0])).status == "running"
             assert (await session.get(NodeRun, unknown_ids[0])).error_code == (

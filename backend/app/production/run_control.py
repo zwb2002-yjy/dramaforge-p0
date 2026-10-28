@@ -32,6 +32,7 @@ class ProductionRunControl:
         if run.status not in {"queued", "running"}:
             raise ConflictError("production run is not cancellable in its current state")
         run.cancellation_requested_at = datetime.now(UTC)
+        run.next_attempt_at = None
         submitted = await self._session.scalar(
             select(ProviderOperation.id)
             .where(

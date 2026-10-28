@@ -2,7 +2,7 @@
 
 Status: current
 Date: 2026-10-28
-Alembic head: 20261028_0091
+Alembic head: 20261028_0092
 
 当前 Alembic 入口跨越 0084 前强制检查已存在的两张实验表和十张旧模型保障表，锁表后
 非空即阻断升级；事务回滚保留原数据和迁移版本。空库初始化中历史迁移生成的静态目录副本
@@ -10,7 +10,7 @@ Alembic head: 20261028_0091
 也可在维护权限下运行 `scripts/audit_model_migration.py`：以 PostgreSQL READ ONLY
 事务核对 0084 涉及的两张实验表和十张旧模型保障表，非空时退出码 1，要求先归档并核验
 恢复。该命令不执行迁移、不删除数据、不把备份存在当作恢复通过；不改写已冻结的 0084。
-Revisions: 95
+Revisions: 96
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Canonical relational graph
@@ -135,6 +135,7 @@ Migration 20260902_0051 removes:
 | 20261027_0089 | Add nullable non-secret `gateway_ref` JSON to existing connections and immutable revisions. Submitted/unknown management writes reconcile by fixed ID. Downgrade refuses any written reference; restore a verified snapshot with retained secrets instead of dropping history. |
 | 20261027_0090 | Explicit media `auth_mode` on connections/revisions; bearer still requires its original credential, supported no-auth profiles require NULL. Availability uses NULLS NOT DISTINCT identity. Downgrade refuses retained no-auth revisions/evidence; no history is deleted or assigned a synthetic credential. |
 | 20261028_0091 | Add a bounded ownership-only scanner for journaled Final Film uploads; reclamation keeps Artifact references and runs object IO outside database transactions. |
+| 20261028_0092 | Add nullable `node_runs.next_attempt_at` and due-time filtering to the existing ownership-only queued resolver. Pending remote tasks release their lease and write the next Outbox event atomically. Frozen execution input, remote IDs and historical rows are unchanged. |
 | 20261007_0083 | Merge the model-system and local-media migration histories into one head without rewriting either branch. |
 
 No canonical Project, Shot, Artifact, ProviderOperation, or EditSession is

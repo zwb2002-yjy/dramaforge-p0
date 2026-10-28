@@ -306,6 +306,8 @@ async def test_worker_honors_provider_retry_after_and_requeues_same_run(
     assert first.rollbacks == 1
     assert fallback.commits == 1
     assert run.status == "queued"
+    assert run.started_at is None
+    assert (run.next_attempt_at - datetime.now(UTC)).total_seconds() > 15
     assert run.id == first.run.id == fallback.run.id
 
 

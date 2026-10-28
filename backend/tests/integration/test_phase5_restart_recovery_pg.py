@@ -394,7 +394,15 @@ class _P5ImageCompiler:
             protocol_profile=FAKE_PROFILE,
             model_id=invoke_model_value,
             operation="image.generate",
-            wire_request={"model": invoke_model_value, "prompt": getattr(intent, "prompt", "")},
+            wire_request={
+                "model": invoke_model_value,
+                "prompt": getattr(intent, "prompt", ""),
+                **{
+                    name: value
+                    for name in ("size", "aspect_ratio", "seed")
+                    if (value := getattr(intent, name, None)) is not None
+                },
+            },
             request_schema_version="2026-08-10",
             safe_request_summary={"operation": "image.t2i", "model": invoke_model_value},
             reference_artifact_ids=[],

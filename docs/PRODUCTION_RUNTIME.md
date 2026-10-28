@@ -135,8 +135,16 @@ Artifact 内容端点对整文件及大 Range 使用 64 KiB 分块流式读取�
   不把 running/cancel_requested 改回 queued，不重写 dispatch_generation，不产生第二次远端 create。
   `NodeRun.started_at` 同时承担活跃尝试租约，running resume 会原子刷新；31 分钟来自
   heavy Worker 的 1800 秒尝试截止加 60 秒余量，不是带 epoch 的分布式 fencing。
-  Provider 轮询超时并主动让出为 queued 时同步清空租约；Retry 窗口内收到取消后，
-  下一次执行可直接核对同一个远端任务。空租约不以 created_at 代替，也不缩短真正活跃尝试的保护窗口。
+    已提交远端任务现在采用短作业：提交后持久化 remote ID / resume token 即退出，
+    每个后续作业最多一次 poll，单次观察墙钟上限 30 秒。待完成时在同一事务写入
+    `NodeRun.next_attempt_at`、清空 `started_at` 并创建原 Outbox 的下一次到期事件；
+    Scheduler、领取条件和 Worker 都拒绝提前执行。正常间隔为图像 3 秒、视频 5 秒，
+    观察错误有上限 300 秒的退避，合法 Retry-After 可要求更长等待。
+    每轮调度代次保存在可变结果元数据，避免 Arq 已完成 job ID 的保留窗口抑制下一轮；
+    不修改冻结输入或创建新的 ProviderOperation。Redis 入队失败保留已知远端任务的到期事实，
+    轮询观察超时继续核对原远端 ID；提交结果未知仍只允许人工核对。
+    取消清除等待时间；无活跃租约的 cancel_requested 可立即被相同调度器发现。
+    空租约不以 created_at 代替，也不缩短真正活跃尝试的保护窗口。
 - 迁移 20260919_0073 增加只返回所有权标识的窄 SECURITY DEFINER 4 参数扫描器，
   在数据库侧限制最多 50 行与至少 31 分钟陈旧窗口；旧 2 参数版本保留用于滚动部署。
   应先迁移再更新 dispatcher 与相关 Worker；恢复后的媒体任务仍使用原队列容量，扫描本身不排入媒体队列。

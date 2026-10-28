@@ -114,7 +114,7 @@ async def test_media_node_enqueues_on_heavy_queue(monkeypatch: pytest.MonkeyPatc
     session = MagicMock()
     session.get = AsyncMock(
         side_effect=[
-            SimpleNamespace(graph_node_id=uuid4()),
+            SimpleNamespace(graph_node_id=uuid4(), input_snapshot={}, output_summary={}),
             SimpleNamespace(node_type="keyframe"),
         ]
     )

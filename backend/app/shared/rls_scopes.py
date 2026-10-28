@@ -214,7 +214,13 @@ async def list_queued_node_run_rls_scopes(
 
     stmt = (
         select(NodeRun.id)
-        .where(NodeRun.status == "queued")
+        .where(
+            or_(
+                NodeRun.status == "queued",
+                (NodeRun.status == "cancel_requested") & NodeRun.started_at.is_(None),
+            ),
+            or_(NodeRun.next_attempt_at.is_(None), NodeRun.next_attempt_at <= datetime.now(UTC)),
+        )
         .order_by(NodeRun.created_at, NodeRun.id)
         .limit(limit)
     )

@@ -209,6 +209,12 @@ async def test_cancel_restart_never_recreates_remote_task(
             assert op.status == "rejected" and op.provider_operation_id is None
             binding.enabled = False
             await session.commit()
+            early = await jobs.execute_node_run({}, str(run_ids[1]))
+            assert early["status"] == "not_due"
+            (await session.get(NodeRun, run_ids[1], populate_existing=True)).next_attempt_at = (
+                datetime.now(UTC) - timedelta(seconds=1)
+            )
+            await session.commit()
             result = await jobs.execute_node_run({}, str(run_ids[1]))
             assert result["status"] == "failed", result
             await session.refresh(op)
@@ -235,6 +241,12 @@ async def test_cancel_restart_never_recreates_remote_task(
                     lambda: settings.model_copy(update={"app_env": "development"}),
                 )
             result = await jobs.execute_node_run({}, str(run_ids[1]))
+            assert result["status"] == "provider_pending", result
+            (await session.get(NodeRun, run_ids[1], populate_existing=True)).next_attempt_at = (
+                datetime.now(UTC) - timedelta(seconds=1)
+            )
+            await session.commit()
+            result = await jobs.execute_node_run({}, str(run_ids[1]))
             run = await session.get(NodeRun, run_ids[1], populate_existing=True)
             expected = (
                 "PROVIDER_MEDIA_MISSING"
@@ -254,6 +266,14 @@ async def test_cancel_restart_never_recreates_remote_task(
             assert artifacts == []
             assert calls == {"create": 1, "poll": 1, "cancel": 0}
             return
+        if outcome != "submit_unknown":
+            submitted = await jobs.execute_node_run({}, str(run_ids[1]))
+            assert submitted["status"] == "provider_pending", submitted
+            assert calls == {"create": 1, "poll": 0, "cancel": 0}
+            (await session.get(NodeRun, run_ids[1], populate_existing=True)).next_attempt_at = (
+                datetime.now(UTC) - timedelta(seconds=1)
+            )
+            await session.commit()
         with pytest.raises(asyncio.CancelledError):
             await jobs.execute_node_run({}, str(run_ids[1]))
         await session.rollback()

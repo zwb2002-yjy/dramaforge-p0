@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import math
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +16,7 @@ from app.config import get_settings
 from app.consistency.identity_policy import (
     identity_evidence_policy_snapshot,
 )
+from app.events.models import OutboxEvent
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.media_io import (
     _apply_media_metadata,
@@ -27,14 +31,81 @@ from app.execution.run_state import (
     ExecuteNodeResult,
     _commit_terminal_failure,
 )
+from app.execution.scheduling import node_run_dispatch_generation
 from app.providers.runtime import PROVIDER_CONTENT_URI, require_resume_token_identity
 from app.shared.db import set_node_run_rls_context
 from app.shared.errors import (
+    NodeRunAlreadyClaimedError,
     ProviderTaskCancelledError,
     ProviderTaskPendingError,
     ValidationAppError,
 )
 from app.storage.minio_store import ObjectStore
+
+POLL_OBSERVATION_TIMEOUT_SECONDS = 30.0
+MAX_POLL_ERROR_BACKOFF_SECONDS = 300.0
+
+
+def _counter(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValidationAppError("Invalid persisted poll sequence")
+    return value
+
+
+def _same_attempt(first: datetime | None, second: datetime | None) -> bool:
+    def utc(value: datetime | None) -> datetime | None:
+        return value.replace(tzinfo=value.tzinfo or UTC) if value is not None else None
+
+    return utc(first) == utc(second)
+
+
+async def _defer_remote_poll(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    operation: ProviderOperation,
+    delay_seconds: float,
+    expected_started_at: datetime | None,
+) -> None:
+    """Release the attempt and schedule the same remote identity atomically."""
+    await session.refresh(run, with_for_update=True)
+    if not _same_attempt(run.started_at, expected_started_at):
+        raise NodeRunAlreadyClaimedError()
+    now = datetime.now(UTC)
+    # Preserve Retry-After, even when longer than our normal error backoff.
+    # Saturation at the largest representable date prevents overflow; it never
+    # turns an extreme Provider wait into a burst of premature observations.
+    maximum_delay = (datetime.max.replace(tzinfo=UTC) - now).total_seconds() - 1
+    due = now + timedelta(seconds=min(delay_seconds, maximum_delay))
+    sequence = _counter((run.output_summary or {}).get("provider_poll_sequence", 0)) + 1
+    run.status = "cancel_requested" if _cancellation_requested(run) else "queued"
+    run.started_at = None
+    run.next_attempt_at = due
+    run.error_code = "PROVIDER_TASK_PENDING"
+    run.error_summary = "Remote Provider task is still running"
+    run.output_summary = {
+        "status": "provider_pending",
+        "provider_operation_id": str(operation.id),
+        "provider_poll_sequence": sequence,
+        "next_attempt_at": due.isoformat(),
+    }
+    session.add(
+        OutboxEvent(
+            event_id=uuid4(),
+            project_id=run.project_id,
+            topic="node_run.enqueue",
+            schema_version=1,
+            payload={
+                "node_run_id": str(run.id),
+                "project_id": str(run.project_id),
+                "status": run.status,
+                "dispatch_generation": node_run_dispatch_generation(run),
+            },
+            next_attempt_at=due,
+        )
+    )
+    await session.commit()
+    raise ProviderTaskPendingError()
 
 
 def _unknown_submission_error_summary(transport_error: object = None) -> str:
@@ -185,6 +256,7 @@ async def _execute_unified_media_node_run(
     from app.shared.errors import ProviderRateLimitedError
 
     now = datetime.now(UTC)
+    attempt_started_at = run.started_at
     project = await session.scalar(select(Project).where(Project.id == run.project_id))
     if project is None:
         raise ValidationAppError("project not found for node run")
@@ -266,7 +338,6 @@ async def _execute_unified_media_node_run(
     remote = ""
     runtime: ProviderRuntime | None = None
     resume: ProviderResumeToken | None = None
-    initial_status = "queued"
     synchronous_image = False
     result: SubmissionResult | None = None
 
@@ -322,7 +393,6 @@ async def _execute_unified_media_node_run(
         )
         remote = str(op.provider_operation_id or "")
         create_status = "resumed"
-        initial_status = "running"
 
     if op is None or resubmit:
         # New submission. Resolve via the shared selection engine.
@@ -451,7 +521,6 @@ async def _execute_unified_media_node_run(
             **result.request_summary,
             "execution_identity": identity_json,
         }
-        initial_status = str(result.status)
         await session.flush()
         await session.commit()
         await set_node_run_rls_context(session, node_run_id=run.id)
@@ -469,8 +538,8 @@ async def _execute_unified_media_node_run(
             remote_secondary_id=op.remote_secondary_id,
         )
 
-    # Poll loop (resume token driven). Synchronous image submissions already
-    # carry the result URL and skip polling entirely.
+    # A submitted task yields immediately. Each later attempt observes it once;
+    # synchronous images already carry their output and need no poll job.
     if not synchronous_image:
         assert resume is not None
         _cancel_requested, cancel_confirmed = await _request_remote_cancellation_once(
@@ -488,41 +557,54 @@ async def _execute_unified_media_node_run(
                 reason="provider_confirmed_cancellation",
             )
             raise ProviderTaskCancelledError()
-        poll_timeout_s = 1_620.0 if node_type in {"video", "video_review"} else 120.0
         poll_interval_s = 5.0 if node_type in {"video", "video_review"} else 3.0
-        deadline = asyncio.get_running_loop().time() + poll_timeout_s
-        poll = PollResult(status=initial_status)
-        poll_count = 0
-        while True:
-            poll = await runtime.poll_video(resume)
-            poll_count += 1
-            status = str(poll.status)
-            op.last_polled_at = datetime.now(UTC)
-            if op.status != "cancel_requested":
-                op.status = "running"
-            poll_error = poll.error_code
-            if poll.http_status is not None or poll_error:
-                summary = dict(op.response_summary or {})
-                summary["last_poll_error"] = str(poll_error or f"http_{poll.http_status}")[:200]
-                raw_count = summary.get("poll_error_count", 0) or 0
-                summary["poll_error_count"] = (raw_count if isinstance(raw_count, int) else 0) + 1
-                if poll.http_status is not None:
-                    summary["last_poll_http_status"] = poll.http_status
-                op.response_summary = summary
-                await session.commit()
-                await set_node_run_rls_context(session, node_run_id=run.id)
-            cancel_confirmed = False
-            # Terminal poll truth wins. In particular a late success must be
-            # imported as completed_after_cancel, not overwritten by a cancel ack.
-            if status not in {"succeeded", "completed", "success", "failed", "cancelled"}:
-                _cancel_requested, cancel_confirmed = await _request_remote_cancellation_once(
-                    session,
-                    run=run,
-                    operation=op,
-                    runtime=runtime,
-                    resume=resume,
-                )
-            if cancel_confirmed or status == "cancelled":
+        poll_count = _counter((op.response_summary or {}).get("poll_count", 0))
+        if create_status != "resumed":
+            await _defer_remote_poll(
+                session,
+                run=run,
+                operation=op,
+                delay_seconds=poll_interval_s,
+                expected_started_at=attempt_started_at,
+            )
+        try:
+            async with asyncio.timeout(POLL_OBSERVATION_TIMEOUT_SECONDS):
+                poll = await runtime.poll_video(resume)
+        except TimeoutError:
+            # Poll is observation of a known remote ID. A lost observation never
+            # authorizes create or reinterprets the frozen execution identity.
+            poll = PollResult(status="running", error_code="PROVIDER_POLL_OBSERVATION_TIMEOUT")
+        poll_count += 1
+        status = str(poll.status)
+        op.last_polled_at = datetime.now(UTC)
+        if op.status != "cancel_requested":
+            op.status = "running"
+        summary = {**dict(op.response_summary or {}), "poll_count": poll_count}
+        if poll.error_code or (poll.http_status is not None and poll.http_status >= 400):
+            summary["last_poll_error"] = str(poll.error_code or f"http_{poll.http_status}")[:200]
+            raw_count = summary.get("poll_error_count", 0) or 0
+            summary["poll_error_count"] = (raw_count if isinstance(raw_count, int) else 0) + 1
+            if poll.http_status is not None:
+                summary["last_poll_http_status"] = poll.http_status
+        op.response_summary = summary
+        # Terminal remote truth wins over a simultaneous cancellation request.
+        if status == "cancelled":
+            await _commit_provider_cancelled(
+                session,
+                run=run,
+                operation=op,
+                reason="provider_confirmed_cancellation",
+            )
+            raise ProviderTaskCancelledError()
+        if status not in {"succeeded", "completed", "success", "failed"}:
+            _cancel_requested, cancel_confirmed = await _request_remote_cancellation_once(
+                session,
+                run=run,
+                operation=op,
+                runtime=runtime,
+                resume=resume,
+            )
+            if cancel_confirmed:
                 await _commit_provider_cancelled(
                     session,
                     run=run,
@@ -530,40 +612,20 @@ async def _execute_unified_media_node_run(
                     reason="provider_confirmed_cancellation",
                 )
                 raise ProviderTaskCancelledError()
-            if status in {"succeeded", "completed", "success", "failed"}:
-                break
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                op.status = "timed_out"
-                op.error_code = "PROVIDER_POLL_TIMEOUT"
-                op.error_summary = (
-                    f"remote task still pending after {poll_timeout_s:.0f}s; resume polling"
-                )
-                op.response_summary = {
-                    **dict(op.response_summary or {}),
-                    "create_status": create_status,
-                    "final_status": "running",
-                    "poll_count": poll_count,
-                    "query_kind": resume.query_kind,
-                }
-                run.status = "queued"
-                # This attempt is yielding to Arq, not still polling. Commit the
-                # lease release with queued so a cancel during Retry can resume
-                # the same remote task immediately without stealing an active job.
-                run.started_at = None
-                run.error_code = "PROVIDER_TASK_PENDING"
-                run.error_summary = "Remote Provider task is still running"
-                run.output_summary = {
-                    "status": "provider_pending",
-                    "provider_operation_id": str(op.id),
-                }
-                await session.commit()
-                raise ProviderTaskPendingError()
             poll_retry_after = poll.retry_after_seconds
-            sleep_s = poll_interval_s
-            if isinstance(poll_retry_after, int | float) and poll_retry_after > 0:
-                sleep_s = max(sleep_s, float(poll_retry_after))
-            await asyncio.sleep(min(sleep_s, remaining))
+            delay = poll_interval_s
+            if poll.error_code:
+                errors = _counter(summary.get("poll_error_count", 0))
+                delay = min(MAX_POLL_ERROR_BACKOFF_SECONDS, delay * 2 ** min(errors, 6))
+            if isinstance(poll_retry_after, int | float) and math.isfinite(poll_retry_after):
+                delay = max(delay, float(poll_retry_after))
+            await _defer_remote_poll(
+                session,
+                run=run,
+                operation=op,
+                delay_seconds=delay,
+                expected_started_at=attempt_started_at,
+            )
     else:
         assert result is not None and (
             result.artifact_uri is not None or result.artifact_bytes is not None
@@ -607,6 +669,8 @@ async def _execute_unified_media_node_run(
         raise ValidationAppError(f"PROVIDER_FAILED: {error_summary}")
 
     op.status = "succeeded"
+    op.error_code = None
+    op.error_summary = None
     op.completed_at = datetime.now(UTC)
     uri: object = (
         result.artifact_bytes
@@ -646,8 +710,12 @@ async def _execute_unified_media_node_run(
     # If cancellation committed first, retain the immutable late Artifact but
     # never make it the graph's latest successful/Formal input.
     await session.refresh(run, with_for_update=True)
+    if not _same_attempt(run.started_at, attempt_started_at):
+        raise NodeRunAlreadyClaimedError()
     completed_after_cancel = _cancellation_requested(run)
     run.status = "completed_after_cancel" if completed_after_cancel else "completed"
+    run.error_code = None
+    run.error_summary = None
     run.result_artifact_id = art.id
     run.provider_cost = op.provider_cost or Decimal("0")
     run.finished_at = datetime.now(UTC)

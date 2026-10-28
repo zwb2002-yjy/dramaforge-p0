@@ -437,13 +437,10 @@ async def test_remote_identity_resumes_interrupted_download_with_zero_create(rec
         interrupted_operation = await session.get(ProviderOperation, operation_id)
         assert interrupted_operation.provider_operation_id == "remote-1"
 
-    class Clock(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return datetime.now(UTC) + timedelta(minutes=32)
-
-    monkeypatch.setattr(jobs, "datetime", Clock)
-    monkeypatch.setattr(provider_recovery, "datetime", Clock)
+    async with recovery.factory() as session:
+        interrupted_run = await session.get(NodeRun, run_id)
+        interrupted_run.started_at = datetime.now(UTC) - timedelta(minutes=32)
+        await session.commit()
     recovery.queue.admitted.clear()  # expired/lost queue delivery after the interrupted attempt
     await jobs.recover_interrupted_provider_jobs(dict(ctx))
     result = await jobs.execute_node_run({}, str(run_id))
@@ -557,9 +554,11 @@ async def test_dispatcher_recovery_bypasses_fifty_jobs_and_a_busy_single_heavy_s
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def test_poll_timeout_releases_lease_then_cancel_retries_same_remote_id(
+@pytest.mark.parametrize("persistence_error", [False, True])
+async def test_single_poll_releases_lease_then_cancel_wakes_same_remote_id(
     recovery,
     monkeypatch,
+    persistence_error,
 ):
     from unittest.mock import AsyncMock
 
@@ -572,7 +571,6 @@ async def test_poll_timeout_releases_lease_then_cancel_retries_same_remote_id(
         ProviderResumeToken,
         ProviderRuntimeResolver,
     )
-    from arq import Retry
 
     # A recent created_at must not be mistaken for an active started_at lease.
     (run_id,) = await seed(recovery, age=timedelta(seconds=10))
@@ -623,12 +621,8 @@ async def test_poll_timeout_releases_lease_then_cancel_retries_same_remote_id(
         operation_id = operation.id
         await session.commit()
 
-    clock = SimpleNamespace(seconds=0)
-    clock.time = lambda: clock.seconds
-
     async def still_pending(token):
         assert token == resume
-        clock.seconds += 121  # Cross the real 120s image polling budget, without sleeping.
         return PollResult(status="running")
 
     runtime = SimpleNamespace(
@@ -641,27 +635,40 @@ async def test_poll_timeout_releases_lease_then_cancel_retries_same_remote_id(
     monkeypatch.setattr(ProviderRuntimeResolver, "resume_runtime_for_identity", resolver)
     prepare = AsyncMock(side_effect=AssertionError("must not compile/resubmit"))
     monkeypatch.setattr(provider_execution, "prepare_media_submission", prepare)
-    # Replace only this module's clock access, never asyncio's global event loop.
-    monkeypatch.setattr(
-        provider_execution,
-        "asyncio",
-        SimpleNamespace(
-            get_running_loop=lambda: clock,
-            sleep=AsyncMock(),
-        ),
-    )
+    if persistence_error:
+        from sqlalchemy.exc import DBAPIError
+
+        defer = provider_execution._defer_remote_poll
+        writes = 0
+
+        async def lose_one_write(*args, **kwargs):
+            nonlocal writes
+            writes += 1
+            if writes == 1:
+                raise DBAPIError(
+                    "synthetic observation write", {}, OSError("connection lost"), True
+                )
+            await defer(*args, **kwargs)
+
+        monkeypatch.setattr(provider_execution, "_defer_remote_poll", lose_one_write)
     monkeypatch.setattr("app.execution.product_path.get_object_store", lambda: SimpleNamespace())
-    with pytest.raises(Retry):
-        await jobs.execute_node_run({"job_try": 1}, str(run_id))
+    pending = await jobs.execute_node_run({"job_try": 1}, str(run_id))
+    assert pending == {"status": "provider_pending", "node_run_id": str(run_id)}
+    early = await jobs.execute_node_run({"job_try": 2}, str(run_id))
+    assert early == {"status": "not_due", "node_run_id": str(run_id)}
     async with recovery.factory() as session:
         run = await session.get(NodeRun, run_id)
         operation = await session.get(ProviderOperation, operation_id)
         released_started_at = run.started_at
         assert run.status == "queued"
-        assert operation.status == "timed_out"
-        assert "120s" in operation.error_summary
+        assert operation.status == ("submitted" if persistence_error else "running")
+        if persistence_error:
+            assert operation.response_summary["last_poll_error"] == "PERSISTENCE_OBSERVATION_LOST"
+        else:
+            assert operation.response_summary["poll_count"] == 1
+        assert run.next_attempt_at.replace(tzinfo=UTC) > datetime.now(UTC)
         project = await session.get(Project, run.project_id)
-        # The real cancellation method runs inside Arq's 5s retry window.
+        # Cancellation wakes the already submitted task before its due time.
         await ProductionRunControl(session).request_cancel(
             project=project,
             run_id=run_id,

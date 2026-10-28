@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from arq import Retry
+from sqlalchemy.exc import DBAPIError
 
 from app.runtime.provider_recovery import provider_attempt_is_active
 from app.runtime.provider_recovery import (
@@ -190,17 +191,19 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
     from sqlalchemy import select
 
     from app.execution.composite_media import composite_inputs_pending
-    from app.execution.models import NodeRun
+    from app.execution.models import NodeRun, ProviderOperation
     from app.execution.product_path import claim_media_node_run, execute_media_node_run
     from app.execution.runtime_invariants import (
         evaluate_required_dependencies,
         fail_run_for_dependency,
     )
+    from app.execution.scheduling import node_run_is_due, provider_retry_delay
 
     _ = ctx
     factory = get_session_factory()
     run_uuid = UUID(node_run_id)
     scope = None
+    claimed_started_at: datetime | None = None
     async with factory() as session:
         try:
             scope = await set_node_run_rls_context(session, node_run_id=run_uuid)
@@ -218,6 +221,9 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             )
             if run is None:
                 raise NodeRunAlreadyClaimedError()
+            if not node_run_is_due(run, now=datetime.now(UTC)):
+                await session.rollback()
+                return {"status": "not_due", "node_run_id": node_run_id}
             resuming = run.status in {"running", "cancel_requested"}
             if resuming and provider_attempt_is_active(run.started_at, now=datetime.now(UTC)):
                 raise NodeRunAlreadyClaimedError()
@@ -249,6 +255,7 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                 run.started_at = datetime.now(UTC)
                 await session.commit()
                 await set_node_run_rls_context(session, node_run_id=run_uuid)
+            claimed_started_at = run.started_at
             result = await execute_media_node_run(
                 session,
                 node_run_id=run_uuid,
@@ -271,13 +278,15 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             return {"status": "already_claimed", "node_run_id": node_run_id}
         except ProviderTaskPendingError:
             await session.rollback()
-            raise Retry(defer=5) from None
+            return {"status": "provider_pending", "node_run_id": node_run_id}
         except ProviderTaskCancelledError:
             await session.rollback()
             return {"status": "cancelled", "node_run_id": node_run_id}
         except ProviderRateLimitedError as exc:
             await session.rollback()
-            retry_after = float(exc.details.get("retry_after_seconds") or 5.0)
+            retry_after = provider_retry_delay(
+                exc.details.get("retry_after_seconds"), now=datetime.now(UTC)
+            )
             # Requeue the claimed run so the dispatcher re-enqueues it after
             # Retry-After (plan §11.2: 429 follows Retry-After, new attempt).
             try:
@@ -286,6 +295,13 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                         run2 = await s2.get(NodeRun, run_uuid)
                         if run2 is not None and run2.status == "running":
                             run2.status = "queued"
+                            run2.started_at = None
+                            try:
+                                run2.next_attempt_at = datetime.now(UTC) + timedelta(
+                                    seconds=retry_after
+                                )
+                            except OverflowError:
+                                run2.next_attempt_at = datetime.max.replace(tzinfo=UTC)
                             await s2.commit()
             except Exception:  # noqa: BLE001 - requeue must not mask the Retry
                 pass
@@ -306,6 +322,79 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                     if await set_node_run_rls_context(s2, node_run_id=run_uuid) is None:
                         return {"status": "failed", "error": str(exc)[:300]}
                     run2 = await s2.get(NodeRun, run_uuid)
+                    if isinstance(exc, DBAPIError) and run2 is not None:
+                        from app.execution.provider_execution import (
+                            _defer_remote_poll,
+                            _same_attempt,
+                        )
+
+                        run2 = await s2.scalar(
+                            select(NodeRun)
+                            .where(NodeRun.id == run_uuid)
+                            .with_for_update(skip_locked=True)
+                            .execution_options(populate_existing=True)
+                        )
+                        if run2 is None or not _same_attempt(run2.started_at, claimed_started_at):
+                            return {"status": "already_claimed", "node_run_id": node_run_id}
+                        operation = await s2.scalar(
+                            select(ProviderOperation)
+                            .where(
+                                ProviderOperation.node_run_id == run_uuid,
+                                ProviderOperation.execution_path_version == "unified-v1",
+                            )
+                            .order_by(
+                                ProviderOperation.attempt_no.desc(),
+                                ProviderOperation.created_at.desc(),
+                            )
+                            .limit(1)
+                        )
+                        if operation is not None and operation.provider_operation_id:
+                            operation.response_summary = {
+                                **dict(operation.response_summary or {}),
+                                "last_poll_error": "PERSISTENCE_OBSERVATION_LOST",
+                            }
+                            try:
+                                await _defer_remote_poll(
+                                    s2,
+                                    run=run2,
+                                    operation=operation,
+                                    delay_seconds=5,
+                                    expected_started_at=claimed_started_at,
+                                )
+                            except ProviderTaskPendingError:
+                                return {"status": "provider_pending", "node_run_id": node_run_id}
+                        if operation is not None and operation.status == "submission_started":
+                            operation.status = "unknown_submission"
+                            operation.error_code = "PROVIDER_SUBMISSION_UNKNOWN"
+                            operation.error_summary = (
+                                "Submission persistence failed; reconcile before any new Create"
+                            )
+                            run2.status = "failed"
+                            run2.error_code = operation.error_code
+                            run2.error_summary = operation.error_summary
+                            run2.output_summary = {
+                                "status": "failed",
+                                "error_code": operation.error_code,
+                                "worker_boundary": True,
+                            }
+                            run2.finished_at = datetime.now(UTC)
+                            operation.completed_at = run2.finished_at
+                            await s2.commit()
+                            return {"status": "failed", "error_code": "PROVIDER_SUBMISSION_UNKNOWN"}
+                    if (
+                        run2 is not None
+                        and run2.status in {"queued", "cancel_requested"}
+                        and run2.started_at is None
+                        and (run2.output_summary or {}).get("status") == "provider_pending"
+                    ):
+                        logger.exception(
+                            "Provider poll scheduling failed for NodeRun %s", node_run_id
+                        )
+                        return {
+                            "status": "provider_pending",
+                            "node_run_id": node_run_id,
+                            "error_code": _worker_failure_code(exc),
+                        }
                     if run2 is not None and run2.status in {
                         "queued",
                         "running",
