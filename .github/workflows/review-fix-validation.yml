@@ -33,4 +33,21 @@ jobs:
         run: |
           uv run --directory backend ruff check app/api/v1/production.py app/providers/http_client.py tests/unit/test_provider_http_pool.py tests/unit/test_final_film_api.py
           uv run --directory backend mypy app
+          uv run --directory backend ruff format --check app/api/v1/production.py app/providers/http_client.py tests/unit/test_provider_http_pool.py tests/unit/test_final_film_api.py
           uv run --directory backend pytest tests/unit/test_provider_http_pool.py tests/unit/test_final_film_api.py -q
+      - name: Audit patched production Python dependencies
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace/backend \
+            python:3.14-slim-bookworm \
+            sh -ec 'pip install --no-cache-dir uv pip-audit; uv export --locked --no-dev --no-emit-project --output-file /tmp/requirements-audit.txt; pip-audit --requirement /tmp/requirements-audit.txt'
+      - name: Trivy filesystem scan (diagnostic)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
