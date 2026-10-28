@@ -264,6 +264,9 @@ describe("ShotDirectorSuggestionPanel", () => {
       "litellm/script-quality",
     );
     expect(screen.getByTestId("recommendation-model-evidence")).toHaveTextContent("22222222");
+    expect(screen.getByTestId("recommendation-model-evidence")).toHaveTextContent(
+      "自动格式修复 0/1",
+    );
     const request = calls.find((call) => call.url.endsWith("/recommendation"));
     expect(`${request?.method} ${request?.url}`).toBe(
       "POST /api/v1/projects/project-1/director/shots/shot-1/recommendation",
@@ -343,6 +346,7 @@ describe("ShotDirectorSuggestionPanel", () => {
       "upstream/director-v1",
     );
     expect(screen.getByTestId("suggestion-model-evidence")).toHaveTextContent("11111111");
+    expect(screen.getByTestId("suggestion-model-evidence")).toHaveTextContent("自动格式修复 0/1");
 
     const request = calls.find((call) => call.url.endsWith("/suggestion"));
     expect(request?.method).toBe("POST");

@@ -877,3 +877,46 @@ async def _assert_stored_failure(service, project, user, request):
     with pytest.raises(ConflictError) as error:
         await service.suggest(project_id=project.id, actor=user, request=request)
     assert error.value.details["code"] == "DIRECTOR_TURN_NOT_REUSABLE"
+
+
+async def test_unknown_schema_repair_keeps_exact_invocation_and_never_replays(session):
+    user, project, scene, shot, _ = await _seed(session)
+    calls = []
+
+    async def handler(request):
+        calls.append(json.loads(request.content))
+        if len(calls) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": "invalid-output-" * 2000}}],
+                },
+            )
+        repair = json.loads(calls[-1]["messages"][-1]["content"])
+        assert len(repair["invalid_output"]) <= 20000
+        assert len(repair["validation_error"]) <= 4000
+        raise httpx.ReadTimeout("synthetic repair response loss", request=request)
+
+    service = ShotDirectorSuggestionService(
+        session, text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler))
+    )
+    request = _request(scene, shot, key="schema-repair:unknown")
+    with pytest.raises(ValidationAppError) as unknown:
+        await service.suggest(project_id=project.id, actor=user, request=request)
+    assert unknown.value.details["code"] == "DIRECTOR_TEXT_CALL_UNKNOWN"
+    invocations = list(
+        (
+            await session.scalars(
+                select(DirectorInvocation).order_by(DirectorInvocation.invocation_key)
+            )
+        ).all()
+    )
+    assert [invocation.invocation_key for invocation in invocations] == [
+        "text:primary:1",
+        "text:schema_repair:1",
+    ]
+    assert invocations[1].status == "unknown_submission"
+    turn = await session.get(DirectorTurn, invocations[0].turn_id)
+    assert turn.schema_repair_count == 1
+    await _assert_stored_failure(service, project, user, request)
+    assert len(calls) == 2

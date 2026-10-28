@@ -556,7 +556,8 @@ export function ShotDirectorSuggestionPanel({
           {proposal.director_evidence && (
             <p className="muted" data-testid="suggestion-model-evidence">
               模型 {proposal.director_evidence.actual_model ?? proposal.director_evidence.model_id}{" "}
-              · 调用 {proposal.director_evidence.turn_id.slice(0, 8)} ·
+              · 调用 {proposal.director_evidence.turn_id.slice(0, 8)} · 自动格式修复{" "}
+              {proposal.director_evidence.schema_repair_count}/1 ·
               {proposal.director_evidence.cost_status === "reported"
                 ? ` ${proposal.director_evidence.reported_cost} ${proposal.director_evidence.currency}`
                 : " 费用未返回"}
@@ -685,7 +686,8 @@ export function ShotDirectorSuggestionPanel({
               模型
               {recommendation.director_evidence.actual_model ??
                 recommendation.director_evidence.model_id}
-              · 调用 {recommendation.director_evidence.turn_id.slice(0, 8)}
+              · 调用 {recommendation.director_evidence.turn_id.slice(0, 8)}· 自动格式修复{" "}
+              {recommendation.director_evidence.schema_repair_count}/1
             </p>
           )}
           <p>

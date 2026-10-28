@@ -104,6 +104,12 @@ Director Runtime 是**独立于生产执行的编排 runtime**：它驱动导演
   文本模型解析冻结版本化 Proxy 部署引用；已 prepared 但尚无 Invocation 的旧请求
   要求显式重建和新请求键，不能重启后重新绑定模型。传输尝试次数与失败阶段持久化于
   Invocation 摘要，独立于业务 schema repair 次数。
+    每次显式文本操作最多一个 primary Invocation 和一个同模型 schema-repair Invocation；
+    第二次结构校验失败即终止，无第三次修复或规则回退。修复输入截断为 20,000 字符原输出
+    和 4,000 字符错误说明。每个 Invocation 的 Proxy HTTP 默认各阶段超时为 120 秒，
+    仅已证明发送前的连接失败最多重试一次；这不是总墙钟截止或额外上游调用授权。
+    已可能发送的超时保留 `unknown_submission`，同请求键重入只读取原事实，不重发 primary
+    或 repair。界面模型证据显示格式修复次数，详细尝试与失败阶段留在原 Invocation。
 - 唤醒重放由 `wakeup_replay.py` 与 worker 启动恢复承担。
 - Assistant 边界：Shot 建议为非持久响应；editing 建议持久化
   DirectorProposal/DirectorProposalItem 并只能经 typed command registry 应用。
