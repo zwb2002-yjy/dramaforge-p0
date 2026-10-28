@@ -17,8 +17,6 @@ backend/.venv/**
 **/dist
 **/build
 tmp
-# Retained local cleanup evidence is not application source.
-dsh-purge
 # Local git worktrees and offline mypy audit caches are not application source.
 .worktrees
 **/.worktrees
