@@ -1,0 +1,25 @@
+name: Review Fix Verification (temporary)
+
+on:
+  push:
+    branches:
+      - codex/review-115a4fb-fixes-20261028
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Verify locked dependency graph
+        run: uv lock --check --directory backend
+      - name: Install reproducible Python dependencies
+        run: uv sync --locked --extra dev --directory backend
+      - name: Verify changed Python code
+        run: |
+          uv run --directory backend ruff check app/api/v1/production.py app/providers/http_client.py tests/unit/test_provider_http_pool.py tests/unit/test_final_film_api.py
+          uv run --directory backend mypy app
+          uv run --directory backend pytest tests/unit/test_provider_http_pool.py tests/unit/test_final_film_api.py -q
