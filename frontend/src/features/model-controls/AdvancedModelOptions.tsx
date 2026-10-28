@@ -17,6 +17,7 @@ export interface AdvancedModelOptionsProps {
   onChange: (key: string, value: unknown) => void;
   /** Reuse the same OptionFieldProps to stay consistent with the form. */
   renderField?: (props: OptionFieldProps) => ReactElement;
+  disabled?: boolean;
 }
 
 export function AdvancedModelOptions({
@@ -24,6 +25,7 @@ export function AdvancedModelOptions({
   values,
   onChange,
   renderField = (props) => <OptionField {...props} />,
+  disabled,
 }: AdvancedModelOptionsProps) {
   const [open, setOpen] = useState(false);
   const keys = Object.keys(options);
@@ -48,6 +50,7 @@ export function AdvancedModelOptions({
                 value: values[key],
                 onChange: (k: string, v: unknown) => onChange(k, v),
                 values,
+                disabled,
               })}
             </Fragment>
           );

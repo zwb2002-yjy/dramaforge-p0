@@ -5167,6 +5167,20 @@ export interface components {
             /** Verified */
             verified: boolean;
         };
+        /** GenerationOptionRead */
+        GenerationOptionRead: {
+            parameter: components["schemas"]["ParameterSpec"];
+            /** Editable */
+            editable: boolean;
+            /** Reason */
+            reason?: ("compiler_unavailable" | "fixed_value" | "sensitive" | "deprecated") | null;
+            inherited_value?: components["schemas"]["JsonValue"] | null;
+            /**
+             * Inherited Source
+             * @default contract_default
+             */
+            inherited_source: string;
+        };
         /** GenerationSnapshotRead */
         GenerationSnapshotRead: {
             /**
@@ -5600,6 +5614,13 @@ export interface components {
             mode_id?: string | null;
             /** Identity Hash */
             identity_hash?: string | null;
+            resolution?: components["schemas"]["ExecutionModelResolution"] | null;
+            /** Generation Options */
+            generation_options?: {
+                [key: string]: components["schemas"]["GenerationOptionRead"];
+            };
+            /** Connection Label */
+            connection_label?: string | null;
         };
         /** ModelRead */
         ModelRead: {

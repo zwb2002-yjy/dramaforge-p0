@@ -32,6 +32,7 @@ type FrozenShotPlan = {
   prompt: string;
   firstFrame: string | null;
   wireFingerprint: string;
+  options: Record<string, unknown>;
 };
 
 export async function installShotJourneyMock(page: Page) {
@@ -174,12 +175,20 @@ export async function installShotJourneyMock(page: Page) {
         expect(body.expected_shot_version).toBe(shot.version);
         const stage = String(body.stage);
         if (stage === "video") expect(shot.formal_keyframe_artifact_id).not.toBeNull();
+        const savedSettings = shot.director_state as {
+          generation_settings?: { video?: { common_options?: Record<string, unknown> } };
+        };
+        const options: Record<string, unknown> =
+          stage === "video"
+            ? { duration_seconds: 5, ...savedSettings.generation_settings?.video?.common_options }
+            : {};
         const frozen = {
           shotId: shot.id,
           version: shot.version,
           stage,
           prompt: stage === "video" ? shot.video_prompt : shot.image_prompt,
           firstFrame: stage === "video" ? shot.formal_keyframe_artifact_id : null,
+          options,
         };
         const fingerprint = createHash("sha256").update(JSON.stringify(frozen)).digest("hex");
         const wireFingerprint = createHash("sha256")
@@ -199,11 +208,11 @@ export async function installShotJourneyMock(page: Page) {
               operation: stage === "video" ? "video.generate" : "image.generate",
               wire_request: {
                 prompt: frozen.prompt,
-                ...(stage === "video" ? { duration: 5 } : {}),
+                ...(stage === "video" ? { duration: options.duration_seconds } : {}),
               },
               reference_fingerprints: frozen.firstFrame ? [frozen.firstFrame] : [],
             },
-            effective_options: stage === "video" ? { duration_seconds: 5 } : {},
+            effective_options: options,
             errors: [],
             warnings: ["MEDIA_BYTES_NOT_VERIFIED", "ACCOUNT_NOT_CHECKED"],
           },
@@ -222,8 +231,8 @@ export async function installShotJourneyMock(page: Page) {
             planned_references: [],
             capability_gaps: [],
             accepted_approximations: [],
-            duration_seconds: stage === "video" ? 5 : null,
-            effective_options: stage === "video" ? { duration_seconds: 5 } : {},
+            duration_seconds: stage === "video" ? options.duration_seconds : null,
+            effective_options: options,
           },
         });
       }

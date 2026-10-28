@@ -9,7 +9,7 @@ from fnmatch import fnmatch
 
 from app.providers.capability_resolver import ProductCapabilityPolicy
 from app.providers.intents import IMAGE_INTENT_OPTION_FIELDS, VIDEO_INTENT_OPTION_FIELDS
-from app.providers.manifest import InputContractSpec, OperationManifest
+from app.providers.manifest import InputContractSpec, ModelCapabilityManifest, OperationManifest
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,19 @@ class WorkbenchContractSelection:
 VIDEO_UI_MODES = frozenset(
     {"text_to_video", "first_frame", "last_frame", "first_last_frame", "omni_reference"}
 )
+
+
+def implemented_workbench_options(manifest: ModelCapabilityManifest) -> frozenset[str]:
+    """Compiler-owned writable subset; catalog declarations cannot enable fields."""
+    from app.providers.registry import get_plugin
+
+    plugin = get_plugin(manifest.provider_type, manifest.protocol_profile)
+    if not plugin.implemented or plugin.compiler_factory is None:
+        return frozenset()
+    image, video = plugin.compiler_factory()
+    compiler = image if manifest.media_kind == "image" else video
+    fields: frozenset[str] = getattr(compiler, "workbench_option_fields", frozenset())
+    return frozenset(fields)
 
 
 def workbench_ui_mode(*, media_kind: str, mode_id: str) -> str:

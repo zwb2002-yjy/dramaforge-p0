@@ -117,6 +117,12 @@ provider evidence and media are retained; no old interface or recovery route is 
 - GET /projects/{project_id}/model-capabilities: exactly one explicit model_id, current media
   stage, or text slot; returns manifest facts, bounded public controls, source/lifecycle annotations.
   Known blocked current bindings remain inspectable with their original Hash and blocker.
+    Explicit model queries use the project's workspace registry. Current-stage reads add the
+    sanitized execution resolution, connection label and `generation_options`: parameter schema,
+    inherited value/source, editability and fixed/sensitive/deprecated/compiler-unavailable reason.
+    This read-only projection does not establish generation qualification. Saved Shot options may
+    bind `source_contract_hash`; a different resolved manifest blocks preflight with
+    `MODEL_OPTIONS_CONTRACT_CHANGED` until explicit review and Save.
 - POST /projects/{project_id}/shots/{shot_id}/compile-preview: ExecutionPlanBody with a current
   shot version, saved creative inputs only; refuses model-supplied approximation acceptance.
   Reuses the execution-plan compiler service and the Worker's single frozen Plan-to-Intent

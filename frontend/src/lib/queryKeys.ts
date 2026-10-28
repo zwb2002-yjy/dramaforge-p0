@@ -154,6 +154,13 @@ export const queryKeys = {
       ["workspace-model-profile", workspaceId, profileId] as const,
     effectiveBindings: (projectId: string) => ["model-bindings-effective", projectId] as const,
     executionPreflight: (projectId: string) => ["execution-model-preflight", projectId] as const,
+    generationOptionsRoot: (projectId: string) => ["model-generation-options", projectId] as const,
+    generationOptions: (
+      projectId: string,
+      workspaceId: string | null,
+      stage: string,
+      mode: string,
+    ) => ["model-generation-options", projectId, workspaceId, stage, mode] as const,
     projectProfile: (projectId: string) => ["project-model-profile", projectId] as const,
     candidates: (projectId: string, operation: string) =>
       ["model-candidates", projectId, operation] as const,

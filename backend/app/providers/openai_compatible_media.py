@@ -391,6 +391,7 @@ class OpenAICompatibleMediaClient:
 
 
 class OpenAICompatibleImageCompiler:
+    workbench_option_fields = frozenset({"size", "aspect_ratio"})
     # The unified delivery layer hands this provider family stored media
     # bytes (data-URI / b64 branches); the URL branch exists for callers
     # that already hold a public URL, which the Workbench Worker is not.
@@ -479,6 +480,7 @@ class OpenAICompatibleImageCompiler:
 
 
 class OpenAICompatibleVideoCompiler:
+    workbench_option_fields = frozenset({"duration_seconds", "resolution", "aspect_ratio"})
     # Same as the image compiler: every reference-consuming branch of this
     # family (FL2VA / Ref2VA / first-frame I2V) requires stored bytes.
     reference_transport = "bytes"

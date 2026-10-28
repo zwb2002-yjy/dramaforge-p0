@@ -9,6 +9,11 @@ import {
 } from "antd";
 import type { ReactNode } from "react";
 import { Disclosure, Drawer } from "../../components/ui";
+import { executionModelSourceLabel } from "../../lib/modelResolutionLabels";
+import {
+  generationOptionLabel,
+  generationOptionSourceLabel,
+} from "../../lib/generationOptionLabels";
 import type { ShotExecutionPlanRead, ShotExecutionStage } from "./api";
 
 const { Text, Paragraph } = Typography;
@@ -199,6 +204,14 @@ export function ShotPreflightDrawer({
                   <Text type="secondary">无外部参考</Text>
                 ) : (
                   <div>
+                    <ol data-testid="preflight-reference-order">
+                      {references.map((reference, index) => (
+                        <li key={index}>
+                          {index + 1}. {reference.purpose} → {reference.role || "默认槽"} ·{" "}
+                          {reference.delivery}
+                        </li>
+                      ))}
+                    </ol>
                     {exactRefs.length > 0 && (
                       <div>
                         <Text type="success">✓ 完全匹配 ({exactRefs.length})：</Text>
@@ -250,12 +263,31 @@ export function ShotPreflightDrawer({
               <Descriptions.Item label="解析模型">
                 <Text strong>{p?.resolved_model?.resolved_model_id ?? "未解析"}</Text>
               </Descriptions.Item>
+              <Descriptions.Item label="模型来源">
+                {p?.resolved_model ? executionModelSourceLabel(p.resolved_model.source) : "未解析"}
+              </Descriptions.Item>
+              <Descriptions.Item label="精确模型绑定">
+                {p?.resolved_model?.provider_model_binding_id ?? "未解析"}
+              </Descriptions.Item>
+              <Descriptions.Item label="连接修订">
+                {p?.resolved_model?.provider_connection_revision_id ?? "未解析"}
+              </Descriptions.Item>
+              <Descriptions.Item label="模型合同修订">
+                {p?.resolved_model?.model_revision ?? "未解析"}
+              </Descriptions.Item>
               <Descriptions.Item label="生成时长">
                 {stage === "video"
                   ? p?.duration_seconds !== undefined && p?.duration_seconds !== null
                     ? `${p.duration_seconds} 秒`
                     : "未确定（不能提交生成）"
                   : "单帧静态"}
+              </Descriptions.Item>
+              <Descriptions.Item label="参数来源" span={2}>
+                {Object.entries(p?.option_sources ?? {}).map(([name, source]) => (
+                  <div key={name}>
+                    {generationOptionLabel(name)}：{generationOptionSourceLabel(source)}
+                  </div>
+                ))}
               </Descriptions.Item>
               <Descriptions.Item label="有效参数" span={2}>
                 {p?.effective_options && Object.keys(p.effective_options).length > 0 ? (
@@ -285,6 +317,16 @@ export function ShotPreflightDrawer({
               <pre data-testid="preflight-compiler-options" style={{ fontSize: "12px" }}>
                 {JSON.stringify(compilerPreview.effective_options, null, 2)}
               </pre>
+              {(compilerPreview.transformations?.length ?? 0) > 0 && (
+                <div data-testid="preflight-transformations">
+                  <Text>参数转换</Text>
+                  <ul>
+                    {compilerPreview.transformations?.map((value, index) => (
+                      <li key={index}>{value}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {compilerPreview.wire_fingerprint && (
                 <Text code data-testid="preflight-wire-fingerprint">
                   {compilerPreview.wire_fingerprint}

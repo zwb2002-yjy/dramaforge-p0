@@ -15,6 +15,7 @@ import { stageOutcomeUnknown } from "../features/production/sceneRunState";
 import { fetchScenes } from "../features/scenes/api";
 import {
   ApiError,
+  getSelectedWorkspaceId,
   createExperiment,
   decideExperiment,
   fetchExperiments,
@@ -34,6 +35,7 @@ export function ProductionPage({
   initialView?: "experiments";
   initialShotId?: string;
 }) {
+  const workspaceId = getSelectedWorkspaceId();
   const qc = useQueryClient();
   const [view, setView] = useState(initialView ?? "progress");
   const [overrideScope, setOverrideScope] = useState<"scene" | "shot">("scene");
@@ -72,8 +74,8 @@ export function ProductionPage({
     enabled: Boolean(projectId),
   });
   const availableModels = useQuery({
-    queryKey: queryKeys.model.catalog(),
-    queryFn: () => listModels(),
+    queryKey: queryKeys.model.catalog(workspaceId),
+    queryFn: ({ signal }) => listModels(undefined, workspaceId, signal),
   });
   // Eligibility is per stage: an image model has a keyframe binding, a video
   // model has a video binding, and an experiment may branch either stage. Both

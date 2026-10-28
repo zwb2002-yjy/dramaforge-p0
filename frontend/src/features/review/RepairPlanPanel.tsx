@@ -104,9 +104,10 @@ function referencePurposeLabel(purpose: string): string {
 }
 
 function ExecutionPreview({ preview }: { preview: RepairStepPlanRead }) {
+  const workspaceId = getSelectedWorkspaceId();
   const models = useQuery({
-    queryKey: queryKeys.model.catalog(),
-    queryFn: () => listModels(),
+    queryKey: queryKeys.model.catalog(workspaceId),
+    queryFn: ({ signal }) => listModels(undefined, workspaceId, signal),
     retry: false,
   });
   const model = executionModelLabel(

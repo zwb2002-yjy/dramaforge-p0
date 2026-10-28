@@ -15,6 +15,33 @@ from tests.unit.test_workbench_execution import (
 __all__ = ["session"]
 
 
+async def test_saved_shot_contract_change_requires_explicit_review_before_preflight(session):
+    from app.production.workbench_execution import WorkbenchExecutionError
+
+    project, binding, user = await _seed(session, manifest_override=_video_manifest_with_contract())
+    shot, _ = await _seed_video_shot(session, project=project, user=user)
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    request = _input(project_id=project.id, shot_id=shot.id, requested_binding_id=binding.id)
+    original = await service.build_plan(project=project, execution_input=request)
+    settings = {"source_contract_hash": "old-contract", "common_options": {"duration_seconds": 5}}
+    shot.director_state = {"generation_settings": {"video": settings}}
+    await session.flush()
+    with pytest.raises(WorkbenchExecutionError) as error:
+        await service.build_plan(project=project, execution_input=request)
+    assert error.value.details["code"] == "MODEL_OPTIONS_CONTRACT_CHANGED"
+    shot.director_state = {
+        "generation_settings": {
+            "video": {
+                **settings,
+                "source_contract_hash": original.resolved_model.manifest_hash,
+            }
+        }
+    }
+    await session.flush()
+    confirmed = await service.build_plan(project=project, execution_input=request)
+    assert confirmed.effective_options["duration_seconds"] == 5
+
+
 @pytest.mark.parametrize(
     "options,mode,code",
     [

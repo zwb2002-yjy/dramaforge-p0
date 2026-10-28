@@ -9,6 +9,8 @@ import { fetchShotWorkbench } from "./api";
 import type { ShotLite, ShotVoiceSettings as ShotVoiceSettingsValue } from "./api";
 import { ShotVoiceSettings } from "./ShotVoiceSettings";
 import { AssetMentionInput } from "../../components/assets/AssetMentionInput";
+import { ShotGenerationSettings } from "./ShotGenerationSettings";
+import { defaultVideoMode, type ShotVideoMode } from "./shotNextAction";
 
 /** Save control handed to the production block so "保存镜头" can be primary. */
 export type ShotDesignSaveControl = {
@@ -16,6 +18,8 @@ export type ShotDesignSaveControl = {
   saving: boolean;
   promptReferencesReady: { image_keyframe: boolean; video: boolean };
   save: () => void;
+  videoMode: ShotVideoMode;
+  setVideoMode: (mode: ShotVideoMode) => void;
 };
 
 type ShotDesignPanelProps = {
@@ -38,6 +42,8 @@ type ShotDesignPanelProps = {
   production?: (control: ShotDesignSaveControl) => ReactNode;
   promptsOpen?: boolean;
   onPromptsOpenChange?: (open: boolean) => void;
+  onOpenModelSettings?: () => void;
+  lastFrameCount?: number;
 };
 
 export type ShotDesignDraft = {
@@ -144,6 +150,8 @@ export function ShotDesignPanel({
   production,
   promptsOpen,
   onPromptsOpenChange,
+  onOpenModelSettings,
+  lastFrameCount = 0,
 }: ShotDesignPanelProps) {
   // An unsaved draft keeps the server version it was edited from. A background
   // refresh may reveal a conflict, but cannot silently rebase or erase it.
@@ -194,18 +202,23 @@ export function ShotDesignPanel({
     !Array.isArray(generationSettings.video)
       ? (generationSettings.video as Record<string, unknown>)
       : {};
-  const requestedVideoDuration = videoSettings.request_duration_seconds;
-  const updateVideoDuration = (raw: string) => {
+  const videoMode =
+    typeof videoSettings.mode_id === "string"
+      ? ["image_to_video", "explicit_binding"].includes(videoSettings.mode_id)
+        ? "first_frame"
+        : (videoSettings.mode_id as ShotVideoMode)
+      : defaultVideoMode({
+          hasFormalKeyframe: Boolean(shot.formal_keyframe_artifact_id),
+          lastFrameCount,
+        });
+  const updateGenerationSettings = (
+    stage: "image_keyframe" | "video",
+    settings: Record<string, unknown>,
+  ) => {
     if (!parsedDirectorState) return;
-    if (raw !== "" && (!Number.isInteger(Number(raw)) || Number(raw) < 1 || Number(raw) > 30)) {
-      return;
-    }
-    const video = { ...videoSettings };
-    if (raw === "") delete video.request_duration_seconds;
-    else video.request_duration_seconds = Number(raw);
     const state = {
       ...parsedDirectorState,
-      generation_settings: { ...generationSettings, video },
+      generation_settings: { ...generationSettings, [stage]: settings },
     };
     updateDraft({
       ...draft,
@@ -443,24 +456,28 @@ export function ShotDesignPanel({
             />
           </Field>
         </div>
-        <Field>
-          视频生成时长（秒，按模型合同校验）
-          <Input
-            aria-label="视频生成时长（秒）"
-            type="number"
-            min="1"
-            max="30"
-            step="1"
-            placeholder="使用模型默认时长"
-            disabled={!parsedDirectorState}
-            value={typeof requestedVideoDuration === "number" ? requestedVideoDuration : ""}
-            onChange={(event) => updateVideoDuration(event.target.value)}
-          />
-        </Field>
-        <p className="df-shot-hint">
-          镜头时长用于剪辑；生成时长只有模型合同允许时才会生效，保存后可在执行预检中核对。
-        </p>
       </Disclosure>
+
+      {(["image_keyframe", "video"] as const).map((stage) => (
+        <ShotGenerationSettings
+          key={stage}
+          projectId={projectId}
+          stage={stage}
+          mode={stage === "video" ? videoMode : "text_to_image"}
+          settings={
+            stage === "video"
+              ? videoSettings
+              : generationSettings.image_keyframe &&
+                  typeof generationSettings.image_keyframe === "object" &&
+                  !Array.isArray(generationSettings.image_keyframe)
+                ? (generationSettings.image_keyframe as Record<string, unknown>)
+                : {}
+          }
+          disabled={!parsedDirectorState}
+          onChange={(settings) => updateGenerationSettings(stage, settings)}
+          onOpenModelSettings={onOpenModelSettings}
+        />
+      ))}
 
       {message && (
         <p className="df-shot-hint" data-testid="shot-design-message" role="status">
@@ -493,6 +510,9 @@ export function ShotDesignPanel({
             video: videoReferencesReady,
           },
           save: () => save.mutate(),
+          videoMode,
+          setVideoMode: (mode) =>
+            updateGenerationSettings("video", { ...videoSettings, mode_id: mode }),
         })
       ) : (
         // Standalone use (outside the inspector) keeps its own save row.

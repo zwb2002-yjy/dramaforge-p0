@@ -156,6 +156,9 @@ export function SceneWorkspace({
       queryClient.invalidateQueries({
         queryKey: queryKeys.model.effectiveBindings(projectId),
       }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.model.generationOptionsRoot(projectId),
+      }),
     ]);
   }, [projectId, queryClient, workspace]);
 

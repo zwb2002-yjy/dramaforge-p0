@@ -115,7 +115,7 @@ export function ShotInspector({
     );
     if (focus === "prompts") setPromptsOpen(true);
     target?.scrollIntoView?.({ block: "nearest" });
-  }, [focusRequest, shot?.id]);
+  }, [focusRequest, shot]);
 
   if (!shot) {
     return (
@@ -165,6 +165,8 @@ export function ShotInspector({
         applyDraft={suggestionDraft}
         onSaved={handleSaved}
         onDirtyChange={onDesignDirtyChange}
+        onOpenModelSettings={onOpenModelSettings}
+        lastFrameCount={references.filter((reference) => reference.purpose === "last_frame").length}
         references={
           <AssetReferencePicker
             key={`references:${shot.id}`}
@@ -185,7 +187,9 @@ export function ShotInspector({
             references={references}
             referencesReady={referencesReady}
             promptReferencesReady={control.promptReferencesReady}
-            dirty={designDirty}
+            dirty={control.dirty}
+            configuredVideoMode={control.videoMode}
+            onVideoModeChange={control.setVideoMode}
             trace={trace}
             candidates={candidates}
             onExecuted={onExecuted}

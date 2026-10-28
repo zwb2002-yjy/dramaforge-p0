@@ -59,18 +59,19 @@ export function OptionField({
   const allowed = allowedValuesFor(spec, keyName, parameter, values);
   const hint = exclusive ? "与已选项互斥" : undefined;
 
-  const baseClass = "w-full rounded border border-gray-300 px-2 py-1 text-sm disabled:opacity-50";
+  const baseClass = "df-model-option";
   const labelNode = (
-    <span className="mb-1 block text-xs font-medium text-gray-700">
+    <span className="df-shot-label">
       {label}
-      {hint ? <span className="ml-2 text-amber-600">{hint}</span> : null}
+      {hint ? <span className="df-shot-hint">{hint}</span> : null}
     </span>
   );
 
   if (component === "switch") {
     return (
-      <Field className="flex items-center gap-2 text-sm">
+      <Field>
         <Checkbox
+          aria-label={label}
           type="checkbox"
           checked={Boolean(value)}
           disabled={effectiveDisabled}
@@ -104,12 +105,20 @@ export function OptionField({
       <div>
         {labelNode}
         <Select
-          value={String(value ?? "")}
+          aria-label={label}
+          value={value == null ? "__inherit__" : String(value)}
           disabled={effectiveDisabled}
-          onChange={(event) => onChange(keyName, event)}
+          onChange={(selected) =>
+            onChange(
+              keyName,
+              selected === "__inherit__"
+                ? undefined
+                : options.find((option) => String(option) === selected),
+            )
+          }
           className={baseClass}
         >
-          <option value="">（默认）</option>
+          <option value="__inherit__">（继承默认）</option>
           {options.map((option) => (
             <option key={String(option)} value={String(option)}>
               {String(option)}
@@ -124,6 +133,7 @@ export function OptionField({
       <div>
         {labelNode}
         <Textarea
+          aria-label={label}
           value={String(value ?? "")}
           disabled={effectiveDisabled}
           onChange={(event) => onChange(keyName, event.target.value)}
@@ -138,10 +148,16 @@ export function OptionField({
       <div>
         {labelNode}
         <Input
+          aria-label={label}
           type="number"
           value={typeof value === "number" ? value : ""}
           disabled={effectiveDisabled}
-          onChange={(event) => onChange(keyName, Number(event.target.value))}
+          min={parameter.minimum ?? undefined}
+          max={parameter.maximum ?? undefined}
+          step={parameter.type === "integer" ? 1 : "any"}
+          onChange={(event) =>
+            onChange(keyName, event.target.value === "" ? undefined : Number(event.target.value))
+          }
           className={baseClass}
         />
       </div>
@@ -151,6 +167,7 @@ export function OptionField({
     <div>
       {labelNode}
       <Input
+        aria-label={label}
         type="text"
         value={String(value ?? "")}
         disabled={effectiveDisabled}
@@ -167,6 +184,7 @@ export interface DynamicCapabilityFormProps {
   onChange: (key: string, value: OptionValue) => void;
   /** Keys to render in the main form (defaults to common_options). */
   optionKeys?: string[];
+  disabled?: boolean;
 }
 
 export function DynamicCapabilityForm({
@@ -174,6 +192,7 @@ export function DynamicCapabilityForm({
   values,
   onChange,
   optionKeys,
+  disabled,
 }: DynamicCapabilityFormProps) {
   const commonOptions = spec.common_options ?? {};
   const keys = optionKeys ?? Object.keys(commonOptions);
@@ -192,6 +211,7 @@ export function DynamicCapabilityForm({
             onChange={onChange}
             values={values}
             spec={spec}
+            disabled={disabled}
           />
         );
       })}

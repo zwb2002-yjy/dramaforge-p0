@@ -43,8 +43,8 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
   });
 
   const models = useQuery({
-    queryKey: queryKeys.model.catalog(),
-    queryFn: () => listModels(),
+    queryKey: queryKeys.model.catalog(workspaceId),
+    queryFn: ({ signal }) => listModels(undefined, workspaceId, signal),
     enabled: Boolean(workspaceId),
   });
 

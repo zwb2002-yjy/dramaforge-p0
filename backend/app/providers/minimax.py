@@ -458,6 +458,7 @@ class MiniMaxHubClient:
 
 
 class MiniMaxImageCompiler:
+    workbench_option_fields = frozenset({"aspect_ratio"})
     reference_transport = "public_url"
 
     def validate(self, intent: Any, model: Any) -> None:
@@ -635,6 +636,7 @@ class MiniMaxImageCompiler:
 
 
 class MiniMaxVideoCompiler:
+    workbench_option_fields = frozenset({"duration_seconds", "resolution", "aspect_ratio"})
     reference_transport = "public_url"
 
     def validate(self, intent: Any, model: Any) -> None:

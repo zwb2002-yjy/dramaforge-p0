@@ -77,6 +77,10 @@ Connection/Credential revision、严格 Compiler 和 ExecutionIdentitySnapshot�
   必须显式提供、来自合同合法默认/固定值，或来自已实施的旧 Agnes 固定 5 秒合同；
   其它协议不再继承通用 5 秒猜测。历史项目绑定来源标为 `legacy_project_binding`，
   旧冻结快照的来源值保持原样。
+- 当前参数可写集合由具体 Compiler 的 `workbench_option_fields` 与合同声明共同限定。
+  能力查询返回同一集合的只读投影，固定值和未实施字段不可编辑；已存镜头设置的
+  `source_contract_hash` 若与当前解析合同不符，预检以 `MODEL_OPTIONS_CONTRACT_CHANGED`
+  阻断，直到用户核对后显式 Save。没有第二套可变模型能力或参数存储。
 - Plan 的 `ui_mode_id` 表示用户输入模式，`input_contract_id` 表示匹配的 typed 合同；
   `mode_id` 保留现有已解析模式/合同标识，供冻结引用合同使用。只有首帧与首尾帧模式要求
   本 Shot Formal 首帧；文本、尾帧、全能参考按自己的有序角色与合同校验。未知模式、

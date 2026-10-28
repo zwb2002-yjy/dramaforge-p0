@@ -54,10 +54,6 @@ from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.compile_preview import CompilePreview, PreviewReference, preview_compile
 from app.providers.effective_options import resolve_generation_options
 from app.providers.errors import ProviderError
-from app.providers.intents import (
-    IMAGE_INTENT_OPTION_FIELDS,
-    VIDEO_INTENT_OPTION_FIELDS,
-)
 from app.providers.manifest import (
     InputModeSpec,
     ModelCapabilityManifest,
@@ -69,6 +65,7 @@ from app.providers.model_resolution import ExecutionModelResolver
 from app.providers.models import ProviderConnection, ProviderConnectionRevision
 from app.providers.validator import validate_parameter
 from app.providers.workbench_contract import (
+    implemented_workbench_options,
     select_workbench_contract,
     validate_mode_roles,
     workbench_ui_mode,
@@ -1394,6 +1391,13 @@ class WorkbenchExecutionService:
 
         gen_settings = _mapping(_mapping(shot.director_state).get("generation_settings"))
         stage_settings = _mapping(gen_settings.get(execution_input.stage))
+        source_contract_hash = stage_settings.get("source_contract_hash")
+        if source_contract_hash is not None and source_contract_hash != resolution.manifest_hash:
+            raise WorkbenchExecutionError(
+                "Saved Shot options belong to a different model contract; "
+                "review and save them again",
+                details={"code": "MODEL_OPTIONS_CONTRACT_CHANGED"},
+            )
 
         # Collect all declared options from contract / mode_spec / option_schema
         declared_all_options: dict[str, ParameterSpec] = {}
@@ -1438,9 +1442,7 @@ class WorkbenchExecutionService:
                 profile_source=resolution.source,
                 common_options=user_common_options,
                 native_options=user_native_options,
-                allowed_options=VIDEO_INTENT_OPTION_FIELDS
-                if execution_input.stage == "video"
-                else IMAGE_INTENT_OPTION_FIELDS,
+                allowed_options=implemented_workbench_options(capability_manifest),
             )
         except ValidationAppError as exc:
             raise WorkbenchExecutionError(str(exc), details=exc.details) from exc

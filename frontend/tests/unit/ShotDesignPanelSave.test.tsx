@@ -84,6 +84,60 @@ describe("ShotDesignPanel save feedback", () => {
     expect(screen.queryByTestId("shot-design-saved-state")).not.toBeInTheDocument();
   });
 
+  it("saves model options through the design gate and reloads the saved Shot values", async () => {
+    let savedState: Record<string, unknown> | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.includes("model-capabilities"))
+        return json({
+          report: { model_id: "test/video", manifest_hash: "a".repeat(64) },
+          generation_options: {
+            duration_seconds: {
+              parameter: {
+                type: "integer",
+                enum: [5, 8],
+                required: false,
+                sensitive: false,
+                deprecated: false,
+              },
+              editable: true,
+              inherited_value: 5,
+              inherited_source: "contract_default",
+            },
+          },
+        });
+      if (init?.method === "PATCH") {
+        expect(url).toContain(`/shots/${SHOT.id}/design`);
+        const body = JSON.parse(String(init.body));
+        expect(body.expected_version).toBe(4);
+        savedState = body.director_state;
+        return json({ ...SHOT, director_state: savedState, version: 5 });
+      }
+      return json({});
+    });
+    const { rerenderShot } = renderPanel();
+    fireEvent.click(screen.getByText("视频生成参数"));
+    const duration = await screen.findByLabelText("视频生成时长（秒）");
+    await selectValue(duration, "8");
+    expect(screen.getByTestId("shot-design-dirty")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("save-shot-design"));
+    await waitFor(() =>
+      expect(savedState).toMatchObject({
+        framing: "medium",
+        generation_settings: { video: { common_options: { duration_seconds: 8 } } },
+      }),
+    );
+    rerenderShot({ ...SHOT, director_state: savedState!, version: 5 });
+    await waitFor(() =>
+      expect(screen.getByTestId("shot-design-saved-state")).toHaveTextContent("已保存 v5"),
+    );
+    expect(screen.getByLabelText("视频生成时长（秒）").closest(".ant-select")).toHaveAttribute(
+      "data-selected-value",
+      "8",
+    );
+  });
+
   it("preserves dirty canvas and prompt fields when the same Shot refreshes", async () => {
     const writes: Array<Record<string, unknown>> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {

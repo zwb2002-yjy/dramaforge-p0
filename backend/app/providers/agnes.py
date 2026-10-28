@@ -670,6 +670,8 @@ class AgnesImageCompiler:
     """Validates an image intent against the catalog manifest and compiles the
     wire request using the same body builder as :class:`AgnesHubClient`."""
 
+    workbench_option_fields = frozenset({"size", "aspect_ratio"})
+
     reference_transport = "bytes"
 
     def reference_transport_for(self, model: Any) -> str:
@@ -940,6 +942,8 @@ class AgnesImageCompiler:
 class AgnesVideoCompiler:
     """Validates a video intent against the catalog manifest and compiles the
     wire request (first-frame I2V) using the same body builder as the HubClient."""
+
+    workbench_option_fields = frozenset({"duration_seconds", "resolution", "aspect_ratio"})
 
     reference_transport = "bytes"
 

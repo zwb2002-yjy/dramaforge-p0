@@ -18,6 +18,65 @@ from tests.unit.test_workbench_execution import (
 __all__ = ["session"]
 
 
+async def test_explicit_model_query_uses_only_the_projects_workspace_binding_registry(session):
+    project, binding, owner = await _seed(session)
+    _other_project, other_binding, _ = await _seed(session)
+    await session.commit()
+    service = ModelInspectionService(session, actor=owner)
+    result = await service.get_model_capabilities(
+        project_id=project.id,
+        model_id=f"binding:{binding.id}",
+    )
+    assert result.report.model_id == f"binding:{binding.id}"
+    with pytest.raises(NotFoundError):
+        await service.get_model_capabilities(
+            project_id=project.id,
+            model_id=f"binding:{other_binding.id}",
+        )
+
+
+async def test_generation_options_expose_profile_defaults_and_compiler_owned_editability(session):
+    from app.providers.model_profiles.orm import ProductionModelProfile
+    from app.providers.model_profiles.slots import ModelSlot
+    from tests.unit.test_workbench_execution import _video_manifest_with_contract
+
+    project, binding, owner = await _seed(
+        session, manifest_override=_video_manifest_with_contract()
+    )
+    session.add(
+        ProductionModelProfile(
+            workspace_id=project.workspace_id,
+            project_id=project.id,
+            name="model defaults",
+            version=1,
+            is_default=False,
+            bindings={
+                ModelSlot.VIDEO_SHOT.value: {
+                    "slot": ModelSlot.VIDEO_SHOT.value,
+                    "model_id": f"binding:{binding.id}",
+                    "native_options": {"resolution": "720p"},
+                    "enabled": True,
+                }
+            },
+            created_by=owner.id,
+            updated_by=owner.id,
+        )
+    )
+    await session.commit()
+    result = await ModelInspectionService(session, actor=owner).get_model_capabilities(
+        project_id=project.id,
+        stage="video",
+        mode_id="first_frame",
+    )
+    assert result.resolution.source == "project_profile"
+    assert result.connection_label == "Agnes"
+    assert result.generation_options["resolution"].editable
+    assert result.generation_options["resolution"].inherited_value == "720p"
+    assert result.generation_options["resolution"].inherited_source == "project_profile"
+    assert not result.generation_options["fps"].editable
+    assert result.generation_options["fps"].reason == "compiler_unavailable"
+
+
 @pytest.mark.parametrize("mode_id", ["explicit_binding", "text_to_image"])
 async def test_preview_is_authorized_deterministic_and_read_only(
     session: AsyncSession, mode_id: str

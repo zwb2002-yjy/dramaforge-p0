@@ -32,6 +32,14 @@ const MODEL_BLOCKER_LABELS: Record<string, string> = {
   PROVIDER_CONNECTION_REVISION_MISSING: "供应商连接缺少不可变执行修订",
   PROVIDER_CREDENTIAL_REVISION_MISSING: "供应商连接引用的凭据修订不可用",
   REQUESTED_MODEL_ID_MISMATCH: "本次指定模型与绑定不一致",
+  MODEL_OPTIONS_CONTRACT_CHANGED: "模型合同已变化，请核对镜头参数后保存并重新预检",
+  MODEL_OPTION_NOT_IMPLEMENTED: "当前编译器尚未开放所设置的参数",
+  MODEL_OPTION_NOT_COMPILED: "所设置的参数未进入实际请求，已阻止提交",
+  MODEL_OPTION_INVALID: "镜头或模型方案中的参数不符合当前合同",
+  MODEL_OPTION_UNDECLARED: "当前模型未声明所设置的参数",
+  MODEL_OPTION_CONFLICT: "同一参数存在相互冲突的设置",
+  MODEL_DURATION_REQUIRED: "请设置当前模型支持的视频生成时长",
+  MODEL_DURATION_UNSUPPORTED: "当前模型不支持所设置的视频生成时长",
 };
 
 export function executionModelSourceLabel(source: string): string {

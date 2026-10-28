@@ -14,6 +14,23 @@ export type ShotExecutionPlanRead = components["schemas"]["ExecutionPlanRead"];
 export type FormalKeyframeRead = components["schemas"]["FormalKeyframeRead"];
 export type FormalVideoRead = components["schemas"]["FormalVideoRead"];
 export type DirectorDelegationRead = components["schemas"]["DirectorTurnRead"];
+export type ShotModelCapabilitiesRead = components["schemas"]["ModelQueryRead"];
+
+/** Workspace-scoped, read-only model/parameter inspection; never creates media. */
+export function fetchShotModelCapabilities(
+  projectId: string,
+  stage: ShotExecutionStage,
+  modeId: string,
+  workspaceId: string | null,
+  signal?: AbortSignal,
+): Promise<ShotModelCapabilitiesRead> {
+  const query = new URLSearchParams({ stage, mode_id: modeId });
+  return apiGet<ShotModelCapabilitiesRead>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/model-capabilities?${query}`,
+    workspaceId,
+    signal,
+  );
+}
 
 export type ShotExecutionInput = Omit<
   components["schemas"]["ExecutionPlanBody"],

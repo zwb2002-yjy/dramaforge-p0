@@ -28,6 +28,69 @@ async function generateAfterWireConfirmation(
   await expect.poll(() => productionWrites(state).length).toBe(writesBeforeConfirmation + 1);
 }
 
+test("Shot model options persist through Save, refresh, inspect and one confirmed command", async ({
+  page,
+}) => {
+  const state = await installShotJourneyMock(page);
+  state.shots[0].formal_keyframe_artifact_id = "formal-test-frame";
+  await page.route("**/model-capabilities?*", (route) =>
+    route.fulfill({
+      json: {
+        report: {
+          model_id: "provider/model-b",
+          model_revision: "r1",
+          manifest_hash: "a".repeat(64),
+        },
+        connection_label: "测试连接",
+        resolution: { invoke_model_value: "model-b", source: "project_profile" },
+        generation_options: {
+          duration_seconds: {
+            parameter: { type: "integer", enum: [5, 8] },
+            editable: true,
+            inherited_value: 5,
+            inherited_source: "contract_default",
+          },
+        },
+      },
+    }),
+  );
+  await page.goto(`${sceneUrl}?shotId=${JOURNEY_SHOT_IDS[0]}`);
+  const options = page.getByTestId("shot-generation-settings-video");
+  await options.getByRole("button", { name: "视频生成参数", exact: true }).click();
+  await expect(options).toContainText("model-b · 测试连接");
+  await options.getByRole("combobox", { name: "视频生成时长（秒）" }).click();
+  await page.getByRole("option", { name: "8", exact: true }).click();
+  expect(productionWrites(state)).toEqual([]);
+  await page.getByTestId("shot-primary-save").click();
+  await expect(page.getByTestId("shot-design-saved-state")).toBeVisible();
+  expect(state.shots[0].director_state).toMatchObject({
+    generation_settings: {
+      video: {
+        source_contract_hash: "a".repeat(64),
+        common_options: { duration_seconds: 8 },
+      },
+    },
+  });
+  await page.reload();
+  await options.getByRole("button", { name: "视频生成参数", exact: true }).click();
+  await expect(options.locator('.ant-select[data-selected-value="8"]')).toBeVisible();
+  await page.getByTestId("inspect-shot-plan").click();
+  const drawer = page.getByTestId("shot-preflight-drawer");
+  await expect(drawer.getByTestId("preflight-compiler-options")).toContainText(
+    '"duration_seconds": 8',
+  );
+  await drawer.getByRole("button", { name: "查看完整脱敏请求结构", exact: false }).click();
+  await expect(drawer.getByTestId("preflight-redacted-wire")).toContainText('"duration": 8');
+  expect(productionWrites(state)).toEqual([]);
+  await drawer.getByTestId("confirm-generate-button").click();
+  await expect.poll(() => productionWrites(state).length).toBe(1);
+  const command = productionWrites(state)[0];
+  expect(state.plans.get(String(command.body.plan_fingerprint))?.options).toEqual({
+    duration_seconds: 8,
+  });
+  expect(command.key).toBeTruthy();
+});
+
 test("an unavailable model precheck explains the blocker and opens settings without executing", async ({
   page,
 }) => {

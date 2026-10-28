@@ -72,6 +72,8 @@ type ShotProductionActionsProps = {
   onReviewCandidates?: () => void;
   /** Open model settings in a drawer without leaving the canvas. */
   onOpenModelSettings?: () => void;
+  configuredVideoMode?: ShotVideoMode;
+  onVideoModeChange?: (mode: ShotVideoMode) => void;
 };
 
 type ActionFeedback = {
@@ -193,7 +195,10 @@ export function ShotProductionActions({
   candidates = [],
   onReviewCandidates,
   onOpenModelSettings,
+  configuredVideoMode,
+  onVideoModeChange,
 }: ShotProductionActionsProps) {
+  const workspaceId = getSelectedWorkspaceId();
   const queryClient = useQueryClient();
   const savedBindings = useQuery({
     queryKey: queryKeys.asset.shotReferences(projectId, shot.id),
@@ -219,6 +224,7 @@ export function ShotProductionActions({
   // The mode follows saved facts until the creator picks one explicitly.
   const [explicitMode, setExplicitMode] = useState<ShotVideoMode | null>(null);
   const videoMode =
+    configuredVideoMode ??
     explicitMode ??
     defaultVideoMode({
       hasFormalKeyframe: Boolean(shot.formal_keyframe_artifact_id),
@@ -257,8 +263,8 @@ export function ShotProductionActions({
   // Display names for execution models come from the backend catalogue; the raw
   // `provider/model` id is contract data and never rendered on this surface.
   const models = useQuery({
-    queryKey: queryKeys.model.catalog(),
-    queryFn: () => listModels(),
+    queryKey: queryKeys.model.catalog(workspaceId),
+    queryFn: ({ signal }) => listModels(undefined, workspaceId, signal),
     enabled: Boolean(projectId),
     retry: false,
   });
@@ -1237,7 +1243,11 @@ export function ShotProductionActions({
             aria-label="视频方式"
             value={videoMode}
             disabled={Boolean(videoStatus) || videoOutcomeUnknown || produce.isPending}
-            onChange={(event) => setExplicitMode(event as ShotVideoMode)}
+            onChange={(event) => {
+              const mode = event as ShotVideoMode;
+              if (onVideoModeChange) onVideoModeChange(mode);
+              else setExplicitMode(mode);
+            }}
           >
             {(Object.keys(VIDEO_MODE_LABEL) as ShotVideoMode[]).map((mode) => (
               <option key={mode} value={mode}>

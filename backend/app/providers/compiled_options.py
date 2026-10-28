@@ -16,6 +16,7 @@ _COMPILER_AUDIT_OPTION_FIELDS = frozenset(
 _COMPILER_AUDIT_REASON_CODES = frozenset(
     {
         "provider_inherits_aspect_ratio_from_first_frame",
+        "provider_inherits_aspect_ratio_from_frame",
         "provider_applies_documented_default",
         "frozen_manifest_native_size_tier",
     }

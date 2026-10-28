@@ -559,6 +559,8 @@ class ArkImageCompiler:
     """Validates an image intent against the Ark catalog manifest and compiles
     the wire request (Seedream) using the same builder as :class:`ArkHubClient`."""
 
+    workbench_option_fields = frozenset({"size", "aspect_ratio", "seed"})
+
     reference_transport = "public_url"
 
     def validate(self, intent: Any, model: Any) -> None:
@@ -767,6 +769,10 @@ class ArkVideoCompiler:
     the Seedance ``content[]`` request. Frozen revisions retain the original
     first-frame-only wire shape; new contracts require explicit product policy.
     """
+
+    workbench_option_fields = frozenset(
+        {"duration_seconds", "resolution", "aspect_ratio", "generate_audio", "seed"}
+    )
 
     reference_transport = "public_url"
 
