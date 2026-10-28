@@ -22,12 +22,12 @@ from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.director.proposal_models import DirectorProposalItem
 from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun
-from app.production.golden_project import seed_golden_project
 from app.production.models import ExperimentBranch
 from app.shared.db import set_rls_context
 from pg_support import available, database_url
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from tests.golden_project import seed_golden_project
 
 
 def _postgres_is_available() -> bool:

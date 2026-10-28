@@ -309,7 +309,6 @@ async def set_shot_formal_keyframe(
         shot_id=shot_id,
         artifact_id=body.artifact_id,
         expected_shot_version=body.expected_shot_version,
-        require_review_approval=True,
     )
     await append_production_notice(
         session,
@@ -373,7 +372,6 @@ async def set_shot_formal_video(
         shot_id=shot_id,
         artifact_id=body.artifact_id,
         expected_shot_version=body.expected_shot_version,
-        require_review_approval=True,
     )
     await append_production_notice(
         session,

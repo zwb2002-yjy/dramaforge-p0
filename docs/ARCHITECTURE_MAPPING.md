@@ -83,8 +83,9 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 9. **shared 组合根**：shared/db 的事务上下文、shared/rls_scopes 的持久归属发现与
    model_registry 的全图注册是组合根性质；拆分职责没有消除 scope discovery 的域模型
    依赖，不能因为 shared 理想上是叶子层，就删除这些有消费者的基础设施。
-10. **golden_project 是证明/测试种子**：迁出前要核对证明脚本，不因位置看起来旧就
-    删除测试资产。
+10. **golden_project 是证明/测试种子**：已核对仅有两个 PG 测试消费者，迁至
+    `backend/tests/golden_project.py`，测试资产保留。测试种子显式建立审片事实再通过正式门，
+    不再从生产模块提供绕门 fixture；两条 production → director 豁免随迁移移除。
 11. **实验分支身份**：当前 DTO/ORM/计划统一为 `experiment_branch_id`，不保留旧字段别名。
 
 收敛优先级（Owner 已定）：问题 2 → 问题 3（text_transport 端口化）→ 问题 9（shared

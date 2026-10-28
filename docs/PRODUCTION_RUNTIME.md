@@ -164,6 +164,10 @@ Artifact 内容端点对整文件及大 Range 使用 64 KiB 分块流式读取�
   `review_allowed` 驱动，不由前端根据任务文案猜测。
 - `demo_confirmed` 表示只确认演示链路，保留为审片事实但永不满足 Formal admission；
   只有同一 Artifact / evidence 的 `approved` 决定可以放行。
+- 内部与 HTTP Formal 写入共用强制 admission，不再提供跳过审片的布尔参数。
+  新的人工作出判定必须引用对应类型、已完成的 Review Run 和仍可用的证据；
+  普通媒体 Run、运行中 Review、已删除证据不能产生新的批准。历史已记录的判定保留。
+  Golden/离线测试种子位于 `backend/tests/`，显式建立精确证据和测试批准，仍通过同一 Formal 门。
 - 视频证据可显式强制重建 review run，以重新抽取首 / 中 / 尾帧；旧证据不被覆盖。
 - 实验分支可冻结各自的 `prompt_override`。多个候选若内容哈希相同会显式标记重复，
   不把同图冒充成可比较的不同结果。

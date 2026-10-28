@@ -184,6 +184,49 @@ async def _count(session: AsyncSession, model: type) -> int:
     return int((await session.execute(select(func.count()).select_from(model))).scalar_one())
 
 
+@pytest.mark.parametrize("invalid", ["media_node", "running", "deleted_evidence"])
+async def test_new_decision_requires_completed_review_and_available_evidence(session, invalid):
+    from datetime import UTC, datetime
+
+    user, project, shot = await _env(session)
+    artifact = await _artifact(session, project_id=project.id)
+    evidence = await _artifact(session, project_id=project.id, hash_seed="b")
+    run = await _review_run(
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        created_by=user.id,
+        upstream_artifact_id=artifact.id,
+        review_artifact_id=evidence.id,
+    )
+    if invalid == "media_node":
+        node = await session.get(GraphNode, run.graph_node_id)
+        node.node_key = "keyframe"
+    elif invalid == "running":
+        run.status = "running"
+    else:
+        evidence.deleted_at = datetime.now(UTC)
+    await session.flush()
+    with pytest.raises(ValidationAppError) as blocked:
+        await record_human_decision(
+            session,
+            project_id=project.id,
+            shot_id=shot.id,
+            artifact_id=artifact.id,
+            review_node_run_id=run.id,
+            review_kind="identity",
+            decision="approved",
+            reason="Review this candidate",
+            actor_id=user.id,
+            shot_version=shot.version,
+            request_key=uuid4().hex,
+        )
+    assert blocked.value.details["code"] == (
+        "REVIEW_EVIDENCE_MISSING" if invalid == "deleted_evidence" else "REVIEW_RUN_INVALID"
+    )
+    assert await _count(session, HumanReviewDecision) == 0
+
+
 @pytest.mark.asyncio
 async def test_a_machine_needs_human_never_admits_production(session: AsyncSession) -> None:
     user, project, shot = await _env(session)
@@ -504,13 +547,15 @@ async def test_decision_submission_is_retry_safe_and_requires_a_reason(
 
     with pytest.raises(ConflictError) as reused:
         await record_human_decision(
-            session, **{**payload, "decision": "rejected", "reason": "改主意了。"}  # type: ignore[arg-type]
+            session,
+            **{**payload, "decision": "rejected", "reason": "改主意了。"},  # type: ignore[arg-type]
         )
     assert reused.value.details.get("code") == "REVIEW_DECISION_REQUEST_REUSED"
 
     with pytest.raises(ValidationAppError) as blank:
         await record_human_decision(
-            session, **{**payload, "request_key": "review:blank", "reason": "   "}  # type: ignore[arg-type]
+            session,
+            **{**payload, "request_key": "review:blank", "reason": "   "},  # type: ignore[arg-type]
         )
     assert blank.value.details.get("code") == "REVIEW_REASON_REQUIRED"
 
@@ -549,12 +594,16 @@ async def test_identical_decision_under_a_new_key_does_not_duplicate_history(
         "shot_version": shot.version,
     }
     first = await record_human_decision(
-        session, **payload, request_key="review:page-load-one"  # type: ignore[arg-type]
+        session,
+        **payload,
+        request_key="review:page-load-one",  # type: ignore[arg-type]
     )
     await session.flush()
     # Same judgement, same evidence, but the client reloaded and minted a new key.
     again = await record_human_decision(
-        session, **payload, request_key="review:page-load-two"  # type: ignore[arg-type]
+        session,
+        **payload,
+        request_key="review:page-load-two",  # type: ignore[arg-type]
     )
     await session.flush()
 
@@ -595,17 +644,29 @@ async def test_decision_rejects_a_review_run_for_another_shot_or_artifact(
     artifact_b = await _artifact(session, project_id=project.id, hash_seed="target-b")
     evidence = await _artifact(session, project_id=project.id, hash_seed="evidence")
     run_a = await _review_run(
-        session, project_id=project.id, shot_id=shot.id, created_by=user.id,
-        upstream_artifact_id=artifact_a.id, review_artifact_id=evidence.id,
+        session,
+        project_id=project.id,
+        shot_id=shot.id,
+        created_by=user.id,
+        upstream_artifact_id=artifact_a.id,
+        review_artifact_id=evidence.id,
     )
     with pytest.raises(ValidationAppError) as mismatch:
         await record_human_decision(
-            session, project_id=project.id, shot_id=shot.id,
-            artifact_id=artifact_b.id, review_node_run_id=run_a.id,
-            review_kind="identity", decision="approved", reason="错误目标",
-            actor_id=user.id, shot_version=shot.version, request_key="review:mismatch",
+            session,
+            project_id=project.id,
+            shot_id=shot.id,
+            artifact_id=artifact_b.id,
+            review_node_run_id=run_a.id,
+            review_kind="identity",
+            decision="approved",
+            reason="错误目标",
+            actor_id=user.id,
+            shot_version=shot.version,
+            request_key="review:mismatch",
         )
     assert mismatch.value.details.get("code") == "REVIEW_TARGET_MISMATCH"
+
 
 @pytest.mark.asyncio
 async def test_admission_rejects_an_unknown_stage(session: AsyncSession) -> None:

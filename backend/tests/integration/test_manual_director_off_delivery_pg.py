@@ -348,6 +348,9 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
                 artifact_type="image",
                 mime_type="image/png",
             )
+            from tests.formal_fixture import approve_candidate
+
+            await approve_candidate(session, shot=shot, artifact=keyframe, actor_id=actor.id)
             await set_formal_keyframe(
                 session,
                 project_id=project.id,
@@ -366,6 +369,9 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
                 data=video_bytes,
                 artifact_type="video",
                 mime_type="video/mp4",
+            )
+            await approve_candidate(
+                session, shot=shot, artifact=video, actor_id=actor.id, video=True
             )
             await set_formal_video(
                 session,
@@ -492,6 +498,9 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
                 project_id=project.id,
                 graph_version_id=graph.current_version_id,
                 graph_node_id=by_key["video_drift_review"].id,
+                attempt_no=1 + int(await session.scalar(select(func.max(NodeRun.attempt_no)).where(
+                    NodeRun.graph_node_id == by_key["video_drift_review"].id,
+                )) or 0),
                 idempotency_key=f"manual-video-drift-review:{uuid4().hex}",
                 input_hash=uuid4().hex * 2,
                 input_snapshot={
@@ -684,7 +693,6 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
                 shot_id=shot.id,
                 artifact_id=repaired_artifact.id,
                 expected_shot_version=shot.version,
-                require_review_approval=True,
             )
             # The explicit Review + Formal gates link the candidate back to its repair step.
             adopted = await record_repair_adoption(

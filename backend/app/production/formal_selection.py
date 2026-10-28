@@ -321,7 +321,6 @@ async def set_formal_keyframe(
     shot_id: UUID,
     artifact_id: UUID,
     expected_shot_version: int | None = None,
-    require_review_approval: bool = False,
 ) -> Shot:
     """Validate and set ``Shot.formal_keyframe_artifact_id`` (03 §38)."""
     shot = await session.scalar(
@@ -348,14 +347,13 @@ async def set_formal_keyframe(
             "artifact is not a keyframe result of this shot",
             details={"code": "NOT_KEYFRAME_CANDIDATE"},
         )
-    if require_review_approval:
-        await require_stage_admission(
-            session,
-            project_id=project_id,
-            shot_id=shot_id,
-            artifact_id=artifact_id,
-            stage="formal_keyframe",
-        )
+    await require_stage_admission(
+        session,
+        project_id=project_id,
+        shot_id=shot_id,
+        artifact_id=artifact_id,
+        stage="formal_keyframe",
+    )
     shot.formal_keyframe_artifact_id = artifact_id
     shot.version = (shot.version or 1) + 1
     return shot
@@ -399,7 +397,6 @@ async def set_formal_video(
     shot_id: UUID,
     artifact_id: UUID,
     expected_shot_version: int | None = None,
-    require_review_approval: bool = False,
 ) -> Shot:
     """Validate and set ``Shot.formal_video_artifact_id`` (03 §39)."""
     shot = await session.scalar(
@@ -429,14 +426,13 @@ async def set_formal_video(
             "artifact is not a video result of this shot",
             details={"code": "NOT_VIDEO_CANDIDATE"},
         )
-    if require_review_approval:
-        await require_stage_admission(
-            session,
-            project_id=project_id,
-            shot_id=shot_id,
-            artifact_id=artifact_id,
-            stage="formal_video",
-        )
+    await require_stage_admission(
+        session,
+        project_id=project_id,
+        shot_id=shot_id,
+        artifact_id=artifact_id,
+        stage="formal_video",
+    )
     shot.formal_video_artifact_id = artifact_id
     shot.version = (shot.version or 1) + 1
     return shot

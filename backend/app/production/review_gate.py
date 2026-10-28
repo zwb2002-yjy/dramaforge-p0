@@ -420,6 +420,15 @@ def _evaluate_admission(
         return StageAdmission(allowed=False, review_kind=review_kind, requirements=[requirement])
 
     if decision is not None and decision.decision == "approved":
+        if (
+            evidence is None
+            or evidence.deleted_at is not None
+            or evidence.storage_state not in {"available", "stored"}
+        ):
+            requirement = _with_reason(requirement, "REVIEW_EVIDENCE_MISSING")
+            return StageAdmission(
+                allowed=False, review_kind=review_kind, requirements=[requirement]
+            )
         # Re-derive the subject from today's facts: the media bytes, the review
         # kind and the evidence artifact the decision pointed at. A changed
         # content hash means the person approved something else.
@@ -550,6 +559,17 @@ async def record_human_decision(
         raise ValidationAppError(
             "review run not found in project", details={"code": "REVIEW_RUN_NOT_FOUND"}
         )
+    review_node = await session.get(GraphNode, review_run.graph_node_id)
+    if (
+        review_node is None
+        or review_node.node_key != REVIEW_NODE_KEYS[review_kind]
+        or review_node.graph_version_id != review_run.graph_version_id
+        or review_run.status not in {"completed", "cached", "completed_after_cancel"}
+    ):
+        raise ValidationAppError(
+            "a completed review of this kind is required",
+            details={"code": "REVIEW_RUN_INVALID"},
+        )
     # New review snapshots carry their exact target. Reject an explicit
     # mismatch, while retaining compatibility with historical evidence rows
     # that predate target fields and can only be bound by the stored decision.
@@ -571,7 +591,12 @@ async def record_human_decision(
             details={"code": "REVIEW_EVIDENCE_MISSING"},
         )
     review_artifact = await session.get(Artifact, review_run.result_artifact_id)
-    if review_artifact is None or review_artifact.project_id != project_id:
+    if (
+        review_artifact is None
+        or review_artifact.project_id != project_id
+        or review_artifact.deleted_at is not None
+        or review_artifact.storage_state not in {"available", "stored"}
+    ):
         raise ValidationAppError(
             "review evidence artifact is unavailable",
             details={"code": "REVIEW_EVIDENCE_MISSING"},

@@ -282,6 +282,9 @@ def _seed_shot_with_formal_keyframe(factory: Any, project_id: str) -> str:
             run.result_artifact_id = artifact.id
             run.status = "completed"
             await session.flush()
+            from tests.formal_fixture import approve_candidate
+
+            await approve_candidate(session, shot=shot, artifact=artifact, actor_id=owner.id)
             await set_formal_keyframe(
                 session,
                 project_id=project.id,

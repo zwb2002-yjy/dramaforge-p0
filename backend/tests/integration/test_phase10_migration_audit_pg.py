@@ -409,6 +409,14 @@ async def test_no_guess_backfill_formal_results_stay_null_pg(pg_session: AsyncSe
     # explicit formal selection is the only way to set it
     artifact = await pg_session.get(Artifact, seed["artifact_id"])
     assert artifact is not None
+    with pytest.raises(ValidationAppError) as blocked:
+        await set_formal_video(
+            pg_session, project_id=project.id, shot_id=shot.id, artifact_id=artifact.id
+        )
+    assert blocked.value.details["code"] == "REVIEW_APPROVAL_REQUIRED"
+    from tests.formal_fixture import approve_candidate
+
+    await approve_candidate(pg_session, shot=shot, artifact=artifact, actor_id=actor.id, video=True)
     await set_formal_video(
         pg_session, project_id=project.id, shot_id=shot.id, artifact_id=artifact.id
     )

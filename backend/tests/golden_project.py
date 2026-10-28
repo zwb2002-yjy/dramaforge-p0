@@ -17,9 +17,6 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.access.models import Project, User, Workspace
 from app.assets.models import Asset, AssetVersion, AssetVersionReference, Scene, Shot
 from app.assets.script_import import import_script
@@ -39,6 +36,9 @@ from app.production.models import (
 from app.production.repair_service import RepairService
 from app.shared.db import set_rls_context
 from app.shared.security import hash_password
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from tests.formal_fixture import approve_candidate
 
 GOLDEN_SCRIPT = """# Episode 1 - Golden Rain
 
@@ -349,9 +349,11 @@ async def seed_golden_project(session: AsyncSession, *, suffix: str) -> GoldenPr
     keyframe, video, _, _ = await _seed_provider_graph(
         session, project_id=project.id, shot_id=shot_one.id, user_id=user.id, suffix=suffix
     )
+    await approve_candidate(session, shot=shot_one, artifact=keyframe, actor_id=user.id)
     await set_formal_keyframe(
         session, project_id=project.id, shot_id=shot_one.id, artifact_id=keyframe.id
     )
+    await approve_candidate(session, shot=shot_one, artifact=video, actor_id=user.id, video=True)
     await set_formal_video(
         session, project_id=project.id, shot_id=shot_one.id, artifact_id=video.id
     )

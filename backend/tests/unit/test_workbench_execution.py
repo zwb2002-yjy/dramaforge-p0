@@ -771,6 +771,9 @@ async def _seed_video_shot(
     run.result_artifact_id = artifact.id
     run.status = "completed"
     await session.flush()
+    from tests.formal_fixture import approve_candidate
+
+    await approve_candidate(session, shot=shot, artifact=artifact, actor_id=user.id)
     await set_formal_keyframe(
         session,
         project_id=project.id,
@@ -1560,7 +1563,7 @@ async def _completed_keyframe_artifact(
 async def test_keyframe_dispatch_queues_the_review_that_the_formal_gate_requires(session):
     """The Formal keyframe gate must be satisfiable through the product path.
 
-    ``set_formal_keyframe(..., require_review_approval=True)`` only admits an
+    ``set_formal_keyframe(..., )`` only admits an
     artifact whose stored human decision points at a review NodeRun that has its
     own evidence artifact. The graph a Workbench dispatch freezes must therefore
     describe the review node -- ``materialize_definition`` refuses a relational
@@ -1610,7 +1613,6 @@ async def test_keyframe_dispatch_queues_the_review_that_the_formal_gate_requires
             shot_id=shot.id,
             artifact_id=keyframe.id,
             expected_shot_version=shot.version,
-            require_review_approval=True,
         )
     assert blocked.value.details["code"] == "REVIEW_APPROVAL_REQUIRED"
     # The gate names its own blocker: no decision yet, and (with a queued review)
@@ -1686,7 +1688,6 @@ async def test_keyframe_dispatch_queues_the_review_that_the_formal_gate_requires
         shot_id=shot.id,
         artifact_id=keyframe.id,
         expected_shot_version=shot.version,
-        require_review_approval=True,
     )
     await session.commit()
     assert updated.formal_keyframe_artifact_id == keyframe.id

@@ -50,7 +50,7 @@ async def approve_and_adopt(session, *, project, shot, user, run, video=False):
     formal = set_formal_video if video else set_formal_keyframe
     await formal(session, project_id=project.id, shot_id=shot.id,
                  artifact_id=candidate.id, expected_shot_version=shot.version,
-                 require_review_approval=True)
+                 )
     assert await record_repair_adoption(
         session, project_id=project.id, shot_id=shot.id, artifact_id=candidate.id,
     ) == 1

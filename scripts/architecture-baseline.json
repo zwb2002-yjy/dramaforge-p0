@@ -243,16 +243,6 @@
       "reason": "Existing workflow/creative implementation coupling; ARCHITECTURE_MAPPING §4."
     },
     {
-      "from": "app.production.golden_project",
-      "to": "app.director.assistant_models",
-      "reason": "Existing workflow/creative implementation coupling; ARCHITECTURE_MAPPING §4."
-    },
-    {
-      "from": "app.production.golden_project",
-      "to": "app.director.proposal_models",
-      "reason": "Existing workflow/creative implementation coupling; ARCHITECTURE_MAPPING §4."
-    },
-    {
       "from": "app.providers.connection_service",
       "to": "app.execution.models",
       "reason": "Existing Provider execution facts/business coupling; ARCHITECTURE_MAPPING §4."
