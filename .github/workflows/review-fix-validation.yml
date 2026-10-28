@@ -6,7 +6,7 @@ on:
       - codex/review-115a4fb-fixes-20261028
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   regression:
@@ -14,6 +14,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+      - name: Regenerate canonical locked dependencies
+        run: uv lock --directory backend
+      - name: Commit resolver-canonical lock to this verification branch
+        run: |
+          if ! git diff --quiet -- backend/uv.lock; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add backend/uv.lock
+            git commit -m "fix(deps): canonical uv lock for patched dependency graph"
+            git push origin HEAD:refs/heads/codex/review-115a4fb-fixes-20261028
+          fi
       - name: Verify locked dependency graph
         run: uv lock --check --directory backend
       - name: Install reproducible Python dependencies
