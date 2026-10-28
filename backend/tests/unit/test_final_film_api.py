@@ -232,7 +232,5 @@ def test_artifact_media_routes_reject_unavailable_or_deleted_objects(
 
     asyncio.run(seed())
     for suffix in ("content", "video-frames/start"):
-        response = client.get(
-            f"/api/v1/projects/{project_id}/artifacts/{artifact_id}/{suffix}"
-        )
+        response = client.get(f"/api/v1/projects/{project_id}/artifacts/{artifact_id}/{suffix}")
         assert response.status_code == 404, response.text
