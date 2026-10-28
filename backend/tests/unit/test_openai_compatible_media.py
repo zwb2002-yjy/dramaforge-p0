@@ -611,6 +611,7 @@ def test_h3_ref2va_refuses_a_false_native_audio_setting() -> None:
 @pytest.mark.parametrize("historical_request", [False, True])
 async def test_text_video_runtime_uses_multipart_and_completed_content_url(
     historical_request: bool,
+    tmp_path,
 ) -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "POST":
@@ -650,7 +651,9 @@ async def test_text_video_runtime_uses_multipart_and_completed_content_url(
     polled = await runtime.poll_video(submitted.resume_token)
     assert polled.status == "succeeded"
     assert polled.artifact_uri == "provider-content"
-    assert await runtime.fetch_artifact(submitted.resume_token) == b"video-bytes"
+    media = await runtime.fetch_artifact(submitted.resume_token, destination=tmp_path / "video.mp4")
+    assert media.path.read_bytes() == b"video-bytes"
+    assert media.content_type == "video/mp4"
 
 
 @pytest.mark.asyncio

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
+import tempfile
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import select
@@ -13,6 +14,7 @@ from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun
 from app.shared.errors import (
     ValidationAppError,
 )
+from app.storage.materialized import MaterializedFile, MediaTransferError, materialize_stream
 from app.storage.minio_store import ObjectStore
 
 
@@ -133,15 +135,14 @@ async def _bind_review_input_artifacts(
     return snapshot
 
 
-async def _read_bound_artifact(
+async def _resolve_bound_artifact(
     session: AsyncSession,
     *,
     run: NodeRun,
     snapshot: dict[str, object],
     prefix: str,
-    store: ObjectStore,
     artifact_type: str,
-) -> tuple[Artifact, bytes]:
+) -> Artifact:
     raw_id = snapshot.get(f"{prefix}_artifact_id")
     try:
         artifact_id = UUID(str(raw_id))
@@ -170,16 +171,66 @@ async def _read_bound_artifact(
             f"{prefix} Artifact binding does not match available storage metadata",
             details={"code": "UPSTREAM_ARTIFACT_MISSING"},
         )
+    return artifact
+
+
+async def _read_bound_artifact_file(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    snapshot: dict[str, object],
+    prefix: str,
+    store: ObjectStore,
+    artifact_type: str,
+    destination: Path,
+) -> tuple[Artifact, MaterializedFile]:
+    artifact = await _resolve_bound_artifact(
+        session,
+        run=run,
+        snapshot=snapshot,
+        prefix=prefix,
+        artifact_type=artifact_type,
+    )
     try:
-        data = await store.get_bytes(object_key=artifact.object_key)
+        media = await materialize_stream(
+            store.iter_bytes(object_key=artifact.object_key),
+            destination=destination,
+            max_bytes=20 * 1024 * 1024 if artifact_type == "image" else 512 * 1024 * 1024,
+            expected_size=artifact.byte_size,
+            expected_hash=artifact.content_hash,
+        )
+    except MediaTransferError as exc:
+        raise ValidationAppError(
+            f"{prefix} Artifact hash/size mismatch", details={"code": "ARTIFACT_HASH_MISMATCH"}
+        ) from exc
     except Exception as exc:
         raise ValidationAppError(
             f"{prefix} Artifact bytes are unavailable",
             details={"code": "UPSTREAM_ARTIFACT_MISSING"},
         ) from exc
-    if not data or hashlib.sha256(data).hexdigest() != artifact.content_hash:
-        raise ValidationAppError(
-            f"{prefix} Artifact hash mismatch",
-            details={"code": "ARTIFACT_HASH_MISMATCH"},
+    return artifact, media
+
+
+async def _read_bound_artifact(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    snapshot: dict[str, object],
+    prefix: str,
+    store: ObjectStore,
+    artifact_type: str,
+) -> tuple[Artifact, bytes]:
+    """Only bounded images are decoded in memory; videos stay file-backed."""
+    if artifact_type != "image":
+        raise ValueError("Only image inputs may be materialized as bytes")
+    with tempfile.TemporaryDirectory(prefix="dramaforge-bound-image-") as scratch:
+        artifact, media = await _read_bound_artifact_file(
+            session,
+            run=run,
+            snapshot=snapshot,
+            prefix=prefix,
+            store=store,
+            artifact_type=artifact_type,
+            destination=Path(scratch) / "image.media",
         )
-    return artifact, data
+        return artifact, media.path.read_bytes()

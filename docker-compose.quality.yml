@@ -61,6 +61,35 @@ services:
     volumes:
       - ${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}:/contract:ro
 
+  minio-quality:
+    image: quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
+    environment:
+      MINIO_ROOT_USER: quality-minio-user
+      MINIO_ROOT_PASSWORD: quality-minio-password
+    command: ["server", "/data"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  media-resource-quality:
+    image: dramaforge-backend-quality:local
+    cap_add: [NET_ADMIN]
+    cpus: 4
+    mem_limit: 8g
+    environment:
+      APP_ENV: test
+      MEDIA_RESOURCE_REQUIRED: "1"
+      MINIO_ENDPOINT: http://minio-quality:9000
+      MINIO_ACCESS_KEY: quality-minio-user
+      MINIO_SECRET_KEY: quality-minio-password
+      MINIO_BUCKET: quality-media
+    depends_on:
+      minio-quality:
+        condition: service_healthy
+    command: ["sh", "-ec", "uv run --offline --no-sync --directory backend pytest tests/media -q -s -rs --fail-on-skip"]
+
   auth-upstream-quality:
     image: dramaforge-backend-quality:local
     command: ["python", "backend/tests/fixtures/mock_auth_gateway_upstream.py"]

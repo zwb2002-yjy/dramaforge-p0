@@ -12,6 +12,20 @@ class TimelineTimingError(ValueError):
     pass
 
 
+@dataclass(frozen=True, kw_only=True)
+class TimelineClipInstructions:
+    clip_id: str
+    video_artifact_id: str
+    subtitle_text: str
+    source_in_seconds: float
+    duration_seconds: float
+    transition_kind: str | None = None
+    transition_duration_seconds: float = 0.0
+    audio_artifact_id: str | None = None
+    source_out_seconds: float | None = None
+    audio_volume: float = 1.0
+
+
 class TimedClip(Protocol):
     @property
     def clip_id(self) -> str: ...

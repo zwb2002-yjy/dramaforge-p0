@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import math
+import tempfile
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import select, update
@@ -20,9 +22,11 @@ from app.events.models import OutboxEvent
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.media_io import (
     _apply_media_metadata,
+    _detected_media_format,
     _inspect_media_metadata,
     _mime_for_node,
-    _resolve_media_bytes,
+    _resolve_media_file,
+    _validate_provider_media,
 )
 from app.execution.media_submission import prepare_media_submission
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
@@ -677,23 +681,34 @@ async def _execute_unified_media_node_run(
         if synchronous_image and result and result.artifact_bytes is not None
         else poll.artifact_uri
     )
-    if uri == PROVIDER_CONTENT_URI:
-        assert resume is not None
-        fetch_artifact = getattr(runtime, "fetch_artifact", None)
-        if not callable(fetch_artifact):
-            raise ValidationAppError("PROVIDER_MEDIA_MISSING: runtime cannot fetch content")
-        uri = await fetch_artifact(resume)
-    data = await _resolve_media_bytes(
-        kind=node_type,
-        remote=remote,
-        prompt=prompt,
-        artifact_uri=uri,
-    )
-
-    mime, ext, art_type = _mime_for_node(node_type)
-    object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.{ext}"
-    media_metadata = _inspect_media_metadata(kind=node_type, data=data)
-    stored = await obj_store.put_bytes(object_key=object_key, data=data, mime_type=mime)
+    with tempfile.TemporaryDirectory(prefix=f"dramaforge-provider-{run.id}-") as scratch:
+        destination = Path(scratch) / "result.media"
+        if uri == PROVIDER_CONTENT_URI:
+            assert resume is not None
+            fetch_artifact = getattr(runtime, "fetch_artifact", None)
+            if not callable(fetch_artifact):
+                raise ValidationAppError("PROVIDER_MEDIA_MISSING: runtime cannot fetch content")
+            media = await fetch_artifact(resume, destination=destination)
+            with media.path.open("rb") as source:
+                _validate_provider_media(
+                    kind=node_type, data=source.read(64), content_type=media.content_type
+                )
+        else:
+            media = await _resolve_media_file(
+                kind=node_type,
+                remote=remote,
+                prompt=prompt,
+                artifact_uri=uri,
+                destination=destination,
+            )
+        mime, ext, art_type = _mime_for_node(node_type)
+        with media.path.open("rb") as source:
+            detected = _detected_media_format(kind=node_type, header=source.read(64))
+        if detected is not None:
+            mime, ext = detected
+        object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.{ext}"
+        media_metadata = _inspect_media_metadata(kind=node_type, path=media.path)
+        stored = await obj_store.put_file(object_key=object_key, path=media.path, mime_type=mime)
     art = await get_or_create_artifact(
         session,
         project_id=run.project_id,

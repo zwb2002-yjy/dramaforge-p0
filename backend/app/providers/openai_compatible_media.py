@@ -25,6 +25,8 @@ import binascii
 import hashlib
 import json
 from collections.abc import Mapping
+from dataclasses import replace
+from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote, urlsplit
 
@@ -46,6 +48,7 @@ from app.providers.runtime import (
     SubmissionResult,
     validate_compiled_submission,
 )
+from app.storage.materialized import MaterializedFile, materialize_stream
 
 OPENAI_MEDIA_PROVIDER = "openai_compatible_media"
 OPENAI_MEDIA_PROFILE = "openai_media_v1"
@@ -982,7 +985,9 @@ class OpenAICompatibleMediaRuntime:
             http_status=result.get("http_status"),
         )
 
-    async def fetch_artifact(self, resume: ProviderResumeToken) -> bytes:
+    async def fetch_artifact(
+        self, resume: ProviderResumeToken, *, destination: Path
+    ) -> MaterializedFile:
         """Fetch only this connection's completed video, never an arbitrary result URL."""
         self._configured()
         url = f"{self._client._host}/videos/{quote(resume.remote_task_id, safe='')}/content"
@@ -991,17 +996,23 @@ class OpenAICompatibleMediaRuntime:
                 timeout=self._settings.openai_compatible_media_timeout_seconds,
                 transport=self._client._transport,
             ) as client,
-            client.stream("GET", url, headers=self._client._headers()) as response,
+            client.stream(
+                "GET", url, headers={**self._client._headers(), "Accept-Encoding": "identity"}
+            ) as response,
         ):
             if response.is_redirect:
                 raise ValueError("provider content redirects are not allowed")
             response.raise_for_status()
-            body = bytearray()
-            async for chunk in response.aiter_bytes(1024 * 1024):
-                body.extend(chunk)
-                if len(body) > 512 * 1024 * 1024:
-                    raise ValueError("provider content exceeds media limit")
-            return bytes(body)
+            if response.headers.get("Content-Encoding", "identity").lower() != "identity":
+                raise ValueError("encoded provider content is not allowed")
+            length = response.headers.get("Content-Length")
+            media = await materialize_stream(
+                response.aiter_bytes(64 * 1024),
+                destination=destination,
+                max_bytes=512 * 1024 * 1024,
+                expected_size=int(length) if length is not None else None,
+            )
+            return replace(media, content_type=response.headers.get("Content-Type"))
 
     async def cancel_video(self, resume: ProviderResumeToken) -> CancelResult:
         self._configured()

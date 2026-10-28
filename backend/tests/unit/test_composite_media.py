@@ -1,4 +1,4 @@
-﻿"""Contract tests for local composite media execution."""
+"""Contract tests for local composite media execution."""
 
 from __future__ import annotations
 
@@ -42,6 +42,12 @@ _SOURCE_META = {
     "voice": ("audio", "audio/wav"),
     "subtitle": ("subtitle", "application/x-subrip"),
 }
+
+
+def _source_file(directory, key, data):
+    path = directory / f"{key}.media"
+    path.write_bytes(data)
+    return path
 
 
 def test_voice_audio_filter_fits_small_overrun_without_truncation() -> None:
@@ -252,6 +258,7 @@ def _media_lineage(sources: dict[str, SourceMedia]) -> dict[str, dict[str, str]]
 
 @pytest.mark.asyncio
 async def test_composite_runs_locally_with_complete_media_lineage(
+    tmp_path,
     session: AsyncSession,
 ) -> None:
     fixture = await _make_composite_fixture(session, add_older_video=True)
@@ -267,20 +274,24 @@ async def test_composite_runs_locally_with_complete_media_lineage(
         CompositeInputs(
             composite_run_id=str(fixture.composite_run.id),
             media_inputs=expected_inputs,
-            video=fixture.sources["video"].data,
-            voice=fixture.sources["voice"].data,
-            subtitle=fixture.sources["subtitle"].data,
+            video=_source_file(tmp_path, "video", fixture.sources["video"].data),
+            voice=_source_file(tmp_path, "voice", fixture.sources["voice"].data),
+            subtitle=_source_file(tmp_path, "subtitle", fixture.sources["subtitle"].data),
         )
     )
     run = await session.get(NodeRun, fixture.composite_run.id)
     artifact = await session.get(Artifact, result.artifact_id)
     operations = (
-        await session.execute(
-            select(ProviderOperation).where(
-                ProviderOperation.node_run_id == fixture.composite_run.id
+        (
+            await session.execute(
+                select(ProviderOperation).where(
+                    ProviderOperation.node_run_id == fixture.composite_run.id
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     assert operations == []
     assert run is not None
@@ -339,7 +350,9 @@ async def test_formal_composite_pins_video_instead_of_latest_repair_candidate(
     )
 
 
-def test_deterministic_composite_bytes_bind_source_and_output_run_lineage() -> None:
+def test_deterministic_composite_bytes_bind_source_and_output_run_lineage(
+    tmp_path,
+) -> None:
     """Independent composite NodeRuns must not collapse to one Artifact."""
     base_inputs = {
         key: {
@@ -362,23 +375,25 @@ def test_deterministic_composite_bytes_bind_source_and_output_run_lineage() -> N
     first = CompositeInputs(
         composite_run_id="composite-first",
         media_inputs=base_inputs,
-        video=_SOURCE_BYTES["video"],
-        voice=_SOURCE_BYTES["voice"],
-        subtitle=_SOURCE_BYTES["subtitle"],
+        video=_source_file(tmp_path, "video", _SOURCE_BYTES["video"]),
+        voice=_source_file(tmp_path, "voice", _SOURCE_BYTES["voice"]),
+        subtitle=_source_file(tmp_path, "subtitle", _SOURCE_BYTES["subtitle"]),
     )
     second = CompositeInputs(
         composite_run_id="composite-second",
         media_inputs=second_inputs,
-        video=_SOURCE_BYTES["video"],
-        voice=_SOURCE_BYTES["voice"],
-        subtitle=_SOURCE_BYTES["subtitle"],
+        video=_source_file(tmp_path, "video", _SOURCE_BYTES["video"]),
+        voice=_source_file(tmp_path, "voice", _SOURCE_BYTES["voice"]),
+        subtitle=_source_file(tmp_path, "subtitle", _SOURCE_BYTES["subtitle"]),
     )
 
     assert composite_lineage_fingerprint(first) != composite_lineage_fingerprint(second)
     assert deterministic_composite_test_bytes(first) != deterministic_composite_test_bytes(second)
 
 
-def test_deterministic_composite_bytes_distinguish_reruns_with_same_inputs() -> None:
+def test_deterministic_composite_bytes_distinguish_reruns_with_same_inputs(
+    tmp_path,
+) -> None:
     """A legal composite re-run has new output ownership even with unchanged media."""
     inputs = {
         key: {
@@ -393,16 +408,16 @@ def test_deterministic_composite_bytes_distinguish_reruns_with_same_inputs() -> 
     first = CompositeInputs(
         composite_run_id="composite-first",
         media_inputs=inputs,
-        video=_SOURCE_BYTES["video"],
-        voice=_SOURCE_BYTES["voice"],
-        subtitle=_SOURCE_BYTES["subtitle"],
+        video=_source_file(tmp_path, "video", _SOURCE_BYTES["video"]),
+        voice=_source_file(tmp_path, "voice", _SOURCE_BYTES["voice"]),
+        subtitle=_source_file(tmp_path, "subtitle", _SOURCE_BYTES["subtitle"]),
     )
     rerun = CompositeInputs(
         composite_run_id="composite-rerun",
         media_inputs=inputs,
-        video=_SOURCE_BYTES["video"],
-        voice=_SOURCE_BYTES["voice"],
-        subtitle=_SOURCE_BYTES["subtitle"],
+        video=_source_file(tmp_path, "video", _SOURCE_BYTES["video"]),
+        voice=_source_file(tmp_path, "voice", _SOURCE_BYTES["voice"]),
+        subtitle=_source_file(tmp_path, "subtitle", _SOURCE_BYTES["subtitle"]),
     )
 
     assert composite_lineage_fingerprint(first) != composite_lineage_fingerprint(rerun)
@@ -452,12 +467,16 @@ async def test_composite_missing_required_input_fails_without_provider_operation
 
     run = await session.get(NodeRun, fixture.composite_run.id)
     operations = (
-        await session.execute(
-            select(ProviderOperation).where(
-                ProviderOperation.node_run_id == fixture.composite_run.id
+        (
+            await session.execute(
+                select(ProviderOperation).where(
+                    ProviderOperation.node_run_id == fixture.composite_run.id
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert operations == []
     assert run is not None
     assert run.status == "failed"
@@ -491,12 +510,16 @@ async def test_composite_unavailable_or_unreadable_input_fails_closed(
 
     run = await session.get(NodeRun, fixture.composite_run.id)
     operations = (
-        await session.execute(
-            select(ProviderOperation).where(
-                ProviderOperation.node_run_id == fixture.composite_run.id
+        (
+            await session.execute(
+                select(ProviderOperation).where(
+                    ProviderOperation.node_run_id == fixture.composite_run.id
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert operations == []
     assert run is not None
     assert run.status == "failed"
@@ -513,22 +536,16 @@ async def test_composite_non_test_render_uses_ffmpeg_and_fails_closed(
     fixture = await _make_composite_fixture(session)
     called = False
 
-    async def failing_ffmpeg(_: CompositeInputs) -> bytes:
+    async def failing_ffmpeg(_: CompositeInputs, *, output_path) -> bytes:
         nonlocal called
         called = True
         raise CompositeRenderError("ffmpeg test failure")
 
     monkeypatch.setenv("APP_ENV", app_env)
     if app_env == "production":
-        monkeypatch.setenv(
-            "SESSION_SECRET", "test-production-session-secret-32-characters"
-        )
-        monkeypatch.setenv(
-            "WORKER_TOKEN", "test-production-worker-token-32-characters"
-        )
-        monkeypatch.setenv(
-            "BYOK_FERNET_KEY", "v0v3D-eSZ4JB_qjFNWVlfYUUKulGroB1bVVa8Seifqc="
-        )
+        monkeypatch.setenv("SESSION_SECRET", "test-production-session-secret-32-characters")
+        monkeypatch.setenv("WORKER_TOKEN", "test-production-worker-token-32-characters")
+        monkeypatch.setenv("BYOK_FERNET_KEY", "v0v3D-eSZ4JB_qjFNWVlfYUUKulGroB1bVVa8Seifqc=")
     clear_settings_cache()
     monkeypatch.setattr("app.execution.composite_media._render_with_ffmpeg", failing_ffmpeg)
     try:
@@ -543,12 +560,16 @@ async def test_composite_non_test_render_uses_ffmpeg_and_fails_closed(
 
     run = await session.get(NodeRun, fixture.composite_run.id)
     operations = (
-        await session.execute(
-            select(ProviderOperation).where(
-                ProviderOperation.node_run_id == fixture.composite_run.id
+        (
+            await session.execute(
+                select(ProviderOperation).where(
+                    ProviderOperation.node_run_id == fixture.composite_run.id
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert called is True
     assert operations == []
     assert run is not None

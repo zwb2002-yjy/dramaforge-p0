@@ -7,8 +7,9 @@ import hashlib
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from io import BytesIO
+from pathlib import Path
 from threading import Lock
-from typing import Protocol, cast
+from typing import BinaryIO, Protocol, cast
 
 from anyio import CancelScope
 from minio.error import S3Error
@@ -26,6 +27,8 @@ class StoredObject:
 
 class ObjectStore(Protocol):
     async def put_bytes(self, *, object_key: str, data: bytes, mime_type: str) -> StoredObject: ...
+
+    async def put_file(self, *, object_key: str, path: Path, mime_type: str) -> StoredObject: ...
 
     async def get_bytes(self, *, object_key: str) -> bytes: ...
 
@@ -67,9 +70,10 @@ class _MinioClient(Protocol):
         self,
         bucket_name: str,
         object_name: str,
-        data: BytesIO,
+        data: BinaryIO,
         length: int,
         content_type: str,
+        num_parallel_uploads: int = 3,
     ) -> object: ...
 
     def get_object(
@@ -90,6 +94,13 @@ class InMemoryObjectStore:
 
     def __init__(self) -> None:
         self._objects: dict[str, bytes] = {}
+
+    async def put_file(self, *, object_key: str, path: Path, mime_type: str) -> StoredObject:
+        # Test/dev store intentionally retains its objects in memory. Production
+        # uses the same port with a bounded SDK file reader below.
+        return await self.put_bytes(
+            object_key=object_key, data=path.read_bytes(), mime_type=mime_type
+        )
 
     async def put_bytes(self, *, object_key: str, data: bytes, mime_type: str) -> StoredObject:
         self._objects[object_key] = data
@@ -148,6 +159,40 @@ class MinioObjectStore:
 
     def clear(self) -> None:
         return None
+
+    async def put_file(self, *, object_key: str, path: Path, mime_type: str) -> StoredObject:
+        uploading = asyncio.create_task(
+            asyncio.to_thread(
+                self._put_file_sync,
+                object_key=object_key,
+                path=path,
+                mime_type=mime_type,
+            )
+        )
+        try:
+            return await asyncio.shield(uploading)
+        except asyncio.CancelledError:
+            # The operation owns the file until the SDK has stopped reading it.
+            # Final Film's existing journal owns any remote cleanup after this.
+            with CancelScope(shield=True):
+                await asyncio.gather(uploading, return_exceptions=True)
+            raise
+
+    def _put_file_sync(self, *, object_key: str, path: Path, mime_type: str) -> StoredObject:
+        with path.open("rb") as source:
+            size = source.seek(0, 2)
+            source.seek(0)
+            content_hash = hashlib.file_digest(source, "sha256").hexdigest()
+            source.seek(0)
+            self._ensure_client().put_object(
+                self._settings.minio_bucket,
+                object_key,
+                source,
+                length=size,
+                content_type=mime_type,
+                num_parallel_uploads=1,
+            )
+        return StoredObject(object_key, content_hash, size, mime_type)
 
     def _ensure_client(self) -> _MinioClient:
         if self._client is not None:

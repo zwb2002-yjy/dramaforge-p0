@@ -71,6 +71,8 @@ def implementation_fingerprint(provider_type: str, protocol_profile: str) -> str
         root / "app/execution/provider_execution.py",
         root / "app/execution/media_submission.py",
         root / "app/execution/media_io.py",
+        root / "app/storage/materialized.py",
+        root / "app/storage/minio_store.py",
         root / "app/production/execution_plan.py",
         root / "app/config.py",
         root / "app/security/byok_keyring.py",

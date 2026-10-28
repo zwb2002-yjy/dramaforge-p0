@@ -262,6 +262,18 @@ dispatcher 的独立恢复扫描不等于正常轮询已释放媒体槽。
 
 ### RT-05 媒体传输保持有界内存与安全校验
 
+- **当前实现**：Provider 远端结果、连接内 content、Composite、视频审片输入及
+  Final Film 输入使用作业拥有的临时文件。下载以64KiB缓冲累计大小与SHA-256，
+  校验Content-Length、媒体类型和魔数后才进入元数据解码及Artifact登记；压缩响应
+  被拒绝，避免透明解压放大缓冲。内联base64分块解码，大小受同一上限约束。
+  MinIO上传读取文件句柄，单文件multipart并发固定为1；内存ObjectStore仅供测试/开发。
+  图片解码的bytes入口只允许经过20MiB传输上限校验的图片。成片与合成渲染接收路径、
+  输出路径，并在上传结束后释放作业文件，不将所有镜头或输出MP4重新聚合成bytes。
+- **可重复传输验证**：`docker-compose.quality.yml`的`media-resource-quality`
+  使用真实证书校验的HTTPS与真实MinIO SDK，分别采样256MiB单路/4路并发下载、
+  上传及流式读回，核验哈希；5ms采样，显式4vCPU/8GiB限制，Provider create为0。
+  该阶段不含解码/编码资源和真实供应商生成；运行证据仍须随候选源码重新取得。
+
 - **需求**：远端下载、存储上传及必要的 Provider 参考上传使用受限缓冲和流式/文件句柄
   传递，避免整文件累积、重复转换 bytes 或以 base64 常驻内存。传输过程中累计实际
   字节数并计算内容哈希；只有完整校验通过的媒体才能登记为成功 Artifact。

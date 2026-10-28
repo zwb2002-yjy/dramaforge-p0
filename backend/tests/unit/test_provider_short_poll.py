@@ -153,7 +153,13 @@ async def test_submit_exits_then_one_poll_per_due_job_without_extra_create(recov
 
     prepare_mock = AsyncMock(side_effect=prepare)
     monkeypatch.setattr(provider_execution, "prepare_media_submission", prepare_mock)
-    monkeypatch.setattr(provider_execution, "_resolve_media_bytes", AsyncMock(return_value=data))
+
+    async def resolve_media(**kwargs):
+        from app.execution.media_io import _resolve_media_file
+
+        return await _resolve_media_file(**{**kwargs, "artifact_uri": data})
+
+    monkeypatch.setattr(provider_execution, "_resolve_media_file", resolve_media)
 
     async def store(**kwargs):
         return SimpleNamespace(
@@ -164,7 +170,7 @@ async def test_submit_exits_then_one_poll_per_due_job_without_extra_create(recov
         )
 
     monkeypatch.setattr(
-        "app.execution.product_path.get_object_store", lambda: SimpleNamespace(put_bytes=store)
+        "app.execution.product_path.get_object_store", lambda: SimpleNamespace(put_file=store)
     )
     async with recovery.factory() as session:
         node = await session.get(GraphNode, recovery.node.id)

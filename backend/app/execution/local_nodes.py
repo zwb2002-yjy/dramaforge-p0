@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from decimal import Decimal
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +15,7 @@ from app.consistency.identity_policy import (
     identity_evidence_policy_snapshot,
 )
 from app.consistency.identity_review import identity_review_images
-from app.execution.artifact_inputs import _read_bound_artifact
+from app.execution.artifact_inputs import _read_bound_artifact, _read_bound_artifact_file
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.models import GraphNode, NodeRun
 from app.execution.run_state import ExecuteNodeResult, _commit_terminal_failure
@@ -35,111 +37,113 @@ async def _complete_composite_node(
 
     from app.execution.composite_media import (
         CompositeInputMissingError,
-        render_composite_bytes,
+        render_composite_file,
         resolve_composite_inputs,
     )
 
-    try:
-        inputs = await resolve_composite_inputs(session, run=run, store=obj_store)
-    except CompositeInputMissingError as exc:
-        await _commit_terminal_failure(
-            session,
-            run=run,
-            error_code="COMPOSITE_INPUT_MISSING",
-            error_summary=str(exc),
-        )
-        raise ValidationAppError(f"COMPOSITE_INPUT_MISSING: {exc}") from exc
+    with tempfile.TemporaryDirectory(prefix=f"dramaforge-composite-{run.id}-") as scratch:
+        try:
+            inputs = await resolve_composite_inputs(
+                session, run=run, store=obj_store, directory=Path(scratch)
+            )
+        except CompositeInputMissingError as exc:
+            await _commit_terminal_failure(
+                session,
+                run=run,
+                error_code="COMPOSITE_INPUT_MISSING",
+                error_summary=str(exc),
+            )
+            raise ValidationAppError(f"COMPOSITE_INPUT_MISSING: {exc}") from exc
 
-    # Persist the source lineage before rendering so a terminal render failure
-    # remains auditable.
-    run.input_snapshot = {
-        **(run.input_snapshot or {}),
-        "media_inputs": inputs.media_inputs,
-    }
+        # Persist the source lineage before rendering so a terminal render failure
+        # remains auditable.
+        run.input_snapshot = {
+            **(run.input_snapshot or {}),
+            "media_inputs": inputs.media_inputs,
+        }
 
-    try:
-        data = await render_composite_bytes(inputs)
-    except Exception as exc:  # noqa: BLE001 - local render must fail closed
-        detail = str(exc) or type(exc).__name__
-        await _commit_terminal_failure(
-            session,
-            run=run,
-            error_code="COMPOSITE_RENDER_FAILED",
-            error_summary=detail,
-        )
-        raise ValidationAppError(f"COMPOSITE_RENDER_FAILED: {detail}") from exc
+        try:
+            output = await render_composite_file(inputs, output_path=Path(scratch) / "output.mp4")
+        except Exception as exc:  # noqa: BLE001 - local render must fail closed
+            detail = str(exc) or type(exc).__name__
+            await _commit_terminal_failure(
+                session,
+                run=run,
+                error_code="COMPOSITE_RENDER_FAILED",
+                error_summary=detail,
+            )
+            raise ValidationAppError(f"COMPOSITE_RENDER_FAILED: {detail}") from exc
 
-    try:
-        object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.mp4"
-        stored = await obj_store.put_bytes(
-            object_key=object_key,
-            data=data,
-            mime_type="video/mp4",
-        )
-        art = await get_or_create_artifact(
-            session,
-            project_id=run.project_id,
-            artifact_type="video",
-            object_key=stored.object_key,
-            content_hash=stored.content_hash,
-            mime_type=stored.mime_type,
-            byte_size=stored.byte_size,
-            produced_by_run_id=run.id,
-        )
-    except Exception as exc:  # noqa: BLE001 - local composite output must fail closed
-        detail = str(exc) or type(exc).__name__
-        await _commit_terminal_failure(
-            session,
-            run=run,
-            error_code="COMPOSITE_RENDER_FAILED",
-            error_summary=detail,
-        )
-        raise ValidationAppError(f"COMPOSITE_RENDER_FAILED: {type(exc).__name__}") from exc
+        try:
+            object_key = f"projects/{run.project_id}/nodes/{node.node_key}/{run.id}.mp4"
+            stored = await obj_store.put_file(
+                object_key=object_key,
+                path=output,
+                mime_type="video/mp4",
+            )
+            art = await get_or_create_artifact(
+                session,
+                project_id=run.project_id,
+                artifact_type="video",
+                object_key=stored.object_key,
+                content_hash=stored.content_hash,
+                mime_type=stored.mime_type,
+                byte_size=stored.byte_size,
+                produced_by_run_id=run.id,
+            )
+        except Exception as exc:  # noqa: BLE001 - local composite output must fail closed
+            detail = str(exc) or type(exc).__name__
+            await _commit_terminal_failure(
+                session,
+                run=run,
+                error_code="COMPOSITE_RENDER_FAILED",
+                error_summary=detail,
+            )
+            raise ValidationAppError(f"COMPOSITE_RENDER_FAILED: {type(exc).__name__}") from exc
 
-    run.status = "completed"
-    run.result_artifact_id = art.id
-    run.provider_cost = Decimal("0")
-    run.platform_cost = Decimal("0")
-    run.finished_at = datetime.now(UTC)
-    run.output_summary = {
-        "artifact_id": str(art.id),
-        "node_type": "composite",
-        "byte_size": art.byte_size,
-        "content_hash": art.content_hash,
-        "media_inputs": inputs.media_inputs,
-        "source_commit": get_settings().source_commit,
-    }
-    if (run.input_snapshot or {}).get("execution_branch") == "formal" and (
-        run.input_snapshot or {}
-    ).get("experiment_id") is None:
-        from app.assets.models import Shot
+        run.status = "completed"
+        run.result_artifact_id = art.id
+        run.provider_cost = Decimal("0")
+        run.platform_cost = Decimal("0")
+        run.finished_at = datetime.now(UTC)
+        run.output_summary = {
+            "artifact_id": str(art.id),
+            "node_type": "composite",
+            "byte_size": art.byte_size,
+            "content_hash": art.content_hash,
+            "media_inputs": inputs.media_inputs,
+            "source_commit": get_settings().source_commit,
+        }
+        if (run.input_snapshot or {}).get("execution_branch") == "formal" and (
+            run.input_snapshot or {}
+        ).get("experiment_id") is None:
+            from app.assets.models import Shot
 
-        shot_id = (run.input_snapshot or {}).get("shot_id")
-        if shot_id:
-            shot = await session.get(Shot, UUID(str(shot_id)))
-            video_input = inputs.media_inputs.get("video")
-            if (
-                shot is not None
-                and shot.project_id == run.project_id
-                and shot.formal_video_artifact_id is not None
-                and isinstance(video_input, dict)
-                and str(video_input.get("artifact_id"))
-                == str(shot.formal_video_artifact_id)
-            ):
-                shot.formal_composite_artifact_id = art.id
-                shot.version = (shot.version or 1) + 1
-    node.latest_successful_run_id = run.id
-    await session.flush()
-    return ExecuteNodeResult(
-        node_run_id=run.id,
-        artifact_id=art.id,
-        object_key=art.object_key,
-        content_hash=art.content_hash,
-        byte_size=art.byte_size,
-        identity_status=None,
-        provider_operation_id=None,
-        node_type="composite",
-    )
+            shot_id = (run.input_snapshot or {}).get("shot_id")
+            if shot_id:
+                shot = await session.get(Shot, UUID(str(shot_id)))
+                video_input = inputs.media_inputs.get("video")
+                if (
+                    shot is not None
+                    and shot.project_id == run.project_id
+                    and shot.formal_video_artifact_id is not None
+                    and isinstance(video_input, dict)
+                    and str(video_input.get("artifact_id")) == str(shot.formal_video_artifact_id)
+                ):
+                    shot.formal_composite_artifact_id = art.id
+                    shot.version = (shot.version or 1) + 1
+        node.latest_successful_run_id = run.id
+        await session.flush()
+        return ExecuteNodeResult(
+            node_run_id=run.id,
+            artifact_id=art.id,
+            object_key=art.object_key,
+            content_hash=art.content_hash,
+            byte_size=art.byte_size,
+            identity_status=None,
+            provider_operation_id=None,
+            node_type="composite",
+        )
 
 
 async def _complete_pure_node(
@@ -259,18 +263,20 @@ async def _complete_pure_node(
                     store=obj_store,
                     artifact_type="image",
                 )
-                video_artifact, video = await _read_bound_artifact(
-                    session,
-                    run=run,
-                    snapshot=snap,
-                    prefix="video",
-                    store=obj_store,
-                    artifact_type="video",
-                )
-                samples = score_video_samples(
-                    extract_video_samples(video),
-                    canonical_image_bytes=canonical,
-                )
+                with tempfile.TemporaryDirectory(prefix=f"dramaforge-review-{run.id}-") as scratch:
+                    video_artifact, video = await _read_bound_artifact_file(
+                        session,
+                        run=run,
+                        snapshot=snap,
+                        prefix="video",
+                        store=obj_store,
+                        artifact_type="video",
+                        destination=Path(scratch) / "video.media",
+                    )
+                    samples = score_video_samples(
+                        extract_video_samples(video.path),
+                        canonical_image_bytes=canonical,
+                    )
                 decision = decide_video_drift(samples)
                 review_status = str(decision["status"])
                 payload.update(

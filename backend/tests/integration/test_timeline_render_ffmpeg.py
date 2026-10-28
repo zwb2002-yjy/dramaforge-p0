@@ -111,12 +111,14 @@ async def test_clip_voice_volume_is_applied_to_real_export(tmp_path, monkeypatch
         "get_settings",
         lambda: get_settings().model_copy(update={"app_env": "development"}),
     )
-    video = (Path(__file__).resolve().parents[3] / "fixtures/playback/red-tone.mp4").read_bytes()
+    video = Path(__file__).resolve().parents[3] / "fixtures/playback/red-tone.mp4"
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(_dialogue_wav(1.2, 440))
     clip = TimelineRenderClip(
         clip_id="trimmed",
         video_artifact_id="video",
-        video_bytes=video,
-        audio_bytes=_dialogue_wav(1.2, 440),
+        video_path=video,
+        audio_path=voice,
         audio_artifact_id="voice",
         subtitle_text="裁切字幕",
         source_in_seconds=0.1,
@@ -126,10 +128,12 @@ async def test_clip_voice_volume_is_applied_to_real_export(tmp_path, monkeypatch
     volumes = []
     for volume in (1.0, 0.25):
         result = await renderer.render_timeline(
-            [replace(clip, audio_volume=volume)], lineage=f"volume:{volume}"
+            [replace(clip, audio_volume=volume)],
+            lineage=f"volume:{volume}",
+            output_path=tmp_path / f"volume-{volume}.mp4",
         )
         output = tmp_path / f"volume-{volume}.mp4"
-        output.write_bytes(result.data)
+        assert result.output_path == output
         assert await _decode_whole_file(output) == ""
         assert abs(float(result.ffprobe["format"]["duration"]) - 0.3) < 0.1
         assert result.summary["timeline_time_map"][0] == {
@@ -183,7 +187,7 @@ async def test_real_ffmpeg_uses_final_subtitle_clock_for_trim_crossfade_and_musi
             ],
             timeout=30,
         )
-        sources.append(path.read_bytes())
+        sources.append(path)
     music = tmp_path / "music.wav"
     await renderer._run(
         [
@@ -199,30 +203,33 @@ async def test_real_ffmpeg_uses_final_subtitle_clock_for_trim_crossfade_and_musi
         ],
         timeout=30,
     )
+    voices = [tmp_path / "red.wav", tmp_path / "blue.wav"]
+    for path, frequency in zip(voices, (220.0, 330.0), strict=True):
+        path.write_bytes(_dialogue_wav(2.0, frequency))
     clips = [
         TimelineRenderClip(
-            "red",
-            "red-video",
-            sources[0],
-            _dialogue_wav(2.0, 220.0),
-            "第一行\nLine two",
-            1,
-            2,
+            clip_id="red",
+            video_artifact_id="red-video",
+            video_path=sources[0],
+            audio_path=voices[0],
+            subtitle_text="第一行\nLine two",
+            source_in_seconds=1,
+            duration_seconds=2,
         ),
         TimelineRenderClip(
-            "blue",
-            "blue-video",
-            sources[1],
-            _dialogue_wav(2.0, 330.0),
-            "Blue shot",
-            0.5,
-            2,
+            clip_id="blue",
+            video_artifact_id="blue-video",
+            video_path=sources[1],
+            audio_path=voices[1],
+            subtitle_text="Blue shot",
+            source_in_seconds=0.5,
+            duration_seconds=2,
             transition_kind="crossfade",
             transition_duration_seconds=0.5,
         ),
     ]
     result = await renderer.render_timeline(
-        clips, lineage="r6-local-proof", music_bytes=music.read_bytes()
+        clips, lineage="r6-local-proof", music_path=music, output_path=tmp_path / "final.mp4"
     )
     assert not result.summary.get("test_render")
     assert result.summary["subtitle_burn_applied"] and result.summary["music_mixed"]
@@ -234,7 +241,7 @@ async def test_real_ffmpeg_uses_final_subtitle_clock_for_trim_crossfade_and_musi
     assert "00:00:00,000 --> 00:00:02,000\n第一行\nLine two" in text
     assert "00:00:01,500 --> 00:00:03,500\nBlue shot" in text
     output = tmp_path / "final.mp4"
-    output.write_bytes(result.data)
+    assert result.output_path == output
 
     decode_errors = await _decode_whole_file(output)
     assert decode_errors.strip() == "", f"Delivered MP4 did not decode cleanly: {decode_errors}"
@@ -270,11 +277,13 @@ async def test_real_ffmpeg_uses_final_subtitle_clock_for_trim_crossfade_and_musi
 
     red, blue = await sample(0.3), await sample(3.0)
     assert red[0] > red[2] + 100 and blue[2] > blue[0] + 100
-    silent = await renderer.render_timeline([replace(clips[0], subtitle_text="")], lineage="empty")
+    silent = await renderer.render_timeline(
+        [replace(clips[0], subtitle_text="")], lineage="empty", output_path=tmp_path / "empty.mp4"
+    )
     assert silent.subtitle_data == b"" and not silent.summary["subtitle_burn_applied"]
     assert abs(float(silent.ffprobe["format"]["duration"]) - 2) <= 0.12
     empty_output = tmp_path / "empty.mp4"
-    empty_output.write_bytes(silent.data)
+    assert silent.output_path == empty_output
 
     async def white_pixels(path):
         data, _ = await renderer._run(
@@ -306,6 +315,7 @@ async def test_real_ffmpeg_uses_final_subtitle_clock_for_trim_crossfade_and_musi
     retimed = await renderer.render_timeline(
         [replace(clips[0], source_in_seconds=0.5, source_out_seconds=1.5, duration_seconds=2.0)],
         lineage="retimed",
+        output_path=tmp_path / "retimed.mp4",
     )
     assert abs(float(retimed.ffprobe["format"]["duration"]) - 2) <= 0.12
     assert retimed.summary["timeline_time_map"][0]["source_out_ms"] == 1500
@@ -315,7 +325,9 @@ async def test_real_ffmpeg_uses_final_subtitle_clock_for_trim_crossfade_and_musi
         json.dumps(
             {
                 "actual_renderer": "ffmpeg",
-                "mp4_sha256": hashlib.sha256(result.data).hexdigest(),
+                "mp4_sha256": hashlib.file_digest(
+                    result.output_path.open("rb"), "sha256"
+                ).hexdigest(),
                 "srt_sha256": hashlib.sha256(result.subtitle_data).hexdigest(),
                 "duration": result.ffprobe["format"]["duration"],
                 "time_map": result.summary["timeline_time_map"],
@@ -343,19 +355,23 @@ async def test_corrupt_source_media_fails_the_delivery_render(
     monkeypatch.setattr(renderer, "get_settings", lambda: settings)
     corrupt = tmp_path / "corrupt.mp4"
     corrupt.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 2048)
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(_dialogue_wav(1.0, 220.0))
     clips = [
         TimelineRenderClip(
-            "clip-1",
-            "video-1",
-            corrupt.read_bytes(),
-            _dialogue_wav(1.0, 220.0),
-            "Corrupt source",
-            0.0,
-            1.0,
+            clip_id="clip-1",
+            video_artifact_id="video-1",
+            video_path=corrupt,
+            audio_path=voice,
+            subtitle_text="Corrupt source",
+            source_in_seconds=0,
+            duration_seconds=1,
         )
     ]
     with pytest.raises(TimelineRenderError):
-        await renderer.render_timeline(clips, lineage="corrupt-source")
+        await renderer.render_timeline(
+            clips, lineage="corrupt-source", output_path=tmp_path / "final.mp4"
+        )
 
 
 async def test_test_mode_render_is_marked_and_cannot_prove_delivery(
@@ -366,22 +382,27 @@ async def test_test_mode_render_is_marked_and_cannot_prove_delivery(
     assert ffmpeg, "Real FFmpeg is required for formal delivery verification"
     settings = get_settings().model_copy(update={"app_env": "test"})
     monkeypatch.setattr(renderer, "get_settings", lambda: settings)
+    video, voice = tmp_path / "video.mp4", tmp_path / "voice.wav"
+    video.write_bytes(b"not-a-real-video")
+    voice.write_bytes(b"not-a-real-audio")
     clips = [
         TimelineRenderClip(
-            "clip-1",
-            "video-1",
-            b"not-a-real-video",
-            b"not-a-real-audio",
-            "stub subtitle",
-            0.0,
-            1.5,
+            clip_id="clip-1",
+            video_artifact_id="video-1",
+            video_path=video,
+            audio_path=voice,
+            subtitle_text="stub subtitle",
+            source_in_seconds=0,
+            duration_seconds=1.5,
         )
     ]
-    rendered = await renderer.render_timeline(clips, lineage="stub-proof")
+    rendered = await renderer.render_timeline(
+        clips, lineage="stub-proof", output_path=tmp_path / "stub.mp4"
+    )
     assert rendered.summary.get("test_render") is True
     assert rendered.ffprobe["format"]["format_name"] == "mp4"
     stub_path = tmp_path / "stub.mp4"
-    stub_path.write_bytes(rendered.data)
+    assert rendered.output_path == stub_path
     decode_errors = await _decode_whole_file(stub_path)
     assert decode_errors.strip() != "", (
         "The test-mode stub unexpectedly decoded as real media; a delivery proof "

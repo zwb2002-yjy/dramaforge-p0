@@ -413,20 +413,22 @@ async def test_remote_identity_resumes_interrupted_download_with_zero_create(rec
         downloads.append(kwargs["remote"])
         if len(downloads) == 1:
             raise asyncio.CancelledError()  # process dies during local download, not create
-        return media
+        from app.execution.media_io import _resolve_media_file
+
+        return await _resolve_media_file(**{**kwargs, "artifact_uri": media})
 
     async def store(**kwargs):
         return SimpleNamespace(
             object_key=kwargs["object_key"],
-            content_hash=hashlib.sha256(kwargs["data"]).hexdigest(),
+            content_hash=hashlib.sha256(kwargs["path"].read_bytes()).hexdigest(),
             mime_type=kwargs["mime_type"],
-            byte_size=len(kwargs["data"]),
+            byte_size=kwargs["path"].stat().st_size,
         )
 
-    monkeypatch.setattr("app.execution.provider_execution._resolve_media_bytes", download)
+    monkeypatch.setattr("app.execution.provider_execution._resolve_media_file", download)
     monkeypatch.setattr(
         "app.execution.product_path.get_object_store",
-        lambda: SimpleNamespace(put_bytes=store),
+        lambda: SimpleNamespace(put_file=store),
     )
     ctx = {}
     await jobs.recover_interrupted_provider_jobs(ctx)

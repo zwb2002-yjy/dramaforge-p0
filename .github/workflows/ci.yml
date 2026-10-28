@@ -264,6 +264,12 @@ jobs:
         run: |
           set -euo pipefail
           docker compose -f docker-compose.quality.yml run --rm --no-deps frontend-quality
+      - name: Run pinned HTTPS and MinIO media resource proofs
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.quality.yml up \
+            --no-build --abort-on-container-exit --exit-code-from media-resource-quality \
+            media-resource-quality
       - name: Run the real Nginx authentication boundary in containers
         run: |
           set -euo pipefail

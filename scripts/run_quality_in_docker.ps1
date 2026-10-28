@@ -44,6 +44,10 @@ try {
     docker compose -f docker-compose.quality.yml run --rm --no-deps frontend-quality
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+    # Real TLS and MinIO SDK streams; isolated synthetic 256MiB fixtures.
+    docker compose -f docker-compose.quality.yml up --no-build --abort-on-container-exit --exit-code-from media-resource-quality media-resource-quality
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
     # Exercise the deployed Nginx config against a synthetic auth upstream.
     docker compose -f docker-compose.quality.yml up --no-build --abort-on-container-exit --exit-code-from auth-gateway-integration-quality auth-gateway-integration-quality
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

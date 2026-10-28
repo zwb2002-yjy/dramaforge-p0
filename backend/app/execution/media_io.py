@@ -6,11 +6,9 @@ import asyncio
 import ipaddress
 import logging
 import socket
-import tempfile
-from collections.abc import Iterable
+from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
 from decimal import Decimal
-from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -28,6 +26,7 @@ from app.execution.models import Artifact
 from app.shared.errors import (
     ValidationAppError,
 )
+from app.storage.materialized import MaterializedFile, MediaTransferError, materialize_stream
 
 logger = logging.getLogger(__name__)
 
@@ -40,22 +39,6 @@ _MEDIA_DOWNLOAD_RETRY_DELAYS: tuple[float, ...] = (1.0, 3.0)
 
 
 _MAX_PROVIDER_IMAGE_BYTES = 20 * 1024 * 1024
-
-
-_ALLOWED_PROVIDER_MEDIA_MIMES = frozenset(
-    {
-        "image/png",
-        "image/jpeg",
-        "image/webp",
-        "video/mp4",
-        "video/quicktime",
-        "video/webm",
-        "audio/mpeg",
-        "audio/wav",
-        "audio/x-wav",
-        "audio/mp4",
-    }
-)
 
 
 def _is_public_ip(address: str) -> bool:
@@ -145,8 +128,9 @@ async def _download_provider_media(
     *,
     kind: str,
     artifact_uri: str,
+    destination: Path,
     transport: httpx.AsyncBaseTransport | None = None,
-) -> bytes:
+) -> MaterializedFile:
     """Download one provider result with pinned DNS, bounded streaming and retries.
 
     The remote task has already succeeded by the time its bytes are fetched, so a
@@ -164,6 +148,7 @@ async def _download_provider_media(
                 value=value,
                 addresses=addresses,
                 transport=transport,
+                destination=destination,
             )
         except (httpx.TransportError, OSError) as exc:
             last_transport_error = exc
@@ -188,126 +173,119 @@ async def _download_provider_media_once(
     value: str,
     addresses: set[str],
     transport: httpx.AsyncBaseTransport | None,
-) -> bytes:
-    """One download attempt over an already validated public URL."""
-    if transport is not None:
-        async with (
-            httpx.AsyncClient(
-                timeout=httpx.Timeout(120.0, connect=20.0),
-                follow_redirects=False,
-                trust_env=False,
-                transport=transport,
-            ) as client,
-            client.stream("GET", value) as response,
-        ):
-            if response.is_redirect:
-                raise ValidationAppError(
-                    "PROVIDER_MEDIA_INVALID: provider media redirects are not allowed"
-                )
-            response.raise_for_status()
-            content_length = response.headers.get("Content-Length")
-            if content_length:
-                try:
-                    if int(content_length) > _MAX_PROVIDER_MEDIA_BYTES:
-                        raise ValidationAppError("PROVIDER_MEDIA_INVALID: response is too large")
-                except ValueError as exc:
-                    raise ValidationAppError(
-                        "PROVIDER_MEDIA_INVALID: response Content-Length is invalid"
-                    ) from exc
-            body = bytearray()
-            async for chunk in response.aiter_bytes(1024 * 1024):
-                body.extend(chunk)
-                if len(body) > _MAX_PROVIDER_MEDIA_BYTES:
-                    raise ValidationAppError("PROVIDER_MEDIA_INVALID: response is too large")
-            if content_length and int(content_length) != len(body):
-                raise ValidationAppError(
-                    "PROVIDER_MEDIA_INVALID: Content-Length does not match bytes"
-                )
-            return _validate_provider_media(
-                kind=kind,
-                data=bytes(body),
-                content_type=response.headers.get("Content-Type"),
-            )
-    host = (urlsplit(value).hostname or "").rstrip(".")
-    base_transport = httpx.AsyncHTTPTransport(
-        trust_env=False,
-        limits=httpx.Limits(max_connections=1),
-    )
-    ssl_context = base_transport._pool._ssl_context
-    base_transport._pool = httpcore.AsyncConnectionPool(
-        ssl_context=ssl_context,
-        max_connections=1,
-        max_keepalive_connections=0,
-        network_backend=_PinnedNetworkBackend(hostname=host, addresses=addresses),
-    )
-    try:
-        async with (
-            httpx.AsyncClient(
-                timeout=httpx.Timeout(120.0, connect=20.0),
-                follow_redirects=False,
-                trust_env=False,
-                transport=base_transport,
-            ) as client,
-            client.stream("GET", value) as response,
-        ):
-            if response.is_redirect:
-                raise ValidationAppError(
-                    "PROVIDER_MEDIA_INVALID: provider media redirects are not allowed"
-                )
-            response.raise_for_status()
-            content_length = response.headers.get("Content-Length")
-            if content_length:
-                try:
-                    if int(content_length) > _MAX_PROVIDER_MEDIA_BYTES:
-                        raise ValidationAppError("PROVIDER_MEDIA_INVALID: response is too large")
-                except ValueError as exc:
-                    raise ValidationAppError(
-                        "PROVIDER_MEDIA_INVALID: response Content-Length is invalid"
-                    ) from exc
-            body = bytearray()
-            async for chunk in response.aiter_bytes(1024 * 1024):
-                body.extend(chunk)
-                if len(body) > _MAX_PROVIDER_MEDIA_BYTES:
-                    raise ValidationAppError("PROVIDER_MEDIA_INVALID: response is too large")
-            if content_length and int(content_length) != len(body):
-                raise ValidationAppError(
-                    "PROVIDER_MEDIA_INVALID: Content-Length does not match bytes"
-                )
-            return _validate_provider_media(
-                kind=kind,
-                data=bytes(body),
-                content_type=response.headers.get("Content-Type"),
-            )
-    finally:
-        await base_transport.aclose()
-
-
-def _media_magic_matches(kind: str, data: bytes) -> bool:
-    if kind in {"keyframe", "image"}:
-        return (
-            data.startswith(b"\x89PNG\r\n\x1a\n")
-            or data.startswith(b"\xff\xd8\xff")
-            or (len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP")
+    destination: Path,
+) -> MaterializedFile:
+    """One existing result, with pinned DNS and bounded disk transfer."""
+    if transport is None:
+        host = (urlsplit(value).hostname or "").rstrip(".")
+        base_transport = httpx.AsyncHTTPTransport(
+            trust_env=False,
+            limits=httpx.Limits(max_connections=1),
         )
-    if kind in {"video", "video_review"}:
-        return len(data) >= 12 and data[4:8] == b"ftyp"
+        ssl_context = base_transport._pool._ssl_context
+        base_transport._pool = httpcore.AsyncConnectionPool(
+            ssl_context=ssl_context,
+            max_connections=1,
+            max_keepalive_connections=0,
+            network_backend=_PinnedNetworkBackend(hostname=host, addresses=addresses),
+        )
+        transport = base_transport
+    async with (
+        httpx.AsyncClient(
+            timeout=httpx.Timeout(120.0, connect=20.0),
+            follow_redirects=False,
+            trust_env=False,
+            transport=transport,
+        ) as client,
+        client.stream("GET", value, headers={"Accept-Encoding": "identity"}) as response,
+    ):
+        if response.is_redirect:
+            raise ValidationAppError(
+                "PROVIDER_MEDIA_INVALID: provider media redirects are not allowed"
+            )
+        response.raise_for_status()
+        if response.headers.get("Content-Encoding", "identity").lower() != "identity":
+            raise ValidationAppError(
+                "PROVIDER_MEDIA_INVALID: encoded media response is not allowed"
+            )
+        length = response.headers.get("Content-Length")
+        try:
+            expected = int(length) if length is not None else None
+        except ValueError as exc:
+            raise ValidationAppError(
+                "PROVIDER_MEDIA_INVALID: response Content-Length is invalid"
+            ) from exc
+        return await _materialize_provider_media(
+            kind=kind,
+            chunks=response.aiter_bytes(64 * 1024),
+            destination=destination,
+            content_type=response.headers.get("Content-Type"),
+            expected_size=expected,
+        )
+
+
+async def _materialize_provider_media(
+    *,
+    kind: str,
+    chunks: AsyncIterator[bytes],
+    destination: Path,
+    content_type: str | None,
+    expected_size: int | None = None,
+) -> MaterializedFile:
+    try:
+        media = await materialize_stream(
+            chunks,
+            destination=destination,
+            max_bytes=min(_MAX_PROVIDER_MEDIA_BYTES, _MAX_PROVIDER_IMAGE_BYTES)
+            if kind in {"keyframe", "image"}
+            else _MAX_PROVIDER_MEDIA_BYTES,
+            expected_size=expected_size,
+        )
+    except MediaTransferError as exc:
+        raise ValidationAppError(
+            f"PROVIDER_MEDIA_INVALID: Content-Length/response size: {exc}"
+        ) from exc
+    try:
+        with media.path.open("rb") as source:
+            _validate_provider_media(kind=kind, data=source.read(64), content_type=content_type)
+    except BaseException:
+        media.path.unlink(missing_ok=True)
+        raise
+    return media
+
+
+def _detected_media_format(*, kind: str, header: bytes) -> tuple[str, str] | None:
+    if kind in {"keyframe", "image"}:
+        if header.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png", "png"
+        if header.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg", "jpg"
+        if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+            return "image/webp", "webp"
+    if kind in {"video", "video_review", "composite"}:
+        if len(header) >= 12 and header[4:8] == b"ftyp":
+            return ("video/quicktime", "mov") if header[8:12] == b"qt  " else ("video/mp4", "mp4")
+        if header.startswith(b"\x1a\x45\xdf\xa3") and b"webm" in header:
+            return "video/webm", "webm"
     if kind in {"voice", "audio"}:
-        return data.startswith((b"ID3", b"RIFF", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"))
-    return bool(data)
+        if header[:4] == b"RIFF" and header[8:12] == b"WAVE":
+            return "audio/wav", "wav"
+        if header.startswith((b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")):
+            return "audio/mpeg", "mp3"
+        if len(header) >= 12 and header[4:8] == b"ftyp":
+            return "audio/mp4", "m4a"
+    return None
 
 
 def _validate_provider_media(*, kind: str, data: bytes, content_type: str | None) -> bytes:
-    if not data or len(data) > _MAX_PROVIDER_MEDIA_BYTES:
-        raise ValidationAppError(
-            "PROVIDER_MEDIA_INVALID: response size is outside the allowed range"
-        )
+    detected = _detected_media_format(kind=kind, header=data)
     normalized_type = (content_type or "").split(";", 1)[0].strip().lower()
-    if normalized_type and normalized_type not in _ALLOWED_PROVIDER_MEDIA_MIMES:
-        raise ValidationAppError("PROVIDER_MEDIA_INVALID: response MIME is not allowed")
-    if not _media_magic_matches(kind, data):
-        raise ValidationAppError("PROVIDER_MEDIA_INVALID: response bytes do not match media kind")
-    if kind in {"keyframe", "image"} and len(data) > _MAX_PROVIDER_IMAGE_BYTES:
-        raise ValidationAppError("PROVIDER_MEDIA_INVALID: image response is too large")
+    if normalized_type == "audio/x-wav":
+        normalized_type = "audio/wav"
+    if not detected or (normalized_type and normalized_type != detected[0]):
+        raise ValidationAppError(
+            "PROVIDER_MEDIA_INVALID: response MIME/bytes do not match media kind"
+        )
     return data
 
 
@@ -318,11 +296,11 @@ class _MediaMetadata:
     duration_seconds: Decimal | None = None
 
 
-def _inspect_media_metadata(*, kind: str, data: bytes) -> _MediaMetadata:
+def _inspect_media_metadata(*, kind: str, path: Path) -> _MediaMetadata:
     """Decode deterministic media metadata before bytes enter object storage."""
     if kind in {"keyframe", "image"}:
         try:
-            with Image.open(BytesIO(data)) as image:
+            with Image.open(path) as image:
                 image.load()
                 return _MediaMetadata(width=image.width, height=image.height)
         except (UnidentifiedImageError, OSError) as exc:
@@ -333,30 +311,27 @@ def _inspect_media_metadata(*, kind: str, data: bytes) -> _MediaMetadata:
         return _MediaMetadata()
     import cv2
 
-    with tempfile.TemporaryDirectory(prefix="dramaforge-media-meta-") as temp_dir:
-        path = Path(temp_dir) / "source.mp4"
-        path.write_bytes(data)
-        capture = cv2.VideoCapture(str(path))
-        try:
-            if not capture.isOpened():
-                if get_settings().app_env == "test":
-                    return _MediaMetadata()
-                raise ValidationAppError("PROVIDER_MEDIA_INVALID: video cannot be decoded")
-            width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
-            frame_rate = float(capture.get(cv2.CAP_PROP_FPS))
-            if width <= 0 or height <= 0 or frame_count <= 0 or frame_rate <= 0:
-                if get_settings().app_env == "test":
-                    return _MediaMetadata()
-                raise ValidationAppError("PROVIDER_MEDIA_INVALID: video metadata is invalid")
-            return _MediaMetadata(
-                width=width,
-                height=height,
-                duration_seconds=Decimal(str(round(frame_count / frame_rate, 3))),
-            )
-        finally:
-            capture.release()
+    capture = cv2.VideoCapture(str(path))
+    try:
+        if not capture.isOpened():
+            if get_settings().app_env == "test":
+                return _MediaMetadata()
+            raise ValidationAppError("PROVIDER_MEDIA_INVALID: video cannot be decoded")
+        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        frame_rate = float(capture.get(cv2.CAP_PROP_FPS))
+        if width <= 0 or height <= 0 or frame_count <= 0 or frame_rate <= 0:
+            if get_settings().app_env == "test":
+                return _MediaMetadata()
+            raise ValidationAppError("PROVIDER_MEDIA_INVALID: video metadata is invalid")
+        return _MediaMetadata(
+            width=width,
+            height=height,
+            duration_seconds=Decimal(str(round(frame_count / frame_rate, 3))),
+        )
+    finally:
+        capture.release()
 
 
 def _apply_media_metadata(artifact: Artifact, metadata: _MediaMetadata) -> None:
@@ -365,51 +340,80 @@ def _apply_media_metadata(artifact: Artifact, metadata: _MediaMetadata) -> None:
     artifact.duration_seconds = metadata.duration_seconds
 
 
-async def _resolve_media_bytes(
+async def _resolve_media_file(
     *,
     kind: str,
     remote: str,
     prompt: str,
     artifact_uri: object,
-) -> bytes:
-    """Load media bytes from URI. Never invent STUB success media on formal path."""
+    destination: Path,
+) -> MaterializedFile:
+    """Materialize one existing result without copying its full media body."""
     from app.config import get_settings
 
+    content_type = None
+    synthetic = False
+    if isinstance(artifact_uri, str) and artifact_uri.startswith(("https://", "http://")):
+        try:
+            return await _download_provider_media(
+                kind=kind, artifact_uri=artifact_uri, destination=destination
+            )
+        except (httpx.HTTPError, OSError) as exc:
+            raise ValidationAppError(
+                f"PROVIDER_MEDIA_DOWNLOAD_FAILED: {type(exc).__name__}"
+            ) from exc
     if isinstance(artifact_uri, bytes):
-        return _validate_provider_media(kind=kind, data=artifact_uri, content_type=None)
-    if isinstance(artifact_uri, str) and artifact_uri:
-        if artifact_uri.startswith("data:") and "," in artifact_uri:
-            import base64
 
-            header, b64 = artifact_uri.split(",", 1)
-            max_encoded_chars = ((_MAX_PROVIDER_MEDIA_BYTES + 2) // 3) * 4
-            if len(b64) > max_encoded_chars:
-                raise ValidationAppError("PROVIDER_MEDIA_INVALID: data URI is too large")
+        async def chunks() -> AsyncIterator[bytes]:
+            for start in range(0, len(artifact_uri), 64 * 1024):
+                yield artifact_uri[start : start + 64 * 1024]
+    elif isinstance(artifact_uri, str) and artifact_uri.startswith("data:") and "," in artifact_uri:
+        import base64
+
+        separator = artifact_uri.index(",")
+        header = artifact_uri[:separator]
+        encoded_start = separator + 1
+        encoded_length = len(artifact_uri) - encoded_start
+        if not header.endswith(";base64"):
+            raise ValidationAppError("PROVIDER_MEDIA_INVALID: malformed data URI")
+        content_type = header[5:].split(";", 1)[0].strip().lower()
+        limit = (
+            min(_MAX_PROVIDER_MEDIA_BYTES, _MAX_PROVIDER_IMAGE_BYTES)
+            if kind in {"keyframe", "image"}
+            else _MAX_PROVIDER_MEDIA_BYTES
+        )
+        if encoded_length > ((limit + 2) // 3) * 4:
+            raise ValidationAppError("PROVIDER_MEDIA_INVALID: data URI is too large")
+
+        async def chunks() -> AsyncIterator[bytes]:
             try:
-                data = base64.b64decode(b64, validate=True)
+                for start in range(encoded_start, len(artifact_uri), 64 * 1024):
+                    part = artifact_uri[start : start + 64 * 1024]
+                    if "=" in part and start + len(part) != len(artifact_uri):
+                        raise ValueError("nonfinal padding")
+                    yield base64.b64decode(part, validate=True)
             except (ValueError, TypeError) as exc:
                 raise ValidationAppError("PROVIDER_MEDIA_INVALID: malformed data URI") from exc
-            mime = header[5:].split(";", 1)[0].strip().lower()
-            return _validate_provider_media(kind=kind, data=data, content_type=mime)
-        if artifact_uri.startswith("http://") or artifact_uri.startswith("https://"):
-            try:
-                return await _download_provider_media(kind=kind, artifact_uri=artifact_uri)
-            except (httpx.HTTPError, OSError) as exc:
-                raise ValidationAppError(
-                    f"PROVIDER_MEDIA_DOWNLOAD_FAILED: {type(exc).__name__}"
-                ) from exc
-        if artifact_uri.startswith("fake://") and get_settings().app_env == "test":
-            # Explicit test-only fake URI → synthetic bytes for contract tests
-            return f"{kind}-TESTFAKE:{remote}:{prompt}".encode()
-        raise ValidationAppError(
-            "PROVIDER_MEDIA_INVALID: unsupported artifact URI; expected HTTPS or validated data"
+    elif get_settings().app_env == "test" and (
+        not artifact_uri or (isinstance(artifact_uri, str) and artifact_uri.startswith("fake://"))
+    ):
+        synthetic = True
+
+        async def chunks() -> AsyncIterator[bytes]:
+            yield f"{kind}-TESTFAKE:{remote}:{prompt}".encode()
+    else:
+        code = (
+            "PROVIDER_MEDIA_INVALID"
+            if isinstance(artifact_uri, str) and artifact_uri
+            else "PROVIDER_MEDIA_MISSING"
         )
-    if get_settings().app_env == "test":
-        # Test adapters without blobs: deterministic bytes for unit tests only
-        return f"{kind}-TESTFAKE:{remote}:{prompt}".encode()
-    raise ValidationAppError(
-        f"PROVIDER_MEDIA_MISSING: adapter succeeded but no artifact_uri bytes "
-        f"(kind={kind} remote={remote}). Refusing STUB media on formal path."
+        raise ValidationAppError(f"{code}: expected HTTPS or validated data; refusing STUB media")
+    if synthetic:
+        return await materialize_stream(
+            chunks(), destination=destination, max_bytes=_MAX_PROVIDER_MEDIA_BYTES
+        )
+    return await _materialize_provider_media(
+        kind=kind, chunks=chunks(), destination=destination, content_type=content_type
     )
 
 

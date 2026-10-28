@@ -12,11 +12,13 @@ from app.execution.media_io import _inspect_media_metadata
 from PIL import Image
 
 
-def test_image_metadata_comes_from_decoded_bytes() -> None:
+def test_image_metadata_comes_from_decoded_bytes(tmp_path) -> None:
     output = BytesIO()
     Image.new("RGB", (73, 131), color=(12, 34, 56)).save(output, format="PNG")
 
-    metadata = _inspect_media_metadata(kind="keyframe", data=output.getvalue())
+    path = tmp_path / "image.png"
+    path.write_bytes(output.getvalue())
+    metadata = _inspect_media_metadata(kind="keyframe", path=path)
 
     assert metadata.width == 73
     assert metadata.height == 131
@@ -40,7 +42,7 @@ def test_video_metadata_comes_from_decoded_frames(tmp_path: Path) -> None:
     finally:
         writer.release()
 
-    metadata = _inspect_media_metadata(kind="video", data=path.read_bytes())
+    metadata = _inspect_media_metadata(kind="video", path=path)
 
     assert metadata.width == 72
     assert metadata.height == 128

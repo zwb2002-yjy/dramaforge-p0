@@ -10,9 +10,11 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID, uuid4
 
@@ -35,6 +37,7 @@ from app.production.service import GraphService
 from app.providers.voice_config import freeze_voice_execution
 from app.runtime.scheduler import NodeRunScheduler
 from app.shared.errors import NotFoundError, ProviderTaskPendingError, ValidationAppError
+from app.storage.materialized import MaterializedFile, MediaTransferError, materialize_stream
 from app.storage.minio_store import ObjectStore
 
 if TYPE_CHECKING:
@@ -52,6 +55,8 @@ _PENDING = frozenset({"queued", "running", "cancel_requested"})
 _FINAL_FILM_GRAPH_KEY = "final_film_assembly"
 _FINAL_FILM_FORMAT = "dramaforge-final-film-v1"
 logger = logging.getLogger(__name__)
+_MAX_FINAL_FILM_INPUT_BYTES = 8 * 1024 * 1024 * 1024
+_MAX_INPUT_MEDIA_BYTES = 512 * 1024 * 1024
 
 
 async def _cleanup_uploads(session: AsyncSession, *, run_id: UUID, store: ObjectStore) -> None:
@@ -689,14 +694,16 @@ def _snapshot_refs(snapshot: dict[str, object]) -> list[_TimelineRef]:
     return refs
 
 
-async def _read_artifact_bytes(
+async def _read_artifact_file(
     artifacts: dict[UUID, Artifact],
     store: ObjectStore,
     artifact_id: UUID,
     *,
     project_id: UUID,
     artifact_type: str,
-) -> tuple[Artifact, bytes]:
+    directory: Path,
+    cache: dict[UUID, MaterializedFile],
+) -> tuple[Artifact, Path]:
     artifact = artifacts.get(artifact_id)
     if (
         artifact is None
@@ -709,19 +716,28 @@ async def _read_artifact_bytes(
             "Final Film input Artifact is unavailable",
             details={"code": "FINAL_FILM_INPUT_UNAVAILABLE", "artifact_id": str(artifact_id)},
         )
+    if artifact_id in cache:
+        return artifact, cache[artifact_id].path
     try:
-        data = await store.get_bytes(object_key=artifact.object_key)
+        media = await materialize_stream(
+            store.iter_bytes(object_key=artifact.object_key),
+            destination=directory / f"artifact-{artifact_id}.media",
+            max_bytes=_MAX_INPUT_MEDIA_BYTES,
+            expected_size=artifact.byte_size,
+            expected_hash=artifact.content_hash,
+        )
+    except MediaTransferError as exc:
+        raise ValidationAppError(
+            "Final Film input size/hash is invalid",
+            details={"code": "FINAL_FILM_INPUT_HASH_MISMATCH", "artifact_id": str(artifact_id)},
+        ) from exc
     except Exception as exc:  # noqa: BLE001
         raise ValidationAppError(
             "Final Film input Artifact cannot be read",
             details={"code": "FINAL_FILM_INPUT_READ_FAILED", "artifact_id": str(artifact_id)},
         ) from exc
-    if not data or hashlib.sha256(data).hexdigest() != artifact.content_hash:
-        raise ValidationAppError(
-            "Final Film input Artifact hash mismatch",
-            details={"code": "FINAL_FILM_INPUT_HASH_MISMATCH", "artifact_id": str(artifact_id)},
-        )
-    return artifact, data
+    cache[artifact_id] = media
+    return artifact, media.path
 
 
 async def _tail_for_ref(
@@ -987,8 +1003,8 @@ async def preview_timeline(
     draft_timeline: dict[str, Any],
 ) -> TimelinePreviewRead:
     """Read-only draft instructions using the exact export reference and timing rules."""
-    from app.production.timeline_renderer import TimelineRenderClip
     from app.production.timeline_subtitles import (
+        TimelineClipInstructions,
         TimelineTimingError,
         build_timeline_subtitles,
         normalize_subtitle_text,
@@ -1005,7 +1021,7 @@ async def preview_timeline(
         shot.id: shot
         for shot in await _formal_shots_for_refs(session, project_id=project_id, refs=refs)
     }
-    instructions: list[TimelineRenderClip] = []
+    instructions: list[TimelineClipInstructions] = []
     audio_states: list[Literal["available", "muted", "none", "unavailable"]] = []
     unsupported: list[str] = []
     for index, ref in enumerate(refs):
@@ -1049,11 +1065,9 @@ async def preview_timeline(
             unsupported.append("voice_unavailable")
         audio_states.append(audio_state)
         instructions.append(
-            TimelineRenderClip(
+            TimelineClipInstructions(
                 clip_id=ref.clip_id,
                 video_artifact_id=str(ref.artifact_id),
-                video_bytes=b"",
-                audio_bytes=None,
                 subtitle_text=""
                 if ref.subtitle_enabled is False
                 else ref.subtitle
@@ -1450,6 +1464,9 @@ async def execute_final_film_node_run(
     delivery_committed = False
     uploads_finished = False
     run_id, operation_id = run.id, operation.id
+    scratch = tempfile.TemporaryDirectory(prefix=f"dramaforge-final-film-{run_id}-")
+    directory = Path(scratch.name)
+    media_cache: dict[UUID, MaterializedFile] = {}
     try:
         # Resolve all immutable metadata in one short transaction. Reading an
         # Artifact lazily inside the media loop would reopen a transaction for
@@ -1481,6 +1498,11 @@ async def execute_final_film_node_run(
             ).all()
         }
         await session.commit()
+        if sum(artifact.byte_size for artifact in artifacts.values()) > _MAX_FINAL_FILM_INPUT_BYTES:
+            raise ValidationAppError(
+                "Final Film input exceeds the local resource limit",
+                details={"code": "FINAL_FILM_INPUT_TOO_LARGE"},
+            )
         timeline_clips: list[TimelineRenderClip] = []
         formal_lineage: list[dict[str, Any]] = []
         frozen_references = snapshot.get("formal_references")
@@ -1490,12 +1512,14 @@ async def execute_final_film_node_run(
             if isinstance(item, dict)
         }
         for ref, composite_run, composite_artifact, media in resolved:
-            _video_artifact, video_bytes = await _read_artifact_bytes(
+            _video_artifact, video_path = await _read_artifact_file(
                 artifacts,
                 obj_store,
                 ref.artifact_id,
                 project_id=run.project_id,
                 artifact_type="video",
+                directory=directory,
+                cache=media_cache,
             )
             voice_input = media.get("voice")
             default_audio_id = (
@@ -1504,14 +1528,16 @@ async def execute_final_film_node_run(
                 else None
             )
             selected_audio_id = ref.audio_id or default_audio_id
-            audio_bytes = None
+            audio_path = None
             if selected_audio_id is not None and not bool(ref.raw_clip.get("muted")):
-                _audio_artifact, audio_bytes = await _read_artifact_bytes(
+                _audio_artifact, audio_path = await _read_artifact_file(
                     artifacts,
                     obj_store,
                     selected_audio_id,
                     project_id=run.project_id,
                     artifact_type="audio",
+                    directory=directory,
+                    cache=media_cache,
                 )
             # Subtitle defaults were frozen at queue time. Empty/disabled text
             # must never resurrect a subsequently edited Canonical Shot dialogue.
@@ -1526,8 +1552,8 @@ async def execute_final_film_node_run(
                 TimelineRenderClip(
                     clip_id=ref.clip_id,
                     video_artifact_id=str(ref.artifact_id),
-                    video_bytes=video_bytes,
-                    audio_bytes=audio_bytes,
+                    video_path=video_path,
+                    audio_path=audio_path,
                     subtitle_text=subtitle_text,
                     source_in_seconds=ref.source_in_seconds,
                     source_out_seconds=(
@@ -1569,14 +1595,16 @@ async def execute_final_film_node_run(
                     },
                 }
             )
-        music_bytes = None
+        music_path = None
         if music_id:
-            _music_artifact, music_bytes = await _read_artifact_bytes(
+            _music_artifact, music_path = await _read_artifact_file(
                 artifacts,
                 obj_store,
                 UUID(str(music_id)),
                 project_id=run.project_id,
                 artifact_type="audio",
+                directory=directory,
+                cache=media_cache,
             )
         lineage = hashlib.sha256(
             json.dumps(formal_lineage, sort_keys=True, separators=(",", ":")).encode()
@@ -1585,7 +1613,8 @@ async def execute_final_film_node_run(
             rendered = await render_timeline(
                 timeline_clips,
                 lineage=lineage,
-                music_bytes=music_bytes,
+                music_path=music_path,
+                output_path=directory / "final.mp4",
                 music_volume=(
                     float(metadata.get("music_volume", 0.12))
                     if isinstance(metadata, dict)
@@ -1612,7 +1641,7 @@ async def execute_final_film_node_run(
             "mp4_container": "mp4" in str((probe.get("format") or {}).get("format_name") or ""),
             "h264_video": video.get("codec_name") == "h264",
             "aac_audio": audio.get("codec_name") == "aac",
-            "dialogue_audio_present": any(bool(clip.audio_bytes) for clip in timeline_clips)
+            "dialogue_audio_present": any(clip.audio_path is not None for clip in timeline_clips)
             and bool(audio),
             "burned_subtitles": bool(render_summary.get("subtitle_burn_applied")),
             "subtitles_match_timeline": (
@@ -1655,9 +1684,9 @@ async def execute_final_film_node_run(
             "uploads_finished": False,
         }
         await session.commit()
-        stored = await obj_store.put_bytes(
+        stored = await obj_store.put_file(
             object_key=object_key,
-            data=rendered.data,
+            path=rendered.output_path,
             mime_type="video/mp4",
         )
         if rendered.subtitle_data:
@@ -1831,6 +1860,8 @@ async def execute_final_film_node_run(
         await session.commit()
         await _cleanup_uploads(session, run_id=run_id, store=obj_store)
         raise
+    finally:
+        scratch.cleanup()
 
 
 __all__ = [

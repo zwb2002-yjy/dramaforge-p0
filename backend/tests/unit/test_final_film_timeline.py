@@ -89,14 +89,15 @@ async def test_final_film_releases_transaction_at_every_io_boundary(session, mon
     await session.commit()
     node = await session.get(GraphNode, run.graph_node_id)
     store = get_object_store()
-    original_get, original_put = store.get_bytes, store.put_bytes
+    original_get, original_put = store.iter_bytes, store.put_file
     original_render = render_timeline
     boundaries = []
 
     async def read(**kwargs):
         assert not session.in_transaction(), "input download holds a transaction"
         boundaries.append("read")
-        return await original_get(**kwargs)
+        async for chunk in original_get(**kwargs):
+            yield chunk
 
     async def write(**kwargs):
         assert not session.in_transaction(), "output upload holds a transaction"
@@ -108,8 +109,8 @@ async def test_final_film_releases_transaction_at_every_io_boundary(session, mon
         boundaries.append("render")
         return await original_render(*args, **kwargs)
 
-    monkeypatch.setattr(store, "get_bytes", read)
-    monkeypatch.setattr(store, "put_bytes", write)
+    monkeypatch.setattr(store, "iter_bytes", read)
+    monkeypatch.setattr(store, "put_file", write)
     monkeypatch.setattr("app.production.timeline_renderer.render_timeline", render)
     await execute_final_film_node_run(session, run=run, node=node, obj_store=store)
     assert {"read", "render", "write"} <= set(boundaries)
@@ -139,13 +140,13 @@ async def test_crashed_upload_is_journaled_and_cleanup_failure_is_retried(sessio
     await session.commit()
     node = await session.get(GraphNode, run.graph_node_id)
     store = get_object_store()
-    original_put = store.put_bytes
+    original_put = store.put_file
 
     async def kill_after_remote_write(**kwargs):
         await original_put(**kwargs)
         raise ProcessKilled()
 
-    monkeypatch.setattr(store, "put_bytes", kill_after_remote_write)
+    monkeypatch.setattr(store, "put_file", kill_after_remote_write)
     with pytest.raises(ProcessKilled):
         await execute_final_film_node_run(session, run=run, node=node, obj_store=store)
     operation = await session.scalar(
@@ -176,7 +177,7 @@ async def test_crashed_upload_is_journaled_and_cleanup_failure_is_retried(sessio
     assert operation.request_summary["upload_objects"] == keys
     with pytest.raises(KeyError):
         await store.get_bytes(object_key=keys[0])
-    await original_put(object_key=keys[0], data=b"late bytes", mime_type="video/mp4")
+    await store.put_bytes(object_key=keys[0], data=b"late bytes", mime_type="video/mp4")
     await cleanup_final_film_uploads(session, node_run_id=run_id, store=store)
     with pytest.raises(KeyError):
         await store.get_bytes(object_key=keys[0])
@@ -206,7 +207,7 @@ async def test_late_upload_after_cleanup_cannot_escape_reclamation(session, monk
     await session.commit()
     node = await session.get(GraphNode, run.graph_node_id)
     store = get_object_store()
-    original_put = store.put_bytes
+    original_put = store.put_file
     input_keys = set(store.keys())
     factory = async_sessionmaker(session.bind, expire_on_commit=False)
 
@@ -220,7 +221,7 @@ async def test_late_upload_after_cleanup_cannot_escape_reclamation(session, monk
             await cleanup_final_film_uploads(cleanup_session, node_run_id=run_id, store=store)
         return await original_put(**kwargs)
 
-    monkeypatch.setattr(store, "put_bytes", late_put)
+    monkeypatch.setattr(store, "put_file", late_put)
     with pytest.raises(ValidationAppError) as failure:
         await execute_final_film_node_run(session, run=run, node=node, obj_store=store)
     assert failure.value.details["code"] == "FINAL_FILM_ATTEMPT_EXPIRED"
@@ -820,14 +821,17 @@ async def test_worker_renders_frozen_timeline_and_persists_lineage(
 
 
 @pytest.mark.asyncio
-async def test_timeline_renderer_reports_edit_semantics_in_test_mode() -> None:
+async def test_timeline_renderer_reports_edit_semantics_in_test_mode(tmp_path) -> None:
+    video, audio = tmp_path / "video.mp4", tmp_path / "audio.wav"
+    video.write_bytes(b"video")
+    audio.write_bytes(b"audio")
     result = await render_timeline(
         [
             TimelineRenderClip(
                 clip_id="clip-1",
                 video_artifact_id="video-1",
-                video_bytes=b"video",
-                audio_bytes=b"audio",
+                video_path=video,
+                audio_path=audio,
                 subtitle_text="Edited subtitle",
                 source_in_seconds=1.25,
                 duration_seconds=2.5,
@@ -835,6 +839,7 @@ async def test_timeline_renderer_reports_edit_semantics_in_test_mode() -> None:
             )
         ],
         lineage="lineage",
+        output_path=tmp_path / "final.mp4",
     )
     assert result.summary["timeline_renderer"] == "ffmpeg-v2"
     assert result.summary["clip_count"] == 1

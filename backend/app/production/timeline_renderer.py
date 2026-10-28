@@ -1,7 +1,7 @@
 """FFmpeg renderer for the persisted OpenCut Timeline.
 
-The renderer is deliberately byte-oriented: the Worker resolves all Artifact
-bytes and this module only applies the immutable Timeline edit instructions.
+The Worker materializes verified Artifact files. This module applies only the
+immutable Timeline edit instructions and writes to the caller-owned output file.
 It never queries the database or invents production lineage.
 """
 
@@ -18,6 +18,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.production.timeline_subtitles import (
+    TimelineClipInstructions,
     TimelineTimingError,
     build_timeline_subtitles,
 )
@@ -27,25 +28,15 @@ class TimelineRenderError(RuntimeError):
     """Raised when a Timeline edit cannot be rendered safely."""
 
 
-@dataclass(frozen=True)
-class TimelineRenderClip:
-    clip_id: str
-    video_artifact_id: str
-    video_bytes: bytes
-    audio_bytes: bytes | None
-    subtitle_text: str
-    source_in_seconds: float
-    duration_seconds: float
-    transition_kind: str | None = None
-    transition_duration_seconds: float = 0.0
-    audio_artifact_id: str | None = None
-    source_out_seconds: float | None = None
-    audio_volume: float = 1.0
+@dataclass(frozen=True, kw_only=True)
+class TimelineRenderClip(TimelineClipInstructions):
+    video_path: Path
+    audio_path: Path | None = None
 
 
 @dataclass(frozen=True)
 class TimelineRenderResult:
-    data: bytes
+    output_path: Path
     ffprobe: dict[str, Any]
     summary: dict[str, Any]
     subtitle_data: bytes = b""
@@ -67,6 +58,11 @@ async def _run(command: list[str], *, timeout: float) -> tuple[bytes, bytes]:
         process.kill()
         await process.communicate()
         raise TimelineRenderError("Timeline FFmpeg process timed out") from exc
+    except BaseException:
+        if process.returncode is None:
+            process.kill()
+        await asyncio.shield(process.communicate())
+        raise
     if process.returncode != 0:
         detail = stderr.decode("utf-8", errors="replace").strip()[-1200:]
         raise TimelineRenderError(detail or f"FFmpeg exited with {process.returncode}")
@@ -100,10 +96,8 @@ async def _render_clip(clip: TimelineRenderClip, *, directory: Path, index: int)
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
         raise TimelineRenderError("ffmpeg executable not found")
-    video = directory / f"source-{index}.mp4"
-    audio = directory / f"audio-{index}.wav"
+    video = clip.video_path
     output = directory / f"timeline-clip-{index}.mp4"
-    video.write_bytes(clip.video_bytes)
 
     command = [ffmpeg, "-y", "-ss", f"{clip.source_in_seconds:.3f}"]
     source_duration = (
@@ -112,9 +106,8 @@ async def _render_clip(clip: TimelineRenderClip, *, directory: Path, index: int)
         else clip.duration_seconds
     )
     command.extend(["-t", f"{source_duration:.3f}", "-i", str(video)])
-    if clip.audio_bytes:
-        audio.write_bytes(clip.audio_bytes)
-        command.extend(["-i", str(audio)])
+    if clip.audio_path is not None:
+        command.extend(["-i", str(clip.audio_path)])
     else:
         command.extend(["-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono"])
     if abs(source_duration - clip.duration_seconds) > 0.0005:
@@ -248,7 +241,7 @@ async def _assemble_segments(
 async def _mix_music(
     *,
     source: Path,
-    music: bytes,
+    music: Path,
     output: Path,
     volume: float,
     duration: float,
@@ -256,8 +249,6 @@ async def _mix_music(
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
         raise TimelineRenderError("ffmpeg executable not found")
-    music_path = output.with_name("timeline-music.wav")
-    music_path.write_bytes(music)
     bounded_volume = min(1.0, max(0.0, volume))
     await _run(
         [
@@ -268,7 +259,7 @@ async def _mix_music(
             "-stream_loop",
             "-1",
             "-i",
-            str(music_path),
+            str(music),
             "-filter_complex",
             f"[1:a]volume={bounded_volume:.3f}[music];[0:a][music]amix=inputs=2:duration=first:dropout_transition=0[aout]",
             "-map",
@@ -289,18 +280,24 @@ async def _mix_music(
     )
 
 
-def _test_render(clips: list[TimelineRenderClip], *, lineage: str) -> TimelineRenderResult:
+def _test_render(
+    clips: list[TimelineRenderClip], *, lineage: str, output_path: Path
+) -> TimelineRenderResult:
     digest = hashlib.sha256(lineage.encode("utf-8"))
     time_map = build_timeline_subtitles(clips)
     digest.update(json.dumps(time_map.evidence(), sort_keys=True).encode("utf-8"))
     for clip in clips:
         digest.update(clip.video_artifact_id.encode("utf-8"))
-        digest.update(clip.video_bytes)
-        digest.update(clip.audio_bytes or b"")
+        for path in (clip.video_path, clip.audio_path):
+            if path is not None:
+                with path.open("rb") as source:
+                    while chunk := source.read(64 * 1024):
+                        digest.update(chunk)
         digest.update(f"{clip.audio_volume:.6f}".encode())
         digest.update(clip.subtitle_text.encode("utf-8"))
         digest.update(f"{clip.source_in_seconds:.3f}:{clip.duration_seconds:.3f}".encode())
     data = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + digest.digest()
+    output_path.write_bytes(data)
     duration = time_map.duration_ms / 1000
     probe = {
         "format": {"duration": f"{duration:.3f}", "format_name": "mp4"},
@@ -310,7 +307,7 @@ def _test_render(clips: list[TimelineRenderClip], *, lineage: str) -> TimelineRe
         ],
     }
     return TimelineRenderResult(
-        data=data,
+        output_path=output_path,
         ffprobe=probe,
         subtitle_data=time_map.srt_bytes,
         summary={
@@ -322,7 +319,7 @@ def _test_render(clips: list[TimelineRenderClip], *, lineage: str) -> TimelineRe
             "timeline_renderer": "ffmpeg-v2",
             "clip_count": len(clips),
             "subtitle_clip_count": sum(bool(clip.subtitle_text.strip()) for clip in clips),
-            "audio_clip_count": sum(bool(clip.audio_bytes) for clip in clips),
+            "audio_clip_count": sum(clip.audio_path is not None for clip in clips),
         },
     )
 
@@ -331,12 +328,15 @@ async def render_timeline(
     clips: list[TimelineRenderClip],
     *,
     lineage: str,
-    music_bytes: bytes | None = None,
+    output_path: Path,
+    music_path: Path | None = None,
     music_volume: float = 0.12,
 ) -> TimelineRenderResult:
     """Render the supplied Timeline edits into one playable MP4."""
     if not clips:
         raise TimelineRenderError("Timeline has no clips")
+    if output_path.exists():
+        raise TimelineRenderError("Timeline output file already exists")
     if any(clip.source_in_seconds < 0 or clip.duration_seconds <= 0 for clip in clips):
         raise TimelineRenderError("Timeline clip trim/duration is invalid")
     if any(not 0 <= clip.audio_volume <= 1 for clip in clips):
@@ -356,7 +356,7 @@ async def render_timeline(
         for clip, timing in zip(clips, time_map.clips, strict=True)
     ]
     if get_settings().app_env == "test":
-        return _test_render(clips, lineage=lineage)
+        return _test_render(clips, lineage=lineage, output_path=output_path)
 
     with tempfile.TemporaryDirectory(prefix="dramaforge-timeline-") as temp:
         directory = Path(temp)
@@ -371,11 +371,11 @@ async def render_timeline(
         else:
             await _concat_cuts(paths, output=assembled, lineage=lineage)
         duration = time_map.duration_ms / 1000
-        if music_bytes:
+        if music_path is not None:
             mixed = directory / "mixed.mp4"
             await _mix_music(
                 source=assembled,
-                music=music_bytes,
+                music=music_path,
                 output=mixed,
                 volume=music_volume,
                 duration=duration,
@@ -413,10 +413,10 @@ async def render_timeline(
                 timeout=300.0,
             )
             assembled = burned
-        data = assembled.read_bytes()
         probe = await _probe(assembled)
+        shutil.move(str(assembled), output_path)
         return TimelineRenderResult(
-            data=data,
+            output_path=output_path,
             ffprobe=probe,
             subtitle_data=time_map.srt_bytes,
             summary={
@@ -426,10 +426,10 @@ async def render_timeline(
                 "timeline_renderer": "ffmpeg-v2",
                 "clip_count": len(clips),
                 "crossfade": has_crossfade,
-                "music_mixed": bool(music_bytes),
+                "music_mixed": music_path is not None,
                 "rendered_duration_seconds": round(duration, 3),
                 "subtitle_clip_count": sum(bool(clip.subtitle_text.strip()) for clip in clips),
-                "audio_clip_count": sum(bool(clip.audio_bytes) for clip in clips),
+                "audio_clip_count": sum(clip.audio_path is not None for clip in clips),
             },
         )
 

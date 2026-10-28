@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from threading import Event
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -9,6 +10,63 @@ import pytest
 from app.config import get_settings
 from app.storage.minio_store import MinioObjectStore
 from fastapi.responses import StreamingResponse
+
+
+async def test_file_upload_reads_a_handle_and_closes_it_after_failure(tmp_path):
+    source = tmp_path / "video.mp4"
+    source.write_bytes(b"bounded-stream" * 10000)
+    store = MinioObjectStore(get_settings())
+    client = Mock()
+    store._client = client
+    readers = []
+
+    def upload(bucket, key, data, *, length, content_type, num_parallel_uploads):
+        assert num_parallel_uploads == 1
+        assert bucket and key == "video.mp4" and content_type == "video/mp4"
+        assert length == source.stat().st_size
+        assert not isinstance(data, bytes)
+        readers.append(data)
+        digest = hashlib.sha256()
+        while chunk := data.read(65536):
+            digest.update(chunk)
+        assert digest.hexdigest() == hashlib.sha256(source.read_bytes()).hexdigest()
+
+    client.put_object.side_effect = upload
+    stored = await store.put_file(object_key="video.mp4", path=source, mime_type="video/mp4")
+    assert stored.byte_size == source.stat().st_size
+    assert readers[0].closed
+    client.put_object.side_effect = OSError("disconnected")
+    with pytest.raises(OSError, match="disconnected"):
+        await store.put_file(object_key="video.mp4", path=source, mime_type="video/mp4")
+    assert client.put_object.call_args.args[2].closed
+    assert source.exists(), "ObjectStore never deletes the caller's file"
+
+
+async def test_cancelled_file_upload_waits_until_sdk_releases_the_file(tmp_path):
+    source = tmp_path / "video.mp4"
+    source.write_bytes(b"owned")
+    store = MinioObjectStore(get_settings())
+    entered, release = Event(), Event()
+    client = Mock()
+    store._client = client
+    readers = []
+
+    def upload(*args, **kwargs):
+        readers.append(args[2])
+        entered.set()
+        assert release.wait(5)
+        assert args[2].read() == b"owned"
+
+    client.put_object.side_effect = upload
+    task = asyncio.create_task(store.put_file(object_key="v", path=source, mime_type="video/mp4"))
+    assert await asyncio.to_thread(entered.wait, 5)
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert readers[0].closed
 
 
 class _BucketClient:
