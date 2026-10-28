@@ -520,6 +520,8 @@ test("model settings activate models inside providers and add custom connections
           default_base_url: "https://fixture.invalid",
           kind: "media",
           implemented: true,
+          auth_modes: ["bearer"],
+          manual_model_ids: false,
           paid_capabilities: [],
           capabilities: ["auth_models"],
           model_list_path: "/models",
@@ -532,6 +534,8 @@ test("model settings activate models inside providers and add custom connections
           default_base_url: "http://litellm:4000",
           kind: "text",
           implemented: true,
+          auth_modes: ["bearer"],
+          manual_model_ids: false,
           paid_capabilities: [],
           capabilities: ["auth_models"],
           model_list_path: "/v1/models",
@@ -548,7 +552,10 @@ test("model settings activate models inside providers and add custom connections
   await expect(page.getByRole("heading", { name: "供应商" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "默认模型" })).toHaveCount(0);
   await expect(page.getByLabel("文本模型")).toHaveCount(0);
-  await expect(page.getByRole("region", { name: "配置 文本服务" })).toBeVisible();
+  const llmConfig = page.getByRole("region", { name: "LLM 配置", exact: true });
+  await expect(llmConfig).toBeVisible();
+  await expect(llmConfig.getByLabel("真实模型 ID", { exact: true })).toBeVisible();
+  await expect(llmConfig.getByRole("button", { name: "保存 LLM 配置" })).toBeVisible();
 
   await page.getByTestId("add-provider").click();
   const dialog = page.getByTestId("add-provider-dialog");

@@ -16,6 +16,12 @@ Golden/验收流水和一次性执行记录不留在当前树中，只通过 Git
 DTO 别名和未接入的第二套身份表不保留兼容。历史迁移、证据和旧数据不用于自动启动工作
 或恢复成新调用；新 Create 仍须当前资格和显式用户授权。
 
+新文本生产仅使用工作区拥有的内部 LiteLLM Proxy 版本化引用；媒体继续使用原
+Compiler / Runtime 与冻结 Binding。通用 Images 合同支持配置不同服务地址和模型 ID，
+不据目录可见或合同测试推断真实生成通过。旧静态文本配置及历史凭据仅按实际历史
+引用保留；未知提交不重放。配置、迁移与运行限制见 [MODEL_PROVIDER.md](MODEL_PROVIDER.md)
+和 [DEPLOYMENT.md](DEPLOYMENT.md)。代码集成不代表任一 LAN 实例已验收。
+
 ## 当前产品
 
 DramaForge 是面向专业个人创作者的 AI 短剧 / 漫剧导演工作台。首版主链为

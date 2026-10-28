@@ -6,6 +6,9 @@ test("two configured no-key Images services share one contract and switch existi
   page,
 }) => {
   await installProfessionalMock(page);
+  await page.route("**/api/v1/workspaces", (route) =>
+    route.fulfill({ json: [{ id: WORKSPACE_ID, name: "我的空间" }] }),
+  );
   const contract = {
     catalog_entry_id: "generic-images",
     capability_manifest_hash: "h".repeat(64),
@@ -190,6 +193,9 @@ test("two configured no-key Images services share one contract and switch existi
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole("button", { name: "管理 alpha", exact: true }).click();
   await page.getByRole("button", { name: "启用 model-alpha", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "已启用 model-alpha", exact: true }),
+  ).toBeDisabled();
   await page.reload();
   await page.getByRole("button", { name: "管理 alpha", exact: true }).click();
   await expect(

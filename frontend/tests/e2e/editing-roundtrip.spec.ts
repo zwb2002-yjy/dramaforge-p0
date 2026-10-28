@@ -145,6 +145,7 @@ test("opening a clip's storyboard and returning preserves the exact editing sess
 }) => {
   const { writes } = await setup(page);
   await page.goto(`${origin}&clipId=edit-clip-2`);
+  await expect(page.getByTestId("edit-session-editor")).toBeVisible();
   await expect(page.getByTestId("editing-track-clip-1")).toHaveAttribute("aria-pressed", "true", {
     timeout: 2000,
   });
@@ -171,6 +172,8 @@ test("replace only the selected clip with its new Formal source after comparison
   const { state, writes } = await setup(page);
   const before = structuredClone(state.editing.session);
   await page.goto(origin);
+  await expect(page.getByTestId("edit-session-editor")).toBeVisible();
+  await expect(page.getByRole("button", { name: "对照并替换素材", exact: true })).toBeEnabled();
   await expect(page.getByText("源镜头已有新版视频", { exact: true })).toBeVisible({
     timeout: 2000,
   });
@@ -222,6 +225,8 @@ test("a shorter replacement requires an explicit crop reset and keeps the timeli
 }) => {
   const { writes } = await setup(page, 2);
   await page.goto(origin);
+  await expect(page.getByTestId("edit-session-editor")).toBeVisible();
+  await expect(page.getByRole("button", { name: "对照并替换素材", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "对照并替换素材", exact: true }).click({ timeout: 2000 });
   const dialog = page.getByRole("dialog", { name: "替换当前片段素材" });
   await expect(

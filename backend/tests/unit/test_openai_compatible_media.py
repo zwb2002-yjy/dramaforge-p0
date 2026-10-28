@@ -128,6 +128,46 @@ async def test_protocol_client_uses_openai_compatible_image_and_video_shapes() -
     assert seen[1].headers["content-type"].startswith("multipart/form-data")
 
 
+@pytest.mark.parametrize("surface", ["client", "runtime"])
+async def test_generations_array_response_cannot_be_adopted_as_videos_contract(surface):
+    """Observed /videos/generations dialect is not the installed /videos profile."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        assert request.method == "POST" and request.url.path == "/v1/videos"
+        return httpx.Response(
+            200,
+            json={
+                "created": 1793118562,
+                "data": [{"id": "remote-video", "url": "/v1/videos/remote-video/content"}],
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    if surface == "client":
+        result = await OpenAICompatibleMediaClient(_settings(), transport=transport).create_video(
+            prompt="synthetic motion"
+        )
+        assert result["status"] == "failed"
+        assert result.get("remote_task_id") is None
+    else:
+        runtime = OpenAICompatibleMediaRuntime(settings=_settings(), transport=transport)
+        submitted = await runtime.submit_video(
+            CompiledVideoRequest(
+                provider_type="openai_compatible_media",
+                protocol_profile=OPENAI_MEDIA_PROFILE,
+                model_id="configured-video",
+                operation="video.generate",
+                wire_request={"model": "configured-video", "prompt": "synthetic motion"},
+                request_schema_version="1",
+            )
+        )
+        assert submitted.status == "failed"
+        assert submitted.remote_task_id is submitted.resume_token is None
+    assert len(seen) == 1  # No alternate path, fake resume, poll or retry.
+
+
 @pytest.mark.asyncio
 async def test_local_video_poll_uses_connection_content_even_with_https_output_url() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:

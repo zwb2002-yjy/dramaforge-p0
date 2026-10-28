@@ -145,15 +145,16 @@ LiteLLM DB 可修改。连接自身保存固定 Proxy 地址及其数据面凭�
 配置写入先提交持久标记；响应丢失或本地回写失败后仅按精确 ID 查询，不再次创建。
 全局 Proxy URL/数据 Key 变化时旧连接失败关闭，必须显式迁移数据面身份，不能静默采用新部署。
 受管连接不走旧凭据写入/发现接口；其保留命名空间不进入全局发现 Registry。
-本阶段管理入口已具备；生产文本调用的单向切换及旧入口退役仍须按后续 Gate 验收。
+新文本生产 Registry 只接纳当前工作区的 ready 受管引用；旧直连及静态别名不再作为
+新执行目标。历史 Profile 不自动改绑，无法解析原身份的旧计划明确受阻。
 
 Proxy 部署已锁定 LiteLLM 1.96.0 的镜像 digest，并开启 DB 模型持久性。其独立网络
 namespace 对目的 IP/端口默认拒绝，模型上游需要显式网络授权；不影响媒体网络。
 当前请求禁止自动重放、跨模型 fallback、HTTP 重定向及请求级目标/凭据覆盖；同名
 YAML/DB 创建会被拒绝。Master/SALT 不传给 API 或 Worker。详见
 [部署边界](DEPLOYMENT.md) 和 [Proxy 配置](../infra/litellm/README.md)。
-这部分基础设施不表示工作区文本直连已完成 G2 切换，也不把可变 Proxy UUID 当成
-不可变模型修订；旧记录、凭据与正式素材保持原样。
+可变 Proxy UUID 不能单独充当不可变模型修订；请求同时携带冻结配置指纹和 Key 修订，
+在 Proxy 内校验目标。旧记录、凭据与正式素材保持原样。
 
 | 层                                         | 位置                                                                            | 职责                                                                                              |
 | ------------------------------------------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
@@ -165,7 +166,7 @@ YAML/DB 创建会被拒绝。Master/SALT 不传给 API 或 Worker。详见
 | TransportProfile                           | providers/transport.py, transport_registry.py                                   | 不可变协议事实声明（endpoint、认证方式、编码、poll/cancel），不含凭证与业务 payload               |
 | Compiler / Runtime                         | providers/adapters_v2.py, runtime.py 与各 Provider 实现                         | Compiler 唯一构造 wire_request；Runtime 校验身份后原样提交并负责认证、网络、poll/resume           |
 | Reference delivery                         | providers/reference_delivery.py, reference_roles.py                             | 严格参考槽位校验、有序多参考传输（不做 `dict[role, artifact]`）、URL/bytes 决策                   |
-| 文本通道                                   | providers/litellm_adapter.py + providers/litellm_gateway + infra/litellm           | OpenAI 兼容 Chat HTTP 客户端，可连接官方 LiteLLM Proxy 或兼容端点；DramaForge 不安装 litellm SDK |
+| 文本通道                                   | providers/litellm_adapter.py + providers/litellm_gateway + infra/litellm           | OpenAI 兼容 Chat HTTP 客户端；新业务只连接部署指定的内部 Proxy，不直连上游；DramaForge 不安装 litellm SDK |
 
 当前媒体模型合同来自 `backend/app/providers/model_catalog/` 的版本化 JSON，
 `catalog_loader.py` 统一加载、校验和计算 hash，active 清单只是派生视图。

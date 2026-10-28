@@ -178,6 +178,15 @@ MATRIX: list[object] = [
     # OpenAI-compatible image
     _case("@contract/openai-image-v1", "text_to_image", False, "contract_validated"),
     _case("@contract/openai-image-v1", "text_to_image", True, "contract_validated"),
+    # Versioned conservative Images: square T2I only, never reference editing.
+    _case("@contract/openai-images-v2", "text_to_image", False, "contract_validated"),
+    _case(
+        "@contract/openai-images-v2",
+        "text_to_image",
+        True,
+        "blocked",
+        ("CAPABILITY_UNSUPPORTED", "REFERENCE_SLOT_UNSUPPORTED"),
+    ),
     # OpenAI-compatible video (first-frame-required contract)
     _case("@contract/openai-video-v1", "text_to_video", False, "blocked", ("REFERENCE_REQUIRED",)),
     _case("@contract/openai-video-v1", "first_frame", False, "blocked", ("REFERENCE_REQUIRED",)),
@@ -597,6 +606,8 @@ async def test_v1_preview_matrix(
         intent, references = _image_intent(
             manifest.provider_type, mode, with_reference=with_reference
         )
+        if manifest.protocol_profile == "openai_images_v2":
+            intent = intent.model_copy(update={"aspect_ratio": "1:1"})
     else:
         intent, references = _video_intent(
             manifest.provider_type, mode, with_reference=with_reference

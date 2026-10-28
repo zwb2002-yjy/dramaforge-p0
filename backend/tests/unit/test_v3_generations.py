@@ -106,7 +106,9 @@ class TestReadSurface:
         # Unbound catalog models are installed metadata, never workspace choices.
         assert all(item["source"] == "installed" for item in models)
 
-    def test_litellm_models_use_gateway_configuration(self, api: tuple[TestClient, Any]) -> None:
+    def test_process_gateway_configuration_cannot_admit_static_text_models(
+        self, api: tuple[TestClient, Any]
+    ) -> None:
         client, _ = api
         _register(client)
         gateway_settings = get_settings().model_copy(
@@ -123,11 +125,60 @@ class TestReadSurface:
         assert response.status_code == 200, response.text
         models = response.json()
         litellm = [item for item in models if item["provider_id"] == "litellm"]
-        assert litellm
-        assert all(item["configured"] and item["available"] for item in litellm)
-        # Process-level gateway aliases are a bootstrap fallback, not a second
-        # product-level text model identity next to workspace connections.
-        assert all(item["source"] == "installed" for item in litellm)
+        # An internal Proxy URL/key alone grants no workspace deployment
+        # identity. Static aliases must not reappear as a production fallback.
+        assert litellm == []
+
+    def test_only_owned_ready_gateway_reference_is_a_text_choice(
+        self, api: tuple[TestClient, Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import httpx
+        from app.access.models import User, Workspace
+        from app.providers import workspace_credentials
+        from app.providers.litellm_gateway.management import GatewayManagementClient
+        from app.providers.litellm_gateway.management_service import GatewayModelService
+        from cryptography.fernet import Fernet
+        from test_gateway_model_management import ProxyFixture, model
+
+        client, factory = api
+        workspace_id = _register(client)
+        settings = get_settings().model_copy(
+            update={
+                "litellm_gateway_url": "http://proxy.internal:4000",
+                "litellm_api_key": "restricted-data-key",
+                "litellm_model_admin_key": "restricted-model-admin",
+                "byok_fernet_key": Fernet.generate_key().decode(),
+                "byok_keyring": "",
+            }
+        )
+        monkeypatch.setattr(workspace_credentials, "get_settings", lambda: settings)
+        proxy = ProxyFixture()
+
+        async def seed() -> str:
+            from uuid import UUID
+
+            async with factory() as session:
+                workspace = await session.get(Workspace, UUID(workspace_id))
+                assert workspace is not None
+                owner = await session.get(User, workspace.owner_user_id)
+                assert owner is not None
+                management = GatewayManagementClient(
+                    settings, transport=httpx.MockTransport(proxy.handle)
+                )
+                connection = await GatewayModelService(
+                    session, settings=settings, client=management
+                ).register(workspace_id=workspace.id, actor=owner, body=model())
+                assert connection.gateway_ref is not None
+                return f"litellm/{connection.id}/{connection.gateway_ref['alias']}"
+
+        identity = _run(seed())
+        response = client.get("/api/v1/models", params={"capability": "text.generate"})
+        assert response.status_code == 200, response.text
+        choices = response.json()
+        assert [choice["id"] for choice in choices] == [identity]
+        assert choices[0]["source"] == "workspace"
+        assert choices[0]["configured"] and choices[0]["available"]
+        assert proxy.creates == 1
 
     def test_provider_plugins_list_text_gateway_as_text_kind(
         self, api: tuple[TestClient, Any]

@@ -126,7 +126,12 @@ internet deployment.
 ## Provider connection security boundary
 
 Workspace-supplied Provider connections send their encrypted credentials to
-the configured `base_url` (connection create/patch and probes carry the key).
+the configured `base_url` through the server-side guarded transport; a supported
+media connection with explicit `auth_mode=none` sends no Authorization header.
+New text connections instead store the internal Proxy address and restricted
+data credential. Their upstream address/key are registered through the existing
+workspace management API and stored by the Proxy, never used as an application
+direct-call fallback.
 The boundary is layered — write-time static validation, then connection-time
 egress enforcement:
 
@@ -159,7 +164,7 @@ egress enforcement:
   set may be tried before any HTTP bytes are sent; no request is replayed.
   Every request also rechecks the URL before entering the pool, including old
   stored URLs; the private opt-in alone cannot authorize plaintext HTTP.
-  Workspace text connections use this guard too. The operator-configured
+  Historical workspace text probes use this guard too. The operator-configured
   internal LiteLLM Proxy URL retains its separate deployment trust boundary.
 - `REFERENCE_PUBLIC_BASE_URL` (default empty): public HTTPS API origin used
   for short-lived signed Provider references. Models whose wire contract
@@ -249,6 +254,46 @@ management key; generation workers do not. The API keeps existing workspace
 ownership/RLS and CSRF enforcement, while the Proxy enforces immutable managed
 targets and monotonic credential revisions. This is restricted credentials in
 the same API process, not full management-process isolation.
+
+New text execution requires a ready workspace-owned managed reference. Keep
+historical connection and credential revisions, BYOK key versions, original
+resume tokens and frozen contracts. Static YAML aliases remain isolated from
+new managed aliases and cannot be selected for new production. Do not infer
+an old alias's physical deployment from its name or automatically remap an old
+profile. A queued old plan without its required identity stays blocked for
+explicit review; a possibly submitted operation is never resubmitted.
+
+Back up both application and Proxy databases with their schema/image versions
+and matching encryption keys before migration. The current head is recorded
+in [DATA_MODEL.md](DATA_MODEL.md). Model reference/auth migrations refuse a
+downgrade when it would discard retained references or no-auth facts; an
+application rollback must still understand the data already written. Restore
+and verify a separate copy first. Preserving a volume without its effective
+SALT/BYOK keys is not a usable rollback.
+
+Schema upgrade and catalog publication are separate maintenance steps. New
+file-backed contracts are not inserted automatically by the API or by replaying
+old frozen seed migrations. With the matching source and backend image, compare
+the catalog first, then explicitly apply it using the maintenance database role:
+
+```bash
+docker compose --profile maintenance run --rm --entrypoint python maintenance /workspace/scripts/sync_model_catalog.py
+docker compose --profile maintenance run --rm --entrypoint python maintenance /workspace/scripts/sync_model_catalog.py --apply
+```
+
+This appends exact contract revisions and synchronizes publication state. An
+existing identity with a different hash is rejected; historical JSON, hashes,
+Bindings and execution identities are never rewritten. Ordinary API/Worker
+roles remain read-only for the catalog.
+
+Media protocol admission is independent of text Proxy health. Choose only an
+installed versioned wire contract; service URL/model ID remain connection and
+Binding data. Discovery, contract checks, revision-specific generated Artifacts,
+browser playback and quality review are separate evidence. An unknown response
+shape, unsupported encoding or false duration must block the corresponding
+service acceptance rather than silently transcode, change the request or certify
+advanced capabilities. Live generation requires its own current Owner contract;
+mock/contract gates do not authorize a live create or a remote service restart.
 
 Named volumes `postgres_data`, `minio_data`, and `litellm_db_data` contain
 persistent state. `docker compose down` preserves them; do not use `--volumes`

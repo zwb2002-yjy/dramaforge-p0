@@ -9,6 +9,7 @@ import { useModelActivation } from "../../src/components/provider/useModelActiva
 import type { WorkspaceModelRole } from "../../src/lib/workspaceModelRoles";
 import { ProviderList } from "../../src/components/provider/ProviderList";
 import { ProviderDetails } from "../../src/components/provider/ProviderDetails";
+import { queryKeys } from "../../src/lib/queryKeys";
 import type { ProviderPluginRead } from "../../src/lib/api";
 
 const WS = "11111111-1111-4111-8111-111111111111";
@@ -468,6 +469,61 @@ describe("AddProviderDialog", () => {
 
 describe("ProviderList", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("retains the inline LLM save when a list refresh sees the committed connection before its response", async () => {
+    const saved = connection({
+      provider_type: "litellm",
+      protocol_profile: "openai_chat_v1",
+      display_name: "文本服务",
+      gateway_ref: { remote_model_id: "physical-chat", alias: "df-fixture", state: "ready" },
+    });
+    let committed = false;
+    let finishSave!: () => void;
+    const calls = mockApi(({ method, url }) => {
+      if (url.endsWith("/provider-plugins")) return json([TEXT_PLUGIN]);
+      if (method === "POST" && url.endsWith("/provider-connections/gateway")) {
+        committed = true;
+        return new Promise<Response>((resolve) => {
+          finishSave = () => void json(saved, 201).then(resolve);
+        });
+      }
+      if (url.endsWith("/provider-connections")) return json(committed ? [saved] : []);
+      if (url.endsWith("/gateway/configuration"))
+        return json({ base_url: "https://text.example.test/v1" });
+      return undefined;
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ProviderList workspaceId={WS} adding={false} onAddingChange={() => undefined} />
+      </QueryClientProvider>,
+    );
+    const panel = await screen.findByRole("region", { name: "LLM 配置" });
+    fireEvent.change(within(panel).getByLabelText("服务地址"), {
+      target: { value: "https://text.example.test/v1" },
+    });
+    fireEvent.change(within(panel).getByLabelText("真实模型 ID"), {
+      target: { value: "physical-chat" },
+    });
+    fireEvent.change(within(panel).getByLabelText("API Key"), { target: { value: "fixture-key" } });
+    fireEvent.click(within(panel).getByRole("button", { name: "保存 LLM 配置" }));
+    await waitFor(() => expect(committed).toBe(true));
+    // A focus/background refresh may observe the committed row while the POST
+    // response is still in flight. It must not replace the active editor.
+    await client.invalidateQueries({ queryKey: queryKeys.provider.connections(WS) });
+    await waitFor(() => expect(client.isFetching()).toBe(0));
+    expect(screen.getByRole("region", { name: "LLM 配置" })).toBe(panel);
+    finishSave();
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+    expect(
+      within(screen.getByRole("region", { name: "LLM 配置" })).getByText("physical-chat"),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "完成" }));
+    expect(await screen.findByRole("button", { name: "管理 文本服务" })).toBeVisible();
+    expect(
+      calls.filter((call) => call.method === "POST" && call.url.endsWith("/gateway")),
+    ).toHaveLength(1);
+  });
 
   it("offers a separate text connection and never carries Agnes edits into local deployment", async () => {
     const agnes = { ...MEDIA_PLUGIN, provider_type: "agnes", protocol_profile: "agnes_cn_v1" };

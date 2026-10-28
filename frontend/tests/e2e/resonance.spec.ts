@@ -179,6 +179,9 @@ test("enclosure selects spatial targets and Escape cancels a pending gesture", a
 test("keyboard can connect two moments without dragging or writing", async ({ page }) => {
   const state = await installProfessionalMock(page);
   await page.goto(`/projects/${PROJECT_ID}/scenes/${SCENE_ID}`);
+  // The loading canvas has no Shot identity and is replaced when the first
+  // Shot arrives. Exercise keyboard actions on the actual selected Shot.
+  await expect(page.getByTestId("cinematic-canvas")).toHaveAttribute("data-shot-id", SHOT_ID);
   await page.getByRole("button", { name: "展开镜头关系图" }).press("Enter");
   await page.getByRole("button", { name: "共同关注", exact: true }).press("Enter");
   await page.getByRole("button", { name: "共同关注镜头 2", exact: true }).press("Space");
