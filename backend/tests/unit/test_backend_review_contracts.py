@@ -103,3 +103,8 @@ def test_authentication_gateway_rate_limit_is_explicit():
     assert "location ~ ^/api/v1/auth/(login|register)$" in nginx
     assert "limit_req zone=auth_requests burst=5 nodelay;" in nginx
     assert "limit_req_status 429;" in nginx
+    assert 'add_header Retry-After "12" always;' in nginx
+    assert "AUTH_RATE_LIMITED" in nginx
+    assert "real_ip_header" not in nginx
+    assert "set_real_ip_from" not in nginx
+    assert '"--no-proxy-headers"' in (ROOT / "backend/Dockerfile").read_text()

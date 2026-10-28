@@ -44,6 +44,10 @@ try {
     docker compose -f docker-compose.quality.yml run --rm --no-deps frontend-quality
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+    # Exercise the deployed Nginx config against a synthetic auth upstream.
+    docker compose -f docker-compose.quality.yml up --no-build --abort-on-container-exit --exit-code-from auth-gateway-integration-quality auth-gateway-integration-quality
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
     # The pinned official LiteLLM image is exercised without an external
     # provider; the integration fixture supplies deterministic mock models.
     docker compose -f docker-compose.quality.yml up --no-build --abort-on-container-exit --exit-code-from litellm-integration-quality litellm-quality litellm-integration-quality

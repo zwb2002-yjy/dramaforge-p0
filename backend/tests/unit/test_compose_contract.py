@@ -26,6 +26,23 @@ def test_isolated_litellm_gate_uses_preinstalled_environment() -> None:
     assert "--fail-on-skip" in command
 
 
+def test_auth_gateway_gate_uses_deployed_config_and_remains_private() -> None:
+    services = yaml.safe_load(
+        (REPO_ROOT / "docker-compose.quality.yml").read_text(encoding="utf-8")
+    )["services"]
+    gateway = services["auth-gateway-quality"]
+    assert gateway["image"] in (REPO_ROOT / "frontend/Dockerfile").read_text()
+    assert gateway["volumes"] == ["./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro"]
+    assert not gateway.get("ports")
+    command = services["auth-gateway-integration-quality"]["command"][-1]
+    assert "--offline --no-sync" in command
+    assert "tests/gateway" in command and "--fail-on-skip" in command
+    for runner in ("scripts/run_quality_in_docker.ps1", ".github/workflows/ci.yml"):
+        assert "--exit-code-from auth-gateway-integration-quality" in (
+            REPO_ROOT / runner
+        ).read_text(encoding="utf-8")
+
+
 def test_compose_defines_required_boot0_services() -> None:
     data = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
     services = data["services"]

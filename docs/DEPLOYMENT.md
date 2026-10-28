@@ -135,7 +135,15 @@ local to each request client.
 
 The public Nginx gateway limits login and registration together to five requests
 per minute per remote address, allowing a burst of five, and returns 429 on
-excess requests. `/metrics` is available on the internal API listener; Nginx
+excess requests with `AUTH_RATE_LIMITED` Problem Details and `Retry-After: 12`.
+The quota uses the TCP peer address; client-supplied `X-Forwarded-For` / `X-Real-IP`
+never select a different quota. Uvicorn's shipped commands disable proxy headers.
+If an additional reverse proxy is placed before this gateway, its clients share
+the proxy's quota by default. Trusting a separately controlled proxy requires an
+explicit Nginx real-IP policy for its exact addresses/networks and a forwarding-chain
+test; do not enable blanket header trust or publish the internal API as a bypass.
+Unknown and inactive accounts perform the same password KDF as a known account,
+and failed logins have the same public error. `/metrics` is available on the internal API listener; Nginx
 does not forward it. `/worker/tick` requires development mode and the worker
 token; production and test reject it.
 

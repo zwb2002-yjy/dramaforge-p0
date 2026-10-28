@@ -33,6 +33,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_doc
 - PostgreSQL `alembic upgrade head` / `alembic check` 与集成测试；
 - OpenAPI 导出与 generated client 检查；
 - 前端 format / lint / typecheck / Vitest / 生产构建 / 生产路由注册检查 / Playwright E2E；
+- 实际 Nginx 配置认证边界（独立 synthetic upstream/第二 TCP 客户端），验证限流、
+  429/Retry-After、伪造 IP 头、跨客户端隔离与窗口恢复；业务认证另由 API 单测覆盖；
 - LiteLLM 集成（固定 digest 官方 Proxy + 独立数据库、内核 namespace ACL、计数 Mock
   上游；覆盖重试覆盖、同名创建竞争、凭据覆盖、重定向及 metadata 拒绝，无外部 Provider 调用）。
 

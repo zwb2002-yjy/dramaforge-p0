@@ -8,6 +8,11 @@ Migration authority: [DATA_MODEL.md](DATA_MODEL.md)
 
 ## Contract rules
 
+The shipped gateway bounds login/register requests by TCP peer address. Excess
+requests return 429 Problem Details (`AUTH_RATE_LIMITED`) with `Retry-After: 12`
+and `Cache-Control: no-store`; no user identity or password is included. The API
+listener is private to Compose and does not trust forwarded client headers.
+
 - FastAPI OpenAPI is the only HTTP contract source.
 - Frontend types are generated into frontend/src/shared/api/generated.ts.
 - Frontend modules consume those schemas as `components["schemas"][...]`; they

@@ -264,6 +264,12 @@ jobs:
         run: |
           set -euo pipefail
           docker compose -f docker-compose.quality.yml run --rm --no-deps frontend-quality
+      - name: Run the real Nginx authentication boundary in containers
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.quality.yml up \
+            --no-build --abort-on-container-exit --exit-code-from auth-gateway-integration-quality \
+            auth-gateway-integration-quality
       - name: Run the real pinned LiteLLM integration in containers
         run: |
           set -euo pipefail
