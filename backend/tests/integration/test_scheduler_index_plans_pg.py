@@ -202,7 +202,8 @@ async def _dispatch_sql(engine) -> str:
     async with engine.connect() as conn:
         definition = await conn.scalar(
             text(
-                "SELECT pg_get_functiondef('app.queued_node_run_contexts(integer,uuid,text)'::regprocedure)"
+                "SELECT pg_get_functiondef("
+                "'app.queued_node_run_contexts(integer,uuid,text)'::regprocedure)"
             )
         )
     body = definition.split("AS $function$", 1)[1].split("$function$", 1)[0]
