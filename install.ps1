@@ -82,8 +82,22 @@ if ($Offline) {
 docker compose @composeArgs up -d --no-build
 if ($LASTEXITCODE -ne 0) { throw 'DramaForge failed to start.' }
 # Bootstrap jobs exit successfully; Compose --wait must only watch daemons.
-docker compose @composeArgs wait migrate database-bootstrap litellm-bootstrap
-if ($LASTEXITCODE -ne 0) { throw 'DramaForge initialization failed.' }
+foreach ($initService in @('migrate', 'database-bootstrap', 'litellm-bootstrap')) {
+    $initContainers = @(docker compose @composeArgs ps --all -q $initService)
+    if ($LASTEXITCODE -ne 0 -or $initContainers.Count -ne 1 -or
+        [string]::IsNullOrWhiteSpace($initContainers[0])) {
+        throw "Could not identify initialization container: $initService"
+    }
+    $initialized = $false
+    for ($attempt = 0; $attempt -lt 180; $attempt++) {
+        $initState = docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' $initContainers[0]
+        if ($LASTEXITCODE -ne 0) { throw "Could not inspect initialization: $initService" }
+        if ($initState -eq 'exited:0') { $initialized = $true; break }
+        if ($initState -match '^(exited|dead):') { throw "Initialization failed: $initService ($initState)" }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $initialized) { throw "Initialization timed out: $initService" }
+}
 $daemonServices = @(docker compose @composeArgs config --services | Where-Object {
     $_ -notin @('migrate', 'database-bootstrap', 'litellm-bootstrap')
 })

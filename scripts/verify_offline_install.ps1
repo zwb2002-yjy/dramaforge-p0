@@ -18,6 +18,10 @@ $repo = Split-Path -Parent $PSScriptRoot
 $sha = (git -C $repo rev-parse HEAD).Trim()
 git -C $repo diff --quiet HEAD --
 if ($LASTEXITCODE -ne 0) { throw "Commit tracked changes before verifying an exact candidate" }
+$untrackedBuildInputs = @(git -C $repo ls-files --others --exclude-standard -- backend frontend infra scripts)
+if ($LASTEXITCODE -ne 0 -or $untrackedBuildInputs.Count -gt 0) {
+    throw "Commit untracked build inputs before verifying an exact candidate"
+}
 $tag = "sha-$($sha.Substring(0, 8))"
 
 $work = if ($WorkDir) { $WorkDir } else { Join-Path $repo "tmp\stage15-install-$tag" }

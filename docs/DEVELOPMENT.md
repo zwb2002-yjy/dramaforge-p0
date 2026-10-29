@@ -93,6 +93,7 @@ Node 跨主版本、Python 跨次版本升级由独立任务评估。安全更�
 `scripts/verify_offline_install.ps1` 可在独立目录和 Compose project 中构建、打包并实际
 运行 `install.ps1 -Offline`。例如使用 `-Port 8096 -WorkDir .\tmp\offline-install-check`。
 它拒绝覆盖已有验证目录、容器或卷；请保留失败证据并为下一次验证使用新的目录和候选。
+验证前须提交运行与打包目录中的全部构建输入；既有未跟踪清理文档不属于镜像输入。
 `-SkipBuild` 只复用来源 SHA 与版本标签均匹配的本地候选镜像。包内包含完整的 LiteLLM
 配置、网络策略与 bootstrap 文件，初始化任务须退出 0，常驻服务须全部健康。
 这是本地候选安装验证，不代替版本化 Release、其实际制品的 online/offline 干净安装或
