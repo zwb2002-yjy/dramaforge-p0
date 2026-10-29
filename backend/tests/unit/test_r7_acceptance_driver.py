@@ -229,9 +229,14 @@ def test_unknown_free_video_is_revised_with_distinct_request_and_never_replayed(
         if request.method == "POST" and path.endswith("/execution-plan"):
             return httpx.Response(
                 200,
-                json={"plan": {"capability_gaps": []}, "plan_fingerprint": "plan-new"},
+                json={
+                    "plan": {"capability_gaps": []},
+                    "plan_fingerprint": "plan-new",
+                    "compiler_contract_preview": {"wire_fingerprint": "d" * 64},
+                },
             )
         if request.method == "POST" and path.endswith("/executions"):
+            assert json.loads(request.content)["compiler_wire_fingerprint"] == "d" * 64
             assert request.headers["Idempotency-Key"].endswith(":video-revision-1")
             return httpx.Response(200, json={"node_run_id": "replacement-run"})
         if request.method == "GET" and path.endswith("/snapshot"):
@@ -285,12 +290,24 @@ def test_unknown_free_video_is_revised_with_distinct_request_and_never_replayed(
         }
         run.save()
 
+        decisions = []
+        run.record_stage_decision = lambda *args: decisions.append(args)
         run.revise_unknown_free()
 
     evidence = run.state["unknown_submission_replacement"]
     assert evidence["original_replay_allowed"] is False
     assert evidence["original_cost_status"] == "unknown"
     assert evidence["replacement_request_hash"] != evidence["original_request_hash"]
+    assert decisions == [
+        (
+            "free-revision:shot-1:video",
+            "free-project",
+            "shot-1",
+            "video-new",
+            "video_drift",
+            "formal_video",
+        )
+    ]
     assert run.state["assertions"]["unknown_submission_not_replayed"] == "PASS"
     assert not any(key == "r7:test:shot-1:video" for _, _, key in requests if key)
 
@@ -302,9 +319,7 @@ def test_review_submit_uses_staged_repair_api_and_marks_only_step_as_paid(tmp_pa
         run.state["run_key"] = "test"
         run.state["projects"] = {"template_auto": {"id": "project-1"}}
         run.shots = lambda _project_id: [{"id": "shot-1"}]
-        run.shot = lambda _project_id, _shot_id: {
-            "formal_video_artifact_id": "formal-video-1"
-        }
+        run.shot = lambda _project_id, _shot_id: {"formal_video_artifact_id": "formal-video-1"}
         run.read = lambda _path: {"provider_operations": []}
         run.record_stage_decision = lambda *args, **kwargs: None
 
@@ -319,6 +334,7 @@ def test_review_submit_uses_staged_repair_api_and_marks_only_step_as_paid(tmp_pa
             "review:repair-step-plan": {
                 "step_ordinal": 1,
                 "plan": {"plan_fingerprint": "b" * 64},
+                "compiler_contract_preview": {"wire_fingerprint": "d" * 64},
             },
             "review:repair-submit": {"node_run_id": "repair-run-1"},
         }
@@ -338,6 +354,7 @@ def test_review_submit_uses_staged_repair_api_and_marks_only_step_as_paid(tmp_pa
     assert preview[2].endswith("/repairs/repair-1/step-plan")
     assert execute[2].endswith("/repairs/repair-1/steps")
     assert execute[3]["expected_plan_fingerprint"] == "b" * 64
+    assert execute[3]["expected_compiler_wire_fingerprint"] == "d" * 64
     assert execute[4] is True
     assert all(call[4] is False for call in calls if call[0] != "review:repair-submit")
     assert run.state["review_repair"]["repair_id"] == "repair-1"
@@ -426,9 +443,7 @@ def test_candidate_promotion_accepts_only_bounded_formal_composite_fix(tmp_path)
         run.promote_candidate(candidate, proof_path)
 
     assert run.state["candidate_sha"] == candidate
-    assert run.state["candidate_history"][-1]["reason"] == (
-        "formal_composite_repair_isolation"
-    )
+    assert run.state["candidate_history"][-1]["reason"] == ("formal_composite_repair_isolation")
 
 
 def test_local_editing_recovery_rejects_unrelated_failure_before_http(tmp_path):
@@ -453,6 +468,7 @@ def test_remote_media_operations_include_canonical_keyframe_kind():
         {"actual_provider": "local_tts", "operation_kind": "voice.generate"},
     ]
 
-    assert driver.Acceptance.remote_media_operations({"provider_operations": operations}) == (
-        operations[:2]
+    assert (
+        driver.Acceptance.remote_media_operations({"provider_operations": operations})
+        == (operations[:2])
     )

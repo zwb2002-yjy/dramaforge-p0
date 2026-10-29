@@ -534,6 +534,14 @@ executable until the user explicitly requests a second preview with
 in the execution body. They are never silently dropped or auto-accepted. A changed
 input requires another preview and explicit confirmation.
 
+Repair step previews also return `compiler_contract_preview` from the same
+Plan → Intent → Compiler path. Execution requires its exact
+`expected_compiler_wire_fingerprint` alongside the plan fingerprint and ordinal;
+missing, blocked or changed proof cannot create a NodeRun. The acknowledged hash
+is frozen for the Worker's actual-wire check. Receipt recovery compares the
+original proof before reading mutable model settings, so the same key cannot
+authorize a different Compiler request.
+
 One Shot has at most one active Repair. Progress comes from NodeRun status, the
 exact adopted Artifact and its applicable stored human decision, never step count.
 For keyframe-then-video repairs, media ordinals are 1 and 3; review remains the

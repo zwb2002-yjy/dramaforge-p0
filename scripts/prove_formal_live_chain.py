@@ -124,7 +124,11 @@ def main() -> int:
         preview.raise_for_status()
         started = post(
             f"/api/v1/projects/{project_id}/shots/{shot_id}/executions",
-            {**execution_input, "plan_fingerprint": preview.json()["plan_fingerprint"]},
+            {
+                **execution_input,
+                "plan_fingerprint": preview.json()["plan_fingerprint"],
+                "compiler_wire_fingerprint": preview.json()["compiler_contract_preview"]["wire_fingerprint"],
+            },
         )
         started.raise_for_status()
         out["steps"] = [

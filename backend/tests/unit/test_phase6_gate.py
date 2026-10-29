@@ -290,6 +290,11 @@ async def test_phase6_gate_drift_repair_keeps_old_formal_in_history(session: Asy
         repair_id=request.id,
         expected_step_ordinal=preview.step_ordinal,
         expected_plan_fingerprint=preview.plan.plan_fingerprint,
+        expected_compiler_wire_fingerprint=(
+            preview.compiler_contract_preview.wire_fingerprint
+            if preview.compiler_contract_preview
+            else None
+        ),
         idempotency_key="gate6-kf",
     )
     assert keyframe_run.status == "queued"
@@ -322,6 +327,11 @@ async def test_phase6_gate_drift_repair_keeps_old_formal_in_history(session: Asy
         repair_id=repair_id,
         expected_step_ordinal=preview.step_ordinal,
         expected_plan_fingerprint=preview.plan.plan_fingerprint,
+        expected_compiler_wire_fingerprint=(
+            preview.compiler_contract_preview.wire_fingerprint
+            if preview.compiler_contract_preview
+            else None
+        ),
         idempotency_key="gate6-video",
     )
     assert video_run.status == "queued"

@@ -21,6 +21,7 @@ const SUBMISSION: RepairSubmission = {
   input: {
     expected_plan_fingerprint: "f".repeat(64),
     expected_step_ordinal: 3,
+    expected_compiler_wire_fingerprint: "d".repeat(64),
     accept_approximations: false,
     idempotency_key: "repair-step:original-key",
   },
@@ -144,6 +145,10 @@ describe("repair submission identity recovery", () => {
     "{broken",
     JSON.stringify({ ...SUBMISSION, input: { idempotency_key: "missing-payload" } }),
     JSON.stringify({ ...SUBMISSION, outcome: "unexpected" }),
+    JSON.stringify({
+      ...SUBMISSION,
+      input: { ...SUBMISSION.input, expected_compiler_wire_fingerprint: "tampered" },
+    }),
     JSON.stringify({
       ...SUBMISSION,
       input: { ...SUBMISSION.input, accept_approximations: "true" },

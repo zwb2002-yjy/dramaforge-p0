@@ -170,6 +170,7 @@ def dispatch_stage(
             json={
                 **payload,
                 "plan_fingerprint": preview["plan_fingerprint"],
+                "compiler_wire_fingerprint": preview["compiler_contract_preview"]["wire_fingerprint"],
                 "accepted_approximations": preview["plan"].get(
                     "accepted_approximations", []
                 ),

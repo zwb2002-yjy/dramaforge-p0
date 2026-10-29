@@ -97,6 +97,18 @@ function stepPlan(request = NEW_REPAIR): RepairStepPlanRead {
     repair_id: request.id,
     step_ordinal: request.next_step_ordinal ?? 1,
     stage: video ? "video_rerun" : "keyframe_regenerate",
+    compiler_contract_preview: {
+      compile_level: "provider_contract",
+      transport_verified: false,
+      account_verified: false,
+      readiness: "contract_validated",
+      prompt_hash: "a".repeat(64),
+      semantic_hash: "a".repeat(64),
+      manifest_hash: "a".repeat(64),
+      reference_ids: [],
+      wire_fingerprint: "d".repeat(64),
+      redacted_wire: { model: "exact-model" },
+    },
     plan: {
       supports_prompt_override: false,
       plan_fingerprint: "b".repeat(64),
@@ -356,6 +368,7 @@ describe("RepairPlanPanel preview and confirmation gates", () => {
       await waitFor(() => expect(writes(server, "/steps")).toHaveLength(1));
       expect(writes(server, "/steps")[0]?.body).toEqual({
         expected_plan_fingerprint: "b".repeat(64),
+        expected_compiler_wire_fingerprint: "d".repeat(64),
         expected_step_ordinal: request.next_step_ordinal,
         accept_approximations: false,
         idempotency_key: expect.stringMatching(/^repair-step:/),
@@ -440,12 +453,13 @@ describe("RepairPlanPanel preview and confirmation gates", () => {
     expect(writes(server, "/steps")).toHaveLength(0);
   });
 
-  it.each(["fingerprint", "scope", "model", "prompt"])(
+  it.each(["fingerprint", "scope", "model", "prompt", "compiler"])(
     "does not execute a plan with invalid %s",
     async (invalid) => {
       const server = mockApi([NEW_REPAIR]);
       server.preview = {
         ...server.preview,
+        ...(invalid === "compiler" ? { compiler_contract_preview: null } : {}),
         plan: {
           ...server.preview.plan,
           ...(invalid === "fingerprint" ? { plan_fingerprint: null } : {}),
@@ -520,6 +534,7 @@ describe("RepairPlanPanel explicit approximation consent", () => {
     await waitFor(() => expect(writes(server, "/steps")).toHaveLength(1));
     expect(writes(server, "/steps")[0]?.body).toEqual({
       expected_plan_fingerprint: "c".repeat(64),
+      expected_compiler_wire_fingerprint: "d".repeat(64),
       expected_step_ordinal: 1,
       accept_approximations: true,
       idempotency_key: expect.stringMatching(/^repair-step:/),

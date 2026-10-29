@@ -442,9 +442,60 @@ async def _previewed_step(
         shot_id=shot_id,
         repair_id=repair_id,
         expected_plan_fingerprint=preview.plan.plan_fingerprint,
+        expected_compiler_wire_fingerprint=(
+            preview.compiler_contract_preview.wire_fingerprint
+            if preview.compiler_contract_preview
+            else None
+        ),
         expected_step_ordinal=preview.step_ordinal,
         idempotency_key=idempotency_key,
     )
+
+
+async def test_repair_requires_matching_wire_confirmation_before_enqueue(session):
+    from app.execution.models import NodeRun
+
+    project, shot, user = await _seed(session)
+    await _seed_model_infra(session, project=project, user=user)
+    service = RepairService(session)
+    plan = await service.build_repair_plan(project=project, shot_id=shot.id)
+    request = await service.create_repair(
+        project=project,
+        user=user,
+        shot_id=shot.id,
+        option="rerun_video",
+        plan_hash=plan.plan_hash,
+        request_key="wire-confirmation",
+    )
+    preview = await service.build_step_plan(
+        project=project,
+        user=user,
+        shot_id=shot.id,
+        repair_id=request.id,
+    )
+    assert preview.compiler_contract_preview.readiness == "contract_validated"
+    wire = preview.compiler_contract_preview.wire_fingerprint
+    payload = dict(
+        project=project,
+        user=user,
+        shot_id=shot.id,
+        repair_id=request.id,
+        expected_plan_fingerprint=preview.plan.plan_fingerprint,
+        expected_step_ordinal=preview.step_ordinal,
+        idempotency_key="wire-step",
+    )
+    for invalid in (None, "0" * 64):
+        with pytest.raises(ValidationAppError) as missing:
+            await service.execute_step(**payload, expected_compiler_wire_fingerprint=invalid)
+        assert missing.value.details["code"] == "COMPILER_WIRE_CONFIRMATION_REQUIRED"
+        assert await _count(session, NodeRun) == 0
+    _, _, run = await service.execute_step(**payload, expected_compiler_wire_fingerprint=wire)
+    assert run.input_snapshot["confirmed_compiler_wire_fingerprint"] == wire
+    _, _, same = await service.execute_step(**payload, expected_compiler_wire_fingerprint=wire)
+    assert same.id == run.id
+    with pytest.raises(ConflictError) as changed:
+        await service.execute_step(**payload, expected_compiler_wire_fingerprint="0" * 64)
+    assert changed.value.details["code"] == "REPAIR_COMMAND_REUSED"
 
 
 @pytest.mark.asyncio
@@ -550,6 +601,11 @@ async def test_repair_first_step_checks_preview_and_lost_response_reuses_receipt
             repair_id=request.id,
             expected_step_ordinal=1,
             expected_plan_fingerprint=preview.plan.plan_fingerprint,
+            expected_compiler_wire_fingerprint=(
+                preview.compiler_contract_preview.wire_fingerprint
+                if preview.compiler_contract_preview
+                else None
+            ),
             idempotency_key="lost-response",
         )
     assert stale.value.details["code"] == "REPAIR_STEP_PLAN_MISMATCH"
@@ -567,6 +623,11 @@ async def test_repair_first_step_checks_preview_and_lost_response_reuses_receipt
         repair_id=request.id,
         expected_step_ordinal=1,
         expected_plan_fingerprint=fresh.plan.plan_fingerprint,
+        expected_compiler_wire_fingerprint=(
+            fresh.compiler_contract_preview.wire_fingerprint
+            if fresh.compiler_contract_preview
+            else None
+        ),
         idempotency_key="lost-response",
     )
     _, first, run = await service.execute_step(**payload)
@@ -655,6 +716,11 @@ async def test_repair_preserves_saved_references_and_detects_binding_change(sess
             repair_id=request.id,
             expected_step_ordinal=1,
             expected_plan_fingerprint=preview.plan.plan_fingerprint,
+            expected_compiler_wire_fingerprint=(
+                preview.compiler_contract_preview.wire_fingerprint
+                if preview.compiler_contract_preview
+                else None
+            ),
             idempotency_key="refs-step",
         )
     assert stale.value.details["code"] == "REPAIR_STEP_PLAN_MISMATCH"
@@ -796,6 +862,11 @@ async def test_approximate_references_need_an_explicit_new_preview_before_dispat
             repair_id=request.id,
             expected_step_ordinal=1,
             expected_plan_fingerprint=preview.plan.plan_fingerprint,
+            expected_compiler_wire_fingerprint=(
+                preview.compiler_contract_preview.wire_fingerprint
+                if preview.compiler_contract_preview
+                else None
+            ),
             idempotency_key="style-step",
         )
     accepted = await service.build_step_plan(
@@ -816,6 +887,11 @@ async def test_approximate_references_need_an_explicit_new_preview_before_dispat
             repair_id=request.id,
             expected_step_ordinal=1,
             expected_plan_fingerprint=preview.plan.plan_fingerprint,
+            expected_compiler_wire_fingerprint=(
+                preview.compiler_contract_preview.wire_fingerprint
+                if preview.compiler_contract_preview
+                else None
+            ),
             accept_approximations=True,
             idempotency_key="style-step",
         )
@@ -826,6 +902,11 @@ async def test_approximate_references_need_an_explicit_new_preview_before_dispat
         repair_id=request.id,
         expected_step_ordinal=1,
         expected_plan_fingerprint=accepted.plan.plan_fingerprint,
+        expected_compiler_wire_fingerprint=(
+            accepted.compiler_contract_preview.wire_fingerprint
+            if accepted.compiler_contract_preview
+            else None
+        ),
         accept_approximations=True,
         idempotency_key="style-step",
     )
@@ -915,6 +996,11 @@ async def test_asset_formal_changed_in_another_session_invalidates_repair_previe
             repair_id=request.id,
             expected_step_ordinal=1,
             expected_plan_fingerprint=preview.plan.plan_fingerprint,
+            expected_compiler_wire_fingerprint=(
+                preview.compiler_contract_preview.wire_fingerprint
+                if preview.compiler_contract_preview
+                else None
+            ),
             idempotency_key="asset-step",
         )
     assert stale.value.details["code"] == "REPAIR_STEP_PLAN_MISMATCH"

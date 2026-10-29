@@ -182,6 +182,8 @@ export function readRepairSubmission(scope: string): RepairSubmission | null {
     !record?.input ||
     typeof record.input.expected_plan_fingerprint !== "string" ||
     !/^[a-f0-9]{64}$/i.test(record.input.expected_plan_fingerprint) ||
+    (record.input.expected_compiler_wire_fingerprint != null &&
+      !/^[a-f0-9]{64}$/.test(record.input.expected_compiler_wire_fingerprint)) ||
     !Number.isInteger(record.input.expected_step_ordinal) ||
     !record.input.expected_step_ordinal ||
     typeof record.input.idempotency_key !== "string" ||

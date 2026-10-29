@@ -29,6 +29,7 @@ from app.production.workbench_execution import (
     WorkbenchExecutionInput,
     WorkbenchExecutionService,
 )
+from app.providers.compile_preview import CompilePreview
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 RepairOption = Literal["rerun_video", "regenerate_keyframe_then_video"]
@@ -100,6 +101,7 @@ class RepairStepPlanRead(BaseModel):
     step_ordinal: int
     stage: str
     plan: WorkbenchExecutionPlan
+    compiler_contract_preview: CompilePreview | None = None
 
 
 class RepairRequestRead(BaseModel):
@@ -362,6 +364,9 @@ class RepairService:
             step_ordinal=ordinal,
             stage=stage,
             plan=plan,
+            compiler_contract_preview=await service.preview_compiler_contract(
+                project=project, plan=plan
+            ),
         )
 
     async def execute_step(
@@ -374,6 +379,7 @@ class RepairService:
         expected_plan_fingerprint: str,
         expected_step_ordinal: int,
         idempotency_key: str,
+        expected_compiler_wire_fingerprint: str | None = None,
         accept_approximations: bool = False,
     ) -> tuple[RepairRequest, RepairStep, NodeRun]:
         """Recheck the displayed plan; one command creates at most one media run.
@@ -416,6 +422,13 @@ class RepairService:
                 raise ConflictError(
                     "repair receipt is unavailable", details={"code": "REPAIR_RECEIPT_MISSING"}
                 )
+            if expected_compiler_wire_fingerprint != (run.input_snapshot or {}).get(
+                "confirmed_compiler_wire_fingerprint"
+            ):
+                raise ConflictError(
+                    "repair command key was used with a different Compiler proof",
+                    details={"code": "REPAIR_COMMAND_REUSED"},
+                )
             return request, step, run
 
         state = await self._read(request)
@@ -438,11 +451,23 @@ class RepairService:
                 "repair inputs or model changed; preview and confirm the step again",
                 details={"code": "REPAIR_STEP_PLAN_MISMATCH"},
             )
+        compiler_preview = await service.preview_compiler_contract(project=project, plan=plan)
+        if (
+            compiler_preview is None
+            or compiler_preview.readiness != "contract_validated"
+            or compiler_preview.wire_fingerprint is None
+            or expected_compiler_wire_fingerprint != compiler_preview.wire_fingerprint
+        ):
+            raise ValidationAppError(
+                "Repair step has no matching acknowledged Compiler proof",
+                details={"code": "COMPILER_WIRE_CONFIRMATION_REQUIRED"},
+            )
         run = await service.create_and_dispatch(
             project=project,
             execution_input=execution_input,
             prepared_plan=plan,
             idempotency_key_override=f"repair:{request.id}:{command_key}",
+            confirmed_compiler_wire_fingerprint=compiler_preview.wire_fingerprint,
         )
         step = RepairStep(
             repair_request_id=request.id,

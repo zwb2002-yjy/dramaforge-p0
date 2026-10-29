@@ -614,6 +614,10 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
                 shot_id=shot.id,
                 repair_id=repair_request.id,
                 expected_plan_fingerprint=repair_preview.plan.plan_fingerprint,
+                expected_compiler_wire_fingerprint=(
+                    repair_preview.compiler_contract_preview.wire_fingerprint
+                    if repair_preview.compiler_contract_preview else None
+                ),
                 expected_step_ordinal=repair_preview.step_ordinal,
                 idempotency_key=f"manual-offline:repair-step:{uuid4().hex}",
             )

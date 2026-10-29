@@ -6950,6 +6950,8 @@ export interface components {
             expected_plan_fingerprint: string;
             /** Expected Step Ordinal */
             expected_step_ordinal: number;
+            /** Expected Compiler Wire Fingerprint */
+            expected_compiler_wire_fingerprint?: string | null;
             /**
              * Accept Approximations
              * @default false
@@ -6978,6 +6980,7 @@ export interface components {
             /** Stage */
             stage: string;
             plan: components["schemas"]["WorkbenchExecutionPlan"];
+            compiler_contract_preview?: components["schemas"]["CompilePreview"] | null;
         };
         /** RepairStepRead */
         RepairStepRead: {

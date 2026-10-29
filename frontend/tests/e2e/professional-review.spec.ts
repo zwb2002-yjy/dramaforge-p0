@@ -130,6 +130,18 @@ test("repair preview requires explicit execution and explicit completion", async
           repair_id: repairId,
           step_ordinal: 1,
           stage: "video_rerun",
+          compiler_contract_preview: {
+            compile_level: "provider_contract",
+            transport_verified: false,
+            account_verified: false,
+            readiness: "contract_validated",
+            wire_fingerprint: "d".repeat(64),
+            prompt_hash: "a".repeat(64),
+            semantic_hash: "a".repeat(64),
+            manifest_hash: "a".repeat(64),
+            reference_ids: [],
+            redacted_wire: { model: "model-b" },
+          },
           plan: {
             plan_fingerprint: "b".repeat(64),
             project_id: PROJECT_ID,
@@ -218,6 +230,7 @@ test("repair preview requires explicit execution and explicit completion", async
   expect(writes[1]?.body).toMatchObject({
     expected_step_ordinal: 1,
     expected_plan_fingerprint: "b".repeat(64),
+    expected_compiler_wire_fingerprint: "d".repeat(64),
     accept_approximations: false,
   });
   expect(writes[2]?.body).toEqual({ reason: "completed" });

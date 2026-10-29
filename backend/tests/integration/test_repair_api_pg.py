@@ -76,6 +76,11 @@ async def test_repair_receipts_survive_api_commit_and_concurrent_retries():
             preview = await preview_repair_step(project.id, shot.id, first.id, user, session)
         command = RepairStepExecuteBody(
             expected_plan_fingerprint=preview.plan.plan_fingerprint,
+            expected_compiler_wire_fingerprint=(
+                preview.compiler_contract_preview.wire_fingerprint
+                if preview.compiler_contract_preview
+                else None
+            ),
             expected_step_ordinal=1,
             idempotency_key="pg-step",
         )

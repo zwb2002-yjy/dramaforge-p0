@@ -441,6 +441,7 @@ class RepairStepExecuteBody(BaseModel):
 
     expected_plan_fingerprint: str = Field(min_length=64, max_length=64)
     expected_step_ordinal: int = Field(ge=1, le=4)
+    expected_compiler_wire_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     accept_approximations: bool = False
     idempotency_key: str = Field(min_length=1, max_length=160)
 
@@ -554,6 +555,7 @@ async def execute_repair_step(
         repair_id=repair_id,
         expected_plan_fingerprint=body.expected_plan_fingerprint,
         expected_step_ordinal=body.expected_step_ordinal,
+        expected_compiler_wire_fingerprint=body.expected_compiler_wire_fingerprint,
         accept_approximations=body.accept_approximations,
         idempotency_key=body.idempotency_key,
     )

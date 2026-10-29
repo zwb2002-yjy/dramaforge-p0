@@ -876,6 +876,7 @@ class Acceptance:
                         {
                             **body,
                             "plan_fingerprint": preview["plan_fingerprint"],
+                            "compiler_wire_fingerprint": preview["compiler_contract_preview"]["wire_fingerprint"],
                             "accepted_approximations": [],
                         },
                         paid=True,
@@ -1016,12 +1017,17 @@ class Acceptance:
             {
                 **preview_request,
                 "plan_fingerprint": preview["plan_fingerprint"],
+                "compiler_wire_fingerprint": preview["compiler_contract_preview"]["wire_fingerprint"],
                 "accepted_approximations": [],
             },
             paid=True,
             command_key=replacement_key,
         )
         run = self.wait_run(project_id, receipt["node_run_id"])
+        self.record_stage_decision(
+            f"free-revision:{shot_id}:video", project_id, shot_id,
+            run["result_artifact_id"], "video_drift", "formal_video",
+        )
         formal = self.once(
             f"free-revision:{shot_id}:video:formal",
             "POST",
@@ -1349,6 +1355,7 @@ class Acceptance:
             f"/projects/{project_id}/shots/{shot_id}/repairs/{repair_request['id']}/steps",
             {
                 "expected_plan_fingerprint": step_plan["plan"]["plan_fingerprint"],
+                "expected_compiler_wire_fingerprint": step_plan["compiler_contract_preview"]["wire_fingerprint"],
                 "expected_step_ordinal": step_plan["step_ordinal"],
                 "accept_approximations": False,
                 # A repair request whose first step already ran is at its human

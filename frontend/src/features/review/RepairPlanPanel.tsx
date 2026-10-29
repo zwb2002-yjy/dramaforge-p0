@@ -196,6 +196,12 @@ function ExecutionPreview({ preview }: { preview: RepairStepPlanRead }) {
       <p className="muted">
         执行将调用以上模型，可能产生费用；这里不提供确定报价。只执行这一媒体步骤，之后仍须人工审查并明确采用。
       </p>
+      {preview.compiler_contract_preview && (
+        <Disclosure title="编译确认（只读）">
+          <p>请求指纹：{preview.compiler_contract_preview.wire_fingerprint ?? "尚未验证"}</p>
+          <pre>{JSON.stringify(preview.compiler_contract_preview.redacted_wire, null, 2)}</pre>
+        </Disclosure>
+      )}
     </section>
   );
 }
@@ -291,6 +297,8 @@ function ActiveRepair({
       (displayed.stage === "keyframe_regenerate" ? "image_keyframe" : "video"),
   );
   const supported = Boolean(
+    displayed?.compiler_contract_preview?.readiness === "contract_validated" &&
+    /^[a-f0-9]{64}$/.test(displayed.compiler_contract_preview.wire_fingerprint ?? "") &&
     displayed?.plan.resolved_model?.status === "RESOLVED" &&
     Boolean(displayed.plan.resolved_model.resolved_model_id) &&
     typeof displayed.plan.prompt === "string" &&
@@ -626,6 +634,8 @@ function ActiveRepair({
                         input: {
                           expected_plan_fingerprint: displayed.plan.plan_fingerprint!,
                           expected_step_ordinal: displayed.step_ordinal,
+                          expected_compiler_wire_fingerprint:
+                            displayed.compiler_contract_preview!.wire_fingerprint,
                           accept_approximations: acceptApproximations,
                           idempotency_key: `repair-step:${globalThis.crypto.randomUUID()}`,
                         },
