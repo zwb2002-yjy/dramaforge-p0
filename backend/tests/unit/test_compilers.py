@@ -422,14 +422,14 @@ async def test_agnes_video_contract_derives_keyframe_wire_mode() -> None:
 
 
 @pytest.mark.asyncio
-async def test_agnes_video_contract_rejects_unverified_audio_wire_shape() -> None:
+async def test_agnes_video_contract_keeps_closed_reference_policy_closed() -> None:
     audio_id = uuid4()
     intent = VideoGenerationIntentV1(
         prompt="rhythmic movement",
         references=[ArtifactReferenceIntent(artifact_id=audio_id, role="reference_audio")],
         selection=ModelSelectionIntent(mode="explicit_binding"),
     )
-    with pytest.raises(ValueError, match="audio wire shape is not verified"):
+    with pytest.raises(ValueError, match="product policy does not open reference"):
         await AgnesVideoCompiler().compile(
             intent,
             _candidate_video_manifest(),
@@ -442,7 +442,7 @@ async def test_agnes_video_contract_rejects_unverified_audio_wire_shape() -> Non
                 )
             ],
             invoke_model_value="agnes-video-2.5",
-            policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"reference"})),
+            policy=ProductCapabilityPolicy(allowed_contracts=frozenset({"frame"})),
         )
 
 

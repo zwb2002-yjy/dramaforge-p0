@@ -97,6 +97,10 @@ Connection/Credential revision、严格 Compiler 和 ExecutionIdentitySnapshot�
 - 媒体通过工作台预览和显式确认，工作台冻结 WorkbenchExecutionPlan，实验图在排队前冻结相同 ExecutionModelResolution；Worker 缺少计划
   与已冻结执行身份时拒绝执行，不能转去重新选模型或单独生成。
 - ProductCapabilityPolicy 是编译时的显式产品开放子集，不引入另一套策略存储。
+- Agnes Video 2.5 / 2.5 Flash 的合同编译器将已声明的音频参考 HTTPS URL 按原顺序写入
+  `audios` 数组，图像与音频分别保持各自的顺序，Artifact 身份记录仍保持完整输入顺序。
+  数量限制、产品策略与发布资格分别校验；现有候选仍是 preview，离线 Wire 证明不代表
+  真实生成或质量认证通过。接口字段见[官方说明](https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-video-25-flash)。
 - 实际提交在执行身份内保存产品策略快照及精确协议/实现指纹；属于原执行的冻结
   证据，不建立第二套 Policy、Handler 或 Runtime。历史身份没有这些事实时只报告
   阻塞，不能自动补造。当前策略与可见性重新检查只用于新 Create。

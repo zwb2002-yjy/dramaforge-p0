@@ -777,8 +777,6 @@ class AgnesVideoCompiler:
         reference_roles = {"reference_image", "reference_video", "reference_audio"}
         if roles & frame_roles and roles & reference_roles:
             raise ValueError("Agnes frame and multimodal references are mutually exclusive")
-        if "reference_audio" in roles:
-            raise ValueError("Agnes reference audio wire shape is not verified")
         mode = "keyframe" if roles & frame_roles else "reference" if roles else "text"
         options = plan.effective_options
         if set(options) - {"duration_seconds", "resolution", "aspect_ratio"}:
@@ -802,6 +800,7 @@ class AgnesVideoCompiler:
             "n": 1,
         }
         images: list[str] = []
+        audios: list[str] = []
         videos: list[dict[str, str]] = []
         for item, (_, role) in zip(references, delivered, strict=True):
             if item.content_url is None:
@@ -811,12 +810,16 @@ class AgnesVideoCompiler:
                 body[role] = url
             elif role == "reference_image":
                 images.append(url)
+            elif role == "reference_audio":
+                audios.append(url)
             elif role == "reference_video":
                 videos.append({"url": url})
             else:
                 raise ValueError(f"Agnes cannot compile reference role: {role}")
         if images:
             body["images"] = images
+        if audios:
+            body["audios"] = audios
         if videos:
             body["videos"] = videos
         fingerprints = [item.fingerprint for item in references if item.fingerprint]
