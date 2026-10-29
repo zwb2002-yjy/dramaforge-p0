@@ -58,16 +58,34 @@ for (const viewport of [
       "参考素材生成",
     ]);
     await mode.press("Escape");
-    for (const value of ["last_frame", "omni_reference"]) {
+    const selectSavedMode = async (value: string) => {
       await selectValue(mode, value);
+      const save = inspector.getByTestId("shot-primary-save");
+      await expect(save).toBeEnabled();
+      await expect(inspector.getByTestId("inspect-shot-plan")).toBeDisabled();
+      expect(
+        state.editing.requests.filter(
+          (request) => request.method === "POST" && request.path.endsWith("/executions"),
+        ),
+      ).toHaveLength(0);
+      await save.click();
+      await expect(save).toHaveCount(0);
+      expect(
+        state.editing.requests
+          .filter((request) => request.method === "PATCH" && request.path.endsWith("/design"))
+          .at(-1)?.body,
+      ).toMatchObject({ director_state: { generation_settings: { video: { mode_id: value } } } });
+    };
+    for (const value of ["last_frame", "omni_reference"]) {
+      await selectSavedMode(value);
       await expect(inspector.getByTestId("shot-primary-blocked")).toBeVisible();
       await expect(inspector.getByTestId("generate-video")).toBeDisabled();
     }
     // First + last frame still starts from the formal frame.
-    await selectValue(mode, "first_last_frame");
+    await selectSavedMode("first_last_frame");
     await expect(inspector.getByTestId("generate-keyframe")).toBeVisible();
     await expect(inspector.getByTestId("generate-video")).toHaveCount(0);
-    await selectValue(mode, "text_to_video");
+    await selectSavedMode("text_to_video");
     await expect(inspector.getByTestId("generate-video")).toBeEnabled();
     await inspector.getByTestId("generate-video").click();
     await confirmPreviewedGeneration(page, state);
