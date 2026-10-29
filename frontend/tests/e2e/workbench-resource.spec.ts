@@ -106,6 +106,40 @@ for (const count of [1, 30, 100]) {
       );
       durations.push(elapsed);
     }
+    const strip = page.getByTestId("shot-strip");
+    const scrollExtent = await strip.evaluate((element) => ({
+      viewport: element.clientWidth,
+      maximum: element.scrollWidth - element.clientWidth,
+    }));
+    const scrollSamples: { elapsedMs: number; requested: number; observed: number }[] = [];
+    if (count > 1) {
+      expect(scrollExtent.maximum).toBeGreaterThan(0);
+      await strip.evaluate((element) => element.scrollTo({ left: 0, behavior: "instant" }));
+      await strip.hover();
+      await page.mouse.wheel(scrollExtent.viewport, 0);
+      await expect.poll(() => strip.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+      for (let index = 0; index < 30; index += 1) {
+        const requested = index % 2 === 0 ? 0 : scrollExtent.maximum;
+        const sample = await strip.evaluate(async (element, requested) => {
+          const started = performance.now();
+          element.scrollTo({ left: requested, behavior: "instant" });
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          return {
+            elapsedMs: performance.now() - started,
+            requested,
+            observed: element.scrollLeft,
+          };
+        }, requested);
+        expect(Math.abs(sample.observed - requested)).toBeLessThanOrEqual(1);
+        scrollSamples.push(sample);
+      }
+    } else {
+      expect(scrollExtent.maximum).toBe(0);
+    }
+    await expect(page.getByTestId("shot-design-panel")).toHaveAttribute(
+      "data-shot-id",
+      targets[targets.length - 1].id,
+    );
     const metrics = await cdp.send("Performance.getMetrics");
     const metric = (values: typeof metrics, name: string) =>
       values.metrics.find((item) => item.name === name)?.value ?? null;
@@ -121,6 +155,17 @@ for (const count of [1, 30, 100]) {
       interactionCount: durations.length,
       p95Ms: p95,
       durations,
+      scroll: {
+        ...scrollExtent,
+        status: scrollSamples.length ? "measured" : "not_applicable_no_overflow",
+        measurement: "DOM scrollTo to next animation frame; wheel movement verified separately",
+        samples: scrollSamples,
+        p95Ms: scrollSamples.length
+          ? scrollSamples.map((sample) => sample.elapsedMs).sort((a, b) => a - b)[
+              Math.ceil(scrollSamples.length * 0.95) - 1
+            ]
+          : null,
+      },
       measurement:
         count === 1
           ? "cached details DOM mount to next animation frame"
