@@ -36,6 +36,7 @@ from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun
 from app.production.models import ExperimentBranch, ShotReferenceBinding
 from app.production.workbench_execution import (
+    WorkbenchExecutionError,
     WorkbenchExecutionInput,
     WorkbenchExecutionService,
 )
@@ -640,6 +641,7 @@ async def _seed_professional_resolution(session: AsyncSession, suffix: str) -> d
         "keyframe": keyframe,
         "credential_revision": credential_revision,
         "connection_revision": connection_revision,
+        "profile": profile,
     }
 
 
@@ -659,6 +661,32 @@ async def test_phase10_professional_resolution_no_bypass_pg(pg_session: AsyncSes
     )
 
     service = WorkbenchExecutionService(pg_session, user_id=user.id)
+    # A saved Profile option must be consumed, not silently ignored. The
+    # controlled Agnes contract does not declare seed, so reject it before any
+    # run exists; explicitly repair the test Profile before testing dispatch.
+    with pytest.raises(WorkbenchExecutionError) as invalid_profile:
+        await service.build_plan(
+            project=project,
+            execution_input=WorkbenchExecutionInput(
+                project_id=project.id,
+                stage="video",
+                shot_id=shot.id,
+                prompt="Lin Xia turns at the corner",
+                semantic_intent={"action": "turn"},
+                mode_id="explicit_binding",
+            ),
+        )
+    assert invalid_profile.value.details["code"] == "MODEL_OPTION_UNDECLARED"
+    assert invalid_profile.value.details["option"] == "seed"
+    assert (
+        await pg_session.scalar(select(NodeRun.id).where(NodeRun.project_id == project.id)) is None
+    )
+    profile = seed["profile"]
+    profile.bindings = {
+        slot: {**value, "native_options": {}} for slot, value in profile.bindings.items()
+    }
+    profile.version += 1
+    await pg_session.flush()
     plan = await service.build_plan(
         project=project,
         execution_input=WorkbenchExecutionInput(

@@ -831,9 +831,8 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
             )
             assert waiting_confirmation.status == "awaiting_user"
             assert waiting_confirmation.wait_reason == "confirm_candidate"
-            # One run per stage node plus the zero-cost review the media dispatch
-            # queues for that stage's Formal gate; assert the shape, not a count
-            # that silently changes when the pipeline gains a node.
+            # The seeded keyframe now has genuine completed review evidence;
+            # media dispatch also queues video review for the next Formal gate.
             keys = [
                 node_key
                 for node_key in (
@@ -844,7 +843,15 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
                     )
                 ).all()
             ]
-            assert keys == ["keyframe", "video", "video_drift_review"]
+            assert keys == ["identity_review", "keyframe", "video", "video_drift_review"]
+            seeded_review = await session.scalar(
+                select(NodeRun)
+                .join(GraphNode, NodeRun.graph_node_id == GraphNode.id)
+                .where(GraphNode.node_key == "identity_review")
+            )
+            assert seeded_review.status == "completed"
+            assert seeded_review.result_artifact_id is not None
+            assert seeded_review.input_snapshot["upstream_artifact_id"] == str(_keyframe.id)
 
         # Reconciliation now observes the already committed Formal fact and
         # schedules the next signal without replaying production.
@@ -894,7 +901,7 @@ async def test_runtime_submits_only_the_persisted_production_authorization(
                     )
                 ).all()
             ]
-            assert keys == ["keyframe", "video", "video_drift_review"]
+            assert keys == ["identity_review", "keyframe", "video", "video_drift_review"]
 
         async with admin_factory() as session:
             profile = await session.scalar(
