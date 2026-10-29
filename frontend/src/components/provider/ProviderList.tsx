@@ -6,7 +6,7 @@ import {
   listProviderPlugins,
   type ProviderConnectionRead,
   type ProviderPluginRead,
-} from "../../lib/api";
+} from "../../features/model-controls/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { Button, Input } from "../ui";
 import { AddProviderDialog } from "./AddProviderDialog";

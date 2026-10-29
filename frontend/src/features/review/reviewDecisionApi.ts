@@ -5,6 +5,12 @@
  * they never change Formal selection or production facts by themselves.
  */
 
+/**
+ * Human review decision client (feature-local, like the other domain clients).
+ *
+ * These endpoints persist a person's judgement about one immutable Artifact;
+ * they never change Formal selection or production facts by themselves.
+ */
 import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 

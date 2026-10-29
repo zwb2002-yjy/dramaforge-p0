@@ -3,9 +3,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ShotDetailsBody } from "../../src/features/shots/ShotDetailsPanel";
-import { fetchExecutionTrace } from "../../src/lib/api";
+import { fetchExecutionTrace } from "../../src/features/shots/api";
 
-vi.mock("../../src/lib/api", () => ({ fetchExecutionTrace: vi.fn() }));
+vi.mock("../../src/features/shots/api", () => ({ fetchExecutionTrace: vi.fn() }));
 vi.mock("../../src/features/shots/changeProposalsApi", () => ({
   listShotChangeProposals: vi.fn().mockResolvedValue([]),
   confirmShotChangeProposal: vi.fn(),

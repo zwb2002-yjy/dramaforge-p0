@@ -11,7 +11,8 @@ import {
   Fieldset,
   Alert,
 } from "../../components/ui";
-import { ApiError, getSelectedWorkspaceId, listModels } from "../../lib/api";
+import { ApiError, getSelectedWorkspaceId } from "../../lib/api";
+import { listModels } from "../model-controls/api";
 import {
   capabilityGapReason,
   capabilityGapSeverityLabel,

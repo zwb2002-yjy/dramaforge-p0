@@ -14,7 +14,8 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useMemo, useState } from "react";
 
-import { apiGetList, type AssetRead } from "../../lib/api";
+import { apiGetList } from "../../lib/api";
+import { type AssetRead } from "./api";
 import {
   ASSET_KIND_LABEL,
   ASSET_STATUS_LABEL,

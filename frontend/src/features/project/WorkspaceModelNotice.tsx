@@ -1,7 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { Button, ActionLink } from "../../components/ui";
 import { CircleAlert, Settings2, TriangleAlert } from "lucide-react";
-import { getWorkspaceModelProfile, listModels, listWorkspaceModelProfiles } from "../../lib/api";
+import {
+  getWorkspaceModelProfile,
+  listModels,
+  listWorkspaceModelProfiles,
+} from "../model-controls/api";
 import { validateSettingsReturnTo } from "../../lib/navigationPreferences";
 import { queryKeys } from "../../lib/queryKeys";
 import { WORKSPACE_MODEL_ROLES } from "../../lib/workspaceModelRoles";

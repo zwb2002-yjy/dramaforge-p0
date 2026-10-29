@@ -4,8 +4,8 @@ import { useMemo, useState } from "react";
 
 import { queryKeys } from "../../lib/queryKeys";
 
+import { ApiError } from "../../lib/api";
 import {
-  ApiError,
   getEffectiveBindings,
   getProjectModelProfile,
   listModelSlots,
@@ -14,7 +14,7 @@ import {
   type ModelProfileRead,
   type ProfileBindingInput,
   type ModelSlotRead,
-} from "../../lib/api";
+} from "../../features/model-controls/api";
 import { SIMPLE_MODE_SLOT_GROUPS, simpleModeToBindings, slotLabel } from "../../lib/modelProfile";
 
 /**

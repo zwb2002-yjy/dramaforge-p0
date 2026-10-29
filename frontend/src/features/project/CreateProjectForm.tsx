@@ -16,7 +16,8 @@ import {
   Flex,
   ActionLink,
 } from "../../components/ui";
-import { createProject, type WorkspaceRead } from "../../lib/api";
+import { createProject } from "./api";
+import { type WorkspaceRead } from "../access/api";
 import { queryKeys } from "../../lib/queryKeys";
 import "./create-project-form.css";
 import { fetchProjectCreativeOptions } from "./creative-options";

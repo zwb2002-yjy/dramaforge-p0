@@ -1,5 +1,6 @@
 /** Owner-only maintenance surface: persisted failures and their explicit replay. */
 
+/** Owner-only maintenance surface: persisted failures and their explicit replay. */
 import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 

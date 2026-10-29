@@ -1,4 +1,5 @@
-import { apiGet, ApiError } from "../../lib/api";
+import { ApiError, apiGet, apiSend, fetchCsrf } from "../../lib/api";
+
 import type { components } from "../../shared/api/generated";
 
 export type ProductionStage = components["schemas"]["ProductionStageRead"];
@@ -105,4 +106,51 @@ export function productionReadErrorMessage(error: unknown): string {
     return "制作状态读取未获授权，请确认登录状态和当前工作空间。";
   }
   return "部分制作状态读取失败，相关统计暂不可用。请重新读取状态，不要将未知状态当作没有任务。";
+}
+
+export type ProjectSnapshot = components["schemas"]["ProjectSnapshot"];
+
+export type ExperimentRead = components["schemas"]["ExperimentRead"];
+
+export function fetchExperiments(projectId: string): Promise<ExperimentRead[]> {
+  return apiGet(`/api/v1/projects/${projectId}/experiments`);
+}
+
+export async function createExperiment(
+  projectId: string,
+  input: Omit<components["schemas"]["ExperimentCreateBody"], "branch_type"> &
+    Partial<Pick<components["schemas"]["ExperimentCreateBody"], "branch_type">>,
+): Promise<ExperimentRead> {
+  const csrf = await fetchCsrf();
+  return apiSend("POST", `/api/v1/projects/${projectId}/experiments`, input, csrf);
+}
+
+export type ExperimentStartRead = components["schemas"]["ExperimentStartRead"];
+
+export async function startExperiment(
+  projectId: string,
+  experimentId: string,
+  targetNodeKey: "keyframe" | "video",
+): Promise<ExperimentStartRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/experiments/${experimentId}/start`,
+    { target_node_key: targetNodeKey },
+    csrf,
+  );
+}
+
+export async function decideExperiment(
+  projectId: string,
+  experimentId: string,
+  input: components["schemas"]["ExperimentDecisionBody"],
+): Promise<ExperimentRead> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/experiments/${experimentId}/decision`,
+    input,
+    csrf,
+  );
 }

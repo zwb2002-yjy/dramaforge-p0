@@ -8,7 +8,7 @@ import {
   saveGatewayModel,
   updateProviderConnection,
   type ProviderConnectionRead,
-} from "../../lib/api";
+} from "../../features/model-controls/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { Button, Dialog, Field, Input } from "../ui";
 import { probeErrorText } from "./providerSetup";

@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { updateProjectCreativeProfile, type ProjectRead } from "../../lib/api";
+import { updateProjectCreativeProfile, type ProjectRead } from "./api";
 import { Field, Select, Alert } from "../../components/ui";
 
 export type CreativeAutonomy = "AUTO" | "ASSIST" | "MANUAL";

@@ -8,7 +8,7 @@ import { Disclosure } from "../../components/ui";
 
 import { Fragment, type ReactElement, useState } from "react";
 
-import type { ParameterSpecRead } from "../../lib/api";
+import type { ParameterSpecRead } from "./api";
 import { OptionField, type OptionFieldProps } from "./DynamicCapabilityForm";
 
 export interface AdvancedModelOptionsProps {

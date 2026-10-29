@@ -8,7 +8,7 @@ import {
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceModelNotice } from "../../src/features/project/WorkspaceModelNotice";
-import type { ModelRead } from "../../src/lib/api";
+import type { ModelRead } from "../../src/features/model-controls/api";
 import { WORKSPACE_MODEL_ROLES } from "../../src/lib/workspaceModelRoles";
 
 const models: ModelRead[] = WORKSPACE_MODEL_ROLES.map((role) => ({

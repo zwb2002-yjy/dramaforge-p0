@@ -7,7 +7,7 @@ import { Field, Checkbox, Select, Input, Textarea, Disclosure } from "../ui";
  */
 
 import { useMemo, useState } from "react";
-import type { CapabilitySpecRead, ParameterSpecRead } from "../../lib/api";
+import type { CapabilitySpecRead, ParameterSpecRead } from "../../features/model-controls/api";
 import { allowedValuesFor, constraintViolations, uiComponentFor } from "../../lib/manifestOptions";
 
 export interface ManifestOptionControlsProps {

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "../../lib/queryKeys";
 
-import { fetchExecutionTrace } from "../../lib/api";
+import { fetchExecutionTrace } from "./api";
 import { nodeRunStatusLabel } from "../../lib/runLabels";
 import { shotStatusLabel } from "../../lib/shotLabels";
 import { zhNode } from "../../lib/zh";

@@ -49,6 +49,12 @@ frontend/src/
   运行中的共享摘要/活跃待办才作降频补偿，空闲列表和首页健康状态不作秒级轮询。
 - `frontend/src/shared/api/generated.ts` 由 OpenAPI 生成，不手改
   （`npm run api:generate` / `api:check`）。
+- HTTP业务客户端归属`features/access`、`project`、`model-controls`、`production`、
+  `shots`、`assets`、`review`及`editing`各域公开API文件；共享`lib/api.ts`只负责
+  Cookie/CSRF、工作空间请求头、错误解析、健康读取及媒体/SSE投递URL，不再转发业务helper。
+  请求/响应引用生成schema，客户端可用Pick/Omit/Partial表达输入子集及服务端默认字段；
+  UI与测试直接更新到当前域接口，不保留旧helper别名。无消费者的项目旧Binding写helper、
+  snapshot/Canvas历史等封装已清退，后端管理/保留端点的生命周期另见API权威。
 - HTTP response/request 形状一律用 `components["schemas"][...]` 引用生成类型；
   `npm run api:authority` 拒绝在 API client 中重新手写同名或异名 HTTP DTO；
   仅前端组合状态可进入脚本内的窄 allowlist。

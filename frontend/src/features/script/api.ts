@@ -5,6 +5,12 @@
  * unchanged.
  */
 
+/** Script workspace contract + reader (Phase 1 §17.4).
+ *
+ * Response shapes come from the OpenAPI-generated contract; this module only
+ * binds them to routes. `importScript` (POST) stays reused from `lib/api.ts`
+ * unchanged.
+ */
 import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 

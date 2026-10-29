@@ -52,6 +52,8 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 | ProductionExperiment/ShotExperiment | 当前实验已由 ExperimentBranch 拥有 | 只保留 ExperimentBranch；旧 ORM 和空的废弃表清退，非空旧表阻止清理 |
 | ExecuteKeyframeResult、_input_hash、shared/ids.py | 无独立用户能力；前者有 ExecuteNodeResult，后者只是未使用包装 | 删除别名/死函数，不改变当前执行 DTO 与 ID 策略 |
 | checkpoint、Outbox、credential revision、reference token | 属恢复、隔离、投递和审计事实 | 保留，不按空表或缺前端按钮清空 |
+| Agnes/MiniMax/Ark HubClient、Registry client factory | 真实唯一消费者是连接探测；新建探测已被付费门阻断，只读查询可由现有 Runtime 完成 | 删除兼容类和不可达生成探测分支；只读已存在任务查询复用同一 Runtime、精确连接修订和远端任务 ID，不创建新任务 |
+| frontend/lib/api.ts 的领域封装 | 各 feature 的真实业务消费者与通用传输混在一处 | 领域请求迁至各 feature API，调用方/测试直接更新；共享层只保留传输/CSRF/错误及通用读取 URL，不保留旧重新导出 |
 
 视频设计尚未实现、存量数据需要单独保管，不能把本表解释成发布完成记录。
 

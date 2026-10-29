@@ -1,4 +1,7 @@
-import type { ProviderPluginModelRead, ProviderPluginRead } from "../../src/lib/api";
+import type {
+  ProviderPluginModelRead,
+  ProviderPluginRead,
+} from "../../src/features/model-controls/api";
 import type {
   KnowledgeBound,
   KnowledgeParameter,

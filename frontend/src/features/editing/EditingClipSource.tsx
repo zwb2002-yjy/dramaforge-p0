@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Dialog, Field, ExternalLink } from "../../components/ui";
-import { artifactContentUrl, fetchOpenCutManifest, type OpenCutManifestRead } from "../../lib/api";
+import { artifactContentUrl } from "../../lib/api";
+import { fetchOpenCutManifest, type OpenCutManifestRead } from "./api";
 import { queryKeys } from "../../lib/queryKeys";
 import type { EditableClip } from "./useTimelineDraft";
 import { timelineCopy as copy } from "./timelineCopy";

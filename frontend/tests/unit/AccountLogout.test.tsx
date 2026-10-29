@@ -4,13 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../src/lib/queryKeys";
 import { AccountSettingsPage } from "../../src/routes/settings-page";
-import {
-  ApiError,
-  fetchCurrentUser,
-  fetchHealth,
-  logoutUser,
-  setSelectedWorkspaceId,
-} from "../../src/lib/api";
+import { ApiError, fetchHealth, setSelectedWorkspaceId } from "../../src/lib/api";
+import { fetchCurrentUser, logoutUser } from "../../src/features/access/api";
 
 vi.mock("../../src/lib/api", async (original) => ({
   ...(await original<typeof import("../../src/lib/api")>()),
@@ -85,3 +80,8 @@ it("does not display stale identity after the session expires", async () => {
   expect(await screen.findByText("未登录。", { exact: false })).toBeInTheDocument();
   expect(screen.queryByText("stale@example.com")).not.toBeInTheDocument();
 });
+
+vi.mock("../../src/features/access/api", () => ({
+  fetchCurrentUser: vi.fn(),
+  logoutUser: vi.fn(),
+}));

@@ -8,7 +8,16 @@
  * resolution to ["720p"]) client-side as a *hint* — the backend re-validates.
  */
 
-import type { CapabilitySpecRead, ParameterSpecRead } from "./api";
+/**
+ * Manifest-driven model option rendering (V3 spec §59).
+ *
+ * The frontend must never branch on a model/provider name. All parameter
+ * shapes, advanced options, and legal combinations come from the model's
+ * capability spec. These pure helpers turn a CapabilitySpec into renderable
+ * controls and apply cross-field constraints (e.g. duration=10 restricts
+ * resolution to ["720p"]) client-side as a *hint* — the backend re-validates.
+ */
+import type { CapabilitySpecRead, ParameterSpecRead } from "../features/model-controls/api";
 
 export type OptionValue = unknown;
 

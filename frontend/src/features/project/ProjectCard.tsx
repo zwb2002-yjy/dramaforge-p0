@@ -1,6 +1,6 @@
 import { ArrowRight, Clapperboard } from "lucide-react";
 import { Button, Card } from "../../components/ui";
-import type { ProjectRead } from "../../lib/api";
+import type { ProjectRead } from "./api";
 import { ProjectActions } from "./ProjectActions";
 import { projectCopy as copy } from "./projectCopy";
 

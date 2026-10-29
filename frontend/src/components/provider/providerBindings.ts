@@ -1,4 +1,8 @@
-import { ApiError, createProviderModelBinding, type ProviderModelBindingRead } from "../../lib/api";
+import { ApiError } from "../../lib/api";
+import {
+  createProviderModelBinding,
+  type ProviderModelBindingRead,
+} from "../../features/model-controls/api";
 import type { ModelChoice } from "./providerSetup";
 import { MEDIA_LABEL } from "./providerSetup";
 

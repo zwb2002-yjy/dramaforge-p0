@@ -6,10 +6,10 @@ import {
   getEffectiveBindings,
   listModelSlots,
   listProjectProviderBindings,
-} from "../../src/lib/api";
+} from "../../src/features/model-controls/api";
 import { queryKeys } from "../../src/lib/queryKeys";
 
-vi.mock("../../src/lib/api", () => ({
+vi.mock("../../src/features/model-controls/api", () => ({
   getEffectiveBindings: vi.fn(),
   listModelSlots: vi.fn(),
   listProjectProviderBindings: vi.fn(),

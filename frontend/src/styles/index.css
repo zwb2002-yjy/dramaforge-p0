@@ -1897,8 +1897,7 @@ code {
   color: var(--muted);
 }
 .asset-card-workspace,
-.review-annotation-workspace,
-.director-board-workspace {
+.review-annotation-workspace {
   min-height: 205px;
   margin: 0.75rem 0;
   padding: 0.75rem;
@@ -1936,29 +1935,6 @@ code {
   display: grid;
   gap: 0.45rem;
   margin-top: 0.65rem;
-}
-.director-board-stage {
-  min-height: 105px;
-  margin: 0.6rem 0;
-  display: grid;
-  place-items: center;
-  border: 1px dashed var(--df-focus-ring);
-  border-radius: var(--df-radius-container);
-  background: var(--df-verdigris-tint);
-  color: var(--muted);
-}
-.director-board-stage > span {
-  justify-self: start;
-  align-self: start;
-  padding: 0.35rem;
-  font-size: 0.6875rem;
-}
-.director-board-character {
-  padding: 1rem;
-  border: 1px solid var(--border-strong);
-  border-radius: 50%;
-  color: var(--text);
-  font-size: 0.75rem;
 }
 .experiment-branch-panel {
   margin-top: 1rem;

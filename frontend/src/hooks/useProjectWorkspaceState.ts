@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiGet, apiSend, fetchCsrf } from "../lib/api";
+import { fetchWorkspaceState, updateWorkspaceState } from "../features/project/api";
 import { queryKeys } from "../lib/queryKeys";
 
 /**
@@ -29,27 +29,6 @@ export function workspaceViewFromPath(pathname: string): WorkspaceView | null {
     : null;
 }
 
-type WorkspaceStateRead = {
-  state: Record<string, unknown>;
-};
-
-function fetchWorkspaceState(projectId: string): Promise<WorkspaceStateRead> {
-  return apiGet<WorkspaceStateRead>(`/api/v1/projects/${projectId}/workspace-state`);
-}
-
-async function updateWorkspaceState(
-  projectId: string,
-  state: Record<string, unknown>,
-): Promise<WorkspaceStateRead> {
-  const csrf = await fetchCsrf();
-  return apiSend<WorkspaceStateRead>(
-    "PATCH",
-    `/api/v1/projects/${projectId}/workspace-state`,
-    { state },
-    csrf,
-  );
-}
-
 export function useProjectWorkspaceState(projectId: string) {
   const queryClient = useQueryClient();
 
@@ -62,7 +41,7 @@ export function useProjectWorkspaceState(projectId: string) {
   });
 
   const mutation = useMutation({
-    mutationFn: (state: Record<string, unknown>) => updateWorkspaceState(projectId, state),
+    mutationFn: (state: Record<string, unknown>) => updateWorkspaceState(projectId, { state }),
     onSuccess: (result) => {
       queryClient.setQueryData(queryKeys.workspace.state(projectId), result);
     },

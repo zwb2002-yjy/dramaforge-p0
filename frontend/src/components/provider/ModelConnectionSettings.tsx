@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button, Field, Select, Alert } from "../ui";
 import { useSettingsWorkspace } from "../../hooks/useSettingsWorkspace";
-import type { WorkspaceRead } from "../../lib/api";
+import type { WorkspaceRead } from "../../features/access/api";
 import { ProviderList } from "./ProviderList";
 
 function WorkspaceSelector({

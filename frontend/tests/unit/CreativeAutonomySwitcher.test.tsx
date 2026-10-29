@@ -4,7 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CreativeAutonomySwitcher } from "../../src/features/project/CreativeAutonomySwitcher";
-import type { ProjectRead } from "../../src/lib/api";
+import type { ProjectRead } from "../../src/features/project/api";
 
 function profile(directorAutonomy = "ASSIST", version = 1) {
   return {

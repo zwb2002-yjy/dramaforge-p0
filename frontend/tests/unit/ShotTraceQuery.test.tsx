@@ -4,9 +4,9 @@ import { afterEach, expect, it, vi } from "vitest";
 
 import { ShotDetailsBody } from "../../src/features/shots/ShotDetailsPanel";
 import type { ShotLite } from "../../src/features/shots/api";
-import { fetchExecutionTrace, type ExecutionTraceRead } from "../../src/lib/api";
+import { fetchExecutionTrace, type ExecutionTraceRead } from "../../src/features/shots/api";
 
-vi.mock("../../src/lib/api", () => ({ fetchExecutionTrace: vi.fn() }));
+vi.mock("../../src/features/shots/api", () => ({ fetchExecutionTrace: vi.fn() }));
 afterEach(() => vi.clearAllMocks());
 
 function shot(id: string): ShotLite {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { apiGet, apiGetList, fetchProjectShots } from "../../src/lib/api";
+import { apiGet, apiGetList } from "../../src/lib/api";
+import { fetchProjectShots } from "../../src/features/shots/api";
 
 /**
  * A list endpoint that answers with a non-array is a contract violation and

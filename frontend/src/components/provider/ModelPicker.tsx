@@ -1,6 +1,9 @@
 import { useMemo, useState } from "react";
 
-import type { ProviderPluginModelRead, ProviderPluginRead } from "../../lib/api";
+import type {
+  ProviderPluginModelRead,
+  ProviderPluginRead,
+} from "../../features/model-controls/api";
 import { Button, Checkbox, Disclosure, Field, Input, Select } from "../ui";
 import {
   MEDIA_LABEL,

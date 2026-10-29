@@ -2,10 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import {
   getSelectedWorkspaceId,
-  listWorkspaceProjects,
-  listWorkspaces,
   setSelectedWorkspaceId as persistSelectedWorkspaceId,
 } from "../lib/api";
+import { listWorkspaceProjects, listWorkspaces } from "../features/access/api";
 import { queryKeys } from "../lib/queryKeys";
 
 export function useSettingsWorkspace(onSelect?: (workspaceId: string | null) => void) {

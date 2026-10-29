@@ -10,7 +10,7 @@ import type { WorkspaceModelRole } from "../../src/lib/workspaceModelRoles";
 import { ProviderList } from "../../src/components/provider/ProviderList";
 import { ProviderDetails } from "../../src/components/provider/ProviderDetails";
 import { queryKeys } from "../../src/lib/queryKeys";
-import type { ProviderPluginRead } from "../../src/lib/api";
+import type { ProviderPluginRead } from "../../src/features/model-controls/api";
 
 const WS = "11111111-1111-4111-8111-111111111111";
 const CONN = "22222222-2222-4222-8222-222222222222";

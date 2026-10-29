@@ -1,6 +1,5 @@
-/** Project-scoped EditingAdapter HTTP client (P9-03A). */
-
 import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
+
 import type { components } from "../../shared/api/generated";
 
 export type EditSessionSummaryRead = components["schemas"]["EditSessionSummaryRead"];
@@ -275,4 +274,10 @@ export async function fetchEditingAudioArtifacts(
   )
     throw new Error("音频列表回执不完整，请刷新并确认前后端版本一致；不要重复生成。");
   return page;
+}
+
+export type OpenCutManifestRead = components["schemas"]["OpenCutManifest"];
+
+export function fetchOpenCutManifest(projectId: string): Promise<OpenCutManifestRead> {
+  return apiGet(`/api/v1/projects/${projectId}/opencut-manifest`);
 }

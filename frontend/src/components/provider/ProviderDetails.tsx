@@ -12,7 +12,7 @@ import {
   type ProviderModelBindingRead,
   type ProviderPluginRead,
   type ProviderProbeRead,
-} from "../../lib/api";
+} from "../../features/model-controls/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { Button, Disclosure, Field, Input } from "../ui";
 import { ModelPicker } from "./ModelPicker";

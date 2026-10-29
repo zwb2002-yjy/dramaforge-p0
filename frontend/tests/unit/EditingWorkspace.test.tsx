@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EditingWorkspace } from "../../src/features/editing/EditingWorkspace";
 import { queryKeys } from "../../src/lib/queryKeys";
-import type { OpenCutManifestRead } from "../../src/lib/api";
+import type { OpenCutManifestRead } from "../../src/features/editing/api";
 
 const PROJECT_ID = "project-1";
 const SCENE_ID = "scene-1";

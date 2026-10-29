@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button, Dialog, Dropdown } from "../../components/ui";
-import { deleteProject, type ProjectRead } from "../../lib/api";
+import { deleteProject, type ProjectRead } from "./api";
 import { forgetProject } from "../../lib/navigationPreferences";
 import { queryKeys } from "../../lib/queryKeys";
 

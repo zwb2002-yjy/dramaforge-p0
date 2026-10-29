@@ -5,16 +5,18 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   ApiError,
-  fetchBootstrapStatus,
-  fetchCurrentUser,
   fetchHealth,
   getSelectedWorkspaceId,
+  setSelectedWorkspaceId as persistSelectedWorkspaceId,
+} from "../lib/api";
+import {
+  fetchBootstrapStatus,
+  fetchCurrentUser,
   listWorkspaceProjects,
   listWorkspaces,
   loginUser,
   registerUser,
-  setSelectedWorkspaceId as persistSelectedWorkspaceId,
-} from "../lib/api";
+} from "../features/access/api";
 import { queryKeys } from "../lib/queryKeys";
 import { getRememberedProjectId } from "../lib/navigationPreferences";
 import {

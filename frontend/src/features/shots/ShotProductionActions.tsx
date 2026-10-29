@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Disclosure, ExternalLink, Field, Select } from "../../components/ui";
 
 import { queryKeys } from "../../lib/queryKeys";
-import { ApiError, getExecutionModelPreflight, listModels } from "../../lib/api";
+import { ApiError } from "../../lib/api";
+import { getExecutionModelPreflight, listModels } from "../model-controls/api";
 import { ShotPreflightDrawer } from "./ShotPreflightDrawer";
 import { receiptCopy } from "./receiptCopy";
 import {

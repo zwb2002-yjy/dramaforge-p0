@@ -3,14 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useEffect, useRef, useState } from "react";
 
+import { artifactContentUrl } from "../../lib/api";
 import {
-  artifactContentUrl,
   createReviewAnnotation,
   decideReviewAnnotation,
-  fetchProjectShots,
   fetchReviewAnnotations,
   type ReviewAnnotationRead,
-} from "../../lib/api";
+} from "./annotationApi";
+import { fetchProjectShots } from "../shots/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { fetchShotWorkbench } from "../shots/api";
 import { isConfirmableShotCandidate, parseShotCandidates } from "../shots/shotCandidates";

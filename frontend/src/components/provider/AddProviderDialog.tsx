@@ -2,8 +2,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { ApiError } from "../../lib/api";
 import {
-  ApiError,
   createProviderConnection,
   runProviderProbe,
   updateProviderConnection,
@@ -11,7 +11,7 @@ import {
   type ProviderConnectionRead,
   type ProviderPluginRead,
   type ProviderProbeRead,
-} from "../../lib/api";
+} from "../../features/model-controls/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { Button, Dialog, Field, Input, Select } from "../ui";
 import { ModelPicker } from "./ModelPicker";

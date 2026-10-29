@@ -2,7 +2,8 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Button, Disclosure, Field, Input, Select, Textarea } from "../../components/ui";
-import { ApiError, updateShotCanvas } from "../../lib/api";
+import { ApiError } from "../../lib/api";
+import { updateShotCanvas } from "./api";
 import { shotTypeOptionsFor } from "../../lib/shotLabels";
 import { updateShotDesign } from "./api";
 import { fetchShotWorkbench } from "./api";

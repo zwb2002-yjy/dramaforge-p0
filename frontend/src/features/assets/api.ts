@@ -1,6 +1,5 @@
-/** Phase 2 feature-local API client (kept out of the shared lib/api.ts). */
-
 import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
+
 import type { components } from "../../shared/api/generated";
 
 export type AssetRead = components["schemas"]["AssetRead"];
@@ -10,11 +9,6 @@ export type AssetCardRead = components["schemas"]["AssetCardRead"];
 
 export function fetchAssetTags(projectId: string): Promise<AssetTagRead[]> {
   return apiGetList<AssetTagRead>(`/api/v1/projects/${projectId}/asset-tags`);
-}
-
-export async function createAssetTag(projectId: string, name: string): Promise<AssetTagRead> {
-  const csrf = await fetchCsrf();
-  return apiSend<AssetTagRead>("POST", `/api/v1/projects/${projectId}/asset-tags`, { name }, csrf);
 }
 
 export async function setAssetTags(
@@ -292,4 +286,8 @@ export async function resolveShotReferences(
     {},
     csrf,
   );
+}
+
+export function fetchProjectAssets(projectId: string): Promise<AssetRead[]> {
+  return apiGet(`/api/v1/projects/${projectId}/assets`);
 }

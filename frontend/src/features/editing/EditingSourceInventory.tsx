@@ -1,5 +1,5 @@
 import { Disclosure, Table } from "../../components/ui";
-import type { OpenCutManifestRead } from "../../lib/api";
+import type { OpenCutManifestRead } from "./api";
 import { timelineCopy as copy } from "./timelineCopy";
 
 function seconds(value: string): string {

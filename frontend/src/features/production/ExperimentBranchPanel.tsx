@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 
-import { artifactContentUrl, type ExperimentRead, type ModelRead } from "../../lib/api";
+import { artifactContentUrl } from "../../lib/api";
+import { type ExperimentRead } from "./api";
+import { type ModelRead } from "../model-controls/api";
 import {
   Button,
   Field,

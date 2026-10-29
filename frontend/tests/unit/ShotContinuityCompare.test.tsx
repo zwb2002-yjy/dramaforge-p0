@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ShotContinuityCompare } from "../../src/features/shots/ShotContinuityCompare";
 import type { ShotLite } from "../../src/features/shots/api";
 import type { ShotCandidate } from "../../src/features/shots/shotCandidates";
-import * as apiModule from "../../src/lib/api";
+import * as apiModule from "../../src/features/review/annotationApi";
 
 const mockShots: ShotLite[] = [
   {

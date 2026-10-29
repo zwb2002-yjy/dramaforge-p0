@@ -45,7 +45,8 @@ const exportedType = /^export\s+type\s+([A-Za-z_$][\w$]*)\s*=\s*([^\r\n;]+)/gm;
 const exportedInterface =
   /^export\s+interface\s+([A-Za-z_$][\w$]*)(?:\s+extends\s+[^\{]+)?\s*\{/gm;
 const localApiObjectTypes = new Map([
-  ["frontend/src/lib/api.ts", new Set(["HealthResponse", "ResolvedProjectWorkspace"])],
+  ["frontend/src/lib/api.ts", new Set(["HealthResponse"])],
+  ["frontend/src/features/project/api.ts", new Set(["ResolvedProjectWorkspace"])],
   ["frontend/src/features/review/repairApi.ts", new Set(["RepairSubmission"])],
   ["frontend/src/features/shots/api.ts", new Set(["PreparedShotExecution"])],
 ]);

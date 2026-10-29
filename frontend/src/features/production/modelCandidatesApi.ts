@@ -7,6 +7,14 @@
  * model the execution path would refuse, instead of failing later at start.
  */
 
+/**
+ * Project-scoped model eligibility client.
+ *
+ * `model-candidates` is the read-only management view over the same eligibility
+ * engine (`app.providers.eligibility.evaluate_candidate`) that the runtime
+ * resolver uses before dispatch. Surfacing it lets the picker avoid offering a
+ * model the execution path would refuse, instead of failing later at start.
+ */
 import { apiGetList } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 

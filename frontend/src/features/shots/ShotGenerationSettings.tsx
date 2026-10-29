@@ -14,7 +14,7 @@ import {
   executionModelBlockerLabel,
 } from "../../lib/modelResolutionLabels";
 import { optionValueIsValid } from "../../lib/manifestOptions";
-import type { CapabilitySpecRead } from "../../lib/api";
+import type { CapabilitySpecRead } from "../model-controls/api";
 import { AdvancedModelOptions, DynamicCapabilityForm } from "../model-controls";
 import { fetchShotModelCapabilities, type ShotExecutionStage } from "./api";
 

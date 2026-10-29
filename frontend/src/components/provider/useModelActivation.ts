@@ -6,7 +6,7 @@ import {
   listModels,
   listWorkspaceModelProfiles,
   updateWorkspaceModelProfile,
-} from "../../lib/api";
+} from "../../features/model-controls/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { WORKSPACE_MODEL_ROLES, type WorkspaceModelRole } from "../../lib/workspaceModelRoles";
 

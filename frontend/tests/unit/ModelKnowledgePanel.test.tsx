@@ -7,7 +7,7 @@ import {
   parameterValue,
   protocolFactValue,
 } from "../../src/components/provider/modelKnowledge";
-import type { ProviderModelBindingRead } from "../../src/lib/api";
+import type { ProviderModelBindingRead } from "../../src/features/model-controls/api";
 import {
   fixtureKnowledge,
   fixtureKnowledgeModel,

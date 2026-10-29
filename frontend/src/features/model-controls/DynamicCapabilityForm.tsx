@@ -8,7 +8,15 @@ import { Field, Checkbox, Select, Textarea, Input, Slider } from "../../componen
  * CapabilitySpecRead. No provider/model-name branching.
  */
 
-import type { CapabilitySpecRead, ParameterSpecRead } from "../../lib/api";
+/**
+ * DynamicCapabilityForm (P4-03/MS8).
+ *
+ * Renders a CapabilitySpec's options purely from the manifest. Every control
+ * shape (switch/slider/select/input/textarea) and every cross-field rule
+ * (conditional allowed values, mutually exclusive groups) comes from
+ * CapabilitySpecRead. No provider/model-name branching.
+ */
+import type { CapabilitySpecRead, ParameterSpecRead } from "./api";
 import { allowedValuesFor, uiComponentFor, type OptionValue } from "../../lib/manifestOptions";
 
 const EMPTY_SPEC: CapabilitySpecRead = {

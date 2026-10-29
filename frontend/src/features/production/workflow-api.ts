@@ -1,5 +1,4 @@
 /** Production-owned workflow / creative-capability API read models (WF13 / CC10). */
-
 import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 
@@ -24,15 +23,6 @@ export function fetchWorkflowOverview(projectId: string): Promise<WorkflowOvervi
     }
     return body.overview;
   });
-}
-
-export function fetchShotWorkflowState(
-  projectId: string,
-  shotId: string,
-): Promise<components["schemas"]["ShotWorkflowStateResponse"]> {
-  return apiGet<components["schemas"]["ShotWorkflowStateResponse"]>(
-    `/api/v1/projects/${projectId}/shots/${shotId}/workflow-state`,
-  );
 }
 
 // --- CC10 creative capability functional UI -----------------------------------

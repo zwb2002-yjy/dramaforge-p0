@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Field, Input, Radio, Textarea } from "../../components/ui";
-import { artifactContentUrl, artifactVideoFrameUrl, createReviewAnnotation } from "../../lib/api";
+import { artifactContentUrl, artifactVideoFrameUrl } from "../../lib/api";
+import { createReviewAnnotation } from "../review/annotationApi";
 import { reviewTargetHref } from "../review/reviewTarget";
 import type { ShotLite } from "./api";
 import type { ShotCandidate } from "./shotCandidates";

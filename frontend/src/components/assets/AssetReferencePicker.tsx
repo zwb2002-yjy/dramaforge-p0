@@ -3,7 +3,7 @@ import { Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button, Input, Select } from "../ui";
-import { fetchProjectAssets } from "../../lib/api";
+import { fetchProjectAssets } from "../../features/assets/api";
 import "./asset-reference-picker.css";
 import { AssetReferenceThumbnail } from "./AssetReferenceThumbnail";
 import { purposeLabel } from "./referenceLabels";

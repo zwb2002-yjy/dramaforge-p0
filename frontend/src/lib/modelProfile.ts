@@ -6,7 +6,14 @@
  * second state. No model/provider-name branching anywhere.
  */
 
-import type { ProfileBindingInput } from "./api";
+/**
+ * Model-profile pure helpers (spec §30/§77/§78).
+ *
+ * Simple mode maps LLM / Image / Video onto slot groups; ``bindings`` stays the
+ * single source of truth — simple mode only generates a bindings patch, never a
+ * second state. No model/provider-name branching anywhere.
+ */
+import type { ProfileBindingInput } from "../features/model-controls/api";
 
 export const SIMPLE_MODE_SLOT_GROUPS: Record<string, string[]> = {
   llm: ["planning.brief", "planning.script", "planning.storyboard"],

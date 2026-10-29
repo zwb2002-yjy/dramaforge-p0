@@ -3,17 +3,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ModelProfileSettings } from "../../src/components/provider/ModelProfileSettings";
+import { ApiError } from "../../src/lib/api";
 import {
-  ApiError,
   getEffectiveBindings,
   getProjectModelProfile,
   listModelSlots,
   listModels,
   putProjectModelProfile,
-} from "../../src/lib/api";
+} from "../../src/features/model-controls/api";
 
-vi.mock("../../src/lib/api", async (original) => ({
-  ...(await original<typeof import("../../src/lib/api")>()),
+vi.mock("../../src/features/model-controls/api", async (original) => ({
+  ...(await original<typeof import("../../src/features/model-controls/api")>()),
   getEffectiveBindings: vi.fn(),
   getProjectModelProfile: vi.fn(),
   listModelSlots: vi.fn(),

@@ -4,7 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { CreateProjectForm } from "../../src/features/project/CreateProjectForm";
-import type { WorkspaceRead } from "../../src/lib/api";
+import type { WorkspaceRead } from "../../src/features/access/api";
 
 const workspace: WorkspaceRead = {
   id: "workspace-1",

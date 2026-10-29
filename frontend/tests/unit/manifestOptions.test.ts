@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { CapabilitySpecRead, ParameterSpecRead } from "../../src/lib/api";
+import type { CapabilitySpecRead, ParameterSpecRead } from "../../src/features/model-controls/api";
 import {
   allowedValuesFor,
   constraintViolations,

@@ -5,7 +5,7 @@ import type {
   ProviderPluginModelRead,
   ProviderPluginRead,
   ProviderProbeRead,
-} from "../../lib/api";
+} from "../../features/model-controls/api";
 
 export type MediaKind = "image" | "video";
 

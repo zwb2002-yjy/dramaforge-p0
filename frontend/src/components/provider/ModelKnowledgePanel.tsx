@@ -2,7 +2,7 @@ import type {
   ProviderModelBindingRead,
   ProviderPluginModelRead,
   ProviderPluginRead,
-} from "../../lib/api";
+} from "../../features/model-controls/api";
 import { Disclosure, Table } from "../ui";
 import {
   boundLabel,

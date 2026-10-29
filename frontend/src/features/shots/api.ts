@@ -1,6 +1,5 @@
-/** Phase 3 feature-local API client — shot domain (shot workbench, shot design). */
+import { ApiError, apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
 
-import { ApiError, apiGet, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 
 export type ShotLite = components["schemas"]["ShotLiteRead"];
@@ -324,4 +323,41 @@ export async function createShotExecution(
     preview,
     idempotencyKey,
   });
+}
+
+export type ExecutionTraceRead = components["schemas"]["ExecutionTraceRead"];
+
+export function fetchExecutionTrace(
+  projectId: string,
+  runId: string,
+  signal?: AbortSignal,
+): Promise<ExecutionTraceRead> {
+  return apiGet(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/trace`,
+    undefined,
+    signal,
+  );
+}
+
+export type ShotRead = components["schemas"]["ShotRead"];
+
+export function fetchProjectShots(projectId: string): Promise<ShotRead[]> {
+  return apiGetList<ShotRead>(`/api/v1/projects/${projectId}/shots`);
+}
+
+export type ShotCanvasUpdateResponse = components["schemas"]["ShotCanvasUpdateResponse"];
+
+export async function updateShotCanvas(
+  projectId: string,
+  shotId: string,
+  input: Omit<components["schemas"]["ShotCanvasUpdateBody"], "camera_move" | "source"> &
+    Partial<Pick<components["schemas"]["ShotCanvasUpdateBody"], "camera_move" | "source">>,
+): Promise<ShotCanvasUpdateResponse> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "PATCH",
+    `/api/v1/projects/${projectId}/shots/${shotId}/canvas`,
+    { ...input, camera_move: input.camera_move ?? "static", source: input.source ?? "user" },
+    csrf,
+  );
 }

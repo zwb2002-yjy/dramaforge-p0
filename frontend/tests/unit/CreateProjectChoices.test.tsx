@@ -3,10 +3,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { CreateProjectForm } from "../../src/features/project/CreateProjectForm";
-import { createProject } from "../../src/lib/api";
+import { createProject } from "../../src/features/project/api";
 import { fetchProjectCreativeOptions } from "../../src/features/project/creative-options";
-vi.mock("../../src/lib/api", async (original) => ({
-  ...(await original<typeof import("../../src/lib/api")>()),
+vi.mock("../../src/features/project/api", async (original) => ({
+  ...(await original<typeof import("../../src/features/project/api")>()),
   createProject: vi.fn(),
 }));
 vi.mock("../../src/features/project/creative-options", () => ({

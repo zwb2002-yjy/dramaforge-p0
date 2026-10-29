@@ -2,7 +2,7 @@
 
 Status: current
 Source: backend/app/api/v1 and generated OpenAPI
-Updated: 2026-10-27
+Updated: 2026-10-29
 Migration authority: [DATA_MODEL.md](DATA_MODEL.md)
 （入口见 [CURRENT.md](CURRENT.md)）
 
@@ -24,6 +24,41 @@ listener is private to Compose and does not trust forwarded client headers.
   an internal Compose service on port 8000.
 - No compatibility endpoint is kept for retired product concepts.
 - `backend/app/api/v1/router.py` owns router registration and exposes `/status`.
+
+Frontend business HTTP clients belong to each `features/*/api.ts` (or the
+domain's named API module). `lib/api.ts` owns transport, CSRF, errors, health
+and Artifact/SSE URL construction. Query hooks consume those domain clients;
+request and response shapes derive from generated OpenAPI schemas.
+
+### Retained surfaces without a current browser producer
+
+Runtime route registration and generated OpenAPI are compared by method/path;
+frontend calls are matched after resolving conditional/template paths. A missing
+browser call does not establish absence of external traffic. The following
+contracts remain owned by their domain; Workers call services rather than these
+HTTP endpoints. None of these classifications authorizes deleting stored facts.
+
+| Surface | Consumer/lifecycle decision |
+|---|---|
+| `GET/PUT …/shots/{shot_id}/director-board` | Retained board domain contract and persistent history; no current repository UI/Worker HTTP producer. Any retirement requires an external-consumer migration decision first. |
+| `POST/GET …/shots/{shot_id}/change-proposals`, `POST …/change-proposals/{proposal_id}/confirm` | Retained typed proposal/version-checked confirmation and history contracts; no current browser producer. Confirmation remains explicit. |
+| `GET …/shots/{shot_id}/canvas-revisions`, `GET …/story/proposals/{proposal_id}` | Exact historical lookup; current UI uses current Canvas or proposal collection. Unused client wrapper removed. |
+| `POST/PATCH …/assets[/{asset_id}]`, `POST …/asset-tags` | Asset/tag management contracts; UI currently uses extraction/promotion, candidates and tag assignment. Unused tag-create client removed. |
+| `POST …/scenes/{scene_id}/split[-preview]` and `merge[-preview]` | Retained structural management commands/previews; no browser producer. Unused client wrappers removed; Scene/Shot history preserved. |
+| `GET /workspaces/{workspace_id}`, `GET …/provider-connections/{connection_id}`, `DELETE …/model-profiles/{profile_id}` | Exact management operations; UI uses scoped collections and profile save. Unused profile-delete client removed. |
+| `PUT …/provider-bindings/{purpose}` | Explicit legacy management contract; current UI writes Profiles and reads the labelled legacy source. Existing execution identity is never rewritten. |
+| `POST …/model-bindings/{model_binding_id}/quality-evidence` | Exact Binding/NodeRun/Artifact quality evidence management; no current browser writer and no paid probe. Unused client removed. |
+| `POST …/director/runtime/turns`, `POST …/turns/{turn_id}/resume` | Headless Director protocol; UI uses scoped Shot suggestion/delegation into the same Runtime. |
+| `GET/HEAD /provider-references/{token}` | External Provider reference delivery via expiring opaque grants; not a browser command. |
+| `GET …/snapshot`, `POST …/compile-preview`, `GET …/generations/{run_id}/snapshot` | Read-only production/compile/frozen-execution diagnostics; browser uses bounded summaries and execution-plan preview. |
+| `GET /capabilities`, `GET /models/{model_id:path}`, `GET …/shots/{shot_id}/workflow-state` | Read-only inspection; browser uses scoped Binding/capability and workflow-overview projections. Unused workflow client removed. |
+| `POST /worker/tick`, `GET /status`, `GET /metrics` | Development-token tick and operational reads; gateway/internal-listener policy applies, not browser production dispatch. |
+
+The table uses `/api/v1` and project/workspace prefixes where omitted. Common
+401/403/404/409/422 Problem Details are produced by authorization/domain handlers,
+even where OpenAPI's per-operation response list declares only validation 422.
+Declared responses alone are not the observed error/permission contract; negative
+HTTP and PostgreSQL isolation tests cover the authorization paths.
 
 ## Route ownership
 

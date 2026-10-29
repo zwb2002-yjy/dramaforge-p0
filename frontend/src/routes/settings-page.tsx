@@ -10,16 +10,18 @@ import { useSettingsWorkspace } from "../hooks/useSettingsWorkspace";
 import { AdvancedRecoveryPanel } from "../features/maintenance/AdvancedRecoveryPanel";
 import {
   ApiError,
+  fetchHealth,
+  setSelectedWorkspaceId as persistSelectedWorkspaceId,
+} from "../lib/api";
+import {
   createWorkspace,
   deleteWorkspace,
   fetchCurrentUser,
-  fetchHealth,
-  fetchProject,
   logoutUser,
   renameWorkspace,
-  setSelectedWorkspaceId as persistSelectedWorkspaceId,
   type WorkspaceRead,
-} from "../lib/api";
+} from "../features/access/api";
+import { fetchProject } from "../features/project/api";
 import { queryKeys } from "../lib/queryKeys";
 
 function SettingsHeader({ title }: { title: string }) {

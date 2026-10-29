@@ -34,7 +34,8 @@ import { EditingSourceInventory } from "./EditingSourceInventory";
 import { editingClipLabel } from "./clipPresentation";
 import { timelineCopy as copy } from "./timelineCopy";
 import { queryKeys } from "../../lib/queryKeys";
-import { ApiError, fetchOpenCutManifest, type OpenCutManifestRead } from "../../lib/api";
+import { ApiError } from "../../lib/api";
+import { fetchOpenCutManifest, type OpenCutManifestRead } from "./api";
 import type { components } from "../../shared/api/generated";
 import {
   createEditSession,

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 
 import { Button, Field, Textarea } from "../ui";
-import { fetchProjectAssets, type AssetRead } from "../../lib/api";
+import { fetchProjectAssets, type AssetRead } from "../../features/assets/api";
 import { queryKeys } from "../../lib/queryKeys";
 import {
   createShotReference,

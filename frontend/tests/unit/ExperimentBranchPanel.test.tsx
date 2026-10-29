@@ -8,7 +8,8 @@ import {
   type ExperimentBranchPanelProps,
 } from "../../src/features/production/ExperimentBranchPanel";
 import { ApiError } from "../../src/lib/api";
-import type { ExperimentRead, ModelRead } from "../../src/lib/api";
+import type { ExperimentRead } from "../../src/features/production/api";
+import type { ModelRead } from "../../src/features/model-controls/api";
 import type { ModelCandidateRead } from "../../src/features/production/modelCandidatesApi";
 
 const MODELS: ModelRead[] = [

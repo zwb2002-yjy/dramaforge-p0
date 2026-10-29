@@ -5,7 +5,7 @@ import {
   getExecutionModelPreflight,
   listModelSlots,
   listProjectProviderBindings,
-} from "../../lib/api";
+} from "../../features/model-controls/api";
 import { queryKeys } from "../../lib/queryKeys";
 import {
   executionModelBlockerLabel,
