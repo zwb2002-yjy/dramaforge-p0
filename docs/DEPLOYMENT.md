@@ -133,6 +133,20 @@ endpoints; it does not configure a forward proxy. HTTP connection pools belong
 to the API/worker event loop and close at shutdown. Headers and cookies remain
 local to each request client.
 
+| Hop | Routing and trust policy |
+|---|---|
+| Application → media Provider (create/query/cancel/discovery) | Direct guarded transport; environment forward proxies disabled. Private HTTPS needs explicit private policy; plaintext LAN needs the exact trusted IP network. Neither setting trusts redirects or a forward proxy. |
+| Worker → returned media URL | Direct public HTTPS with validated/pinned DNS, no redirects or environment proxy; bounded file transfer checks MIME, size and hash. A trusted private Provider API does not grant private download URLs access. |
+| Application → internal LiteLLM data/management plane | Explicit deployment address/credentials, environment proxies disabled; no direct upstream fallback. |
+| LiteLLM → configured upstream | Separate Proxy namespace ACL and upstream configuration policy; application Provider allowlists do not authorize this hop. |
+
+The real-socket HTTP pool regression poisons `HTTP_PROXY` while exercising an
+explicitly trusted LAN endpoint; the media-resource gate poisons `HTTPS_PROXY`
+while downloading real TLS fixtures. The LiteLLM integration gate independently
+tests its restricted network namespace. Enterprise forward proxies and proxy
+authentication are not supported by enabling environment variables; they require
+a separate SSRF policy and connection-time enforcement design.
+
 The public Nginx gateway limits login and registration together to five requests
 per minute per remote address, allowing a burst of five, and returns 429 on
 excess requests with `AUTH_RATE_LIMITED` Problem Details and `Retry-After: 12`.

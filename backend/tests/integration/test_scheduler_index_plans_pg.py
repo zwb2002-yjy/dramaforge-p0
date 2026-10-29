@@ -8,6 +8,8 @@ indexes, runs EXPLAIN on the exact claim queries and asserts index plans.
 
 from __future__ import annotations
 
+import json
+import re
 from uuid import uuid4
 
 import pytest
@@ -64,18 +66,21 @@ async def _seed(engine) -> None:
     version_id = uuid4()
     async with engine.begin() as conn:
         await conn.execute(
-            text("INSERT INTO users (id, email, display_name, password_hash) "
-                 "VALUES (:id, :email, 'IX', 'unused')"),
+            text(
+                "INSERT INTO users (id, email, display_name, password_hash) "
+                "VALUES (:id, :email, 'IX', 'unused')"
+            ),
             {"id": user_id, "email": f"ix-{user_id.hex[:8]}@example.com"},
         )
         await conn.execute(
-            text("INSERT INTO workspaces (id, owner_user_id, name) "
-                 "VALUES (:id, :owner, 'IX')"),
+            text("INSERT INTO workspaces (id, owner_user_id, name) VALUES (:id, :owner, 'IX')"),
             {"id": workspace_id, "owner": user_id},
         )
         await conn.execute(
-            text("INSERT INTO projects (id, workspace_id, name, aspect_ratio, "
-                 "budget_limit) VALUES (:id, :ws, 'IX', '9:16', 0)"),
+            text(
+                "INSERT INTO projects (id, workspace_id, name, aspect_ratio, "
+                "budget_limit) VALUES (:id, :ws, 'IX', '9:16', 0)"
+            ),
             {"id": project_id, "ws": workspace_id},
         )
         await conn.execute(
@@ -142,8 +147,10 @@ async def _seed(engine) -> None:
             {"id": graph_id, "project": project_id, "user": user_id},
         )
         await conn.execute(
-            text("INSERT INTO graph_versions (id, graph_id, version_number, "
-                 "definition_hash) VALUES (:id, :graph, 1, 'h')"),
+            text(
+                "INSERT INTO graph_versions (id, graph_id, version_number, "
+                "definition_hash) VALUES (:id, :graph, 1, 'h')"
+            ),
             {"id": version_id, "graph": graph_id},
         )
         await conn.execute(
@@ -187,12 +194,25 @@ async def _seed(engine) -> None:
 
 async def _explain(engine, query: str) -> str:
     async with engine.connect() as conn:
-        rows = await conn.execute(text("EXPLAIN " + query))
+        rows = await conn.execute(text("EXPLAIN (ANALYZE, BUFFERS) " + query))
         return "\n".join(str(row[0]) for row in rows)
 
 
+async def _dispatch_sql(engine) -> str:
+    async with engine.connect() as conn:
+        definition = await conn.scalar(
+            text(
+                "SELECT pg_get_functiondef('app.queued_node_run_contexts(integer,uuid,text)'::regprocedure)"
+            )
+        )
+    body = definition.split("AS $function$", 1)[1].split("$function$", 1)[0]
+    for name, value in (("p_limit", "20"), ("p_project_id", "NULL"), ("p_source_commit", "NULL")):
+        body = re.sub(r"\b" + name + r"\b", value, body)
+    return body
+
+
 @pytest.mark.asyncio
-async def test_scheduler_hot_paths_use_partial_indexes():
+async def test_scheduler_hot_paths_use_partial_indexes(record_property):
     dbname = f"dramaforge_ix_{uuid4().hex[:8]}"
     await _create_database(dbname)
     engine = create_async_engine(_async_url(dbname))
@@ -215,6 +235,14 @@ async def test_scheduler_hot_paths_use_partial_indexes():
         node_run = await _explain(engine, NODE_RUN_SQL)
         assert "Seq Scan on node_runs" not in node_run, node_run
         assert "idx_node_runs_queued_order" in node_run
+
+        dispatch = await _explain(engine, await _dispatch_sql(engine))
+        record_property("current_dispatch_explain", dispatch)
+        record_property(
+            "hot_path_explain",
+            json.dumps({"outbox": claim, "metrics": metrics, "wakeup": wakeup, "node": node_run}),
+        )
+        assert "Seq Scan on node_runs" not in dispatch, dispatch
     finally:
         await engine.dispose()
         await _drop_database(dbname)

@@ -13,6 +13,19 @@ Alembic head: 20261028_0092
 Revisions: 96
 （入口见 [CURRENT.md](CURRENT.md)）
 
+### 调度索引与历史保留
+
+Outbox 未发布、Director 待唤醒、NodeRun 排队索引由迁移维护。
+`test_scheduler_index_plans_pg.py` 在含 50,000 条已发布事件、20,000 条已完成
+唤醒和 20,000 量级 NodeRun 历史的独立数据库中执行 `EXPLAIN (ANALYZE,
+BUFFERS)`，并从数据库提取当前 `queued_node_run_contexts` 函数体核对真实调度
+查询，而非只检查旧的 queued 条件。该规模通过不等于所有数据分布的延迟承诺。
+
+历史命令、JSONB 授权账本的长期增长/锁等待仍属 P2 容量债，负责人为项目 Owner。
+退出条件是在代表性项目与并发写入负载下记录实际查询计划、锁等待和 p95，再决定
+索引或单独归档合同；当前未实施自动删除、TTL 或重新授权。容量优化不得清除
+审计、未知提交或冻结身份，也不能把历史授权重新用于新 Create。
+
 ## Canonical relational graph
 
 users → workspaces → projects
