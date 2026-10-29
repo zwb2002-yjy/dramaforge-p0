@@ -63,6 +63,10 @@ chmod +x install.sh
 The installer verifies `release.env`, pulls the immutable release images,
 generates unique secrets by running `app.install_env` inside the backend image,
 and starts the stack with `--no-build`. It never invokes a host package manager.
+It first requires `migrate`, `database-bootstrap`, and `litellm-bootstrap` to
+exit successfully, then checks the health of the long-running services without
+restarting those initialization jobs. A failed initialization or unhealthy
+runtime prevents the installer from reporting readiness.
 Initialization also generates a separate `DIRECTOR_CHECKPOINT_PASSWORD` and
 its local `DIRECTOR_CHECKPOINT_DATABASE_URL`; the release workflow supplies
 the checkpoint password explicitly when validating and smoke-testing Compose.

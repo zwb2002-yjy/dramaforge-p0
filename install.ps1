@@ -79,8 +79,19 @@ if ($Offline) {
     docker compose @composeArgs pull
     if ($LASTEXITCODE -ne 0) { throw 'Failed to pull release images.' }
 }
-docker compose @composeArgs up -d --wait --no-build
+docker compose @composeArgs up -d --no-build
 if ($LASTEXITCODE -ne 0) { throw 'DramaForge failed to start.' }
+# Bootstrap jobs exit successfully; Compose --wait must only watch daemons.
+docker compose @composeArgs wait migrate database-bootstrap litellm-bootstrap
+if ($LASTEXITCODE -ne 0) { throw 'DramaForge initialization failed.' }
+$daemonServices = @(docker compose @composeArgs config --services | Where-Object {
+    $_ -notin @('migrate', 'database-bootstrap', 'litellm-bootstrap')
+})
+if ($LASTEXITCODE -ne 0 -or $daemonServices.Count -eq 0) {
+    throw 'Could not resolve DramaForge runtime services.'
+}
+docker compose @composeArgs up -d --no-build --no-deps --no-recreate --wait --wait-timeout 180 @daemonServices
+if ($LASTEXITCODE -ne 0) { throw 'DramaForge runtime services did not become healthy.' }
 $port = '8080'
 foreach ($line in Get-Content -LiteralPath $envFile -Encoding utf8) {
     if ($line -match '^DRAMAFORGE_PORT=(.+)$') { $port = $Matches[1] }

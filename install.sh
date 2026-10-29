@@ -81,6 +81,21 @@ if [ "$offline" = true ]; then
 else
     docker compose "$@" pull
 fi
-docker compose "$@" up -d --wait --no-build
+docker compose "$@" up -d --no-build
+# Bootstrap jobs exit successfully; Compose --wait must only watch daemons.
+docker compose "$@" wait migrate database-bootstrap litellm-bootstrap
+services=$(docker compose "$@" config --services)
+daemon_services=$(printf '%s\n' "$services" | while IFS= read -r service; do
+    case "$service" in
+        migrate|database-bootstrap|litellm-bootstrap) ;;
+        *) printf '%s\n' "$service" ;;
+    esac
+done)
+if [ -z "$daemon_services" ]; then
+    echo "Could not resolve DramaForge runtime services." >&2
+    exit 1
+fi
+# Compose service names are whitespace-free; split this generated list into arguments.
+docker compose "$@" up -d --no-build --no-deps --no-recreate --wait --wait-timeout 180 $daemon_services
 port=$(sed -n 's/^DRAMAFORGE_PORT=//p' .env | tail -n 1)
 echo "DramaForge is ready at http://localhost:${port:-8080}"

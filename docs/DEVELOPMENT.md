@@ -88,6 +88,16 @@ Node 跨主版本、Python 跨次版本升级由独立任务评估。安全更�
 运行前核对它的项目名和资源归属，不与使用同一 quality 项目的其它会话并行；它不是
 现有开发/生产实例的清理工具。普通 docs-only 改动不因新增验收文字就运行完整门。
 
+## 本地离线安装验证
+
+`scripts/verify_offline_install.ps1` 可在独立目录和 Compose project 中构建、打包并实际
+运行 `install.ps1 -Offline`。例如使用 `-Port 8096 -WorkDir .\tmp\offline-install-check`。
+它拒绝覆盖已有验证目录、容器或卷；请保留失败证据并为下一次验证使用新的目录和候选。
+`-SkipBuild` 只复用来源 SHA 与版本标签均匹配的本地候选镜像。包内包含完整的 LiteLLM
+配置、网络策略与 bootstrap 文件，初始化任务须退出 0，常驻服务须全部健康。
+这是本地候选安装验证，不代替版本化 Release、其实际制品的 online/offline 干净安装或
+Owner 发布门禁；不会运行真实 Provider 生成。
+
 ## 运行健康检查与真实验收驱动的区别
 
 `/health`、`/gateway-health` 和容器状态仅证明运行与来源信息，不能证明创作、Provider

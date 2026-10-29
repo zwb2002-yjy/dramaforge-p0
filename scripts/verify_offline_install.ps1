@@ -16,6 +16,8 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 $sha = (git -C $repo rev-parse HEAD).Trim()
+git -C $repo diff --quiet HEAD --
+if ($LASTEXITCODE -ne 0) { throw "Commit tracked changes before verifying an exact candidate" }
 $tag = "sha-$($sha.Substring(0, 8))"
 
 $work = if ($WorkDir) { $WorkDir } else { Join-Path $repo "tmp\stage15-install-$tag" }
@@ -27,16 +29,14 @@ Write-Host "tag       : $tag"
 Write-Host "work dir  : $work"
 Write-Host "project   : $project on port $Port"
 
-if (Test-Path $work) { Remove-Item -Recurse -Force $work }
+if (Test-Path -LiteralPath $work) { throw "Verification directory already exists; preserve it and choose a new -WorkDir: $work" }
 New-Item -ItemType Directory -Force -Path $bundle, (Join-Path $bundle "infra\litellm") | Out-Null
 
-# A previous attempt leaves its own volumes behind, and the freshly rendered .env
-# carries new database credentials: tear the project down so the install starts
-# from the clean state every time.
-$previous = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-docker compose -p $project down -v --remove-orphans 2>&1 | Out-Null
-$ErrorActionPreference = $previous
+# A fresh install must not delete a previous verification's data or evidence.
+$existingContainers = @(docker ps -aq --filter "label=com.docker.compose.project=$project")
+if ($LASTEXITCODE -ne 0 -or $existingContainers.Count -gt 0) { throw "Verification project already exists or could not be inspected: $project" }
+$existingVolumes = @(docker volume ls -q --filter "label=com.docker.compose.project=$project")
+if ($LASTEXITCODE -ne 0 -or $existingVolumes.Count -gt 0) { throw "Verification volumes already exist or could not be inspected: $project" }
 
 $backendImage = "dramaforge-backend:$tag"
 $frontendImage = "dramaforge-frontend:$tag"
@@ -57,7 +57,9 @@ $common = @(
 foreach ($file in $common) {
     Copy-Item (Join-Path $repo $file) (Join-Path $bundle $file) -Force
 }
-Copy-Item (Join-Path $repo "infra\litellm\config.yaml") (Join-Path $bundle "infra\litellm\config.yaml") -Force
+foreach ($file in @("config.yaml", "proxy_policy.py", "transport_policy.py", "bootstrap_keys.py")) {
+    Copy-Item (Join-Path $repo "infra\litellm\$file") (Join-Path $bundle "infra\litellm\$file") -Force
+}
 
 $runtimeImages = @(
     $backendImage, $frontendImage,
@@ -68,6 +70,13 @@ $runtimeImages = @(
 foreach ($image in $runtimeImages) {
     docker image inspect $image > $null 2>&1
     if ($LASTEXITCODE -ne 0) { throw "runtime image missing locally: $image" }
+}
+foreach ($image in @($backendImage, $frontendImage)) {
+    $identity = @(docker image inspect $image | ConvertFrom-Json)[0].Config.Labels
+    if ($LASTEXITCODE -ne 0 -or $identity.'org.opencontainers.image.revision' -ne $sha -or
+        $identity.'org.opencontainers.image.version' -ne $Version) {
+        throw "Image identity does not match the exact candidate/version: $image"
+    }
 }
 
 $headsOutput = docker run --rm -v "${repo}:/workspace" -w /workspace/backend $backendImage python -c @"
@@ -155,10 +164,8 @@ Write-Host "`n== installing the bundle into a clean directory =="
 # container and redirected by file: piping it through the PowerShell pipeline
 # rewrites bytes, and a container created without stdin never sees the template.
 $probe = "df-env-probe-$($sha.Substring(0,8))"
-$previous = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-docker rm -f $probe 2>&1 | Out-Null
-$ErrorActionPreference = $previous
+$existingProbe = @(docker ps -aq --filter "name=^/$probe`$")
+if ($LASTEXITCODE -ne 0 -or $existingProbe.Count -gt 0) { throw "Environment rendering container already exists or could not be inspected: $probe" }
 docker create --name $probe $backendImage sh -c `
     "python -m app.install_env --version $Version --source-commit $sha --backend-image $backendImage --frontend-image $frontendImage < /tmp/template.env" | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "could not create the env rendering container" }
@@ -200,20 +207,23 @@ try {
 }
 
 Write-Host "`n== asserting the installed stack =="
-# `migrate` and `database-bootstrap` are one-shot jobs: they must exit 0, every
+# The three initialization jobs must exit 0; every
 # long-running service must report healthy.
-$oneShotServices = @("migrate", "database-bootstrap")
+$oneShotServices = @("migrate", "database-bootstrap", "litellm-bootstrap")
 $deadline = (Get-Date).AddMinutes(6)
 $healthy = $false
 $finalState = @()
+$expectedServices = @(docker compose --env-file (Join-Path $bundle ".env") -f (Join-Path $bundle "docker-compose.yml") -p $project config --services)
+if ($LASTEXITCODE -ne 0 -or $expectedServices.Count -eq 0) { throw "Could not resolve verification services" }
 while ((Get-Date) -lt $deadline) {
-    $finalState = @(docker compose -p $project ps --all --format "{{.Service}} {{.State}} {{.Health}} {{.ExitCode}}" 2>$null)
-    $problems = @()
+    $stateLines = @(docker compose --env-file (Join-Path $bundle ".env") -f (Join-Path $bundle "docker-compose.yml") -p $project ps --all --format json)
+    if ($LASTEXITCODE -ne 0) { throw "Could not inspect the verification project" }
+    $finalState = @($stateLines | ForEach-Object { $_ | ConvertFrom-Json })
+    $problems = @($expectedServices | Where-Object { $_ -notin $finalState.Service } | ForEach-Object { "missing service: $_" })
     foreach ($row in $finalState) {
-        $parts = $row -split '\s+'
-        $service = $parts[0]; $state = $parts[1]; $health = $parts[2]; $exitCode = $parts[3]
+        $service = $row.Service; $state = $row.State; $health = $row.Health; $exitCode = $row.ExitCode
         if ($oneShotServices -contains $service) {
-            if ($state -ne "exited" -or ($exitCode -and $exitCode -ne "0")) { $problems += "$service state=$state exit=$exitCode" }
+            if ($state -ne "exited" -or $exitCode -ne 0) { $problems += "$service state=$state exit=$exitCode" }
             continue
         }
         if ($state -ne "running" -or $health -ne "healthy") { $problems += "$service state=$state health=$health" }
@@ -221,13 +231,19 @@ while ((Get-Date) -lt $deadline) {
     if ($finalState.Count -gt 0 -and $problems.Count -eq 0) { $healthy = $true; break }
     Start-Sleep -Seconds 10
 }
-$finalState = @(docker compose -p $project ps --all --format "{{.Service}} {{.State}} {{.Health}} {{.ExitCode}}" 2>$null)
-$finalState | ForEach-Object { Write-Host "  $_" }
+$finalState | ForEach-Object { Write-Host "  $($_.Service) $($_.State) $($_.Health) $($_.ExitCode)" }
 
 $gateway = try { (Invoke-WebRequest -Uri "http://127.0.0.1:$Port/gateway-health" -UseBasicParsing -TimeoutSec 20).StatusCode } catch { "error: $_" }
 $health = try { (Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -UseBasicParsing -TimeoutSec 20).Content } catch { "error: $_" }
 Write-Host "gateway-health: $gateway"
 Write-Host "health: $health"
+$runtimeIdentityMatches = $false
+try {
+    $healthIdentity = $health | ConvertFrom-Json
+    $runtimeIdentityMatches = $healthIdentity.source_commit -eq $sha -and
+        $healthIdentity.version -eq $Version -and $healthIdentity.env -eq "production" -and
+        $healthIdentity.status -eq "ok" -and $healthIdentity.db -eq "up"
+} catch { $runtimeIdentityMatches = $false }
 
 $evidence = [ordered]@{
     candidate_sha           = $sha
@@ -245,6 +261,7 @@ $evidence = [ordered]@{
     compose_project         = $project
     entry_port              = $Port
     all_services_healthy    = $healthy
+    runtime_identity_matches = $runtimeIdentityMatches
     gateway_health          = "$gateway"
     health                  = "$health"
     compose_state           = @($finalState)
@@ -255,4 +272,5 @@ $evidence | ConvertTo-Json -Depth 5 | Set-Content -Path $evidencePath -Encoding 
 
 Write-Host "`nevidence: $evidencePath"
 if (-not $healthy) { throw "installed stack did not reach a healthy state" }
+if ($gateway -ne 200 -or -not $runtimeIdentityMatches) { throw "installed gateway/API identity did not match the candidate" }
 Write-Host "STAGE15 INSTALL SMOKE: PASS (local reproduction only)"
