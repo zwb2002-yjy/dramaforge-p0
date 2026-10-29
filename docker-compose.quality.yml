@@ -68,7 +68,8 @@ services:
       - ${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}:/contract:ro
 
   minio-quality:
-    image: ${DRAMAFORGE_MINIO_QUALITY_IMAGE:-quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z}
+    # Verified amd64 CI mirror; pin the manifest digest to avoid mutable-tag drift.
+    image: ghcr.io/zwb2002-yjy/dramaforge-minio@sha256:34c8e2f52a5984492555427fee07254c80036bdb7079bb91679232abd7a4fa20
     environment:
       MINIO_ROOT_USER: quality-minio-user
       MINIO_ROOT_PASSWORD: quality-minio-password

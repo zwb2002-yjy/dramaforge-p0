@@ -246,9 +246,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       QUALITY_CONTRACT_DIR: ./tmp/quality-contract
-      # Exact linux/amd64 manifest/config/layers of the pinned upstream release.
-      # Keep this CI transport copy explicit; never retry another MinIO version.
-      DRAMAFORGE_MINIO_QUALITY_IMAGE: ghcr.io/zwb2002-yjy/dramaforge-minio@sha256:34c8e2f52a5984492555427fee07254c80036bdb7079bb91679232abd7a4fa20
     steps:
       - uses: actions/checkout@v7
       - name: Build the exact quality images

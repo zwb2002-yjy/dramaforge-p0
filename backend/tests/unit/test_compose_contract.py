@@ -14,7 +14,7 @@ BUILD_COMPOSE = REPO_ROOT / "docker-compose.build.yml"
 OFFLINE_COMPOSE = REPO_ROOT / "docker-compose.offline.yml"
 
 
-def test_ci_minio_copy_is_immutable_without_changing_runtime_distribution() -> None:
+def test_quality_minio_copy_is_immutable_without_changing_runtime_distribution() -> None:
     quality = yaml.safe_load(
         (REPO_ROOT / "docker-compose.quality.yml").read_text(encoding="utf-8")
     )
@@ -22,16 +22,13 @@ def test_ci_minio_copy_is_immutable_without_changing_runtime_distribution() -> N
         (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     )
     upstream = "quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z"
-    assert quality["services"]["minio-quality"]["image"] == (
-        "${DRAMAFORGE_MINIO_QUALITY_IMAGE:-" + upstream + "}"
-    )
     gate = workflow["jobs"]["container-gates"]
-    image = gate["env"]["DRAMAFORGE_MINIO_QUALITY_IMAGE"]
+    image = quality["services"]["minio-quality"]["image"]
     assert re.fullmatch(
         r"ghcr\.io/zwb2002-yjy/dramaforge-minio@sha256:[0-9a-f]{64}", image
     )
-    # The cached copy has only the tested amd64 platform. Keep it scoped to the
-    # hosted x64 gate; local quality and packaged runtime retain the upstream.
+    # The quality copy has only the tested amd64 platform. The hosted gate runs
+    # on x64; packaged runtime retains the upstream multi-platform reference.
     assert gate["runs-on"] == "ubuntu-latest"
     assert yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]["minio"][
         "image"

@@ -48,10 +48,10 @@ LiteLLM 集成进程共享受限网络命名空间，使用镜像构建阶段已
 避免源码时间戳触发隔离构建并请求 PyPI；
 依赖或源码变化应重建质量镜像，不能通过放宽出网 ACL 修复依赖准备问题。
 
-`minio-quality` 可通过 `DRAMAFORGE_MINIO_QUALITY_IMAGE` 显式指定测试镜像。
-托管 x64 CI 使用固定 digest 的 GHCR 副本，其 manifest、配置及各层与已验收的
+质量门的 `minio-quality` 使用固定 digest 的 GHCR 副本，其 manifest、配置及各层与已验收的
 固定版 MinIO 的 linux/amd64 内容完全相同；不切换版本，也不在拉取失败时静默回退。
-本机未设置该变量时仍使用原上游多架构镜像，生产与发布制品的 MinIO 引用不受此变量影响。
+该副本只包含 linux/amd64；质量门主机须能够运行该平台的容器，不据此宣称其他架构资源验收通过。
+生产与发布制品仍保留原上游多架构镜像引用。
 
 本地完整质量门与 GitHub Full Gate 共用 `docker-compose.quality.yml`，不维护第二套
 测试实现。当前 dev 处于快速开发模式，PR CI 只监听 `main`（见 RELEASE.md）；
