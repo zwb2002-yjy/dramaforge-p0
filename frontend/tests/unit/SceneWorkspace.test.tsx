@@ -214,6 +214,7 @@ describe("SceneWorkspace", () => {
     expect(within(inspector).getByRole("heading", { name: "镜头 1" })).toBeInTheDocument();
     expect(within(inspector).queryByRole("tab")).not.toBeInTheDocument();
     expect(within(inspector).getByLabelText("画面描述")).toHaveValue("A turns");
+    fireEvent.click(within(inspector).getByText("镜头参数"));
     expect(within(inspector).getByLabelText("镜头类型")).toBeInTheDocument();
     expect(within(inspector).getByTestId("shot-production-actions")).toBeInTheDocument();
     expect(within(inspector).queryByTestId("shot-production-trace")).not.toBeInTheDocument();
@@ -993,6 +994,9 @@ it("keeps dialogue and voice drafts and guards shot switches without generating"
     </QueryClientProvider>,
   );
   await screen.findByText("Voice Studio");
+  fireEvent.click(
+    within(screen.getByTestId("shot-design-voice")).getByRole("button", { name: "配音" }),
+  );
   await findSelectOption(screen.getByLabelText("配音音色"), "目录声音乙 · zh-CN");
   fireEvent.change(screen.getByLabelText("对白／旁白文本"), {
     target: { value: "尚未保存的对白" },
@@ -1015,6 +1019,9 @@ it("keeps dialogue and voice drafts and guards shot switches without generating"
     expect(screen.getByTestId("cinematic-canvas")).toHaveAttribute("data-shot-id", "shot-2"),
   );
   expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("第二个镜头的对白");
+  fireEvent.click(
+    within(screen.getByTestId("shot-design-voice")).getByRole("button", { name: "配音" }),
+  );
   expectSelectValue(screen.getByLabelText("配音音色"), "");
   expect(screen.getByLabelText("配音语速")).toHaveAttribute("aria-valuenow", "0");
   expect(calls).toContainEqual({

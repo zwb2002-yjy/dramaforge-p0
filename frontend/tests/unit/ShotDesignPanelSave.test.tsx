@@ -323,6 +323,8 @@ describe("ShotDesignPanel canvas write gate", () => {
     const patches = recordingFetch();
     renderPanel();
 
+    fireEvent.click(screen.getByText("镜头参数"));
+
     expect(screen.getByTestId("shot-design-camera-facts")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("画面描述"), { target: { value: "A turns" } });
     await selectValue(screen.getByLabelText("镜头类型"), "close_up");

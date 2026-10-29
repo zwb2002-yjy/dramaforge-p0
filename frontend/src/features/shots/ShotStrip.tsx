@@ -1,3 +1,5 @@
+import { memo, useCallback, useLayoutEffect, useRef } from "react";
+
 import { Button } from "../../components/ui";
 import { artifactContentUrl } from "../../lib/api";
 import { nodeRunStatusKind } from "../../lib/runLabels";
@@ -34,6 +36,62 @@ function durationLabel(value: ShotLite["duration_seconds"]): string {
   return Number.isFinite(parsed) ? `${parsed}s` : `${value || "—"}s`;
 }
 
+const ShotStripCard = memo(function ShotStripCard({
+  projectId,
+  shot,
+  selected,
+  risk,
+  expanded,
+  onSelectShot,
+}: {
+  projectId?: string;
+  shot: ShotLite;
+  selected: boolean;
+  risk: boolean;
+  expanded: boolean;
+  onSelectShot: (shotId: string) => void;
+}) {
+  return (
+    <li>
+      <Button
+        type="button"
+        className={selected ? "active" : undefined}
+        aria-current={selected ? "true" : undefined}
+        aria-label={`#${shot.shot_number} ${shotTypeLabel(shot.shot_type)} ${durationLabel(shot.duration_seconds)}`}
+        onClick={() => onSelectShot(shot.id)}
+        data-testid={`shot-strip-card-${shot.id}`}
+      >
+        <span className="qc-shot-strip-thumb" data-testid={`shot-strip-thumb-${shot.id}`}>
+          {projectId && shot.formal_keyframe_artifact_id ? (
+            <img
+              src={artifactContentUrl(projectId, shot.formal_keyframe_artifact_id)}
+              alt={`#${shot.shot_number} 正式关键帧`}
+            />
+          ) : (
+            <span aria-hidden="true">镜{String(shot.shot_number).padStart(2, "0")}</span>
+          )}
+        </span>
+        <span className="qc-shot-strip-copy">
+          <strong>#{shot.shot_number}</strong>
+          <span>{shotTypeLabel(shot.shot_type)}</span>
+          {expanded && <small>{durationLabel(shot.duration_seconds)}</small>}
+        </span>
+        {expanded && (
+          <span className="qc-shot-strip-status" aria-label="正式状态">
+            <em className={shot.formal_keyframe_artifact_id ? "ready" : undefined}>
+              关键帧 {shot.formal_keyframe_artifact_id ? "已确认" : "待确认"}
+            </em>
+            <em className={shot.formal_video_artifact_id ? "ready" : undefined}>
+              视频 {shot.formal_video_artifact_id ? "已确认" : "待确认"}
+            </em>
+            {risk && <em className="risk">生产失败风险</em>}
+          </span>
+        )}
+      </Button>
+    </li>
+  );
+});
+
 /** Bottom horizontal storyboard strip for one Scene. */
 export function ShotStrip({
   projectId,
@@ -44,6 +102,12 @@ export function ShotStrip({
   expanded = false,
   onToggleExpanded,
 }: ShotStripProps) {
+  const onSelect = useRef(onSelectShot);
+  useLayoutEffect(() => {
+    onSelect.current = onSelectShot;
+  }, [onSelectShot]);
+  // Unchanged cards keep their render while clicks honor the latest draft guard.
+  const selectShot = useCallback((shotId: string) => onSelect.current(shotId), []);
   return (
     <section
       className={`qc-shot-strip-panel${expanded ? " is-expanded" : " is-compact"}`}
@@ -76,49 +140,17 @@ export function ShotStrip({
         data-selected-shot-id={selectedShotId ?? undefined}
         aria-label="镜头序列"
       >
-        {shots.map((shot) => {
-          const selected = shot.id === selectedShotId;
-          const risk = hasTraceRisk(traceByShot[shot.id] ?? []);
-          return (
-            <li key={shot.id}>
-              <Button
-                type="button"
-                className={selected ? "active" : undefined}
-                aria-current={selected ? "true" : undefined}
-                aria-label={`#${shot.shot_number} ${shotTypeLabel(shot.shot_type)} ${durationLabel(shot.duration_seconds)}`}
-                onClick={() => onSelectShot(shot.id)}
-                data-testid={`shot-strip-card-${shot.id}`}
-              >
-                <span className="qc-shot-strip-thumb" data-testid={`shot-strip-thumb-${shot.id}`}>
-                  {projectId && shot.formal_keyframe_artifact_id ? (
-                    <img
-                      src={artifactContentUrl(projectId, shot.formal_keyframe_artifact_id)}
-                      alt={`#${shot.shot_number} 正式关键帧`}
-                    />
-                  ) : (
-                    <span aria-hidden="true">镜{String(shot.shot_number).padStart(2, "0")}</span>
-                  )}
-                </span>
-                <span className="qc-shot-strip-copy">
-                  <strong>#{shot.shot_number}</strong>
-                  <span>{shotTypeLabel(shot.shot_type)}</span>
-                  {expanded && <small>{durationLabel(shot.duration_seconds)}</small>}
-                </span>
-                {expanded && (
-                  <span className="qc-shot-strip-status" aria-label="正式状态">
-                    <em className={shot.formal_keyframe_artifact_id ? "ready" : undefined}>
-                      关键帧 {shot.formal_keyframe_artifact_id ? "已确认" : "待确认"}
-                    </em>
-                    <em className={shot.formal_video_artifact_id ? "ready" : undefined}>
-                      视频 {shot.formal_video_artifact_id ? "已确认" : "待确认"}
-                    </em>
-                    {risk && <em className="risk">生产失败风险</em>}
-                  </span>
-                )}
-              </Button>
-            </li>
-          );
-        })}
+        {shots.map((shot) => (
+          <ShotStripCard
+            key={shot.id}
+            projectId={projectId}
+            shot={shot}
+            selected={shot.id === selectedShotId}
+            risk={hasTraceRisk(traceByShot[shot.id] ?? [])}
+            expanded={expanded}
+            onSelectShot={selectShot}
+          />
+        ))}
       </ol>
     </section>
   );

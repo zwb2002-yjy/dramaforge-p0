@@ -423,6 +423,7 @@ export function ShotDesignPanel({
         title="镜头参数"
         description={`${shotTypeOptionsFor(shotType).find((option) => option.value === shotType)?.label ?? "景别"} · ${cameraMove || "固定机位"} · ${durationSeconds || "—"} 秒`}
         testId="shot-camera-parameters"
+        lazy
       >
         <div className="df-shot-camera" data-testid="shot-design-camera-facts">
           <Field>
@@ -567,7 +568,7 @@ export function ShotDesignPanel({
           onChange={(value) => updateDraft({ ...draft, video_prompt: value })}
         />
       </Disclosure>
-      <Disclosure compact title="配音" testId="shot-design-voice">
+      <Disclosure compact title="配音" testId="shot-design-voice" lazy>
         {voiceSettings ? (
           <ShotVoiceSettings projectId={projectId} value={voiceSettings} onChange={updateVoice} />
         ) : (

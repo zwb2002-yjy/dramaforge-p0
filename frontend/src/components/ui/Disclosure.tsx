@@ -10,6 +10,7 @@ export function Disclosure({
   open,
   onOpenChange,
   compact = false,
+  lazy = false,
   ...props
 }: Omit<HTMLAttributes<HTMLDivElement>, "title" | "onChange"> & {
   title: ReactNode;
@@ -19,6 +20,8 @@ export function Disclosure({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   compact?: boolean;
+  /** Mount on first expansion, then retain the mounted draft when collapsed. */
+  lazy?: boolean;
 }) {
   return (
     <Collapse
@@ -38,7 +41,7 @@ export function Disclosure({
       items={[
         {
           key: "content",
-          forceRender: true,
+          forceRender: !lazy,
           label: (
             <>
               <Typography.Text strong>{title}</Typography.Text>

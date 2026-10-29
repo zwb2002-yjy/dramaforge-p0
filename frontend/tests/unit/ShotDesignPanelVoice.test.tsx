@@ -1,7 +1,7 @@
 import { sliderValue } from "./sliderValue";
 import { findSelectOption, expectSelectValue, selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ShotDesignPanel, type ShotDesignDraft } from "../../src/features/shots/ShotDesignPanel";
@@ -101,7 +101,14 @@ function renderPanel(shot: ShotLite = SHOT) {
   const view = render(panel());
   return { onSaved, applySuggestion: (draft: ShotDesignDraft) => view.rerender(panel(draft)) };
 }
+function openVoice() {
+  const toggle = within(screen.getByTestId("shot-design-voice")).getByRole("button", {
+    name: "配音",
+  });
+  if (toggle.getAttribute("aria-expanded") !== "true") fireEvent.click(toggle);
+}
 async function selectVoice() {
+  openVoice();
   await findSelectOption(screen.getByLabelText("配音音色"), "目录声音乙 · zh-CN");
   await selectValue(screen.getByLabelText("配音音色"), "voice:voice-b");
 }
@@ -115,9 +122,31 @@ function save() {
 afterEach(() => vi.restoreAllMocks());
 
 describe("ShotDesignPanel dialogue and voice gates", () => {
+  it("defers unopened camera and voice controls while retaining a collapsed voice draft", async () => {
+    const { calls, writes } = backend();
+    renderPanel();
+    expect(screen.queryByLabelText("镜头类型")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("配音音色")).not.toBeInTheDocument();
+    expect(calls.some((call) => call.url.endsWith("/voice-options"))).toBe(false);
+    const toggle = within(screen.getByTestId("shot-design-voice")).getByRole("button", {
+      name: "配音",
+    });
+    fireEvent.click(toggle);
+    await findSelectOption(screen.getByLabelText("配音音色"), "目录声音乙 · zh-CN");
+    await selectValue(screen.getByLabelText("配音音色"), "voice:voice-b");
+    sliderValue(screen.getByLabelText("配音语速"), -15);
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+    expectSelectValue(screen.getByLabelText("配音音色"), "voice:voice-b");
+    expect(screen.getByLabelText("配音语速")).toHaveAttribute("aria-valuenow", "-15");
+    expect(calls.filter((call) => call.url.endsWith("/voice-options"))).toHaveLength(1);
+    expect(writes()).toEqual([]);
+  });
+
   it("does not materialize defaults or write anything merely by opening the panel", async () => {
     const { writes } = backend();
     renderPanel();
+    openVoice();
     await findSelectOption(screen.getByLabelText("配音音色"), "目录声音甲 · zh-CN");
     expect(screen.getByLabelText("对白／旁白文本")).toHaveValue("原始对白");
     expectSelectValue(screen.getByLabelText("配音音色"), "");
@@ -197,6 +226,7 @@ describe("ShotDesignPanel dialogue and voice gates", () => {
       ...SHOT,
       director_state: { voice: { voice_id: "legacy-voice", rate_percent: 0 } },
     });
+    openVoice();
     await screen.findByText(/当前音色不在此引擎的目录中/);
     sliderValue(screen.getByLabelText("配音语速"), -30);
     save();
@@ -212,6 +242,7 @@ describe("ShotDesignPanel dialogue and voice gates", () => {
       ...SHOT,
       director_state: { voice: { voice_id: "voice-b", rate_percent: 10 } },
     });
+    openVoice();
     await findSelectOption(screen.getByLabelText("配音音色"), "沿用实例默认（目录声音甲）");
     await selectValue(screen.getByLabelText("配音音色"), "");
     save();
@@ -261,6 +292,7 @@ describe("ShotDesignPanel dialogue and voice gates", () => {
   it("keeps an unreadable stored voice untouched instead of rewriting it", async () => {
     const { writes } = backend();
     renderPanel({ ...SHOT, director_state: { voice: { voice_id: null, rate_percent: 99 } } });
+    openVoice();
     expect(screen.getByText(/配音设置无效/)).toBeInTheDocument();
     expect(screen.queryByLabelText("配音音色")).not.toBeInTheDocument();
     editDialogue();
