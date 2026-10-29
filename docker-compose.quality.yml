@@ -68,7 +68,7 @@ services:
       - ${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}:/contract:ro
 
   minio-quality:
-    image: quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
+    image: ${DRAMAFORGE_MINIO_QUALITY_IMAGE:-quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z}
     environment:
       MINIO_ROOT_USER: quality-minio-user
       MINIO_ROOT_PASSWORD: quality-minio-password
