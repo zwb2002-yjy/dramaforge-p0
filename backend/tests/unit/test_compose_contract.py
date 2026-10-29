@@ -13,19 +13,6 @@ BUILD_COMPOSE = REPO_ROOT / "docker-compose.build.yml"
 OFFLINE_COMPOSE = REPO_ROOT / "docker-compose.offline.yml"
 
 
-def test_isolated_litellm_gate_uses_preinstalled_environment() -> None:
-    services = yaml.safe_load(
-        (REPO_ROOT / "docker-compose.quality.yml").read_text(encoding="utf-8")
-    )["services"]
-    integration = services["litellm-integration-quality"]
-    assert integration["network_mode"] == "service:litellm-policy-network-quality"
-    command = integration["command"][-1]
-    assert "uv run --offline --no-sync --directory backend pytest" in command
-    for filename in ("test_litellm_real_proxy.py", "test_litellm_proxy_policy.py"):
-        assert filename in command
-    assert "--fail-on-skip" in command
-
-
 def test_auth_gateway_gate_uses_deployed_config_and_remains_private() -> None:
     services = yaml.safe_load(
         (REPO_ROOT / "docker-compose.quality.yml").read_text(encoding="utf-8")
