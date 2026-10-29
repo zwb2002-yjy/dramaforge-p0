@@ -1,8 +1,8 @@
 """Unified Provider runtime/compiler contracts and resolver (stage B).
 
 Single wire owner: a Compiler produces ``CompiledVideoRequest.wire_request`` and
-the Runtime ``submit_*`` sends it verbatim. Existing HubClient methods become
-compatible wrappers over the same low-level transport. Resume is driven by a
+the Runtime ``submit_*`` sends it verbatim. Read-only account task probes use
+the same Runtime polling surface. Resume is driven by a
 sanitized :class:`ProviderResumeToken` persisted on ``ProviderOperation`` —
 never by current Feature Flags or the current Project binding.
 """

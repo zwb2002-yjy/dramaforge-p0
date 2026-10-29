@@ -514,6 +514,9 @@ AgnesVideoCompiler 分支接受该 schema-1 方言（2.5 输出约束且无 inpu
   也不例外；ProbeRequest 不含任何「确认已付费」字段。
   仅未标付费的 `auth_models` 与查询已有远端任务的 `video_poll_download` 保持可用；
   插件若将它们标为付费也会阻止。该查询不创建新生成任务，成功不自动认证模型绑定。
+  已有任务查询通过当前精确连接/凭证修订配置的统一Runtime发送同一远端ID的GET；
+  不再构造另一套Hub创建客户端。Agnes、MiniMax、Ark的旧创建/取消封装及不可达的
+  生成探针分支已移除；Compiler和Runtime是媒体创建与任务协议的唯一实现。
   这是缺少独立 paid-probe 授权合同期间的 fail-closed，不是已实现的 Owner 授权。
 
 ## 冻结接入合同与账号证据

@@ -59,6 +59,9 @@ FORBIDDEN_TEXT = (
     "ExecuteKeyframe" + "Result",
     "/projects/" + "{project_id}/dispatch",
     "/projects/" + "{project_id}/node-runs/{node_run_id}/enqueue",
+    "Agnes" + "HubClient",
+    "MiniMax" + "HubClient",
+    "Ark" + "HubClient",
 )
 FORBIDDEN_FILES = (
     ROOT / "backend" / "app" / "production" / "archive_models.py",

@@ -11,7 +11,10 @@ import json
 import httpx
 import pytest
 from app.config import Settings
-from app.providers.minimax import MiniMaxHubClient
+from app.providers.minimax import MiniMaxRuntime
+from app.providers.runtime import ProviderResumeToken
+
+from fixtures.protocol_requests import image_request, video_request
 
 MINIMAX_HOST = "https://api.minimaxi.com"
 
@@ -37,12 +40,13 @@ async def test_image_i2i_path_auth_body_and_response() -> None:
             json={"data": {"image_urls": ["https://cdn.example/image.png"]}},
         )
 
-    client = MiniMaxHubClient(_settings(), transport=httpx.MockTransport(handler))
-    result = await client.create_image(
-        prompt="preserve identity",
-        reference_url="https://dramaforge.example/api/v1/provider-references/image-token",
-        reference_artifact_id="artifact-1",
-        reference_fingerprint="a" * 64,
+    client = MiniMaxRuntime(settings=_settings(), transport=httpx.MockTransport(handler))
+    result = await client.submit_image(
+        await image_request(
+            "minimax",
+            prompt="preserve identity",
+            reference_url="https://dramaforge.example/api/v1/provider-references/image-token",
+        )
     )
 
     assert seen["url"] == f"{MINIMAX_HOST}/v1/image_generation"
@@ -62,8 +66,8 @@ async def test_image_i2i_path_auth_body_and_response() -> None:
             }
         ],
     }
-    assert result["status"] == "succeeded"
-    assert result["artifact_uri"] == "https://cdn.example/image.png"
+    assert result.status == "succeeded"
+    assert result.artifact_uri == "https://cdn.example/image.png"
 
 
 @pytest.mark.asyncio
@@ -103,24 +107,51 @@ async def test_video_i2v_create_poll_cancel_and_failure_state() -> None:
             return httpx.Response(200, json={"status": "cancelled"})
         return httpx.Response(200, json=next(poll_responses))
 
-    client = MiniMaxHubClient(_settings(), transport=httpx.MockTransport(handler))
-    created = await client.create_video(
-        prompt="slow camera move",
-        image_url="https://dramaforge.example/api/v1/provider-references/frame-token",
+    client = MiniMaxRuntime(settings=_settings(), transport=httpx.MockTransport(handler))
+    created = await client.submit_video(
+        await video_request(
+            "minimax",
+            prompt="slow camera move",
+            reference_url="https://dramaforge.example/api/v1/provider-references/frame-token",
+        )
     )
-    assert created["status"] == "queued"
-    assert created["remote_task_id"] == "task-123"
-    assert (await client.poll_video("task-123"))["status"] == "queued"
-    assert (await client.poll_video("task-123"))["status"] == "running"
-    completed = await client.poll_video("task-123")
-    assert completed == {
-        "status": "succeeded",
-        "artifact_uri": "https://cdn.example/video.mp4",
-    }
-    failed = await client.poll_video("task-123")
-    assert failed["status"] == "failed"
-    assert failed["error_code"] == "PROVIDER_TASK_FAILED"
-    assert await client.cancel("task-123") == {"status": "cancelled"}
+    assert created.status == "queued"
+    assert created.remote_task_id == "task-123"
+    assert (
+        await client.poll_video(
+            ProviderResumeToken(
+                provider_type="minimax", protocol_profile="minimax_cn_v1", remote_task_id="task-123"
+            )
+        )
+    ).status == "queued"
+    assert (
+        await client.poll_video(
+            ProviderResumeToken(
+                provider_type="minimax", protocol_profile="minimax_cn_v1", remote_task_id="task-123"
+            )
+        )
+    ).status == "running"
+    completed = await client.poll_video(
+        ProviderResumeToken(
+            provider_type="minimax", protocol_profile="minimax_cn_v1", remote_task_id="task-123"
+        )
+    )
+    assert completed.status == "succeeded"
+    assert completed.artifact_uri == "https://cdn.example/video.mp4"
+    failed = await client.poll_video(
+        ProviderResumeToken(
+            provider_type="minimax", protocol_profile="minimax_cn_v1", remote_task_id="task-123"
+        )
+    )
+    assert failed.status == "failed"
+    assert failed.error_code == "PROVIDER_TASK_FAILED"
+    assert (
+        await client.cancel_video(
+            ProviderResumeToken(
+                provider_type="minimax", protocol_profile="minimax_cn_v1", remote_task_id="task-123"
+            )
+        )
+    ).status == "cancelled"
     assert seen_paths == [
         ("POST", "/v2/video_generation"),
         ("GET", "/v2/query/video_generation/task-123"),
@@ -140,15 +171,16 @@ async def test_create_transport_failure_is_one_post_and_unknown_submission() -> 
         calls += 1
         raise httpx.ReadError("connection lost")
 
-    client = MiniMaxHubClient(_settings(), transport=httpx.MockTransport(handler))
-    result = await client.create_video(
-        prompt="motion",
-        image_url="https://dramaforge.example/frame.png",
+    client = MiniMaxRuntime(settings=_settings(), transport=httpx.MockTransport(handler))
+    result = await client.submit_video(
+        await video_request(
+            "minimax", prompt="motion", reference_url="https://dramaforge.example/frame.png"
+        )
     )
     assert calls == 1
-    assert result["status"] == "unknown_submission"
-    assert result["error_code"] == "PROVIDER_SUBMISSION_UNKNOWN"
-    assert result["transport_error"] == "ReadError"
+    assert result.status == "unknown_submission"
+    assert result.error_code == "PROVIDER_SUBMISSION_UNKNOWN"
+    assert result.error == "ReadError"
 
 
 @pytest.mark.asyncio
@@ -156,11 +188,19 @@ async def test_missing_or_non_https_references_fail_before_network() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("invalid references must not create a provider request")
 
-    client = MiniMaxHubClient(_settings(), transport=httpx.MockTransport(handler))
+    client = MiniMaxRuntime(settings=_settings(), transport=httpx.MockTransport(handler))
     with pytest.raises(ValueError, match="HTTPS"):
-        await client.create_image(prompt="portrait", reference_url="http://example.com/ref.png")
+        await client.submit_image(
+            await image_request(
+                "minimax", prompt="portrait", reference_url="http://example.com/ref.png"
+            )
+        )
     with pytest.raises(ValueError, match="HTTPS"):
-        await client.create_video(prompt="motion", image_url="data:image/png;base64,abc")
+        await client.submit_video(
+            await video_request(
+                "minimax", prompt="motion", reference_url="data:image/png;base64,abc"
+            )
+        )
 
 
 @pytest.mark.asyncio
@@ -168,14 +208,17 @@ async def test_http_error_and_summary_redaction() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(429, headers={"Retry-After": "2"}, json={"error": "busy"})
 
-    client = MiniMaxHubClient(_settings(), transport=httpx.MockTransport(handler))
-    result = await client.create_image(
-        prompt="secret prompt",
-        reference_url="https://dramaforge.example/api/v1/provider-references/secret-token",
+    client = MiniMaxRuntime(settings=_settings(), transport=httpx.MockTransport(handler))
+    result = await client.submit_image(
+        await image_request(
+            "minimax",
+            prompt="secret prompt",
+            reference_url="https://dramaforge.example/api/v1/provider-references/secret-token",
+        )
     )
-    assert result["status"] == "failed"
-    assert result["error_code"] == "PROVIDER_RATE_LIMITED"
-    summary = json.dumps(result["request_summary"])
+    assert result.status == "failed"
+    assert result.error_code == "PROVIDER_RATE_LIMITED"
+    summary = json.dumps(result.request_summary)
     assert "secret prompt" not in summary
     assert "secret-token" not in summary
     assert "test-minimax-key" not in summary

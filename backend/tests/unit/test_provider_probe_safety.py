@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -25,7 +26,8 @@ from app.providers.models import (
     ProviderModelBinding,
     ProviderQualityEvidence,
 )
-from app.providers.registry import ProviderPlugin
+from app.providers.registry import get_plugin
+from app.providers.runtime import PollResult, ProviderResumeToken
 from app.security.models import EncryptedProviderCredential
 from app.shared.base import Base
 from app.shared.errors import ValidationAppError
@@ -445,7 +447,11 @@ async def test_generation_probes_fail_closed_before_credentials_clients_or_artif
     client = Mock(side_effect=AssertionError("must not build provider client"))
     reference = AsyncMock(side_effect=AssertionError("must not read reference artifacts"))
     monkeypatch.setattr(service, "_probe_settings", settings)
-    monkeypatch.setattr(ProviderPlugin, "build_client", client)
+    plugin = get_plugin(provider, profile)
+    monkeypatch.setattr(
+        "app.providers.connection_service._resolve_plugin",
+        lambda *_: replace(plugin, runtime_factory=client),
+    )
     monkeypatch.setattr(service, "_validated_reference_artifact", reference)
     before = list(await session.scalars(select(ProviderCapabilityEvidence.id)))
     with pytest.raises(ValidationAppError) as caught:
@@ -567,10 +573,14 @@ async def test_nonpaid_existing_task_poll_remains_explicit_and_binding_scoped(
         purpose="video",
         enabled=True,
     )
-    poll = AsyncMock(return_value={"status": "succeeded", "http_status": 200})
+    poll = AsyncMock(return_value=PollResult(status="succeeded", http_status=200))
     client = Mock()
     client.poll_video = poll
-    monkeypatch.setattr(ProviderPlugin, "build_client", lambda *args, **kwargs: client)
+    plugin = get_plugin(connection.provider_type, connection.protocol_profile)
+    monkeypatch.setattr(
+        "app.providers.connection_service._resolve_plugin",
+        lambda *_: replace(plugin, runtime_factory=lambda **kwargs: client),
+    )
     result = await service.probe(
         workspace_id=workspace.id,
         connection_id=connection.id,
@@ -580,13 +590,20 @@ async def test_nonpaid_existing_task_poll_remains_explicit_and_binding_scoped(
         remote_task_id="synthetic-existing-task",
         remote_query_kind="video_id",
     )
-    poll.assert_awaited_once_with("synthetic-existing-task", query_kind="video_id")
+    poll.assert_awaited_once_with(
+        ProviderResumeToken(
+            provider_type=connection.provider_type,
+            protocol_profile=connection.protocol_profile,
+            remote_task_id="synthetic-existing-task",
+            query_kind="video_id",
+        )
+    )
     assert result.status == "passed"
     assert result.model_binding_id == binding.id
     assert result.credential_revision == connection.credential_revision
     assert binding.account_verified is False
-    client.create_image.assert_not_called()
-    client.create_video.assert_not_called()
+    client.submit_image.assert_not_called()
+    client.submit_video.assert_not_called()
 
 
 @pytest.mark.asyncio

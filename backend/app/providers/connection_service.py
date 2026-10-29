@@ -41,8 +41,8 @@ from app.providers.models import (
     ProviderModelBinding,
     ProviderQualityEvidence,
 )
-from app.providers.reference_delivery import issue_artifact_reference
 from app.providers.registry import ProviderPlugin, get_plugin
+from app.providers.runtime import ProviderResumeToken
 from app.providers.workspace_credentials import configured_byok_keyring
 from app.security.credentials import read_credential_by_id, store_credential
 from app.security.models import EncryptedProviderCredential
@@ -61,9 +61,9 @@ _CAPABILITIES = frozenset(
 )
 
 
-# No generation probe may dispatch until the API can carry a positive per-call
-# budget and Owner authorization. Plugin metadata cannot turn generation into a
-# read-only operation by accidentally omitting it from paid_capabilities.
+# Generation probes need a standalone Owner operation-count authorization
+# contract. Plugin metadata cannot turn generation into a read-only operation
+# by accidentally omitting it from paid_capabilities.
 _READ_ONLY_PROBE_CAPABILITIES = frozenset({"auth_models", "video_poll_download"})
 
 
@@ -600,40 +600,11 @@ class ProviderConnectionService:
         from app.providers.egress import guarded_provider_transport
 
         probe_transport = guarded_provider_transport(settings=cfg)
-        client = (
-            plugin.build_client(cfg, host=probe_revision.base_url, transport=probe_transport)
-            if capability != "auth_models"
-            else None
-        )
-        reference_artifact: Artifact | None = None
-        reference_bytes: bytes | None = None
-        reference_mime = "image/png"
-        reference_url: str | None = None
         if reference_artifact_id is not None:
-            reference_artifact, reference_bytes = await self._validated_reference_artifact(
+            await self._validated_reference_artifact(
                 workspace_id=workspace_id,
                 artifact_id=reference_artifact_id,
             )
-            reference_mime = reference_artifact.mime_type
-            if capability == "image_i2i" and plugin.image_i2i_probe_transport == "public_url":
-                grant = await issue_artifact_reference(
-                    self._session,
-                    artifact=reference_artifact,
-                    workspace_id=workspace_id,
-                    created_by_user_id=actor.id,
-                )
-                reference_url = grant.url
-                # Provider requests run outside this transaction. Commit the
-                # grant first so a separate public delivery request can see it,
-                # then restore the authenticated Workspace RLS context.
-                await self._session.commit()
-                from app.shared.db import set_rls_context
-
-                await set_rls_context(
-                    self._session,
-                    user_id=actor.id,
-                    workspace_id=workspace_id,
-                )
         request_fingerprint = hashlib.sha256(
             json.dumps(
                 {
@@ -713,94 +684,7 @@ class ProviderConnectionService:
                     error_code = "PROVIDER_REQUEST_FAILED"
             except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
                 error_code = "PROVIDER_UNAVAILABLE"
-        elif capability == "image_t2i":
-            assert client is not None
-            evidence_model_id = (
-                binding.invoke_model_value
-                if binding is not None
-                else getattr(cfg, f"{plugin.prefix}_image_model")
-            )
-            result = await client.create_image(
-                prompt="Cinematic portrait contract probe",
-            )
-            result_status = str(result.get("status") or "failed")
-            status = "passed" if result_status == "succeeded" else result_status
-            provider_request_id = str(result.get("remote_task_id") or "") or None
-            http_status = int(result["http_status"]) if result.get("http_status") else None
-            error_code = str(result.get("error_code") or "") or None
-        elif capability == "image_i2i":
-            assert client is not None
-            evidence_model_id = (
-                binding.invoke_model_value
-                if binding is not None
-                else getattr(cfg, f"{plugin.prefix}_image_model")
-            )
-            if reference_bytes is None:
-                error_code = "PROBE_REFERENCE_REQUIRED"
-            else:
-                if plugin.image_i2i_probe_transport == "public_url":
-                    if reference_url is None:
-                        error_code = "PROBE_REFERENCE_REQUIRED"
-                    else:
-                        result = await client.create_image(
-                            prompt="Preserve the supplied character identity",
-                            reference_url=reference_url,
-                            reference_artifact_id=str(reference_artifact_id),
-                            reference_fingerprint=(
-                                reference_artifact.content_hash
-                                if reference_artifact is not None
-                                else None
-                            ),
-                        )
-                        result_status = str(result.get("status") or "failed")
-                        status = "passed" if result_status == "succeeded" else result_status
-                        provider_request_id = str(result.get("remote_task_id") or "") or None
-                        http_status = (
-                            int(result["http_status"]) if result.get("http_status") else None
-                        )
-                        error_code = str(result.get("error_code") or "") or None
-                else:
-                    result = await client.create_image(
-                        prompt="Preserve the supplied character identity",
-                        canonical_image_bytes=reference_bytes,
-                        canonical_image_mime=reference_mime,
-                    )
-                    result_status = str(result.get("status") or "failed")
-                    status = "passed" if result_status == "succeeded" else result_status
-                    provider_request_id = str(result.get("remote_task_id") or "") or None
-                    http_status = int(result["http_status"]) if result.get("http_status") else None
-                    error_code = str(result.get("error_code") or "") or None
-        elif capability == "video_i2v":
-            assert client is not None
-            evidence_model_id = (
-                binding.invoke_model_value
-                if binding is not None
-                else getattr(cfg, f"{plugin.prefix}_video_model")
-            )
-            if reference_bytes is None:
-                error_code = "PROBE_REFERENCE_REQUIRED"
-            else:
-                result = await client.create_video(
-                    prompt="Controlled camera motion with stable facial appearance",
-                    image_bytes=reference_bytes,
-                    image_mime=reference_mime,
-                    reference_artifact_ids=[str(reference_artifact_id)],
-                    reference_fingerprints=(
-                        [reference_artifact.content_hash] if reference_artifact is not None else []
-                    ),
-                )
-                result_status = str(result.get("status") or "failed")
-                status = (
-                    "passed"
-                    if result_status in {"succeeded", "queued", "running"}
-                    and result.get("remote_task_id")
-                    else result_status
-                )
-                provider_request_id = str(result.get("remote_task_id") or "") or None
-                http_status = int(result["http_status"]) if result.get("http_status") else None
-                error_code = str(result.get("error_code") or "") or None
         else:
-            assert client is not None
             evidence_model_id = (
                 binding.invoke_model_value
                 if binding is not None
@@ -809,15 +693,27 @@ class ProviderConnectionService:
             if remote_task_id is None or remote_query_kind not in {"video_id", "task_id"}:
                 error_code = "PROBE_REMOTE_TASK_REQUIRED"
             else:
-                poll = await client.poll_video(
-                    remote_task_id,
+                if plugin.runtime_factory is None:
+                    raise ValidationAppError(
+                        "provider has no read-only task runtime",
+                        details={"code": "PROVIDER_POLL_UNAVAILABLE"},
+                    )
+                runtime = plugin.runtime_factory(
+                    settings=cfg,
+                    host=probe_revision.base_url,
+                    transport=probe_transport,
+                )
+                resume = ProviderResumeToken(
+                    provider_type=connection.provider_type,
+                    protocol_profile=probe_revision.protocol_profile,
+                    remote_task_id=remote_task_id,
                     query_kind=remote_query_kind,
                 )
-                poll_status = str(poll.get("status") or "failed")
-                status = "passed" if poll_status == "succeeded" else poll_status
+                poll = await runtime.poll_video(resume)
+                status = "passed" if poll.status == "succeeded" else poll.status
                 provider_request_id = remote_task_id
-                http_status = int(poll["http_status"]) if poll.get("http_status") else None
-                error_code = str(poll.get("error_code") or "") or None
+                http_status = poll.http_status
+                error_code = poll.error_code
 
         evidence = ProviderCapabilityEvidence(
             workspace_id=workspace_id,

@@ -75,27 +75,28 @@ def test_agnes_plugin_is_implemented() -> None:
 
 
 def test_ark_plugin_is_implemented() -> None:
-    from app.providers.volcengine import ArkHubClient
+    from app.providers.volcengine import ArkRuntime
 
     plugin = get_plugin("volcengine", "ark_cn_v1")
     assert plugin.implemented is True
     assert plugin.default_base_url == "https://ark.cn-beijing.volces.com/api/v3"
     # The implemented plugin must build a real Ark protocol client.
-    client = plugin.build_client(Settings())
-    assert isinstance(client, ArkHubClient)
+    assert plugin.runtime_factory is not None
+    runtime = plugin.runtime_factory(settings=Settings())
+    assert isinstance(runtime, ArkRuntime)
     profiles = {p.protocol_profile for p in list_plugins()}
     assert {"agnes_cn_v1", "ark_cn_v1", "minimax_cn_v1"} <= profiles
 
 
 def test_minimax_plugin_is_implemented() -> None:
-    from app.providers.minimax import MiniMaxHubClient
+    from app.providers.minimax import MiniMaxRuntime
 
     plugin = get_plugin("minimax", "minimax_cn_v1")
     assert plugin.implemented is True
     assert plugin.default_base_url == "https://api.minimaxi.com"
     assert plugin.capability_purposes == {"image_i2i": "keyframe", "video_i2v": "video"}
-    assert plugin.image_i2i_probe_transport == "public_url"
-    assert isinstance(plugin.build_client(Settings()), MiniMaxHubClient)
+    assert plugin.runtime_factory is not None
+    assert isinstance(plugin.runtime_factory(settings=Settings()), MiniMaxRuntime)
 
 
 def test_video_provider_defaults_are_ready_for_account_probes() -> None:
@@ -125,35 +126,6 @@ def test_plugin_registration_duplicate_is_rejected() -> None:
         register_plugin(plugin)
 
 
-class _FakeClient:
-    """Protocol-surface stub sufficient for capability probes."""
-
-    def __init__(self, settings: Settings, host: str | None) -> None:
-        self.settings = settings
-        self.host = host
-
-    async def create_image(self, **kwargs: Any) -> dict[str, Any]:
-        return {
-            "status": "succeeded",
-            "remote_task_id": "fake-img-1",
-            "http_status": 200,
-        }
-
-    async def create_video(self, **kwargs: Any) -> dict[str, Any]:
-        return {
-            "status": "queued",
-            "remote_task_id": "fake-vid-1",
-            "http_status": 202,
-        }
-
-    async def poll_video(self, remote_task_id: str, **kwargs: Any) -> dict[str, Any]:
-        return {
-            "status": "succeeded",
-            "http_status": 200,
-            "artifact_uri": "https://fake.example.com/v.mp4",
-        }
-
-
 def _fake_plugin() -> ProviderPlugin:
     # settings_prefix/credential_provider_key reuse the existing agnes slots so
     # the fake plugin rides the already-verified Settings/BYOK plumbing; the
@@ -169,7 +141,6 @@ def _fake_plugin() -> ProviderPlugin:
         capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
         paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
         model_list_path="/v1/models",
-        client_factory=lambda settings, host, transport: _FakeClient(settings, host),
     )
 
 

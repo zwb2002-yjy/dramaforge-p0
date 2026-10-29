@@ -604,9 +604,10 @@ async def test_deprecated_catalog_binding_cannot_be_bound_to_a_new_project(
 def test_paid_probe_route_rejects_before_any_provider_dispatch(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from dataclasses import replace
     from unittest.mock import Mock
 
-    from app.providers.registry import ProviderPlugin
+    from app.providers.registry import get_plugin
 
     key = Fernet.generate_key().decode("ascii")
     monkeypatch.setenv("BYOK_PRIMARY_KEY_VERSION", "v1")
@@ -621,7 +622,11 @@ def test_paid_probe_route_rejects_before_any_provider_dispatch(
     assert created.status_code == 201
     connection_id = created.json()["id"]
     factory = Mock(side_effect=AssertionError("Provider must not be constructed"))
-    monkeypatch.setattr(ProviderPlugin, "build_client", factory)
+    plugin = get_plugin("agnes", "agnes_cn_v1")
+    monkeypatch.setattr(
+        "app.providers.connection_service._resolve_plugin",
+        lambda *_: replace(plugin, runtime_factory=factory),
+    )
     rejected = client.post(
         f"/api/v1/workspaces/{workspace_id}/provider-connections/{connection_id}/probes",
         json={"capability": "image_t2i"},
