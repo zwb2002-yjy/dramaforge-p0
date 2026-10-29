@@ -13,7 +13,7 @@ LiteLLM 文本通道，且关闭导演时手动生产不受影响。
 
 ## 决策
 
-V1 的导演持久编排内核采用 Python LangGraph，锁定 `langgraph>=1.2.11,<1.3` 与
+V1 的导演持久编排内核采用 Python LangGraph，锁定 `langgraph>=1.2.14,<1.3` 与
 `langgraph-checkpoint-postgres>=3.1.2,<3.2`。解析版本以 `backend/uv.lock` 为准，运行时基线为 Python 3.14.x。
 状态 Schema 与引擎身份由 `backend/app/director/runtime/` 的版本常量定义；
 已有轮次按冻结版本恢复，不由新配置替换引擎。
