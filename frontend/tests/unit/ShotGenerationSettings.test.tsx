@@ -143,6 +143,29 @@ describe("Shot generation settings", () => {
     });
   });
 
+  it.each([
+    { request_duration_seconds: 10 },
+    { common_options: { duration: 10 } },
+    { native_options: { duration: 10 } },
+    { request_duration_seconds: 5, common_options: { duration_seconds: 8 } },
+  ])(
+    "removes every saved duration form after explicit incompatible cleanup: %j",
+    async (initial) => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(() => json(capabilities()));
+      setup({ ...initial, unrelated_draft: "keep" });
+      open();
+      await screen.findByText(/remote-image/);
+      fireEvent.click(screen.getByText("移除不兼容参数"));
+      expect(JSON.parse(screen.getByTestId("settings").textContent!)).toEqual({
+        common_options: {},
+        native_options: {},
+        unrelated_draft: "keep",
+      });
+      expect(screen.queryByText("移除不兼容参数")).not.toBeInTheDocument();
+      expectSelectValue(screen.getByLabelText("视频生成时长（秒）"), "8");
+    },
+  );
+
   it("rechecks changed model contracts without silently migrating a Shot override", async () => {
     let response = capabilities();
     vi.spyOn(globalThis, "fetch").mockImplementation(() => json(response));

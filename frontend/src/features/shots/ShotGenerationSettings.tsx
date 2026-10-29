@@ -55,8 +55,15 @@ function StageOptions({
   const common = mapping(settings.common_options);
   const native = mapping(settings.native_options);
   const overrides = { ...common, ...native };
-  if (settings.request_duration_seconds != null) {
-    overrides.duration_seconds = settings.request_duration_seconds;
+  const durationValues = [
+    settings.request_duration_seconds,
+    native.duration_seconds,
+    native.duration,
+    common.duration_seconds,
+    common.duration,
+  ].filter((value) => value != null);
+  if (durationValues.length > 0) {
+    overrides.duration_seconds = durationValues[0];
   }
   const values = Object.fromEntries(
     Object.entries(options).map(([name, option]) => [
@@ -108,7 +115,8 @@ function StageOptions({
         options[name].reason === "sensitive" ||
         options[name].reason === "deprecated" ||
         !optionValueIsValid(options[name].parameter, overrides[name]) ||
-        (common[name] != null && native[name] != null && common[name] !== native[name])),
+        (common[name] != null && native[name] != null && common[name] !== native[name]) ||
+        (name === "duration_seconds" && durationValues.some((value) => value !== overrides[name]))),
   );
   const changedContract =
     query.data &&
@@ -249,7 +257,17 @@ function StageOptions({
                     delete nextCommon[name];
                     delete nextNative[name];
                   }
-                  onChange({ ...settings, common_options: nextCommon, native_options: nextNative });
+                  const next: Record<string, unknown> = {
+                    ...settings,
+                    common_options: nextCommon,
+                    native_options: nextNative,
+                  };
+                  if (incompatible.includes("duration_seconds")) {
+                    delete next.request_duration_seconds;
+                    delete nextCommon.duration;
+                    delete nextNative.duration;
+                  }
+                  onChange(next);
                 }}
               >
                 {copy.remove}
