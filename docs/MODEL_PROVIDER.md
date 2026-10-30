@@ -297,6 +297,19 @@ Protocol/DTO，以及无调用方的 `providers/openai.py`、`providers/fake.py`
   认证或生成验证。模型列表分别展示目录、合同、生成产物和质量事实。当前修订的生成
   记录由现有成功 ProviderOperation → 完成 NodeRun → 可用 Artifact 只读投影，精确匹配
   连接/凭据/绑定/目录 Hash；它不是浏览器预览通过或画质认证，也不替代独立 LIVE 验收。
+- `openai_json_video_v1` 是独立的 JSON 文生视频请求协议，复用现有 Compiler/Runtime。
+  连接填写 API base prefix，模型 ID 来自该连接的目录或明确手填；无认证须显式选 `none`，
+  不借用进程默认 Key。请求候选 `@contract/json-video-t2v-v1 / v1` 只发送
+  `model/prompt/seconds/size` 到相对路径 `/videos`，不接受首帧、参考素材、Seed 或音频控制。
+  首版请求子集固定 `seconds=5`、`size=832x480`；`adaptive` 明确记录为该尺寸的 26:15，
+  不能冒称 16:9 或静默适配项目画幅。这是请求子集，不是实际产物已经达标的证明。
+  当前合同保持 preview/documented，需单独核实实际媒体的时长、编码和播放兼容性，
+  目录返回与生成受理均不提升资格。异步响应 fixture、实际接口结果与产物验收分开记录，
+  不把接口能生成和下载推广成该型号完全兼容，也不把短片段改记为请求时长。
+  完成结果只从冻结连接的同源 `/videos/{id}/content` 下载，不把返回的服务器文件路径
+  当作本地文件；该协议不声明取消支持。旧协议、旧执行身份和旧绑定不重解释。
+- 通用媒体 Create 的不认识成功响应、408/429/5xx 均保留 `unknown_submission`，
+  不自动换路径、补造任务 ID 或重发；明确的其他 4xx 拒绝仍记录为失败。
 - SGLang H3 的 `@contract/sglang-h3-t2v-v1` 是独立的 `video.t2v` 合同：零图片
   输入，`t2va` 任务，经 `/v1/videos` multipart 提交、按任务 ID 轮询并读取
   `/content`。这不是 MiniMax 云 API `minimax_cn_v1` 的首帧合同。工作空间保存

@@ -163,7 +163,9 @@ async def test_generations_array_response_cannot_be_adopted_as_videos_contract(s
                 request_schema_version="1",
             )
         )
-        assert submitted.status == "failed"
+        # The unknown envelope cannot prove that this POST did not create work.
+        assert submitted.status == "unknown_submission"
+        assert submitted.error_code == "PROVIDER_SUBMISSION_UNKNOWN"
         assert submitted.remote_task_id is submitted.resume_token is None
     assert len(seen) == 1  # No alternate path, fake resume, poll or retry.
 

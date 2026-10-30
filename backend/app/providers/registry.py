@@ -104,13 +104,17 @@ def _register_defaults() -> None:
     from app.providers.catalog_loader import active_manifests_for
     from app.providers.openai_compatible_media import (
         OPENAI_IMAGES_PROFILE,
+        OPENAI_JSON_VIDEO_PROFILE,
         OPENAI_MEDIA_DEFAULT_HOST,
         OPENAI_MEDIA_PROFILE,
+        _json_video_compiler_factory,
+        _json_video_runtime_factory,
         _openai_compatible_media_compiler_factory,
         _openai_compatible_media_runtime_factory,
         _openai_images_compiler_factory,
         _openai_images_runtime_factory,
         normalize_images_base_url,
+        normalize_json_video_base_url,
     )
 
     register_plugin(
@@ -177,6 +181,29 @@ def _register_defaults() -> None:
             ),
             runtime_factory=_openai_compatible_media_runtime_factory,
             compiler_factory=_openai_compatible_media_compiler_factory,
+        )
+    )
+    register_plugin(
+        ProviderPlugin(
+            provider_type="openai_compatible_media",
+            protocol_profile=OPENAI_JSON_VIDEO_PROFILE,
+            display_name="JSON 文生视频（请求候选）",
+            default_base_url="",
+            implemented=True,
+            auth_modes=frozenset({"bearer", "none"}),
+            manual_model_ids=True,
+            base_url_normalizer=normalize_json_video_base_url,
+            availability_list_scope="positive_only",
+            settings_prefix="openai_compatible_media",
+            credential_provider_key="openai_compatible_media",
+            model_list_path="/models",
+            catalog_manifests=tuple(
+                m
+                for m in active_manifests_for(provider_type="openai_compatible_media")
+                if m["protocol_profile"] == OPENAI_JSON_VIDEO_PROFILE
+            ),
+            runtime_factory=_json_video_runtime_factory,
+            compiler_factory=_json_video_compiler_factory,
         )
     )
     # Connection plugin for a workspace-scoped LiteLLM or OpenAI-compatible

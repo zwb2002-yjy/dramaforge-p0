@@ -24,6 +24,7 @@ import base64
 import binascii
 import hashlib
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
@@ -53,6 +54,7 @@ from app.storage.materialized import MaterializedFile, materialize_stream
 OPENAI_MEDIA_PROVIDER = "openai_compatible_media"
 OPENAI_MEDIA_PROFILE = "openai_media_v1"
 OPENAI_IMAGES_PROFILE = "openai_images_v2"
+OPENAI_JSON_VIDEO_PROFILE = "openai_json_video_v1"
 OPENAI_MEDIA_DEFAULT_HOST = "https://api.openai.com/v1"
 
 
@@ -71,6 +73,21 @@ def normalize_images_base_url(host: str) -> str:
             raise ValueError("Images operation URL requires an explicit API base prefix")
         return value
     return value if urlsplit(value).path else f"{value}/v1"
+
+
+def normalize_json_video_base_url(host: str) -> str:
+    value = host.strip().rstrip("/")
+    if not value or value.endswith(("/videos", "/videos/generations")):
+        raise ValueError("JSON video requires an API base prefix, not a generation operation URL")
+    return value if urlsplit(value).path else f"{value}/v1"
+
+
+def _submission_uncertain(response: httpx.Response) -> bool:
+    return (
+        response.status_code < 400
+        or response.status_code in {408, 429}
+        or response.status_code >= 500
+    )
 
 
 def _json_object(response: httpx.Response) -> dict[str, Any]:
@@ -184,9 +201,10 @@ class OpenAICompatibleMediaClient:
         self._settings = cfg
         self.protocol_profile = protocol_profile
         self._key = cfg.openai_compatible_media_api_key.strip()
-        normalize = (
-            normalize_images_base_url if protocol_profile == OPENAI_IMAGES_PROFILE else _base_url
-        )
+        normalize = {
+            OPENAI_IMAGES_PROFILE: normalize_images_base_url,
+            OPENAI_JSON_VIDEO_PROFILE: normalize_json_video_base_url,
+        }.get(protocol_profile, _base_url)
         self._host = normalize(host or cfg.openai_compatible_media_base_url)
         self._transport = transport or guarded_provider_transport(settings=self._settings)
         self._image_model = cfg.openai_compatible_media_image_model.strip()
@@ -197,14 +215,14 @@ class OpenAICompatibleMediaClient:
             self._settings.openai_compatible_media_enabled
             and (
                 self._key
-                or self.protocol_profile == OPENAI_IMAGES_PROFILE
+                or self.protocol_profile in {OPENAI_IMAGES_PROFILE, OPENAI_JSON_VIDEO_PROFILE}
                 and self._settings.openai_compatible_media_auth_mode == "none"
             )
         )
 
     def _headers(self) -> dict[str, str]:
         if (
-            self.protocol_profile == OPENAI_IMAGES_PROFILE
+            self.protocol_profile in {OPENAI_IMAGES_PROFILE, OPENAI_JSON_VIDEO_PROFILE}
             and self._settings.openai_compatible_media_auth_mode == "none"
         ):
             return {}
@@ -493,12 +511,18 @@ class OpenAICompatibleVideoCompiler:
         ("@contract/sglang-h3-t2v-v1", "v2"): "t2va",
         ("@contract/sglang-h3-ref2va-v1", "v3"): "ref2va",
         ("@contract/sglang-h3-fl2va-v1", "v2"): "fl2va",
+        ("@contract/json-video-t2v-v1", "v1"): "json_t2v",
     }
+
+    def __init__(self, protocol_profile: str = OPENAI_MEDIA_PROFILE) -> None:
+        self.protocol_profile = protocol_profile
 
     def _wire_contract(self, model: ModelCapabilityManifest) -> str | None:
         return self._wire_contracts.get((model.model_id, model.model_revision))
 
     def validate(self, intent: Any, model: ModelCapabilityManifest) -> None:
+        if model.protocol_profile != self.protocol_profile:
+            raise ValueError("video compiler and contract protocol profiles differ")
         operation = model.operations.get("video.generate")
         if operation is None:
             raise ValueError("model does not support video.generate")
@@ -506,7 +530,24 @@ class OpenAICompatibleVideoCompiler:
         reference_mode = intent.mode_id == "omni_reference"
         wire_contract = self._wire_contract(model)
         if wire_contract is None and model.model_id in {key[0] for key in self._wire_contracts}:
-            raise ValueError("SGLang contract revision has no registered compiler")
+            raise ValueError("video contract revision has no registered compiler")
+        if self.protocol_profile == OPENAI_JSON_VIDEO_PROFILE:
+            if wire_contract != "json_t2v" or "video.t2v" not in operation.capabilities:
+                raise ValueError("JSON video requires its explicit text-to-video contract")
+            if not text_only or intent.references:
+                raise ValueError("JSON text-to-video accepts no reference media")
+            if not isinstance(intent.prompt, str) or not intent.prompt.strip():
+                raise ValueError("JSON video requires a non-empty prompt")
+            for name in ("duration_seconds", "resolution", "aspect_ratio"):
+                expected = operation.output_constraints[name]
+                requested = getattr(intent.output, name)
+                if requested is not None and requested != expected:
+                    raise ValueError(f"JSON video does not implement requested {name}")
+            if intent.output.seed is not None or intent.output.generate_audio is not None:
+                raise ValueError("JSON video has no seed or audio-control request field")
+            return
+        if wire_contract == "json_t2v":
+            raise ValueError("JSON text-to-video requires its own protocol profile")
         fl2va = wire_contract == "fl2va"
         frame_modes = {"first_frame", "last_frame", "first_last_frame"}
         if reference_mode:
@@ -559,6 +600,49 @@ class OpenAICompatibleVideoCompiler:
         invoke_model_value: str,
     ) -> CompiledVideoRequest:
         self.validate(intent, model)
+        if self._wire_contract(model) == "json_t2v":
+            if references:
+                raise ValueError("JSON text-to-video cannot resolve reference media")
+            constraints = model.operations["video.generate"].output_constraints
+            duration = cast(int, constraints["duration_seconds"])
+            size = cast(str, constraints["resolution"])
+            width, height = (int(part) for part in size.split("x"))
+            divisor = math.gcd(width, height)
+            ratio = f"{width // divisor}:{height // divisor}"
+            return CompiledVideoRequest(
+                provider_type=OPENAI_MEDIA_PROVIDER,
+                protocol_profile=self.protocol_profile,
+                model_id=invoke_model_value,
+                operation="video.generate",
+                wire_request={
+                    "model": invoke_model_value,
+                    "prompt": intent.prompt,
+                    "seconds": duration,
+                    "size": size,
+                },
+                request_schema_version=model.manifest_version,
+                safe_request_summary={
+                    "operation": "video.generate",
+                    "model": invoke_model_value,
+                    "reference_count": 0,
+                    "input_mode": "text_to_video",
+                    "transport": "json",
+                    "effective_common_options": {
+                        "duration_seconds": duration,
+                        "resolution": size,
+                        "aspect_ratio": ratio,
+                    },
+                    "translation_transformations": [
+                        {
+                            "field": "aspect_ratio",
+                            "from_value": intent.output.aspect_ratio,
+                            "to_value": ratio,
+                            "reason": "provider_applies_documented_default",
+                        }
+                    ],
+                    "request_schema_version": model.manifest_version,
+                },
+            )
         if self._wire_contract(model) == "fl2va":
             expected_roles = {
                 "text_to_video": [],
@@ -805,6 +889,8 @@ class OpenAICompatibleMediaRuntime:
             raise RuntimeError("OpenAI-compatible media connection is not configured")
 
     async def submit_image(self, request: CompiledImageRequest) -> SubmissionResult:
+        if self.protocol_profile == OPENAI_JSON_VIDEO_PROFILE:
+            raise ValueError("JSON video profile has no image operation")
         validate_compiled_submission(
             request,
             provider_type=self.provider,
@@ -889,9 +975,12 @@ class OpenAICompatibleMediaRuntime:
         data = _json_object(response)
         url = _first_url(data)
         if response.status_code >= 400 or url is None:
+            uncertain = _submission_uncertain(response)
             return SubmissionResult(
-                status="failed",
-                error_code=_error_code(response.status_code),
+                status="unknown_submission" if uncertain else "failed",
+                error_code="PROVIDER_SUBMISSION_UNKNOWN"
+                if uncertain
+                else _error_code(response.status_code),
                 http_status=response.status_code,
                 retry_after_seconds=_retry_after(response),
                 request_fingerprint=_fingerprint(request.wire_request),
@@ -950,9 +1039,12 @@ class OpenAICompatibleMediaRuntime:
         data = _json_object(response)
         remote_id = _task_id(data)
         if response.status_code >= 400 or remote_id is None:
+            uncertain = _submission_uncertain(response)
             return SubmissionResult(
-                status="unknown_submission" if response.status_code == 0 else "failed",
-                error_code=_error_code(response.status_code),
+                status="unknown_submission" if uncertain else "failed",
+                error_code="PROVIDER_SUBMISSION_UNKNOWN"
+                if uncertain
+                else _error_code(response.status_code),
                 http_status=response.status_code,
                 retry_after_seconds=_retry_after(response),
                 request_fingerprint=_fingerprint(request.wire_request),
@@ -977,6 +1069,8 @@ class OpenAICompatibleMediaRuntime:
     async def poll_video(self, resume: ProviderResumeToken) -> PollResult:
         self._configured()
         result = await self._client.poll_video(resume.remote_task_id, query_kind=resume.query_kind)
+        if self.protocol_profile == OPENAI_JSON_VIDEO_PROFILE and result["status"] == "succeeded":
+            result["artifact_uri"] = PROVIDER_CONTENT_URI
         return PollResult(
             status=str(result["status"]),
             progress=float(result.get("progress") or 0),
@@ -1015,6 +1109,8 @@ class OpenAICompatibleMediaRuntime:
             return replace(media, content_type=response.headers.get("Content-Type"))
 
     async def cancel_video(self, resume: ProviderResumeToken) -> CancelResult:
+        if self.protocol_profile == OPENAI_JSON_VIDEO_PROFILE:
+            return CancelResult(status="failed")
         self._configured()
         async with provider_http_client(
             timeout=self._settings.openai_compatible_media_timeout_seconds,
@@ -1058,3 +1154,11 @@ def _openai_images_runtime_factory(**kwargs: Any) -> OpenAICompatibleMediaRuntim
 
 def _openai_images_compiler_factory() -> tuple[OpenAICompatibleImageCompiler, None]:
     return OpenAICompatibleImageCompiler(OPENAI_IMAGES_PROFILE), None
+
+
+def _json_video_runtime_factory(**kwargs: Any) -> OpenAICompatibleMediaRuntime:
+    return OpenAICompatibleMediaRuntime(protocol_profile=OPENAI_JSON_VIDEO_PROFILE, **kwargs)
+
+
+def _json_video_compiler_factory() -> tuple[None, OpenAICompatibleVideoCompiler]:
+    return None, OpenAICompatibleVideoCompiler(OPENAI_JSON_VIDEO_PROFILE)
