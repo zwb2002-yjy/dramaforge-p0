@@ -1,0 +1,21 @@
+.qc-project-shell .qc-project-bar {
+  height: auto;
+  min-height: var(--df-topbar-h);
+  flex-wrap: wrap;
+  row-gap: var(--df-space-2);
+  column-gap: var(--df-space-3);
+  padding-block: var(--df-space-2);
+}
+.qc-project-bar > .qc-project-name {
+  flex: 1;
+  min-width: 0;
+}
+.creative-autonomy-switcher.compact {
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 0;
+}
+.creative-autonomy-switcher.compact p {
+  margin: var(--df-space-1) 0 0;
+  font-size: var(--df-text-sm);
+}

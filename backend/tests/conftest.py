@@ -16,7 +16,8 @@ os.environ.setdefault("SESSION_SECRET", "test-session-secret-32chars-min")
 os.environ.setdefault("BYOK_FERNET_KEY", "test-byok-fernet-key-replace==")
 # Keep live keys out of accidental adapter selection, including ones in root .env.
 os.environ["AGNES_ENABLED"] = "false"
-os.environ["TEXT_LLM_ENABLED"] = "false"
+os.environ["TTS_ENABLED"] = "false"
+# Disable the canonical text gateway even when the host or root .env configures it.
 os.environ["LITELLM_GATEWAY_URL"] = ""
 os.environ["LITELLM_API_KEY"] = ""
 os.environ["WORKER_TOKEN"] = ""
@@ -84,6 +85,15 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 def _clear_settings() -> Iterator[None]:
     clear_settings_cache()
     yield
+    clear_settings_cache()
+
+
+@pytest.fixture
+def configured_director_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Configure admission for text-bridge tests; no checkpoint I/O is performed."""
+    monkeypatch.setenv(
+        "DIRECTOR_CHECKPOINT_DATABASE_URL", "postgresql://checkpoint.invalid/unit-test"
+    )
     clear_settings_cache()
 
 

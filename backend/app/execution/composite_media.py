@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import json
 import shutil
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.execution.branches import branch_priority
 from app.execution.models import Artifact, GraphNode, NodeRun
+from app.storage.materialized import materialize_stream
+from app.storage.media_process import media_process_command
 from app.storage.minio_store import ObjectStore
 
 _SUCCESS_STATUSES = frozenset({"completed", "cached", "completed_after_cancel"})
@@ -54,13 +55,13 @@ def _voice_audio_filter(*, video_duration: float, voice_duration: float) -> str:
 
 @dataclass(frozen=True)
 class CompositeInputs:
-    """Resolved media bytes and immutable lineage for one composite execution."""
+    """Resolved media files and immutable lineage for one composite execution."""
 
     composite_run_id: str
     media_inputs: dict[str, dict[str, str]]
-    video: bytes
-    voice: bytes
-    subtitle: bytes
+    video: Path
+    voice: Path
+    subtitle: Path
 
 
 def composite_lineage_fingerprint(inputs: CompositeInputs) -> str:
@@ -100,6 +101,9 @@ async def composite_inputs_pending(
         return False
 
     shot_id = str((run.input_snapshot or {}).get("shot_id") or "").strip()
+    formal_video_artifact_id = str(
+        (run.input_snapshot or {}).get("formal_video_artifact_id") or ""
+    ).strip()
     if not shot_id:
         return False
 
@@ -126,6 +130,12 @@ async def composite_inputs_pending(
         if priority is None:
             continue
         key = source_node.node_key
+        if (
+            key == "video"
+            and formal_video_artifact_id
+            and str(source_run.result_artifact_id or "") != formal_video_artifact_id
+        ):
+            continue
         current = latest_by_key.get(key)
         if current is None or (
             priority,
@@ -148,9 +158,13 @@ async def resolve_composite_inputs(
     *,
     run: NodeRun,
     store: ObjectStore,
+    directory: Path,
 ) -> CompositeInputs:
     """Resolve the latest successful video, voice, and subtitle for this shot."""
     shot_id = str((run.input_snapshot or {}).get("shot_id") or "").strip()
+    formal_video_artifact_id = str(
+        (run.input_snapshot or {}).get("formal_video_artifact_id") or ""
+    ).strip()
     if not shot_id:
         raise CompositeInputMissingError("composite run has no shot_id")
 
@@ -179,6 +193,12 @@ async def resolve_composite_inputs(
         priority = branch_priority(source_run.input_snapshot, run.input_snapshot)
         if priority is None:
             continue
+        if (
+            key == "video"
+            and formal_video_artifact_id
+            and str(source_run.result_artifact_id or "") != formal_video_artifact_id
+        ):
+            continue
         current = selected.get(key)
         if current is None or (
             priority,
@@ -193,7 +213,7 @@ async def resolve_composite_inputs(
         ):
             selected[key] = (source_run, artifact)
 
-    bytes_by_key: dict[str, bytes] = {}
+    files_by_key: dict[str, Path] = {}
     media_inputs: dict[str, dict[str, str]] = {}
     for key, (expected_type, expected_mime) in _MEDIA_REQUIREMENTS.items():
         source = selected.get(key)
@@ -210,14 +230,18 @@ async def resolve_composite_inputs(
         ):
             raise CompositeInputMissingError(f"{key} Artifact has invalid type or MIME type")
         try:
-            data = await store.get_bytes(object_key=source_artifact.object_key)
-        except Exception as exc:  # noqa: BLE001 - ObjectStore implementations vary
-            raise CompositeInputMissingError(f"{key} Artifact cannot be read") from exc
-        if not data:
-            raise CompositeInputMissingError(f"{key} Artifact is empty")
-        if hashlib.sha256(data).hexdigest() != source_artifact.content_hash:
-            raise CompositeInputMissingError(f"{key} Artifact content hash does not match")
-        bytes_by_key[key] = data
+            media = await materialize_stream(
+                store.iter_bytes(object_key=source_artifact.object_key),
+                destination=directory / f"{key}.media",
+                max_bytes=512 * 1024 * 1024 if key == "video" else 20 * 1024 * 1024,
+                expected_size=source_artifact.byte_size,
+                expected_hash=source_artifact.content_hash,
+            )
+        except Exception as exc:
+            raise CompositeInputMissingError(
+                f"{key} Artifact cannot be read/verified: {exc}"
+            ) from exc
+        files_by_key[key] = media.path
         media_inputs[key] = {
             "artifact_id": str(source_artifact.id),
             "object_key": source_artifact.object_key,
@@ -229,37 +253,42 @@ async def resolve_composite_inputs(
     return CompositeInputs(
         composite_run_id=str(run.id),
         media_inputs=media_inputs,
-        video=bytes_by_key["video"],
-        voice=bytes_by_key["voice"],
-        subtitle=bytes_by_key["subtitle"],
+        video=files_by_key["video"],
+        voice=files_by_key["voice"],
+        subtitle=files_by_key["subtitle"],
     )
 
 
-async def render_composite_bytes(inputs: CompositeInputs) -> bytes:
+async def render_composite_file(inputs: CompositeInputs, *, output_path: Path) -> Path:
     """Render media locally, using deterministic bytes only in the test environment."""
+    if output_path.exists():
+        raise CompositeRenderError("output file already exists")
     if get_settings().app_env == "test":
-        return deterministic_composite_test_bytes(inputs)
-    return await _render_with_ffmpeg(inputs)
+        output_path.write_bytes(deterministic_composite_test_bytes(inputs))
+        return output_path
+    return await _render_with_ffmpeg(inputs, output_path=output_path)
 
 
 def deterministic_composite_test_bytes(inputs: CompositeInputs) -> bytes:
     """Return stable MP4-signatured bytes without requiring FFmpeg in unit tests."""
     digest = hashlib.sha256()
-    for key, data in (
+    for key, path in (
         ("video", inputs.video),
         ("voice", inputs.voice),
         ("subtitle", inputs.subtitle),
     ):
         digest.update(key.encode("ascii"))
         digest.update(b"\0")
-        digest.update(len(data).to_bytes(8, "big"))
-        digest.update(data)
+        digest.update(path.stat().st_size.to_bytes(8, "big"))
+        with path.open("rb") as source:
+            while chunk := source.read(65536):
+                digest.update(chunk)
     digest.update(b"lineage\0")
     digest.update(composite_lineage_fingerprint(inputs).encode("ascii"))
     return b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + digest.digest()
 
 
-async def _render_with_ffmpeg(inputs: CompositeInputs) -> bytes:
+async def _render_with_ffmpeg(inputs: CompositeInputs, *, output_path: Path) -> Path:
     """Mux voice and burn SRT subtitles into an MP4 with the local FFmpeg executable."""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
@@ -269,90 +298,102 @@ async def _render_with_ffmpeg(inputs: CompositeInputs) -> bytes:
         raise CompositeRenderError("ffprobe executable not found")
     lineage_fingerprint = composite_lineage_fingerprint(inputs)
 
-    with tempfile.TemporaryDirectory(prefix="dramaforge-composite-") as tmp:
-        tmp_path = Path(tmp)
-        video_path = tmp_path / "video.mp4"
-        voice_path = tmp_path / "voice.wav"
-        subtitle_path = tmp_path / "subtitle.srt"
-        output_path = tmp_path / "composite.mp4"
-        video_path.write_bytes(inputs.video)
-        voice_path.write_bytes(inputs.voice)
-        subtitle_path.write_bytes(inputs.subtitle)
+    video_path, voice_path, subtitle_path = inputs.video, inputs.voice, inputs.subtitle
 
-        async def media_duration(path: Path) -> float:
-            probe = await asyncio.create_subprocess_exec(
-                ffprobe,
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                str(path),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await probe.communicate()
-            if probe.returncode != 0:
-                detail = stderr.decode("utf-8", errors="replace").strip()[:300]
-                raise CompositeRenderError(detail or f"ffprobe failed for {path.name}")
-            try:
-                return float(stdout.decode("ascii").strip())
-            except ValueError as exc:
-                raise CompositeRenderError(f"invalid duration for {path.name}") from exc
-
-        video_duration = await media_duration(video_path)
-        voice_duration = await media_duration(voice_path)
-        audio_filter = _voice_audio_filter(
-            video_duration=video_duration,
-            voice_duration=voice_duration,
-        )
-
-        subtitle_filter_path = (
-            subtitle_path.as_posix().replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
-        )
-        process = await asyncio.create_subprocess_exec(
-            ffmpeg,
-            "-y",
-            "-i",
-            str(video_path),
-            "-i",
-            str(voice_path),
-            "-vf",
-            f"subtitles=filename='{subtitle_filter_path}'",
-            "-map",
-            "0:v:0",
-            "-map",
-            "1:a:0",
-            "-af",
-            audio_filter,
-            "-c:v",
-            "libx264",
-            "-c:a",
-            "aac",
-            "-metadata",
-            f"comment=dramaforge-composite-lineage:{lineage_fingerprint}",
-            "-shortest",
-            "-movflags",
-            "+faststart",
-            str(output_path),
+    async def media_duration(path: Path) -> float:
+        probe = await asyncio.create_subprocess_exec(
+            *media_process_command(
+                [
+                    ffprobe,
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(path),
+                ]
+            ),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            _, stderr = await asyncio.wait_for(process.communicate(), timeout=300.0)
-        except TimeoutError as exc:
-            process.kill()
-            await process.communicate()
-            raise CompositeRenderError("ffmpeg timed out") from exc
-
-        if process.returncode != 0:
+            stdout, stderr = await asyncio.wait_for(probe.communicate(), timeout=60)
+        except BaseException:
+            if probe.returncode is None:
+                probe.kill()
+            await asyncio.shield(probe.communicate())
+            raise
+        if probe.returncode != 0:
             detail = stderr.decode("utf-8", errors="replace").strip()[:300]
-            message = detail or f"ffmpeg failed with exit code {process.returncode}"
-            raise CompositeRenderError(message)
-        if not output_path.is_file():
-            raise CompositeRenderError("ffmpeg did not produce output")
-        data = output_path.read_bytes()
-        if len(data) < 32 or b"ftyp" not in data[:32]:
-            raise CompositeRenderError("ffmpeg output is not a valid MP4")
-        return data
+            raise CompositeRenderError(detail or f"ffprobe failed for {path.name}")
+        try:
+            return float(stdout.decode("ascii").strip())
+        except ValueError as exc:
+            raise CompositeRenderError(f"invalid duration for {path.name}") from exc
+
+    video_duration = await media_duration(video_path)
+    voice_duration = await media_duration(voice_path)
+    audio_filter = _voice_audio_filter(
+        video_duration=video_duration,
+        voice_duration=voice_duration,
+    )
+
+    subtitle_filter_path = (
+        subtitle_path.as_posix().replace("\\", "/").replace(":", r"\:").replace("'", r"\'")
+    )
+    process = await asyncio.create_subprocess_exec(
+        *media_process_command(
+            [
+                ffmpeg,
+                "-y",
+                "-i",
+                str(video_path),
+                "-i",
+                str(voice_path),
+                "-vf",
+                f"subtitles=filename='{subtitle_filter_path}'",
+                "-map",
+                "0:v:0",
+                "-map",
+                "1:a:0",
+                "-af",
+                audio_filter,
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "aac",
+                "-metadata",
+                f"comment=dramaforge-composite-lineage:{lineage_fingerprint}",
+                "-shortest",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ]
+        ),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        _, stderr = await asyncio.wait_for(process.communicate(), timeout=300.0)
+    except TimeoutError as exc:
+        process.kill()
+        await process.communicate()
+        raise CompositeRenderError("ffmpeg timed out") from exc
+    except BaseException:
+        if process.returncode is None:
+            process.kill()
+        await asyncio.shield(process.communicate())
+        raise
+
+    if process.returncode != 0:
+        detail = stderr.decode("utf-8", errors="replace").strip()[:300]
+        message = detail or f"ffmpeg failed with exit code {process.returncode}"
+        raise CompositeRenderError(message)
+    if not output_path.is_file():
+        raise CompositeRenderError("ffmpeg did not produce output")
+    with output_path.open("rb") as source:
+        header = source.read(32)
+    if len(header) < 32 or b"ftyp" not in header:
+        raise CompositeRenderError("ffmpeg output is not a valid MP4")
+    return output_path

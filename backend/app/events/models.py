@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.base import Base
@@ -94,4 +94,15 @@ Index(
     "idx_event_log_project_occurred",
     EventLog.__table__.c.project_id,
     EventLog.__table__.c.occurred_at,
+)
+# Dispatcher hot path: claim/metrics/reclaim scan pending and leased rows
+# every second while published rows accumulate forever (backend-review 1.2;
+# EXPLAIN evidence: 201k rows -> 35ms parallel seq scan per claim). The
+# partial index keeps the scan proportional to unpublished rows only.
+Index(
+    "idx_outbox_events_unpublished",
+    OutboxEvent.__table__.c.status,
+    OutboxEvent.__table__.c.next_attempt_at,
+    postgresql_where=text("status <> 'published'"),
+    sqlite_where=text("status <> 'published'"),
 )

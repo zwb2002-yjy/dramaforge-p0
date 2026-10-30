@@ -64,6 +64,7 @@ Desktop.ini
 image*.png
 image*.jpg
 image*.jpeg
+frontend/screenshot.png
 scripts/_tmp_check.sql
 !frontend/tests/e2e/*-snapshots/
 !frontend/tests/e2e/*-snapshots/*.png

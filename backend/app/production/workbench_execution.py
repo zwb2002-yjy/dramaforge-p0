@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 from collections.abc import Mapping
-from typing import Final, Literal, cast
+from typing import Any, Final, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
@@ -37,22 +39,40 @@ from app.execution.shot_pipeline import (
 from app.production.execution_plan import (
     PendingSuggestion,
     WorkbenchExecutionPlan,
+    generation_intent_from_plan,
 )
 from app.production.formal_selection import require_formal_keyframe
 from app.production.models import GraphVersion, ProductionGraph, ShotReferenceBinding
 from app.production.reference_intents import (
+    PURPOSE_TO_ROLE,
     ShotReferenceIntent,
     compile_references,
 )
 from app.production.service import GraphService
 from app.providers.capabilities import Capability
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.manifest import ModelCapabilityManifest, to_v3_model_manifest
+from app.providers.compile_preview import CompilePreview, PreviewReference, preview_compile
+from app.providers.effective_options import resolve_generation_options
+from app.providers.errors import ProviderError
+from app.providers.manifest import (
+    InputModeSpec,
+    ModelCapabilityManifest,
+    ParameterSpec,
+    to_v3_model_manifest,
+)
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.model_resolution import ExecutionModelResolver
 from app.providers.models import ProviderConnection, ProviderConnectionRevision
+from app.providers.validator import validate_parameter
+from app.providers.workbench_contract import (
+    implemented_workbench_options,
+    select_workbench_contract,
+    validate_mode_roles,
+    workbench_fixed_duration,
+    workbench_ui_mode,
+)
 from app.shared.enums import GraphStatus
-from app.shared.errors import ConflictError, ValidationAppError
+from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 PlanStage = Literal["image_keyframe", "video"]
 
@@ -106,6 +126,70 @@ def _workbench_idempotency_key(
     return f"workbench:{stage}:sha256:{digest}"
 
 
+async def ensure_stage_review_run(
+    session: AsyncSession,
+    *,
+    project: Project,
+    shot: Shot,
+    artifact_id: UUID,
+    stage: PlanStage,
+    created_by: UUID,
+    force: bool = False,
+) -> NodeRun:
+    """Queue (or return) the review run that admits this exact Artifact.
+
+    A candidate can exist before its review evidence does — a graph published
+    before the gate existed, or a candidate produced while the tail review was
+    still bound to an earlier attempt.  The review page then reports missing
+    evidence and the person cannot record any decision, so the candidate needs a
+    supported way to obtain its evidence.  This queues the same zero-cost tail
+    review; it contacts no Provider and invents no second truth.
+    """
+
+    artifact = await session.scalar(
+        select(Artifact).where(
+            Artifact.id == artifact_id,
+            Artifact.project_id == project.id,
+            Artifact.deleted_at.is_(None),
+        )
+    )
+    if artifact is None:
+        raise WorkbenchExecutionError(
+            "artifact not found in project", details={"code": "ARTIFACT_NOT_FOUND"}
+        )
+    producer = None
+    if artifact.produced_by_run_id is not None:
+        producer = await session.get(NodeRun, artifact.produced_by_run_id)
+    if producer is None or producer.project_id != project.id:
+        raise WorkbenchExecutionError(
+            "artifact has no admitted production run",
+            details={"code": "ARTIFACT_PRODUCER_MISSING"},
+        )
+    shot_id = str((producer.input_snapshot or {}).get("shot_id") or "")
+    if shot_id != str(shot.id):
+        raise WorkbenchExecutionError(
+            "artifact was not produced for this shot",
+            details={"code": "ARTIFACT_SHOT_MISMATCH"},
+        )
+    review_run = await _queue_stage_review_run(
+        session,
+        run=producer,
+        stage=stage,
+        project=project,
+        shot=shot,
+        created_by=created_by,
+        force=force,
+    )
+    if review_run is None:
+        # The published graph carries no review node for this stage, so no
+        # evidence can be produced without a new graph version.
+        raise WorkbenchExecutionError(
+            "the published graph has no review node for this stage",
+            details={"code": "REVIEW_NODE_MISSING"},
+        )
+    return review_run
+
+
 def _chain_input_hash(payload: dict[str, object]) -> str:
     canonical = json.dumps(
         payload,
@@ -131,6 +215,7 @@ async def _queue_stage_review_run(
     project: Project,
     shot: Shot,
     created_by: UUID,
+    force: bool = False,
 ) -> NodeRun | None:
     """Queue the zero-cost review run that admits this media candidate.
 
@@ -139,9 +224,11 @@ async def _queue_stage_review_run(
     consumes the media run as its upstream (bound at execution time from the run's
     own artifact), and it contacts no Provider.
 
-    An existing live or finished review for this node is returned instead of a
-    second one: `prepare_formal_tail` materializes the same tail review, and two
-    runs for one node would break the (graph_node_id, attempt_no) identity.
+    A review of this exact producer is reused rather than queued twice
+    (`prepare_formal_tail` materializes the same tail review, and two live runs
+    for one node would break the (graph_node_id, attempt_no) identity).  A new
+    media candidate gets its own attempt of the tail review, because a human
+    decision is bound to the exact upstream Artifact.
     """
     review_key, _review_type, review_name = REVIEW_NODE_FOR_STAGE[stage]
     node = await session.scalar(
@@ -155,22 +242,22 @@ async def _queue_stage_review_run(
         # this stage gained a gate). The media run is already durable; the review
         # is added by the next graph version instead of being invented here.
         return None
-    # Reuse the review this shot already has, whichever entry point queued it:
-    # `prepare_formal_tail` materializes the tail review too, and a second live
-    # run for the same node would violate (graph_node_id, attempt_no).
-    existing = await session.scalar(
+    # The review must judge the candidate that was just produced: a decision is
+    # bound to the exact upstream Artifact, so reusing the review of a previous
+    # candidate would leave this one with evidence that can never be approved.
+    # A review for this exact producer is reused; otherwise the new candidate
+    # gets its own attempt of the tail review.
+    producer_review = await session.scalar(
         select(NodeRun)
         .where(
             NodeRun.graph_node_id == node.id,
-            NodeRun.status.in_(
-                ("queued", "running", "completed", "cached", "completed_after_cancel")
-            ),
+            NodeRun.input_snapshot["upstream_node_run_id"].as_string() == str(run.id),
         )
         .order_by(NodeRun.attempt_no.desc(), NodeRun.created_at.desc())
         .limit(1)
     )
-    if existing is not None:
-        return existing
+    if producer_review is not None and not force:
+        return producer_review
     latest = await session.scalar(
         select(NodeRun)
         .where(NodeRun.graph_node_id == node.id)
@@ -313,7 +400,7 @@ class WorkbenchExecutionInput(BaseModel):
 
     project_id: UUID
     shot_id: UUID
-    shot_experiment_id: UUID | None = None
+    experiment_branch_id: UUID | None = None
     stage: PlanStage
     prompt: str = Field(min_length=1)
     semantic_intent: dict[str, JsonValue] = Field(default_factory=dict)
@@ -449,10 +536,16 @@ class WorkbenchExecutionService:
             binding_rows = (
                 (
                     await self._session.execute(
-                        select(ShotReferenceBinding).where(
+                        select(ShotReferenceBinding)
+                        .where(
                             ShotReferenceBinding.id.in_(binding_ids),
                             ShotReferenceBinding.project_id == project.id,
                             ShotReferenceBinding.shot_id == shot.id,
+                        )
+                        .order_by(
+                            ShotReferenceBinding.sort_order,
+                            ShotReferenceBinding.created_at,
+                            ShotReferenceBinding.id,
                         )
                     )
                 )
@@ -528,6 +621,20 @@ class WorkbenchExecutionService:
                         "reference binding is not enabled for this execution stage",
                         details={"code": "REFERENCE_STAGE_MISMATCH"},
                     )
+                if binding.asset_id is not None:
+                    asset = await self._session.get(Asset, binding.asset_id, populate_existing=True)
+                    if asset is None or asset.status == "recycled":
+                        raise WorkbenchExecutionError(
+                            "reference asset is unavailable",
+                            details={"code": "REFERENCE_NOT_RESOLVED"},
+                        )
+            if artifact.deleted_at is not None or artifact.storage_state not in {
+                "available",
+                "stored",
+            }:
+                raise WorkbenchExecutionError(
+                    "reference media is unavailable", details={"code": "REFERENCE_NOT_RESOLVED"}
+                )
 
             version_id = reference.asset_version_id
             if binding is not None:
@@ -589,7 +696,116 @@ class WorkbenchExecutionService:
                     }
                 )
             )
-        return hydrated
+        # The saved binding order and asset-version reference order are the input
+        # slots' authority. The client cannot change model numbering by shuffling IDs.
+        binding_order = {binding.id: index for index, binding in enumerate(bindings.values())}
+        version_order = (
+            await self._session.scalars(
+                select(AssetVersionReference)
+                .where(
+                    AssetVersionReference.project_id == project.id,
+                    AssetVersionReference.asset_version_id.in_(
+                        [ref.asset_version_id for ref in hydrated if ref.asset_version_id]
+                    ),
+                )
+                .order_by(
+                    AssetVersionReference.sort_order,
+                    AssetVersionReference.label,
+                    AssetVersionReference.id,
+                )
+            )
+        ).all()
+        artifact_order = {
+            (item.asset_version_id, item.artifact_id): index
+            for index, item in enumerate(version_order)
+        }
+        return sorted(
+            hydrated,
+            key=lambda ref: (
+                binding_order.get(ref.binding_id, len(bindings))
+                if ref.binding_id is not None
+                else len(bindings),
+                artifact_order.get((ref.asset_version_id, ref.artifact_id), 0)
+                if ref.asset_version_id is not None and ref.artifact_id is not None
+                else 0,
+            ),
+        )
+
+    async def _compile_prompt_mentions(
+        self,
+        *,
+        project: Project,
+        prompt: str,
+        references: list[ShotReferenceIntent],
+        semantic_intent: dict[str, JsonValue],
+    ) -> str:
+        """Compile saved @labels into deterministic, auditable media ordinals.
+
+        These are natural-language slot descriptions, not an invented provider
+        token syntax. The same ordered Artifact list is consumed by the Worker.
+        """
+        source_prompt = semantic_intent.get("source_prompt")
+        tokens = set(
+            re.findall(r"@[\w-]*", source_prompt if isinstance(source_prompt, str) else prompt)
+        )
+        if not tokens:
+            return prompt
+        bindings = (
+            await self._session.scalars(
+                select(ShotReferenceBinding).where(
+                    ShotReferenceBinding.project_id == project.id,
+                    ShotReferenceBinding.id.in_(
+                        [ref.binding_id for ref in references if ref.binding_id]
+                    ),
+                )
+            )
+        ).all()
+        labels = {binding.id: binding for binding in bindings}
+        counts: dict[str, int] = {}
+        mappings: list[dict[str, JsonValue]] = []
+        for reference in references:
+            media = reference.mime_type.split("/", 1)[0]
+            counts[media] = counts.get(media, 0) + 1
+            binding = labels.get(reference.binding_id) if reference.binding_id is not None else None
+            if binding is None or binding.label not in tokens:
+                continue
+            noun = {"image": "参考图片", "video": "参考视频", "audio": "参考音频"}.get(
+                media, "参考素材"
+            )
+            mappings.append(
+                {
+                    "label": binding.label,
+                    "binding_id": str(binding.id),
+                    "binding_version": binding.version,
+                    "asset_id": str(binding.asset_id) if binding.asset_id else None,
+                    "asset_version_id": str(reference.asset_version_id)
+                    if reference.asset_version_id
+                    else None,
+                    "artifact_id": str(reference.artifact_id),
+                    "role": PURPOSE_TO_ROLE.get(reference.purpose),
+                    "ordinal": counts[media],
+                    "notation": f"{noun}{counts[media]}",
+                }
+            )
+        for token in tokens:
+            matches = [binding for binding in bindings if binding.label == token]
+            if len(matches) != 1 or not any(item["label"] == token for item in mappings):
+                raise WorkbenchExecutionError(
+                    "prompt @reference is unresolved or ambiguous",
+                    details={"code": "REFERENCE_MENTION_UNRESOLVED", "label": token},
+                )
+        semantic_intent["prompt_reference_map"] = cast(JsonValue, mappings)
+        return re.sub(
+            r"@[\w-]*",
+            lambda match: (
+                "、".join(
+                    str(item["notation"]) for item in mappings if item["label"] == match.group()
+                )
+                if match.group() in tokens
+                else match.group()
+            ),
+            prompt,
+        )
 
     async def _authoritative_creative_input(
         self,
@@ -648,15 +864,28 @@ class WorkbenchExecutionService:
                 "scene not found",
                 details={"code": "SCENE_NOT_FOUND"},
             )
+        profile = await self._session.scalar(
+            select(ProjectCreativeProfile).where(ProjectCreativeProfile.project_id == project.id)
+        )
+        project_snapshot = _mapping(
+            _mapping(profile.strategy_snapshot if profile else {}).get("creative_capabilities")
+        )
         scene_design = _mapping(scene.design_state)
         shot_state = _mapping(shot.director_state)
         scene_snapshot = _mapping(scene_design.get("creative_capabilities"))
         shot_snapshot = _mapping(shot_state.get("creative_capabilities"))
         effective_intent = _deep_merge(
-            _mapping(scene_snapshot.get("effective_intent")),
+            _deep_merge(
+                _mapping(project_snapshot.get("effective_intent")),
+                _mapping(scene_snapshot.get("effective_intent")),
+            ),
             _mapping(shot_snapshot.get("effective_intent")),
         )
         value_sources = {
+            **{
+                str(key): "project_default"
+                for key in _mapping(project_snapshot.get("value_sources"))
+            },
             **{
                 str(key): str(value)
                 for key, value in _mapping(scene_snapshot.get("value_sources")).items()
@@ -666,9 +895,12 @@ class WorkbenchExecutionService:
                 for key, value in _mapping(shot_snapshot.get("value_sources")).items()
             },
         }
-        skills = _skill_guidance(scene_snapshot, shot_snapshot)
+        skills = _skill_guidance(project_snapshot, scene_snapshot, shot_snapshot)
         shot_language = _deep_merge(
-            _mapping(scene_snapshot.get("shot_director_intent_patch")),
+            _deep_merge(
+                _mapping(project_snapshot.get("shot_director_intent_patch")),
+                _mapping(scene_snapshot.get("shot_director_intent_patch")),
+            ),
             _mapping(shot_snapshot.get("shot_director_intent_patch")),
         )
         continuity_context = _mapping(scene_design.get("continuity_context"))
@@ -684,7 +916,7 @@ class WorkbenchExecutionService:
         request_tags = {
             key: value
             for key, value in execution_input.semantic_intent.items()
-            if key in {"repair"}
+            if key in {"repair", "repair_request_id", "repair_step"}
         }
         semantic: dict[str, JsonValue] = {
             "intent": (
@@ -696,6 +928,7 @@ class WorkbenchExecutionService:
             "shot_version": shot.version,
             "scene_version": scene.version,
             "visual_description": shot.visual_description,
+            "source_prompt": base_prompt,
             "director_state": cast(JsonValue, director_state),
             "effective_creative_intent": cast(JsonValue, effective_intent),
             "creative_value_sources": cast(JsonValue, value_sources),
@@ -705,13 +938,18 @@ class WorkbenchExecutionService:
             "creative_snapshot_hashes": cast(
                 JsonValue,
                 {
+                    **(
+                        {"project": project_snapshot.get("compiled_hash")}
+                        if project_snapshot
+                        else {}
+                    ),
                     "scene": scene_snapshot.get("compiled_hash"),
                     "shot": shot_snapshot.get("compiled_hash"),
                 },
             ),
             "request_tags": cast(JsonValue, request_tags),
         }
-        # Repair is the sole allow-listed caller tag. Keep its historical
+        # Only repair provenance is allow-listed caller metadata. Keep its historical
         # top-level shape for Worker/trace compatibility while also grouping
         # all caller tags under request_tags for inspection.
         semantic.update(request_tags)
@@ -748,7 +986,18 @@ class WorkbenchExecutionService:
         }
         shot_language = _mapping(semantic_intent.get("shot_language"))
         suggestions: list[PendingSuggestion] = []
+        project_snapshot = _mapping(
+            _mapping(profile.strategy_snapshot).get("creative_capabilities")
+        )
+        uses_project_defaults = bool(project_snapshot.get("compiled_hash")) and _mapping(
+            semantic_intent.get("creative_snapshot_hashes")
+        ).get("project") == project_snapshot.get("compiled_hash")
         for style_id in profile.selected_style_ids or []:
+            if (
+                uses_project_defaults
+                and _mapping(project_snapshot.get("style")).get("key") == style_id
+            ):
+                continue
             suggestions.append(
                 PendingSuggestion(
                     key=f"style:{style_id}",
@@ -766,9 +1015,7 @@ class WorkbenchExecutionService:
                 PendingSuggestion(
                     key=f"skill:{skill_id}",
                     label=str(skill_id),
-                    reason=(
-                        "该技能尚未编译进本镜头的创作快照，因此本次执行不会注入它的指导文本。"
-                    ),
+                    reason=("该技能尚未编译进本镜头的创作快照，因此本次执行不会注入它的指导文本。"),
                 )
             )
         selected_language = profile.selected_shot_language
@@ -783,19 +1030,111 @@ class WorkbenchExecutionService:
                     ),
                 )
             )
-        if profile.selected_genre:
-            # The genre has no compiled consumer in this repository: it stays a
-            # profile annotation and must never be shown as an execution input.
+        if profile.selected_genre and not (
+            uses_project_defaults
+            and _mapping(project_snapshot.get("genre")).get("key") == profile.selected_genre
+        ):
+            # Unaccepted template recommendations remain annotations.
             suggestions.append(
                 PendingSuggestion(
                     key=f"genre:{profile.selected_genre}",
                     label=str(profile.selected_genre),
-                    reason=(
-                        "题材仅作为项目档案记录；它不参与执行计划，也不作为模型参数。"
-                    ),
+                    reason=("题材仅作为项目档案记录；它不参与执行计划，也不作为模型参数。"),
                 )
             )
         return suggestions
+
+    async def saved_shot_references(
+        self,
+        *,
+        project: Project,
+        shot_id: UUID,
+        stage: PlanStage,
+    ) -> list[ShotReferenceIntent]:
+        """Resolve the saved, non-experiment references for a repair preview.
+
+        The same build_plan lineage validator/compiler admits these identities.
+        Unresolved bindings fail closed instead of silently disappearing from
+        the repaired shot. The resulting plan freezes each concrete artifact.
+        """
+        bindings = (
+            await self._session.scalars(
+                select(ShotReferenceBinding)
+                .where(
+                    ShotReferenceBinding.project_id == project.id,
+                    ShotReferenceBinding.shot_id == shot_id,
+                    ShotReferenceBinding.experiment_branch_id.is_(None),
+                    ShotReferenceBinding.stage.in_(
+                        ("both", "image" if stage == "image_keyframe" else "video")
+                    ),
+                )
+                .order_by(
+                    ShotReferenceBinding.sort_order,
+                    ShotReferenceBinding.created_at,
+                    ShotReferenceBinding.id,
+                )
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+        references: list[ShotReferenceIntent] = []
+        for binding in bindings:
+            version_id = binding.asset_version_id
+            if binding.resolution_mode == "current_formal":
+                asset = await self._session.scalar(
+                    select(Asset)
+                    .where(
+                        Asset.id == binding.asset_id,
+                        Asset.project_id == project.id,
+                    )
+                    .execution_options(populate_existing=True)
+                )
+                version_id = asset.current_version_id if asset else None
+            if binding.resolution_mode == "direct_artifact":
+                artifact_ids = [binding.artifact_id] if binding.artifact_id else []
+            elif version_id is not None:
+                artifact_ids = list(
+                    await self._session.scalars(
+                        select(AssetVersionReference.artifact_id)
+                        .where(
+                            AssetVersionReference.project_id == project.id,
+                            AssetVersionReference.asset_version_id == version_id,
+                        )
+                        .order_by(
+                            AssetVersionReference.sort_order,
+                            AssetVersionReference.label,
+                            AssetVersionReference.id,
+                        )
+                    )
+                )
+            else:
+                artifact_ids = []
+            if not artifact_ids:
+                raise WorkbenchExecutionError(
+                    "saved reference is unresolved; select its formal asset/version first",
+                    details={"code": "REFERENCE_NOT_RESOLVED", "binding_id": str(binding.id)},
+                )
+            for artifact_id in artifact_ids:
+                artifact = await self._session.get(Artifact, artifact_id, populate_existing=True)
+                if (
+                    artifact is None
+                    or artifact.project_id != project.id
+                    or artifact.deleted_at is not None
+                    or artifact.storage_state not in {"available", "stored"}
+                ):
+                    raise WorkbenchExecutionError(
+                        "saved reference media is unavailable",
+                        details={"code": "REFERENCE_NOT_RESOLVED", "binding_id": str(binding.id)},
+                    )
+                references.append(
+                    ShotReferenceIntent(
+                        binding_id=binding.id,
+                        purpose=binding.purpose,
+                        asset_version_id=version_id,
+                        artifact_id=artifact_id,
+                        resolution_mode=binding.resolution_mode,
+                    )
+                )
+        return references
 
     async def build_plan(
         self,
@@ -820,6 +1159,50 @@ class WorkbenchExecutionService:
             references=list(execution_input.references),
         )
         slot, capability, purpose, _node_key = _STAGE_CONTRACT[execution_input.stage]
+        try:
+            ui_mode_id = workbench_ui_mode(
+                media_kind="video" if execution_input.stage == "video" else "image",
+                mode_id=execution_input.mode_id,
+            )
+        except ValueError as exc:
+            raise WorkbenchExecutionError(
+                str(exc), details={"code": "MODEL_INPUT_MODE_UNSUPPORTED"}
+            ) from exc
+        text_video = execution_input.stage == "video" and execution_input.mode_id == "text_to_video"
+        last_frame_video = (
+            execution_input.stage == "video" and execution_input.mode_id == "last_frame"
+        )
+        first_last_video = (
+            execution_input.stage == "video" and execution_input.mode_id == "first_last_frame"
+        )
+        reference_video = (
+            execution_input.stage == "video" and execution_input.mode_id == "omni_reference"
+        )
+        if text_video:
+            capability = Capability.VIDEO_TEXT_TO_VIDEO
+        elif last_frame_video:
+            capability = Capability.VIDEO_LAST_FRAME_TO_VIDEO
+        elif first_last_video:
+            capability = Capability.VIDEO_FIRST_LAST_FRAME
+        elif reference_video:
+            capability = Capability.VIDEO_REFERENCE_TO_VIDEO
+            if not references or not any(
+                reference.purpose
+                in {
+                    "identity",
+                    "clothing",
+                    "pose",
+                    "style",
+                    "scene_layout",
+                    "scene_lighting",
+                    "generic_reference",
+                    "action",
+                    "camera_language",
+                    "audio_rhythm",
+                }
+                for reference in references
+            ):
+                raise WorkbenchExecutionError("reference video requires a saved media reference")
         resolution = await ExecutionModelResolver(self._session).resolve(
             project=project,
             slot=slot,
@@ -830,8 +1213,13 @@ class WorkbenchExecutionService:
             requested_binding_id=execution_input.requested_binding_id,
         )
         if resolution.status != "RESOLVED" or resolution.catalog_entry_id is None:
+            missing_model = resolution.reason or resolution.status
             raise WorkbenchExecutionError(
-                f"selected execution model is unavailable: {resolution.reason or resolution.status}"
+                f"selected execution model is unavailable: {missing_model}",
+                details={
+                    "code": missing_model,
+                    "resolution_status": resolution.status,
+                },
             )
 
         # Connection / credential revision identity for the plan (07 §16).
@@ -854,7 +1242,7 @@ class WorkbenchExecutionService:
             if current_revision is not None:
                 connection_revision_id = current_revision.id
                 credential_revision_id = current_revision.credential_revision_id
-        if connection_revision_id is None or credential_revision_id is None:
+        if connection_revision_id is None:
             raise WorkbenchExecutionError("resolved provider connection revision is unavailable")
         # Carry the immutable revision identity with the typed model
         # resolution.  The worker must be able to reconstruct the exact
@@ -870,17 +1258,53 @@ class WorkbenchExecutionService:
         if entry is None:
             raise WorkbenchExecutionError("resolved catalog entry not found")
         capability_manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
+        operation = capability_manifest.operations.get("video.generate")
+        if execution_input.stage == "video" and operation and operation.reference_media_limits:
+            media = (
+                await self._session.scalars(
+                    select(Artifact).where(
+                        Artifact.id.in_([ref.artifact_id for ref in references]),
+                        Artifact.project_id == project.id,
+                    )
+                )
+            ).all()
+            durations = {
+                artifact.id: float(artifact.duration_seconds)
+                if artifact.duration_seconds is not None
+                else None
+                for artifact in media
+            }
+            try:
+                operation.reference_media_limits.validate_metadata(
+                    [
+                        (
+                            PURPOSE_TO_ROLE.get(ref.purpose, ""),
+                            durations.get(ref.artifact_id) if ref.artifact_id is not None else None,
+                        )
+                        for ref in references
+                    ]
+                )
+            except ValueError as exc:
+                raise WorkbenchExecutionError(str(exc)) from exc
         v3_manifest = to_v3_model_manifest(
             capability_manifest,
             transport_profile_id="workbench",
         )
 
-        if execution_input.stage == "video":
+        shot = await self._session.get(Shot, execution_input.shot_id)
+        if shot is None or shot.project_id != project.id:
+            raise WorkbenchExecutionError("shot not found")
+
+        if execution_input.stage == "video" and (last_frame_video or first_last_video):
+            last_frames = [ref for ref in references if ref.purpose == "last_frame"]
+            if len(last_frames) != 1:
+                raise WorkbenchExecutionError("last-frame mode requires one saved last frame")
+
+        if execution_input.stage == "video" and not (
+            text_video or reference_video or last_frame_video
+        ):
             # Video execution requires the shot formal keyframe; the latest
             # image must never be used as a fallback (03 §38/§39).
-            shot = await self._session.get(Shot, execution_input.shot_id)
-            if shot is None or shot.project_id != project.id:
-                raise WorkbenchExecutionError("shot not found")
             try:
                 formal = await require_formal_keyframe(
                     self._session,
@@ -889,7 +1313,13 @@ class WorkbenchExecutionService:
                 )
             except ValidationAppError as exc:
                 raise WorkbenchExecutionError(str(exc)) from exc
-            if not any(ref.artifact_id == formal.id for ref in references):
+            requested_frames = [ref for ref in references if ref.purpose == "first_frame"]
+            if any(ref.artifact_id != formal.id for ref in requested_frames):
+                raise WorkbenchExecutionError(
+                    "submitted first frame differs from the Formal keyframe",
+                    details={"code": "FORMAL_KEYFRAME_SNAPSHOT_MISMATCH"},
+                )
+            if not requested_frames:
                 references.insert(
                     0,
                     ShotReferenceIntent(
@@ -898,27 +1328,351 @@ class WorkbenchExecutionService:
                         mime_type=formal.mime_type,
                     ),
                 )
+            # The Formal keyframe was inserted after initial hydration. Its
+            # immutable fingerprint must be bound before preview, freezing and
+            # worker compilation; otherwise D2 silently lacks media identity.
+            references = await self._hydrate_and_validate_references(
+                project=project,
+                shot_id=execution_input.shot_id,
+                stage=execution_input.stage,
+                references=references,
+            )
+
+        effective_mode_id = execution_input.mode_id
+        operation_key: Literal["image.generate", "video.generate"] = (
+            "video.generate" if execution_input.stage == "video" else "image.generate"
+        )
+        operation_manifest = capability_manifest.operations.get(operation_key)
+        matched_input_contract = None
+        input_contract_id = None
+        if operation_manifest is not None and operation_manifest.input_contracts:
+            try:
+                selected_contract = select_workbench_contract(
+                    operation=operation_manifest,
+                    media_kind="video" if execution_input.stage == "video" else "image",
+                    references=[
+                        (PURPOSE_TO_ROLE.get(ref.purpose, ""), ref.mime_type) for ref in references
+                    ],
+                    ui_mode_id=ui_mode_id,
+                )
+            except ValueError as exc:
+                raise WorkbenchExecutionError(
+                    str(exc), details={"code": "MODEL_INPUT_COMBINATION_UNSUPPORTED"}
+                ) from exc
+            effective_mode_id = selected_contract.contract_id
+            input_contract_id = selected_contract.contract_id
+            matched_input_contract = operation_manifest.input_contracts.get(effective_mode_id)
+            resolution = resolution.model_copy(update={"mode_id": effective_mode_id})
+
+        spec = v3_manifest.capability_specs.get(capability)
+        mode_spec: InputModeSpec | None = None
+        if spec is not None:
+            try:
+                mode_spec = spec.mode_spec(effective_mode_id)
+            except ValueError as exc:
+                raise WorkbenchExecutionError(
+                    "Model input contract is not declared",
+                    details={"code": "MODEL_INPUT_MODE_UNSUPPORTED"},
+                ) from exc
 
         compiled = compile_references(
             manifest=v3_manifest,
             capability=capability,
             references=references,
-            mode_id=execution_input.mode_id,
+            mode_id=effective_mode_id,
             accept_approximations=execution_input.accept_approximations,
+        )
+        prompt = await self._compile_prompt_mentions(
+            project=project, prompt=prompt, references=references, semantic_intent=semantic_intent
         )
         pending_suggestions = await self._pending_creative_suggestions(
             project=project,
             semantic_intent=semantic_intent,
         )
 
+        gen_settings = _mapping(_mapping(shot.director_state).get("generation_settings"))
+        stage_settings = _mapping(gen_settings.get(execution_input.stage))
+        source_contract_hash = stage_settings.get("source_contract_hash")
+        if source_contract_hash is not None and source_contract_hash != resolution.manifest_hash:
+            raise WorkbenchExecutionError(
+                "Saved Shot options belong to a different model contract; "
+                "review and save them again",
+                details={"code": "MODEL_OPTIONS_CONTRACT_CHANGED"},
+            )
+
+        # Collect all declared options from contract / mode_spec / option_schema
+        declared_all_options: dict[str, ParameterSpec] = {}
+        if spec is not None:
+            declared_all_options.update(spec.common_options)
+            declared_all_options.update(spec.native_options)
+            if mode_spec is not None:
+                declared_all_options.update(mode_spec.common_options)
+                declared_all_options.update(mode_spec.native_options)
+        if matched_input_contract is not None:
+            declared_all_options.update(matched_input_contract.common_options)
+            declared_all_options.update(matched_input_contract.native_options)
+        if operation_manifest is not None and operation_manifest.output_options:
+            declared_all_options.update(operation_manifest.output_options)
+
+        raw_option_schema = entry.capability_manifest_json.get("option_schema") or {}
+        raw_options = (
+            raw_option_schema.get("options") if isinstance(raw_option_schema, dict) else {}
+        )
+        if isinstance(raw_options, dict):
+            for opt_k, opt_v in raw_options.items():
+                if opt_k not in declared_all_options and isinstance(opt_v, dict):
+                    opt_type = opt_v.get("type") or "string"
+                    if opt_type in {"string", "integer", "number", "boolean", "array", "object"}:
+                        declared_all_options[opt_k] = ParameterSpec.model_validate(
+                            {
+                                "type": opt_type,
+                                "enum": opt_v.get("values"),
+                                "default": opt_v.get("default"),
+                                "minimum": opt_v.get("minimum"),
+                                "maximum": opt_v.get("maximum"),
+                            }
+                        )
+
+        user_common_options = _mapping(stage_settings.get("common_options"))
+        user_native_options = _mapping(stage_settings.get("native_options"))
+
+        try:
+            merged_options = resolve_generation_options(
+                declared=declared_all_options,
+                profile_options=resolution.native_options,
+                profile_source=resolution.source,
+                common_options=user_common_options,
+                native_options=user_native_options,
+                allowed_options=implemented_workbench_options(capability_manifest),
+            )
+        except ValidationAppError as exc:
+            raise WorkbenchExecutionError(str(exc), details=exc.details) from exc
+        effective_options = merged_options.values
+        option_sources = merged_options.sources
+
+        selected_ratio = str(effective_options.get("aspect_ratio") or project.aspect_ratio)
+        effective_options["aspect_ratio"] = selected_ratio
+        option_sources.setdefault("aspect_ratio", "project")
+        # Validate the same explicit ratio that preview and the Worker compile.
+        # Reject a fixed or enumerated output mismatch in the read-only preview,
+        # before a queued run can turn a predictable contract error into a failure.
+        if mode_spec is not None:
+            ratio_spec = mode_spec.common_options.get("aspect_ratio")
+            if ratio_spec is not None and ratio_spec.enum != ["adaptive"]:
+                try:
+                    validate_parameter("aspect_ratio", selected_ratio, ratio_spec)
+                except ProviderError as exc:
+                    raise WorkbenchExecutionError(
+                        f"Selected model cannot output project aspect ratio {selected_ratio}",
+                        details={
+                            "code": "MODEL_OUTPUT_ASPECT_RATIO_UNSUPPORTED",
+                            "aspect_ratio": selected_ratio,
+                            "supported": ratio_spec.enum,
+                        },
+                    ) from exc
+
+        plan_duration: float | None = None
+        if execution_input.stage == "video":
+            # Shot.duration_seconds owns editing; the saved stage-specific setting
+            # is the explicit generation request, not a timeline fallback.
+            requested_duration = stage_settings.get("request_duration_seconds")
+            duration_options = [
+                value
+                for value in (
+                    user_common_options.get("duration_seconds"),
+                    user_common_options.get("duration"),
+                    user_native_options.get("duration_seconds"),
+                    user_native_options.get("duration"),
+                )
+                if value is not None
+            ]
+            duration_spec = declared_all_options.get(
+                "duration_seconds"
+            ) or declared_all_options.get("duration")
+            if requested_duration is None:
+                requested_duration = effective_options.get(
+                    "duration_seconds", effective_options.get("duration")
+                )
+            elif not duration_options:
+                option_sources["duration_seconds"] = "shot_duration"
+            if requested_duration is not None:
+                if duration_spec is None:
+                    raise WorkbenchExecutionError(
+                        "Selected model does not declare a video duration option",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    )
+                try:
+                    req_d = float(str(requested_duration))
+                    option_durations = [float(str(value)) for value in duration_options]
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise WorkbenchExecutionError(
+                        "Requested video duration is invalid",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    ) from exc
+                if (
+                    isinstance(requested_duration, bool)
+                    or not math.isfinite(req_d)
+                    or req_d <= 0
+                    or not req_d.is_integer()
+                    or any(value != req_d for value in option_durations)
+                ):
+                    raise WorkbenchExecutionError(
+                        "Requested video duration must be a supported whole number of seconds",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    )
+                plan_duration = req_d
+            elif duration_spec is not None and (
+                duration_spec.default is not None
+                or duration_spec.enum is not None
+                and len(duration_spec.enum) == 1
+            ):
+                try:
+                    default_duration = (
+                        duration_spec.default
+                        if duration_spec.default is not None
+                        else (duration_spec.enum or [None])[0]
+                    )
+                    plan_duration = float(str(default_duration))
+                except (ValueError, TypeError, OverflowError) as exc:
+                    raise WorkbenchExecutionError(
+                        "Model contract has an invalid default video duration",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    ) from exc
+                if (
+                    not math.isfinite(plan_duration)
+                    or plan_duration <= 0
+                    or not plan_duration.is_integer()
+                ):
+                    raise WorkbenchExecutionError(
+                        "Model contract has an unsupported default video duration",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    )
+                option_sources["duration_seconds"] = "contract_default"
+            elif (fixed_duration := workbench_fixed_duration(capability_manifest)) is not None:
+                # Compiler-owned explicit default; there is no generic fallback.
+                plan_duration = float(fixed_duration)
+                option_sources["duration_seconds"] = "compiler_fixed_default"
+            else:
+                raise WorkbenchExecutionError(
+                    "Selected model has no explicit video duration default",
+                    details={"code": "MODEL_DURATION_REQUIRED"},
+                )
+            # Both integer and numeric contracts accept whole seconds; validating a
+            # float (4.0) against an integer contract wrongly rejects a valid 4s.
+            # Check implicit defaults too: never freeze an unsupported 5s fallback.
+            if duration_spec is not None:
+                try:
+                    validate_parameter("duration_seconds", int(plan_duration), duration_spec)
+                except ProviderError as exc:
+                    raise WorkbenchExecutionError(
+                        "Video duration is outside the selected model contract",
+                        details={"code": "MODEL_DURATION_UNSUPPORTED"},
+                    ) from exc
+            effective_options["duration_seconds"] = int(plan_duration)
+            if stage_settings.get("request_duration_seconds") is not None:
+                option_sources["duration_seconds"] = "shot_duration"
+                merged_options.requested["shot_duration"] = {
+                    "duration_seconds": cast(JsonValue, stage_settings["request_duration_seconds"])
+                }
+
+        supports_prompt_override = False
+        if (
+            "prompt_override" in declared_all_options
+            or (mode_spec is not None and "prompt_override" in mode_spec.input_slots)
+            or (
+                matched_input_contract is not None
+                and "prompt_override" in matched_input_contract.input_slots
+            )
+            or (spec is not None and "prompt_override" in spec.input_slots)
+        ):
+            supports_prompt_override = True
+        else:
+            raw_op = (entry.capability_manifest_json.get("operations") or {}).get(
+                operation_key
+            ) or {}
+            raw_prompt_spec = raw_op.get("prompt_spec") or {}
+            if isinstance(raw_prompt_spec, dict) and (
+                raw_prompt_spec.get("allow_override") is True
+                or raw_prompt_spec.get("prompt_override") is True
+            ):
+                supports_prompt_override = True
+
+        prompt_override = stage_settings.get("prompt_override")
+        if prompt_override is not None:
+            if not supports_prompt_override:
+                raise WorkbenchExecutionError(
+                    "Model contract does not declare an editable prompt override slot",
+                    details={"code": "PROMPT_OVERRIDE_SLOT_UNDECLARED"},
+                )
+            override_str = str(prompt_override).strip()
+            if not override_str:
+                raise WorkbenchExecutionError(
+                    "Prompt override cannot be blank",
+                    details={"code": "PROMPT_CONTRACT_UNSUPPORTED", "reason": "blank"},
+                )
+            if len(override_str) > 4000:
+                raise WorkbenchExecutionError(
+                    "Prompt override exceeds contract length limit of 4000 "
+                    f"(got {len(override_str)})",
+                    details={
+                        "code": "PROMPT_CONTRACT_UNSUPPORTED",
+                        "max_length": 4000,
+                        "actual_length": len(override_str),
+                    },
+                )
+            # Validate against prompt_spec in operation manifest if declared
+            op_manifest = capability_manifest.operations.get(operation_key)
+            if op_manifest is not None:
+                raw_op = (entry.capability_manifest_json.get("operations") or {}).get(
+                    operation_key
+                ) or {}
+                raw_prompt_spec = raw_op.get("prompt_spec")
+                if isinstance(raw_prompt_spec, dict):
+                    max_len_info = raw_prompt_spec.get("max_length")
+                    if isinstance(max_len_info, dict) and max_len_info.get("kind") == "bounded":
+                        bound = max_len_info.get("value")
+                        if isinstance(bound, (int, float)) and len(override_str) > bound:
+                            raise WorkbenchExecutionError(
+                                f"Prompt override length {len(override_str)} exceeds "
+                                f"model contract limit of {bound}",
+                                details={
+                                    "code": "PROMPT_CONTRACT_UNSUPPORTED",
+                                    "max_length": bound,
+                                    "actual_length": len(override_str),
+                                },
+                            )
+                    min_len_info = raw_prompt_spec.get("min_length")
+                    if isinstance(min_len_info, dict) and min_len_info.get("kind") == "bounded":
+                        bound = min_len_info.get("value")
+                        if isinstance(bound, (int, float)) and len(override_str) < bound:
+                            raise WorkbenchExecutionError(
+                                f"Prompt override length {len(override_str)} is below "
+                                f"model contract minimum of {bound}",
+                                details={
+                                    "code": "PROMPT_CONTRACT_UNSUPPORTED",
+                                    "min_length": bound,
+                                    "actual_length": len(override_str),
+                                },
+                            )
+            # Recompile the override's character tokens and references.
+            prompt = await self._compile_prompt_mentions(
+                project=project,
+                prompt=override_str,
+                references=references,
+                semantic_intent=semantic_intent,
+            )
+            prompt_override = override_str
+
         plan = WorkbenchExecutionPlan(
             project_id=project.id,
             shot_id=execution_input.shot_id,
-            shot_experiment_id=execution_input.shot_experiment_id,
+            experiment_branch_id=execution_input.experiment_branch_id,
             stage=execution_input.stage,
             prompt=prompt,
             semantic_intent=semantic_intent,
-            mode_id=execution_input.mode_id,
+            mode_id=effective_mode_id,
+            ui_mode_id=ui_mode_id,
+            input_contract_id=input_contract_id,
             resolved_model=resolution,
             capability=capability,
             planned_references=compiled.planned_references,
@@ -932,6 +1686,12 @@ class WorkbenchExecutionService:
             credential_revision_id=credential_revision_id,
             accepted_approximations=compiled.accepted_approximations,
             expected_shot_version=execution_input.expected_shot_version,
+            duration_seconds=plan_duration,
+            prompt_override=prompt_override,
+            effective_options=effective_options,
+            option_sources=option_sources,
+            requested_options=merged_options.requested,
+            supports_prompt_override=supports_prompt_override,
         ).freeze()
 
         # Fail closed on any remaining capability gap (fatal gaps always remain;
@@ -944,18 +1704,91 @@ class WorkbenchExecutionService:
         if blocking_gaps:
             reasons = "; ".join(gap.reason for gap in blocking_gaps)
             raise WorkbenchExecutionError(f"workbench plan has capability gaps: {reasons}")
+        if execution_input.stage == "video":
+            try:
+                validate_mode_roles(
+                    media_kind="video",
+                    ui_mode_id=ui_mode_id,
+                    roles=[ref.role or "" for ref in plan.planned_references],
+                )
+            except ValueError as exc:
+                raise WorkbenchExecutionError(
+                    str(exc), details={"code": "MODEL_INPUT_COMBINATION_UNSUPPORTED"}
+                ) from exc
         return plan
+
+    async def preview_compiler_contract(
+        self,
+        *,
+        project: Project,
+        plan: WorkbenchExecutionPlan,
+    ) -> CompilePreview | None:
+        """Read-only adapter compilation, deliberately NOT the final wire request.
+
+        All modes reuse the real Compiler; reference transports are normalized
+        by immutable artifact ID, content hash and ordinal. Media bytes are
+        reverified in the Worker immediately before the paid request.
+        Do not create a NodeRun, ProviderOperation or ProviderRuntime here.
+        """
+        if plan.capability_gaps or any(
+            ref.delivery == "unsupported" for ref in plan.planned_references
+        ):
+            return None
+        identity = plan.resolved_model
+        if (
+            identity.catalog_entry_id is None
+            or identity.provider_model_binding_id is None
+            or not identity.invoke_model_value
+        ):
+            return None
+        if plan.stage not in {"video", "image_keyframe"}:
+            return None
+        entry = await self._session.get(ModelCatalogEntry, identity.catalog_entry_id)
+        if entry is None or entry.contract_manifest_hash != identity.manifest_hash:
+            return None
+        manifest = ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
+        references = [
+            PreviewReference(
+                role=cast(Any, ref.role),
+                artifact_id=ref.artifact_id,
+                fingerprint=ref.fingerprint,
+                mime_type=ref.mime_type,
+            )
+            for ref in plan.planned_references
+            if ref.artifact_id is not None and ref.role is not None and ref.fingerprint is not None
+        ]
+        if len(references) != len(plan.planned_references):
+            return None
+        intent = generation_intent_from_plan(plan, fallback_aspect_ratio=project.aspect_ratio)
+        return await preview_compile(
+            manifest=manifest,
+            invoke_model_value=identity.invoke_model_value,
+            intent=intent,
+            references=references,
+            expected_mode_id=plan.input_contract_id,
+            include_redacted_wire=True,
+        )
 
     async def lock_command_scope(self, *, project_id: UUID) -> None:
         # Command keys are unique per project, including accidental reuse on
         # different Shots. Serialize the short DB-only queueing transaction.
-        await self._session.execute(
-            select(Project.id).where(Project.id == project_id).with_for_update()
+        project = await self._session.scalar(
+            select(Project)
+            .where(Project.id == project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
+        if project is None or project.deleted_at is not None:
+            raise NotFoundError("project not found")
 
     async def find_command_receipt(
-        self, *, project_id: UUID, shot_id: UUID, stage: PlanStage,
-        command_key: str | None, plan_fingerprint: str | None = None,
+        self,
+        *,
+        project_id: UUID,
+        shot_id: UUID,
+        stage: PlanStage,
+        command_key: str | None,
+        plan_fingerprint: str | None = None,
         expected_request_hash: str | None = None,
     ) -> NodeRun | None:
         """Read a committed frozen receipt; never resolve or submit a model."""
@@ -964,30 +1797,43 @@ class WorkbenchExecutionService:
         if command_key is None and not plan_fingerprint:
             return None
         key = _workbench_idempotency_key(
-            stage=stage, override=command_key, plan_fingerprint=plan_fingerprint or "",
+            stage=stage,
+            override=command_key,
+            plan_fingerprint=plan_fingerprint or "",
         )
-        run = await self._session.scalar(select(NodeRun).where(
-            NodeRun.project_id == project_id, NodeRun.idempotency_key == key,
-        ))
+        run = await self._session.scalar(
+            select(NodeRun).where(
+                NodeRun.project_id == project_id,
+                NodeRun.idempotency_key == key,
+            )
+        )
         if run is None:
             return None
         snapshot = run.input_snapshot or {}
         graph_shot = await self._session.scalar(
             select(ProductionGraph.scope_entity_id)
             .join(GraphVersion, GraphVersion.graph_id == ProductionGraph.id)
-            .where(GraphVersion.id == run.graph_version_id,
-                   ProductionGraph.project_id == project_id, ProductionGraph.scope_type == "shot")
+            .where(
+                GraphVersion.id == run.graph_version_id,
+                ProductionGraph.project_id == project_id,
+                ProductionGraph.scope_type == "shot",
+            )
         )
-        if (graph_shot != shot_id or snapshot.get("shot_id") != str(shot_id)
-                or snapshot.get("stage") != stage):
+        if (
+            graph_shot != shot_id
+            or snapshot.get("shot_id") != str(shot_id)
+            or snapshot.get("stage") != stage
+        ):
             raise ConflictError(
                 "Execution command key belongs to a different Shot or stage",
                 details={"code": "EXECUTION_COMMAND_SCOPE_CONFLICT"},
             )
         if expected_request_hash is not None and (
             snapshot.get("workbench_request_hash") != expected_request_hash
-            or (plan_fingerprint is not None
-                and snapshot.get("plan_fingerprint") != plan_fingerprint)
+            or (
+                plan_fingerprint is not None
+                and snapshot.get("plan_fingerprint") != plan_fingerprint
+            )
         ):
             raise ConflictError(
                 "Execution command key was already used with a different request",
@@ -1003,6 +1849,7 @@ class WorkbenchExecutionService:
         idempotency_key_override: str | None = None,
         prepared_plan: WorkbenchExecutionPlan | None = None,
         request_hash: str | None = None,
+        confirmed_compiler_wire_fingerprint: str | None = None,
     ) -> NodeRun:
         """Resolve the shot graph, create a queued NodeRun and persist the
         frozen plan snapshot for the worker.
@@ -1013,7 +1860,9 @@ class WorkbenchExecutionService:
         identity = request_hash or workbench_request_hash(execution_input.model_dump(mode="json"))
         await self.lock_command_scope(project_id=project.id)
         existing = await self.find_command_receipt(
-            project_id=project.id, shot_id=execution_input.shot_id, stage=execution_input.stage,
+            project_id=project.id,
+            shot_id=execution_input.shot_id,
+            stage=execution_input.stage,
             command_key=idempotency_key_override,
             plan_fingerprint=prepared_plan.plan_fingerprint if prepared_plan else None,
             expected_request_hash=identity,
@@ -1025,8 +1874,11 @@ class WorkbenchExecutionService:
             execution_input=execution_input,
         )
         existing = await self.find_command_receipt(
-            project_id=project.id, shot_id=execution_input.shot_id, stage=execution_input.stage,
-            command_key=idempotency_key_override, plan_fingerprint=plan.plan_fingerprint,
+            project_id=project.id,
+            shot_id=execution_input.shot_id,
+            stage=execution_input.stage,
+            command_key=idempotency_key_override,
+            plan_fingerprint=plan.plan_fingerprint,
             expected_request_hash=identity,
         )
         if existing is not None:
@@ -1087,8 +1939,10 @@ class WorkbenchExecutionService:
             select(GraphNode.id).where(GraphNode.id == node.id).with_for_update()
         )
         previous_run = await self._session.scalar(
-            select(NodeRun).where(NodeRun.graph_node_id == node.id)
-            .order_by(NodeRun.attempt_no.desc()).limit(1)
+            select(NodeRun)
+            .where(NodeRun.graph_node_id == node.id)
+            .order_by(NodeRun.attempt_no.desc())
+            .limit(1)
         )
         attempt_no = (previous_run.attempt_no if previous_run is not None else 0) + 1
         await _ensure_pure_chain_upstreams(
@@ -1118,6 +1972,7 @@ class WorkbenchExecutionService:
                 reference.model_dump(mode="json") for reference in plan.planned_references
             ],
             "plan_fingerprint": plan.plan_fingerprint,
+            "confirmed_compiler_wire_fingerprint": confirmed_compiler_wire_fingerprint,
             "stage": plan.stage,
             "mode_id": plan.mode_id,
             "prompt": plan.prompt,
@@ -1133,7 +1988,9 @@ class WorkbenchExecutionService:
             "model_binding_id": str(plan.resolved_model.provider_model_binding_id),
             "capability_manifest_hash": plan.resolved_model.manifest_hash,
             "connection_revision_id": str(plan.connection_revision_id),
-            "credential_revision_id": str(plan.credential_revision_id),
+            "credential_revision_id": str(plan.credential_revision_id)
+            if plan.credential_revision_id
+            else None,
             "execution_model_resolution": plan.resolved_model.model_dump(mode="json"),
             "selection_plan": {
                 "purpose": "keyframe" if plan.stage == "image_keyframe" else "video",
@@ -1155,12 +2012,21 @@ class WorkbenchExecutionService:
             "plan": {"prompt": plan.prompt},
         }
         if plan.stage == "video":
-            # The current Workbench API intentionally exposes no separate
-            # duration control.  The verified video manifests use the
-            # canonical five-second product intent, which is also the safe
-            # default used by the unified compiler.
-            snapshot["duration_seconds"] = 5
+            if plan.duration_seconds is None:
+                raise WorkbenchExecutionError(
+                    "Execution plan has no frozen video duration",
+                    details={"code": "MODEL_DURATION_REQUIRED"},
+                )
+            snapshot["duration_seconds"] = plan.duration_seconds
             snapshot["aspect_ratio"] = project.aspect_ratio
+        if plan.effective_options:
+            snapshot["options"] = plan.effective_options
+            if "aspect_ratio" in plan.effective_options:
+                snapshot["aspect_ratio"] = plan.effective_options["aspect_ratio"]
+            if "duration_seconds" in plan.effective_options:
+                snapshot["duration_seconds"] = plan.effective_options["duration_seconds"]
+        if plan.prompt_override:
+            snapshot["prompt_override"] = plan.prompt_override
         input_hash = _node_run_input_hash(snapshot)
         node_run = NodeRun(
             project_id=project.id,

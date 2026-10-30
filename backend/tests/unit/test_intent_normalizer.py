@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
 from app.providers.intents import (
     ArtifactReferenceIntent,
     ModelSelectionIntent,
@@ -26,9 +27,7 @@ def _video_intent(**over: object) -> VideoGenerationIntentV1:
 
 def test_required_first_frame_derives_capability() -> None:
     intent = _video_intent(
-        references=[
-            ArtifactReferenceIntent(artifact_id=uuid4(), role="first_frame", required=True)
-        ]
+        references=[ArtifactReferenceIntent(artifact_id=uuid4(), role="first_frame", required=True)]
     )
     result = normalize_video(intent)
     assert result.ok
@@ -57,9 +56,7 @@ def test_caller_declared_capabilities_union_with_derived() -> None:
 
 def test_repeated_reference_role_is_preserved_for_ms3() -> None:
     ref = ArtifactReferenceIntent(artifact_id=uuid4(), role="reference_image")
-    intent = _video_intent(
-        references=[ref, ref.model_copy(update={"artifact_id": uuid4()})]
-    )
+    intent = _video_intent(references=[ref, ref.model_copy(update={"artifact_id": uuid4()})])
     result = normalize_video(intent)
     assert result.ok
     assert result.reference_roles == frozenset({"reference_image"})
@@ -75,12 +72,9 @@ def test_preview_purpose_is_rejected_in_stage_ab() -> None:
     assert any("preview" in error for error in result.errors)
 
 
-def test_auto_selection_mode_is_rejected_in_stage_ab() -> None:
-    result = normalize_video(
-        _video_intent(selection=ModelSelectionIntent(mode="auto"))
-    )
-    assert not result.ok
-    assert any("auto" in error for error in result.errors)
+def test_unsupported_selection_mode_is_rejected_at_the_contract() -> None:
+    with pytest.raises(ValueError):
+        ModelSelectionIntent(mode="auto")
 
 
 def test_normalize_reference_roles_maps_all_roles() -> None:

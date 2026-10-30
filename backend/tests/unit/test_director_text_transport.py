@@ -20,11 +20,11 @@ from app.director.recommendation import (
 )
 from app.director.suggestion import ShotDirectorSuggestionRequest, ShotDirectorSuggestionService
 from app.director.text_model import CapabilityTextModel
-from app.director.text_transport import DirectorTextTransport
+from app.director.text_transport import DirectorTextRuntimeAdapter
 from app.director.turn_models import DirectorTurn
 from app.execution.models import Artifact, NodeRun
 from app.providers.contracts.common import ExecutionContext, GenerationStatus
-from app.providers.contracts.text import TextGenerateRequest
+from app.providers.contracts.text import TextGenerateRequest, TextMessage
 from app.providers.litellm_adapter import LiteLLMModelAdapter
 from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
 from app.providers.model_profiles.orm import ProductionModelProfile
@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 Handler = Callable[[httpx.Request], Awaitable[httpx.Response]]
 MODEL_ID = "litellm/controlled-storyboard"
+pytestmark = pytest.mark.usefixtures("configured_director_runtime")
 
 
 @pytest.mark.asyncio
@@ -50,10 +51,13 @@ async def test_text_model_port_runs_without_business_session_and_preserves_unkno
 
     port = CapabilityTextModel(_registry(handler))
     result = await port.generate(
-        request=TextGenerateRequest(prompt="Return a structured suggestion"),
+        request=TextGenerateRequest(
+            messages=[TextMessage(role="user", content="Return a structured suggestion")]
+        ),
         model_id=MODEL_ID,
-        context=ExecutionContext(trace_id="turn", operation_id="invocation:primary",
-                                 idempotency_key="invocation:primary"),
+        context=ExecutionContext(
+            trace_id="turn", operation_id="invocation:primary", idempotency_key="invocation:primary"
+        ),
     )
     assert result.status == GenerationStatus.SUBMIT_UNKNOWN
     assert len(calls) == 1
@@ -96,8 +100,9 @@ async def _seed(session: AsyncSession) -> tuple[User, Project, Scene, Shot, Shot
     await session.flush()
     from app.access.models import ProjectCreativeProfile
 
-    session.add(ProjectCreativeProfile(project_id=project.id, start_type="FREE",
-                                       director_autonomy="ASSIST"))
+    session.add(
+        ProjectCreativeProfile(project_id=project.id, start_type="FREE", director_autonomy="ASSIST")
+    )
     await session.flush()
     episode = Episode(project_id=project.id, episode_number=1, title="E1", synopsis="")
     session.add(episode)
@@ -203,6 +208,67 @@ def _valid_candidate(request: httpx.Request) -> dict[str, object]:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("entrypoint", ["suggestion", "recommendation"])
+async def test_missing_checkpoint_rejects_before_text_call_or_turn_write(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    entrypoint: str,
+) -> None:
+    from app.config import clear_settings_cache
+
+    user, project, scene, shot, _ = await _seed(session)
+    monkeypatch.setenv("DIRECTOR_CHECKPOINT_DATABASE_URL", "")
+    clear_settings_cache()
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        candidate = (
+            _valid_candidate(request)
+            if entrypoint == "suggestion"
+            else {
+                "base_shot_version": shot.version,
+                "scope": "shot",
+                "category": "CAMERA_MOTION",
+                "current_state": "Static",
+                "suggested_change": "Keep static",
+                "reason": "Restraint",
+                "expected_effect": "Stillness",
+                "risk": "Less movement",
+                "affected_facts": [],
+                "typed_operations": [],
+            }
+        )
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": json.dumps(candidate)}}]}
+        )
+
+    transport = DirectorTextRuntimeAdapter(session, registry=_registry(handler))
+    with pytest.raises(ConflictError) as exc:
+        if entrypoint == "suggestion":
+            await ShotDirectorSuggestionService(session, text_transport=transport).suggest(
+                project_id=project.id,
+                actor=user,
+                request=_request(scene, shot, key="missing-checkpoint"),
+            )
+        else:
+            await DirectorRecommendationService(session, text_transport=transport).recommend(
+                project_id=project.id,
+                actor=user,
+                request=DirectorRecommendationRequest(
+                    scene_id=scene.id,
+                    shot_id=shot.id,
+                    expected_shot_version=shot.version,
+                    request_key="missing-checkpoint",
+                ),
+            )
+    assert exc.value.details["code"] == "DIRECTOR_CHECKPOINT_NOT_CONFIGURED"
+    assert calls == []
+    assert await session.scalar(select(func.count()).select_from(DirectorTurn)) == 0
+    assert await session.scalar(select(func.count()).select_from(DirectorInvocation)) == 0
+
+
+@pytest.mark.asyncio
 async def test_same_model_uses_distinct_shot_context_and_persists_exact_evidence(
     session: AsyncSession,
 ) -> None:
@@ -226,7 +292,7 @@ async def test_same_model_uses_distinct_shot_context_and_persists_exact_evidence
             },
         )
 
-    text_transport = DirectorTextTransport(session, registry=_registry(handler))
+    text_transport = DirectorTextRuntimeAdapter(session, registry=_registry(handler))
     service = ShotDirectorSuggestionService(session, text_transport=text_transport)
     first = await service.suggest(
         project_id=project.id,
@@ -260,9 +326,7 @@ async def test_same_model_uses_distinct_shot_context_and_persists_exact_evidence
     assert {turn.transport_record_id for turn in turns} == {"call-1", "call-2"}
     assert all(turn.token_usage == {"prompt_tokens": 20, "completion_tokens": 10} for turn in turns)
     assert all(turn.provider_cost == Decimal("0.00420000") for turn in turns)
-    invocations = list(
-        (await session.execute(select(DirectorInvocation))).scalars()
-    )
+    invocations = list((await session.execute(select(DirectorInvocation))).scalars())
     assert len(invocations) == 2
     assert {invocation.status for invocation in invocations} == {"completed"}
     assert await session.scalar(select(func.count()).select_from(NodeRun)) == 0
@@ -293,7 +357,7 @@ async def test_request_key_replays_stored_result_without_second_model_call(
 
     service = ShotDirectorSuggestionService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     )
     request = _request(scene, shot, key="shot-turn:idempotent")
     first = await service.suggest(project_id=project.id, actor=user, request=request)
@@ -332,7 +396,7 @@ async def test_completed_invocation_recovers_interrupted_turn_without_second_mod
 
     service = ShotDirectorSuggestionService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     )
     request = _request(scene, shot, key="shot-turn:journal-recovery")
     first = await service.suggest(project_id=project.id, actor=user, request=request)
@@ -340,7 +404,9 @@ async def test_completed_invocation_recovers_interrupted_turn_without_second_mod
     turn_id = first.director_evidence.turn_id
 
     await session.execute(
-        update(DirectorTurn).where(DirectorTurn.id == turn_id).values(
+        update(DirectorTurn)
+        .where(DirectorTurn.id == turn_id)
+        .values(
             status="thinking",
             transport_status="prepared",
             transport_record_id=None,
@@ -408,7 +474,7 @@ async def test_proactive_recommendation_uses_the_same_real_text_bridge(
 
     result = await DirectorRecommendationService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     ).recommend(
         project_id=project.id,
         actor=user,
@@ -451,7 +517,7 @@ async def test_schema_repair_is_same_model_and_bounded_to_one_attempt(
 
     result = await ShotDirectorSuggestionService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     ).suggest(
         project_id=project.id,
         actor=user,
@@ -466,9 +532,9 @@ async def test_schema_repair_is_same_model_and_bounded_to_one_attempt(
     invocations = list(
         (
             await session.execute(
-                select(DirectorInvocation).where(
-                    DirectorInvocation.turn_id == result.director_evidence.turn_id
-                ).order_by(DirectorInvocation.created_at)
+                select(DirectorInvocation)
+                .where(DirectorInvocation.turn_id == result.director_evidence.turn_id)
+                .order_by(DirectorInvocation.created_at)
             )
         ).scalars()
     )
@@ -504,7 +570,7 @@ async def test_second_invalid_or_forbidden_output_fails_without_rule_fallback(
     with pytest.raises(ValidationAppError) as raised:
         await ShotDirectorSuggestionService(
             session,
-            text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+            text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
         ).suggest(
             project_id=project.id,
             actor=user,
@@ -534,7 +600,7 @@ async def test_unconfigured_model_fails_explicitly_and_records_failed_turn(
     with pytest.raises(ValidationAppError) as raised:
         await ShotDirectorSuggestionService(
             session,
-            text_transport=DirectorTextTransport(
+            text_transport=DirectorTextRuntimeAdapter(
                 session, registry=_registry(must_not_call, configured=False)
             ),
         ).suggest(
@@ -568,7 +634,7 @@ async def test_reusing_request_key_for_changed_context_fails_closed(
 
     service = ShotDirectorSuggestionService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     )
     key = "shot-turn:reused"
     await service.suggest(
@@ -613,7 +679,7 @@ async def test_shot_changed_in_another_transaction_marks_late_result_stale(tmp_p
         with pytest.raises(ConflictError) as raised:
             await ShotDirectorSuggestionService(
                 session,
-                text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+                text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
             ).suggest(
                 project_id=project.id,
                 actor=user,
@@ -643,31 +709,41 @@ async def test_rejected_context_new_request_key_never_calls_text_provider(sessio
 
     async def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
-        return httpx.Response(200, json={
-            "choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}],
-        })
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}],
+            },
+        )
 
-    bridge = DirectorTextTransport(session, registry=_registry(handler))
+    bridge = DirectorTextRuntimeAdapter(session, registry=_registry(handler))
     service = ShotDirectorSuggestionService(session, text_transport=bridge)
     result = await service.suggest(
-        project_id=project.id, actor=user, request=_request(scene, shot, key="rejection:one"),
+        project_id=project.id,
+        actor=user,
+        request=_request(scene, shot, key="rejection:one"),
     )
     turn = await session.get(DirectorTurn, result.director_evidence.turn_id)
     await DirectorTurnService(session).record_user_decision(
-        project_id=project.id, turn_id=turn.id, expected_revision=turn.revision,
-        decision="reject", accepted_operation_indices=[],
+        project_id=project.id,
+        turn_id=turn.id,
+        expected_revision=turn.revision,
+        decision="reject",
+        accepted_operation_indices=[],
     )
     await session.commit()
     with pytest.raises(ConflictError) as rejected:
         await service.suggest(
-            project_id=project.id, actor=user,
+            project_id=project.id,
+            actor=user,
             request=_request(scene, shot, key="rejection:new-key"),
         )
     assert rejected.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
     assert len(calls) == 1
     assert await session.scalar(select(func.count()).select_from(DirectorTurn)) == 1
     await service.suggest(
-        project_id=project.id, actor=user,
+        project_id=project.id,
+        actor=user,
         request=_request(scene, shot, key="rejection:changed", instruction="Changed goal"),
     )
     assert len(calls) == 2
@@ -678,29 +754,169 @@ async def test_manual_blocks_proactive_text_but_preserves_explicit_user_requests
     from app.access.models import ProjectCreativeProfile
 
     user, project, scene, shot, _other = await _seed(session)
-    profile = await session.scalar(select(ProjectCreativeProfile).where(
-        ProjectCreativeProfile.project_id == project.id))
+    profile = await session.scalar(
+        select(ProjectCreativeProfile).where(ProjectCreativeProfile.project_id == project.id)
+    )
     profile.director_autonomy = "MANUAL"
     await session.commit()
     calls = []
 
     async def handler(request):
         calls.append(request)
-        return httpx.Response(200, json={
-            "choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}],
-        })
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}],
+            },
+        )
 
-    bridge = DirectorTextTransport(session, registry=_registry(handler))
+    bridge = DirectorTextRuntimeAdapter(session, registry=_registry(handler))
     with pytest.raises(ValidationAppError) as disabled:
         await DirectorRecommendationService(session, text_transport=bridge).recommend(
-            project_id=project.id, actor=user,
-            request=DirectorRecommendationRequest(scene_id=scene.id, shot_id=shot.id,
-                expected_shot_version=shot.version, request_key="manual:proactive"),
+            project_id=project.id,
+            actor=user,
+            request=DirectorRecommendationRequest(
+                scene_id=scene.id,
+                shot_id=shot.id,
+                expected_shot_version=shot.version,
+                request_key="manual:proactive",
+            ),
         )
     assert disabled.value.details["code"] == "DIRECTOR_PROACTIVE_DISABLED"
     assert calls == []
     assert await session.scalar(select(func.count()).select_from(DirectorTurn)) == 0
     await ShotDirectorSuggestionService(session, text_transport=bridge).suggest(
-        project_id=project.id, actor=user, request=_request(scene, shot, key="manual:explicit"),
+        project_id=project.id,
+        actor=user,
+        request=_request(scene, shot, key="manual:explicit"),
     )
     assert len(calls) == 1
+
+
+async def test_prepared_text_without_invocation_requires_explicit_rebuild(session):
+    from sqlalchemy import delete
+
+    user, project, scene, shot, _ = await _seed(session)
+    sent = []
+
+    async def handler(request):
+        sent.append(request)
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}]}
+        )
+
+    service = ShotDirectorSuggestionService(
+        session, text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler))
+    )
+    request = _request(scene, shot, key="prepared-historical-text")
+    first = await service.suggest(project_id=project.id, actor=user, request=request)
+    turn_id = first.director_evidence.turn_id
+    await session.execute(delete(DirectorInvocation).where(DirectorInvocation.turn_id == turn_id))
+    await session.execute(
+        update(DirectorTurn)
+        .where(DirectorTurn.id == turn_id)
+        .values(
+            status="thinking", transport_status="prepared", output_hash=None, output_snapshot={}
+        )
+    )
+    await session.commit()
+    with pytest.raises(ConflictError) as error:
+        await service.suggest(project_id=project.id, actor=user, request=request)
+    assert error.value.details["code"] == "DIRECTOR_TEXT_REQUIRES_REVIEW"
+    assert len(sent) == 1
+
+
+@pytest.mark.parametrize("outcome", ["pre_send", "possible_send", "success_after_retry"])
+async def test_transport_attempt_evidence_is_durable_and_separate_from_schema_repair(
+    session, outcome
+):
+    user, project, scene, shot, _ = await _seed(session)
+    calls = 0
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        if outcome == "pre_send" or (outcome == "success_after_retry" and calls == 1):
+            raise httpx.ConnectError("synthetic pre-send", request=request)
+        if outcome == "possible_send":
+            raise httpx.ReadTimeout("synthetic response loss", request=request)
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}]}
+        )
+
+    service = ShotDirectorSuggestionService(
+        session, text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler))
+    )
+    request = _request(scene, shot, key="transport-evidence:" + outcome)
+    if outcome == "success_after_retry":
+        await service.suggest(project_id=project.id, actor=user, request=request)
+    else:
+        with pytest.raises(ValidationAppError):
+            await service.suggest(project_id=project.id, actor=user, request=request)
+    invocation = (await session.scalars(select(DirectorInvocation))).one()
+    expected = 1 if outcome == "possible_send" else 2
+    assert calls == expected
+    assert invocation.response_summary["df_proxy_transport_attempts"] == expected
+    assert (
+        invocation.response_summary["df_proxy_failure_phase"]
+        == {
+            "pre_send": "df_proxy_pre_send",
+            "possible_send": "df_proxy_possible_send",
+            "success_after_retry": None,
+        }[outcome]
+    )
+    assert invocation.invocation_key == "text:primary:1"
+    if outcome == "success_after_retry":
+        await service.suggest(project_id=project.id, actor=user, request=request)
+    else:
+        await _assert_stored_failure(service, project, user, request)
+    assert calls == expected
+
+
+async def _assert_stored_failure(service, project, user, request):
+    with pytest.raises(ConflictError) as error:
+        await service.suggest(project_id=project.id, actor=user, request=request)
+    assert error.value.details["code"] == "DIRECTOR_TURN_NOT_REUSABLE"
+
+
+async def test_unknown_schema_repair_keeps_exact_invocation_and_never_replays(session):
+    user, project, scene, shot, _ = await _seed(session)
+    calls = []
+
+    async def handler(request):
+        calls.append(json.loads(request.content))
+        if len(calls) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": "invalid-output-" * 2000}}],
+                },
+            )
+        repair = json.loads(calls[-1]["messages"][-1]["content"])
+        assert len(repair["invalid_output"]) <= 20000
+        assert len(repair["validation_error"]) <= 4000
+        raise httpx.ReadTimeout("synthetic repair response loss", request=request)
+
+    service = ShotDirectorSuggestionService(
+        session, text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler))
+    )
+    request = _request(scene, shot, key="schema-repair:unknown")
+    with pytest.raises(ValidationAppError) as unknown:
+        await service.suggest(project_id=project.id, actor=user, request=request)
+    assert unknown.value.details["code"] == "DIRECTOR_TEXT_CALL_UNKNOWN"
+    invocations = list(
+        (
+            await session.scalars(
+                select(DirectorInvocation).order_by(DirectorInvocation.invocation_key)
+            )
+        ).all()
+    )
+    assert [invocation.invocation_key for invocation in invocations] == [
+        "text:primary:1",
+        "text:schema_repair:1",
+    ]
+    assert invocations[1].status == "unknown_submission"
+    turn = await session.get(DirectorTurn, invocations[0].turn_id)
+    assert turn.schema_repair_count == 1
+    await _assert_stored_failure(service, project, user, request)
+    assert len(calls) == 2

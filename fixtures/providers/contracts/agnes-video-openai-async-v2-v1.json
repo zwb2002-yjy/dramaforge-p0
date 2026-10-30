@@ -1,0 +1,68 @@
+{
+  "manifest": {
+    "manifest_version": "2026-09-21",
+    "provider_type": "agnes",
+    "protocol_profile": "agnes_cn_v1",
+    "model_id": "@contract/agnes-video-openai-async-v2",
+    "model_revision": "v2",
+    "media_kind": "video",
+    "display_name": "Agnes Video 2.5 协议插件",
+    "lifecycle": "active",
+    "catalog_source": "protocol_contract",
+    "documented_at": "2026-09-21",
+    "operations": {
+      "video.generate": {
+        "operation": "video.generate",
+        "capabilities": [
+          "video.i2v.first_frame"
+        ],
+        "output_constraints": {
+          "protocol_generation": "2.5",
+          "resolution": "720P",
+          "duration_seconds": 5,
+          "aspect_ratio": "9:16",
+          "native_audio": false
+        },
+        "reference_constraints": {
+          "first_frame": {
+            "min": 1,
+            "max": 1
+          }
+        },
+        "exclusive_groups": []
+      }
+    },
+    "option_schema": {
+      "namespace": "",
+      "options": {}
+    },
+    "implementation_status": "contract_tested",
+    "evidence": {
+      "current_contract": {
+        "source_type": "contract_fixture",
+        "source_url": "repository:backend/tests/unit",
+        "checked_at": "2026-10-07"
+      }
+    }
+  },
+  "manifest_hash": "a9bdcc31a87f7daced274a3f8271683029de83d3b9717223f65757feb22fe6c2",
+  "contract": {
+    "documentation_source": {
+      "notes": "Frozen local compiler contract; no provider request or account verification.",
+      "verified_at": "2026-10-07"
+    },
+    "wire_template": {
+      "method": "POST",
+      "path": "/v1/videos",
+      "request_body": {
+        "model": "<discovered-model>",
+        "prompt": "<prompt>",
+        "seconds": 5,
+        "size": "720x1280",
+        "aspect_ratio": "9:16",
+        "input_image_b64": "Zml4dHVyZQ==",
+        "input_image_mime": "image/png"
+      }
+    }
+  }
+}

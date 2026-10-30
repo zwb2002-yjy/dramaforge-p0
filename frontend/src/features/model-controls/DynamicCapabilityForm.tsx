@@ -1,3 +1,4 @@
+import { Field, Checkbox, Select, Textarea, Input, Slider } from "../../components/ui";
 /**
  * DynamicCapabilityForm (P4-03/MS8).
  *
@@ -7,15 +8,21 @@
  * CapabilitySpecRead. No provider/model-name branching.
  */
 
-import type { CapabilitySpecRead, ParameterSpecRead } from "../../lib/api";
+/**
+ * DynamicCapabilityForm (P4-03/MS8).
+ *
+ * Renders a CapabilitySpec's options purely from the manifest. Every control
+ * shape (switch/slider/select/input/textarea) and every cross-field rule
+ * (conditional allowed values, mutually exclusive groups) comes from
+ * CapabilitySpecRead. No provider/model-name branching.
+ */
+import type { CapabilitySpecRead, ParameterSpecRead } from "./api";
 import { allowedValuesFor, uiComponentFor, type OptionValue } from "../../lib/manifestOptions";
 
 const EMPTY_SPEC: CapabilitySpecRead = {
-  capability: "",
-  input_slots: {},
-  common_options: {},
-  native_options: {},
-  constraints: { mutually_exclusive: [], requires: {}, conditional: [] },
+  capability: "image.generate",
+  minimum_total_references: 0,
+  auto_match_contract: false,
   transport_profile_id: "",
 };
 
@@ -36,7 +43,7 @@ function isDisabledByExclusiveGroup(
   keyName: string,
   values: Record<string, OptionValue>,
 ): boolean {
-  for (const group of spec.constraints.mutually_exclusive) {
+  for (const group of spec.constraints?.mutually_exclusive ?? []) {
     if (!group.includes(keyName)) continue;
     const occupied = group.find((member) => member !== keyName && values[member] !== undefined);
     if (occupied !== undefined) return true;
@@ -60,25 +67,26 @@ export function OptionField({
   const allowed = allowedValuesFor(spec, keyName, parameter, values);
   const hint = exclusive ? "与已选项互斥" : undefined;
 
-  const baseClass = "w-full rounded border border-gray-300 px-2 py-1 text-sm disabled:opacity-50";
+  const baseClass = "df-model-option";
   const labelNode = (
-    <span className="mb-1 block text-xs font-medium text-gray-700">
+    <span className="df-shot-label">
       {label}
-      {hint ? <span className="ml-2 text-amber-600">{hint}</span> : null}
+      {hint ? <span className="df-shot-hint">{hint}</span> : null}
     </span>
   );
 
   if (component === "switch") {
     return (
-      <label className="flex items-center gap-2 text-sm">
-        <input
+      <Field>
+        <Checkbox
+          aria-label={label}
           type="checkbox"
           checked={Boolean(value)}
           disabled={effectiveDisabled}
           onChange={(event) => onChange(keyName, event.target.checked)}
         />
         {label}
-      </label>
+      </Field>
     );
   }
   if (component === "slider") {
@@ -87,13 +95,13 @@ export function OptionField({
     return (
       <div>
         {labelNode}
-        <input
-          type="range"
+        <Slider
+          ariaLabelForHandle={label}
           min={min}
           max={max}
           value={typeof value === "number" ? value : ((parameter.default as number) ?? min)}
           disabled={effectiveDisabled}
-          onChange={(event) => onChange(keyName, Number(event.target.value))}
+          onChange={(value) => onChange(keyName, value)}
           className="w-full"
         />
       </div>
@@ -104,19 +112,27 @@ export function OptionField({
     return (
       <div>
         {labelNode}
-        <select
-          value={String(value ?? "")}
+        <Select
+          aria-label={label}
+          value={value == null ? "__inherit__" : String(value)}
           disabled={effectiveDisabled}
-          onChange={(event) => onChange(keyName, event.target.value)}
+          onChange={(selected) =>
+            onChange(
+              keyName,
+              selected === "__inherit__"
+                ? undefined
+                : options.find((option) => String(option) === selected),
+            )
+          }
           className={baseClass}
         >
-          <option value="">（默认）</option>
+          <option value="__inherit__">（继承默认）</option>
           {options.map((option) => (
             <option key={String(option)} value={String(option)}>
               {String(option)}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
     );
   }
@@ -124,7 +140,8 @@ export function OptionField({
     return (
       <div>
         {labelNode}
-        <textarea
+        <Textarea
+          aria-label={label}
           value={String(value ?? "")}
           disabled={effectiveDisabled}
           onChange={(event) => onChange(keyName, event.target.value)}
@@ -138,11 +155,17 @@ export function OptionField({
     return (
       <div>
         {labelNode}
-        <input
+        <Input
+          aria-label={label}
           type="number"
           value={typeof value === "number" ? value : ""}
           disabled={effectiveDisabled}
-          onChange={(event) => onChange(keyName, Number(event.target.value))}
+          min={parameter.minimum ?? undefined}
+          max={parameter.maximum ?? undefined}
+          step={parameter.type === "integer" ? 1 : "any"}
+          onChange={(event) =>
+            onChange(keyName, event.target.value === "" ? undefined : Number(event.target.value))
+          }
           className={baseClass}
         />
       </div>
@@ -151,7 +174,8 @@ export function OptionField({
   return (
     <div>
       {labelNode}
-      <input
+      <Input
+        aria-label={label}
         type="text"
         value={String(value ?? "")}
         disabled={effectiveDisabled}
@@ -168,6 +192,7 @@ export interface DynamicCapabilityFormProps {
   onChange: (key: string, value: OptionValue) => void;
   /** Keys to render in the main form (defaults to common_options). */
   optionKeys?: string[];
+  disabled?: boolean;
 }
 
 export function DynamicCapabilityForm({
@@ -175,12 +200,14 @@ export function DynamicCapabilityForm({
   values,
   onChange,
   optionKeys,
+  disabled,
 }: DynamicCapabilityFormProps) {
-  const keys = optionKeys ?? Object.keys(spec.common_options);
+  const commonOptions = spec.common_options ?? {};
+  const keys = optionKeys ?? Object.keys(commonOptions);
   return (
     <div className="space-y-3" data-testid="dynamic-capability-form">
       {keys.map((key) => {
-        const parameter = spec.common_options[key];
+        const parameter = commonOptions[key];
         if (!parameter) return null;
         return (
           <OptionField
@@ -192,6 +219,7 @@ export function DynamicCapabilityForm({
             onChange={onChange}
             values={values}
             spec={spec}
+            disabled={disabled}
           />
         );
       })}

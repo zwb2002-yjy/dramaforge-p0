@@ -3,7 +3,7 @@
 A :class:`ProviderPlugin` is the extension point for a model supplier: it
 describes one ``(provider_type, protocol_profile)`` pair — its default host,
 BYOK credential key, model contracts, capability→purpose mapping, and how to
-build the protocol client used for account verification.
+build the Compiler/Runtime used by production and read-only task verification.
 
 Adding a supplier means registering a plugin; execution code resolves plugins
 from the registry instead of branching on provider names. A plugin may be
@@ -15,16 +15,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
-from app.config import Settings
 from app.providers.adapter import ModelAdapter
 from app.providers.capabilities import Capability, capability_satisfied
 from app.providers.manifest import ModelManifest
-
-# (settings, host) -> protocol client. The client exposes the create/poll surface
-# used by capability probes (create_image / create_video / poll_video).
-ClientFactory = Callable[[Settings, str | None], Any]
 
 
 @dataclass(frozen=True)
@@ -33,28 +28,26 @@ class ProviderPlugin:
     protocol_profile: str
     display_name: str
     default_base_url: str
-    # Whether the protocol client is implemented. Catalog-only plugins cannot be
+    # Whether protocol execution is implemented. Catalog-only plugins cannot be
     # used to create connections or run probes.
     implemented: bool = False
+    auth_modes: frozenset[str] = frozenset({"bearer"})
+    manual_model_ids: bool = False
+    base_url_normalizer: Callable[[str], str] | None = None
     # BYOK credential slot key; defaults to provider_type.
     credential_provider_key: str | None = None
     # Settings field prefix (``<prefix>_enabled/api_key/base_url/...``); defaults
     # to provider_type.
     settings_prefix: str | None = None
-    # (media_type, purpose) -> model id that this profile is allowed to bind.
-    # DEPRECATED in favor of catalog_manifests; retained for legacy validation.
-    model_contracts: dict[tuple[str, str], str] = field(default_factory=dict)
     # capability -> purpose advanced by account verification (image_i2i->keyframe).
     capability_purposes: dict[str, str] = field(default_factory=dict)
-    # Capabilities that spend real budget and require an explicit authorization.
+    # Paid capabilities require explicit Owner authorization.
     paid_capabilities: frozenset[str] = frozenset()
-    # How an image I2I capability probe carries its canonical artifact. The
-    # connection service routes by this declared protocol contract, never by
-    # supplier name.
-    image_i2i_probe_transport: str = "bytes"
     # Path suffix (on default_base_url) used by the auth_models capability probe.
     model_list_path: str = "/v1/models"
-    client_factory: ClientFactory | None = None
+    # Whether a successful list is complete for this plugin's media models.
+    # A positive-only list can prove a present ID, but omission is inconclusive.
+    availability_list_scope: Literal["none", "positive_only", "complete"] = "none"
     # Versioned capability manifests shipped with the plugin (current seed).
     catalog_manifests: tuple[dict[str, Any], ...] = ()
     # Factories for the unified runtime/compiler surface (stages B1-B3).
@@ -68,14 +61,6 @@ class ProviderPlugin:
     @property
     def prefix(self) -> str:
         return self.settings_prefix or self.provider_type
-
-    def build_client(self, settings: Settings, *, host: str | None = None) -> Any:
-        if self.client_factory is None:
-            raise NotImplementedError(
-                f"provider plugin {self.provider_type}/{self.protocol_profile} "
-                "has no protocol client implementation"
-            )
-        return self.client_factory(settings, host)
 
 
 _registry: dict[tuple[str, str], ProviderPlugin] = {}
@@ -109,24 +94,6 @@ def implemented_plugins() -> list[ProviderPlugin]:
     )
 
 
-def _agnes_hub_client(settings: Settings, host: str | None) -> Any:
-    from app.providers.agnes import AgnesHubClient
-
-    return AgnesHubClient(settings, host=host)
-
-
-def _ark_hub_client(settings: Settings, host: str | None) -> Any:
-    from app.providers.volcengine import ArkHubClient
-
-    return ArkHubClient(settings, host=host)
-
-
-def _minimax_hub_client(settings: Settings, host: str | None) -> Any:
-    from app.providers.minimax import MiniMaxHubClient
-
-    return MiniMaxHubClient(settings, host=host)
-
-
 def _register_defaults() -> None:
     from app.providers.agnes import (
         AGNES_CN_HOST,
@@ -134,7 +101,21 @@ def _register_defaults() -> None:
         _agnes_compiler_factory,
         _agnes_runtime_factory,
     )
-    from app.providers.catalog_seed_data import seed_manifests_for
+    from app.providers.catalog_loader import active_manifests_for
+    from app.providers.openai_compatible_media import (
+        OPENAI_IMAGES_PROFILE,
+        OPENAI_JSON_VIDEO_PROFILE,
+        OPENAI_MEDIA_DEFAULT_HOST,
+        OPENAI_MEDIA_PROFILE,
+        _json_video_compiler_factory,
+        _json_video_runtime_factory,
+        _openai_compatible_media_compiler_factory,
+        _openai_compatible_media_runtime_factory,
+        _openai_images_compiler_factory,
+        _openai_images_runtime_factory,
+        normalize_images_base_url,
+        normalize_json_video_base_url,
+    )
 
     register_plugin(
         ProviderPlugin(
@@ -145,17 +126,99 @@ def _register_defaults() -> None:
             implemented=True,
             settings_prefix="agnes",
             credential_provider_key="agnes",
-            model_contracts={
-                ("image", "keyframe"): "agnes-image-2.1-flash",
-                ("video", "video"): "agnes-video-v2.0",
-            },
             capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
             paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
             model_list_path="/v1/models",
-            client_factory=_agnes_hub_client,
-            catalog_manifests=tuple(seed_manifests_for(provider_type="agnes")),
+            # Completeness for every media model is not established by the
+            # catalog endpoint. Only an exact returned ID proves visibility.
+            availability_list_scope="positive_only",
+            catalog_manifests=tuple(active_manifests_for(provider_type="agnes")),
             runtime_factory=_agnes_runtime_factory,
             compiler_factory=_agnes_compiler_factory,
+        )
+    )
+    register_plugin(
+        ProviderPlugin(
+            provider_type="openai_compatible_media",
+            protocol_profile=OPENAI_IMAGES_PROFILE,
+            display_name="通用 Images 文生图（同步）",
+            default_base_url="",
+            implemented=True,
+            auth_modes=frozenset({"bearer", "none"}),
+            manual_model_ids=True,
+            base_url_normalizer=normalize_images_base_url,
+            availability_list_scope="positive_only",
+            settings_prefix="openai_compatible_media",
+            credential_provider_key="openai_compatible_media",
+            capability_purposes={"image_t2i": "keyframe"},
+            paid_capabilities=frozenset({"image_t2i"}),
+            model_list_path="/models",
+            catalog_manifests=tuple(
+                m
+                for m in active_manifests_for(provider_type="openai_compatible_media")
+                if m["protocol_profile"] == OPENAI_IMAGES_PROFILE
+            ),
+            runtime_factory=_openai_images_runtime_factory,
+            compiler_factory=_openai_images_compiler_factory,
+        )
+    )
+    register_plugin(
+        ProviderPlugin(
+            provider_type="openai_compatible_media",
+            protocol_profile=OPENAI_MEDIA_PROFILE,
+            display_name="OpenAI 兼容图像 / 视频",
+            default_base_url=OPENAI_MEDIA_DEFAULT_HOST,
+            implemented=True,
+            settings_prefix="openai_compatible_media",
+            credential_provider_key="openai_compatible_media",
+            capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
+            paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
+            model_list_path="/models",
+            catalog_manifests=tuple(
+                m
+                for m in active_manifests_for(provider_type="openai_compatible_media")
+                if m["protocol_profile"] == OPENAI_MEDIA_PROFILE
+            ),
+            runtime_factory=_openai_compatible_media_runtime_factory,
+            compiler_factory=_openai_compatible_media_compiler_factory,
+        )
+    )
+    register_plugin(
+        ProviderPlugin(
+            provider_type="openai_compatible_media",
+            protocol_profile=OPENAI_JSON_VIDEO_PROFILE,
+            display_name="JSON 文生视频（请求候选）",
+            default_base_url="",
+            implemented=True,
+            auth_modes=frozenset({"bearer", "none"}),
+            manual_model_ids=True,
+            base_url_normalizer=normalize_json_video_base_url,
+            availability_list_scope="positive_only",
+            settings_prefix="openai_compatible_media",
+            credential_provider_key="openai_compatible_media",
+            model_list_path="/models",
+            catalog_manifests=tuple(
+                m
+                for m in active_manifests_for(provider_type="openai_compatible_media")
+                if m["protocol_profile"] == OPENAI_JSON_VIDEO_PROFILE
+            ),
+            runtime_factory=_json_video_runtime_factory,
+            compiler_factory=_json_video_compiler_factory,
+        )
+    )
+    # Connection plugin for a workspace-scoped LiteLLM or OpenAI-compatible
+    # text gateway. Model capability plugins are registered from discovery;
+    # this record owns only URL/auth/model-list transport.
+    register_plugin(
+        ProviderPlugin(
+            provider_type="litellm",
+            protocol_profile="openai_chat_v1",
+            display_name="LiteLLM / OpenAI 兼容文本服务",
+            default_base_url="http://litellm:4000",
+            implemented=True,
+            settings_prefix="litellm",
+            credential_provider_key="litellm",
+            model_list_path="/v1/models",
         )
     )
     from app.providers.minimax import (
@@ -174,16 +237,11 @@ def _register_defaults() -> None:
             implemented=True,
             settings_prefix="minimax",
             credential_provider_key="minimax",
-            model_contracts={
-                ("image", "keyframe"): "image-01",
-                ("video", "video"): "MiniMax-H3",
-            },
             capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
             paid_capabilities=frozenset({"image_i2i", "video_i2v"}),
-            image_i2i_probe_transport="public_url",
             model_list_path="/v1/models",
-            client_factory=_minimax_hub_client,
-            catalog_manifests=tuple(seed_manifests_for(provider_type="minimax")),
+            availability_list_scope="positive_only",
+            catalog_manifests=tuple(active_manifests_for(provider_type="minimax")),
             runtime_factory=_minimax_runtime_factory,
             compiler_factory=_minimax_compiler_factory,
         )
@@ -205,17 +263,12 @@ def _register_defaults() -> None:
             implemented=True,
             settings_prefix="volcengine",
             credential_provider_key="volcengine",
-            model_contracts={
-                ("image", "keyframe"): "doubao-seedream-4-0-250828",
-                ("video", "video"): "doubao-seedance-2-0-260128",
-            },
             capability_purposes={"image_i2i": "keyframe", "video_i2v": "video"},
             paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
             # TODO(phase-d): confirm whether the Ark data plane exposes a model
             # list endpoint; the auth_models probe may need a different check.
             model_list_path="/models",
-            client_factory=_ark_hub_client,
-            catalog_manifests=tuple(seed_manifests_for(provider_type="volcengine")),
+            catalog_manifests=tuple(active_manifests_for(provider_type="volcengine")),
             runtime_factory=_ark_runtime_factory,
             compiler_factory=_ark_compiler_factory,
         )
@@ -223,6 +276,36 @@ def _register_defaults() -> None:
 
 
 _register_defaults()
+
+
+def _validate_catalog_registration() -> None:
+    """Every file-backed manifest must belong to a registered protocol plugin."""
+    from app.providers.catalog_loader import CATALOG_MODELS
+
+    declared = {
+        (
+            item["provider_type"],
+            item["protocol_profile"],
+            item["model_id"],
+            item["model_revision"],
+        )
+        for item in CATALOG_MODELS
+    }
+    registered = {
+        (
+            item["provider_type"],
+            item["protocol_profile"],
+            item["model_id"],
+            item["model_revision"],
+        )
+        for plugin in _registry.values()
+        for item in plugin.catalog_manifests
+    }
+    if declared != registered:
+        raise ValueError("model catalog contains manifests without a registered provider profile")
+
+
+_validate_catalog_registration()
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +331,7 @@ class UnknownModelError(LookupError):
 @dataclass(frozen=True)
 class RegisteredModel:
     manifest: ModelManifest
-    adapter: ModelAdapter
+    adapter: ModelAdapter | None
 
 
 class ModelRegistry:
@@ -258,7 +341,7 @@ class ModelRegistry:
     def __init__(self) -> None:
         self._models: dict[str, RegisteredModel] = {}
 
-    def register(self, manifest: ModelManifest, adapter: ModelAdapter) -> None:
+    def register(self, manifest: ModelManifest, adapter: ModelAdapter | None = None) -> None:
         if manifest.id in self._models:
             raise DuplicateModelError(manifest.id)
         self._models[manifest.id] = RegisteredModel(manifest=manifest, adapter=adapter)

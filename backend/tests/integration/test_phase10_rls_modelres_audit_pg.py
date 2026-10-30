@@ -34,17 +34,14 @@ from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun
-from app.production.models import (
-    ProductionExperiment,
-    ShotExperiment,
-    ShotReferenceBinding,
-)
+from app.production.models import ExperimentBranch, ShotReferenceBinding
 from app.production.workbench_execution import (
+    WorkbenchExecutionError,
     WorkbenchExecutionInput,
     WorkbenchExecutionService,
 )
+from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.models import (
@@ -58,6 +55,7 @@ from app.shared.security import hash_password
 from pg_support import available, database_url
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from tests.unit.model_infra_fixture import unit_video_manifest
 
 
 def _postgres_is_available() -> bool:
@@ -90,8 +88,7 @@ P10_05_TABLES = [
     "asset_tag_links",  # tag
     "shot_reference_bindings",
     "asset_version_references",  # binding
-    "production_experiments",
-    "shot_experiments",  # experiment
+    "experiment_branches",  # experiment
     "review_annotations",  # annotation
     "director_threads",
     "director_messages",  # director assistant
@@ -178,7 +175,7 @@ async def _seed_user_workspace_projects(session: AsyncSession, suffix: str) -> d
             name="Lin Xia",
             description="Lead",
             metadata_json={},
-            status="draft",
+            status="formal",
             created_by=user.id,
         )
     )
@@ -237,21 +234,13 @@ async def _seed_user_workspace_projects(session: AsyncSession, suffix: str) -> d
             proposal_id=proposal.id, project_id=project_b.id, command="shot.update_design"
         )
     )
-    experiment = ProductionExperiment(
-        project_id=project_b.id,
-        name="B exp",
-        idempotency_key=f"exp-{suffix}",
-        status="draft",
-        created_by=user.id,
-    )
-    session.add(experiment)
-    await session.flush()
     session.add(
-        ShotExperiment(
-            production_experiment_id=experiment.id,
+        ExperimentBranch(
             project_id=project_b.id,
-            shot_id=shot.id,
-            prompts={},
+            source_shot_id=shot.id,
+            name="B exp",
+            idempotency_key=f"exp-{suffix}",
+            status="draft",
             created_by=user.id,
         )
     )
@@ -468,12 +457,8 @@ async def test_phase10_rls_cross_project_negative_pg(pg_session: AsyncSession) -
             select(DirectorProposalItem.id).where(DirectorProposalItem.project_id == project_b.id),
         ),
         (
-            "production_experiments",
-            select(ProductionExperiment.id).where(ProductionExperiment.project_id == project_b.id),
-        ),
-        (
-            "shot_experiments",
-            select(ShotExperiment.id).where(ShotExperiment.project_id == project_b.id),
+            "experiment_branches",
+            select(ExperimentBranch.id).where(ExperimentBranch.project_id == project_b.id),
         ),
         (
             "shot_reference_bindings",
@@ -556,7 +541,7 @@ async def _seed_professional_resolution(session: AsyncSession, suffix: str) -> d
     shot.formal_keyframe_artifact_id = keyframe.id
     await session.flush()
 
-    manifest = next(item for item in SEED_MANIFESTS if item["model_id"] == "agnes-video-v2.0")
+    manifest = unit_video_manifest()
     model_id = f"p10-res-{suffix}"
     entry = ModelCatalogEntry(
         provider_type="agnes",
@@ -656,6 +641,7 @@ async def _seed_professional_resolution(session: AsyncSession, suffix: str) -> d
         "keyframe": keyframe,
         "credential_revision": credential_revision,
         "connection_revision": connection_revision,
+        "profile": profile,
     }
 
 
@@ -675,6 +661,32 @@ async def test_phase10_professional_resolution_no_bypass_pg(pg_session: AsyncSes
     )
 
     service = WorkbenchExecutionService(pg_session, user_id=user.id)
+    # A saved Profile option must be consumed, not silently ignored. The
+    # controlled Agnes contract does not declare seed, so reject it before any
+    # run exists; explicitly repair the test Profile before testing dispatch.
+    with pytest.raises(WorkbenchExecutionError) as invalid_profile:
+        await service.build_plan(
+            project=project,
+            execution_input=WorkbenchExecutionInput(
+                project_id=project.id,
+                stage="video",
+                shot_id=shot.id,
+                prompt="Lin Xia turns at the corner",
+                semantic_intent={"action": "turn"},
+                mode_id="explicit_binding",
+            ),
+        )
+    assert invalid_profile.value.details["code"] == "MODEL_OPTION_UNDECLARED"
+    assert invalid_profile.value.details["option"] == "seed"
+    assert (
+        await pg_session.scalar(select(NodeRun.id).where(NodeRun.project_id == project.id)) is None
+    )
+    profile = seed["profile"]
+    profile.bindings = {
+        slot: {**value, "native_options": {}} for slot, value in profile.bindings.items()
+    }
+    profile.version += 1
+    await pg_session.flush()
     plan = await service.build_plan(
         project=project,
         execution_input=WorkbenchExecutionInput(

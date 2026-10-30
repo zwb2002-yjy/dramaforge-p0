@@ -12,6 +12,20 @@ class TimelineTimingError(ValueError):
     pass
 
 
+@dataclass(frozen=True, kw_only=True)
+class TimelineClipInstructions:
+    clip_id: str
+    video_artifact_id: str
+    subtitle_text: str
+    source_in_seconds: float
+    duration_seconds: float
+    transition_kind: str | None = None
+    transition_duration_seconds: float = 0.0
+    audio_artifact_id: str | None = None
+    source_out_seconds: float | None = None
+    audio_volume: float = 1.0
+
+
 class TimedClip(Protocol):
     @property
     def clip_id(self) -> str: ...
@@ -65,6 +79,14 @@ def _timestamp(milliseconds: int) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
 
 
+def normalize_subtitle_text(text: str) -> str:
+    return "\n".join(
+        line
+        for line in text.replace("\r\n", "\n").replace("\r", "\n").strip().split("\n")
+        if line.strip()
+    )
+
+
 def build_timeline_subtitles(clips: Sequence[TimedClip]) -> TimelineSubtitleMap:
     if not clips:
         raise TimelineTimingError("Timeline has no clips")
@@ -107,14 +129,7 @@ def build_timeline_subtitles(clips: Sequence[TimedClip]) -> TimelineSubtitleMap:
         )
         # Empty lines delimit cues in SRT; retain all nonempty Unicode lines
         # without accidentally emitting another cue or resurrecting old dialogue.
-        text = "\n".join(
-            line
-            for line in clip.subtitle_text.replace("\r\n", "\n")
-            .replace("\r", "\n")
-            .strip()
-            .split("\n")
-            if line.strip()
-        )
+        text = normalize_subtitle_text(clip.subtitle_text)
         if text:
             cues.append(f"{len(cues) + 1}\n{_timestamp(start)} --> {_timestamp(end)}\n{text}\n")
     return TimelineSubtitleMap(tuple(timings), end, len(cues), "\n".join(cues).encode("utf-8"))

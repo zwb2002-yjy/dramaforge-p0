@@ -28,7 +28,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         fonts-noto-cjk \
         ffmpeg \
         git \
-        postgresql-client; do \
+        postgresql-client \
+        iptables; do \
         if [ "${attempt}" -ge 3 ]; then exit 1; fi; \
         attempt=$((attempt + 1)); \
         apt-get ${apt_options} update; \
@@ -78,4 +79,4 @@ USER 10001:10001
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--no-proxy-headers"]

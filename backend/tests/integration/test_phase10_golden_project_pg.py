@@ -22,12 +22,12 @@ from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.director.proposal_models import DirectorProposalItem
 from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun
-from app.production.golden_project import seed_golden_project
-from app.production.models import ProductionExperiment, ShotExperiment
+from app.production.models import ExperimentBranch
 from app.shared.db import set_rls_context
 from pg_support import available, database_url
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from tests.golden_project import seed_golden_project
 
 
 def _postgres_is_available() -> bool:
@@ -104,18 +104,9 @@ async def test_golden_professional_project_covers_p10_06_pg(pg_session: AsyncSes
     assert len(runs) >= 2
 
     # Experiment branch.
-    experiment = await pg_session.get(ProductionExperiment, golden.experiment.id)
+    experiment = await pg_session.get(ExperimentBranch, golden.experiment.id)
     assert experiment is not None
-    shot_experiments = (
-        (
-            await pg_session.execute(
-                select(ShotExperiment).where(ShotExperiment.project_id == golden.project.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert len(shot_experiments) >= 1
+    assert experiment.source_shot_id == shot_one.id
 
     # Review + repair.
     assert golden.open_annotation is not None and golden.open_annotation.status == "open"

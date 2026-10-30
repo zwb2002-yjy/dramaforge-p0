@@ -35,7 +35,6 @@ class ModelSlot(StrEnum):
 
     VIDEO_SHOT = "video.shot"
 
-    AUDIO_TTS = "audio.tts"
 
 
 class ModelSlotDefinition(BaseModel):
@@ -44,7 +43,6 @@ class ModelSlotDefinition(BaseModel):
 
     slot: ModelSlot
     required_capabilities: list[Capability]
-    fallback_slot: ModelSlot | None = None
     description: str
 
 
@@ -89,6 +87,7 @@ MODEL_SLOT_DEFINITIONS: dict[ModelSlot, ModelSlotDefinition] = {
         required_capabilities=[
             Capability.VIDEO_TEXT_TO_VIDEO,
             Capability.VIDEO_IMAGE_TO_VIDEO,
+            Capability.VIDEO_LAST_FRAME_TO_VIDEO,
             Capability.VIDEO_FIRST_LAST_FRAME,
             Capability.VIDEO_REFERENCE_TO_VIDEO,
         ],
@@ -96,11 +95,6 @@ MODEL_SLOT_DEFINITIONS: dict[ModelSlot, ModelSlotDefinition] = {
             "镜头视频。一个 Slot 可服务多个视频 Capability；具体模型不必支持全部，"
             "最终 Router 按实际请求 Capability 验证（spec §10）。"
         ),
-    ),
-    ModelSlot.AUDIO_TTS: ModelSlotDefinition(
-        slot=ModelSlot.AUDIO_TTS,
-        required_capabilities=[Capability.AUDIO_TTS],
-        description="对白 / 旁白语音合成。",
     ),
 }
 
@@ -147,8 +141,11 @@ def slot_satisfies(slot: ModelSlot, capability: Capability) -> bool:
 
 def slots_for_capability(capability: Capability) -> list[ModelSlot]:
     """Slots that declare ``capability`` — used to filter the slot picker."""
-    return [slot for slot, definition in MODEL_SLOT_DEFINITIONS.items()
-            if capability in definition.required_capabilities]
+    return [
+        slot
+        for slot, definition in MODEL_SLOT_DEFINITIONS.items()
+        if capability in definition.required_capabilities
+    ]
 
 
 def validate_slot_definitions() -> None:
@@ -164,24 +161,6 @@ def validate_slot_definitions() -> None:
         for capability in definition.required_capabilities:
             if not isinstance(capability, Capability):
                 raise ValueError(f"slot {slot} has non-Capability requirement: {capability!r}")
-    # Acyclic fallback graph: simple DFS cycle detection.
-    visiting: set[ModelSlot] = set()
-    visited: set[ModelSlot] = set()
-
-    def visit(node: ModelSlot) -> None:
-        if node in visited:
-            return
-        if node in visiting:
-            raise ValueError(f"fallback_slot cycle detected at {node}")
-        visiting.add(node)
-        definition = MODEL_SLOT_DEFINITIONS.get(node)
-        if definition is not None and definition.fallback_slot is not None:
-            visit(definition.fallback_slot)
-        visiting.discard(node)
-        visited.add(node)
-
-    for slot in MODEL_SLOT_DEFINITIONS:
-        visit(slot)
 
 
 validate_slot_definitions()

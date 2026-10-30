@@ -1,7 +1,7 @@
 # ARCHITECTURE — 架构与代码归属权威
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Date: 2026-09-14 / Base: dev 070faa3 / Alembic head: 20260910_0066
+Updated: 2026-10-07；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 
 本文件描述**当前项目实际怎么组成**。它受架构宪法
 [CANONICAL_ARCHITECTURE.md](CANONICAL_ARCHITECTURE.md) 约束：宪法定义目标世界观，
@@ -38,13 +38,13 @@ Date: 2026-09-14 / Base: dev 070faa3 / Alembic head: 20260910_0066
 |---|---|---|---|
 | Access | backend/app/access | users, workspaces, projects, workspace state and creative profile | media execution or provider selection |
 | Story/Assets | backend/app/assets | ScriptDocument, Episode, Scene, Shot, Asset, AssetVersion, version references, tags | provider calls |
-| References | backend/app/production/reference_intents.py and api/v1/references.py | explicit binding, compilation, model capability gaps | name/prompt fallback |
+| References | backend/app/contracts/shot_reference.py, production/reference_intents.py and api/v1/references.py | shared intent, explicit binding, compilation, model capability gaps | name/prompt fallback |
 | Workbench | backend/app/workbench and backend/app/production/workbench_execution.py | workspace state, frozen execution plan and NodeRun creation | direct Provider HTTP, budget gate |
 | Production graph | backend/app/production | graph versions, branches, formal selection, repair plans, Final Film and timeline rendering | HTTP/API concerns, silent rerun |
-| Runtime | backend/app/execution/product_path.py and voice_path.py | Worker execution, lineage, artifact persistence, shot locks | HTTP/API concerns, old branches |
+| Runtime | backend/app/execution (module responsibilities in PRODUCTION_RUNTIME.md) | Worker execution, lineage, artifact persistence, shot locks | HTTP/API concerns, old branches |
 | Director Assistant | backend/app/director/assistant_models.py, suggestion.py, proposal_* | suggestions, threads, typed proposal/apply boundary | media, budgets, workflow ownership |
 | Director runtime | backend/app/director/runtime and backend/app/workers/director.py | turn/invocation identity, engine routing, checkpoints, wakeups, resume fencing | Canonical media writes or bypassing Apply/Save/Formal gates |
-| Providers | backend/app/providers | manifests, compilers, runtime adapters, connection/credential revisions, model profiles | product stages or UI state |
+| Providers | backend/app/providers | file-backed catalog, manifests/input contracts, compilers, runtime adapters, connection/credential revisions, availability and model profiles | product stages or UI state |
 | Review/Repair | backend/app/delivery and backend/app/production/repair_service.py | annotations, decisions, explicit repair plans | silent rerun or fallback |
 | Editing | backend/app/editing, api/v1/editing.py, api/v1/opencut.py | EditSession timeline, suggestions and export | rewriting production truth |
 | Events | backend/app/events and backend/app/workers/dispatcher.py | event log, outbox delivery, dead letters, SSE | product decisions |
@@ -57,8 +57,8 @@ Date: 2026-09-14 / Base: dev 070faa3 / Alembic head: 20260910_0066
 
 UI → typed API client（OpenAPI 生成）→ domain service → canonical models/runtime。
 Provider adapter 只能被 Workbench Worker 执行或其显式配置/探测边界触达。
-所有源码提交必须通过容器质量门（[DEVELOPMENT.md](DEVELOPMENT.md)）和
-generated OpenAPI 检查。
+验证按改动影响执行，发布候选必须通过完整容器质量门；API 变更同时检查 generated
+OpenAPI。`dev` 快速开发与 `main` 的强制门边界见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 ## 退役表面边界（已硬删除，禁止回归）
 

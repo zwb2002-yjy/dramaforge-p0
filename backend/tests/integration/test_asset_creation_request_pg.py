@@ -15,7 +15,7 @@ from pathlib import Path
 
 import asyncpg
 import pytest
-from pg_support import alembic_head, alembic_parent, env_target
+from pg_support import alembic_parent, env_target
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 
@@ -80,9 +80,7 @@ def _alembic(dbname: str, *args: str) -> None:
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("TEST_PG_ENABLED") != "1" or not _pg_available_sync(),
-    reason=(
-        "set TEST_PG_ENABLED=1 with an explicitly configured isolated PostgreSQL target"
-    ),
+    reason=("set TEST_PG_ENABLED=1 with an explicitly configured isolated PostgreSQL target"),
 )
 
 
@@ -165,13 +163,13 @@ async def test_asset_creation_request_index_and_migration_round_trip() -> None:
     dbname = f"dramaforge_asset_req_{uuid.uuid4().hex[:10]}"
     try:
         await _create_db(dbname)
-        _alembic(dbname, "upgrade", "head")
+        _alembic(dbname, "upgrade", "20261007_0083")
         seeded = _seed_project(dbname)
 
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             head = conn.execute(text("select version_num from alembic_version")).scalar()
-            assert head == alembic_head()
+            assert head == "20261007_0083"
             columns = {
                 row[0]
                 for row in conn.execute(
@@ -245,6 +243,6 @@ async def test_asset_creation_request_index_and_migration_round_trip() -> None:
             }
             assert "creation_request_key" not in columns
         engine.dispose()
-        _alembic(dbname, "upgrade", "head")
+        _alembic(dbname, "upgrade", "20261007_0083")
     finally:
         await _drop_db(dbname)

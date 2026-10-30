@@ -5,6 +5,7 @@ from __future__ import annotations
 from arq.connections import RedisSettings
 
 from app.config import get_settings
+from app.runtime.resources import shutdown_runtime_resources
 from app.workers.jobs import JOB_FUNCTIONS, recover_interrupted_provider_jobs
 
 
@@ -18,6 +19,7 @@ class WorkerSettings:
 
     functions = JOB_FUNCTIONS
     on_startup = recover_interrupted_provider_jobs
+    on_shutdown = shutdown_runtime_resources
     redis_settings = _redis_settings()
     queue_name = get_settings().arq_heavy_queue_name
     max_jobs = get_settings().arq_heavy_max_jobs

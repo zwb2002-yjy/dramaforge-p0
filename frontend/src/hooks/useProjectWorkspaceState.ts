@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiGet, apiSend, fetchCsrf } from "../lib/api";
+import { fetchWorkspaceState, updateWorkspaceState } from "../features/project/api";
 import { queryKeys } from "../lib/queryKeys";
 
 /**
@@ -29,41 +29,21 @@ export function workspaceViewFromPath(pathname: string): WorkspaceView | null {
     : null;
 }
 
-type WorkspaceStateRead = {
-  state: Record<string, unknown>;
-};
-
-function fetchWorkspaceState(projectId: string): Promise<WorkspaceStateRead> {
-  return apiGet<WorkspaceStateRead>(`/api/v1/projects/${projectId}/workspace-state`);
-}
-
-async function updateWorkspaceState(
-  projectId: string,
-  state: Record<string, unknown>,
-): Promise<WorkspaceStateRead> {
-  const csrf = await fetchCsrf();
-  return apiSend<WorkspaceStateRead>(
-    "PATCH",
-    `/api/v1/projects/${projectId}/workspace-state`,
-    { state },
-    csrf,
-  );
-}
-
 export function useProjectWorkspaceState(projectId: string) {
   const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: queryKeys.workspace.state(projectId),
     queryFn: () => fetchWorkspaceState(projectId),
-    enabled: Boolean(projectId) && projectId !== "demo",
+    enabled: Boolean(projectId),
     staleTime: 30_000,
+    retry: false,
   });
 
   const mutation = useMutation({
-    mutationFn: (state: Record<string, unknown>) => updateWorkspaceState(projectId, state),
+    mutationFn: (state: Record<string, unknown>) => updateWorkspaceState(projectId, { state }),
     onSuccess: (result) => {
-      queryClient.setQueryData(["workspace-state", projectId], result);
+      queryClient.setQueryData(queryKeys.workspace.state(projectId), result);
     },
   });
 
@@ -78,6 +58,10 @@ export function useProjectWorkspaceState(projectId: string) {
     state,
     lastView,
     isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    isError: query.isError,
+    error: query.error,
+    retry: query.refetch,
     isSaving: mutation.isPending,
     rememberState(partial: Record<string, unknown>) {
       mutation.mutate(partial);

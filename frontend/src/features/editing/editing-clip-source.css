@@ -1,0 +1,44 @@
+.editing-clip-source {
+  display: grid;
+  gap: var(--df-space-2);
+  margin-block-end: var(--df-space-4);
+  padding-block-end: var(--df-space-3);
+  border-bottom: 1px solid var(--df-border);
+}
+.editing-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--df-space-2);
+}
+.editing-clip-source p {
+  margin: 0;
+  font-size: var(--df-font-size-caption);
+  color: var(--df-text-muted);
+}
+.editing-source-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--df-space-4);
+  margin-block: var(--df-space-4);
+}
+.editing-source-comparison figure {
+  margin: 0;
+  min-width: 0;
+}
+.editing-source-comparison figcaption {
+  margin-block-end: var(--df-space-2);
+  font-size: var(--df-font-size-caption);
+  color: var(--df-text-secondary);
+}
+.editing-source-comparison video {
+  width: 100%;
+  height: var(--df-edit-preview-height);
+  object-fit: contain;
+  background: var(--df-surface-screen);
+  border-radius: var(--df-radius-container);
+}
+@media (max-width: 640px) {
+  .editing-source-comparison {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

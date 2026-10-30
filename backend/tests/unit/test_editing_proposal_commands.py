@@ -141,7 +141,7 @@ async def _seed(
         graph_node_id=node.id,
         idempotency_key=f"edit-proposal:{uuid4().hex}",
         input_hash="a" * 64,
-        status="completed",
+        status="queued",
         input_snapshot={"shot_id": str(shot.id), "stage": "video"},
         output_summary={"source": "test"},
         created_by=user.id,
@@ -162,6 +162,7 @@ async def _seed(
     session.add(artifact)
     await session.flush()
     run.result_artifact_id = artifact.id
+    run.status = "completed"
     shot.formal_video_artifact_id = artifact.id
     operation = ProviderOperation(
         node_run_id=run.id,
@@ -287,6 +288,7 @@ async def test_manual_save_bumps_edit_session_version_once(session: AsyncSession
         project_id=project.id,
         session_id=edit_session.id,
         timeline={"clips": list(edit_session.timeline["clips"]), "metadata": {"manual": True}},
+        expected_session_version=1,
     )
     assert saved.version == 2
     assert saved.timeline["metadata"] == {"manual": True}
@@ -303,6 +305,7 @@ async def test_valid_reorder_duration_and_subtitle_plan_bumps_once_and_preserves
         project_id=project.id,
         session_id=edit_session.id,
         timeline=dict(edit_session.timeline),
+        expected_session_version=1,
     )
     await session.refresh(edit_session)
     facts_before = await _snapshot_facts(
@@ -387,6 +390,7 @@ async def test_stale_edit_session_proposal_marks_item_stale_without_mutation(
         project_id=project.id,
         session_id=edit_session.id,
         timeline=dict(edit_session.timeline),
+        expected_session_version=1,
     )
     await session.refresh(edit_session)
     before = (
@@ -620,8 +624,8 @@ async def test_malformed_edit_session_plans_fail_closed_without_mutation(
     assert edit_session.production_lineage == before[2]
 
 
-def test_plan_rejects_forbidden_fields_and_accepts_aliases() -> None:
-    from app.editing.proposal_plan import EditSessionTimelinePlan
+def test_plan_rejects_forbidden_fields_and_retired_aliases() -> None:
+    from app.editing.proposal_plan import EditSessionTimelineCommand, EditSessionTimelinePlan
 
     with pytest.raises(ValueError):
         EditSessionTimelinePlan.model_validate(
@@ -636,7 +640,20 @@ def test_plan_rejects_forbidden_fields_and_accepts_aliases() -> None:
                 ]
             }
         )
-    plan = EditSessionTimelinePlan.model_validate(
-        {"operations": [{"kind": "reorder_clips", "clip_ids": ["clip-a"]}]}
-    )
-    assert plan.operations[0].operation == "reorder_clips"
+    with pytest.raises(ValueError):
+        EditSessionTimelinePlan.model_validate(
+            {"operations": [{"kind": "reorder_clips", "clip_ids": ["clip-a"]}]}
+        )
+
+    session_id = str(uuid4())
+    canonical_plan = {
+        "operations": [{"operation": "reorder_clips", "clip_ids": ["clip-a"]}]
+    }
+    retired_payloads = [
+        {"session_id": session_id, "plan": canonical_plan},
+        {"edit_session_id": session_id, "timeline_plan": canonical_plan},
+        {"edit_session_id": session_id, "operations": canonical_plan["operations"]},
+    ]
+    for payload in retired_payloads:
+        with pytest.raises(ValueError):
+            EditSessionTimelineCommand.model_validate(payload)

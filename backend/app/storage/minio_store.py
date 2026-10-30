@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Protocol, cast
+from pathlib import Path
+from threading import Lock
+from typing import BinaryIO, Protocol, cast
+
+from anyio import CancelScope
+from minio.error import S3Error
 
 from app.config import Settings, get_settings
 
@@ -19,11 +26,23 @@ class StoredObject:
 
 
 class ObjectStore(Protocol):
-    async def put_bytes(
-        self, *, object_key: str, data: bytes, mime_type: str
-    ) -> StoredObject: ...
+    async def put_bytes(self, *, object_key: str, data: bytes, mime_type: str) -> StoredObject: ...
+
+    async def put_file(self, *, object_key: str, path: Path, mime_type: str) -> StoredObject: ...
 
     async def get_bytes(self, *, object_key: str) -> bytes: ...
+
+    async def get_size(self, *, object_key: str) -> int: ...
+
+    async def get_range(self, *, object_key: str, offset: int, length: int) -> bytes: ...
+
+    def iter_bytes(
+        self,
+        *,
+        object_key: str,
+        offset: int = 0,
+        length: int | None = None,
+    ) -> AsyncIterator[bytes]: ...
 
     async def delete_bytes(self, *, object_key: str) -> None: ...
 
@@ -31,11 +50,15 @@ class ObjectStore(Protocol):
 
 
 class _MinioResponse(Protocol):
-    def read(self) -> bytes: ...
+    def read(self, amt: int | None = None) -> bytes: ...
 
     def close(self) -> None: ...
 
     def release_conn(self) -> None: ...
+
+
+class _MinioObjectInfo(Protocol):
+    size: int
 
 
 class _MinioClient(Protocol):
@@ -47,14 +70,23 @@ class _MinioClient(Protocol):
         self,
         bucket_name: str,
         object_name: str,
-        data: BytesIO,
+        data: BinaryIO,
         length: int,
         content_type: str,
+        num_parallel_uploads: int = 3,
     ) -> object: ...
 
-    def get_object(self, bucket_name: str, object_name: str) -> _MinioResponse: ...
+    def get_object(
+        self,
+        bucket_name: str,
+        object_name: str,
+        offset: int | None = None,
+        length: int | None = None,
+    ) -> _MinioResponse: ...
 
     def remove_object(self, bucket_name: str, object_name: str) -> None: ...
+
+    def stat_object(self, bucket_name: str, object_name: str) -> _MinioObjectInfo: ...
 
 
 class InMemoryObjectStore:
@@ -63,9 +95,14 @@ class InMemoryObjectStore:
     def __init__(self) -> None:
         self._objects: dict[str, bytes] = {}
 
-    async def put_bytes(
-        self, *, object_key: str, data: bytes, mime_type: str
-    ) -> StoredObject:
+    async def put_file(self, *, object_key: str, path: Path, mime_type: str) -> StoredObject:
+        # Test/dev store intentionally retains its objects in memory. Production
+        # uses the same port with a bounded SDK file reader below.
+        return await self.put_bytes(
+            object_key=object_key, data=path.read_bytes(), mime_type=mime_type
+        )
+
+    async def put_bytes(self, *, object_key: str, data: bytes, mime_type: str) -> StoredObject:
         self._objects[object_key] = data
         return StoredObject(
             object_key=object_key,
@@ -79,8 +116,33 @@ class InMemoryObjectStore:
             raise KeyError(object_key)
         return self._objects[object_key]
 
+    async def get_size(self, *, object_key: str) -> int:
+        return len(self._objects[object_key])
+
+    async def get_range(self, *, object_key: str, offset: int, length: int) -> bytes:
+        if object_key not in self._objects:
+            raise KeyError(object_key)
+        if offset < 0 or length <= 0:
+            raise IndexError("invalid range offset or length")
+        data = self._objects[object_key]
+        if offset >= len(data):
+            raise IndexError("range offset is beyond stored bytes")
+        return data[offset : offset + length]
+
     async def delete_bytes(self, *, object_key: str) -> None:
         self._objects.pop(object_key, None)
+
+    async def iter_bytes(
+        self,
+        *,
+        object_key: str,
+        offset: int = 0,
+        length: int | None = None,
+    ) -> AsyncIterator[bytes]:
+        data = self._objects[object_key]
+        end = len(data) if length is None else min(len(data), offset + length)
+        for start in range(offset, end, 64 * 1024):
+            yield data[start : min(start + 64 * 1024, end)]
 
     def clear(self) -> None:
         self._objects.clear()
@@ -93,32 +155,70 @@ class MinioObjectStore:
     def __init__(self, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
         self._client: _MinioClient | None = None
+        self._client_lock = Lock()
 
     def clear(self) -> None:
         return None
 
+    async def put_file(self, *, object_key: str, path: Path, mime_type: str) -> StoredObject:
+        uploading = asyncio.create_task(
+            asyncio.to_thread(
+                self._put_file_sync,
+                object_key=object_key,
+                path=path,
+                mime_type=mime_type,
+            )
+        )
+        try:
+            return await asyncio.shield(uploading)
+        except asyncio.CancelledError:
+            # The operation owns the file until the SDK has stopped reading it.
+            # Final Film's existing journal owns any remote cleanup after this.
+            with CancelScope(shield=True):
+                await asyncio.gather(uploading, return_exceptions=True)
+            raise
+
+    def _put_file_sync(self, *, object_key: str, path: Path, mime_type: str) -> StoredObject:
+        with path.open("rb") as source:
+            size = source.seek(0, 2)
+            source.seek(0)
+            content_hash = hashlib.file_digest(source, "sha256").hexdigest()
+            source.seek(0)
+            self._ensure_client().put_object(
+                self._settings.minio_bucket,
+                object_key,
+                source,
+                length=size,
+                content_type=mime_type,
+                num_parallel_uploads=1,
+            )
+        return StoredObject(object_key, content_hash, size, mime_type)
+
     def _ensure_client(self) -> _MinioClient:
         if self._client is not None:
             return self._client
-        from minio import Minio
+        # Async callers run this in a worker thread; initialization must be
+        # serialized so concurrent uploads do not create duplicate clients.
+        with self._client_lock:
+            if self._client is not None:
+                return self._client
+            from minio import Minio
 
-        endpoint = self._settings.minio_endpoint.replace("http://", "").replace(
-            "https://", ""
-        )
-        secure = self._settings.minio_endpoint.startswith("https://")
-        client = cast(
-            _MinioClient,
-            Minio(
-                endpoint,
-                access_key=self._settings.minio_access_key,
-                secret_key=self._settings.minio_secret_key,
-                secure=secure,
-                region=self._settings.minio_region,
-            ),
-        )
-        self._ensure_bucket(client)
-        self._client = client
-        return client
+            endpoint = self._settings.minio_endpoint.replace("http://", "").replace("https://", "")
+            secure = self._settings.minio_endpoint.startswith("https://")
+            client = cast(
+                _MinioClient,
+                Minio(
+                    endpoint,
+                    access_key=self._settings.minio_access_key,
+                    secret_key=self._settings.minio_secret_key,
+                    secure=secure,
+                    region=self._settings.minio_region,
+                ),
+            )
+            self._ensure_bucket(client)
+            self._client = client
+            return client
 
     def _ensure_bucket(self, client: _MinioClient) -> None:
         bucket = self._settings.minio_bucket
@@ -131,9 +231,12 @@ class MinioObjectStore:
             if not client.bucket_exists(bucket):
                 raise
 
-    async def put_bytes(
-        self, *, object_key: str, data: bytes, mime_type: str
-    ) -> StoredObject:
+    async def put_bytes(self, *, object_key: str, data: bytes, mime_type: str) -> StoredObject:
+        return await asyncio.to_thread(
+            self._put_bytes_sync, object_key=object_key, data=data, mime_type=mime_type
+        )
+
+    def _put_bytes_sync(self, *, object_key: str, data: bytes, mime_type: str) -> StoredObject:
         client = self._ensure_client()
         content_hash = hashlib.sha256(data).hexdigest()
         client.put_object(
@@ -151,8 +254,55 @@ class MinioObjectStore:
         )
 
     async def get_bytes(self, *, object_key: str) -> bytes:
+        return await asyncio.to_thread(self._get_bytes_sync, object_key=object_key)
+
+    def _get_bytes_sync(self, *, object_key: str) -> bytes:
         client = self._ensure_client()
-        response = client.get_object(self._settings.minio_bucket, object_key)
+        try:
+            response = client.get_object(self._settings.minio_bucket, object_key)
+        except S3Error as exc:
+            if exc.code == "NoSuchKey":
+                raise KeyError(object_key) from exc
+            raise
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
+
+    async def get_size(self, *, object_key: str) -> int:
+        return await asyncio.to_thread(self._get_size_sync, object_key=object_key)
+
+    def _get_size_sync(self, *, object_key: str) -> int:
+        client = self._ensure_client()
+        try:
+            return client.stat_object(self._settings.minio_bucket, object_key).size
+        except S3Error as exc:
+            if exc.code == "NoSuchKey":
+                raise KeyError(object_key) from exc
+            raise
+
+    async def get_range(self, *, object_key: str, offset: int, length: int) -> bytes:
+        return await asyncio.to_thread(
+            self._get_range_sync, object_key=object_key, offset=offset, length=length
+        )
+
+    def _get_range_sync(self, *, object_key: str, offset: int, length: int) -> bytes:
+        # Native object-store range read: a media seek fetches only the
+        # requested segment instead of the whole object (backend-review 1.3).
+        if offset < 0 or length <= 0:
+            raise IndexError("invalid range offset or length")
+        client = self._ensure_client()
+        try:
+            response = client.get_object(
+                self._settings.minio_bucket, object_key, offset=offset, length=length
+            )
+        except S3Error as exc:
+            if exc.code == "NoSuchKey":
+                raise KeyError(object_key) from exc
+            if exc.code == "InvalidRange":
+                raise IndexError("range offset is beyond stored bytes") from exc
+            raise
         try:
             return response.read()
         finally:
@@ -160,6 +310,69 @@ class MinioObjectStore:
             response.release_conn()
 
     async def delete_bytes(self, *, object_key: str) -> None:
+        await asyncio.to_thread(self._delete_bytes_sync, object_key=object_key)
+
+    async def iter_bytes(
+        self,
+        *,
+        object_key: str,
+        offset: int = 0,
+        length: int | None = None,
+    ) -> AsyncIterator[bytes]:
+        # One GET per response, bounded reads, and guaranteed connection release
+        # on completion or client disconnect. The synchronous SDK stays off-loop.
+        def open_response() -> _MinioResponse:
+            return self._ensure_client().get_object(
+                self._settings.minio_bucket,
+                object_key,
+                offset=offset,
+                length=length,
+            )
+
+        opening = asyncio.create_task(asyncio.to_thread(open_response))
+        try:
+            response = await asyncio.shield(opening)
+        except asyncio.CancelledError:
+            # A cancelled request can still finish opening in its worker thread.
+            # Starlette's cancellation scope keeps cancelling every await unless
+            # cleanup is shielded from that scope as well as asyncio cancellation.
+            with CancelScope(shield=True):
+                response = await opening
+                try:
+                    await asyncio.to_thread(response.close)
+                finally:
+                    await asyncio.to_thread(response.release_conn)
+            raise
+        try:
+            remaining = length
+            while remaining is None or remaining > 0:
+                size = 64 * 1024 if remaining is None else min(64 * 1024, remaining)
+                # Shield the blocking read so closing on cancellation never races
+                # a thread that is still reading the same response.
+                read = asyncio.create_task(asyncio.to_thread(response.read, size))
+                try:
+                    chunk = await asyncio.shield(read)
+                except asyncio.CancelledError:
+                    with CancelScope(shield=True):
+                        await read
+                    raise
+                if not chunk:
+                    break
+                if remaining is not None:
+                    remaining -= len(chunk)
+                yield chunk
+        finally:
+
+            def close_response() -> None:
+                try:
+                    response.close()
+                finally:
+                    response.release_conn()
+
+            with CancelScope(shield=True):
+                await asyncio.shield(asyncio.to_thread(close_response))
+
+    def _delete_bytes_sync(self, *, object_key: str) -> None:
         client = self._ensure_client()
         client.remove_object(self._settings.minio_bucket, object_key)
 

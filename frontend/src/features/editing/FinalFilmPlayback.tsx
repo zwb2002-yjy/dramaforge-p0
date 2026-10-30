@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
 import { artifactContentUrl } from "../../lib/api";
+import { Button, Alert } from "../../components/ui";
+import { deliveryCopy as copy } from "./deliveryCopy";
 
 export function FinalFilmPlayback({
   projectId,
@@ -14,11 +16,12 @@ export function FinalFilmPlayback({
   return (
     <>
       <video
+        className="final-film-video"
         ref={video}
         controls
         playsInline
         preload="metadata"
-        aria-label="成片播放器"
+        aria-label={copy.playback}
         data-testid="final-film-player"
         src={artifactContentUrl(projectId, artifactId)}
         onPlay={() => setPlaying(true)}
@@ -26,23 +29,23 @@ export function FinalFilmPlayback({
         onEnded={() => setPlaying(false)}
         onError={() => setError(true)}
       >
-        当前浏览器不支持视频播放。
+        {copy.browserUnsupported}
       </video>
       <div className="film-playback-actions">
-        <button
+        <Button
           type="button"
           disabled={playing || error}
           onClick={() => {
             void video.current?.play().catch(() => setError(true));
           }}
         >
-          播放成片
-        </button>
-        <button type="button" disabled={!playing} onClick={() => video.current?.pause()}>
-          暂停成片
-        </button>
+          {copy.play}
+        </Button>
+        <Button type="button" disabled={!playing} onClick={() => video.current?.pause()}>
+          {copy.pause}
+        </Button>
       </div>
-      {error && <p role="alert">成片媒体暂时不可读取。保留历史记录，不会自动重新导出。</p>}
+      {error && <Alert role="alert" type="error" showIcon description={<>{copy.mediaError}</>} />}
     </>
   );
 }

@@ -1,10 +1,11 @@
+import { getSelectOption, expectSelectValue, selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EditingWorkspace } from "../../src/features/editing/EditingWorkspace";
 import { queryKeys } from "../../src/lib/queryKeys";
-import type { OpenCutManifestRead } from "../../src/lib/api";
+import type { OpenCutManifestRead } from "../../src/features/editing/api";
 
 const PROJECT_ID = "project-1";
 const SCENE_ID = "scene-1";
@@ -26,6 +27,7 @@ function json(body: unknown, status = 200): Promise<Response> {
 function mockEditingFetch(implementation: typeof fetch) {
   return vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = String(input);
+    if ((init?.method ?? "GET") === "GET" && url.endsWith("/assets")) return json([]);
     if (
       (init?.method ?? "GET") === "GET" &&
       (url.endsWith("/edit-sessions") || url.endsWith("/final-films"))
@@ -298,14 +300,16 @@ describe("EditingWorkspace", () => {
     renderWorkspace();
 
     const clip = await screen.findByTestId("editing-clip");
-    expect(clip).toHaveTextContent("正式视频 · 0–3 秒 · 片段 1 · 镜头 #1");
+    expect(
+      within(clip)
+        .getAllByRole("cell", { hidden: true })
+        .map((cell) => cell.textContent),
+    ).toEqual(["正式视频", "片段 1 · 镜头 #1", "0–3 秒", "正式素材已交付"]);
     expect(clip).toHaveTextContent("正式素材已交付");
     expect(clip).not.toHaveTextContent(SCENE_ID);
     expect(clip).not.toHaveTextContent(SHOT_ID);
     expect(clip).not.toHaveTextContent("artifact-formal");
-    expect(
-      screen.getByText("当前展示正式时间线的只读预览；你可以继续已有会话，或显式创建新会话。"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("选择已有剪辑，或用正式镜头创建时间线。")).toBeInTheDocument();
     expect(calls).toEqual([{ method: "GET", url: "/api/v1/projects/project-1/opencut-manifest" }]);
     expect(screen.getByTestId("editing-read-only")).toHaveTextContent("只读");
     expect(screen.getByTestId("create-edit-session")).toBeEnabled();
@@ -365,7 +369,42 @@ describe("EditingWorkspace", () => {
     expect(screen.getByTestId("editing-workspace")).toHaveAttribute("data-session-id", SESSION_ID);
     expect(screen.getByTestId("edit-session-lineage")).toHaveTextContent("lineage_readonly");
     expect(screen.getAllByTestId("edit-session-clip")).toHaveLength(2);
-    expect(calls).toEqual([`/api/v1/projects/${PROJECT_ID}/edit-sessions/${SESSION_ID}`]);
+    expect(calls).toEqual([
+      `/api/v1/projects/${PROJECT_ID}/edit-sessions/${SESSION_ID}`,
+      `/api/v1/projects/${PROJECT_ID}/opencut-manifest`,
+    ]);
+  });
+
+  it("keeps raw identifiers out of the creative surface", async () => {
+    // The plan forbids ordinary creative UI from showing interface/database
+    // fields, hashes or internal ids; they belong in a marked read-only
+    // diagnostics block that is collapsed by default.
+    mockEditingFetch((input) => {
+      const url = String(input);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/assets")) return json([]);
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-facts");
+
+    const facts = screen.getByTestId("edit-session-facts");
+    // Raw lineage fields stay inside the collapsed diagnostics block: the
+    // default-visible part of the panel carries no interface/database names.
+    const diagnostics = screen.getByTestId("edit-session-diagnostics");
+    const visible = (facts.textContent ?? "").replace(diagnostics.textContent ?? "", "");
+    expect(visible).not.toMatch(/\b(artifact_id|shot_id|scene_id|episode_id)\b/);
+    expect(visible).not.toContain("artifact-formal");
+    // The identifiers are still available, just inside the diagnostics block.
+    expect(
+      within(screen.getByTestId("edit-session-diagnostics")).getByText(SESSION_ID),
+    ).toBeInTheDocument();
+
+    // Clip audio is chosen by name, not by pasting an Artifact id.
+    const audioControl = screen.getByTestId("clip-audio-0");
+    expect(audioControl).toHaveClass("ant-select");
+    expect(within(audioControl as HTMLElement).getByText("沿用镜头对白")).toBeInTheDocument();
+    expect(screen.getByTestId("clip-diagnostics-0")).not.toHaveAttribute("open");
   });
 
   it("edits only local clip order/duration until an explicit save", async () => {
@@ -383,8 +422,9 @@ describe("EditingWorkspace", () => {
     fireEvent.click(screen.getByTestId("move-clip-down-0"));
     expect(screen.getByTestId("edit-session-dirty")).toHaveTextContent("未保存");
     expect(screen.getByDisplayValue("2.25")).toBeInTheDocument();
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(calls[0].url).toContain(`/edit-sessions/${SESSION_ID}`);
+    expect(calls.every((call) => call.method === "GET")).toBe(true);
     expect(screen.getByTestId("save-edit-timeline")).toBeEnabled();
   });
 
@@ -424,6 +464,7 @@ describe("EditingWorkspace", () => {
     const patch = calls.find((call) => call.url.endsWith("/timeline"));
     expect(patch?.method).toBe("PATCH");
     expect(patch?.body).toEqual({
+      expected_session_version: 1,
       timeline: {
         clips: [
           {
@@ -481,7 +522,12 @@ describe("EditingWorkspace", () => {
     });
     renderPersistedSession();
     expect(await screen.findByDisplayValue("1.75")).toBeInTheDocument();
-    expect(calls.some((url) => url.endsWith("/opencut-manifest"))).toBe(false);
+    expect(calls.some((url) => url.endsWith("/opencut-manifest"))).toBe(true);
+    expect(screen.getByLabelText("片段 1 原始视频预览")).toHaveAttribute(
+      "src",
+      `/api/v1/projects/${PROJECT_ID}/artifacts/artifact-formal-2/content`,
+    );
+    expect(screen.getByTestId("save-edit-timeline")).toBeDisabled();
     expect(screen.getByTestId("edit-session-lineage")).toHaveTextContent("lineage_readonly");
   });
 
@@ -513,6 +559,7 @@ describe("EditingWorkspace", () => {
     expect(within(exportPanel).queryByText("artifact-formal")).not.toBeInTheDocument();
     expect(calls).toEqual([
       { method: "GET", url: `/api/v1/projects/${PROJECT_ID}/edit-sessions/${SESSION_ID}` },
+      { method: "GET", url: `/api/v1/projects/${PROJECT_ID}/opencut-manifest` },
       { method: "GET", url: `/api/v1/projects/${PROJECT_ID}/edit-sessions/${SESSION_ID}/export` },
     ]);
   });
@@ -535,6 +582,34 @@ describe("EditingWorkspace", () => {
     fireEvent.change(screen.getByLabelText("镜头 1 时长"), { target: { value: "2.25" } });
     fireEvent.click(screen.getByTestId("save-edit-timeline"));
     expect(await screen.findByRole("alert")).toHaveTextContent("timeline save rejected by server");
+    expect(screen.getByTestId("edit-session-dirty")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("2.25")).toBeInTheDocument();
+  });
+
+  it("keeps the local draft and explains how to recover from a stale save conflict", async () => {
+    mockEditingFetch((input) => {
+      const url = String(input);
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-stale" });
+      if (url.endsWith(`/edit-sessions/${SESSION_ID}/timeline`)) {
+        return json(
+          {
+            detail: "edit session version conflict",
+            code: "CONFLICT",
+            details: { expected_session_version: 1, actual_session_version: 2 },
+          },
+          409,
+        );
+      }
+      return json({});
+    });
+    renderPersistedSession();
+    await screen.findByTestId("edit-session-editor");
+    fireEvent.change(screen.getByLabelText("镜头 1 时长"), { target: { value: "2.25" } });
+    fireEvent.click(screen.getByTestId("save-edit-timeline"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("本地未保存草稿已保留");
+    expect(screen.getByRole("alert")).toHaveTextContent("重新加载后手动合并");
     expect(screen.getByTestId("edit-session-dirty")).toBeInTheDocument();
     expect(screen.getByDisplayValue("2.25")).toBeInTheDocument();
   });
@@ -642,6 +717,7 @@ describe("EditingWorkspace", () => {
     const clips = (patchBody?.timeline as { clips: Array<Record<string, unknown>> })?.clips;
     expect(clips?.map((clip) => clip.id)).toEqual(["clip-2", "clip-1"]);
     expect(clips?.[1]).toMatchObject({ id: "clip-1", duration_seconds: 2.5 });
+    expect(patchBody?.expected_session_version).toBe(1);
     expect(patchBody).not.toHaveProperty("production_lineage");
   });
 
@@ -836,6 +912,7 @@ describe("EditingWorkspace", () => {
           timeline_version: 1,
           shot_ids: ["shot-1", "shot-2"],
           node_run_ids: [],
+          preparation_fingerprint: "a".repeat(64),
           status: "queued",
         });
       }
@@ -869,7 +946,9 @@ describe("EditingWorkspace", () => {
     expect(result).toHaveTextContent("15.233");
     const renderCall = calls.find((call) => call.url.endsWith("/final-film/render"));
     expect(renderCall?.method).toBe("POST");
-    expect(renderCall?.headers?.["Idempotency-Key"]).toBe(`final-${PROJECT_ID}-${SESSION_ID}-1`);
+    expect(renderCall?.headers?.["Idempotency-Key"]).toBe(
+      `final-${SESSION_ID}-1-${"a".repeat(64)}`,
+    );
     expect(screen.getByTestId("final-film-player")).toHaveAttribute(
       "src",
       `/api/v1/projects/${PROJECT_ID}/artifacts/artifact-final-1/content`,
@@ -1165,4 +1244,116 @@ describe("EditingWorkspace", () => {
     expect(screen.queryByText("正式素材待交付")).not.toBeInTheDocument();
     expect(requestCount).toBe(2);
   });
+});
+
+it("does not offer an Asset identity where the renderer requires an audio Artifact", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    const url = String(input);
+    if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+    if (url.endsWith("/assets"))
+      return json([{ id: "asset-not-an-audio-artifact", kind: "audio", name: "声音设定" }]);
+    if (url.endsWith("/edit-sessions") || url.endsWith("/final-films")) return json([]);
+    return json({});
+  });
+  renderPersistedSession();
+  const control = await screen.findByTestId("clip-audio-0");
+  await waitFor(() => expect(screen.getByTestId("edit-session-editor")).toBeInTheDocument());
+  expect(within(control).queryByRole("option", { name: "声音设定" })).not.toBeInTheDocument();
+  expect(getSelectOption(screen.getByTestId("clip-audio-0"), "沿用镜头对白")).toBeInTheDocument();
+});
+
+it("saves chosen audio Artifacts and an explicit mute only through timeline Save", async () => {
+  let saved = persistedSession();
+  const patches: Array<Record<string, unknown>> = [];
+  const requests: string[] = [];
+  mockEditingFetch((input, init) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(saved);
+    if (url.includes("/production-history/artifacts?"))
+      return json({
+        items: [
+          {
+            id: "artifact-real-audio",
+            object_key: "audio/result.wav",
+            content_hash: "h",
+            byte_size: 16000,
+            mime_type: "audio/wav",
+            storage_state: "available",
+            duration_seconds: "2.5",
+            produced_by_run_id: null,
+            width: null,
+            height: null,
+          },
+        ],
+        next_cursor: null,
+      });
+    if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-audio" });
+    if (url.endsWith("/timeline")) {
+      const body = JSON.parse(String(init?.body));
+      patches.push(body);
+      saved = persistedSession(body.timeline, saved.version + 1);
+      return json(saved);
+    }
+    return json({});
+  });
+  renderPersistedSession();
+  await screen.findByTestId("edit-session-editor");
+  expect(requests.some((url) => url.includes("/production-history/artifacts"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "选择镜头 1 配音" }));
+  fireEvent.click(await screen.findByRole("button", { name: "使用音频 1" }));
+  expectSelectValue(screen.getByTestId("clip-audio-0"), "artifact-real-audio");
+  fireEvent.click(screen.getByText("背景音乐（可选）"));
+  fireEvent.click(screen.getByRole("button", { name: "选择背景音乐" }));
+  fireEvent.click(await screen.findByRole("button", { name: "使用音频 1" }));
+  expect(patches).toEqual([]);
+  expect(screen.getByTestId("export-final-film")).toBeDisabled();
+  fireEvent.click(screen.getByTestId("save-edit-timeline"));
+  await waitFor(() => expect(patches).toHaveLength(1));
+  expect(patches[0]).toMatchObject({
+    expected_session_version: 1,
+    timeline: { metadata: { music_artifact_id: "artifact-real-audio" } },
+  });
+  expect(saved.timeline).toMatchObject({
+    clips: [
+      expect.objectContaining({ audio_id: "artifact-real-audio", muted: false }),
+      expect.objectContaining({ audio_id: "audio-2" }),
+    ],
+  });
+  expect(patches[0]).not.toHaveProperty("production_lineage");
+  await waitFor(() => expect(screen.getByTestId("save-edit-timeline")).toBeDisabled());
+  await selectValue(screen.getByTestId("clip-audio-0"), "__muted__");
+  expect(patches).toHaveLength(1);
+  fireEvent.click(screen.getByTestId("save-edit-timeline"));
+  await waitFor(() => expect(patches).toHaveLength(2));
+  expect(patches[1]).toMatchObject({ expected_session_version: 2 });
+  expect(saved.timeline).toMatchObject({
+    clips: [
+      expect.objectContaining({ audio_id: "", muted: true }),
+      expect.objectContaining({ audio_id: "audio-2" }),
+    ],
+  });
+});
+
+it("selects the same clip in the visual timeline, source preview and inspector without saving", async () => {
+  const writes: string[] = [];
+  mockEditingFetch((input, init) => {
+    const url = String(input);
+    if ((init?.method ?? "GET") !== "GET") writes.push(url);
+    if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession());
+    return json({});
+  });
+  renderPersistedSession();
+  await screen.findByTestId("editing-visual-track");
+  expect(screen.getByTestId("editing-track-clip-0")).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(screen.getByTestId("editing-track-clip-1"));
+  expect(screen.getByTestId("editing-track-clip-1")).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByTestId("editing-clip-focus-1")).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getAllByTestId("edit-session-clip")[1]).toHaveAttribute("data-selected", "true");
+  expect(screen.getByLabelText("片段 2 原始视频预览")).toHaveAttribute(
+    "src",
+    `/api/v1/projects/${PROJECT_ID}/artifacts/artifact-formal-2/content`,
+  );
+  expect(screen.getByTestId("save-edit-timeline")).toBeDisabled();
+  expect(writes).toEqual([]);
 });

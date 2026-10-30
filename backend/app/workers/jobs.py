@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from arq import Retry
+from sqlalchemy.exc import DBAPIError
 
-from app.config import get_settings
+from app.runtime.provider_recovery import provider_attempt_is_active
+from app.runtime.provider_recovery import (
+    recover_interrupted_provider_jobs as _recover_provider_jobs,
+)
 from app.shared.db import get_session_factory, set_node_run_rls_context
 from app.shared.errors import (
     AppError,
@@ -19,6 +24,7 @@ from app.shared.errors import (
     ProviderTaskPendingError,
 )
 from app.shared.model_registry import load_all_models
+from app.storage.scratch import sweep_owned_media
 
 # Ensure full MetaData / FK graph is registered in worker process (SQLAlchemy
 # needs all related tables present when compiling FLUSH).
@@ -50,100 +56,10 @@ def _worker_failure_code(exc: Exception) -> str:
     return "WORKER_ERROR"
 
 
-async def health_ping(ctx: dict[str, Any]) -> dict[str, str]:
-    _ = ctx
-    return {"status": "ok", "job": "health_ping"}
-
-
-async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> None:
-    """Resume polling persisted remote tasks after a Heavy Worker restart."""
-    from datetime import UTC, datetime, timedelta
-
-    from sqlalchemy import select
-
-    from app.execution.models import NodeRun, ProviderOperation
-    from app.runtime.scheduler import NodeRunScheduler
-    from app.shared.db import (
-        list_resumable_provider_node_run_rls_scopes,
-        set_rls_context,
-    )
-
-    _ = ctx
-    factory = get_session_factory()
-    async with factory() as session:
-        # Persisted remote identity is authoritative across candidate upgrades.
-        candidates = await list_resumable_provider_node_run_rls_scopes(
-            session,
-            limit=50,
-            source_commit=None,
-        )
-        for node_run_id, scope in candidates:
-            await set_rls_context(
-                session,
-                user_id=scope.user_id,
-                workspace_id=scope.workspace_id,
-                project_id=scope.project_id,
-            )
-            run = await session.scalar(
-                select(NodeRun).where(NodeRun.id == node_run_id).with_for_update()
-            )
-            operation = await session.scalar(
-                select(ProviderOperation)
-                .where(
-                    ProviderOperation.node_run_id == node_run_id,
-                    ProviderOperation.execution_path_version == "unified-v1",
-                )
-                .order_by(ProviderOperation.attempt_no.desc())
-                .limit(1)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-            if (
-                run is None
-                or run.status not in {"running", "cancel_requested"}
-                or operation is None
-            ):
-                await session.rollback()
-                continue
-            if operation.provider_operation_id is None:
-                started = operation.created_at
-                if started.tzinfo is None:
-                    started = started.replace(tzinfo=UTC)
-                if operation.status == "submission_started" and started < datetime.now(
-                    UTC
-                ) - timedelta(minutes=30):
-                    operation.status = "unknown_submission"
-                    operation.error_code = "PROVIDER_SUBMISSION_UNKNOWN"
-                    operation.error_summary = (
-                        "Interrupted submission has no remote identity; do not resubmit."
-                    )
-                    run.status = "failed"
-                    run.error_code = operation.error_code
-                    run.error_summary = operation.error_summary
-                    run.finished_at = operation.completed_at = datetime.now(UTC)
-                    await session.commit()
-                else:
-                    await session.rollback()
-                continue
-            if operation.status not in {"submitted", "running", "timed_out", "cancel_requested"}:
-                await session.rollback()
-                continue
-            snapshot = dict(run.input_snapshot or {})
-            raw_resume_count = snapshot.get("provider_poll_resume_count")
-            resume_count = (raw_resume_count if isinstance(raw_resume_count, int) else 0) + 1
-            snapshot["provider_poll_resume_count"] = resume_count
-            snapshot["dispatch_generation"] = (
-                f"provider-resume-{str(operation.id)[:12]}-{resume_count}"
-            )
-            run.input_snapshot = snapshot
-            # The queued status makes the existing claim path reusable, while
-            # cancellation_requested_at remains the authoritative instruction
-            # to cancel/observe the same remote operation after restart.
-            run.status = "queued"
-            run.error_code = None
-            run.error_summary = None
-            await session.commit()
-            await NodeRunScheduler(session).enqueue_node_run_only(node_run_id)
+async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> dict[str, int]:
+    """Compatibility startup entry; the resident dispatcher owns periodic scans."""
+    await asyncio.to_thread(sweep_owned_media)
+    return await _recover_provider_jobs(ctx, session_factory=get_session_factory())
 
 
 async def recover_interrupted_director_turns(ctx: dict[str, Any]) -> dict[str, int]:
@@ -198,12 +114,10 @@ async def recover_interrupted_director_turns(ctx: dict[str, Any]) -> dict[str, i
 
 
 async def reconcile_waiting_director_turns(ctx: dict[str, Any]) -> dict[str, int]:
-    """Low-rate, browser-independent next-checkpoint reconciliation."""
+    """Low-rate, browser-independent reconciliation for runtime-bound Director turns."""
 
-    from app.access.models import Project
-    from app.director.next_action import DirectorNextActionService
     from app.director.runtime.reconcile import DirectorRuntimeFactReconciler
-    from app.director.turn_service import DirectorTurnService
+    from app.director.turn_service import ACTIVE_TURN_STATUSES, DirectorTurnService
     from app.shared.db import (
         list_reconcilable_director_turn_rls_scopes,
         set_rls_context,
@@ -231,32 +145,35 @@ async def reconcile_waiting_director_turns(ctx: dict[str, Any]) -> dict[str, int
                 project_id=scope.project_id,
             )
             try:
-                project = await session.get(Project, scope.project_id)
-                if project is None:
-                    failed += 1
-                    await session.rollback()
-                    continue
-                turn = await DirectorTurnService(session).get(
-                    project_id=project.id,
+                service = DirectorTurnService(session)
+                turn = await service.get(
+                    project_id=scope.project_id,
                     turn_id=turn_id,
                 )
-                if turn.runtime_execution_id is not None:
-                    wakeup = await DirectorRuntimeFactReconciler(session).reconcile(turn)
-                    if wakeup is None:
-                        unchanged += 1
-                    else:
+                if turn.runtime_execution_id is None:
+                    if turn.status in ACTIVE_TURN_STATUSES:
+                        await service.compare_and_set(
+                            turn=turn,
+                            expected_statuses=tuple(ACTIVE_TURN_STATUSES),
+                            target_status="stale",
+                            updates={
+                                "wait_reason": "runtime_binding_missing",
+                                "last_error": (
+                                    "Director turn has no LangGraph runtime binding; "
+                                    "legacy coordination is not resumed."
+                                ),
+                            },
+                        )
                         reconciled += 1
+                    else:
+                        unchanged += 1
                     await session.commit()
                     continue
-                revision = turn.revision
-                result = await DirectorNextActionService(session).reconcile(
-                    project=project,
-                    turn_id=turn_id,
-                )
-                if result.turn_revision != revision:
-                    reconciled += 1
-                else:
+                wakeup = await DirectorRuntimeFactReconciler(session).reconcile(turn)
+                if wakeup is None:
                     unchanged += 1
+                else:
+                    reconciled += 1
                 await session.commit()
             except ConflictError as exc:
                 failed += 1
@@ -273,26 +190,46 @@ async def reconcile_waiting_director_turns(ctx: dict[str, Any]) -> dict[str, int
 
 async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, Any]:
     """Worker job: execute media NodeRun via product_path (Adapter OK here)."""
+    from sqlalchemy import select
+
     from app.execution.composite_media import composite_inputs_pending
-    from app.execution.models import NodeRun
+    from app.execution.models import NodeRun, ProviderOperation
     from app.execution.product_path import claim_media_node_run, execute_media_node_run
     from app.execution.runtime_invariants import (
         evaluate_required_dependencies,
         fail_run_for_dependency,
     )
+    from app.execution.scheduling import node_run_is_due, provider_retry_delay
 
     _ = ctx
     factory = get_session_factory()
     run_uuid = UUID(node_run_id)
     scope = None
+    claimed_started_at: datetime | None = None
     async with factory() as session:
         try:
             scope = await set_node_run_rls_context(session, node_run_id=run_uuid)
             if scope is None:
                 return {"status": "failed", "error": "node_run not found"}
-            run = await session.get(NodeRun, run_uuid)
+            # Serialize admission with recovery and other queue generations.
+            # A running attempt owns started_at for at most the heavy timeout
+            # (1800s) plus a 60s margin. Do not steal it, even when its last
+            # Provider poll is old or an old queue delivers the same NodeRun.
+            run = await session.scalar(
+                select(NodeRun)
+                .where(NodeRun.id == run_uuid)
+                .with_for_update(skip_locked=True)
+                .execution_options(populate_existing=True)
+            )
             if run is None:
-                return {"status": "failed", "error": "node_run not visible under RLS"}
+                raise NodeRunAlreadyClaimedError()
+            if not node_run_is_due(run, now=datetime.now(UTC)):
+                await session.rollback()
+                return {"status": "not_due", "node_run_id": node_run_id}
+            resuming = run.status in {"running", "cancel_requested"}
+            if resuming and provider_attempt_is_active(run.started_at, now=datetime.now(UTC)):
+                raise NodeRunAlreadyClaimedError()
+
             if run.status == "cancelled":
                 return {"status": "cancelled", "node_run_id": node_run_id}
             dependency = await evaluate_required_dependencies(session, run=run)
@@ -313,6 +250,14 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             if await composite_inputs_pending(session, run=run):
                 raise Retry(defer=5)
             await claim_media_node_run(session, node_run_id=run_uuid)
+            if resuming:
+                # claim_media_node_run already timestamps queued claims, but
+                # historically returned resumable running rows without a new
+                # timestamp. Persist this attempt's lease before polling/I/O.
+                run.started_at = datetime.now(UTC)
+                await session.commit()
+                await set_node_run_rls_context(session, node_run_id=run_uuid)
+            claimed_started_at = run.started_at
             result = await execute_media_node_run(
                 session,
                 node_run_id=run_uuid,
@@ -335,13 +280,15 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             return {"status": "already_claimed", "node_run_id": node_run_id}
         except ProviderTaskPendingError:
             await session.rollback()
-            raise Retry(defer=5) from None
+            return {"status": "provider_pending", "node_run_id": node_run_id}
         except ProviderTaskCancelledError:
             await session.rollback()
             return {"status": "cancelled", "node_run_id": node_run_id}
         except ProviderRateLimitedError as exc:
             await session.rollback()
-            retry_after = float(exc.details.get("retry_after_seconds") or 5.0)
+            retry_after = provider_retry_delay(
+                exc.details.get("retry_after_seconds"), now=datetime.now(UTC)
+            )
             # Requeue the claimed run so the dispatcher re-enqueues it after
             # Retry-After (plan §11.2: 429 follows Retry-After, new attempt).
             try:
@@ -350,6 +297,13 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                         run2 = await s2.get(NodeRun, run_uuid)
                         if run2 is not None and run2.status == "running":
                             run2.status = "queued"
+                            run2.started_at = None
+                            try:
+                                run2.next_attempt_at = datetime.now(UTC) + timedelta(
+                                    seconds=retry_after
+                                )
+                            except OverflowError:
+                                run2.next_attempt_at = datetime.max.replace(tzinfo=UTC)
                             await s2.commit()
             except Exception:  # noqa: BLE001 - requeue must not mask the Retry
                 pass
@@ -370,6 +324,79 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                     if await set_node_run_rls_context(s2, node_run_id=run_uuid) is None:
                         return {"status": "failed", "error": str(exc)[:300]}
                     run2 = await s2.get(NodeRun, run_uuid)
+                    if isinstance(exc, DBAPIError) and run2 is not None:
+                        from app.execution.provider_execution import (
+                            _defer_remote_poll,
+                            _same_attempt,
+                        )
+
+                        run2 = await s2.scalar(
+                            select(NodeRun)
+                            .where(NodeRun.id == run_uuid)
+                            .with_for_update(skip_locked=True)
+                            .execution_options(populate_existing=True)
+                        )
+                        if run2 is None or not _same_attempt(run2.started_at, claimed_started_at):
+                            return {"status": "already_claimed", "node_run_id": node_run_id}
+                        operation = await s2.scalar(
+                            select(ProviderOperation)
+                            .where(
+                                ProviderOperation.node_run_id == run_uuid,
+                                ProviderOperation.execution_path_version == "unified-v1",
+                            )
+                            .order_by(
+                                ProviderOperation.attempt_no.desc(),
+                                ProviderOperation.created_at.desc(),
+                            )
+                            .limit(1)
+                        )
+                        if operation is not None and operation.provider_operation_id:
+                            operation.response_summary = {
+                                **dict(operation.response_summary or {}),
+                                "last_poll_error": "PERSISTENCE_OBSERVATION_LOST",
+                            }
+                            try:
+                                await _defer_remote_poll(
+                                    s2,
+                                    run=run2,
+                                    operation=operation,
+                                    delay_seconds=5,
+                                    expected_started_at=claimed_started_at,
+                                )
+                            except ProviderTaskPendingError:
+                                return {"status": "provider_pending", "node_run_id": node_run_id}
+                        if operation is not None and operation.status == "submission_started":
+                            operation.status = "unknown_submission"
+                            operation.error_code = "PROVIDER_SUBMISSION_UNKNOWN"
+                            operation.error_summary = (
+                                "Submission persistence failed; reconcile before any new Create"
+                            )
+                            run2.status = "failed"
+                            run2.error_code = operation.error_code
+                            run2.error_summary = operation.error_summary
+                            run2.output_summary = {
+                                "status": "failed",
+                                "error_code": operation.error_code,
+                                "worker_boundary": True,
+                            }
+                            run2.finished_at = datetime.now(UTC)
+                            operation.completed_at = run2.finished_at
+                            await s2.commit()
+                            return {"status": "failed", "error_code": "PROVIDER_SUBMISSION_UNKNOWN"}
+                    if (
+                        run2 is not None
+                        and run2.status in {"queued", "cancel_requested"}
+                        and run2.started_at is None
+                        and (run2.output_summary or {}).get("status") == "provider_pending"
+                    ):
+                        logger.exception(
+                            "Provider poll scheduling failed for NodeRun %s", node_run_id
+                        )
+                        return {
+                            "status": "provider_pending",
+                            "node_run_id": node_run_id,
+                            "error_code": _worker_failure_code(exc),
+                        }
                     if run2 is not None and run2.status in {
                         "queued",
                         "running",
@@ -384,8 +411,6 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                         run2.error_summary = (
                             message[:500] if message else f"{type(exc).__name__} (no message)"
                         )
-                        from datetime import UTC, datetime
-
                         run2.finished_at = datetime.now(UTC)
                         run2.output_summary = {
                             "status": "failed",
@@ -401,25 +426,7 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             return {"status": "failed", "error": str(exc)[:300]}
 
 
-async def dispatch_outbox(ctx: dict[str, Any]) -> dict[str, Any]:
-    """Periodic: claim outbox + enqueue Arq jobs (no Adapter)."""
-    from app.runtime.scheduler import NodeRunScheduler, RedisStreamPublisher
-
-    settings = get_settings()
-    factory = get_session_factory()
-    async with factory() as session:
-        pub = RedisStreamPublisher(settings.redis_url)
-        try:
-            n = await NodeRunScheduler(session, publisher=pub).dispatch_pending(
-                worker_id=str(ctx.get("job_id", "worker"))
-            )
-            return {"enqueued": n}
-        finally:
-            await pub.close()
-
-
-JOB_FUNCTIONS = [
-    health_ping,
-    execute_node_run,
-    dispatch_outbox,
-]
+# Outbox dispatch is a resident process (``app.workers.dispatcher``), not an
+# Arq job. Keeping only executable NodeRun work here prevents a registered but
+# never-enqueued maintenance job from becoming a second dispatch path.
+JOB_FUNCTIONS = [execute_node_run]

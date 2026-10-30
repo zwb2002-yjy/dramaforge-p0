@@ -1,0 +1,89 @@
+{
+  "manifest_version": "2026-09-28",
+  "provider_type": "volcengine",
+  "protocol_profile": "ark_cn_v1",
+  "model_id": "doubao-seedream-5-0-flash-260915",
+  "model_revision": "2026-09-28-candidate",
+  "media_kind": "image",
+  "display_name": "doubao-seedream-5-0-flash-260915",
+  "lifecycle": "preview",
+  "catalog_source": "official_static",
+  "implementation_status": "documented",
+  "documented_at": "2026-09-28",
+  "operations": {
+    "image.generate": {
+      "operation": "image.generate",
+      "capabilities": [
+        "image.t2i",
+        "image.i2i"
+      ],
+      "input_contracts": {
+        "text": {
+          "input_slots": {},
+          "maximum_total_references": 0
+        },
+        "reference": {
+          "input_slots": {
+            "reference_image": {
+              "maximum": 10,
+              "media_types": [
+                "image/*"
+              ]
+            }
+          },
+          "minimum_total_references": 1,
+          "maximum_total_references": 10
+        }
+      },
+      "output_options": {
+        "size": {
+          "type": "string",
+          "enum": [
+            "1K",
+            "1.5K",
+            "2K"
+          ],
+          "default": "2K"
+        },
+        "response_format": {
+          "type": "string",
+          "enum": [
+            "url",
+            "b64_json"
+          ],
+          "default": "url"
+        },
+        "output_format": {
+          "type": "string",
+          "enum": [
+            "jpeg",
+            "png"
+          ],
+          "default": "jpeg"
+        }
+      }
+    }
+  },
+  "documented_features": [
+    "image.layer_decomposition",
+    "image.interactive_edit",
+    "image.transparent_background",
+    "image.prompt_optimization"
+  ],
+  "evidence": {
+    "model": {
+      "source_type": "official_model_list",
+      "source_url": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+      "checked_at": "2026-09-28"
+    },
+    "image_api": {
+      "source_type": "official_api_doc",
+      "source_url": "https://docs.volcengine.com/docs/ark/image-generation-api?lang=en",
+      "checked_at": "2026-09-28"
+    }
+  },
+  "option_schema": {
+    "namespace": "",
+    "options": {}
+  }
+}

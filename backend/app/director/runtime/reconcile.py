@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Literal
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,11 +64,7 @@ class DirectorRuntimeFactReconciler:
                 actor_id=turn.actor_id,
             ),
             turn_id=turn.id,
-            signal_id=uuid5(
-                NAMESPACE_URL,
-                f"dramaforge:runtime-reconcile:{turn.runtime_execution_id}:"
-                f"{turn.runtime_revision}:{event.event_id}:{reason}",
-            ),
+            signal_id=event.event_id,
             reason=reason,
             reference_id=event.event_id,
             expected_revision=turn.runtime_revision,

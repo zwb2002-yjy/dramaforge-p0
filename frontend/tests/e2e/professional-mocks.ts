@@ -2,7 +2,7 @@
  * Shared Playwright API mock for the professional V1 E2E suites (P10-07).
  *
  * Mirrors the professional pages' API surface: scene workspace, production
- * snapshot/shots, workbench assets/experiments/review/director board/OpenCut,
+ * snapshot/shots, workbench assets/experiments/review/OpenCut,
  * change proposals, and professional shot dispatch. No backend required.
  */
 import type { Page, Route } from "@playwright/test";
@@ -30,6 +30,10 @@ type EditingClip = {
   subtitle: string;
   audio_id: string | null;
   transition: Record<string, unknown> | null;
+  source_in_seconds?: number | string;
+  source_out_seconds?: number | string | null;
+  audio_volume?: number;
+  muted?: boolean;
 };
 
 type EditingTimeline = {
@@ -69,7 +73,6 @@ export type ProfessionalMockState = {
   annotations: Array<Record<string, unknown>>;
   revisions: Array<Record<string, unknown>>;
   proposals: Array<Record<string, unknown>>;
-  board: Record<string, unknown> | null;
   shotVersion: number;
   formalKeyframeArtifactId: string | null;
   formalVideoArtifactId: string | null;
@@ -416,7 +419,6 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     annotations: [],
     revisions: [],
     proposals: [],
-    board: null,
     shotVersion: 1,
     formalKeyframeArtifactId: null,
     formalVideoArtifactId: null,
@@ -432,6 +434,9 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       suggestionResponses: [],
     },
   };
+  // A completed mock candidate must have a durable receipt for its exact
+  // submitted command. Unknown keys still return 404 and never trigger a retry.
+  const executionReceipts = new Map<string, { stage: string; receipt: Record<string, unknown> }>();
   await page.addInitScript((workspaceId) => {
     sessionStorage.setItem("dramaforge.selected-workspace-id", workspaceId);
   }, WORKSPACE_ID);
@@ -443,6 +448,12 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     }
     const method = request.method();
     const path = url.pathname;
+    if (
+      request.method() === "POST" &&
+      /^\/api\/v1\/projects\/[^/]+\/shots\/[^/]+\/references\/resolve$/.test(path)
+    ) {
+      return json(route, []);
+    }
     const body = request.postDataJSON?.() ?? {};
     state.editing.requests.push({ method, path, body: clone(body) });
     if (path === "/health") return json(route, { status: "ok", db: "up" });
@@ -496,9 +507,58 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
           formal_keyframe_count: 2,
           formal_video_count: 2,
           risk_count: 0,
+          pending_review_count: 0,
+          generating_count: 0,
+          failed_count: 0,
+          unknown_count: 0,
           representative_artifact: null,
         },
       ]);
+    }
+    if (path.endsWith("/workbench") && method === "GET") {
+      const shotId = path.split("/").at(-2) ?? SHOT_ID;
+      return json(route, {
+        shot: workspaceShot(state, state.shotVersion, shotId, shotId === SHOT_ID ? 1 : 2),
+        references: [],
+        candidates: shotId === SHOT_ID ? clone(state.candidates) : [],
+        trace: [],
+        old_version_warnings: [],
+      });
+    }
+    if (path.endsWith("/batch-production/preview") && method === "GET") {
+      // "补齐" preview: the first shot follows the mock's formal facts; the
+      // second has no saved model choice so it stays blocked.
+      const stage = url.searchParams.get("stage") === "video" ? "video" : "image_keyframe";
+      const first =
+        stage === "image_keyframe"
+          ? state.formalKeyframeArtifactId
+            ? { disposition: "skipped", reason: "ALREADY_FORMAL" }
+            : { disposition: "ready", reason: null }
+          : state.formalVideoArtifactId
+            ? { disposition: "skipped", reason: "ALREADY_FORMAL" }
+            : state.formalKeyframeArtifactId
+              ? { disposition: "ready", reason: null }
+              : { disposition: "skipped", reason: "FORMAL_KEYFRAME_REQUIRED" };
+      const items = [
+        { shot_id: SHOT_ID, scene_id: SCENE_ID, shot_number: 1, ...first },
+        {
+          shot_id: SECOND_SHOT_ID,
+          scene_id: SCENE_ID,
+          shot_number: 2,
+          disposition: "blocked",
+          reason: "MODEL_BINDING_MISSING",
+        },
+      ];
+      return json(route, {
+        project_id: PROJECT_ID,
+        scene_id: url.searchParams.get("scene_id"),
+        stage,
+        fingerprint: (stage === "video" ? "v" : "k").repeat(64),
+        ready_count: items.filter((item) => item.disposition === "ready").length,
+        skipped_count: items.filter((item) => item.disposition === "skipped").length,
+        blocked_count: items.filter((item) => item.disposition === "blocked").length,
+        items,
+      });
     }
     if (path.endsWith("/workspace") && method === "GET") {
       return json(route, {
@@ -519,6 +579,27 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         ],
         references: { [SHOT_ID]: [], [SECOND_SHOT_ID]: [] },
         candidates: { [SHOT_ID]: clone(state.candidates), [SECOND_SHOT_ID]: [] },
+        overview: {
+          [SHOT_ID]: {
+            pending_review: state.candidates.some(
+              (candidate) =>
+                candidate.artifact_id &&
+                candidate.artifact_id !== state.formalKeyframeArtifactId &&
+                candidate.artifact_id !== state.formalVideoArtifactId &&
+                !candidate.review_allowed &&
+                candidate.review_decision !== "rejected",
+            ),
+            generating: false,
+            generation_failed: false,
+            outcome_unknown: false,
+          },
+          [SECOND_SHOT_ID]: {
+            pending_review: false,
+            generating: false,
+            generation_failed: false,
+            outcome_unknown: false,
+          },
+        },
         trace: {
           [SHOT_ID]: [
             {
@@ -574,13 +655,50 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
           409,
         );
       }
+      const stage = String(body.stage);
       return json(route, {
-        plan: { accepted_approximations: [] },
         plan_fingerprint: "a".repeat(64),
+        compiler_contract_preview: {
+          compile_level: "provider_contract",
+          readiness: "contract_validated",
+          transport_verified: false,
+          account_verified: false,
+          wire_fingerprint: "b".repeat(64),
+          redacted_wire: {
+            model_id: "provider/mock-v1",
+            operation: stage === "video" ? "video.generate" : "image.generate",
+            wire_request: {
+              prompt: stage === "video" ? state.videoPrompt : state.imagePrompt,
+              ...(stage === "video" ? { duration: 5 } : {}),
+            },
+          },
+          effective_options: stage === "video" ? { duration_seconds: 5 } : {},
+          errors: [],
+          warnings: ["MEDIA_BYTES_NOT_VERIFIED", "ACCOUNT_NOT_CHECKED"],
+        },
+        plan: {
+          project_id: PROJECT_ID,
+          shot_id: SHOT_ID,
+          expected_shot_version: state.shotVersion,
+          stage,
+          mode_id: body.mode_id,
+          prompt: stage === "video" ? state.videoPrompt : state.imagePrompt,
+          resolved_model: { status: "RESOLVED", resolved_model_id: "provider/mock-v1" },
+          planned_references: [],
+          capability_gaps: [],
+          accepted_approximations: [],
+          duration_seconds: stage === "video" ? 5 : null,
+          effective_options: stage === "video" ? { duration_seconds: 5 } : {},
+        },
       });
     }
     if (path.endsWith("/executions/receipt") && method === "GET") {
-      return json(route, { code: "NOT_FOUND", detail: "no committed receipt" }, 404);
+      const key = url.searchParams.get("idempotency_key") ?? "";
+      const stage = url.searchParams.get("stage");
+      const existing = executionReceipts.get(key);
+      return existing && existing.stage === stage
+        ? json(route, existing.receipt)
+        : json(route, { code: "NOT_FOUND", detail: "no committed receipt" }, 404);
     }
     if (
       path.includes("/director/runtime/shots/") &&
@@ -606,6 +724,9 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     }
     if (path.includes("/director/turns") && method === "GET") return json(route, []);
     if (path.endsWith("/executions") && method === "POST") {
+      if (body.compiler_wire_fingerprint !== "b".repeat(64)) {
+        return json(route, { code: "COMPILER_WIRE_CONFIRMATION_REQUIRED" }, 422);
+      }
       if (body.expected_shot_version !== state.shotVersion) {
         return json(
           route,
@@ -627,16 +748,43 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
             status: "completed",
             artifact_type: "image",
             mime_type: "image/png",
+            review_allowed: true,
+            review_decision_id: "88888888-8888-4888-8888-888888888888",
+            review_node_run_id: "99999999-8888-4777-8666-555555555555",
+            review_artifact_id: "aaaaaaaa-8888-4777-8666-555555555555",
+          },
+        ];
+      } else if (body.stage === "video") {
+        state.candidates = [
+          {
+            artifact_id: "candidate-video-1",
+            node_run_id: "run-video-1",
+            node_key: "video",
+            stage: "video",
+            status: "completed",
+            artifact_type: "video",
+            mime_type: "video/mp4",
+            review_allowed: true,
+            review_decision_id: "77777777-8888-4777-8666-555555555555",
+            review_node_run_id: "66666666-8888-4777-8666-555555555555",
+            review_artifact_id: "bbbbbbbb-8888-4777-8666-555555555555",
           },
         ];
       }
-      return json(route, {
-        node_run_id: "run-keyframe-1",
+      const operationKey = request.headers()["idempotency-key"];
+      if (!operationKey) throw new Error("Mock production creates require an Idempotency-Key");
+      const receipt = {
+        node_run_id: body.stage === "video" ? "run-video-1" : "run-keyframe-1",
         graph_id: "graph-1",
         graph_version_id: "version-graph-1",
         status: "queued",
         plan_fingerprint: "a".repeat(64),
+      };
+      executionReceipts.set(operationKey, {
+        stage: String(body.stage),
+        receipt: { ...receipt, status: "completed" },
       });
+      return json(route, receipt);
     }
     if (path.endsWith("/formal-keyframe") && method === "POST") {
       if (body.expected_shot_version !== state.shotVersion) {
@@ -678,6 +826,18 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         version: state.shotVersion,
       });
     }
+    if (path.endsWith("/production-summary"))
+      return json(route, {
+        project_id: PROJECT_ID,
+        total_runs: 0,
+        completed_runs: 0,
+        running_runs: 0,
+        failed_runs: 0,
+        artifact_count: 0,
+        recent_failures: [],
+        has_more_failures: false,
+        stages: [],
+      });
     if (path.endsWith("/snapshot")) {
       return json(route, {
         project_id: PROJECT_ID,
@@ -707,8 +867,45 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         },
       ]);
     }
+    if (
+      method === "GET" &&
+      (path === "/api/v1/provider-plugins" ||
+        path.endsWith("/provider-connections") ||
+        path.endsWith("/model-profiles"))
+    )
+      return json(route, []);
     if (path === "/api/v1/model-slots") return json(route, []);
     if (path.endsWith("/model-bindings/effective")) return json(route, []);
+    if (path.endsWith("/execution-models/preflight")) {
+      return json(route, {
+        project_id: PROJECT_ID,
+        ready: true,
+        stages: [
+          {
+            stage: "image_keyframe",
+            slot: "visual.keyframe",
+            purpose: "keyframe",
+            ready: true,
+            source: "project_profile",
+            requested_model_id: "provider/model-b",
+            resolved_model_id: "provider/model-b",
+            provider_model_binding_id: "77777777-7777-4777-8777-777777777777",
+            reason: null,
+          },
+          {
+            stage: "video",
+            slot: "video.shot",
+            purpose: "video",
+            ready: true,
+            source: "project_profile",
+            requested_model_id: "provider/model-b",
+            resolved_model_id: "provider/model-b",
+            provider_model_binding_id: "77777777-7777-4777-8777-777777777777",
+            reason: null,
+          },
+        ],
+      });
+    }
     if (path.endsWith("/model-profile") && method === "GET") {
       return json(route, { id: "project-profile", name: "当前项目", bindings: {}, version: 1 });
     }
@@ -840,20 +1037,6 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       state.annotations.push(annotation);
       return json(route, annotation, 201);
     }
-    if (path.endsWith("/director-board") && method === "GET") return json(route, state.board);
-    if (path.endsWith("/director-board") && method === "PUT") {
-      state.board = {
-        id: "board-1",
-        shot_id: SHOT_ID,
-        mode: body.mode,
-        camera: body.camera,
-        characters: body.characters,
-        scene: body.scene,
-        version: 1,
-        updated_at: new Date().toISOString(),
-      };
-      return json(route, state.board);
-    }
     if (path === "/api/v1/projects/" + PROJECT_ID + "/opencut-manifest") {
       if (method !== "GET") throw new Error("formal OpenCut manifest must use GET");
       assertExactJson(body, {}, "OpenCut manifest body");
@@ -862,6 +1045,79 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
 
     const editSessionsPath = "/api/v1/projects/" + PROJECT_ID + "/edit-sessions";
     const editSessionPath = editSessionsPath + "/" + EDIT_SESSION_ID;
+
+    if (path === editSessionPath + "/final-films" && method === "GET") {
+      return json(route, []);
+    }
+
+    if (path === "/api/v1/projects/" + PROJECT_ID + "/final-film/prepare" && method === "POST") {
+      assertExactJson(
+        body,
+        {
+          edit_session_id: EDIT_SESSION_ID,
+          expected_timeline_version: state.editing.session.version,
+        },
+        "Final Film prepare body",
+      );
+      return json(route, {
+        project_id: PROJECT_ID,
+        edit_session_id: EDIT_SESSION_ID,
+        timeline_version: state.editing.session.version,
+        shot_ids: [SHOT_ID, SECOND_SHOT_ID],
+        node_run_ids: [],
+        preparation_fingerprint: "a".repeat(64),
+        status: "queued",
+      });
+    }
+
+    if (path === "/api/v1/projects/" + PROJECT_ID + "/final-film/render" && method === "POST") {
+      assertExactJson(
+        body,
+        {
+          edit_session_id: EDIT_SESSION_ID,
+          expected_timeline_version: state.editing.session.version,
+          name: "V1 Final Film",
+        },
+        "Final Film render body",
+      );
+      const expectedKey = `final-${EDIT_SESSION_ID}-${state.editing.session.version}-${"a".repeat(64)}`;
+      if ((await request.headerValue("idempotency-key")) !== expectedKey) {
+        throw new Error("Final Film render must use the frozen preparation identity");
+      }
+      return json(route, {
+        project_id: PROJECT_ID,
+        edit_session_id: EDIT_SESSION_ID,
+        timeline_version: state.editing.session.version,
+        node_run_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        attempt_no: 1,
+        status: "completed",
+        result: {
+          project_id: PROJECT_ID,
+          edit_session_id: EDIT_SESSION_ID,
+          timeline_version: state.editing.session.version,
+          export_id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          artifact_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          node_run_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          provider_operation_id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          format: "dramaforge-final-film-v1",
+          status: "completed",
+          duration_seconds: "9",
+          shot_count: 2,
+          timeline_clip_count: 2,
+          composite_artifact_ids: ["artifact-video-1", "artifact-video-2"],
+          source_commit: "e2e",
+          mime_type: "video/mp4",
+          byte_size: 9000,
+          storage_state: "available",
+          content_hash: "b".repeat(64),
+          formal_references: [],
+          subtitle_artifact_id: null,
+          subtitle_content_hash: null,
+          subtitle_byte_size: 0,
+          subtitle_cue_count: 0,
+        },
+      });
+    }
 
     if (path === editSessionsPath && method === "POST") {
       if (state.editing.created) throw new Error("EditSession creation must happen exactly once");
@@ -884,8 +1140,17 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       if ((await request.headerValue("x-csrf-token")) !== "csrf-e2e") {
         throw new Error("EditSession timeline save must carry the fetched CSRF token");
       }
-      assertExactKeys(body, ["timeline"], "EditSession timeline save body");
+      assertExactKeys(
+        body,
+        ["expected_session_version", "timeline"],
+        "EditSession timeline save body",
+      );
       const timeline = (body as { timeline?: unknown }).timeline;
+      const expectedVersion = (body as { expected_session_version?: unknown })
+        .expected_session_version;
+      if (expectedVersion !== state.editing.session.version) {
+        throw new Error("EditSession timeline save must target the loaded session version");
+      }
       assertExactKeys(timeline, ["clips", "metadata"], "EditSession timeline payload");
       assertNoProductionLineage(body);
       assertExactJson(

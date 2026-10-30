@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -9,9 +10,46 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = REPO_ROOT / "docker-compose.yml"
 DEV_COMPOSE = REPO_ROOT / "docker-compose.dev.yml"
-GPU_COMPOSE = REPO_ROOT / "docker-compose.gpu.yml"
 BUILD_COMPOSE = REPO_ROOT / "docker-compose.build.yml"
 OFFLINE_COMPOSE = REPO_ROOT / "docker-compose.offline.yml"
+
+
+def test_quality_minio_copy_is_immutable_without_changing_runtime_distribution() -> None:
+    quality = yaml.safe_load(
+        (REPO_ROOT / "docker-compose.quality.yml").read_text(encoding="utf-8")
+    )
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    )
+    upstream = "quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z"
+    gate = workflow["jobs"]["container-gates"]
+    image = quality["services"]["minio-quality"]["image"]
+    assert re.fullmatch(
+        r"ghcr\.io/zwb2002-yjy/dramaforge-minio@sha256:[0-9a-f]{64}", image
+    )
+    # The quality copy has only the tested amd64 platform. The hosted gate runs
+    # on x64; packaged runtime retains the upstream multi-platform reference.
+    assert gate["runs-on"] == "ubuntu-latest"
+    assert yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]["minio"][
+        "image"
+    ] == upstream
+
+
+def test_auth_gateway_gate_uses_deployed_config_and_remains_private() -> None:
+    services = yaml.safe_load(
+        (REPO_ROOT / "docker-compose.quality.yml").read_text(encoding="utf-8")
+    )["services"]
+    gateway = services["auth-gateway-quality"]
+    assert gateway["image"] in (REPO_ROOT / "frontend/Dockerfile").read_text()
+    assert gateway["volumes"] == ["./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro"]
+    assert not gateway.get("ports")
+    command = services["auth-gateway-integration-quality"]["command"][-1]
+    assert "--offline --no-sync" in command
+    assert "tests/gateway" in command and "--fail-on-skip" in command
+    for runner in ("scripts/run_quality_in_docker.ps1", ".github/workflows/ci.yml"):
+        assert "--exit-code-from auth-gateway-integration-quality" in (
+            REPO_ROOT / runner
+        ).read_text(encoding="utf-8")
 
 
 def test_compose_defines_required_boot0_services() -> None:
@@ -35,6 +73,10 @@ def test_compose_defines_required_boot0_services() -> None:
     assert "healthcheck" in services["postgres"]
     assert "healthcheck" in services["redis"]
     assert "healthcheck" in services["minio"]
+    for name in ("postgres", "redis", "minio", "litellm-db", "litellm"):
+        assert services[name]["restart"] == "unless-stopped"
+    for name in ("postgres", "redis", "minio", "litellm-db"):
+        assert services[name]["healthcheck"]["start_period"]
     provider_env = {
         "AGNES_ENABLED",
         "AGNES_API_KEY",
@@ -46,11 +88,9 @@ def test_compose_defines_required_boot0_services() -> None:
         "HTTP_PROXY",
         "HTTPS_PROXY",
         "NO_PROXY",
-        "TEXT_LLM_ENABLED",
-        "TEXT_LLM_API_KEY",
-        "TEXT_LLM_BASE_URL",
-        "TEXT_LLM_MODEL",
-        "TEXT_LLM_API_STYLE",
+        "LITELLM_GATEWAY_URL",
+        "LITELLM_API_KEY",
+        "LITELLM_LOGICAL_MODELS",
         "TTS_ENABLED",
         "TTS_ENGINE",
         "TTS_VOICE",
@@ -59,6 +99,7 @@ def test_compose_defines_required_boot0_services() -> None:
         env = services[name]["environment"]
         assert provider_env <= set(env), f"missing runtime provider config in {name}"
         assert "DRAMAFORGE_SOURCE_COMMIT" in env
+        assert "DATABASE_SSL" in env
     assert "ARQ_HEAVY_MAX_JOBS" in services["worker-heavy"]["environment"]
     assert services["dispatcher"]["command"] == ["python", "-m", "app.workers.dispatcher"]
     externally_published = {
@@ -71,22 +112,30 @@ def test_compose_defines_required_boot0_services() -> None:
         not ports for name, ports in externally_published.items() if name != "frontend"
     )
     assert services["frontend"]["depends_on"]["api"]["condition"] == "service_healthy"
-    assert services["frontend"]["image"] == (
-        "${DRAMAFORGE_FRONTEND_IMAGE:-ghcr.io/zwb2002-yjy/"
-        "dramaforge-frontend:v0.1.0}"
-    )
+    assert data["name"] == "dramaforge-dev"
+    assert services["frontend"]["image"] == "${DRAMAFORGE_FRONTEND_IMAGE:-dramaforge-frontend:dev}"
     assert services["frontend"]["read_only"] is True
     assert services["frontend"]["cap_drop"] == ["ALL"]
     for name in ("api", "dispatcher", "worker-default", "worker-heavy", "worker-director"):
+        env = services[name]["environment"]
+        assert env["PROVIDER_BASE_URL_ALLOW_PRIVATE"] == "${PROVIDER_BASE_URL_ALLOW_PRIVATE:-false}"
+        assert env["PROVIDER_TRUSTED_HTTP_NETWORKS"] == "${PROVIDER_TRUSTED_HTTP_NETWORKS:-}"
         condition = services[name]["depends_on"]["database-bootstrap"]["condition"]
         assert condition == "service_completed_successfully"
+        assert services[name]["depends_on"]["postgres"]["condition"] == "service_healthy"
+        assert services[name]["restart"] == "unless-stopped"
         assert services[name]["security_opt"] == ["no-new-privileges:true"]
         assert services[name]["cap_drop"] == ["ALL"]
         assert "healthcheck" in services[name]
-        assert services[name]["image"] == (
-            "${DRAMAFORGE_BACKEND_IMAGE:-ghcr.io/zwb2002-yjy/"
-            "dramaforge-backend:v0.1.0}"
-        )
+        assert services[name]["image"] == "${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}"
+    # Every service that imports app.config in production must receive the
+    # generated secrets that settings validation checks. worker-director builds
+    # full Settings at import (RedisSettings.from_dsn(get_settings())), so a
+    # missing WORKER_TOKEN makes it restart-loop on a fresh install.
+    for name in ("api", "worker-default", "worker-heavy", "worker-director"):
+        env = services[name]["environment"]
+        assert "WORKER_TOKEN" in env, f"{name} cannot validate production settings"
+        assert "SESSION_SECRET" in env, f"{name} cannot validate production settings"
     maintenance = services["maintenance"]
     assert maintenance["profiles"] == ["maintenance"]
     assert maintenance["entrypoint"] == [
@@ -128,6 +177,14 @@ def test_director_worker_has_independent_queue_and_no_api_dependency() -> None:
     assert "POSTGRES_APP_PASSWORD" not in checkpoint_dsn
     assert "worker-director" not in services["api"]["depends_on"]
     assert "worker-director" not in services["worker-default"]["depends_on"]
+    api_checkpoint_dsn = services["api"]["environment"][
+        "DIRECTOR_CHECKPOINT_DATABASE_URL"
+    ]
+    assert "DIRECTOR_CHECKPOINT_USER" in api_checkpoint_dsn
+    assert "DIRECTOR_CHECKPOINT_PASSWORD" in api_checkpoint_dsn
+    assert "POSTGRES_APP_PASSWORD" not in api_checkpoint_dsn
+    assert "WORKER_KIND" not in services["worker-default"]["environment"]
+    assert "WORKER_KIND" not in services["worker-heavy"]["environment"]
     assert DirectorWorker.queue_name != ProductionWorker.queue_name
     assert not any("director" in function.__name__ for function in ProductionWorker.functions)
     assert not getattr(ProductionWorker, "on_startup", None)
@@ -169,19 +226,13 @@ def test_installers_use_images_without_host_package_installers() -> None:
     assert "docker load --input" in scripts[1]
 
 
-def test_gpu_profile_is_optional_and_not_default() -> None:
-    data = yaml.safe_load(GPU_COMPOSE.read_text(encoding="utf-8"))
-    comfy = data["services"]["comfyui"]
-    assert "gpu" in comfy.get("profiles", [])
-
-
 def test_development_override_exposes_infrastructure_debug_ports_only() -> None:
     services = yaml.safe_load(DEV_COMPOSE.read_text(encoding="utf-8"))["services"]
     assert "api" not in services or not services["api"].get("ports")
     assert services["postgres"]["ports"] == ["5432:5432"]
     assert services["redis"]["ports"] == ["6379:6379"]
     assert services["minio"]["ports"] == ["9000:9000", "9001:9001"]
-    assert services["litellm"]["ports"] == ["4000:4000"]
+    assert services["litellm-network"]["ports"] == ["4000:4000"]
     assert "frontend" not in services
 
 
@@ -277,3 +328,41 @@ def test_frontend_html_cannot_cache_old_chunk_entrypoints() -> None:
     assert 'location ^~ /assets/' in nginx
     assert 'try_files $uri =404;' in nginx
     assert 'add_header X-Content-Type-Options "nosniff" always;' in nginx
+
+
+def test_retired_text_settings_are_not_deployment_inputs() -> None:
+    for filename in ("docker-compose.yml", "docker-compose.quality.yml", ".env.example"):
+        assert "TEXT_LLM_" not in (REPO_ROOT / filename).read_text(encoding="utf-8")
+
+
+def test_proxy_owns_a_restricted_network_namespace_and_persistent_salt() -> None:
+    services = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]
+    proxy = services["litellm"]
+    guard = services["litellm-network"]
+    assert proxy["network_mode"] == "service:litellm-network"
+    assert proxy["cap_drop"] == ["ALL"]
+    assert guard["cap_add"] == ["NET_ADMIN"]
+    assert guard["read_only"] is True
+    assert proxy["environment"]["LITELLM_SALT_KEY"].startswith("${LITELLM_SALT_KEY:?")
+    assert proxy["environment"]["STORE_MODEL_IN_DB"] == "True"
+    assert "@sha256:" in proxy["image"]
+    assert "HTTP_PROXY" not in proxy["environment"]
+    for name in ("api", "worker-default", "worker-heavy", "worker-director"):
+        assert "LITELLM_MASTER_KEY" not in services[name]["environment"]
+        assert "LITELLM_SALT_KEY" not in services[name]["environment"]
+
+
+def test_provider_forbidden_processes_disable_canonical_text_gateway() -> None:
+    runtime = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]
+    quality = yaml.safe_load(
+        (REPO_ROOT / "docker-compose.quality.yml").read_text(encoding="utf-8")
+    )["services"]
+    for service in (runtime["worker-director"], quality["backend-quality"]):
+        env = service["environment"]
+        assert env["AGNES_ENABLED"] == "false"
+        assert env["LITELLM_GATEWAY_URL"] == ""
+        assert env["LITELLM_API_KEY"] == ""
+    for name in ("api", "worker-default", "worker-heavy"):
+        env = runtime[name]["environment"]
+        assert env["LITELLM_GATEWAY_URL"] == "${LITELLM_GATEWAY_URL:-http://litellm:4000}"
+        assert env["LITELLM_API_KEY"] == "${LITELLM_API_KEY:-}"

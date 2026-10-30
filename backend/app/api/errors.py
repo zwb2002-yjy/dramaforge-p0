@@ -43,16 +43,19 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(RequestValidationError)
-    async def validation_handler(
-        _request: Request, exc: RequestValidationError
-    ) -> JSONResponse:
+    async def validation_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
         return problem_response(
             status_code=422,
             code="VALIDATION_ERROR",
             message="Request validation failed",
             details={
                 "errors": jsonable_encoder(
-                    exc.errors(),
+                    # Validation inputs (including root objects) can contain
+                    # plaintext keys/passwords even when fields use SecretStr.
+                    [
+                        {key: value for key, value in error.items() if key not in {"input", "ctx"}}
+                        for error in exc.errors()
+                    ],
                     custom_encoder={Exception: str, ValueError: str},
                 )
             },
@@ -80,8 +83,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                 status_code=503,
                 code="DATABASE_UNAVAILABLE",
                 message=(
-                    "数据库不可用（PostgreSQL 连接失败）。"
-                    "请启动 Docker Compose PostgreSQL 后重试。"
+                    "数据库不可用（PostgreSQL 连接失败）。请启动 Docker Compose PostgreSQL 后重试。"
                 ),
                 details={"error_type": name},
             )

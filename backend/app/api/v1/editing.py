@@ -37,6 +37,7 @@ from app.director.turn_service import DirectorTurnService
 from app.editing.adapter import EditingAdapter
 from app.editing.models import EditSession
 from app.editing.timeline_builder import build_edit_session_for_project
+from app.production.final_film import TimelinePreviewRead, preview_timeline
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["editing"], dependencies=[Depends(require_selected_workspace)])
@@ -76,6 +77,7 @@ class EditTimelineUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     timeline: EditTimelinePayload
+    expected_session_version: int = Field(ge=1)
 
     @model_validator(mode="after")
     def reject_production_lineage(self) -> EditTimelineUpdateRequest:
@@ -249,6 +251,28 @@ async def get_edit_session(
     return _edit_session_read(row)
 
 
+@router.post(
+    "/projects/{project_id}/edit-sessions/{session_id}/preview-plan",
+    response_model=TimelinePreviewRead,
+)
+async def get_timeline_preview_plan(
+    project_id: UUID,
+    session_id: UUID,
+    body: EditTimelineUpdateRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> TimelinePreviewRead:
+    await _owned_session(project_id=project_id, session_id=session_id, user=user, session=session)
+    return await preview_timeline(
+        session,
+        project_id=project_id,
+        edit_session_id=session_id,
+        expected_timeline_version=body.expected_session_version,
+        draft_timeline=body.timeline.model_dump(mode="json"),
+    )
+
+
 @router.patch(
     "/projects/{project_id}/edit-sessions/{session_id}/timeline",
     response_model=EditSessionRead,
@@ -271,6 +295,7 @@ async def save_edit_timeline(
         project_id=project_id,
         session_id=row.id,
         timeline=dict(body.timeline.model_dump(mode="json")),
+        expected_session_version=body.expected_session_version,
     )
     await DirectorTurnService(session).mark_scope_stale(
         project_id=project_id,

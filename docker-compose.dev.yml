@@ -12,7 +12,7 @@ services:
       - "9000:9000"
       - "9001:9001"
 
-  litellm:
+  litellm-network:
     ports:
       - "4000:4000"
 

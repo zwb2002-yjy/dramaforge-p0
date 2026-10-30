@@ -87,17 +87,21 @@ def normalize_image(
     intent: ImageGenerationIntent,
 ) -> NormalizationResult:
     errors: list[str] = []
+    try:
+        intent.selected_reference_ids()
+    except ValueError as exc:
+        errors.append(str(exc))
     if intent.selection.mode != "explicit_binding":
         errors.append(f"selection mode not open in stage A+B: {intent.selection.mode}")
     if intent.purpose != "keyframe":
         errors.append(f"image purpose not open in stage A+B: {intent.purpose}")
     capabilities: set[str] = set(intent.requirements.required_capabilities)
-    if intent.reference_artifact_id is not None:
+    if intent.reference_artifact_ids:
         capabilities.add("image.i2i")
     return NormalizationResult(
         required_capabilities=frozenset(capabilities),
         reference_roles=frozenset({"reference_image"})
-        if intent.reference_artifact_id is not None
+        if intent.reference_artifact_ids
         else frozenset(),
         preferred_capabilities=frozenset(intent.preferences.preferred_capabilities),
         errors=errors,

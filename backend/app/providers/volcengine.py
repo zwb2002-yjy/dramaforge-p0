@@ -30,6 +30,8 @@ from uuid import uuid4
 import httpx
 
 from app.config import Settings, get_settings
+from app.providers.egress import guarded_provider_transport
+from app.providers.http_client import provider_http_client
 
 ARK_CN_PROFILE = "ark_cn_v1"
 ARK_CN_HOST = "https://ark.cn-beijing.volces.com/api/v3"
@@ -131,7 +133,7 @@ def _video_result_url(data: dict[str, Any]) -> str | None:
 
 # ---------------------------------------------------------------------------
 # Low-level transport and wire-body builders (single source of truth).
-# Both the legacy HubClient methods and the unified Compiler/Runtime go through
+# The Compiler/Runtime use
 # these, so there is exactly one wire contract and one HTTP send path.
 # ---------------------------------------------------------------------------
 
@@ -145,7 +147,7 @@ async def _post_json(
     timeout: float,
     transport: httpx.AsyncBaseTransport | None,
 ) -> httpx.Response:
-    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+    async with provider_http_client(timeout=timeout, transport=transport) as client:
         return await client.post(f"{host}{path}", headers=headers, json=body)
 
 
@@ -157,7 +159,7 @@ async def _get_json(
     timeout: float,
     transport: httpx.AsyncBaseTransport | None,
 ) -> httpx.Response:
-    async with httpx.AsyncClient(timeout=timeout, transport=transport) as client:
+    async with provider_http_client(timeout=timeout, transport=transport) as client:
         return await client.get(f"{host}{path}", headers=headers)
 
 
@@ -223,400 +225,6 @@ def _request_fingerprint(body: dict[str, object]) -> str:
     ).hexdigest()
 
 
-class ArkHubClient:
-    """Single-attempt Volcengine Ark protocol client."""
-
-    _IMAGE_REQUEST_TIMEOUT_S = 150.0
-    _VIDEO_REQUEST_TIMEOUT_S = 120.0
-
-    def __init__(
-        self,
-        settings: Settings | None = None,
-        *,
-        transport: httpx.AsyncBaseTransport | None = None,
-        host: str | None = None,
-    ) -> None:
-        self._settings = settings or get_settings()
-        self._transport = transport
-        self._host = (host or self._settings.volcengine_base_url).strip().rstrip("/")
-        self._key = self._settings.volcengine_api_key.strip()
-        self._image_model = self._settings.volcengine_image_model
-        self._video_model = self._settings.volcengine_video_model
-        self._tasks: dict[str, dict[str, Any]] = {}
-
-    @property
-    def host(self) -> str:
-        return self._host
-
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self._key}",
-            "Content-Type": "application/json",
-        }
-
-    def configured(self) -> bool:
-        return bool(self._key and self._settings.volcengine_enabled)
-
-    async def create_image(
-        self,
-        *,
-        prompt: str,
-        size: str = "2048x2048",
-        reference_url: str | None = None,
-        reference_artifact_id: str | None = None,
-        reference_fingerprint: str | None = None,
-        seed: int | None = None,
-    ) -> dict[str, Any]:
-        if not self.configured():
-            raise RuntimeError("Volcengine Ark connection is not configured")
-        body, operation, references = _build_image_body(
-            self._image_model,
-            prompt=prompt,
-            size=size,
-            reference_url=reference_url,
-            seed=seed,
-        )
-        request_fingerprint = _request_fingerprint(body)
-        summary: dict[str, object] = {
-            "protocol_profile": ARK_CN_PROFILE,
-            "host": urlsplit(self._host).hostname or "",
-            "operation": operation,
-            "model": self._image_model,
-            "size": str(body.get("size", "")),
-            "reference_count": len(references),
-            "reference_artifact_ids": ([reference_artifact_id] if reference_artifact_id else []),
-            "reference_fingerprints": (
-                [reference_fingerprint] if reference_fingerprint else []
-            ),
-            "reference_transport": "signed_url" if references else "none",
-            "request_schema_fingerprint": _schema_fingerprint(body),
-        }
-        try:
-            response = await _post_json(
-                self._host,
-                ARK_IMAGE_PATH,
-                headers=self._headers(),
-                body=body,
-                timeout=self._IMAGE_REQUEST_TIMEOUT_S,
-                transport=self._transport,
-            )
-        except httpx.TransportError as exc:
-            return {
-                "status": "unknown_submission",
-                "error_code": "PROVIDER_SUBMISSION_UNKNOWN",
-                "actual_provider": "volcengine",
-                "actual_model": self._image_model,
-                "protocol_profile": ARK_CN_PROFILE,
-                "request_fingerprint": request_fingerprint,
-                "request_summary": summary,
-                "reference_fingerprints": list(references),
-                "transport_error": type(exc).__name__,
-            }
-        data = _json_object(response)
-        image_url = _image_result_url(data)
-        if response.status_code >= 400 or not image_url:
-            code = (
-                _error_code(response.status_code)
-                if response.status_code >= 400
-                else "PROVIDER_RESPONSE_INVALID"
-            )
-            return {
-                "status": "failed",
-                "http_status": response.status_code,
-                "error_code": code,
-                "error": f"Ark image request failed ({response.status_code})",
-                "actual_provider": "volcengine",
-                "actual_model": self._image_model,
-                "protocol_profile": ARK_CN_PROFILE,
-                "request_fingerprint": request_fingerprint,
-                "request_summary": summary,
-                "reference_fingerprints": list(references),
-            }
-        remote_id = f"ark-image-{uuid4()}"
-        self._tasks[remote_id] = {
-            "kind": "image",
-            "status": "succeeded",
-            "artifact_uri": image_url,
-        }
-        return {
-            "remote_task_id": remote_id,
-            "status": "succeeded",
-            "artifact_uri": image_url,
-            "actual_provider": "volcengine",
-            "actual_model": self._image_model,
-            "protocol_profile": ARK_CN_PROFILE,
-            "request_fingerprint": request_fingerprint,
-            "request_summary": summary,
-            "reference_fingerprints": list(references),
-        }
-
-    async def create_video(
-        self,
-        *,
-        prompt: str,
-        image_url: str | None = None,
-        reference_artifact_ids: list[str] | None = None,
-        reference_fingerprints: list[str] | None = None,
-    ) -> dict[str, Any]:
-        if not self.configured():
-            raise RuntimeError("Volcengine Ark connection is not configured")
-        body, operation, references = _build_video_body(
-            self._video_model,
-            prompt=prompt,
-            image_url=image_url,
-        )
-        request_fingerprint = _request_fingerprint(body)
-        summary: dict[str, object] = {
-            "protocol_profile": ARK_CN_PROFILE,
-            "host": urlsplit(self._host).hostname or "",
-            "operation": operation,
-            "model": self._video_model,
-            "reference_count": len(references),
-            "reference_artifact_ids": list(reference_artifact_ids or []),
-            "reference_fingerprints": list(reference_fingerprints or []),
-            "reference_transport": "signed_url" if references else "none",
-            "request_schema_fingerprint": _schema_fingerprint(body),
-        }
-        try:
-            response = await _post_json(
-                self._host,
-                ARK_VIDEO_CREATE_PATH,
-                headers=self._headers(),
-                body=body,
-                timeout=self._VIDEO_REQUEST_TIMEOUT_S,
-                transport=self._transport,
-            )
-        except httpx.TransportError as exc:
-            return {
-                "status": "unknown_submission",
-                "error_code": "PROVIDER_SUBMISSION_UNKNOWN",
-                "actual_provider": "volcengine",
-                "actual_model": self._video_model,
-                "protocol_profile": ARK_CN_PROFILE,
-                "request_fingerprint": request_fingerprint,
-                "request_summary": summary,
-                "transport_error": type(exc).__name__,
-            }
-        data = _json_object(response)
-        task_id = data.get("id")
-        task_id_value = str(task_id) if task_id is not None and str(task_id) else None
-        if response.status_code >= 400 or task_id_value is None:
-            code = (
-                _error_code(response.status_code)
-                if response.status_code >= 400
-                else "PROVIDER_RESPONSE_INVALID"
-            )
-            return {
-                "status": "failed",
-                "http_status": response.status_code,
-                "error_code": code,
-                "error": f"Ark video request failed ({response.status_code})",
-                "actual_provider": "volcengine",
-                "actual_model": self._video_model,
-                "protocol_profile": ARK_CN_PROFILE,
-                "request_fingerprint": request_fingerprint,
-                "request_summary": summary,
-            }
-        assert task_id_value is not None
-        self._tasks[task_id_value] = {
-            "kind": "video",
-            "status": "queued",
-        }
-        return {
-            "remote_task_id": task_id_value,
-            "status": "queued",
-            "actual_provider": "volcengine",
-            "actual_model": self._video_model,
-            "protocol_profile": ARK_CN_PROFILE,
-            "request_fingerprint": request_fingerprint,
-            "request_summary": summary,
-        }
-
-    async def poll_video(
-        self,
-        remote_task_id: str,
-        *,
-        query_kind: str | None = None,
-    ) -> dict[str, Any]:
-        if not self.configured():
-            raise RuntimeError("Volcengine Ark connection is not configured")
-        _ = query_kind  # Ark polls by task id only
-        try:
-            response = await _get_json(
-                self._host,
-                f"{ARK_VIDEO_CREATE_PATH}/{remote_task_id}",
-                headers=self._headers(),
-                timeout=60.0,
-                transport=self._transport,
-            )
-        except httpx.TransportError as exc:
-            return {
-                "status": "running",
-                "poll_error": type(exc).__name__,
-                "error_code": "PROVIDER_POLL_TRANSIENT",
-            }
-        data = _json_object(response)
-        if response.status_code >= 400:
-            if response.status_code == 429 or response.status_code >= 500:
-                return {
-                    "status": "running",
-                    "http_status": response.status_code,
-                    "error_code": (
-                        "PROVIDER_RATE_LIMITED"
-                        if response.status_code == 429
-                        else "PROVIDER_POLL_TRANSIENT"
-                    ),
-                    "poll_error": f"http_{response.status_code}",
-                }
-            return {
-                "status": "failed",
-                "http_status": response.status_code,
-                "error_code": _error_code(response.status_code),
-                "error": f"Ark video poll failed ({response.status_code})",
-            }
-        raw_status = str(data.get("status") or "unknown").lower()
-        if raw_status in {"succeeded", "completed", "success", "done"}:
-            status = "succeeded"
-        elif raw_status in {"failed", "error", "expired"}:
-            status = "failed"
-        elif raw_status in {"queued", "pending"}:
-            status = "queued"
-        else:
-            status = "running"
-        uri = _video_result_url(data)
-        result: dict[str, Any] = {"status": status}
-        if uri:
-            result["artifact_uri"] = uri
-        if status == "failed":
-            result["error_code"] = "PROVIDER_TASK_FAILED"
-            result["error"] = "Ark video task failed"
-        self._tasks[remote_task_id] = {
-            **self._tasks.get(remote_task_id, {}),
-            "kind": "video",
-            "status": status,
-        }
-        return result
-
-    async def poll(self, remote_task_id: str) -> dict[str, Any]:
-        task = self._tasks.get(remote_task_id)
-        if task and task.get("kind") == "video":
-            return await self.poll_video(remote_task_id)
-        if task and task.get("kind") == "image":
-            return {
-                "status": task["status"],
-                "progress": 1.0,
-                "artifact_uri": task.get("artifact_uri"),
-            }
-        return {"status": "failed", "error_code": "PROVIDER_TASK_UNKNOWN"}
-
-    async def cancel(self, remote_task_id: str) -> dict[str, Any]:
-        try:
-            async with httpx.AsyncClient(
-                timeout=30.0,
-                transport=self._transport,
-            ) as client:
-                response = await client.delete(
-                    f"{self._host}{ARK_VIDEO_CREATE_PATH}/{remote_task_id}",
-                    headers=self._headers(),
-                )
-            if response.status_code < 400 and remote_task_id in self._tasks:
-                self._tasks[remote_task_id]["status"] = "cancelled"
-        except httpx.TransportError:
-            pass
-        return {"status": "cancelled"}
-
-    async def fetch_cost(self, remote_task_id: str) -> dict[str, Any]:
-        _ = remote_task_id
-        return {"amount": 0.0, "currency": "USD", "units": 1.0}
-
-
-class ArkImageAdapter:
-    provider = "volcengine"
-    protocol_profile = ARK_CN_PROFILE
-
-    def __init__(
-        self,
-        settings: Settings | None = None,
-        *,
-        transport: httpx.AsyncBaseTransport | None = None,
-        host: str | None = None,
-    ) -> None:
-        self._client = ArkHubClient(settings, transport=transport, host=host)
-        self.model = self._client._image_model
-
-    async def create(self, request: dict[str, Any]) -> dict[str, Any]:
-        return await self._client.create_image(
-            prompt=str(request.get("prompt") or ""),
-            size=str(request.get("size") or "2048x2048"),
-            reference_url=(str(request["reference_url"]) if request.get("reference_url") else None),
-            reference_artifact_id=(
-                str(request["reference_artifact_id"])
-                if request.get("reference_artifact_id")
-                else None
-            ),
-            reference_fingerprint=(
-                str(request["reference_fingerprint"])
-                if request.get("reference_fingerprint")
-                else None
-            ),
-            seed=int(request["seed"]) if request.get("seed") is not None else None,
-        )
-
-    async def poll(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.poll(remote_task_id)
-
-    async def cancel(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.cancel(remote_task_id)
-
-    async def fetch_cost(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.fetch_cost(remote_task_id)
-
-
-class ArkVideoAdapter:
-    provider = "volcengine"
-    protocol_profile = ARK_CN_PROFILE
-
-    def __init__(
-        self,
-        settings: Settings | None = None,
-        *,
-        transport: httpx.AsyncBaseTransport | None = None,
-        host: str | None = None,
-    ) -> None:
-        self._client = ArkHubClient(settings, transport=transport, host=host)
-        self.model = self._client._video_model
-
-    async def create(self, request: dict[str, Any]) -> dict[str, Any]:
-        return await self._client.create_video(
-            prompt=str(request.get("prompt") or ""),
-            image_url=(str(request["image_url"]) if request.get("image_url") else None),
-            reference_artifact_ids=[
-                str(item) for item in request.get("reference_artifact_ids", [])
-            ],
-            reference_fingerprints=[
-                str(item) for item in request.get("reference_fingerprints", [])
-            ],
-        )
-
-    async def poll(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.poll(remote_task_id)
-
-    async def poll_persisted(
-        self,
-        remote_task_id: str,
-        *,
-        query_kind: str | None,
-    ) -> dict[str, Any]:
-        _ = query_kind  # Ark polls by task id only
-        return await self._client.poll_video(remote_task_id)
-
-    async def cancel(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.cancel(remote_task_id)
-
-    async def fetch_cost(self, remote_task_id: str) -> dict[str, Any]:
-        return await self._client.fetch_cost(remote_task_id)
-
-
 # ---------------------------------------------------------------------------
 # Stage B3: unified Ark Compiler + Runtime (single wire owner).
 # Only fields already backed by Contract Test / Probe / quality evidence are
@@ -644,19 +252,34 @@ def _ark_summary(
 
 class ArkImageCompiler:
     """Validates an image intent against the Ark catalog manifest and compiles
-    the wire request (Seedream) using the same builder as :class:`ArkHubClient`."""
+    the wire request (Seedream) with the protocol-owned body builder."""
+
+    workbench_option_fields = frozenset({"size", "aspect_ratio", "seed"})
+
+    reference_transport = "public_url"
 
     def validate(self, intent: Any, model: Any) -> None:
         op = model.operations.get("image.generate")
         if op is None:
             raise ValueError("model does not support image.generate")
+        if op.input_contracts:
+            required = "image.i2i" if intent.selected_reference_ids() else "image.t2i"
+            if required not in set(op.capabilities):
+                raise ValueError(f"model does not support {required}")
+            return
+        if intent.seed is not None:
+            raise ValueError("Ark image catalog revision does not declare seed")
+        if intent.aspect_ratio not in {None, "1:1"}:
+            raise ValueError("Ark image aspect ratio must match the frozen square size")
+        if intent.size not in {None, op.output_constraints.get("size")}:
+            raise ValueError("Ark image size must match the frozen manifest")
         capabilities = set(op.capabilities)
         required = "image.t2i"
-        if intent.reference_artifact_id is not None:
+        if intent.single_reference_id() is not None:
             required = "image.i2i"
         if required not in capabilities:
             raise ValueError(f"model does not support {required}")
-        if intent.reference_artifact_id is not None:
+        if intent.single_reference_id() is not None:
             constraint = op.reference_constraints.get("reference_image")
             if constraint is None or constraint.max < 1:
                 raise ValueError("model does not accept a reference_image")
@@ -668,11 +291,14 @@ class ArkImageCompiler:
         references: list[Any],
         *,
         invoke_model_value: str,
+        policy: Any | None = None,
     ) -> Any:
         self.validate(intent, model)
-        image_references = [
-            ref for ref in references if ref.role == "reference_image"
-        ]
+        if model.operations["image.generate"].input_contracts:
+            return self._compile_contract(
+                intent, model, references, invoke_model_value=invoke_model_value, policy=policy
+            )
+        image_references = [ref for ref in references if ref.role == "reference_image"]
         if len(image_references) > 1:
             raise ValueError(
                 "UNSUPPORTED_BY_LEGACY_BRIDGE: image compiler accepts at most one reference_image"
@@ -718,15 +344,139 @@ class ArkImageCompiler:
             reference_fingerprints=fps,
         )
 
+    def _compile_contract(
+        self,
+        intent: Any,
+        model: Any,
+        references: list[Any],
+        *,
+        invoke_model_value: str,
+        policy: Any | None,
+    ) -> Any:
+        from typing import cast as _cast
+
+        from pydantic import JsonValue
+
+        from app.providers.capability_resolver import CapabilityResolver, ReferenceMetadata
+        from app.providers.runtime import CompiledImageRequest
+
+        if policy is None:
+            raise ValueError("Ark image input contracts require an explicit product policy")
+        selected_ids = intent.selected_reference_ids()
+        if [ref.artifact_id for ref in references] != selected_ids or any(
+            ref.role != "reference_image" for ref in references
+        ):
+            raise ValueError("resolved Ark image references do not match creative intent")
+        metadata = [
+            ReferenceMetadata(
+                artifact_id=ref.artifact_id,
+                mime_type=ref.mime_type,
+                byte_size=ref.byte_size,
+                width=ref.width,
+                height=ref.height,
+            )
+            for ref in references
+        ]
+        plan = CapabilityResolver().resolve(
+            manifest=model,
+            intent=intent,
+            reference_metadata=metadata,
+            policy=policy,
+        )
+        options = plan.effective_options
+        unsupported = options.keys() - {
+            "size",
+            "aspect_ratio",
+            "response_format",
+            "watermark",
+            "seed",
+            "output_format",
+            "sequential_image_generation",
+        }
+        if unsupported:
+            raise ValueError(f"Ark image wire options are unsupported: {sorted(unsupported)}")
+        size = options.get("size")
+        if not isinstance(size, str) or not size.strip():
+            raise ValueError("Ark image size must be declared by the manifest")
+        ratio = options.get("aspect_ratio")
+        if ratio is not None:
+            if not isinstance(ratio, str) or "x" not in size:
+                raise ValueError("Ark image aspect ratio requires a concrete widthxheight size")
+            try:
+                width, height = (int(value) for value in size.lower().split("x", 1))
+                ratio_width, ratio_height = (int(value) for value in ratio.split(":", 1))
+            except ValueError as exc:
+                raise ValueError("Ark image size or aspect ratio is malformed") from exc
+            if width <= 0 or height <= 0 or abs(width / height - ratio_width / ratio_height) > 0.01:
+                raise ValueError("Ark image size does not match requested aspect ratio")
+        response_format = options.get("response_format", "url")
+        if response_format != "url":
+            raise ValueError("Ark image product requires URL response format")
+        if options.get("sequential_image_generation", "disabled") != "disabled":
+            raise ValueError("Ark image product only supports one output image")
+        body: dict[str, object] = {
+            "model": invoke_model_value,
+            "prompt": _require_prompt(intent.prompt),
+            "size": size,
+            "response_format": response_format,
+            "watermark": options.get("watermark", False),
+        }
+        for option in ("seed", "output_format", "sequential_image_generation"):
+            if option in options:
+                body[option] = options[option]
+        artifact_ids: list[Any] = []
+        fingerprints: list[str] = []
+        urls: list[str] = []
+        for ref in references:
+            if ref.content_url is None:
+                raise ValueError("Ark reference_image must be an HTTPS URL")
+            urls.append(_require_https_reference(ref.content_url))
+            artifact_ids.append(ref.artifact_id)
+            if ref.fingerprint:
+                fingerprints.append(ref.fingerprint)
+        if urls:
+            body["image"] = urls
+        summary = _ark_summary(
+            operation="image.i2i" if urls else "image.t2i",
+            invoke_model_value=invoke_model_value,
+            reference_artifact_ids=[str(item) for item in artifact_ids],
+            reference_fingerprints=fingerprints,
+            schema_version=model.manifest_version,
+        )
+        summary["matched_contract"] = plan.matched_contract
+        summary["effective_common_options"] = options
+        summary["translation_transformations"] = []
+        return CompiledImageRequest(
+            provider_type="volcengine",
+            protocol_profile=ARK_CN_PROFILE,
+            model_id=invoke_model_value,
+            operation="image.generate",
+            wire_request=_cast(dict[str, JsonValue], body),
+            request_schema_version=model.manifest_version,
+            safe_request_summary=_cast(dict[str, JsonValue], summary),
+            reference_artifact_ids=artifact_ids,
+            reference_fingerprints=fingerprints,
+        )
+
 
 class ArkVideoCompiler:
     """Validates a video intent against the Ark catalog manifest and compiles
-    the Seedance ``content[]`` first-frame request. No duration/ratio/audio."""
+    the Seedance ``content[]`` request. Frozen revisions retain the original
+    first-frame-only wire shape; new contracts require explicit product policy.
+    """
+
+    workbench_option_fields = frozenset(
+        {"duration_seconds", "resolution", "aspect_ratio", "generate_audio", "seed"}
+    )
+
+    reference_transport = "public_url"
 
     def validate(self, intent: Any, model: Any) -> None:
         op = model.operations.get("video.generate")
         if op is None:
             raise ValueError("model does not support video.generate")
+        if op.input_contracts:
+            return
         capabilities = set(op.capabilities)
         if not ("video.i2v" in capabilities or "video.i2v.first_frame" in capabilities):
             raise ValueError("model does not support video.i2v")
@@ -744,10 +494,13 @@ class ArkVideoCompiler:
                 intent.output.aspect_ratio,
                 intent.output.duration_seconds,
                 intent.output.generate_audio,
+                intent.output.resolution,
+                intent.output.seed,
             )
         ):
             raise ValueError(
-                "Ark video catalog revision cannot express duration, ratio, or audio"
+                "Ark video catalog revision cannot express duration, ratio, audio, "
+                "resolution, or seed"
             )
 
     async def compile(
@@ -757,8 +510,13 @@ class ArkVideoCompiler:
         references: list[Any],
         *,
         invoke_model_value: str,
+        policy: Any | None = None,
     ) -> Any:
         self.validate(intent, model)
+        if model.operations["video.generate"].input_contracts:
+            return self._compile_contract(
+                intent, model, references, invoke_model_value=invoke_model_value, policy=policy
+            )
         first = next(ref for ref in references if ref.role == "first_frame")
         if first.content_url is None:
             raise ValueError("Ark video first_frame must be an HTTPS reference URL")
@@ -795,6 +553,126 @@ class ArkVideoCompiler:
             reference_fingerprints=fps,
         )
 
+    def _compile_contract(
+        self,
+        intent: Any,
+        model: Any,
+        references: list[Any],
+        *,
+        invoke_model_value: str,
+        policy: Any | None,
+    ) -> Any:
+        from typing import cast as _cast
+
+        from pydantic import JsonValue
+
+        from app.providers.capability_resolver import CapabilityResolver, ReferenceMetadata
+        from app.providers.reference_roles import canonical_reference_role
+        from app.providers.runtime import CompiledVideoRequest
+
+        if policy is None:
+            raise ValueError("Ark video input contracts require an explicit product policy")
+        selected = [
+            (item.artifact_id, canonical_reference_role(str(item.role)))
+            for item in intent.references
+        ]
+        delivered = [
+            (item.artifact_id, canonical_reference_role(str(item.role))) for item in references
+        ]
+        if selected != delivered:
+            raise ValueError("resolved Ark references do not match creative intent")
+        metadata = [
+            ReferenceMetadata(
+                artifact_id=item.artifact_id,
+                mime_type=item.mime_type,
+                byte_size=item.byte_size,
+                duration_seconds=item.duration_seconds,
+                width=item.width,
+                height=item.height,
+            )
+            for item in references
+        ]
+        plan = CapabilityResolver().resolve(
+            manifest=model,
+            intent=intent,
+            reference_metadata=metadata,
+            policy=policy,
+        )
+        wire_roles = {
+            "first_frame": "image_url",
+            "last_frame": "image_url",
+            "reference_image": "image_url",
+            "reference_video": "video_url",
+            "reference_audio": "audio_url",
+        }
+        content: list[dict[str, object]] = [
+            {"type": "text", "text": _require_prompt(intent.prompt)}
+        ]
+        artifact_ids: list[Any] = []
+        fingerprints: list[str] = []
+        for item, (_, role) in zip(references, delivered, strict=True):
+            if role not in wire_roles or item.content_url is None:
+                raise ValueError(f"Ark cannot deliver reference role: {role}")
+            wire_type = wire_roles[role]
+            content.append(
+                {
+                    "type": wire_type,
+                    wire_type: {"url": _require_https_reference(item.content_url)},
+                    "role": role,
+                }
+            )
+            artifact_ids.append(item.artifact_id)
+            if item.fingerprint:
+                fingerprints.append(item.fingerprint)
+        body: dict[str, object] = {"model": invoke_model_value, "content": content}
+        option_names = {
+            "duration_seconds": "duration",
+            "aspect_ratio": "ratio",
+            "resolution": "resolution",
+            "generate_audio": "generate_audio",
+            "seed": "seed",
+            "output_format": "output_format",
+            "watermark": "watermark",
+        }
+        transformations: list[dict[str, object]] = []
+        for name, value in plan.effective_options.items():
+            wire_name = option_names.get(name)
+            if wire_name is None:
+                raise ValueError(f"Ark video wire option is unsupported: {name}")
+            if name == "aspect_ratio" and any(role == "first_frame" for _, role in delivered):
+                if value != "adaptive":
+                    transformations.append(
+                        {
+                            "field": "aspect_ratio",
+                            "from_value": value,
+                            "to_value": "adaptive",
+                            "reason": "provider_inherits_aspect_ratio_from_first_frame",
+                        }
+                    )
+                value = "adaptive"
+            body[wire_name] = value
+        summary = _ark_summary(
+            operation="video.generate",
+            invoke_model_value=invoke_model_value,
+            reference_artifact_ids=[str(item) for item in artifact_ids],
+            reference_fingerprints=fingerprints,
+            schema_version=model.manifest_version,
+        )
+        summary["matched_contract"] = plan.matched_contract
+        summary["effective_common_options"] = plan.effective_options
+        summary["translation_transformations"] = transformations
+        return CompiledVideoRequest(
+            provider_type="volcengine",
+            protocol_profile=ARK_CN_PROFILE,
+            model_id=invoke_model_value,
+            operation="video.generate",
+            wire_request=_cast(dict[str, JsonValue], body),
+            request_schema_version=model.manifest_version,
+            safe_request_summary=_cast(dict[str, JsonValue], summary),
+            reference_artifact_ids=artifact_ids,
+            reference_fingerprints=fingerprints,
+        )
+
 
 class ArkRuntime:
     """Unified Ark runtime. Sends the compiled wire request verbatim; polls by
@@ -815,7 +693,7 @@ class ArkRuntime:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._settings = settings or get_settings()
-        self._transport = transport
+        self._transport = transport or guarded_provider_transport(settings=self._settings)
         self._host = (host or self._settings.volcengine_base_url).strip().rstrip("/")
         self._key = self._settings.volcengine_api_key.strip()
         self._enabled = self._settings.volcengine_enabled
@@ -830,8 +708,18 @@ class ArkRuntime:
         return bool(self._key and self._enabled)
 
     async def submit_image(self, request: Any) -> Any:
-        from app.providers.runtime import ProviderResumeToken, SubmissionResult
+        from app.providers.runtime import (
+            ProviderResumeToken,
+            SubmissionResult,
+            validate_compiled_submission,
+        )
 
+        validate_compiled_submission(
+            request,
+            provider_type=self.provider,
+            protocol_profile=self.protocol_profile,
+            operation="image.generate",
+        )
         if not self._configured():
             raise RuntimeError("Volcengine Ark connection is not configured")
         try:
@@ -883,8 +771,18 @@ class ArkRuntime:
         )
 
     async def submit_video(self, request: Any) -> Any:
-        from app.providers.runtime import ProviderResumeToken, SubmissionResult
+        from app.providers.runtime import (
+            ProviderResumeToken,
+            SubmissionResult,
+            validate_compiled_submission,
+        )
 
+        validate_compiled_submission(
+            request,
+            provider_type=self.provider,
+            protocol_profile=self.protocol_profile,
+            operation="video.generate",
+        )
         if not self._configured():
             raise RuntimeError("Volcengine Ark connection is not configured")
         try:
@@ -989,9 +887,7 @@ class ArkRuntime:
         from app.providers.runtime import CancelResult
 
         try:
-            async with httpx.AsyncClient(
-                timeout=30.0, transport=self._transport
-            ) as client:
+            async with provider_http_client(timeout=30.0, transport=self._transport) as client:
                 await client.delete(
                     f"{self._host}{ARK_VIDEO_CREATE_PATH}/{resume.remote_task_id}",
                     headers=self._headers(),

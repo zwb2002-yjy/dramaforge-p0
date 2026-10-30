@@ -1,4 +1,4 @@
-import type { ProjectSnapshot } from "../../lib/api";
+import type { ProjectSnapshot } from "./api";
 
 type SnapshotRun = ProjectSnapshot["node_runs"][number];
 

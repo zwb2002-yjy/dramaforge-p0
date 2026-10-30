@@ -162,6 +162,14 @@ async def generate_project_story_proposal(
         actor=user,
         request=body,
     )
+    # Generation commits the turn and proposal. Restore transaction-local RLS
+    # before reading items; otherwise PostgreSQL hides the persisted operations.
+    await set_rls_context(
+        session,
+        user_id=user.id,
+        workspace_id=project.workspace_id,
+        project_id=project.id,
+    )
     proposal = await _proposal_read(
         session,
         project_id=project.id,

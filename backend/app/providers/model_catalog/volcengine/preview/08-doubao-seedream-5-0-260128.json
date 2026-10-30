@@ -1,0 +1,59 @@
+{
+  "manifest_version": "2026-09-28",
+  "provider_type": "volcengine",
+  "protocol_profile": "ark_cn_v1",
+  "model_id": "doubao-seedream-5-0-260128",
+  "model_revision": "2026-09-28-candidate",
+  "media_kind": "image",
+  "display_name": "doubao-seedream-5-0-260128",
+  "lifecycle": "preview",
+  "catalog_source": "official_static",
+  "implementation_status": "documented",
+  "documented_at": "2026-09-28",
+  "operations": {
+    "image.generate": {
+      "operation": "image.generate",
+      "capabilities": [
+        "image.t2i",
+        "image.i2i"
+      ],
+      "input_contracts": {
+        "text": {
+          "input_slots": {},
+          "maximum_total_references": 0
+        },
+        "reference": {
+          "input_slots": {
+            "reference_image": {
+              "maximum": 14,
+              "media_types": [
+                "image/*"
+              ]
+            }
+          },
+          "minimum_total_references": 1,
+          "maximum_total_references": 14
+        }
+      }
+    }
+  },
+  "documented_features": [
+    "image.group_generation"
+  ],
+  "evidence": {
+    "model": {
+      "source_type": "official_model_list",
+      "source_url": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+      "checked_at": "2026-09-28"
+    },
+    "image_api": {
+      "source_type": "official_api_doc",
+      "source_url": "https://docs.volcengine.com/docs/ark/image-generation-api?lang=en",
+      "checked_at": "2026-09-28"
+    }
+  },
+  "option_schema": {
+    "namespace": "",
+    "options": {}
+  }
+}

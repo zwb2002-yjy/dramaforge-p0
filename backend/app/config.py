@@ -1,5 +1,6 @@
 """Application configuration loaded from environment variables."""
 
+import ipaddress
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal, Self
@@ -25,7 +26,6 @@ class Settings(BaseSettings):
 
     app_name: str = "DramaForge"
     app_env: Literal["development", "test", "production"] = "development"
-    debug: bool = False
     api_prefix: str = "/api/v1"
     source_commit: str = Field(
         default="",
@@ -58,9 +58,42 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://dramaforge:dramaforge@localhost:5432/dramaforge",
         description="SQLAlchemy async DSN using asyncpg",
     )
-    director_runtime_engine: Literal["legacy", "langgraph"] = Field(
-        default="legacy",
-        description="Engine assigned only to newly started Director turns",
+    database_ssl: bool = Field(
+        default=False,
+        description="Enable TLS for PostgreSQL connections; local Compose defaults to false",
+    )
+    # Connection-pool sizing per process (backend-review 1.4): every container
+    # shares one PostgreSQL, so each role states its own ceiling. The Compose
+    # services set these per role (api 20+10, worker-default 10+5,
+    # worker-heavy 5+5, dispatcher 3+2); the sum stays well under the
+    # PostgreSQL max_connections budget.
+    db_pool_size: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Steady pool connections per process engine",
+    )
+    db_max_overflow: int = Field(
+        default=10,
+        ge=0,
+        le=50,
+        description="Burst connections allowed beyond db_pool_size",
+    )
+    db_pool_timeout_seconds: int = Field(
+        default=30,
+        ge=1,
+        le=300,
+        description="Seconds a checkout waits for a free connection before failing",
+    )
+    db_pool_recycle_seconds: int = Field(
+        default=1800,
+        ge=30,
+        le=86400,
+        description="Recycle connections older than this to survive idle resets",
+    )
+    director_runtime_engine: Literal["langgraph"] = Field(
+        default="langgraph",
+        description="The single durable Director execution engine",
     )
     director_checkpoint_database_url: str = Field(
         default="",
@@ -106,7 +139,6 @@ class Settings(BaseSettings):
         ge=1,
         description="Maximum concurrent heavy media jobs per Arq worker process",
     )
-    worker_kind: Literal["default", "heavy"] = "default"
     worker_token: str = Field(
         default="",
         description="Shared secret for /api/v1/worker/tick (local Worker substitute)",
@@ -149,24 +181,45 @@ class Settings(BaseSettings):
         description="Public HTTPS API origin used for short-lived Provider references",
     )
     reference_token_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
-
-    # Text LLM BYOK (Anthropic-compatible Messages API, e.g. baizhi / DeepSeek).
-    text_llm_enabled: bool = False
-    text_llm_api_key: str = Field(default="", description="User BYOK for text LLM")
-    text_llm_base_url: str = Field(
-        default="",
-        description="Anthropic-compatible base, e.g. https://host/api/anthropic",
+    # Workspace-supplied provider base_urls decide where encrypted provider
+    # credentials are sent. Private self-hosted deployments are a supported
+    # product feature (joint review 6-4); this explicit operator opt-in
+    # admits private and loopback destinations (never link-local/metadata)
+    # for authenticated self-hosted networks.
+    provider_base_url_allow_private: bool = Field(
+        default=False,
+        description="Authorize private/loopback provider base_urls for self-hosted deployments",
     )
-    text_llm_model: str = Field(
-        default="deepseek-v4-flash",
-        description="Catalog id (baizhi dsv4flash → deepseek-v4-flash)",
+    # Scoped plaintext-HTTP trust for provider base_urls (joint-review
+    # follow-up: local model deployments must not require a global security
+    # downgrade). Declaring a network authorizes, for exactly those
+    # addresses: http:// base_urls (IP literals at write time) and
+    # connection-time egress. Link-local, multicast, unspecified and
+    # reserved addresses stay blocked even when a network claims them.
+    provider_trusted_http_networks: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        description=(
+            "Comma-separated IPv4/IPv6 CIDRs authorized for plaintext HTTP "
+            "provider base_urls, e.g. PROVIDER_TRUSTED_HTTP_NETWORKS=172.18.6.0/24"
+        ),
     )
-    text_llm_api_style: Literal["anthropic", "openai"] = "anthropic"
 
+    # Generic OpenAI-compatible media protocol. This is a protocol connection,
+    # not a supplier-specific plugin: the workspace supplies URL + key and picks
+    # discovered image/video model ids from the UI.
+    openai_compatible_media_enabled: bool = False
+    openai_compatible_media_auth_mode: str = Field(default="bearer", pattern="^(bearer|none)$")
+    openai_compatible_media_api_key: str = Field(
+        default="", description="Workspace BYOK for OpenAI-compatible image/video APIs"
+    )
+    openai_compatible_media_base_url: str = Field(default="https://api.openai.com/v1")
+    openai_compatible_media_image_model: str = Field(default="")
+    openai_compatible_media_video_model: str = Field(default="")
+    openai_compatible_media_timeout_seconds: float = Field(default=300.0, ge=30.0, le=900.0)
     # LiteLLM Gateway backend (spec §24–§26, §113; fix spec §3/§22). Text models
     # registered in the V3 registry with ``backend.kind="litellm"`` submit
     # through this OpenAI-compatible gateway. ``LITELLM_API_KEY`` is the
-    # DramaForge Virtual/Master key used to call the gateway — NOT an upstream
+    # DramaForge restricted data key used to call the gateway — NOT an upstream
     # provider key (fix spec §22/§57).
     litellm_gateway_url: str = Field(
         default="",
@@ -175,13 +228,16 @@ class Settings(BaseSettings):
             "(fix spec §19/§20 — adapter always appends /v1/chat/completions)"
         ),
     )
-    litellm_api_key: str = Field(default="", description="LiteLLM Gateway API key")
-    # Logical alias the ``litellm/text-llm`` bootstrap bridge sends to the
-    # gateway (fix spec §32/§33). Decoupled from TEXT_LLM_MODEL — DramaForge
+    litellm_api_key: str = Field(
+        default="", repr=False, exclude=True, description="LiteLLM data key"
+    )
+    litellm_model_admin_key: str = Field(default="", repr=False, exclude=True)
+    # Logical alias the ``litellm/script-quality`` bootstrap bridge sends to the
+    # gateway (fix spec §32/§33). DramaForge
     # requests the logical group, the LiteLLM Router picks the deployment.
     litellm_text_gateway_model: str = Field(
-        default="legacy-text",
-        description="Logical gateway model alias used by the litellm/text-llm bridge",
+        default="script-quality",
+        description="Logical gateway model alias used by the litellm/script-quality bridge",
     )
     # Static logical aliases registered as ``litellm/<alias>`` text models
     # (fix spec §34/§41/§104). Profile slots (planning.brief/script/storyboard)
@@ -190,24 +246,45 @@ class Settings(BaseSettings):
         default_factory=lambda: ["script-quality", "script-fast"],
         description="Comma-separated LiteLLM logical aliases registered at bootstrap",
     )
-    # Best-effort startup sync of ``GET /v1/models`` into the default registry
-    # (fix spec §36/§37). Default OFF keeps app boot fast and gateway-independent;
-    # admin refresh / tests call the sync service explicitly.
-    litellm_discovery_startup: bool = False
-
-    # Local TTS is opt-in for formal development verification.
+    # Speech is explicit and opt-in; network speech never falls back to local speech.
     tts_enabled: bool = False
-    tts_engine: str = "espeak-ng"
-    tts_voice: str = "zh"
+    tts_engine: str = "edge-tts"
+    tts_voice: str = "zh-CN-XiaoxiaoNeural"
+    tts_proxy: str | None = Field(default=None, repr=False, exclude=True)
 
-
-    @field_validator("cors_origins", "litellm_logical_models", mode="before")
+    @field_validator(
+        "cors_origins", "litellm_logical_models", "provider_trusted_http_networks", mode="before"
+    )
     @classmethod
     def split_csv_lists(cls, value: object) -> object:
         if isinstance(value, str):
             items = [part.strip() for part in value.split(",") if part.strip()]
             return items
         return value
+
+    @field_validator("provider_trusted_http_networks", mode="after")
+    @classmethod
+    def validate_trusted_http_networks(cls, value: list[str]) -> list[str]:
+        """Canonicalize and bound the plaintext-HTTP trust scope.
+
+        A whole-address-space network would silently turn the scoped policy
+        into a global "any HTTP destination" downgrade, so /0 is rejected.
+        """
+
+        canonical: list[str] = []
+        for entry in value:
+            try:
+                network = ipaddress.ip_network(entry, strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    f"PROVIDER_TRUSTED_HTTP_NETWORKS entry is not a valid network: {entry}"
+                ) from exc
+            if network.prefixlen == 0:
+                raise ValueError(
+                    "PROVIDER_TRUSTED_HTTP_NETWORKS must not cover the whole address space"
+                )
+            canonical.append(network.with_prefixlen)
+        return canonical
 
     @model_validator(mode="after")
     def validate_production_secrets(self) -> Self:
@@ -246,12 +323,11 @@ class Settings(BaseSettings):
         """True when MiniMax BYOK is present and its profile is enabled."""
         return bool(self.minimax_enabled and self.minimax_api_key.strip())
 
-    def text_llm_configured(self) -> bool:
-        return bool(
-            self.text_llm_enabled
-            and self.text_llm_api_key.strip()
-            and self.text_llm_base_url.strip()
-        )
+    def provider_trusted_network_objects(
+        self,
+    ) -> tuple["ipaddress.IPv4Network | ipaddress.IPv6Network", ...]:
+        """Parsed, canonical trusted networks for the scoped HTTP policy."""
+        return tuple(ipaddress.ip_network(entry) for entry in self.provider_trusted_http_networks)
 
 
 @lru_cache

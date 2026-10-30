@@ -17,12 +17,16 @@ from collections.abc import Callable
 GENERATORS: dict[str, Callable[[], str]] = {
     "POSTGRES_PASSWORD": lambda: secrets.token_urlsafe(32),
     "POSTGRES_APP_PASSWORD": lambda: secrets.token_urlsafe(32),
+    "DIRECTOR_CHECKPOINT_PASSWORD": lambda: secrets.token_urlsafe(32),
     "MINIO_ROOT_PASSWORD": lambda: secrets.token_urlsafe(32),
     "LITELLM_DB_PASSWORD": lambda: secrets.token_urlsafe(32),
     "SESSION_SECRET": lambda: secrets.token_urlsafe(48),
     "WORKER_TOKEN": lambda: secrets.token_urlsafe(48),
     "BYOK_FERNET_KEY": lambda: base64.urlsafe_b64encode(secrets.token_bytes(32)).decode(),
     "LITELLM_MASTER_KEY": lambda: f"sk-{secrets.token_urlsafe(40)}",
+    "LITELLM_API_KEY": lambda: f"sk-{secrets.token_urlsafe(40)}",
+    "LITELLM_MODEL_ADMIN_KEY": lambda: f"sk-{secrets.token_urlsafe(40)}",
+    "LITELLM_SALT_KEY": lambda: f"sk-{secrets.token_urlsafe(40)}",
 }
 
 SOURCE_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -61,6 +65,10 @@ def render_new_env(
             "DATABASE_URL": (
                 "postgresql+asyncpg://dramaforge_app:"
                 f"{generated['POSTGRES_APP_PASSWORD']}@localhost:5432/dramaforge"
+            ),
+            "DIRECTOR_CHECKPOINT_DATABASE_URL": (
+                "postgresql://dramaforge_director_checkpoint:"
+                f"{generated['DIRECTOR_CHECKPOINT_PASSWORD']}@localhost:5432/dramaforge"
             ),
             "MINIO_SECRET_KEY": generated["MINIO_ROOT_PASSWORD"],
             "DRAMAFORGE_VERSION": version,

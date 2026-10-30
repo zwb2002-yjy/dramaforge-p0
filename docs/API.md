@@ -2,42 +2,196 @@
 
 Status: current
 Source: backend/app/api/v1 and generated OpenAPI
-Date: 2026-09-15
-Base: dev 5ea45d6
-Migration head: 20260915_0069
+Updated: 2026-10-29
+Migration authority: [DATA_MODEL.md](DATA_MODEL.md)
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ## Contract rules
 
+The shipped gateway bounds login/register requests by TCP peer address. Excess
+requests return 429 Problem Details (`AUTH_RATE_LIMITED`) with `Retry-After: 12`
+and `Cache-Control: no-store`; no user identity or password is included. The API
+listener is private to Compose and does not trust forwarded client headers.
+
 - FastAPI OpenAPI is the only HTTP contract source.
 - Frontend types are generated into frontend/src/shared/api/generated.ts.
+- Frontend modules consume those schemas as `components["schemas"][...]`; they
+  never re-declare a generated schema by hand. `npm run --prefix frontend
+  api:authority` (CI `frontend-fast` and the container gate) rejects both
+  same-name schema copies and differently named hand-written DTOs exported by
+  API client modules. Its narrow allowlist contains only composed frontend state.
 - User-facing access is the frontend gateway at port 8080; the API process is
   an internal Compose service on port 8000.
 - No compatibility endpoint is kept for retired product concepts.
-- `backend/app/api/v1/router.py` registers 26 routers and exposes `/status`.
+- `backend/app/api/v1/router.py` owns router registration and exposes `/status`.
+
+Frontend business HTTP clients belong to each `features/*/api.ts` (or the
+domain's named API module). `lib/api.ts` owns transport, CSRF, errors, health
+and Artifact/SSE URL construction. Query hooks consume those domain clients;
+request and response shapes derive from generated OpenAPI schemas.
+
+### Retained surfaces without a current browser producer
+
+Runtime route registration and generated OpenAPI are compared by method/path;
+frontend calls are matched after resolving conditional/template paths. A missing
+browser call does not establish absence of external traffic. The following
+contracts remain owned by their domain; Workers call services rather than these
+HTTP endpoints. None of these classifications authorizes deleting stored facts.
+
+| Surface | Consumer/lifecycle decision |
+|---|---|
+| `GET/PUT …/shots/{shot_id}/director-board` | Retained board domain contract and persistent history; no current repository UI/Worker HTTP producer. Any retirement requires an external-consumer migration decision first. |
+| `POST/GET …/shots/{shot_id}/change-proposals`, `POST …/change-proposals/{proposal_id}/confirm` | Retained typed proposal/version-checked confirmation and history contracts; no current browser producer. Confirmation remains explicit. |
+| `GET …/shots/{shot_id}/canvas-revisions`, `GET …/story/proposals/{proposal_id}` | Exact historical lookup; current UI uses current Canvas or proposal collection. Unused client wrapper removed. |
+| `POST/PATCH …/assets[/{asset_id}]`, `POST …/asset-tags` | Asset/tag management contracts; UI currently uses extraction/promotion, candidates and tag assignment. Unused tag-create client removed. |
+| `POST …/scenes/{scene_id}/split[-preview]` and `merge[-preview]` | Retained structural management commands/previews; no browser producer. Unused client wrappers removed; Scene/Shot history preserved. |
+| `GET /workspaces/{workspace_id}`, `GET …/provider-connections/{connection_id}`, `DELETE …/model-profiles/{profile_id}` | Exact management operations; UI uses scoped collections and profile save. Unused profile-delete client removed. |
+| `PUT …/provider-bindings/{purpose}` | Explicit legacy management contract; current UI writes Profiles and reads the labelled legacy source. Existing execution identity is never rewritten. |
+| `POST …/model-bindings/{model_binding_id}/quality-evidence` | Exact Binding/NodeRun/Artifact quality evidence management; no current browser writer and no paid probe. Unused client removed. |
+| `POST …/director/runtime/turns`, `POST …/turns/{turn_id}/resume` | Headless Director protocol; UI uses scoped Shot suggestion/delegation into the same Runtime. |
+| `GET/HEAD /provider-references/{token}` | External Provider reference delivery via expiring opaque grants; not a browser command. |
+| `GET …/snapshot`, `POST …/compile-preview`, `GET …/generations/{run_id}/snapshot` | Read-only production/compile/frozen-execution diagnostics; browser uses bounded summaries and execution-plan preview. |
+| `GET /capabilities`, `GET /models/{model_id:path}`, `GET …/shots/{shot_id}/workflow-state` | Read-only inspection; browser uses scoped Binding/capability and workflow-overview projections. Unused workflow client removed. |
+| `POST /worker/tick`, `GET /status`, `GET /metrics` | Development-token tick and operational reads; gateway/internal-listener policy applies, not browser production dispatch. |
+
+The table uses `/api/v1` and project/workspace prefixes where omitted. Common
+401/403/404/409/422 Problem Details are produced by authorization/domain handlers,
+even where OpenAPI's per-operation response list declares only validation 422.
+Declared responses alone are not the observed error/permission contract; negative
+HTTP and PostgreSQL isolation tests cover the authorization paths.
 
 ## Route ownership
+
+LLM management uses the owned workspace connection surface; writes require CSRF:
+
+| Method | Workspace-relative path | Contract |
+|---|---|---|
+| POST | `/provider-connections/gateway` | `GatewayModelWrite`; one durable request ID, upstream model ID/URL/Key; returns a non-secret connection reference |
+| PUT | `/provider-connections/{id}/gateway` | New immutable target version; old references remain readable |
+| PUT | `/provider-connections/{id}/gateway/credential` | `GatewayKeyWrite`; same model/alias, new upstream Key revision |
+| POST | `/provider-connections/{id}/gateway/reconcile` | Read back exact Proxy deployment ID; never repeats submission |
+| GET | `/provider-connections/{id}/gateway/configuration` | Read current URL/model from Proxy authority; never returns Key |
+
+The prefix is `/api/v1/workspaces/{workspace_id}`. Pending/unknown writes return
+202 and explicit `gateway_ref.state`; ready means configuration identity matched,
+not upstream authentication or live generation acceptance. Global Proxy URL/data
+credential changes require an explicit data-plane migration. Validation Problem
+Details retain error locations/types/messages, excluding submitted inputs and
+exception contexts so invalid passwords and Keys are not echoed.
+
+素材引用仍使用 `ShotReferenceBinding` 的 CRUD 与 `references/resolve`。
+解析结果明确返回 `binding_id`、`stage`、Artifact ID、真实 MIME 和内容指纹；前端不从名字或
+展示标签猜测绑定身份。`@标签` 在同一 Shot 内唯一，非法/重复标签分别返回
+`REFERENCE_LABEL_INVALID` / `REFERENCE_LABEL_CONFLICT`，更新继续要求 `expected_version`。
+`execution-plan` 根据保存的绑定顺序和 AssetVersionReference 顺序编译编号，将原始提示词
+保存在 `semantic_intent.source_prompt`，标签到 Artifact/版本/编号映射保存在
+`semantic_intent.prompt_reference_map`。未解析标签拒绝预检；顺序、标签及绑定版本变化影响计划指纹。
+已接受 NodeRun 的 Worker 继续消费冻结提示词及完整 Artifact 列表，不再解析可变资产名称或当前版本。
+预检按所选能力及输入合同校验项目比例；固定/枚举输出比例冲突返回
+`MODEL_OUTPUT_ASPECT_RATIO_UNSUPPORTED`，不会创建 NodeRun 或调用 Provider。提交继续重验同一合同，
+不通过改写比例或替换模型修复冲突。
+
+当前 `POST …/shots/{shot_id}/execution-plan` 返回冻结的语义计划、`plan_fingerprint`，
+以及可选的 `compiler_contract_preview`（`readiness`、`redacted_wire`、
+`wire_fingerprint`）。后者由实际 Provider Compiler 只读计算：
+将参考素材的传输地址/二进制内容规范化为带顺序、Artifact ID 和内容指纹的槽位，
+其余有效 wire 字段参与 SHA-256 确认指纹。无法验证的组合明确阻断，
+不读取用户凭证、不创建 NodeRun/ProviderOperation，也不调用付费 Provider。
+
+`POST …/shots/{shot_id}/executions` 接受前端明确确认的
+`compiler_wire_fingerprint`，在重建语义计划后再次使用同一 Compiler 校验。
+缺少或不匹配的确认以 `COMPILER_WIRE_CONFIRMATION_REQUIRED` 拒绝，不入队。
+确认指纹冻结在 NodeRun 中；Worker 核验真实素材的不可变哈希、
+编译真实请求后再校验脱敏结构指纹，不一致以
+`COMPILER_WIRE_FINGERPRINT_MISMATCH` 阻断付费提交。
+临时 URL/媒体字节属于晚绑定传输值，预检成功不代表真实账号、可达性或供应商传输实测通过；
+同一命令的回执/重试复用 Idempotency-Key，用户明确再次创建另用新命令身份。
+
+`DELETE /api/v1/projects/{project_id}?expected_version=N` requires Owner workspace access
+and CSRF. Stale versions and active NodeRun/Director work return 409. Success returns 204,
+hides the project from lists and denies subsequent workbench access. Historical execution,
+provider evidence and media are retained; no old interface or recovery route is introduced.
 
 | Surface | Module | Current responsibility |
 |---|---|---|
 | Auth and workspaces | auth.py | session, CSRF, owner bootstrap, workspace CRUD |
-| Projects | projects.py | project shell and V1 CreativeTemplate profile |
+| Projects | projects.py | project shell, V1 CreativeTemplate profile and confirmed project deletion |
 | Script | scripts.py | script import, ScriptDocument/Episode/Scene/Shot reads, Shot canvas proposals |
 | Story | story.py | proposal-first Story authoring: generate, preview and partial apply through the shared command registry |
 | Assets | assets.py | Asset, AssetVersion, AssetVersionReference, asset cards and tags |
 | References | references.py | explicit ShotReferenceBinding CRUD and `@Asset` resolution |
 | Scenes | scenes.py, workflow_overview.py | scene structure, workspace snapshot, structural commands, read-only project workflow view |
-| Workbench | workbench.py | workspace state, Shot design, execution-plan preview, execution dispatch, formal selection, trace, staged repair (`repair-plan`, `repairs`, `repairs/{id}`, `repairs/{id}/steps`) |
+| Workbench | workbench.py | workspace state, Shot design, execution-plan preview, execution dispatch, formal selection, trace, staged repair (`repair-plan`, `repairs`, `repairs/{id}`, `repairs/{id}/step-plan`, `repairs/{id}/steps`, `repairs/{id}/close`) |
 | Director Assistant | director.py | proposal-only Shot suggestion and recommendation (`/director/shots/{shot_id}/...`), bounded Director turns, runtime start/control/resume signals, read-only runtime capabilities |
-| Director board | director_board.py | per-shot 2D and rough-3D director board state |
+| Director board | director_board.py | per-shot 2D and rough-3D director board state — the only authoritative director-board writer |
 | Review | review.py | evidence annotations and annotation decisions, plus the human review decision (`review-summary`, `review-decisions`) that admits an exact Artifact |
-| Production monitor | production.py | Artifact bytes/frames, project snapshot, Outbox/Arq enqueue |
-| Providers | provider_connections.py, provider_references.py, credentials.py, generations.py, model_profiles.py, model_candidates.py | model catalog, connection/credential revisions, capability probe and generation, reference delivery, model profiles and read-only candidates |
-| Experiments | experiments.py | isolated Shot experiment branches and adoption |
+| Batch production / todo | batch_production.py | read-only per-Shot plan preview, explicit bounded Owner dispatch through the canonical command path, and server-fact-driven production todo / consistency risk projection |
+| Production monitor | production.py | Artifact bytes/frames and project snapshot; queue dispatch belongs to Workers, not a second user command |
+| Providers | provider_connections.py, provider_references.py, generations.py, model_profiles.py, model_candidates.py, model_inspection.py | read-only model catalog/capabilities/manifest, connection/credential revisions, capability probe, reference delivery, model profiles (binding validation is an invariant of the save path, not a separate endpoint) and read-only candidates; media generation has no second write surface |
+| Experiments | experiments.py | isolated Shot experiment branches; adoption is the ExperimentBranch decision, never a second adopt endpoint |
 | Editing | editing.py, opencut.py, final_film.py | EditSession timeline, suggestion, export, OpenCut manifest, Final Film bound to a timeline version |
-| Creative capabilities | creative_capabilities.py, workflow_planning.py | provider-neutral intent/capability planning and workflow-state freeze |
+| Creative capabilities | creative_capabilities.py, workflow_planning.py | provider-neutral intent/capability planning and the read-only workflow-state aggregation; workflow/participation freeze is a domain action for Director/Workbench, not an HTTP surface |
 | Events | events.py | SSE subscription with Last-Event-ID resume |
+| Maintenance | maintenance.py | Owner-only recovery: list persisted failures, replay one Director wakeup or one Outbox dead letter with the expected failure identity |
 | Worker tick | worker.py | worker-only HTTP tick for local/dev when Arq runs separately |
+
+## Read-only Model Capability / Prompt Compiler
+
+- Provider connection create accepts `auth_mode=bearer|none` (default bearer).
+  Bearer requires an API key; none accepts no key and is available only for explicitly
+  supported media profiles. Read responses expose the mode and credential presence, never
+  the key. Plugins expose `auth_modes` and `manual_model_ids` for the existing form.
+  A manual remote ID plus a published generic contract saves an unverified binding;
+  a successful exact-ID directory observation is required before new Create.
+- GET /provider-plugins retains exact catalog revisions and adds optional typed `knowledge`
+  with field evidence, referenced sources, implementation/product/account distinctions and
+  `new_create_blocker`. Knowledge never substitutes the selected Binding revision.
+- Connection model-bindings GET adds nullable `generation_evidence` with the exact
+  `connection_revision_id` and `verified` result. This proves a successful matching
+  unified ProviderOperation/NodeRun and a retained available Artifact record, not
+  browser playback or quality approval. Directory and probe flags cannot substitute it.
+  The workspace read traverses only request-visible projects under ordinary project RLS
+  and restores its original project context; it creates no execution or privileged reader.
+- GET /models reports `available=false` and `availability_reason` for blocked bindings while
+  preserving their connection/configuration facts; directory visibility does not qualify a contract.
+- GET /projects/{project_id}/model-capabilities: exactly one explicit model_id, current media
+  stage, or text slot; returns manifest facts, bounded public controls, source/lifecycle annotations.
+  Known blocked current bindings remain inspectable with their original Hash and blocker.
+    Explicit model queries use the project's workspace registry. Current-stage reads add the
+    sanitized execution resolution, connection label and `generation_options`: parameter schema,
+    inherited value/source, editability and fixed/sensitive/deprecated/compiler-unavailable reason.
+    This read-only projection does not establish generation qualification. Saved Shot options may
+    bind `source_contract_hash`; a different resolved manifest blocks preflight with
+    `MODEL_OPTIONS_CONTRACT_CHANGED` until explicit review and Save.
+- POST /projects/{project_id}/shots/{shot_id}/compile-preview: ExecutionPlanBody with a current
+  shot version, saved creative inputs only; refuses model-supplied approximation acceptance.
+  Reuses the execution-plan compiler service and the Worker's single frozen Plan-to-Intent
+  conversion, including Profile/Shot options and the resolved input contract. Plan/Wire hashes
+  and effective options match execution-plan; diagnostics omit the prompt-bearing redacted Wire.
+  Uses placeholder references, never a Provider or production writer.
+- GET /projects/{project_id}/shots/{shot_id}/generations/{run_id}/snapshot: safe requested /
+  planned / compiled / observed evidence from the exact authorized run, no raw payload or secrets.
+
+Ownership: api/v1/model_inspection.py → production/model_inspection.py → existing resolvers,
+Workbench reads and provider compilers. Account status remains not_checked; compiler acceptance
+is not executable readiness. No new schema migration or second generation write path.
+
+## Single authoritative write entry
+
+Each product concept has exactly one write entry point. These writers were
+retired as duplicate surfaces; the underlying domain logic stays where an
+internal caller still needs it:
+
+| Retired surface | Kept as the sole authority |
+|---|---|
+| `PUT/GET …/provider-credentials` | the current ProviderConnection credential revision path, plus explicitly configured deployment-level LiteLLM text sources; no retired credential writer |
+| legacy `shot_ids` experiment creation DTO | `ExperimentCreateBody` -> shared ExperimentBranch draft service (also used by Director); no old creation response union |
+| `POST …/dispatch`, `POST …/node-runs/{id}/enqueue` | Workbench executions / staged Repair for user intent; dispatcher, Worker and qualified maintenance recovery for delivery/recovery |
+| `POST …/experiments/{experiment_id}/adopt` | the `ExperimentBranch` `decision` endpoint |
+| `PATCH …/scenes/{scene_id}/shots/{shot_id}/director-board` | `DirectorBoardState` `GET`/`PUT` |
+| `POST …/shots/{shot_id}/workflow-template`, `POST …/shots/{shot_id}/participation-plan` | the workflow/participation domain used by Director and Workbench |
+| `POST /model-profiles/validate` | `validate_bindings`, enforced on the profile save path |
+| `POST`/`GET`/`cancel /projects/{id}/generations` | the Workbench execution path (`execution-plan` -> `executions` -> NodeRun) is the only media generation writer; `generations.py` keeps only the read-only catalog |
 
 ## Deliberately absent
 
@@ -56,18 +210,71 @@ Review/Repair, Artifact delivery, and EditSession export.
 
 ## Admission gates on the write surface
 
-Three write paths refuse to continue until a stored fact says they may. Each is
+The write paths below refuse to continue until a stored fact says they may. Each is
 validated server-side; a disabled button is never the only guard.
 
 | Write path | Requirement | Refusal |
 |---|---|---|
 | `POST …/formal-keyframe`, `POST …/formal-video` | a stored human `approved` decision for that exact Artifact (`human_review_decisions`) | 422 `REVIEW_APPROVAL_REQUIRED` with `reason` (`REVIEW_AWAITING_HUMAN`, `REVIEW_DECISION_MISSING`, `REVIEW_DECISION_REJECTED`, `REVIEW_DECISION_STALE`) |
 | `POST …/final-film/render` | the same decision for every clip Artifact on the frozen Timeline | 422 `DELIVERY_REVIEW_REQUIRED` with the offending `artifact_id` and `reason` |
-| `POST …/repairs/{id}/steps` | the step being dispatched is a media step, not a human decision | 422 `REPAIR_STEP_REQUIRES_REVIEW` |
+| `POST …/repairs/{id}/steps` | mandatory displayed `expected_plan_fingerprint`, `expected_step_ordinal` and `idempotency_key`; previous exact candidate must pass human review and explicit Formal adoption | 409 stale plan/step or reused command; 422 `REPAIR_STEP_REQUIRES_REVIEW` |
+| `POST …/repairs/{id}/close` | `completed` requires final reviewed/Formal candidate; `abandoned` ends only this repair, not remote work; neither closes an active or unknown-submission run | 409 `REPAIR_NOT_COMPLETE` / `REPAIR_RUN_ACTIVE` / `REPAIR_SUBMISSION_UNKNOWN` |
+
+`demo_confirmed` is a stored review decision for walkthrough confirmation only. It remains
+blocked by the Formal gate and never aliases `approved`.
+
+`GET …/batch-production/preview` is side-effect free. It classifies every Shot in scope as
+`ready`, `skipped` (`ALREADY_FORMAL`, `STAGE_ALREADY_ACTIVE`, `CANDIDATE_AWAITING_REVIEW`,
+`CANDIDATE_AWAITING_FORMAL`, `FORMAL_KEYFRAME_REQUIRED`) or
+`blocked` (preflight / resolver code) and returns `ready_count`, `skipped_count` and
+`blocked_count`. `POST …/batch-production` requires the exact preview fingerprint,
+`max_provider_calls` (1–500, at least the ready count) and `owner_authorized=true`; it dispatches
+only `ready` Shots (409 `BATCH_PREVIEW_STALE`, 422 `BATCH_CALL_LIMIT_EXCEEDED`). Each accepted
+NodeRun stores that concrete authorization (batch key, preview fingerprint, actor, time, call index
+and count). There is no money field: provider pricing is settled by the provider account.
 
 Review steps are human actions: the review page records the decision, and the
 Formal selection stays a separate user action. A machine `needs_human` result is
 evidence, never an approval.
+
+## Cross-layer consistency contracts
+
+- Asset status is `draft | active | recycled`; AssetVersion status is
+  `candidate | formal | historical | rejected`. Ordinary Asset creation makes
+  v1 Formal and stores it in `current_version_id`; `archived` is rejected.
+- Scene summaries include `pending_review_count`, `generating_count`,
+  `failed_count` and `unknown_count`, counting Shots with each independent fact.
+  Workspace `overview` exposes the corresponding typed flags by Shot ID.
+  `risk_count` counts Shots with a failed/blocked latest media attempt or an
+  unknown Provider outcome. This read projection replaces the old raw
+  Shot.status risk heuristic; it does not write lifecycle state or imply Formal.
+  Superseded attempts and decisions follow the same ordering and fingerprint
+  rules as the workbench. `SceneSummaryService` lives in `app/workbench/scene_summary.py`.
+- Asset create/update accepts top-level `tags`. `asset_tags` and
+  `asset_tag_links` are the only tag query source; `metadata.tags` has no
+  runtime meaning.
+- `PATCH …/edit-sessions/{session_id}/timeline` requires
+  `expected_session_version`, locks the row, and returns 409 without mutation
+  when the loaded version is stale.
+- `POST …/edit-sessions/{session_id}/preview-plan` accepts the same editable
+  timeline and `expected_session_version`. It only reads project-owned Formal
+  references and returns the export's millisecond trim/duration/subtitle map,
+  selected existing voice identity, clip volume and unsupported effects.
+  It does not Save, prepare a tail, queue a NodeRun or create a Provider operation.
+  Stale baselines and invalid media use the existing validation errors.
+  `audio_volume` defaults to 1 when absent; Save, preview and render validate
+  its finite 0–1 range and a boolean `muted`. Source video audio is replaced by
+  selected/default voice or silence, as in Final Film rendering.
+- Authenticated Artifact content supports single HTTP byte ranges (206 and
+  `Content-Range`) for native seek; invalid ranges return 416. Project ownership
+  is checked before delivery. MinIO uses native offset/length reads and a
+  metadata-only stat to compare the stored total with Artifact.byte_size.
+  A mismatch (including zero metadata for nonempty bytes) returns 422 with
+  `ARTIFACT_SIZE_MISMATCH`; a short range read fails the same way. Only the
+  requested segment is buffered; full responses still buffer the entire object.
+- `GET …/creative-capabilities/catalog` projects Genre, Style, Shot Language,
+  Quality Policy, Skills, and staged strategies from the backend registries;
+  the same registries validate Freeze requests.
 
 ## Idempotent submissions
 
@@ -83,6 +290,8 @@ Retries must not create a second operation:
 
 ## Required checks
 
+这些检查在下述质量容器内执行，片段不是宿主安装指令。
+
 npm run api:check
 frontend: npm run format:check
 backend: alembic check
@@ -93,3 +302,255 @@ The authoritative dependency installation and command execution are defined by
 docker-compose.quality.yml (backend/Dockerfile.quality and
 frontend/Dockerfile.quality). The repository does not require a host Python or
 Node installation for development or release evidence.
+
+## 创作体验改进：目标 API 扩展
+
+**状态：待实现/待验收。** 本节是开发约束，不是当前 OpenAPI；语义字段清单不预先
+宣称具体 DTO 或 endpoint 已存在。需求来源见 [开发合同](ARCHITECTURE_MAPPING.md#creation-improvement-contract)、
+MODEL_PROVIDER 的 MP-01–MP-12 和 FRONTEND_WORKBENCH 的 UI-01–UI-13。
+优先演进 Route ownership 中的现有领域入口，禁止另建通用生成/任务/模型代理 API。
+
+### 连接、发现与默认模型
+
+| 现有入口族 | 目标请求/响应语义 | 副作用与拒绝边界 |
+|---|---|---|
+| Provider plugins/catalog | 协议、发现策略、能力/参数/UI schema、官方或协议来源、版本与 hash | 只读；不返回 Key 或可执行代码；目录不等于实测可用 |
+| Connection create/update/credential | 具名连接、明确协议与 base URL；响应返回规范化来源、connection/credential revision 及非秘密状态 | 保存与换 Key 是显式写入；同协议多连接共存；不自动 probe/create；Key 只写不读 |
+| Probes | 分开表达认证、目录读取及已支持模式的受控验证；返回范围、revision、时间、结果/错误 | 用户明确触发；读取目录不调用生成；付费合同未实现前保持现有拒绝 |
+| Model bindings | 精确远端 ID、连接修订、已知合同/模式；目录选择或手动登记的来源 | 手动登记不提升认证/实测状态；未知能力不产生可执行绑定 |
+| Model profiles/effective/preflight | 默认与项目/镜头覆盖、继承来源、解析出的完整身份及字段级阻塞原因 | 保存与执行使用同一 resolver；不能按模型名静默选择连接或更换模型 |
+
+URL+Key 可以在同一向导提交，但 UI 必须明确各写入结果。若实现沿用“创建连接→保存凭证”
+的多请求流程，第二步失败要保留并返回原 connection ID，可继续保存，不能提示整体成功或
+重试时制造重复连接。新增原子请求应仍调用现有领域服务并验证事务，不创建另一套凭证存储。
+
+无目录接口按 MP-04 区分“未提供目录”与“认证拒绝”。首次计费验证须绑定精确合同、模型、
+输入、授权和幂等命令，走既有生产事实；明确 401/403、无合同、无权限/授权仍拒绝。
+普通生成不因手动输入 ID 自动获得首次验证豁免。该演进必须补齐 ADR 0005 的适用说明。
+
+### 最终请求预览、提交与回执
+
+扩展现有 `execution-plan`，由同一 Compiler 产生以下**非秘密投影**：
+
+- 输入来源：已保存对象/版本、原始 prompt、显式采用的优化版本；
+- 解析结果：connection/credential revision ID、远端模型、模式、合同/compiler/prompt 策略版本；
+- 最终请求：转换后 prompt、有效参数及单位、有序 Artifact ID/hash/角色和交付类型；
+- 转换说明：默认、映射、近似、未支持项及字段级错误；不得省略字段却声称已生效；
+- 确认身份：编译 fingerprint、输入版本、允许晚绑定的传输字段名、可提交状态和阻塞原因。
+
+预览不调用 LLM、上传素材到供应商、获取收费结果或创建执行事实；需要 LLM 优化时走显式
+提案入口。返回的 JSON 不含鉴权头、Key、签名 URL、base64 或可复用下载凭证。
+服务端保存/重建的不可变编译内容与其 UI 投影必须可核对，具体持久化位置见 DATA_MODEL。
+
+`executions` 只受理该预览对应的保存版本与 hash，原子检查权限、模型/凭证修订、引用、
+合同、授权和幂等命令。旧预览以类型化冲突拒绝，且零排队、零 create；不能先受理后再
+解释“参数已经更新”。同命令重试返回原 receipt；用户明确“再生成一次”产生新的命令身份，
+不能把等同的 prompt/hash 当作永久去重键。Worker 消费同一冻结语义请求，见 MP-07/RT。
+
+错误合同复用已有稳定 code，新增内容通过 Pydantic/OpenAPI 生成。最少包含非秘密的
+correlation ID、字段/引用定位、是否需新预览及明确恢复动作；区分查询原任务与新提交。
+HTTP 状态与业务状态须一致解释，`unknown_submission` 不返回引导自动 create 的重试提示。
+
+#### 创作者参数与预检的具体接口设计（目标，未实现）
+
+| 既有入口 | 本切片扩展与约束 |
+|---|---|
+| `GET …/model-capabilities?stage=…&mode_id=…` | 解析当前 Binding；返回同合同的参数 schema、可编辑性/映射限制、来源与身份；显式 `model_id` 目录查询不等于当前选择或账号资格 |
+| `PATCH …/shots/{shot_id}/design` | 在既有 `director_state` 下校验并保存 typed `generation_settings`，与原始 prompt 分开；保留其它设计字段，校验 `expected_version`，返回保存后的版本；结构见 DATA_MODEL |
+| `POST …/shots/{shot_id}/execution-plan` | 从已保存 Shot、阶段设置和当前解析身份形成单一冻结编译结果；允许接受已声明的近似（`allow_approximation=True`）并更新计划指纹；返回完整安全投影和确认指纹，不接受任意调用方参数 JSON 绕过保存 |
+| `POST …/shots/{shot_id}/compile-preview` | 保留只读诊断用途，复用同一构建/编译结果的安全投影；严格拒绝任何模型近似（`allow_approximation=False`，触发即阻断且返回 `MODEL_APPROXIMATION_NOT_ACCEPTED`）；删除独立拼五秒和拒绝所有 native_options 的重复构造；诊断成功仍不表示账号或传输验证通过 |
+| `POST …/shots/{shot_id}/executions` | 精确指纹、输入版本、已接受近似及命令身份；受理前原子验证，失败不创建 NodeRun/排队/create；成功将同一语义请求冻结到原 NodeRun |
+| `GET …/shots/{shot_id}/executions/receipt` | 按原命令查询；恢复只观察已受理事实；404 也不作为自动另开命令的依据 |
+
+上述 URL 的省略部分沿用各入口当前项目路径；这是现有端点演进，不新增通用生成 API。
+常用项和 native 参数必须同时经过模式 schema、产品开放范围及实际 Compiler 映射校验。
+字段级错误定位到阶段/字段/引用，并区分未知字段、不支持、越界、类型错误、条件冲突、
+版本/身份失效；前端可以校验，但不能代替后端。未保存覆盖、受保护字段及越权对象均拒绝。
+
+确认指纹覆盖最终文本、有效参数及类型、生成时长、项目画幅、输入/合同/Compiler 版本、
+连接与凭证修订、有序引用及内容 hash、接受的近似；计划时长等参与编译的保存事实同时纳入
+版本核对。仅允许列举的认证与短期传输槽晚绑定。抽屉直接消费该投影，不从执行历史摘要
+拼出另一份“本次发送”。接受近似会改变指纹，必须重新展示并再次确认；阻断项不能仅靠勾选消除。
+
+命令身份与计划指纹分离：用户一次明确确认生成产生一个幂等 key，并在发送前保存原操作
+身份；双击、响应丢失、恢复查询沿用原 key。用户明确再次生成即使计划相同也产生新 key，
+不能继续仅用 fingerprint 作为永久命令身份。相同 key 不同请求拒绝，重放已受理同命令返回
+原回执；未知提交不自动重发，回执丢失测试必须断言零新增 Provider create。
+
+公共请求投影不返回原始 wire JSON 或鉴权材料；模型、参数和参考按安全白名单结构展示。
+哈希只保留凭证修订身份，不包含 Key、签名地址或易变时间戳。具体响应名与错误 code 以
+实现后的 Pydantic/OpenAPI 为唯一类型源，本节不宣称这些扩展已出现在当前 OpenAPI。
+
+### 预演、审片与剪辑
+
+动态分镜读取现有 Shot、Artifact、保存时长/字幕/音频的播放投影，不新建服务端生产入口。
+缺媒体返回可定位的缺失信息；前端不得为补齐播放自动生成。相邻镜头与审片证据读取验证
+同项目的对象、版本、采样与血缘，复用本文件的视频证据合同。
+
+审片中的“通过并设为正式”可把两个现有显式动作组织在一个明确标名的交互中；不能改变
+`approved` 与 Formal 的领域区别。批准成功而 Formal 冲突时保留批准事实、回显冲突及最新
+候选，不提前展示正式成功，也不发第二条生产请求。
+
+Editing 继续使用既有 EditSession timeline 和乐观版本。预览和导出共享顺序、trim、时长、
+片段配音音量、现有配音与字幕的时间映射；不把只播源片段当作编辑效果预览。不支持预览的高级效果
+明确标识，保留数据与现有导出。保存 409 返回冲突语义，前端保留草稿；Export 绑定已保存
+版本，不能偷偷 Save。验收采用 AC-11–AC-15，新增类型统一从后端生成。
+
+剧本树是既有 StoryProposal 的读投影；“采用当前场”仍提交准确的 operation ID 集合。
+服务端验证父级存在或已显式纳入同一事务，并按依赖顺序执行；不能只靠前端选中父级保证完整性。
+重复/部分已采用与 409 复用既有提案回执，不增加场景树写入端点，也不自动包含其它场或删除操作。
+
+连续性看板通过既有批注/修复接口流转，定位精确 Shot、Artifact/NodeRun 和时间点；
+人工清单不等于审批。连续性四区证据通过镜头详情或上下文读取投影一次性获取相邻首末帧与参考资产，
+避免多重并发散装请求竞态。动态分镜试听所需关联对白音频由镜头只读投影字段（如 `dialogue_audio_url`
+与 `voice_artifact_id`）随镜头直接返回，不发起额外反查，不增加试听生成入口。
+剪辑替换只读当前 Formal manifest，再修改既有 EditSession 草稿；来源复核失败、版本变化或
+源裁切越界必须明确阻断，源时长不足不能静默重裁切或改正式素材。
+
+## 无前端消费者的能力：先判用途，再决定清退
+
+| 对象 | 用户是否需要该能力 | 当前处置与权威替代 |
+|---|---|---|
+| video-frames / 视频采样证据 | 需要，人工审片需比较时间上的变化 | 已由相邻镜头对照消费首/末帧；下节仍含待完成的深入审片目标 |
+| 项目 dispatch / NodeRun enqueue HTTP | 需要生成/修复/恢复，不需要控制队列 | 退役这两个 HTTP helper；保留内部 scheduler 与 Worker 调用，使用既有 executions/receipt、repairs、maintenance recovery |
+| worker/tick、provider-reference token、status/metrics | Worker、Provider、运维需要，不是创作页面 | 保留；不为了制造消费者而增加前端按钮 |
+| per-shot director-board `GET`/`PUT` | 当前创作链无前端消费者 | 端点与 `director_board_states` 存储暂保留；前端 helper 已退役（见 FRONTEND_WORKBENCH），是否清退由后端领域单独裁定 |
+| TEXT_LLM_* 与旧文本凭证写面 | 需要文本模型，不需要旧凭证入口 | 当前文本 HTTP adapter 消费部署配置或空间连接；沿用 ProviderConnection 与模型选择，不恢复旧环境变量/写面；来源隔离缺口见 MODEL_PROVIDER |
+| 旧实验 ORM / DTO | 需要隔离实验，但不需要旧生产轨 | 当前 ExperimentBranch；旧表仅历史映射，不重新给 UI 提供旧入口 |
+
+### 视频证据与候选审核：精确目标入口与待完成证据设计
+
+**范围**：仅桌面。复用 Review 工作区与现有候选/修复事实，不新增第二条审核或生产
+主链，不自动生成媒体，也不把读取帧作为付费 Provider 操作。
+
+**入口与准确目标**：候选托盘提供“审查此候选”；修复步骤提供“审查本步候选”；
+正式视频保留“审查正式版本”。均进入现有 /projects/$projectId/review，携带经过
+校验的 shotId、artifactId、reviewKind、stage，可附 repairRequestId/repairStepId。
+普通无目标路由可沿用正式版本作为默认；明确传入 artifactId 时，失效或不匹配就
+报错，绝不回退成“当前正式视频”。stage=formal_video 是准入用途，不表示目标
+已经 Formal。服务端仍校验工作空间、Project、Shot、Artifact 血缘和对应审查记录。
+
+**已实现（current）**：候选托盘与修复步骤提供携带精确目标的审查入口。ReviewWorkspace
+使用工作台返回的镜头候选 / 正式结果校验目标；修复入口额外核对请求、步骤和结果。
+显式目标无效时显示错误，不回退正式版本。播放器、批注与人工决定绑定同一 Artifact；
+切换目标会隔离本地草稿、幂等键及迟到提交反馈。RepairStepRead 只读投影本步
+NodeRun.result_artifact_id，不另存可修改副本，也不以 adopted_artifact_id 猜测候选。
+
+**设计未实现（not current）**：服务端全链血缘 / 错 Shot 拒绝审计、候选正式采用按钮的
+资格、下述视频证据清单与交付，以及对应 8080 端到端验收尚未完成。下列「合同与证据
+来源」「单一桌面组件」「避免重复解码与伪证据」「操作与状态」「验收切片」均为待实现
+设计，不得当作已上线能力引用。
+
+**单一桌面组件**：复用 VideoReviewTimeline，加一条按时间排序的视频证据条与可选
+参考对照区。展示首/中/尾帧及已有的 scene-change 采样；每帧显示准确时间和角色，
+点击定位同一个 Artifact 的播放器。标准参考图取该 review 输入绑定的 canonical
+Artifact；正式关键帧若另行展示必须标明其不同身份，不默认把它等同 canonical。
+批注继续用 video_time，绑定目标 artifact_id；旧的 Shot 级批注单独标明范围，
+不能将旧产物的时间批注当成新候选的批注。
+
+**合同与证据来源**：优先扩展现有 review-summary 的类型化 evidence 投影，来源仍是
+该 review_node_run_id 的 review_artifact_id/JSON 和已冻结输入，不引入新审核表：
+
+- source Artifact ID/hash，review NodeRun/Artifact ID，sampling_version；
+- canonical reference Artifact ID/hash；
+- frames：sample_id、role、timestamp_seconds、frame_content_hash、delivery path、
+  available/unavailable 状态及明确原因。
+
+当前 video-frames/{role} 仅返回 PNG、只接受 start/mid/end，无法独自承载上述合同。
+后续扩展其交付合同时必须绑定对应的审查身份/采样版本，并支持清单中的采样，而非
+接受任意对象路径。保留旧 PNG 读取不等于承诺它已经是完整的证据接口。
+
+**避免重复解码与伪证据**：同一视频与采样版本只生成一组派生帧。优先由已有本地
+review 节点在生成证据时将帧作为不可变派生 Artifact 物化，复用既有存储/血缘，
+不新增 ProviderOperation 或伪造生产成功。旧记录仅有 hash 时，只有按相同版本
+重建并验证 frame hash 一致才可作为对应证据交付；不能重现时显示不可用，不把
+现在抽出的近似帧冒充历史证据。缓存键至少隔离工作空间、Artifact/hash、采样版本；
+权限检查不能被缓存命中绕过。GET 不创建生产 NodeRun 或触发远端生成。
+
+**操作与状态**：查看/定位/切换候选是零写入；保存批注、人工通过/拒绝、设为正式、
+继续修复分别走各自现有命令。按钮资格只消费服务端 allowed_actions/blocked_reason
+及当前版本，不复制准入规则；不能因缩略图加载成功自动放行，也不新增一条全局
+“审核通过即自动 Formal”的规则。已有人工决定幂等与 expected_shot_version 保留。
+
+加载、无审查记录、无参考、帧不可解码、证据过期、权限失败和提交冲突分别展示。
+切换 Artifact 后取消旧请求、清空局部播放/选择状态；不显示上一候选的迟到响应。
+只有 bytes 预览而无可核对证据时必须明确标注，不生成一致性分数或冒充已审核。
+
+**验收切片**：
+
+1. 先补准确候选导航与 RepairStepRead 的只读目标投影；旧正式入口仍可用。
+2. 再补 review-summary 证据清单与权限/不可变交付测试；三帧请求不得重复采样。
+3. 接桌面证据条、时间定位和绑定 Artifact 的批注，复用现有人工决定面板。
+4. DOM/网络断言覆盖：候选 A 与正式 B 不串目标；迟到响应不串图；修复候选未
+   Formal 仍可准确审查；跨工作空间/错 Shot/错 review ID 拒绝；损坏证据不冒充
+   通过；浏览帧不产生 mutation/Provider 请求；人工决定不自动改 Formal；409 保稿。
+
+以上设计实现时先更新后端 OpenAPI，再生成客户端；不能在前端自行发明证据响应或
+直接调用不存在的接口。在标注「已实现（current）」之外的段落完成并改标之前，
+本节整体不得作为发布完成证据。
+
+## 生产只读模型：摘要、观察与历史
+
+这些 GET 都要求登录、选中的 workspace 与项目所有权；不会受理或重试生成。
+
+| 路径（项目前缀 `/api/v1/projects/{project_id}`） | 合同 |
+|---|---|
+| `/production-summary` | SQL 按镜头 / node key / 执行分支 / 实验选择有效尝试，返回计数、最多 20 条当前失败、`has_more_failures` 与九个 canonical 环节的 `stages`，不返回冻结提示词或全量产物血缘 |
+| `/node-runs/status?run_id=…` | 1–100 个精确 ID，按请求顺序返回状态、结果 Artifact ID 与 `error_code`；任一缺失或跨项目即整体拒绝，不返回部分成功。调用方用 `PROVIDER_SUBMISSION_UNKNOWN` 区分需人工对账的未知提交，不按普通失败重试 |
+| `/production-history/runs` | 历史尝试的轻量分页，只读定位、状态与错误摘要；包含旧尝试，不能当作当前状态计数 |
+| `/production-history/artifacts` | Artifact 只读分页，不下载媒体内容；回收/不可用状态仍按正式存储事实呈现 |
+
+剪辑音频选择复用 Artifact 分页的 `usable_audio=true` 只读筛选：仅返回同项目、类型为 audio、MIME 为 audio/*、存储 available、未软删除且有非空媒体对象的产物。筛选先于 keyset 分页，limit 仍为 1–100；不把 Asset 身份当作 Artifact，不创建生成或修复任务。省略此参数时，历史页原有的完整存储状态展示保持不变。
+
+`stages` 按 `SHOT_NODES` 顺序固定返回九项，每项为 `node_key`、`status_counts`、
+`latest_failure`。只统计 `execution_branch=formal` 且无 `experiment_id` 的有效尝试；
+实验计入顶部资源总数，但不能补齐主线环节。未知 node key 不做子串匹配。
+没有记录时返回空计数和 null 失败，不表示完成。每个环节最多一条当前有效失败，
+不受全局 20 条失败窗口挤出，错误摘要最多 500 字符。执行完成不是人工 Review 或 Formal 的凭据。
+摘要服务使用固定 4 次 SELECT（计数、产物数、近期失败、各环节失败），不随镜头数增加逐项查询；
+路由权限查询另计。
+
+历史接口 `limit` 默认 25、范围 1–100，游标按 `created_at DESC, id DESC` 稳定分页，
+返回 `items` 与 `next_cursor`，无下一页时为 null；无效游标返回 422。
+原 `/snapshot` 保留供完整诊断/证明工具使用，不再是制作总览或成片等待的轮询接口。
+其依赖读取与 Worker 共用同一失败关闭判定，通过批量读取避免逐 run 查询。
+查询数量回归在 `test_production_bounded_reads.py` 中覆盖不同数据规模；这不是响应时延 SLA。
+
+
+### 镜头配音配置与成片准备身份
+
+- GET /api/v1/projects/{project_id}/voice-options：经过当前工作空间与项目 Owner 授权，只返回实例配置、默认音色、可选音色与服务说明；不探测服务、不发送对白。status=configured 只代表配置有效，不代表已经联网验证。
+- ShotDirectorState.voice 使用 ShotVoiceSettings：voice_id=null 表示沿用实例默认，rate_percent 范围 -30 到 30；经既有镜头 design PATCH 与 expected_version 保存。未知/不兼容音色在写入变更或生成冻结时拒绝，不自动替换。
+- FinalFilmPrepareRead.preparation_fingerprint 表示本次实际准备的尾部素材身份（包含相关 NodeRun）。客户端将该指纹和剪辑会话/时间线版本一起用于显式 render 的幂等键；缺少此回执时不盲目重试或渲染旧素材。
+
+## Resumable repair commands
+
+`step-plan` is read-only: it resolves saved Shot references (excluding experiments),
+the current model/connection/credential revision and saved creative inputs into the
+same WorkbenchExecutionPlan used for dispatch. Unresolved or unsupported references
+fail closed. Approximate references may be previewed as warnings; they are not
+executable until the user explicitly requests a second preview with
+`accept_approximations=true`, then confirms its new fingerprint with the same flag
+in the execution body. They are never silently dropped or auto-accepted. A changed
+input requires another preview and explicit confirmation.
+
+Repair step previews also return `compiler_contract_preview` from the same
+Plan → Intent → Compiler path. Execution requires its exact
+`expected_compiler_wire_fingerprint` alongside the plan fingerprint and ordinal;
+missing, blocked or changed proof cannot create a NodeRun. The acknowledged hash
+is frozen for the Worker's actual-wire check. Receipt recovery compares the
+original proof before reading mutable model settings, so the same key cannot
+authorize a different Compiler request.
+
+One Shot has at most one active Repair. Progress comes from NodeRun status, the
+exact adopted Artifact and its applicable stored human decision, never step count.
+For keyframe-then-video repairs, media ordinals are 1 and 3; review remains the
+existing Review/Formal UI action, not another provider command. `next_action` is
+`execute_step`, `wait`, `human_decision`, `ready_to_close`, `close_or_replan`,
+`reconcile_submission` or `closed`;
+`next_step_ordinal` is non-null only when a media step can be previewed. A lost-response
+retry with the same key, ordinal and fingerprint returns its original receipt before
+re-resolving mutable settings; it cannot advance to the next step. No blind repair
+retry exists for failed/unknown provider work. `node_run_error_code` exposes
+`PROVIDER_SUBMISSION_UNKNOWN` even though the NodeRun status is `failed`; such a
+repair cannot be abandoned to unlock another submission before reconciliation.

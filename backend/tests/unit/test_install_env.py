@@ -35,11 +35,28 @@ def test_release_env_is_unique_and_bound_to_exact_images() -> None:
     assert first["DRAMAFORGE_BACKEND_IMAGE"] == kwargs["backend_image"]
     assert first["DRAMAFORGE_FRONTEND_IMAGE"] == kwargs["frontend_image"]
     assert first["DATABASE_URL"].endswith("@localhost:5432/dramaforge")
+    assert len(first["DIRECTOR_CHECKPOINT_PASSWORD"]) >= 32
+    assert first["DIRECTOR_CHECKPOINT_PASSWORD"] != second["DIRECTOR_CHECKPOINT_PASSWORD"]
+    assert first["DIRECTOR_CHECKPOINT_PASSWORD"] != first["POSTGRES_APP_PASSWORD"]
+    assert first["DIRECTOR_CHECKPOINT_DATABASE_URL"] == (
+        "postgresql://dramaforge_director_checkpoint:"
+        f"{first['DIRECTOR_CHECKPOINT_PASSWORD']}@localhost:5432/dramaforge"
+    )
     assert first["MINIO_SECRET_KEY"] == first["MINIO_ROOT_PASSWORD"]
     assert re.fullmatch(r"[A-Za-z0-9_-]{43}=", first["BYOK_FERNET_KEY"])
     for name in GENERATORS:
         assert first[name]
         assert first[name] != second[name]
+
+
+def test_release_workflow_supplies_all_required_compose_variables() -> None:
+    import yaml
+
+    compose = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    required = set(re.findall(r"\$\{([A-Z_]+):\?", compose))
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/release.yml").read_text())
+    release_env = workflow["jobs"]["containers-and-sbom"]["env"]
+    assert required <= release_env.keys(), required - release_env.keys()
 
 
 def test_release_env_rejects_ambiguous_source_identity() -> None:

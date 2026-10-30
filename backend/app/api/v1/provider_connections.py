@@ -7,8 +7,9 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, Field, SecretStr
+from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import (
@@ -18,16 +19,37 @@ from app.api.deps import (
     SessionDep,
     require_selected_workspace,
 )
+from app.providers.capability_summary import ModelCapabilitySummary, summarize_model_capability
+from app.providers.catalog_loader import ModelCatalogLoader
+from app.providers.catalog_models import ModelCatalogEntry
+from app.providers.catalog_publication import (
+    catalog_new_create_blocker,
+    effective_publication_lifecycle,
+)
 from app.providers.catalog_service import ModelCatalogService
 from app.providers.connection_service import ProviderConnectionService
+from app.providers.knowledge_projection import (
+    ModelKnowledgeRead,
+    knowledge_for_model,
+    project_model_knowledge,
+)
+from app.providers.litellm_gateway.management import (
+    GatewayConfigurationRead,
+    GatewayKeyWrite,
+    GatewayModelWrite,
+    GatewayReference,
+)
+from app.providers.litellm_gateway.management_service import GatewayModelService
+from app.providers.manifest import ModelCapabilityManifest, read_catalog_manifest
 from app.providers.models import (
+    ProjectProviderBinding,
     ProviderCapabilityEvidence,
     ProviderConnection,
     ProviderModelBinding,
     ProviderQualityEvidence,
 )
 from app.providers.registry import list_plugins
-from app.shared.errors import NotFoundError
+from app.shared.errors import NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["provider-connections"])
 
@@ -40,9 +62,13 @@ class ProviderPluginModelRead(BaseModel):
     media_type: str
     model_revision: str
     lifecycle: str
+    implementation_status: str
     catalog_source: str
     capabilities: list[str]
     option_schema: dict[str, object]
+    capability_summary: ModelCapabilitySummary
+    knowledge: ModelKnowledgeRead | None = None
+    new_create_blocker: str | None = None
 
 
 class ProviderPluginRead(BaseModel):
@@ -50,7 +76,12 @@ class ProviderPluginRead(BaseModel):
     protocol_profile: str
     display_name: str
     default_base_url: str
+    # ``text`` plugins expose discovered chat models directly; ``media`` plugins
+    # need a catalog contract match and a model binding before execution.
+    kind: Literal["media", "text"]
     implemented: bool
+    auth_modes: list[str] = Field(default_factory=lambda: ["bearer"])
+    manual_model_ids: bool = False
     paid_capabilities: list[str]
     capabilities: list[str]
     model_list_path: str
@@ -66,9 +97,25 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
     capability probes, and model binding choices without hard-coded supplier
     names or model ids.
     """
-    entries = await ModelCatalogService(session).list_entries(lifecycle="active")
+    entries = await ModelCatalogService(session).list_entries()
     by_plugin: dict[tuple[str, str], list[ProviderPluginModelRead]] = {}
+    knowledge_catalog = ModelCatalogLoader().load()
+    knowledge_cache: dict[tuple[str, str, str], ModelKnowledgeRead | None] = {}
     for entry in entries:
+        manifest = read_catalog_manifest(entry.capability_manifest_json)
+        key = (entry.provider_type, entry.protocol_profile, entry.model_id)
+        if key not in knowledge_cache:
+            knowledge_cache[key] = knowledge_for_model(*key, catalog=knowledge_catalog)
+        blocker = catalog_new_create_blocker(
+            entry.provider_type,
+            entry.protocol_profile,
+            entry.model_id,
+            entry.model_revision,
+            entry.contract_manifest_hash,
+            schema_version=entry.capability_manifest_json.get("schema_version", "1"),
+            lifecycle=entry.lifecycle,
+            catalog_source=entry.catalog_source,
+        )
         operations = entry.capability_manifest_json.get("operations") or {}
         capabilities = sorted(
             {
@@ -86,10 +133,20 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
                 display_name=entry.display_name,
                 media_type=entry.media_kind,
                 model_revision=entry.model_revision,
-                lifecycle=entry.lifecycle,
+                lifecycle=effective_publication_lifecycle(
+                    entry.provider_type, entry.protocol_profile, entry.model_id, entry.lifecycle
+                ),
+                implementation_status=manifest.implementation_status
+                if isinstance(manifest, ModelCapabilityManifest)
+                else "not_implemented",
                 catalog_source=entry.catalog_source,
                 capabilities=capabilities,
                 option_schema=dict(entry.option_schema_json or {}),
+                capability_summary=summarize_model_capability(manifest, new_create_blocker=blocker),
+                new_create_blocker=blocker,
+                knowledge=knowledge_cache[key]
+                if isinstance(manifest, ModelCapabilityManifest)
+                else project_model_knowledge(entry.capability_manifest_json),
             )
         )
     result: list[ProviderPluginRead] = []
@@ -101,7 +158,10 @@ async def list_provider_plugins(session: SessionDep) -> list[ProviderPluginRead]
                 protocol_profile=plugin.protocol_profile,
                 display_name=plugin.display_name,
                 default_base_url=plugin.default_base_url,
+                kind="text" if plugin.provider_type == "litellm" else "media",
                 implemented=plugin.implemented,
+                auth_modes=sorted(plugin.auth_modes),
+                manual_model_ids=plugin.manual_model_ids,
                 paid_capabilities=sorted(plugin.paid_capabilities),
                 capabilities=sorted(
                     set(plugin.capability_purposes)
@@ -120,7 +180,8 @@ class ConnectionCreate(BaseModel):
     display_name: str = Field(default="", max_length=120)
     protocol_profile: str = Field(default="agnes_cn_v1", min_length=1, max_length=80)
     base_url: str | None = Field(default=None, max_length=240)
-    api_key: SecretStr = Field(min_length=1, max_length=4096)
+    api_key: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
+    auth_mode: Literal["bearer", "none"] = "bearer"
     enabled: bool = True
 
 
@@ -141,11 +202,14 @@ class ConnectionRead(BaseModel):
     display_name: str
     base_url: str
     protocol_profile: str
+    auth_mode: Literal["bearer", "none"] = "bearer"
     enabled: bool
     credential_configured: bool
     credential_key_version: str | None
     verification_status: str
     verified_at: datetime | None
+    connection_revision_id: UUID
+    gateway_ref: GatewayReference | None = None
 
 
 class ProbeRequest(BaseModel):
@@ -160,7 +224,6 @@ class ProbeRequest(BaseModel):
     reference_artifact_id: UUID | None = None
     remote_task_id: str | None = None
     remote_query_kind: Literal["video_id", "task_id"] | None = None
-    paid_request_confirmed: bool = False
 
 
 class ProbeRead(BaseModel):
@@ -176,13 +239,21 @@ class ProbeRead(BaseModel):
     request_fingerprint: str
     tested_at: datetime
     error_code: str | None
+    discovered_model_ids: list[str]
+    connection_revision_id: UUID | None
 
 
 class ModelBindingCreate(BaseModel):
     media_type: Literal["image", "video"]
     model_id: str = Field(min_length=1, max_length=160)
     purpose: Literal["keyframe", "video"]
+    capability_contract_id: UUID | None = None
     enabled: bool = True
+
+
+class GenerationEvidenceRead(BaseModel):
+    connection_revision_id: UUID
+    verified: bool
 
 
 class ModelBindingRead(BaseModel):
@@ -201,12 +272,12 @@ class ModelBindingRead(BaseModel):
     remote_resource_kind: str | None
     remote_resource_id: str | None
     invoke_model_value: str | None
+    generation_evidence: GenerationEvidenceRead | None = None
 
 
 class ProjectBindingWrite(BaseModel):
     model_binding_id: UUID
     selection_strategy: Literal["explicit_binding"] = "explicit_binding"
-    fallback_policy: Literal["none"] = "none"
 
 
 class ProjectBindingRead(BaseModel):
@@ -215,7 +286,20 @@ class ProjectBindingRead(BaseModel):
     purpose: str
     model_binding_id: UUID
     selection_strategy: str
-    fallback_policy: str
+
+
+class ProjectBindingDetailRead(ProjectBindingRead):
+    """Project binding plus the model identity it currently points at.
+
+    The settings surface has to answer "which model serves this purpose?"; without
+    the read model the page could only print a raw binding id, and a refresh lost
+    the answer entirely (decision 2026-09-19: add a read-only project binding API).
+    """
+
+    model_id: str | None = None
+    display_name: str | None = None
+    provider_type: str | None = None
+    model_binding_enabled: bool | None = None
 
 
 class QualityEvidenceWrite(BaseModel):
@@ -238,6 +322,11 @@ class QualityEvidenceRead(BaseModel):
 async def _connection_read(
     service: ProviderConnectionService, connection: ProviderConnection
 ) -> ConnectionRead:
+    # Report the stored credential, not an assumption: a connection can exist
+    # without one (created before a key was saved, or after its credential row was
+    # removed), and claiming "已保存" then is a state lie the Owner cannot detect.
+    credential_version = await service.credential_version(connection)
+    revision = await service.current_connection_revision(connection=connection)
     return ConnectionRead(
         id=connection.id,
         workspace_id=connection.workspace_id,
@@ -245,11 +334,16 @@ async def _connection_read(
         display_name=connection.display_name,
         base_url=connection.base_url,
         protocol_profile=connection.protocol_profile,
+        auth_mode=connection.auth_mode,
         enabled=connection.enabled,
-        credential_configured=True,
-        credential_key_version=await service.credential_version(connection),
+        credential_configured=credential_version is not None,
+        credential_key_version=credential_version,
         verification_status=connection.verification_status,
         verified_at=connection.verified_at,
+        connection_revision_id=revision.id,
+        gateway_ref=GatewayReference.model_validate(connection.gateway_ref)
+        if connection.gateway_ref
+        else None,
     )
 
 
@@ -267,10 +361,14 @@ def _probe_read(evidence: ProviderCapabilityEvidence) -> ProbeRead:
         request_fingerprint=evidence.request_fingerprint,
         tested_at=evidence.tested_at,
         error_code=evidence.error_code,
+        discovered_model_ids=list(evidence.discovered_model_ids or []),
+        connection_revision_id=evidence.connection_revision_id,
     )
 
 
-def _model_read(binding: ProviderModelBinding) -> ModelBindingRead:
+def _model_read(
+    binding: ProviderModelBinding, *, generation_evidence: GenerationEvidenceRead | None = None
+) -> ModelBindingRead:
     return ModelBindingRead(
         id=binding.id,
         connection_id=binding.connection_id,
@@ -287,6 +385,7 @@ def _model_read(binding: ProviderModelBinding) -> ModelBindingRead:
         remote_resource_kind=binding.remote_resource_kind,
         remote_resource_id=binding.remote_resource_id,
         invoke_model_value=binding.invoke_model_value,
+        generation_evidence=generation_evidence,
     )
 
 
@@ -305,6 +404,126 @@ def _quality_read(evidence: ProviderQualityEvidence) -> QualityEvidenceRead:
 
 
 @router.post(
+    "/workspaces/{workspace_id}/provider-connections/gateway",
+    response_model=ConnectionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def register_gateway_model(
+    workspace_id: UUID,
+    body: GatewayModelWrite,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+    response: Response,
+    _: CsrfDep,
+) -> ConnectionRead:
+    if workspace.id != workspace_id:
+        raise NotFoundError("workspace not found")
+    connection = await GatewayModelService(session).register(
+        workspace_id=workspace_id, actor=user, body=body
+    )
+    if GatewayReference.model_validate(connection.gateway_ref).state != "ready":
+        response.status_code = status.HTTP_202_ACCEPTED
+    return await _connection_read(ProviderConnectionService(session), connection)
+
+
+@router.put(
+    "/workspaces/{workspace_id}/provider-connections/{connection_id}/gateway",
+    response_model=ConnectionRead,
+)
+async def replace_gateway_model_version(
+    workspace_id: UUID,
+    connection_id: UUID,
+    body: GatewayModelWrite,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+    response: Response,
+    _: CsrfDep,
+) -> ConnectionRead:
+    if workspace.id != workspace_id:
+        raise NotFoundError("workspace not found")
+    connection = await GatewayModelService(session).register(
+        workspace_id=workspace_id,
+        actor=user,
+        body=body,
+        connection_id=connection_id,
+    )
+    if GatewayReference.model_validate(connection.gateway_ref).state != "ready":
+        response.status_code = status.HTTP_202_ACCEPTED
+    return await _connection_read(ProviderConnectionService(session), connection)
+
+
+@router.put(
+    "/workspaces/{workspace_id}/provider-connections/{connection_id}/gateway/credential",
+    response_model=ConnectionRead,
+)
+async def rotate_gateway_model_key(
+    workspace_id: UUID,
+    connection_id: UUID,
+    body: GatewayKeyWrite,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+    response: Response,
+    _: CsrfDep,
+) -> ConnectionRead:
+    if workspace.id != workspace_id:
+        raise NotFoundError("workspace not found")
+    connection = await GatewayModelService(session).rotate_key(
+        workspace_id=workspace_id,
+        actor=user,
+        connection_id=connection_id,
+        body=body,
+    )
+    if GatewayReference.model_validate(connection.gateway_ref).state != "ready":
+        response.status_code = status.HTTP_202_ACCEPTED
+    return await _connection_read(ProviderConnectionService(session), connection)
+
+
+@router.post(
+    "/workspaces/{workspace_id}/provider-connections/{connection_id}/gateway/reconcile",
+    response_model=ConnectionRead,
+)
+async def reconcile_gateway_model(
+    workspace_id: UUID,
+    connection_id: UUID,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> ConnectionRead:
+    if workspace.id != workspace_id:
+        raise NotFoundError("workspace not found")
+    connection = await GatewayModelService(session).reconcile(
+        workspace_id=workspace_id,
+        actor=user,
+        connection_id=connection_id,
+    )
+    return await _connection_read(ProviderConnectionService(session), connection)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/provider-connections/{connection_id}/gateway/configuration",
+    response_model=GatewayConfigurationRead,
+)
+async def read_gateway_model_configuration(
+    workspace_id: UUID,
+    connection_id: UUID,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+) -> GatewayConfigurationRead:
+    if workspace.id != workspace_id:
+        raise NotFoundError("workspace not found")
+    return await GatewayModelService(session).configuration(
+        workspace_id=workspace_id,
+        actor=user,
+        connection_id=connection_id,
+    )
+
+
+@router.post(
     "/workspaces/{workspace_id}/provider-connections",
     response_model=ConnectionRead,
     status_code=status.HTTP_201_CREATED,
@@ -319,19 +538,28 @@ async def create_connection(
 ) -> ConnectionRead:
     if workspace.id != workspace_id:
         raise NotFoundError("workspace not found")
+    if body.provider_type == "litellm":
+        raise ValidationAppError(
+            "new LLM configurations require Proxy model management",
+            details={"code": "LLM_PROXY_MANAGEMENT_REQUIRED"},
+        )
     service = ProviderConnectionService(session)
     connection = await service.create_connection(
         workspace_id=workspace_id,
         actor=user,
         display_name=body.display_name,
-        api_key=body.api_key.get_secret_value(),
+        api_key=body.api_key.get_secret_value() if body.api_key else None,
+        auth_mode=body.auth_mode,
         enabled=body.enabled,
         provider_type=body.provider_type,
         protocol_profile=body.protocol_profile,
         base_url=body.base_url,
     )
+    # Workspace RLS settings are transaction-local; serialize all scoped reads
+    # before commit so a successful write cannot turn into a false 422 response.
+    response = await _connection_read(service, connection)
     await session.commit()
-    return await _connection_read(service, connection)
+    return response
 
 
 @router.get(
@@ -395,8 +623,9 @@ async def patch_connection(
         enabled=body.enabled,
         base_url=body.base_url,
     )
+    response = await _connection_read(service, connection)
     await session.commit()
-    return await _connection_read(service, connection)
+    return response
 
 
 @router.put(
@@ -421,8 +650,9 @@ async def put_connection_credential(
         actor=user,
         api_key=body.api_key.get_secret_value(),
     )
+    response = await _connection_read(service, connection)
     await session.commit()
-    return await _connection_read(service, connection)
+    return response
 
 
 @router.post(
@@ -449,7 +679,6 @@ async def run_probe(
         reference_artifact_id=body.reference_artifact_id,
         remote_task_id=body.remote_task_id,
         remote_query_kind=body.remote_query_kind,
-        paid_request_confirmed=body.paid_request_confirmed,
     )
     await session.commit()
     return _probe_read(evidence)
@@ -497,6 +726,7 @@ async def create_model_binding(
         media_type=body.media_type,
         model_id=body.model_id,
         purpose=body.purpose,
+        capability_contract_id=body.capability_contract_id,
         enabled=body.enabled,
     )
     await session.commit()
@@ -515,10 +745,24 @@ async def list_model_bindings(
 ) -> list[ModelBindingRead]:
     if workspace.id != workspace_id:
         raise NotFoundError("workspace not found")
-    bindings = await ProviderConnectionService(session).list_model_bindings(
+    service = ProviderConnectionService(session)
+    bindings = await service.list_model_bindings(
         workspace_id=workspace_id, connection_id=connection_id
     )
-    return [_model_read(binding) for binding in bindings]
+    revision_id, verified_ids = await service.generation_verified_bindings(
+        workspace_id=workspace_id, connection_id=connection_id
+    )
+    return [
+        _model_read(
+            binding,
+            generation_evidence=GenerationEvidenceRead(
+                connection_revision_id=revision_id, verified=binding.id in verified_ids
+            )
+            if revision_id is not None
+            else None,
+        )
+        for binding in bindings
+    ]
 
 
 @router.post(
@@ -553,6 +797,62 @@ async def record_quality_evidence(
     return _quality_read(evidence)
 
 
+@router.get(
+    "/projects/{project_id}/provider-bindings",
+    response_model=list[ProjectBindingDetailRead],
+    dependencies=[Depends(require_selected_workspace)],
+)
+async def list_project_bindings(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> list[ProjectBindingDetailRead]:
+    """Read-only view of the project's Provider bindings (one row per purpose)."""
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    rows = (
+        (
+            await session.execute(
+                select(ProjectProviderBinding)
+                .where(ProjectProviderBinding.project_id == project.id)
+                .order_by(ProjectProviderBinding.purpose)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    details: list[ProjectBindingDetailRead] = []
+    for row in rows:
+        model = await session.get(ProviderModelBinding, row.model_binding_id)
+        entry = (
+            await session.get(ModelCatalogEntry, model.catalog_entry_id)
+            if model is not None and model.catalog_entry_id is not None
+            else None
+        )
+        connection = (
+            await session.get(ProviderConnection, model.connection_id)
+            if model is not None
+            else None
+        )
+        details.append(
+            ProjectBindingDetailRead(
+                id=row.id,
+                project_id=row.project_id,
+                purpose=row.purpose,
+                model_binding_id=row.model_binding_id,
+                selection_strategy=row.selection_strategy,
+                model_id=model.model_id if model is not None else None,
+                display_name=(
+                    entry.display_name
+                    if entry is not None
+                    else (model.model_id if model is not None else None)
+                ),
+                provider_type=connection.provider_type if connection is not None else None,
+                model_binding_enabled=model.enabled if model is not None else None,
+            )
+        )
+    return details
+
+
 @router.put(
     "/projects/{project_id}/provider-bindings/{purpose}",
     response_model=ProjectBindingRead,
@@ -571,7 +871,6 @@ async def put_project_binding(
         project=project,
         purpose=purpose,
         model_binding_id=body.model_binding_id,
-        fallback_policy=body.fallback_policy,
         actor=user,
         selection_strategy=body.selection_strategy,
     )
@@ -582,5 +881,4 @@ async def put_project_binding(
         purpose=binding.purpose,
         model_binding_id=binding.model_binding_id,
         selection_strategy=binding.selection_strategy,
-        fallback_policy=binding.fallback_policy,
     )

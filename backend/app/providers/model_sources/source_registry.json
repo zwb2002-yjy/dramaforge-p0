@@ -1,0 +1,670 @@
+{
+  "schema_version": "1",
+  "sources": [
+    {
+      "source_id": "e45b9c6bbfe915bf0c18fa180642cca69860e5da58b0cc641550ea7083d9a45f",
+      "kind": "official_api_doc",
+      "url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-image-21-flash",
+      "applies_to": [
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-image-2.1-flash",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-image-2.1-flash",
+          "api_version": "v1",
+          "region": "CN"
+        }
+      ]
+    },
+    {
+      "source_id": "3fdb54d2597664c20669861ba1d0d5e6c0335a4f3e00978865285250f8fb4950",
+      "kind": "official_api_doc",
+      "url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-image-21-flash.md",
+      "applies_to": [
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-image-2.1-flash",
+          "api_version": "unknown",
+          "region": "unknown"
+        }
+      ]
+    },
+    {
+      "source_id": "cfbb45bca73d714e3d1a241368f70a14c1ddd6ff02ac9125e9c17e54fee20848",
+      "kind": "official_api_doc",
+      "url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-video-v20",
+      "applies_to": [
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-video-v2.0",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-video-v2.0",
+          "api_version": "v1",
+          "region": "CN"
+        }
+      ]
+    },
+    {
+      "source_id": "9fb251a30ef0c1a162116b16628dcffc38608bb1895016f33564207f02eb4bc5",
+      "kind": "official_api_doc",
+      "url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-video-v20.md",
+      "applies_to": [
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-video-v2.0",
+          "api_version": "unknown",
+          "region": "unknown"
+        }
+      ]
+    },
+    {
+      "source_id": "e4014369c9aca452b87ccd68f21d0b076c45ab0ea4de4c69fa0859c41e1a380b",
+      "kind": "official_notice",
+      "url": "https://docs.volcengine.com/docs/ark/model-deprecation-notice?lang=zh",
+      "applies_to": [
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-1-0-pro-250528",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-4-0-250828",
+          "api_version": "unknown",
+          "region": "unknown"
+        }
+      ]
+    },
+    {
+      "source_id": "524d3f2684c8ab950106e62a93f8c981805323d55075dab00eafe801551d5747",
+      "kind": "official_api_doc",
+      "url": "https://www.volcengine.com/docs/82379",
+      "applies_to": [
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-1-0-pro-250528",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-4-0-250828",
+          "api_version": "unknown",
+          "region": "unknown"
+        }
+      ]
+    },
+    {
+      "source_id": "e7b697cfe939cf0e478ee5fc1d2744ab821a6d08a2bfa2db69531de8bc9986ce",
+      "kind": "official_api_doc",
+      "url": "https://docs.volcengine.com/docs/ark/create-video-generation-task-api?lang=zh",
+      "applies_to": [
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-260128",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-1-0-pro-250528",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-fast-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-mini-260615",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-5-260628",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        }
+      ]
+    },
+    {
+      "source_id": "822fe94cf8f7228bcfdc2eb5e624b3b67a01f3915383c6137a879d9a64cd4957",
+      "kind": "official_api_doc",
+      "url": "https://www.volcengine.com/docs/82379/1520758?lang=zh",
+      "applies_to": [
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-260128",
+          "api_version": "unknown",
+          "region": "unknown"
+        }
+      ]
+    },
+    {
+      "source_id": "285e7b8a6a0342cdba33a520c46f3651f947d1afddc986032518f1da212d3810",
+      "kind": "official_api_doc",
+      "url": "https://platform.minimax.cn/docs/api-reference/image-generation-i2i",
+      "applies_to": [
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "image-01",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "image-01",
+          "api_version": "v1",
+          "region": "CN"
+        }
+      ]
+    },
+    {
+      "source_id": "7892d0e1969229a7a33dc58fb70c8087ba724be2c4558592b8e094819c8dca6f",
+      "kind": "official_api_doc",
+      "url": "https://platform.minimaxi.com/docs/api-reference/image-generation-i2i.md",
+      "applies_to": [
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "image-01",
+          "api_version": "unknown",
+          "region": "unknown"
+        }
+      ]
+    },
+    {
+      "source_id": "b2dd7decb55f39042b6f7fe8dc148531db4ec03af6f2f1fb324141e54e40d3c1",
+      "kind": "official_api_doc",
+      "url": "https://platform.minimax.cn/docs/api-reference/video-generation-v2-create",
+      "applies_to": [
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "MiniMax-H3",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "MiniMax-H3",
+          "api_version": "v2",
+          "region": "CN"
+        },
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "MiniMax-H3-Max",
+          "api_version": "v2",
+          "region": "CN"
+        }
+      ]
+    },
+    {
+      "source_id": "daa7edcfe694f7a3fc2ee2a5e4d4404205e260a275fc17daea0d5b39017863b2",
+      "kind": "official_sdk",
+      "url": "https://github.com/MiniMax-AI/cli/blob/main/src/video/v2.ts",
+      "applies_to": [
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "MiniMax-H3",
+          "api_version": "unknown",
+          "region": "unknown"
+        }
+      ]
+    },
+    {
+      "source_id": "d3af0f2d3fed67ed52513e375abf003525ba1c2acce0de0a2a0bd81d05d35412",
+      "kind": "official_api_doc",
+      "url": "https://github.com/AgnesAI-Labs/skills/blob/main/agnes-ai-models/references/model_catalog.md",
+      "applies_to": [
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-image-2.5-flash",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-video-2.5",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-video-2.5-flash",
+          "api_version": "unknown",
+          "region": "unknown"
+        }
+      ]
+    },
+    {
+      "source_id": "9d7b3a15689e6955e3a197ea204e30fe1b9c96020772fd899d008327d94938a9",
+      "kind": "official_api_doc",
+      "url": "https://docs.volcengine.com/docs/ark/image-generation-api?lang=en",
+      "applies_to": [
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-4-0-250828",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-4-5-251128",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-260128",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-flash-260915",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-lite-260128",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-pro-260628",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-4-0-250828",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-4-5-251128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-lite-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-pro-260628",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-flash-260915",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        }
+      ]
+    },
+    {
+      "source_id": "3eae5991171dedc94b3d69db463cd464cdeebebac729e0dea5ba24a7ad0892e5",
+      "kind": "official_api_doc",
+      "url": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+      "applies_to": [
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-260128",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-fast-260128",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-mini-260615",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-5-260628",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-4-0-250828",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-4-5-251128",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-260128",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-flash-260915",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-lite-260128",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-pro-260628",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-4-0-250828",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-4-5-251128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-lite-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-pro-260628",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedream-5-0-flash-260915",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-1-0-pro-250528",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-fast-260128",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-mini-260615",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-5-260628",
+          "api_version": "v3",
+          "region": "cn-beijing"
+        }
+      ]
+    },
+    {
+      "source_id": "d7152a6775213564ff6e7366d611601d5712faff5d137da4f1f388f18c27d229",
+      "kind": "official_api_doc",
+      "url": "https://platform.minimax.io/docs/api-reference/image-generation-t2i",
+      "applies_to": [
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "image-01",
+          "api_version": "unknown",
+          "region": "unknown"
+        }
+      ]
+    },
+    {
+      "source_id": "53a8200a8f1043fa766e9ef1d4a0ccce9aa3127143b6d3214d920c5931a15c6e",
+      "kind": "official_api_doc",
+      "url": "https://platform.minimax.io/docs/api-reference/image-generation-i2i",
+      "applies_to": [
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "image-01",
+          "api_version": "unknown",
+          "region": "unknown"
+        }
+      ]
+    },
+    {
+      "source_id": "c7abd6c0fd91273b3cabb11be8afa4ae5e9a1d1c2ea16e250ef5defbde48d330",
+      "kind": "official_api_doc",
+      "url": "https://docs.volcengine.com/docs/ark/seedance-2-5-prompt-guide?lang=zh",
+      "applies_to": [
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-260128",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-fast-260128",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-0-mini-260615",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "volcengine",
+          "protocol_profile": "ark_cn_v1",
+          "model_id": "doubao-seedance-2-5-260628",
+          "api_version": "unknown",
+          "region": "unknown"
+        }
+      ]
+    },
+    {
+      "source_id": "d672f7147e2b89bffe88200e5ab881d76a8eb1d93509d6c4195a3f88225ae3c6",
+      "kind": "official_api_doc",
+      "url": "https://platform.minimax.io/docs/api-reference/video-generation-v2-create",
+      "applies_to": [
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "MiniMax-H3",
+          "api_version": "unknown",
+          "region": "unknown"
+        },
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "MiniMax-H3-Max",
+          "api_version": "unknown",
+          "region": "unknown"
+        }
+      ]
+    },
+    {
+      "source_id": "b311b417853bf5f9e5649a1c0b2503b61e80e77d0c86c236a5ed5ed1dbc8e5bb",
+      "kind": "official_api_doc",
+      "url": "https://platform.minimax.io/docs/guides/models-intro",
+      "applies_to": [
+        {
+          "provider_type": "minimax",
+          "protocol_profile": "minimax_cn_v1",
+          "model_id": "MiniMax-H3-Max",
+          "api_version": "unknown",
+          "region": "unknown"
+        }
+      ]
+    },
+    {
+      "source_id": "04bb5fb311745d4da48772032b42e6f520caacfa1b43f7be28a43320747d6e38",
+      "kind": "official_api_doc",
+      "url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-image-25-flash",
+      "applies_to": [
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-image-2.5-flash",
+          "api_version": "v1",
+          "region": "CN"
+        }
+      ]
+    },
+    {
+      "source_id": "48229922d30cf2460937a72ef08480375273e4b2fbe331f4462d3b4d0646badd",
+      "kind": "official_api_doc",
+      "url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-video-25",
+      "applies_to": [
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-video-2.5",
+          "api_version": "v1",
+          "region": "CN"
+        }
+      ]
+    },
+    {
+      "source_id": "5c9e2659238d3c31c18b88cb751ec6e76c87b08a49008200a6a4b64f1c212cba",
+      "kind": "official_api_doc",
+      "url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-video-25-flash",
+      "applies_to": [
+        {
+          "provider_type": "agnes",
+          "protocol_profile": "agnes_cn_v1",
+          "model_id": "agnes-video-2.5-flash",
+          "api_version": "v1",
+          "region": "CN"
+        }
+      ]
+    }
+  ]
+}

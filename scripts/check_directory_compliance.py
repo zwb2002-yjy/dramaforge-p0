@@ -34,7 +34,6 @@ ALLOWED_ROOT = {
     "docker-compose.yml",
     "docker-compose.build.yml",
     "docker-compose.dev.yml",
-    "docker-compose.gpu.yml",
     "docker-compose.offline.yml",
     "docker-compose.quality.yml",
     "install.ps1",
@@ -74,6 +73,8 @@ LOCAL_ONLY_ROOT = {
     "node_modules",
     "dist",
     "coverage",
+    "test-results",
+    "playwright-report",
     ".venv",
     "venv",
     ".env",  # local secrets only; never committed

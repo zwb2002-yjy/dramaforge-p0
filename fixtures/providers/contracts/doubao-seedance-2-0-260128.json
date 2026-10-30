@@ -39,36 +39,44 @@
     }
   },
   "manifest": {
-    "catalog_source": "official_static",
-    "display_name": "Seedance 2.0",
-    "documented_at": "2026-08-17",
-    "lifecycle": "active",
     "manifest_version": "2026-08-17",
-    "media_kind": "video",
+    "provider_type": "volcengine",
+    "protocol_profile": "ark_cn_v1",
     "model_id": "doubao-seedance-2-0-260128",
-    "model_revision": "v1",
+    "model_revision": "v3",
+    "media_kind": "video",
+    "display_name": "Seedance 2.0",
+    "lifecycle": "active",
+    "catalog_source": "official_static",
+    "documented_at": "2026-08-17",
     "operations": {
       "video.generate": {
+        "operation": "video.generate",
         "capabilities": [
           "video.i2v.first_frame"
         ],
-        "exclusive_groups": [],
-        "operation": "video.generate",
         "output_constraints": {},
         "reference_constraints": {
           "first_frame": {
-            "max": 1,
-            "min": 1
+            "min": 1,
+            "max": 1
           }
-        }
+        },
+        "exclusive_groups": []
       }
     },
     "option_schema": {
       "namespace": "",
       "options": {}
     },
-    "protocol_profile": "ark_cn_v1",
-    "provider_type": "volcengine"
+    "implementation_status": "contract_tested",
+    "evidence": {
+      "current_contract": {
+        "source_type": "contract_fixture",
+        "source_url": "repository:backend/tests/unit",
+        "checked_at": "2026-10-07"
+      }
+    }
   },
-  "manifest_hash": "9fe8be474428218ff47221413062b26d4d23e2541000611600112f09d1fcbae5"
+  "manifest_hash": "e3c3cf3d1761a1d9afaba94fc90537b6ceac4af75e7e8f986781504a27935169"
 }

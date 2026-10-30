@@ -20,7 +20,7 @@ from app.director.story_generation import (
     StoryGenerationService,
     render_story_markdown,
 )
-from app.director.text_transport import DirectorTextTransport
+from app.director.text_transport import DirectorTextRuntimeAdapter
 from app.director.turn_models import DirectorTurn
 from app.providers.litellm_adapter import LiteLLMModelAdapter
 from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
@@ -33,6 +33,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 MODEL_ID = "litellm/controlled-script"
+pytestmark = pytest.mark.usefixtures("configured_director_runtime")
 
 
 @pytest.fixture
@@ -225,7 +226,7 @@ async def test_brief_generates_parser_compatible_proposal_without_canonical_writ
     before = await _counts(session, project.id)
     result = await StoryGenerationService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     ).generate_proposal(
         project=project,
         actor=user,
@@ -254,6 +255,42 @@ async def test_brief_generates_parser_compatible_proposal_without_canonical_writ
 
 
 @pytest.mark.asyncio
+async def test_story_generation_accepts_parameter_wrapped_structured_output(
+    session: AsyncSession,
+) -> None:
+    """Some OpenAI-compatible models wrap valid structured JSON in `parameter`."""
+
+    project, user = await _seed(session)
+    calls = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        content = (
+            json.dumps({"parameter": json.dumps(_candidate(), ensure_ascii=False)})
+            if calls == 1
+            else "{}"
+        )
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": content}}]},
+        )
+
+    result = await StoryGenerationService(
+        session,
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
+    ).generate_proposal(
+        project=project,
+        actor=user,
+        request=_request(key="story-turn:parameter-wrapper"),
+    )
+
+    assert calls == 1
+    assert result.draft.title == "雨夜离站"
+    assert result.evidence.schema_repair_count == 0
+
+
+@pytest.mark.asyncio
 async def test_same_request_reuses_turn_and_proposal_then_changed_brief_conflicts(
     session: AsyncSession,
 ) -> None:
@@ -270,7 +307,7 @@ async def test_same_request_reuses_turn_and_proposal_then_changed_brief_conflict
 
     service = StoryGenerationService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     )
     request = _request(key="story-turn:idempotent")
     first = await service.generate_proposal(project=project, actor=user, request=request)
@@ -306,7 +343,7 @@ async def test_partial_decisions_apply_only_selected_generated_story_items(
 
     generated = await StoryGenerationService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     ).generate_proposal(
         project=project,
         actor=user,
@@ -344,6 +381,66 @@ async def test_partial_decisions_apply_only_selected_generated_story_items(
 
 
 @pytest.mark.asyncio
+async def test_rejected_generated_story_can_be_regenerated_from_the_same_brief(
+    session: AsyncSession,
+) -> None:
+    project, user = await _seed(session)
+    calls = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(_candidate(title=f"雨夜离站 · 版本 {calls}"))
+                        }
+                    }
+                ]
+            },
+        )
+
+    service = StoryGenerationService(
+        session,
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
+    )
+    first = await service.generate_proposal(
+        project=project,
+        actor=user,
+        request=_request(key="story-turn:regenerate:first"),
+    )
+    await ProposalService(session, actor=user).partial_apply(
+        project=project,
+        proposal_id=first.proposal.proposal.id,
+        apply_input=PartialApplyInput(
+            decisions=[
+                ProposalDecision(item_id=item.id, decision="rejected")
+                for item in first.proposal.items
+            ]
+        ),
+    )
+
+    second = await service.generate_proposal(
+        project=project,
+        actor=user,
+        request=_request(key="story-turn:regenerate:second"),
+    )
+
+    assert calls == 2
+    assert second.draft.title == "雨夜离站 · 版本 2"
+    assert second.proposal.proposal.id != first.proposal.proposal.id
+    assert await _counts(session, project.id) == {
+        "documents": 0,
+        "episodes": 0,
+        "scenes": 0,
+        "shots": 0,
+    }
+
+
+@pytest.mark.asyncio
 async def test_malicious_or_invalid_story_output_fails_after_one_repair(
     session: AsyncSession,
 ) -> None:
@@ -362,7 +459,7 @@ async def test_malicious_or_invalid_story_output_fails_after_one_repair(
     with pytest.raises(ValidationAppError) as raised:
         await StoryGenerationService(
             session,
-            text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+            text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
         ).generate_proposal(
             project=project,
             actor=user,
@@ -396,7 +493,7 @@ async def test_unconfigured_script_model_records_failure_and_manual_path_remains
     with pytest.raises(ValidationAppError) as raised:
         await StoryGenerationService(
             session,
-            text_transport=DirectorTextTransport(
+            text_transport=DirectorTextRuntimeAdapter(
                 session, registry=_registry(must_not_call, configured=False)
             ),
         ).generate_proposal(
@@ -438,7 +535,7 @@ async def test_parser_failure_after_model_success_is_persisted(
     with pytest.raises(ValidationAppError) as raised:
         await StoryGenerationService(
             session,
-            text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+            text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
         ).generate_proposal(
             project=project,
             actor=user,
@@ -488,7 +585,7 @@ async def test_story_changed_in_another_transaction_marks_generation_stale(tmp_p
         with pytest.raises(ConflictError) as raised:
             await StoryGenerationService(
                 session,
-                text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+                text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
             ).generate_proposal(
                 project=project,
                 actor=user,
@@ -541,3 +638,57 @@ def test_renderer_prevents_model_text_from_injecting_story_headings() -> None:
     assert "\n## Scene 99" not in rendered
     assert "\n### Shot 99" not in rendered
     assert "Station ／ fake-time / night" in rendered
+
+
+@pytest.mark.asyncio
+async def test_generate_route_rebinds_transaction_scope_before_reading_items(
+    session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api.v1 import story as route
+
+    project, user = await _seed(session)
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": json.dumps(_candidate())}}]}
+        )
+
+    service = StoryGenerationService(
+        session,
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
+    )
+    monkeypatch.setattr(route, "StoryGenerationService", lambda _session: service)
+
+    async def get_project(_self, **_kwargs):
+        return project
+
+    monkeypatch.setattr(route.ProjectService, "get_project_for_owner", get_project)
+    scope = {}
+
+    async def bind(_session, **kwargs):
+        scope.update(kwargs)
+
+    monkeypatch.setattr(route, "set_rls_context", bind)
+    original_read = route._proposal_read
+
+    async def scoped_read(_session, **kwargs):
+        # generate_proposal commits. PostgreSQL SET LOCAL has ended here,
+        # so the response query must explicitly restore the Owner scope.
+        assert scope == {
+            "user_id": user.id,
+            "workspace_id": project.workspace_id,
+            "project_id": project.id,
+        }
+        return await original_read(_session, **kwargs)
+
+    monkeypatch.setattr(route, "_proposal_read", scoped_read)
+    result = await route.generate_project_story_proposal(
+        project_id=project.id,
+        body=_request(key="story-route:scope"),
+        user=user,
+        session=session,
+        _csrf=None,
+    )
+    assert len(result.proposal.operations) >= 4
+    assert (await _counts(session, project.id))["shots"] == 0

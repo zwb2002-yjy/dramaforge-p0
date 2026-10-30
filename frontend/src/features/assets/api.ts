@@ -1,6 +1,5 @@
-/** Phase 2 feature-local API client (kept out of the shared lib/api.ts). */
-
 import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
+
 import type { components } from "../../shared/api/generated";
 
 export type AssetRead = components["schemas"]["AssetRead"];
@@ -10,11 +9,6 @@ export type AssetCardRead = components["schemas"]["AssetCardRead"];
 
 export function fetchAssetTags(projectId: string): Promise<AssetTagRead[]> {
   return apiGetList<AssetTagRead>(`/api/v1/projects/${projectId}/asset-tags`);
-}
-
-export async function createAssetTag(projectId: string, name: string): Promise<AssetTagRead> {
-  const csrf = await fetchCsrf();
-  return apiSend<AssetTagRead>("POST", `/api/v1/projects/${projectId}/asset-tags`, { name }, csrf);
 }
 
 export async function setAssetTags(
@@ -83,6 +77,20 @@ export async function promoteAssetVersion(
   );
 }
 
+export async function rejectAssetVersion(
+  projectId: string,
+  assetId: string,
+  versionId: string,
+): Promise<AssetVersionRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<AssetVersionRead>(
+    "POST",
+    `/api/v1/projects/${projectId}/assets/${assetId}/versions/${versionId}/reject`,
+    {},
+    csrf,
+  );
+}
+
 export function fetchAssetCard(projectId: string, assetId: string): Promise<AssetCardRead> {
   return apiGet<AssetCardRead>(`/api/v1/projects/${projectId}/assets/${assetId}/card`);
 }
@@ -123,6 +131,25 @@ export function roleLabel(role: string): string {
 
 export function rolesForAssetKind(kind: string): string[] {
   return ASSET_KIND_ROLES[kind] ?? ["primary"];
+}
+
+/**
+ * Asset kinds one Artifact type may become.
+ *
+ * Mirrors the server's ARTIFACT_KIND_MATCH guard: a video Artifact may only
+ * become a video asset, and 角色 / 场景 cards are image-only. Offering a kind the
+ * server will refuse turns an explicit user action into a late error.
+ */
+const ASSET_KINDS_BY_ARTIFACT_TYPE: Record<string, string[]> = {
+  image: ["character", "scene", "video"],
+  video: ["video"],
+  audio: ["audio"],
+  subtitle: ["subtitle"],
+};
+
+export function assetKindsForArtifactType(artifactType: string | null | undefined): string[] {
+  if (!artifactType) return Object.keys(ASSET_KIND_ROLES);
+  return ASSET_KINDS_BY_ARTIFACT_TYPE[artifactType] ?? Object.keys(ASSET_KIND_ROLES);
 }
 
 /**
@@ -170,12 +197,7 @@ export function fetchAssetVersions(
 
 export type ShotBindingRead = components["schemas"]["app__api__v1__references__BindingRead"];
 export type ShotExecutionReference = components["schemas"]["ShotReferenceIntent"];
-export type ResolvedShotReference = components["schemas"]["ResolvedReferenceRead"] & {
-  /** Optional server lineage fields retained for forward-compatible responses. */
-  binding_id?: string | null;
-  mime_type?: string;
-  fingerprint?: string | null;
-};
+export type ResolvedShotReference = components["schemas"]["ResolvedReferenceRead"];
 
 export function fetchShotReferences(projectId: string, shotId: string): Promise<ShotBindingRead[]> {
   return apiGetList<ShotBindingRead>(`/api/v1/projects/${projectId}/shots/${shotId}/references`);
@@ -191,7 +213,8 @@ export async function createShotReference(
     artifact_id?: string | null;
     resolution_mode?: string;
     label?: string;
-    stage?: string;
+    stage?: "image" | "video" | "both";
+    sort_order?: number;
   },
 ): Promise<ShotBindingRead> {
   const csrf = await fetchCsrf();
@@ -206,7 +229,36 @@ export async function createShotReference(
       resolution_mode: input.resolution_mode ?? "current_formal",
       label: input.label ?? "",
       stage: input.stage ?? "both",
+      ...(input.sort_order === undefined ? {} : { sort_order: input.sort_order }),
     },
+    csrf,
+  );
+}
+
+/**
+ * Change one binding in product language: swap the asset, follow the current
+ * formal version, pin to a concrete version, or change its purpose. The
+ * expected_version keeps a stale page from overwriting a newer binding.
+ */
+export async function updateShotReference(
+  projectId: string,
+  bindingId: string,
+  input: {
+    expected_version: number;
+    stage?: "image" | "video" | "both";
+    sort_order?: number;
+    asset_id?: string | null;
+    asset_version_id?: string | null;
+    resolution_mode?: "current_formal" | "pinned_version" | "direct_artifact";
+    purpose?: string;
+    label?: string;
+  },
+): Promise<ShotBindingRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<ShotBindingRead>(
+    "PATCH",
+    `/api/v1/projects/${projectId}/references/${bindingId}`,
+    input,
     csrf,
   );
 }
@@ -234,4 +286,8 @@ export async function resolveShotReferences(
     {},
     csrf,
   );
+}
+
+export function fetchProjectAssets(projectId: string): Promise<AssetRead[]> {
+  return apiGet(`/api/v1/projects/${projectId}/assets`);
 }

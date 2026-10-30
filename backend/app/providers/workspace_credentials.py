@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from uuid import UUID
+import hmac
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,8 +10,6 @@ from app.config import Settings, get_settings
 from app.providers.models import ProviderConnection
 from app.security.byok_keyring import ByokKeyring, KeyringConfigurationError, parse_keyring
 from app.security.credentials import (
-    has_credential,
-    read_credential,
     read_credential_by_id,
 )
 from app.shared.errors import AppError
@@ -43,51 +41,30 @@ def configured_byok_keyring(settings: Settings | None = None) -> ByokKeyring:
         raise WorkspaceCredentialConfigurationError() from exc
 
 
-async def settings_for_workspace_provider(
-    session: AsyncSession,
-    *,
-    workspace_id: UUID,
-    provider: str,
-    settings: Settings | None = None,
-) -> Settings:
-    cfg = settings or get_settings()
-    if not await has_credential(session, workspace_id=workspace_id, provider=provider):
-        return cfg
-    credential = await read_credential(
-        session,
-        workspace_id=workspace_id,
-        provider=provider,
-        keyring=configured_byok_keyring(cfg),
-    )
-    if credential is None:
-        return cfg
-    if provider == "text":
-        return cfg.model_copy(update={"text_llm_enabled": True, "text_llm_api_key": credential})
-    if provider == "agnes":
-        return cfg.model_copy(update={"agnes_enabled": True, "agnes_api_key": credential})
-    if provider == "volcengine":
-        return cfg.model_copy(
-            update={"volcengine_enabled": True, "volcengine_api_key": credential}
-        )
-    if provider == "minimax":
-        return cfg.model_copy(update={"minimax_enabled": True, "minimax_api_key": credential})
-    raise ValueError(f"unsupported workspace credential provider: {provider}")
-
-
 async def runtime_connection_settings(
     session: AsyncSession,
     *,
     connection: ProviderConnection,
     settings: Settings | None = None,
 ) -> Settings:
-    """Build runtime Settings from a ProviderConnection (BYOK credential slot +
-    connection host), used by the unified Provider runtime. Mirrors the legacy
-    ``settings_for_workspace_provider`` but keys off the connection's provider
-    type + protocol profile instead of a hardcoded provider name."""
+    """Resolve only the immutable credential revision named by a connection."""
     from app.providers.registry import get_plugin
 
     cfg = settings or get_settings()
     plugin = get_plugin(connection.provider_type, connection.protocol_profile)
+    if getattr(connection, "auth_mode", "bearer") == "none":
+        if "none" not in plugin.auth_modes or connection.credential_id is not None:
+            raise WorkspaceCredentialConfigurationError()
+        return cfg.model_copy(
+            update={
+                f"{plugin.prefix}_enabled": True,
+                f"{plugin.prefix}_api_key": "",
+                f"{plugin.prefix}_base_url": connection.base_url,
+                f"{plugin.prefix}_auth_mode": "none",
+            }
+        )
+    if connection.credential_id is None:
+        raise WorkspaceCredentialConfigurationError()
     credential = await read_credential_by_id(
         session,
         workspace_id=connection.workspace_id,
@@ -105,5 +82,54 @@ async def runtime_connection_settings(
             f"{prefix}_enabled": True,
             f"{prefix}_api_key": credential,
             f"{prefix}_base_url": connection.base_url,
+            **({f"{prefix}_auth_mode": "bearer"} if hasattr(cfg, f"{prefix}_auth_mode") else {}),
+        }
+    )
+
+
+async def runtime_text_gateway_settings(
+    session: AsyncSession,
+    *,
+    connection: ProviderConnection,
+    settings: Settings | None = None,
+) -> Settings:
+    """Resolve only a managed reference to the configured internal Proxy.
+
+    Historical direct connections are readable by the data layer but cannot
+    become a new transport target or silently inherit a new process credential.
+    """
+    if (
+        connection.provider_type != "litellm"
+        or connection.protocol_profile != "openai_chat_v1"
+        or connection.credential_id is None
+    ):
+        raise WorkspaceCredentialConfigurationError()
+    cfg = settings or get_settings()
+    from app.providers.litellm_gateway.management import GatewayReference
+
+    if connection.gateway_ref is None:
+        raise WorkspaceCredentialConfigurationError()
+    reference = GatewayReference.model_validate(connection.gateway_ref)
+    if (
+        reference.state != "ready"
+        or reference.workspace_id != connection.workspace_id
+        or reference.connection_id != connection.id
+        or connection.base_url.rstrip("/") != cfg.litellm_gateway_url.rstrip("/")
+    ):
+        raise WorkspaceCredentialConfigurationError()
+    credential = await read_credential_by_id(
+        session,
+        workspace_id=connection.workspace_id,
+        credential_id=connection.credential_id,
+        keyring=configured_byok_keyring(cfg),
+    )
+    if credential is None or not hmac.compare_digest(
+        credential.encode(), cfg.litellm_api_key.encode()
+    ):
+        raise WorkspaceCredentialConfigurationError()
+    return cfg.model_copy(
+        update={
+            "litellm_gateway_url": cfg.litellm_gateway_url,
+            "litellm_api_key": credential,
         }
     )

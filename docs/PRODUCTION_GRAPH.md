@@ -1,7 +1,7 @@
 # PRODUCTION_GRAPH — Graph / Node / NodeRun 定义权威
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Date: 2026-09-15 / Base: dev 5ea45d6 / Alembic head: 20260910_0066
+Updated: 2026-10-07；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 
 本文件只回答一件事：**ProductionGraph 怎么组织执行计划。**
 
@@ -133,7 +133,7 @@ Graph 的 `definition` 是一个 JSON 文档（`GraphVersion.definition`），�
 不是并行执行引擎：真实的 Shot 生产固定使用 `shot-p0-v1`。
 
 因此这是**发现性问题（模板目录分散在三个模块）**，不是**概念性问题（两套 Graph）**。
-详见 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) 问题 5。
+详见 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) §4 问题 5。
 
 ---
 
@@ -146,9 +146,9 @@ Graph 的 `definition` 是一个 JSON 文档（`GraphVersion.definition`），�
 | `prompt_compose` | 把创作意图与 prompt 契约编译为该镜头可执行的 prompt 文档 | 纯上游（零成本本地） |
 | `keyframe` | 生成关键帧图像 | 真实生产 / Provider |
 | `identity_review` | 角色一致性证据与判定 | 零成本本地 review |
-| `video` | 由正式关键帧生成视频 | 真实生产 / Provider |
+| `video` | 按冻结合同由文本、正式首帧、尾帧、首尾帧或参考素材生成视频 | 真实生产 / Provider |
 | `video_review` | 视频漂移证据与判定（node_key 常为 `video_drift_review`） | 零成本本地 review |
-| `voice` | 对白语音合成 | 本地 `local-voice-v1` |
+| `voice` | 对白语音合成 | 冻结 VoiceExecutionSpec；Edge/eSpeak/静音身份见 PRODUCTION_RUNTIME |
 | `subtitle` | 字幕生成 | 零成本本地 |
 | `composite` | 合成该镜头成片片段 | 零成本本地 |
 | `continuity_review` | 连续性证据与判定 | 零成本本地 review |

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -13,6 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.events.outbox import OutboxDispatcher, StreamPublisher
 from app.execution.models import GraphNode, NodeRun
+from app.execution.scheduling import (
+    due_node_runs,
+    node_run_dispatch_generation,
+    provider_retry_delay,
+)
 from app.shared.db import (
     NodeRunRlsScope,
     list_pending_outbox_event_rls_scopes,
@@ -79,9 +86,20 @@ class RedisStreamPublisher(StreamPublisher):
     async def publish(self, topic: str, payload: dict[str, object]) -> str:
         try:
             client = self._client()
-            fields = {k: str(v) if not isinstance(v, str) else v for k, v in payload.items()}
-            msg_id = await client.xadd(f"dramaforge:stream:{topic}", fields)
-            self.messages.append((topic, {**payload, "_stream_id": msg_id}))
+            fields = {
+                key: (
+                    json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+                    if isinstance(value, (dict, list))
+                    else str(value)
+                )
+                for key, value in payload.items()
+            }
+            msg_id = await client.xadd(
+                f"dramaforge:stream:{topic}",
+                fields,
+                maxlen=10_000,
+                approximate=True,
+            )
             return str(msg_id)
         except Exception as exc:
             # APP_ENV=test only: allow in-memory publisher for unit tests without Redis.
@@ -109,7 +127,7 @@ class NodeRunScheduler:
         publisher: StreamPublisher | None = None,
     ) -> None:
         self._session = session
-        self._dispatcher = OutboxDispatcher(session, publisher=publisher)
+        self._dispatcher = OutboxDispatcher(session, publisher=publisher, sse_hub=None)
         self.enqueued_job_ids: list[str] = []
 
     async def dispatch_pending(
@@ -140,7 +158,10 @@ class NodeRunScheduler:
                 await self._session.rollback()
                 continue
             try:
-                await self._dispatcher.publish_leased(event)
+                await self._dispatcher.publish_leased(
+                    event,
+                    workspace_id=event_scope.workspace_id,
+                )
                 await self._session.commit()
                 count += 1
             except Exception as exc:  # noqa: BLE001
@@ -164,6 +185,15 @@ class NodeRunScheduler:
                     workspace_id=node_run_scope.workspace_id,
                     project_id=node_run_scope.project_id,
                 )
+                candidate = await self._session.scalar(
+                    select(NodeRun)
+                    .where(NodeRun.id == run_id, due_node_runs(datetime.now(UTC)))
+                    .with_for_update(skip_locked=True)
+                    .execution_options(populate_existing=True)
+                )
+                if candidate is None:
+                    await self._session.rollback()
+                    continue
                 job_id = await self._enqueue_node_run(run_id)
                 await self._session.commit()
                 self.enqueued_job_ids.append(job_id)
@@ -177,6 +207,7 @@ class NodeRunScheduler:
                     project_id=node_run_scope.project_id,
                 )
                 await self._mark_queue_failed(run_id, error=str(exc))
+        await self._dispatcher.pending_count()
         return count
 
     async def enqueue_node_run_only(self, node_run_id: UUID) -> str:
@@ -186,7 +217,6 @@ class NodeRunScheduler:
         NodeRun/Outbox rows are durable. On enqueue failure, NodeRun is marked
         failed with QUEUE_UNAVAILABLE (no silent 200+queued).
         """
-        from datetime import UTC, datetime
         from uuid import uuid4
 
         from app.events.models import OutboxEvent
@@ -211,7 +241,7 @@ class NodeRunScheduler:
                 OutboxEvent.topic == "node_run.enqueue",
             )
         )
-        dispatch_generation = str((run.input_snapshot or {}).get("dispatch_generation") or "")
+        dispatch_generation = node_run_dispatch_generation(run)
         has_enqueue_event = any(
             str((event.payload or {}).get("node_run_id")) == str(node_run_id)
             and str((event.payload or {}).get("dispatch_generation") or "") == dispatch_generation
@@ -261,11 +291,14 @@ class NodeRunScheduler:
         run = await self._session.get(NodeRun, node_run_id)
         if run is None:
             return
+        if (run.output_summary or {}).get("status") == "provider_pending":
+            # A Redis outage cannot turn a known remote task into a new Create.
+            # Due NodeRun/Outbox facts remain available to the next dispatcher.
+            return
         if run.status == "queued":
             run.status = "failed"
             run.error_code = "QUEUE_UNAVAILABLE"
             run.error_summary = error[:500]
-            from datetime import UTC, datetime
 
             run.finished_at = datetime.now(UTC)
             await self._session.commit()
@@ -274,8 +307,7 @@ class NodeRunScheduler:
         """Enqueue on Redis/Arq. Fail closed — never return local:* as success."""
         import asyncio
 
-        from arq import create_pool
-        from arq.connections import RedisSettings
+        from app.runtime.queue_pool import queue_pool
 
         settings = get_settings()
         run = await self._session.get(NodeRun, node_run_id)
@@ -294,41 +326,27 @@ class NodeRunScheduler:
         stable_job_id = queue_scoped_job_id(
             queue_name=queue_name,
             node_run_id=node_run_id,
-            dispatch_generation=(
-                str((getattr(run, "input_snapshot", None) or {}).get("dispatch_generation") or "")
-                or None
-                if run is not None
-                else None
-            ),
+            dispatch_generation=node_run_dispatch_generation(run) if run is not None else None,
         )
 
         async def _arq() -> str:
-            redis_settings = RedisSettings.from_dsn(settings.redis_url)
-            # Fail fast in broken/missing Redis environments (unit tests, local misconfig).
-            redis_settings.conn_timeout = 1
-            redis_settings.conn_retries = 0
-            redis_settings.conn_retry_delay = 0
-            redis = await create_pool(redis_settings)
-            try:
-                job = await redis.enqueue_job(
-                    "execute_node_run",
-                    str(node_run_id),
-                    _job_id=stable_job_id,
-                    _queue_name=queue_name,
-                )
-                if job is None:
-                    # Already enqueued with same job id — treat as success (idempotent)
-                    return stable_job_id
-                return str(job.job_id)
-            finally:
-                await redis.close()
+            redis = await queue_pool(settings.redis_url)
+            job = await redis.enqueue_job(
+                "execute_node_run",
+                str(node_run_id),
+                _job_id=stable_job_id,
+                _queue_name=queue_name,
+            )
+            if job is None:
+                return stable_job_id
+            return str(job.job_id)
 
         try:
             return await asyncio.wait_for(_arq(), timeout=8.0)
         except Exception as exc:
             raise ValidationAppError(
                 f"QUEUE_UNAVAILABLE: Redis/Arq enqueue failed ({type(exc).__name__}: {exc}). "
-                "NodeRun marked failed; start Redis + workers (docker compose up -d)."
+                "Start Redis + workers (docker compose up -d)."
             ) from exc
 
 
@@ -347,6 +365,21 @@ class WorkerRuntime:
         """Close a transaction opened while inspecting a terminal run."""
         if self._session.in_transaction():
             await self._session.commit()
+
+    async def _defer_rejected_create(self, run_id: UUID, error: ProviderRateLimitedError) -> None:
+        await self._rollback_if_active()
+        if await set_node_run_rls_context(self._session, node_run_id=run_id) is None:
+            return
+        run = await self._session.get(NodeRun, run_id)
+        if run is not None and run.status == "running":
+            run.status, run.started_at = "queued", None
+            run.next_attempt_at = datetime.now(UTC) + timedelta(
+                seconds=provider_retry_delay(
+                    error.details.get("retry_after_seconds"),
+                    now=datetime.now(UTC),
+                )
+            )
+        await self._commit_if_active()
 
     async def process_queued(self, *, limit: int = 20) -> int:
         from app.execution.composite_media import composite_inputs_pending
@@ -416,17 +449,8 @@ class WorkerRuntime:
                 except ProviderTaskCancelledError:
                     await self._commit_if_active()
                     progressed = True
-                except ProviderRateLimitedError:
-                    await self._rollback_if_active()
-                    # Requeue the claimed run so a later dispatch retries after
-                    # Retry-After (plan §11.2: 429 follows Retry-After).
-                    if await set_node_run_rls_context(self._session, node_run_id=run_id) is None:
-                        continue
-                    current = await self._session.get(NodeRun, run_id)
-                    if current is not None and current.status == "running":
-                        current.status = "queued"
-                        await self._session.flush()
-                        await self._commit_if_active()
+                except ProviderRateLimitedError as exc:
+                    await self._defer_rejected_create(run_id, exc)
                     next_deferred.append((run_id, scope))
                     continue
                 except Exception as exc:  # noqa: BLE001
@@ -445,7 +469,6 @@ class WorkerRuntime:
                         current.status = "failed"
                         current.error_code = getattr(exc, "code", None) or "NODE_EXECUTION_FAILED"
                         current.error_summary = str(exc)[:500]
-                        from datetime import UTC, datetime
 
                         current.finished_at = datetime.now(UTC)
                         await self._session.flush()
@@ -502,5 +525,8 @@ class WorkerRuntime:
         except ProviderTaskCancelledError:
             await self._commit_if_active()
             return True
+        except ProviderRateLimitedError as exc:
+            await self._defer_rejected_create(node_run_id, exc)
+            return False
         await self._session.commit()
         return True
