@@ -9,8 +9,6 @@ explicit test fixture only.
 
 from __future__ import annotations
 
-import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
@@ -32,6 +30,7 @@ from app.access.projects import ProjectService
 from app.assets.models import Scene, Shot
 from app.assets.schemas import ShotDirectorState
 from app.config import get_settings
+from app.director.forbidden_fields import reject_forbidden_fields
 from app.director.runtime.capabilities import require_director_runtime_available
 from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.text_transport import DirectorInvocationEvidence, DirectorTextRuntimeAdapter
@@ -45,72 +44,10 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-_FORBIDDEN_KEYS = frozenset(
-    {
-        "artifact",
-        "artifact_id",
-        "artifact_ids",
-        "artifact_url",
-        "column",
-        "execution",
-        "execution_id",
-        "execution_plan",
-        "node_run",
-        "node_run_id",
-        "node_run_ids",
-        "provider",
-        "provider_model_id",
-        "provider_model_ids",
-        "provider_operation",
-        "provider_operation_id",
-        "provider_request",
-        "raw_sql",
-        "runtime",
-        "runtime_id",
-        "sql",
-        "sql_query",
-        "table",
-        "worker",
-        "worker_queue",
-    }
-)
-_FORBIDDEN_PREFIXES = (
-    "artifact_",
-    "execution_",
-    "node_run_",
-    "provider_",
-    "raw_sql_",
-    "runtime_",
-    "sql_",
-    "worker_",
-)
-
-
-def _normalized_field_name(key: object) -> str:
-    """Normalize snake/camel/kebab field spellings before policy matching."""
-
-    text = str(key).strip().replace("-", "_").replace(" ", "_")
-    text = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", text)
-    text = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", text)
-    return re.sub(r"_+", "_", text).lower()
-
-
-def _is_forbidden_field(key: object) -> bool:
-    normalized = _normalized_field_name(key)
-    return normalized in _FORBIDDEN_KEYS or normalized.startswith(_FORBIDDEN_PREFIXES)
-
-
 def _reject_execution_fields(value: object, *, path: str = "suggestion") -> None:
     """Reject execution/provider fields even inside free-form design maps."""
 
-    if isinstance(value, Mapping):
-        for key, nested in value.items():
-            if _is_forbidden_field(key):
-                raise ValueError(f"{path} contains forbidden design field: {key}")
-            _reject_execution_fields(nested, path=f"{path}.{key}")
-    elif isinstance(value, list | tuple):
-        for index, nested in enumerate(value):
-            _reject_execution_fields(nested, path=f"{path}[{index}]")
+    reject_forbidden_fields(value, path=path, message="contains forbidden design field")
 
 
 class SuggestionDirectorState(RootModel[dict[str, object]]):

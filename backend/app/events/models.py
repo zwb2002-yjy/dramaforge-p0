@@ -106,3 +106,14 @@ Index(
     postgresql_where=text("status <> 'published'"),
     sqlite_where=text("status <> 'published'"),
 )
+# Enqueue dedupe: the scheduler asks whether this run already has an enqueue
+# fact for its current dispatch generation. The partial expression index makes
+# that lookup independent of a project's accumulated Outbox history.
+Index(
+    "idx_outbox_events_node_run_enqueue",
+    OutboxEvent.__table__.c.project_id,
+    OutboxEvent.__table__.c.payload.op("->>")("node_run_id"),
+    OutboxEvent.__table__.c.payload.op("->>")("dispatch_generation"),
+    postgresql_where=text("topic = 'node_run.enqueue'"),
+    sqlite_where=text("topic = 'node_run.enqueue'"),
+)

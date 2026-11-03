@@ -241,7 +241,11 @@ async def test_failed_media_run_is_resumable_and_never_resubmitted() -> None:
 
         enqueued: list[object] = []
 
-        async def _record_enqueue(self, node_run_id):  # type: ignore[no-untyped-def]
+        async def _record_enqueue(self, node_run_id, *, before_commit=None):  # type: ignore[no-untyped-def]
+            # The audit/recovery facts are written by the same transaction that
+            # makes the queue transition durable.
+            if before_commit is not None:
+                await before_commit()
             enqueued.append(node_run_id)
             return "job-1"
 
@@ -273,6 +277,7 @@ async def test_failed_media_run_is_resumable_and_never_resubmitted() -> None:
         assert applied is True
         assert enqueued == [run.id]
         assert run.status == "queued"
+        assert (run.output_summary or {})["recovery"]["replayed_from"] == "failed"
         assert run.error_code is None and run.error_summary is None
         # A resumed run is no longer an actionable failure.
         assert await recovery_service.list_recovery_items(session, actor=owner) == []

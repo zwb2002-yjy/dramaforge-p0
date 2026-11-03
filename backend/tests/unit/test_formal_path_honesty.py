@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 from app.events.models import OutboxEvent
-from app.events.outbox import OutboxDispatcher
+from app.events.outbox import OutboxDispatcher, StreamPublisher
 from app.providers.errors import ProviderNotConfiguredError
 from app.providers.local_tts import get_local_tts_adapter
 from app.shared.enums import OutboxStatus
@@ -159,7 +159,7 @@ async def test_outbox_reclaim_expired_lease() -> None:
         db_session.add(ev)
         await db_session.flush()
 
-        disp = OutboxDispatcher(db_session)
+        disp = OutboxDispatcher(db_session, StreamPublisher())
         n = await disp.reclaim_expired_leases()
         assert n >= 1
         await db_session.refresh(ev)

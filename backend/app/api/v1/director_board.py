@@ -11,8 +11,9 @@ from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.assets.models import Shot
 from app.production.models import DirectorBoardState
-from app.shared.errors import ConflictError
+from app.shared.errors import ConflictError, NotFoundError
 
 router = APIRouter(tags=["director-board"], dependencies=[Depends(require_selected_workspace)])
 
@@ -84,6 +85,12 @@ async def save_director_board(
     _csrf: CsrfDep,
 ) -> DirectorBoardRead:
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    # The board row may not exist yet. Lock its stable parent before looking
+    # for it so concurrent first saves cannot both insert version 1.
+    if await session.scalar(select(Shot.id).where(
+        Shot.id == shot_id, Shot.project_id == project_id,
+    ).with_for_update()) is None:
+        raise NotFoundError("shot not found")
     row = (
         await session.execute(
             select(DirectorBoardState)
@@ -92,6 +99,7 @@ async def save_director_board(
                 DirectorBoardState.shot_id == shot_id,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     now = datetime.now(UTC)

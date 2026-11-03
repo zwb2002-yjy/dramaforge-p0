@@ -129,9 +129,6 @@ export async function requestEditingDirectorSuggestion(
   );
 }
 
-/** Explicit alias for callers that prefer the verb used by the Director API. */
-export const suggestEditingDirector = requestEditingDirectorSuggestion;
-
 export async function requestProactiveEditingDirectorSuggestion(
   projectId: string,
   sessionId: string,

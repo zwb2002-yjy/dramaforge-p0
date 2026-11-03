@@ -24,6 +24,7 @@ import {
   type StoryProposalRead,
 } from "./api";
 import { ScriptImportPanel } from "./ScriptImportPanel";
+import { storyCreateIdempotencyKey } from "./createKey";
 import type { DirectorInvocationEvidence } from "../director/suggestion-types";
 import "./script-workspace.css";
 
@@ -325,10 +326,11 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
     mutationFn: async () => {
       setFormError(null);
       setApplyMessage(null);
+      const effectiveFilename = filename.trim() || "story-draft.md";
       return createStoryProposal(projectId, {
-        idempotency_key: `story-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        idempotency_key: storyCreateIdempotencyKey(brief, effectiveFilename, draftText),
         brief,
-        filename: filename.trim() || "story-draft.md",
+        filename: effectiveFilename,
         draft_text: draftText,
       });
     },

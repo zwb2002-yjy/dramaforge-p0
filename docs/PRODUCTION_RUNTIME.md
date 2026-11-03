@@ -108,9 +108,21 @@ Artifact 内容端点对整文件及大 Range 使用 64 KiB 分块流式读取�
 
 ## 恢复与重试
 
+- 同步图片 Create 成功后，把 URL 或已持久化的图片对象 key / SHA-256 / 大小写入同一个
+  ProviderOperation 的 `response_summary.synchronous_result`，绑定 operation_id 与 node_run_id。
+  二进制先存对象再提交回执；恢复仍核对冻结执行身份，复用回执下载/物化，不生成伪远端 ID，
+  不走视频 poll，也不再次 Create。损坏/跨运行回执、未知提交和缺回执的历史同步调用须人工核对。
 - Outbox 投递失败在进入死信前按尝试次数使用 5 秒起步、最多 300 秒的指数退避与稳定有界 jitter；
   `next_attempt_at` 到期前 dispatcher 不重新租赁该事件。人工死信重放是显式操作，
   仍会立即尝试一次。
+- Outbox 使用唯一的按 event_id 认领逻辑；重放按 Event → DeadLetter 加锁并刷新，
+  不抢占仍有效的发布租约。生产 publisher 显式使用 Redis，内存 publisher 仅供测试注入。
+  Redis 发布与数据库提交不能构成跨系统原子事务，投递语义为至少一次；消费者按 event_id
+  去重，Director Inbox 以 `(consumer_id, event_id)` 唯一约束实现持久幂等。SSE 消费者只失效并重读事实。
+  Redis Streams 按 Outbox topic 分键（`dramaforge:stream:{topic}`，有界 maxlen）。进程内 SSE 与
+  Director 消费者只读 `production.facts.v1`；`node_run.enqueue`、`director.wakeup.replayed`、
+  `maintenance.media_node_run.replayed`、`outbox.dead_letter.replayed` 是运维/外部观察面，
+  不作为产品状态来源——数据库 Outbox 行才是持久事实；长期无外部消费者时的清退属于独立的接线决定。
 
 - 迁移 20260908_0057–0060 提供恢复函数/授权：可恢复导演轮次、事实对账、
   Formal 检查点、cancellation-requested Provider 工作。
@@ -150,8 +162,8 @@ Artifact 内容端点对整文件及大 Range 使用 64 KiB 分块流式读取�
   应先迁移再更新 dispatcher 与相关 Worker；恢复后的媒体任务仍使用原队列容量，扫描本身不排入媒体队列。
 - 没有远端身份的陈旧 submission_started 失败关闭为 unknown_submission；
   单行恢复失败不阻塞尾部任务，超时后后续扫描仍会覆盖未完成项。
-- submit-unknown 或可能已计费的调用不盲目重试（幂等键由
-  `providers/idempotency.py` 管理）。
+- submit-unknown 或可能已计费的调用不盲目重试（意图幂等由 `NodeRun.idempotency_key`
+  承担，脱敏请求摘要与语义指纹由 `providers/request_summary.py` 规范化后持久化）。
 - `ShotExecutionTrace` 对媒体 queued NodeRun 返回本作品内可观察的待执行序位、前方数量和
   基于本作品近期完成样本的等待估算；它不声称覆盖跨作品 / Provider 全局队列。没有足够
   历史样本时明确返回未知，不伪造 ETA。
@@ -196,11 +208,10 @@ Repair 的“等待生成 / 等待审核与正式采用 / 可继续下一步 / �
 对应跨域验收为 AC-07 / AC-08 / AC-15 / AC-17；所有资源负载、数值阈值与默认并发值
 只以该合同 §6.6 为准，本节不复制另一组数值。
 
-当前事实：`execution/provider_execution.py` 仍在同一媒体 Worker 作业内循环 poll / sleep，
-直到终态或尝试截止才让出作业，因此远端等待仍占用该 Worker 的媒体执行容量。
-dispatcher 的独立恢复扫描不等于正常轮询已释放媒体槽。
-`execution/media_io.py` 虽通过 `aiter_bytes` 分块接收，仍累加到完整 `bytearray` 并返回 `bytes`；
-这不是满足资源基准的端到端有界内存传输。以下目标必须有新实现与离线证据才能改写为现状。
+当前事实：`execution/provider_execution.py` 每个短作业只观察一次远端任务，非终态通过
+`next_attempt_at` 与事务 Outbox 让出 Worker；dispatcher 另有独立恢复扫描。
+`execution/media_io.py` 通过有界流写入作业专属临时文件，后续存储使用文件接口。
+这些实现事实不代表全部 RT 资源基准或跨域验收已经通过，仍按各条的离线证据核验。
 
 ### RT-01 编译快照与执行同源
 

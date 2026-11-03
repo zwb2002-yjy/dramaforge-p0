@@ -13,11 +13,15 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from app.providers.capability_manifest_v2 import TypedModelCapabilityManifest
 from app.providers.catalog_loader import ModelCatalogLoader
 from app.providers.catalog_publication import catalog_new_create_blocker
-from app.providers.capability_manifest_v2 import TypedModelCapabilityManifest
-from app.providers.manifest import read_catalog_manifest
-from app.providers.manifest import ModelCapabilityManifest, OperationManifest, ParameterSpec
+from app.providers.manifest import (
+    ModelCapabilityManifest,
+    OperationManifest,
+    ParameterSpec,
+    read_catalog_manifest,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "docs" / "generated" / "MODEL_SUPPORT.md"

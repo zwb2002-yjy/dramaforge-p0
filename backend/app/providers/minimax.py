@@ -28,6 +28,13 @@ from pydantic import JsonValue
 from app.config import Settings, get_settings
 from app.providers.egress import guarded_provider_transport
 from app.providers.http_client import provider_http_client
+from app.providers.submission_gate import submission_gate
+from app.providers.transport_errors import (
+    error_code_for_status as _error_code,
+)
+from app.providers.transport_errors import (
+    retry_after_seconds as _retry_after_seconds,
+)
 
 MINIMAX_CN_PROFILE = "minimax_cn_v1"
 MINIMAX_CN_HOST = "https://api.minimaxi.com"
@@ -63,30 +70,6 @@ def _json_object(response: httpx.Response) -> dict[str, Any]:
     except Exception:
         return {}
     return value if isinstance(value, dict) else {}
-
-
-def _error_code(status_code: int) -> str:
-    if status_code == 400:
-        return "PROVIDER_BAD_REQUEST"
-    if status_code == 401:
-        return "PROVIDER_AUTH_FAILED"
-    if status_code in {402, 403}:
-        return "PROVIDER_FORBIDDEN"
-    if status_code == 429:
-        return "PROVIDER_RATE_LIMITED"
-    if status_code >= 500:
-        return "PROVIDER_UNAVAILABLE"
-    return "PROVIDER_REQUEST_FAILED"
-
-
-def _retry_after_seconds(response: httpx.Response) -> float | None:
-    raw = response.headers.get("Retry-After", "").strip()
-    if not raw:
-        return None
-    try:
-        return max(float(raw), 0.0)
-    except ValueError:
-        return None
 
 
 def _api_succeeded(data: dict[str, Any]) -> bool:
@@ -722,6 +705,7 @@ class MiniMaxRuntime:
         self._host = (host or self._settings.minimax_base_url).strip().rstrip("/")
         self._key = self._settings.minimax_api_key.strip()
         self._enabled = self._settings.minimax_enabled
+        self._submission_limit = self._settings.minimax_max_concurrent_submissions
         self._transport = transport or guarded_provider_transport(settings=self._settings)
 
     def _configured(self) -> bool:
@@ -732,7 +716,6 @@ class MiniMaxRuntime:
 
     async def submit_image(self, request: Any) -> Any:
         from app.providers.runtime import (
-            ProviderResumeToken,
             SubmissionResult,
             validate_compiled_submission,
         )
@@ -746,14 +729,15 @@ class MiniMaxRuntime:
         if not self._configured():
             raise RuntimeError("MiniMax connection is not configured")
         try:
-            response = await _post_json(
-                self._host,
-                MINIMAX_IMAGE_PATH,
-                headers=self._headers(),
-                body=request.wire_request,
-                timeout=150.0,
-                transport=self._transport,
-            )
+            async with submission_gate("minimax", self._host, self._submission_limit):
+                response = await _post_json(
+                    self._host,
+                    MINIMAX_IMAGE_PATH,
+                    headers=self._headers(),
+                    body=request.wire_request,
+                    timeout=150.0,
+                    transport=self._transport,
+                )
         except httpx.TransportError as exc:
             return SubmissionResult(
                 status="unknown_submission",
@@ -775,19 +759,11 @@ class MiniMaxRuntime:
                 request_fingerprint=_request_fingerprint(request.wire_request),
                 request_summary=request.safe_request_summary,
             )
-        remote_task_id = str(data.get("id") or "minimax-image")
-        token = ProviderResumeToken(
-            provider_type="minimax",
-            protocol_profile=MINIMAX_CN_PROFILE,
-            remote_task_id=remote_task_id,
-        )
         return SubmissionResult(
-            remote_task_id=remote_task_id,
             status="succeeded",
             artifact_uri=uri,
             request_fingerprint=_request_fingerprint(request.wire_request),
             request_summary=request.safe_request_summary,
-            resume_token=token,
         )
 
     async def submit_video(self, request: Any) -> Any:
@@ -806,14 +782,15 @@ class MiniMaxRuntime:
         if not self._configured():
             raise RuntimeError("MiniMax connection is not configured")
         try:
-            response = await _post_json(
-                self._host,
-                MINIMAX_VIDEO_CREATE_PATH,
-                headers=self._headers(),
-                body=request.wire_request,
-                timeout=120.0,
-                transport=self._transport,
-            )
+            async with submission_gate("minimax", self._host, self._submission_limit):
+                response = await _post_json(
+                    self._host,
+                    MINIMAX_VIDEO_CREATE_PATH,
+                    headers=self._headers(),
+                    body=request.wire_request,
+                    timeout=120.0,
+                    transport=self._transport,
+                )
         except httpx.TransportError as exc:
             return SubmissionResult(
                 status="unknown_submission",
@@ -824,7 +801,8 @@ class MiniMaxRuntime:
             )
         data = _json_object(response)
         task_id = data.get("task_id")
-        if response.status_code >= 400 or not _api_succeeded(data) or not task_id:
+        # Task identity takes precedence over HTTP/business error metadata.
+        if not task_id:
             return SubmissionResult(
                 status="failed",
                 error_code=_error_code(response.status_code)
@@ -858,7 +836,7 @@ class MiniMaxRuntime:
                 self._host,
                 MINIMAX_VIDEO_QUERY_PATH.format(task_id=resume.remote_task_id),
                 headers=self._headers(),
-                timeout=60.0,
+                timeout=20.0,
                 transport=self._transport,
             )
         except httpx.TransportError:
@@ -899,19 +877,24 @@ class MiniMaxRuntime:
             raise RuntimeError("MiniMax connection is not configured")
         try:
             async with provider_http_client(timeout=30.0, transport=self._transport) as client:
-                await client.delete(
+                response = await client.delete(
                     f"{self._host}{MINIMAX_VIDEO_CANCEL_PATH.format(task_id=resume.remote_task_id)}",
                     headers=self._headers(),
                 )
         except httpx.TransportError:
-            pass
-        return CancelResult(status="cancelled")
+            return CancelResult(status="unknown")
+        if response.status_code >= 400:
+            return CancelResult(status="failed")
+        status = str(_json_object(response).get("status") or "").lower()
+        return CancelResult(
+            status="cancelled" if status in {"cancelled", "canceled"} else "requested"
+        )
 
     async def fetch_cost(self, resume: Any) -> Any:
         from app.providers.runtime import CostResult
 
         _ = resume
-        return CostResult(amount=0.0, currency="USD", units=1.0)
+        return CostResult(amount=None, currency="USD", units=1.0, cost_status="not_reported")
 
 
 def _minimax_runtime_factory(

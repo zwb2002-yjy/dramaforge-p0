@@ -32,7 +32,7 @@ from app.providers.models import (
     ProviderModelBinding,
 )
 from app.security.models import EncryptedProviderCredential
-from app.shared.errors import NotFoundError, ValidationAppError
+from app.shared.errors import ValidationAppError
 
 if TYPE_CHECKING:
     from app.providers.model_resolution import ExecutionModelResolution
@@ -318,84 +318,6 @@ class ProviderRuntimeResolver:
             ),
             invoke_model_value=binding.invoke_model_value if binding is not None else None,
             manifest_hash=entry.contract_manifest_hash if entry is not None else None,
-        )
-
-    async def resolve_runtime_for_model_binding(
-        self,
-        *,
-        model_binding_id: UUID,
-        settings: Any = None,
-    ) -> ResolvedRuntime:
-        """Resolve the existing runtime from one concrete binding identity.
-
-        This is the Professional entry point. It deliberately starts with the
-        selected ``ProviderModelBinding`` and its catalog revision; it never
-        searches seed manifests by provider/media and never chooses a sibling
-        model when the selected identity is invalid.
-        """
-        binding = await self._session.get(ProviderModelBinding, model_binding_id)
-        if binding is None:
-            raise NotFoundError("provider model binding not found")
-        connection = await self._session.get(ProviderConnection, binding.connection_id)
-        if connection is None:
-            raise NotFoundError("provider connection not found")
-        entry = (
-            await self._session.get(ModelCatalogEntry, binding.catalog_entry_id)
-            if binding.catalog_entry_id is not None
-            else None
-        )
-        if entry is None:
-            raise ValidationAppError(
-                "provider model binding has no catalog revision",
-                details={"code": "MODEL_RUNTIME_IDENTITY_INVALID"},
-            )
-        reasons: list[str] = []
-        if not binding.enabled:
-            reasons.append("BINDING_DISABLED")
-        if not connection.enabled:
-            reasons.append("CONNECTION_DISABLED")
-        if binding.workspace_id != connection.workspace_id:
-            reasons.append("BINDING_CONNECTION_WORKSPACE_MISMATCH")
-        if binding.catalog_entry_id != entry.id:
-            reasons.append("BINDING_CATALOG_MISMATCH")
-        if entry.catalog_source != "protocol_contract" and entry.model_id != binding.model_id:
-            reasons.append("CATALOG_MODEL_MISMATCH")
-        if entry.provider_type != connection.provider_type:
-            reasons.append("CATALOG_PROVIDER_MISMATCH")
-        if entry.protocol_profile != connection.protocol_profile:
-            reasons.append("CATALOG_PROTOCOL_MISMATCH")
-        if entry.media_kind != binding.media_type:
-            reasons.append("CATALOG_MEDIA_MISMATCH")
-        if entry.lifecycle != "active":
-            reasons.append("CATALOG_LIFECYCLE_UNACCEPTABLE")
-        if binding.capability_manifest_hash != entry.contract_manifest_hash:
-            reasons.append("MANIFEST_HASH_MISMATCH")
-        if not binding.invoke_model_value:
-            reasons.append("INVOKE_MODEL_VALUE_MISSING")
-        elif (
-            entry.catalog_source == "protocol_contract"
-            and binding.invoke_model_value != binding.model_id
-        ):
-            reasons.append("INVOKE_MODEL_IDENTITY_MISMATCH")
-        if reasons:
-            raise ValidationAppError(
-                "concrete provider model runtime identity is invalid",
-                details={
-                    "code": "MODEL_RUNTIME_IDENTITY_INVALID",
-                    "reasons": reasons,
-                    "model_binding_id": str(binding.id),
-                    "catalog_entry_id": str(entry.id),
-                },
-            )
-        from app.providers.registry import get_plugin
-
-        plugin = get_plugin(connection.provider_type, connection.protocol_profile)
-        return await self.resolve(
-            plugin=plugin,
-            connection=connection,
-            binding=binding,
-            entry=entry,
-            settings=settings,
         )
 
     async def resolve_runtime_for_resolution(

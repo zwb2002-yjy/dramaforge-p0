@@ -57,6 +57,9 @@ def test_in_memory_policy_mutation_is_rejected():
         "intents.py",
         "workbench_contract.py",
         "media_submission.py",
+        "synchronous_results.py",
+        "submission_gate.py",
+        "transport_errors.py",
         "execution_plan.py",
     ],
 )

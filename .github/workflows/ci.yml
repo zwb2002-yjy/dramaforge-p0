@@ -179,63 +179,6 @@ jobs:
               python scripts/repo_guardrails.py policy --repo-root /workspace
             '
 
-  backend-fast:
-    name: backend-fast
-    needs: policy
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.base_ref == 'dev' &&
-      needs.policy.outputs.backend == 'true' &&
-      needs.policy.outputs.full_quality != 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Build backend quality image
-        run: docker compose -f docker-compose.quality.yml build backend-quality
-      - name: Run backend fast gates
-        run: |
-          set -euo pipefail
-          docker compose -f docker-compose.quality.yml run --rm --no-deps \
-            backend-quality \
-            sh -ec '
-              set -eu
-              python3 scripts/check_canonical_surface.py
-              python3 scripts/arch_import_scan.py --check
-              PYTHONPATH=/workspace/backend uv run --directory backend python /workspace/scripts/generate_model_support_docs.py --check
-              uv run --directory backend ruff check app tests alembic/versions
-              uv run --directory backend mypy app
-              uv run --directory backend pytest tests/unit -q
-            '
-
-  frontend-fast:
-    name: frontend-fast
-    needs: policy
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.base_ref == 'dev' &&
-      needs.policy.outputs.frontend == 'true' &&
-      needs.policy.outputs.full_quality != 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Build frontend quality image
-        run: docker compose -f docker-compose.quality.yml build frontend-quality
-      - name: Run frontend fast gates
-        run: |
-          set -euo pipefail
-          docker compose -f docker-compose.quality.yml run --rm --no-deps \
-            frontend-quality \
-            sh -ec '
-              set -eu
-              npm run --prefix frontend format:check
-              npm run --prefix frontend api:authority
-              npm run --prefix frontend lint
-              npm run --prefix frontend typecheck
-              npm run --prefix frontend test
-              npm run --prefix frontend build
-              npm run --prefix frontend routes:check
-            '
-
   container-gates:
     name: container-gates
     needs: policy

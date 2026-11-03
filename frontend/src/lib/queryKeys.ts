@@ -63,10 +63,13 @@ export const queryKeys = {
       tagFilter: string,
     ) => ["project-assets", projectId, kindFilter, statusFilter, nameFilter, tagFilter] as const,
     tags: (projectId: string) => ["asset-tags", projectId] as const,
+    /** Bare prefix; matches every asset's version list for invalidation. */
+    versionsRoot: (projectId: string) => ["asset-versions", projectId] as const,
     versions: (projectId: string, assetId: string) =>
       ["asset-versions", projectId, assetId] as const,
+    /** Bare prefix; matches every asset's card projection for invalidation. */
+    cardRoot: (projectId: string) => ["asset-card", projectId] as const,
     card: (projectId: string, assetId: string) => ["asset-card", projectId, assetId] as const,
-    mentions: (projectId: string) => ["mention-assets", projectId] as const,
     picker: (projectId: string) => ["picker-assets", projectId] as const,
     shotReferences: (projectId: string, shotId: string | null | undefined) =>
       ["shot-references", projectId, shotId] as const,
@@ -82,7 +85,6 @@ export const queryKeys = {
     todos: (projectId: string) => ["production-todos", projectId] as const,
     runHistory: (projectId: string) => ["production-run-history", projectId] as const,
     artifactHistory: (projectId: string) => ["production-artifact-history", projectId] as const,
-    snapshot: (projectId: string) => ["snapshot", projectId] as const,
     workflowOverview: (projectId: string) => ["workflow-overview", projectId] as const,
     provenance: (
       projectId: string,
@@ -91,8 +93,6 @@ export const queryKeys = {
     ) => ["creative-provenance", projectId, scope, targetId] as const,
     creativeCatalog: (projectId: string) => ["creative-capability-catalog", projectId] as const,
     opencutManifest: (projectId: string) => ["opencut-manifest", projectId] as const,
-    canvasRevisions: (projectId: string, shotId: string | null | undefined) =>
-      ["canvas-revisions", projectId, shotId] as const,
   },
 
   experiment: {

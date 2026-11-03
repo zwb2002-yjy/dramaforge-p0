@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from redis.asyncio import Redis, from_url
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -127,7 +128,13 @@ class NodeRunScheduler:
         publisher: StreamPublisher | None = None,
     ) -> None:
         self._session = session
-        self._dispatcher = OutboxDispatcher(session, publisher=publisher, sse_hub=None)
+        self._dispatcher = OutboxDispatcher(
+            session,
+            publisher=publisher if publisher is not None else RedisStreamPublisher(
+                get_settings().redis_url
+            ),
+            sse_hub=None,
+        )
         self.enqueued_job_ids: list[str] = []
 
     async def dispatch_pending(
@@ -210,12 +217,19 @@ class NodeRunScheduler:
         await self._dispatcher.pending_count()
         return count
 
-    async def enqueue_node_run_only(self, node_run_id: UUID) -> str:
+    async def enqueue_node_run_only(
+        self,
+        node_run_id: UUID,
+        *,
+        before_commit: Callable[[], Awaitable[None]] | None = None,
+    ) -> str:
         """Write Outbox, COMMIT, then enqueue Arq. Never executes Adapter.
 
         Order is intentional: Worker must never observe a Redis job before the
-        NodeRun/Outbox rows are durable. On enqueue failure, NodeRun is marked
-        failed with QUEUE_UNAVAILABLE (no silent 200+queued).
+        NodeRun/Outbox rows are durable. ``before_commit`` lets a caller add facts
+        (for example a replay audit) that must persist in the same transaction as
+        the queue transition. On enqueue failure, NodeRun is marked failed with
+        QUEUE_UNAVAILABLE (no silent 200+queued).
         """
         from uuid import uuid4
 
@@ -234,20 +248,24 @@ class NodeRunScheduler:
         run = await self._session.get(NodeRun, node_run_id)
         if run is None:
             raise NotFoundError("node_run not found")
-        # Durable Outbox fact before Arq (NodeRun → Outbox → commit → Arq)
-        existing = await self._session.execute(
-            select(OutboxEvent).where(
+        # Durable Outbox fact before Arq (NodeRun → Outbox → commit → Arq).
+        # The lookup is pushed into SQL and served by the partial expression
+        # index, so enqueue cost stays flat as a project's history grows.
+        dispatch_generation = node_run_dispatch_generation(run)
+        existing = await self._session.scalar(
+            select(OutboxEvent.id)
+            .where(
                 OutboxEvent.project_id == run.project_id,
                 OutboxEvent.topic == "node_run.enqueue",
+                OutboxEvent.payload["node_run_id"].as_string() == str(node_run_id),
+                func.coalesce(
+                    OutboxEvent.payload["dispatch_generation"].as_string(), ""
+                )
+                == dispatch_generation,
             )
+            .limit(1)
         )
-        dispatch_generation = node_run_dispatch_generation(run)
-        has_enqueue_event = any(
-            str((event.payload or {}).get("node_run_id")) == str(node_run_id)
-            and str((event.payload or {}).get("dispatch_generation") or "") == dispatch_generation
-            for event in existing.scalars().all()
-        )
-        if not has_enqueue_event:
+        if existing is None:
             self._session.add(
                 OutboxEvent(
                     event_id=uuid4(),
@@ -266,6 +284,9 @@ class NodeRunScheduler:
                 )
             )
         await self._session.flush()
+        if before_commit is not None:
+            await before_commit()
+            await self._session.flush()
         # COMMIT first — eliminate flush-then-Redis race
         await self._session.commit()
         try:
@@ -411,6 +432,10 @@ class WorkerRuntime:
                     if current is None:
                         continue
                     if current.status == "cancelled":
+                        # Do not carry this candidate's read transaction into the
+                        # next iteration: a long loop must not keep an idle
+                        # transaction (and its snapshot/locks) open.
+                        await self._rollback_if_active()
                         progressed = True
                         continue
                     dependency = await evaluate_required_dependencies(self._session, run=current)

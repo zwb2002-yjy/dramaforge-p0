@@ -798,3 +798,219 @@ async def test_editing_recovery_reads_obey_runtime_role_and_frozen_scope_pg(
     assert history[0].timeline_version == 7
     assert history[0].result is None
     assert not pg_session.new and not pg_session.dirty
+
+
+@pytest.mark.asyncio
+async def test_asset_mutation_responses_keep_tags_across_commit_pg(
+    pg_session: AsyncSession,
+) -> None:
+    from app.api.v1.assets import (
+        AssetFromArtifactBody,
+        _asset_tag_names,
+        create_asset_from_artifact,
+        recycle_asset,
+        restore_asset,
+    )
+    from app.assets.from_artifact_service import asset_creation_request_hash
+    from app.assets.models import AssetTag, AssetTagLink
+
+    user = User(email=f"tag-response-{uuid4().hex}@example.com", display_name="Owner",
+                password_hash=hash_password("password123"))
+    pg_session.add(user)
+    await pg_session.flush()
+    workspace = Workspace(owner_user_id=user.id, name="Tags")
+    pg_session.add(workspace)
+    await pg_session.flush()
+    project = Project(workspace_id=workspace.id, name="Tags", aspect_ratio="9:16", budget_limit=0)
+    pg_session.add(project)
+    await pg_session.flush()
+    asset = Asset(project_id=project.id, kind="character", name="Lead", status="active")
+    body = AssetFromArtifactBody(kind="character", name="Lead", artifact_id=uuid4())
+    asset.creation_request_key = "replay-tagged-card"
+    asset.creation_request_hash = asset_creation_request_hash(
+        artifact_id=body.artifact_id, kind=body.kind, name=body.name,
+        description=body.description, reference_role=body.reference_role, metadata=body.metadata,
+    )
+    tag = AssetTag(project_id=project.id, name="lead", normalized_name="lead")
+    pg_session.add_all([asset, tag])
+    await pg_session.flush()
+    pg_session.add(AssetTagLink(asset_id=asset.id, tag_id=tag.id))
+    await pg_session.commit()
+    # The session-scoped role survives each endpoint commit; LOCAL GUCs do not.
+    await pg_session.execute(text("SET ROLE dramaforge_app"))
+    pg_session.info["selected_workspace_id"] = workspace.id
+    try:
+        for endpoint in (recycle_asset, restore_asset):
+            await set_rls_context(pg_session, user_id=user.id, workspace_id=workspace.id,
+                                  project_id=project.id)
+            response = await endpoint(project_id=project.id, asset_id=asset.id, user=user,
+                                      session=pg_session, _csrf=None)
+            assert response.tags == ["lead"]
+            assert await _asset_tag_names(pg_session, asset.id) == []
+        await set_rls_context(pg_session, user_id=user.id, workspace_id=workspace.id,
+                              project_id=project.id)
+        replay = await create_asset_from_artifact(
+            project_id=project.id, body=body, user=user, session=pg_session,
+            _csrf=None, idempotency_key="replay-tagged-card",
+        )
+        assert replay.id == asset.id and replay.tags == ["lead"]
+    finally:
+        await pg_session.rollback()
+        await pg_session.execute(text("RESET ROLE"))
+        await pg_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_terminal_execution_changed_is_emitted_by_database_pg(
+    pg_session: AsyncSession,
+) -> None:
+    from app.events.models import EventLog, OutboxEvent
+    from app.execution.models import GraphNode
+    from app.production.models import GraphVersion, ProductionGraph
+
+    seeded = await _seed_user_workspace_projects(pg_session, uuid4().hex[:8])
+    project, shot, user = seeded["project_b"], seeded["shot"], seeded["user"]
+    graph = ProductionGraph(project_id=project.id, scope_type="shot", scope_entity_id=shot.id,
+                            template_key="shot-p0-v1", created_by=user.id)
+    pg_session.add(graph)
+    await pg_session.flush()
+    version = GraphVersion(graph_id=graph.id, version_number=1, definition_hash="f" * 64)
+    pg_session.add(version)
+    await pg_session.flush()
+    node = GraphNode(graph_version_id=version.id, node_key="video", node_type="video",
+                     display_name="Video")
+    pg_session.add(node)
+    await pg_session.flush()
+    run = NodeRun(project_id=project.id, graph_version_id=version.id, graph_node_id=node.id,
+                  idempotency_key=f"notice-{uuid4()}", input_hash="a" * 64, status="running",
+                  input_snapshot={"workbench_plan": {}, "shot_id": str(shot.id)},
+                  created_by=user.id)
+    pg_session.add(run)
+    await pg_session.flush()
+    await pg_session.execute(text("SET LOCAL ROLE dramaforge_app"))
+    await set_rls_context(pg_session, user_id=user.id, workspace_id=seeded["workspace"].id,
+                          project_id=project.id)
+    run.status = "failed"
+    await pg_session.flush()
+    notices = list(await pg_session.scalars(select(EventLog).where(
+        EventLog.aggregate_id == shot.id, EventLog.event_type == "execution_changed")))
+    assert len(notices) == 1
+    assert notices[0].payload["notice"]["node_run_id"] == str(run.id)
+    outbox = await pg_session.scalar(select(OutboxEvent).where(
+        OutboxEvent.event_id == notices[0].event_id, OutboxEvent.topic == "production.facts.v1"))
+    assert outbox is not None
+    # Rolled-back facts and notices disappear together.
+    notice_id = notices[0].event_id
+    await pg_session.rollback()
+    assert await pg_session.scalar(select(EventLog).where(EventLog.event_id == notice_id)) is None
+    assert await pg_session.scalar(select(OutboxEvent).where(
+        OutboxEvent.event_id == notice_id,
+    )) is None
+
+
+@pytest.mark.asyncio
+async def test_experiment_replay_keeps_run_states_before_rls_commit_pg(
+    pg_session: AsyncSession,
+) -> None:
+    from app.api.v1.experiments import create_experiment
+    from app.execution.models import GraphNode
+    from app.production.experiment_service import ExperimentCreateBody, create_experiment_branch
+    from app.production.models import GraphVersion, ProductionGraph
+
+    seeded = await _seed_user_workspace_projects(pg_session, uuid4().hex[:8])
+    project, shot, user = seeded["project_b"], seeded["shot"], seeded["user"]
+    body = ExperimentCreateBody(name="Replay", idempotency_key=f"replay-{uuid4()}",
+                                source_shot_id=shot.id)
+    branch = await create_experiment_branch(pg_session, project_id=project.id,
+                                             actor_id=user.id, body=body)
+    graph = ProductionGraph(project_id=project.id, scope_type="shot", scope_entity_id=shot.id,
+                            template_key="shot-p0-v1", created_by=user.id)
+    pg_session.add(graph)
+    await pg_session.flush()
+    version = GraphVersion(graph_id=graph.id, version_number=1, definition_hash="a" * 64)
+    pg_session.add(version)
+    await pg_session.flush()
+    node = GraphNode(graph_version_id=version.id, node_key="video", node_type="video",
+                     display_name="Video")
+    pg_session.add(node)
+    await pg_session.flush()
+    run = NodeRun(project_id=project.id, graph_version_id=version.id, graph_node_id=node.id,
+                  idempotency_key=f"exp-{uuid4()}", input_hash="c" * 64, status="failed",
+                  input_snapshot={"experiment_id": str(branch.id), "node_key": "video"},
+                  created_by=user.id)
+    pg_session.add(run)
+    await pg_session.flush()
+    branch.status = "running"
+    branch.parameters = {**branch.parameters, "run_ids": [str(run.id)]}
+    await pg_session.commit()
+    await pg_session.execute(text("SET ROLE dramaforge_app"))
+    pg_session.info["selected_workspace_id"] = seeded["workspace"].id
+    try:
+        await set_rls_context(pg_session, user_id=user.id, workspace_id=seeded["workspace"].id,
+                              project_id=project.id)
+        replay = await create_experiment(project_id=project.id, body=body, user=user,
+                                          session=pg_session, _csrf=None)
+        assert replay.id == branch.id
+        assert replay.comparison["run_states"][0]["run_id"] == str(run.id)
+        assert replay.comparison["run_states"][0]["status"] == "failed"
+        # An unscoped read after commit would have hidden precisely this run.
+        assert await pg_session.scalar(select(NodeRun).where(NodeRun.id == run.id)) is None
+    finally:
+        await pg_session.rollback()
+        await pg_session.execute(text("RESET ROLE"))
+        await pg_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_synchronous_image_receipt_is_discovered_without_remote_id_pg(
+    pg_session: AsyncSession,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.execution.models import GraphNode, ProviderOperation
+    from app.execution.synchronous_results import SynchronousImageReceipt
+    from app.production.models import GraphVersion, ProductionGraph
+    from app.shared.db import list_resumable_provider_node_run_rls_scopes
+
+    seeded = await _seed_user_workspace_projects(pg_session, uuid4().hex[:8])
+    project, shot, user = seeded["project_b"], seeded["shot"], seeded["user"]
+    graph = ProductionGraph(project_id=project.id, scope_type="shot", scope_entity_id=shot.id,
+                            template_key="shot-p0-v1", created_by=user.id)
+    pg_session.add(graph)
+    await pg_session.flush()
+    version = GraphVersion(graph_id=graph.id, version_number=1, definition_hash="d" * 64)
+    pg_session.add(version)
+    await pg_session.flush()
+    node = GraphNode(graph_version_id=version.id, node_key="keyframe", node_type="keyframe",
+                     display_name="Keyframe")
+    pg_session.add(node)
+    await pg_session.flush()
+    stale = datetime.now(UTC) - timedelta(hours=2)
+    run = NodeRun(project_id=project.id, graph_version_id=version.id, graph_node_id=node.id,
+                  idempotency_key=f"sync-{uuid4()}", input_hash="e" * 64, status="running",
+                  input_snapshot={"shot_id": str(shot.id)}, created_by=user.id,
+                  started_at=stale, created_at=stale)
+    pg_session.add(run)
+    await pg_session.flush()
+    operation = ProviderOperation(node_run_id=run.id, operation_kind="image",
+        actual_provider="openai_compatible_media", actual_model="image",
+        request_fingerprint="f" * 64, execution_path_version="unified-v1",
+        status="submitted", created_at=stale, submitted_at=stale)
+    pg_session.add(operation)
+    await pg_session.flush()
+    operation.response_summary = {"synchronous_result": SynchronousImageReceipt(
+        operation_id=operation.id, node_run_id=run.id,
+        artifact_uri="https://media.example/received.png",
+    ).model_dump(mode="json")}
+    await pg_session.commit()
+    await pg_session.execute(text("SET ROLE dramaforge_app"))
+    try:
+        candidates = await list_resumable_provider_node_run_rls_scopes(pg_session, limit=50)
+        match = next(scope for run_id, scope in candidates if run_id == run.id)
+        assert match.project_id == project.id
+        assert match.workspace_id == seeded["workspace"].id
+        assert match.user_id == user.id
+    finally:
+        await pg_session.rollback()
+        await pg_session.execute(text("RESET ROLE"))
+        await pg_session.commit()

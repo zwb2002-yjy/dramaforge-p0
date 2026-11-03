@@ -4,7 +4,6 @@ type RecordValue = Record<string, unknown>;
 export type ProductionChange = { projectId: string; kind: string; shotId?: string };
 
 const PROJECT_FACTS = new Set([
-  "snapshot",
   "production-summary",
   "production-run-history",
   "production-artifact-history",
@@ -27,12 +26,7 @@ const SHOT_FACTS = new Set([
   "repair-plan",
   "director-turns",
 ]);
-const FORMAL_FACTS = new Set([
-  "opencut-manifest",
-  "shot-references",
-  "shot-reference-resolution",
-  "canvas-revisions",
-]);
+const FORMAL_FACTS = new Set(["opencut-manifest", "shot-references", "shot-reference-resolution"]);
 const record = (value: unknown): RecordValue | null =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as RecordValue)

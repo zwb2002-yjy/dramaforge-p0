@@ -33,6 +33,7 @@ def test_outbox_retry_delay_is_exponential_jittered_and_capped() -> None:
     event_id = UUID(int=5)
     dispatcher = OutboxDispatcher(
         AsyncSession(),
+        StreamPublisher(),
         retry_base_seconds=5,
         retry_max_seconds=30,
     )
@@ -117,7 +118,7 @@ async def test_outbox_pending_metrics_refresh_pending_and_oldest_wait(engine_fac
         )
         session.add(event)
         await session.commit()
-        dispatcher = OutboxDispatcher(session)
+        dispatcher = OutboxDispatcher(session, StreamPublisher())
         assert await dispatcher.pending_count() == 1
 
     metrics = metrics_payload().decode("utf-8")

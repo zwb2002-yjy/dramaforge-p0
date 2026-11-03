@@ -1,8 +1,8 @@
 # DATA_MODEL — 数据模型权威
 
 Status: current
-Date: 2026-10-28
-Alembic head: 20261028_0092
+Date: 2026-11-03
+Alembic head: 20261103_0096
 
 当前 Alembic 入口跨越 0084 前强制检查已存在的两张实验表和十张旧模型保障表，锁表后
 非空即阻断升级；事务回滚保留原数据和迁移版本。空库初始化中历史迁移生成的静态目录副本
@@ -69,12 +69,21 @@ projects → event_log / outbox_events / outbox_dead_letters
 | Events | event_log, outbox_events, outbox_dead_letters | app/events/models.py |
 | Security | encrypted_provider_credentials, key_rotation_audits | app/security/models.py |
 | Provider identity | provider_connections, provider_connection_revisions, provider_capability_evidence, provider_model_bindings, project_provider_bindings, provider_quality_evidence, artifact_reference_tokens | app/providers/models.py |
-| Provider catalog/profile | provider_model_catalog_entries, production_model_profiles | app/providers/catalog_models.py, app/providers/model_profiles/orm.py |
+| Provider catalog/profile | provider_model_catalog_entries, production_model_profiles, provider_availability_evidence, provider_model_availability | app/providers/catalog_models.py, app/providers/model_profiles/orm.py, app/providers/availability_models.py |
 
 当前仅保留文件目录/具体 Binding 与连接修订、逐模型可用性证据/投影。证据追加且不可改写。
 同 provider/profile 连接可以并存；模型必须选择具体身份。历史两条父链在 0083 汇合，
 当前 0084 进行单向清理：未接入的过渡表与旧实验表退役，引用字段统一为
 `experiment_branch_id`。非空旧实验表阻止清理，必须单独归档，不自动转换成当前事实。
+
+Asset tag 归一化由运行时 `str.strip().casefold()` 决定；0096 将 0070 历史 SQL `lower()`
+键收敛到同一规则。同项目等价拼写优先保留已有 canonical ID，否则保留最早 ID；合并前
+迁移全部资产关联，重复关联保留最早创建时间。不同项目不合并。正常运行不做标签 GC；
+该数据迁移不反向重建旧的重复词汇 ID，降级后仍保留 canonical 键及全部关联。
+显示名仍最多 80 字符；派生查找键使用 Text，容纳 casefold 的字符展开。存在超过 80 字符
+的 canonical 键时拒绝缩回旧列宽，不截断数据。
+终态通知触发器与 outbox 事实依赖写入事务先设置
+project/user GUC；新增直接写 NodeRun 终态的代码必须沿用同一前提，否则通知事实不完整。
 新增明确合同 revision，不改写旧 Manifest/hash；不提供回旧系统的 downgrade。
 旧实例数据卷单独保管，当前开发环境使用新数据库并应用完整迁移链。
 
@@ -149,7 +158,11 @@ Migration 20260902_0051 removes:
 | 20261027_0090 | Explicit media `auth_mode` on connections/revisions; bearer still requires its original credential, supported no-auth profiles require NULL. Availability uses NULLS NOT DISTINCT identity. Downgrade refuses retained no-auth revisions/evidence; no history is deleted or assigned a synthetic credential. |
 | 20261028_0091 | Add a bounded ownership-only scanner for journaled Final Film uploads; reclamation keeps Artifact references and runs object IO outside database transactions. |
 | 20261028_0092 | Add nullable `node_runs.next_attempt_at` and due-time filtering to the existing ownership-only queued resolver. Pending remote tasks release their lease and write the next Outbox event atomically. Frozen execution input, remote IDs and historical rows are unchanged. |
+| 20261030_0093 | Extend the existing ownership-only Provider recovery resolver to discover committed synchronous image receipts without inventing remote task IDs. Receipt identity and stored-object hash are checked by the execution path; unknown submissions remain fail-stop. |
+| 20261030_0094 | Add a partial expression index serving the `node_run.enqueue` Outbox dedupe lookup, so enqueue no longer scans a project's whole enqueue history. No table or data rewrite. |
+| 20261030_0095 | Add the missing `shot_human_locks.shot_id` and `exports.episode_id` foreign keys (orphan rows are cleaned first), require workspace ownership in the two Provider availability RLS policies, verify both sides of `asset_tag_links`, drop the retired 2-argument recovery resolver, revoke UPDATE/DELETE on the rotation-audit and bootstrap-singleton tables, and add the NULL-project workspace-profile name index. |
 | 20261007_0083 | Merge the model-system and local-media migration histories into one head without rewriting either branch. |
+| 20261103_0096 | Normalize legacy tag keys with Python casefold, merge equivalent vocabulary rows within each project while preserving every asset link, and remove the derived key's display-length cap. Downgrade refuses keys that would be truncated. |
 
 No canonical Project, Shot, Artifact, ProviderOperation, or EditSession is
 deleted by these revisions. Revision 0070 backfills legacy Asset lifecycle and
@@ -157,7 +170,7 @@ tag data before enforcing the canonical constraints.
 
 ## Schema invariants
 
-- Alembic has one head: 20261028_0091 (verify with `alembic heads` on the candidate).
+- Alembic has one head: 20261103_0096 (verify with `alembic heads` on the candidate).
 - Metadata registration is centralized in app/shared/model_registry.py.
 - ProviderOperation is NodeRun-owned only.
 - Identity reference resolution is explicit and version-pinned.
@@ -172,11 +185,10 @@ tag data before enforcing the canonical constraints.
 
 ## 历史实验记录
 
-当前实验唯一事实是 ExperimentBranch，HTTP 与 Director 共享创建服务。
-production_experiments / shot_experiments 的 ORM 已隔离到
-以便既有持久数据仍可管理；没有当前运行时读取/写入或独立采用服务。
-不以本次收口为由删除历史表或伪造迁移后的候选结果。Golden fixture 使用当前
-ExperimentBranch，不再为旧轨制造新样本。
+当前实验唯一事实是 ExperimentBranch，HTTP 与 Director 共享创建服务。迁移
+20261007_0084 已删除 production_experiments / shot_experiments，旧 ORM 也已移除；
+该迁移在旧表非空时拒绝升级。历史实例数据与证据独立保留，不能伪造成当前分支。
+Golden fixture 使用当前 ExperimentBranch，不再为旧轨制造新样本。
 
 ## 数据库清理准入
 

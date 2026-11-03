@@ -106,15 +106,28 @@ async def _render_clip(clip: TimelineRenderClip, *, directory: Path, index: int)
         if clip.source_out_seconds is not None
         else clip.duration_seconds
     )
+    if source_duration <= 0 or clip.duration_seconds <= 0:
+        raise TimelineRenderError("Timeline clip durations must be positive")
     command.extend(["-t", f"{source_duration:.3f}", "-i", str(video)])
     if clip.audio_path is not None:
-        command.extend(["-i", str(clip.audio_path)])
+        command.extend(["-ss", f"{clip.source_in_seconds:.3f}",
+                        "-t", f"{source_duration:.3f}", "-i", str(clip.audio_path)])
     else:
         command.extend(["-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono"])
     if abs(source_duration - clip.duration_seconds) > 0.0005:
         command.extend(
             ["-vf", f"setpts=(PTS-STARTPTS)*{clip.duration_seconds / source_duration:.9f}"]
         )
+    # Keep speech on the same source clock as video, including retiming.
+    speed = source_duration / clip.duration_seconds
+    audio_filters = ["asetpts=PTS-STARTPTS"]
+    while speed > 2:
+        audio_filters.append("atempo=2")
+        speed /= 2
+    while speed < 0.5:
+        audio_filters.append("atempo=0.5")
+        speed *= 2
+    audio_filters.extend([f"atempo={speed:.9f}", f"volume={clip.audio_volume:.6f}", "apad"])
     command.extend(
         [
             "-map",
@@ -124,7 +137,7 @@ async def _render_clip(clip: TimelineRenderClip, *, directory: Path, index: int)
             "-t",
             f"{clip.duration_seconds:.3f}",
             "-af",
-            f"volume={clip.audio_volume:.6f},apad",
+            ",".join(audio_filters),
             "-c:v",
             "libx264",
             "-pix_fmt",

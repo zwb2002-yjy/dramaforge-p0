@@ -26,6 +26,7 @@ from app.production.models import (
     SHOT_REFERENCE_PURPOSES,
     SHOT_REFERENCE_RESOLUTION_MODES,
     SHOT_REFERENCE_STAGES,
+    ExperimentBranch,
     ShotReferenceBinding,
 )
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
@@ -146,6 +147,7 @@ async def _validate_binding_source_ownership(
     asset_id: UUID | None,
     asset_version_id: UUID | None,
     artifact_id: UUID | None,
+    experiment_branch_id: UUID | None = None,
 ) -> None:
     """Keep persisted bindings inside the project they claim to reference.
 
@@ -155,6 +157,14 @@ async def _validate_binding_source_ownership(
     foreign execution input.
     """
 
+    if experiment_branch_id is not None and await session.scalar(
+        select(ExperimentBranch.id).where(ExperimentBranch.id == experiment_branch_id,
+                                          ExperimentBranch.project_id == project_id)
+    ) is None:
+        raise ValidationAppError(
+            "reference experiment does not belong to the current project",
+            details={"code": "REFERENCE_PROJECT_MISMATCH"},
+        )
     if asset_id is not None:
         asset_status = await session.scalar(
             select(Asset.status).where(Asset.id == asset_id, Asset.project_id == project_id)
@@ -297,6 +307,7 @@ class ShotReferenceService:
             asset_id=body.asset_id,
             asset_version_id=body.asset_version_id,
             artifact_id=body.artifact_id,
+            experiment_branch_id=body.experiment_branch_id,
         )
         binding = ShotReferenceBinding(
             project_id=project_id,
@@ -380,12 +391,16 @@ class ShotReferenceService:
             artifact_id=new_artifact_id,
             resolution_mode=new_mode,
         )
+        new_branch_id = (body.experiment_branch_id
+                         if "experiment_branch_id" in body.model_fields_set
+                         else binding.experiment_branch_id)
         await _validate_binding_source_ownership(
             self._session,
             project_id=project_id,
             asset_id=new_asset_id,
             asset_version_id=new_version_id,
             artifact_id=new_artifact_id,
+            experiment_branch_id=new_branch_id,
         )
         if new_purpose not in SHOT_REFERENCE_PURPOSES:
             raise ValidationAppError("unknown reference purpose")
@@ -397,8 +412,7 @@ class ShotReferenceService:
         binding.resolution_mode = new_mode
         binding.stage = new_stage
         binding.purpose = new_purpose
-        if body.experiment_branch_id is not None:
-            binding.experiment_branch_id = body.experiment_branch_id
+        binding.experiment_branch_id = new_branch_id
         if body.label is not None:
             await self._validate_mention_label(
                 project_id=project_id,

@@ -37,7 +37,7 @@ from app.director.creative_capabilities.shot_language_library import (
     QUALITY_POLICIES,
     SHOT_LANGUAGE_PACKS,
 )
-from app.shared.errors import ValidationAppError
+from app.shared.errors import NotFoundError, ValidationAppError
 
 router = APIRouter(
     tags=["creative-capabilities"], dependencies=[Depends(require_selected_workspace)]
@@ -177,10 +177,10 @@ def _frozen(state: dict[str, object] | None) -> dict[str, object]:
 async def _scene_in_project(session: SessionDep, *, scene_id: UUID, project_id: UUID) -> Scene:
     scene = await session.get(Scene, scene_id)
     if scene is None:
-        raise ValidationAppError("scene not found", details={"code": "SCENE_NOT_FOUND"})
+        raise NotFoundError("scene not found", details={"code": "SCENE_NOT_FOUND"})
     episode = await session.get(Episode, scene.episode_id)
     if episode is None or episode.project_id != project_id:
-        raise ValidationAppError("scene not found", details={"code": "SCENE_NOT_FOUND"})
+        raise NotFoundError("scene not found", details={"code": "SCENE_NOT_FOUND"})
     return scene
 
 
@@ -197,7 +197,7 @@ async def creative_capability_provenance(
     if shot_id is not None:
         shot = await session.get(Shot, shot_id)
         if shot is None or shot.project_id != project_id:
-            raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
+            raise NotFoundError("shot not found", details={"code": "SHOT_NOT_FOUND"})
         if _frozen(shot.director_state):
             return CreativeStateResponse(
                 creative_capabilities=_frozen(shot.director_state), target="shot"
@@ -303,7 +303,7 @@ async def freeze_creative_capabilities(
     elif body.shot_id is not None:
         shot = await session.get(Shot, body.shot_id)
         if shot is None or shot.project_id != project_id:
-            raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
+            raise NotFoundError("shot not found", details={"code": "SHOT_NOT_FOUND"})
         saved_user_intent = dict(shot.director_state or {})
         saved_user_intent.update(
             {

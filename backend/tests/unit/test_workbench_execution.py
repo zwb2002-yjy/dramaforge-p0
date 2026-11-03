@@ -2133,3 +2133,36 @@ async def test_compiler_contract_preview_is_side_effect_free_for_text_video(
     assert seen[0].mode_id == "text_to_video"
     assert seen[0].output.duration_seconds == int(text_plan.duration_seconds)
     assert await session.scalar(select(func.count()).select_from(ProviderOperation)) == 0
+
+
+@pytest.mark.asyncio
+async def test_plan_history_filters_media_stage_before_pagination(session):
+    from datetime import UTC, datetime, timedelta
+
+    from app.execution.models import GraphNode
+
+    project, binding, user = await _seed(session)
+    shot, artifact = await _seed_video_shot(session, project=project, user=user)
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(project=project,
+        execution_input=_input(shot_id=shot.id, requested_binding_id=binding.id))
+    source = await session.get(NodeRun, artifact.produced_by_run_id)
+    video = await session.scalar(select(GraphNode).where(
+        GraphNode.graph_version_id == source.graph_version_id, GraphNode.node_key == "video"))
+    review = await session.scalar(select(GraphNode).where(
+        GraphNode.graph_version_id == source.graph_version_id,
+        GraphNode.node_key == "identity_review"))
+    now = datetime.now(UTC)
+    for index in range(26):
+        session.add(NodeRun(project_id=project.id, graph_version_id=source.graph_version_id,
+            graph_node_id=video.id if index == 0 else review.id, attempt_no=100 + index,
+            idempotency_key=f"history-{uuid4()}", input_hash="f" * 64, status="failed",
+            created_by=user.id, created_at=now + timedelta(seconds=index),
+            input_snapshot={"shot_id": str(shot.id),
+                            "workbench_plan": plan.model_dump(mode="json")}))
+    await session.flush()
+    history = await service.get_recent_plan(project_id=project.id, shot_id=shot.id,
+                                            stage="video", limit=20)
+    assert len(history) == 1 and history[0].plan_fingerprint == plan.plan_fingerprint
+    assert await service.get_recent_plan(project_id=project.id, shot_id=shot.id,
+                                          stage="image_keyframe") == []

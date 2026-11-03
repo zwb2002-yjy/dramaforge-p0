@@ -69,7 +69,7 @@ $runtimeImages = @(
     $backendImage, $frontendImage,
     "postgres:15-alpine", "redis:7-alpine",
     "quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z",
-    "ghcr.io/berriai/litellm:v1.96.0"
+    "ghcr.io/berriai/litellm:v1.96.0@sha256:90d8de0ea6fbb3cad145d1019d00a0149ae400b1e18e2011a60f1988f143f672"
 )
 foreach ($image in $runtimeImages) {
     docker image inspect $image > $null 2>&1

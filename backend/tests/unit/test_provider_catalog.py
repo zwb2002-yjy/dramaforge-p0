@@ -67,7 +67,12 @@ def _assert_fixture_completeness(manifests: list[dict[str, object]], fixtures_di
         manifest = catalog[identity]
         assert fixture["manifest"] == manifest
         assert fixture["manifest_hash"] == hash_manifest(manifest)
-        assert fixture["contract"]["wire_template"]["method"] in {"POST", "GET"}
+        template = fixture["contract"]["wire_template"]
+        assert template["method"] in {"POST", "GET"}
+        # A method-only guard would keep passing if an adapter changed the path,
+        # body shape or success envelope. Pin the structural wire identity too.
+        assert isinstance(template.get("path"), str) and template["path"].startswith("/")
+        assert isinstance(template.get("request_body"), dict) or template["method"] == "GET"
 
 
 @pytest.fixture
@@ -245,9 +250,18 @@ def test_packaged_preview_catalog_has_model_evidence_and_no_active_collision() -
             continue
         assert manifest.implementation_status in {"discovered", "documented", "contract_tested"}
         assert manifest.evidence
-        assert all(
-            evidence.source_url.startswith("https://") for evidence in manifest.evidence.values()
-        )
+        for evidence in manifest.evidence.values():
+            if evidence.source_url.startswith("repository:"):
+                # Protocol contracts prove a reproducible wire shape, not an
+                # upstream model's capabilities. Repository evidence is part
+                # of that current contract and must resolve to a real file.
+                assert manifest.catalog_source == "protocol_contract"
+                assert evidence.source_type in {"contract_fixture", "quality_evidence"}
+                root = Path(__file__).resolve().parents[3]
+                source = (root / evidence.source_url.removeprefix("repository:")).resolve()
+                assert source.is_relative_to(root) and source.is_file()
+            else:
+                assert evidence.source_url.startswith("https://")
 
 
 def test_unknown_protocol_profile_fails_registry_bootstrap() -> None:

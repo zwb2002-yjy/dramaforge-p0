@@ -14,6 +14,9 @@ SESSION_COOKIE = "dramaforge_session"
 CSRF_COOKIE = "dramaforge_csrf"
 CSRF_HEADER = "X-CSRF-Token"
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 14
+# OWASP Password Storage Cheat Sheet: 600k iterations for PBKDF2-HMAC-SHA256.
+# The count is stored inside each hash, so existing 120k hashes keep verifying.
+PASSWORD_HASH_ITERATIONS = 600_000
 
 
 def hash_password(password: str) -> str:
@@ -21,7 +24,7 @@ def hash_password(password: str) -> str:
     if not password:
         raise ValueError("password must be non-empty")
     salt = secrets.token_hex(16)
-    iterations = 120_000
+    iterations = PASSWORD_HASH_ITERATIONS
     digest = hashlib.pbkdf2_hmac(
         "sha256", password.encode("utf-8"), salt.encode("ascii"), iterations
     )
@@ -81,6 +84,8 @@ def issue_csrf_token(*, secret: str) -> str:
 def verify_csrf_token(*, cookie_token: str | None, header_token: str | None, secret: str) -> bool:
     """Double-submit CSRF: cookie and header must match and verify."""
     if not cookie_token or not header_token:
+        return False
+    if not cookie_token.isascii() or not header_token.isascii():
         return False
     if not hmac.compare_digest(cookie_token, header_token):
         return False

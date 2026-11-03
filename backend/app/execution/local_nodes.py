@@ -7,6 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
@@ -121,7 +122,10 @@ async def _complete_composite_node(
 
             shot_id = (run.input_snapshot or {}).get("shot_id")
             if shot_id:
-                shot = await session.get(Shot, UUID(str(shot_id)))
+                shot = await session.scalar(
+                    select(Shot).where(Shot.id == UUID(str(shot_id)))
+                    .with_for_update().execution_options(populate_existing=True)
+                )
                 video_input = inputs.media_inputs.get("video")
                 if (
                     shot is not None

@@ -41,7 +41,7 @@ afterEach(() => vi.restoreAllMocks());
 describe("Asset version decisions", () => {
   it("rejects a candidate version through the explicit decision endpoint", async () => {
     vi.mocked(fetchAssetTags).mockResolvedValue([]);
-    vi.mocked(fetchAssetVersions).mockResolvedValue([
+    const versions = [
       {
         id: "version-2",
         asset_id: "asset-1",
@@ -51,9 +51,15 @@ describe("Asset version decisions", () => {
         is_primary: false,
         created_at: "2026-01-01T00:00:00Z",
       },
-    ] as never);
+    ];
+    vi.mocked(fetchAssetVersions).mockImplementation(async () => versions as never);
     vi.mocked(fetchAssetCard).mockResolvedValue({ missing_reference_roles: [] } as never);
-    vi.mocked(rejectAssetVersion).mockResolvedValue({} as never);
+    vi.mocked(rejectAssetVersion).mockImplementation(async () => {
+      // Mutate the mocked server state so the assertion covers the refetch, not
+      // only the transport arguments.
+      versions[0].status = "rejected";
+      return {} as never;
+    });
     vi.spyOn(globalThis, "fetch").mockImplementation(() =>
       Promise.resolve(
         new Response(JSON.stringify([asset]), {
@@ -79,5 +85,7 @@ describe("Asset version decisions", () => {
     await waitFor(() =>
       expect(rejectAssetVersion).toHaveBeenCalledWith("project-1", "asset-1", "version-2"),
     );
+    // The rejected status must come back through the refetched projection.
+    expect(await screen.findByText(/已拒绝/)).toBeInTheDocument();
   });
 });

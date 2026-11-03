@@ -51,7 +51,7 @@ the explicit Apply / Save / Formal / Export gates.
 - `/design-preview` — development-only design-system showcase; absent from production builds.
 
 Quick routes and Quick mock product routes are deleted. Server state lives in
-TanStack Query; Zustand only holds layout/selection UI state.
+TanStack Query; layout and selection use component or router state. No Zustand store is active.
 
 ## Identity ownership
 

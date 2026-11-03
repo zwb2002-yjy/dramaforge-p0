@@ -112,6 +112,15 @@ and CSRF. Stale versions and active NodeRun/Director work return 409. Success re
 hides the project from lists and denies subsequent workbench access. Historical execution,
 provider evidence and media are retained; no old interface or recovery route is introduced.
 
+Sessions are signed, stateless cookies with a 14-day maximum age; `POST /api/v1/auth/logout`
+clears the session and CSRF cookies, and rotating `SESSION_SECRET` invalidates outstanding
+tokens. There is no server-side session store or per-token revocation list.
+
+Project deletion is a soft delete that retains execution/provider/media facts. Workspace
+deletion therefore requires the workspace to have no project rows at all, including
+soft-deleted ones; there is no project-undelete endpoint. The retained rows, not a hidden
+project count, are the reason a used workspace stays undeletable.
+
 | Surface | Module | Current responsibility |
 |---|---|---|
 | Auth and workspaces | auth.py | session, CSRF, owner bootstrap, workspace CRUD |
@@ -132,8 +141,8 @@ provider evidence and media are retained; no old interface or recovery route is 
 | Editing | editing.py, opencut.py, final_film.py | EditSession timeline, suggestion, export, OpenCut manifest, Final Film bound to a timeline version |
 | Creative capabilities | creative_capabilities.py, workflow_planning.py | provider-neutral intent/capability planning and the read-only workflow-state aggregation; workflow/participation freeze is a domain action for Director/Workbench, not an HTTP surface |
 | Events | events.py | SSE subscription with Last-Event-ID resume |
-| Maintenance | maintenance.py | Owner-only recovery: list persisted failures, replay one Director wakeup or one Outbox dead letter with the expected failure identity |
-| Worker tick | worker.py | worker-only HTTP tick for local/dev when Arq runs separately |
+| Maintenance | maintenance.py | Owner-only recovery: list persisted failures; replay one Director wakeup, Outbox dead letter, or `POST /maintenance/media-node-runs/{node_run_id}/replay` with the expected failure identity. Media replay reuses the frozen operation/result and never creates a new paid generation. |
+| Worker tick | worker.py | token-protected development-only HTTP tick when no separate Arq worker is running; unavailable outside development |
 
 ## Read-only Model Capability / Prompt Compiler
 
@@ -415,6 +424,7 @@ Editing 继续使用既有 EditSession timeline 和乐观版本。预览和导�
 | 项目 dispatch / NodeRun enqueue HTTP | 需要生成/修复/恢复，不需要控制队列 | 退役这两个 HTTP helper；保留内部 scheduler 与 Worker 调用，使用既有 executions/receipt、repairs、maintenance recovery |
 | worker/tick、provider-reference token、status/metrics | Worker、Provider、运维需要，不是创作页面 | 保留；不为了制造消费者而增加前端按钮 |
 | per-shot director-board `GET`/`PUT` | 当前创作链无前端消费者 | 端点与 `director_board_states` 存储暂保留；前端 helper 已退役（见 FRONTEND_WORKBENCH），是否清退由后端领域单独裁定 |
+| `PUT …/provider-bindings/{purpose}` | 创作 UI 通过 model-profile 写入，不需要第二个写面 | 端点仅由验收/运维脚本使用；保留其合同但不再新增前端调用，是否合并进 model-profile 写面由后端领域单独裁定 |
 | TEXT_LLM_* 与旧文本凭证写面 | 需要文本模型，不需要旧凭证入口 | 当前文本 HTTP adapter 消费部署配置或空间连接；沿用 ProviderConnection 与模型选择，不恢复旧环境变量/写面；来源隔离缺口见 MODEL_PROVIDER |
 | 旧实验 ORM / DTO | 需要隔离实验，但不需要旧生产轨 | 当前 ExperimentBranch；旧表仅历史映射，不重新给 UI 提供旧入口 |
 

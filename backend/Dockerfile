@@ -65,7 +65,7 @@ ARG DRAMAFORGE_SOURCE_COMMIT=local
 LABEL org.opencontainers.image.title="DramaForge backend" \
       org.opencontainers.image.version=$DRAMAFORGE_VERSION \
       org.opencontainers.image.revision=$DRAMAFORGE_SOURCE_COMMIT \
-      org.opencontainers.image.source="https://github.com/zwb2002-yjy/DramaForge"
+      org.opencontainers.image.source="https://github.com/zwb2002-yjy/dramaforge-p0"
 
 ENV DRAMAFORGE_SOURCE_COMMIT=$DRAMAFORGE_SOURCE_COMMIT
 

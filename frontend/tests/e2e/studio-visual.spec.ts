@@ -69,11 +69,16 @@ test("asset gallery keeps edits explicit, retains failed drafts and separates pe
     })),
   );
   let saves = 0;
-  await page.route("**/assets/*/tags", (route) => {
+  await page.route("**/assets/*/tags", async (route) => {
     saves++;
-    return route.fulfill(
-      saves === 1 ? { status: 500, json: { detail: "test failure" } } : { json: [] },
-    );
+    if (saves === 1) {
+      return route.fulfill({ status: 500, json: { detail: "test failure" } });
+    }
+    const assetId = new URL(route.request().url()).pathname.split("/").at(-2);
+    const tags = (route.request().postDataJSON() as { tags: string[] }).tags;
+    const asset = state.assets.find((item) => item.id === assetId);
+    if (asset) asset.tags = tags;
+    return route.fulfill({ json: tags });
   });
   await page.goto("/projects/" + PROJECT_ID + "/assets");
   const cards = page.getByTestId("asset-card");
@@ -94,6 +99,10 @@ test("asset gallery keeps edits explicit, retains failed drafts and separates pe
   await cards.first().getByRole("button", { name: "保存", exact: true }).click();
   await expect(first).toHaveValue("");
   expect(saves).toBe(2);
+  // The successful save must mutate the mocked server state and be reflected
+  // back to the card; a no-op 200 would make this e2e unable to detect a lost
+  // tag write.
+  await expect(cards.first().getByText("重逢", { exact: true })).toBeVisible();
   await second.fill("未保存标签");
   await cards.nth(1).getByText("管理素材", { exact: true }).click();
   await cards.nth(1).getByText("管理素材", { exact: true }).click();

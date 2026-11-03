@@ -57,3 +57,14 @@ updates:
       - dependency-name: node
         update-types:
           - version-update:semver-major
+  # Runtime service images pinned in the root compose files.
+  - package-ecosystem: docker
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-major

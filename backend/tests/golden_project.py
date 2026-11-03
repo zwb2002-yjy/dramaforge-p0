@@ -457,12 +457,14 @@ async def seed_golden_project(session: AsyncSession, *, suffix: str) -> GoldenPr
     )
     await session.flush()
 
-    # Edit session from formal shots.
+    # The fixture produces a Formal video for shot_one only. Explicit selection
+    # must not depend on the builder silently dropping the other unfinished shots.
+    assert shot_one.formal_video_artifact_id == video.id
     edit = await build_edit_session_from_shots(
         session,
         project_id=project.id,
         user_id=user.id,
-        shot_ids=[shot.id for shot in shot_rows],
+        shot_ids=[shot_one.id],
         name="Golden edit",
     )
 

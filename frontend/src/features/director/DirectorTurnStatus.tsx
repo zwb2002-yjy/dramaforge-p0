@@ -51,9 +51,9 @@ const WAIT_LABEL: Record<string, string> = {
   autonomy_changed: "导演模式已变化",
   context_rejected: "相同建议上下文已被拒绝",
   user_rejected: "建议已拒绝",
-  // The runtime stops a turn when it reaches its step budget; the product says
-  // so in creative language instead of naming the internal limit.
-  step_limit_reached: "本轮协作步数已用完，等待你确认后继续",
+  // The runtime stops a turn when it reaches its step budget. There is no
+  // dedicated "continue" control; a new user instruction starts the next turn.
+  step_limit_reached: "本轮协作步数已用完；如需继续，请发送新的指令",
 };
 
 function objectValue(value: unknown): Record<string, unknown> | null {
@@ -114,7 +114,8 @@ function nextActionLabel(value: unknown): string {
  */
 function stopSummary(raw: string | null | undefined): string | null {
   if (!raw) return null;
-  if (raw.includes("step_limit_reached")) return "本轮导演协作步数已用完，确认后可继续。";
+  if (raw.includes("step_limit_reached"))
+    return "本轮导演协作步数已用完；如需继续，请发送新的指令。";
   if (raw.toLowerCase().includes("cancel")) return "导演协作已停止。";
   if (raw.toLowerCase().includes("timeout")) return "导演协作超时，可重新发起。";
   return "导演协作未能完成，可在诊断详情中查看原因。";

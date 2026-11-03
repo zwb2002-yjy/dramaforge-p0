@@ -208,3 +208,86 @@ async def test_resume_token_never_carries_secrets_or_wire() -> None:
     assert "agnes-api" not in json.dumps(dumped)
     assert "prompt" not in dumped
     assert "wire_request" not in dumped
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["agnes", "minimax", "volcengine"])
+async def test_throttled_create_preserves_remote_identity(provider: str) -> None:
+    from app.providers.minimax import MiniMaxRuntime
+    from app.providers.volcengine import ArkRuntime
+
+    settings = Settings(
+        agnes_enabled=True, agnes_api_key="test-key",
+        minimax_enabled=True, minimax_api_key="test-key",
+        volcengine_enabled=True, volcengine_api_key="test-key",
+    )
+    types = {"agnes": AgnesRuntime, "minimax": MiniMaxRuntime, "volcengine": ArkRuntime}
+    fields = {"agnes": "task_id", "minimax": "task_id", "volcengine": "id"}
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.method)
+        return httpx.Response(429, json={fields[provider]: "already-created"},
+                              headers={"Retry-After": "30"})
+
+    runtime = types[provider](settings=settings, transport=httpx.MockTransport(handler))
+    compiled = _compiled_video().model_copy(update={
+        "provider_type": provider, "protocol_profile": runtime.protocol_profile,
+    })
+    result = await runtime.submit_video(compiled)
+    assert result.remote_task_id == "already-created"
+    assert result.resume_token is not None
+    assert result.status == "queued"
+    assert result.error_code != "PROVIDER_RATE_LIMITED"
+    assert calls == ["POST"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["agnes", "minimax", "volcengine"])
+async def test_unreported_provider_cost_is_not_invented(provider: str) -> None:
+    from app.providers.minimax import MiniMaxRuntime
+    from app.providers.volcengine import ArkRuntime
+    types = {"agnes": AgnesRuntime, "minimax": MiniMaxRuntime, "volcengine": ArkRuntime}
+    runtime = types[provider](settings=Settings())
+    result = await runtime.fetch_cost(None)
+    assert result.amount is None
+    assert result.cost_status == "not_reported"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["agnes", "minimax", "volcengine"])
+@pytest.mark.parametrize("outcome", ["denied", "transport", "accepted"])
+async def test_cancel_does_not_invent_terminal_confirmation(provider: str, outcome: str) -> None:
+    from app.providers.minimax import MiniMaxRuntime
+    from app.providers.volcengine import ArkRuntime
+    types = {"agnes": AgnesRuntime, "minimax": MiniMaxRuntime, "volcengine": ArkRuntime}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if outcome == "transport":
+            raise httpx.ReadError("lost cancel response")
+        return httpx.Response(403 if outcome == "denied" else 202,
+                              json={"status": "cancel_requested"})
+
+    settings = Settings(agnes_enabled=True, agnes_api_key="test-key",
+        minimax_enabled=True, minimax_api_key="test-key",
+        volcengine_enabled=True, volcengine_api_key="test-key")
+    runtime = types[provider](settings=settings, transport=httpx.MockTransport(handler))
+    token = ProviderResumeToken(provider_type=provider, protocol_profile=runtime.protocol_profile,
+                                remote_task_id="existing-paid-task")
+    result = await runtime.cancel_video(token)
+    assert result.status != "cancelled"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["minimax", "volcengine"])
+async def test_explicit_cancel_confirmation_is_preserved(provider: str) -> None:
+    from app.providers.minimax import MiniMaxRuntime
+    from app.providers.volcengine import ArkRuntime
+    types = {"minimax": MiniMaxRuntime, "volcengine": ArkRuntime}
+    settings = Settings(minimax_enabled=True, minimax_api_key="test-key",
+                        volcengine_enabled=True, volcengine_api_key="test-key")
+    runtime = types[provider](settings=settings, transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"status": "cancelled"})))
+    token = ProviderResumeToken(provider_type=provider, protocol_profile=runtime.protocol_profile,
+                                remote_task_id="existing-paid-task")
+    assert (await runtime.cancel_video(token)).status == "cancelled"

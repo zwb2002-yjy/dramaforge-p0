@@ -25,6 +25,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
+.mypy_audit_cache/
 .ruff_cache/
 .coverage
 htmlcov/

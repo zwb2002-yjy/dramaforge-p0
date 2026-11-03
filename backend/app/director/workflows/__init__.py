@@ -42,11 +42,6 @@ from app.director.workflows.layered_planning import (
     SceneStoryboardPlanPayload,
     ShotPlanPayload,
 )
-from app.director.workflows.layered_production_service import (
-    materialize_episode_plan,
-    materialize_scene_storyboard,
-    require_episode_scene,
-)
 from app.director.workflows.library import (
     build_workflow_registry,
     dialogue_graph_factory,
@@ -138,13 +133,10 @@ __all__ = [
     "get_default_registry",
     "is_scene_failure_isolated",
     "load_continuity_context",
-    "materialize_episode_plan",
-    "materialize_scene_storyboard",
     "max_subject_references",
     "max_subject_references_from_catalog_manifest",
     "participation_director_state",
     "persist_continuity_context",
-    "require_episode_scene",
     "scene_production_status",
     "required_subject_references",
     "visible_subject_count_from_snapshot",

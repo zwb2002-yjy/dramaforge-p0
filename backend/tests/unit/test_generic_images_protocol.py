@@ -294,8 +294,10 @@ def test_admin_api_registers_two_models_without_catalog_or_code_changes(api, mon
     assert _run_create(count_credentials()) == 0
 
 
+@pytest.mark.parametrize("interrupt_result", [False, True])
+@pytest.mark.parametrize("result_transport", ["binary", "url"])
 async def test_two_configured_models_produce_separate_artifacts_through_the_canonical_worker(
-    session, monkeypatch
+    session, monkeypatch, interrupt_result, result_transport,
 ):
     from app.assets.models import Shot
     from app.execution.models import Artifact, ProviderOperation
@@ -337,6 +339,29 @@ async def test_two_configured_models_produce_separate_artifacts_through_the_cano
     )
     service = ProviderConnectionService(session)
     store = InMemoryObjectStore()
+    if result_transport == "url":
+        from app.execution import media_io
+        from app.providers.openai_compatible_media import OpenAICompatibleMediaRuntime
+
+        submit = OpenAICompatibleMediaRuntime.submit_image
+
+        async def submit_url(runtime, request):
+            result = await submit(runtime, request)
+            return result.model_copy(update={
+                "artifact_bytes": None,
+                "artifact_uri": f"https://media.example/{request.model_id}.png",
+            })
+
+        async def download_result(*, kind, artifact_uri, destination):
+            async def chunks():
+                yield png("red" if "alpha" in artifact_uri else "blue")
+
+            return await media_io._materialize_provider_media(
+                kind=kind, chunks=chunks(), destination=destination, content_type="image/png",
+            )
+
+        monkeypatch.setattr(OpenAICompatibleMediaRuntime, "submit_image", submit_url)
+        monkeypatch.setattr(media_io, "_download_provider_media", download_result)
     artifacts, bindings = [], []
     for index, label in enumerate(("alpha", "beta")):
         connection = await service.create_connection(
@@ -401,7 +426,29 @@ async def test_two_configured_models_produce_separate_artifacts_through_the_cano
             confirmed_compiler_wire_fingerprint=proof.wire_fingerprint,
         )
         await session.commit()
-        result = await execute_media_node_run(session, node_run_id=run.id, store=store)
+        if interrupt_result:
+            import asyncio
+
+            from app.execution import provider_execution
+
+            inspect_media = provider_execution._inspect_media_metadata
+
+            def interrupted_result(**kwargs):
+                raise asyncio.CancelledError()
+
+            monkeypatch.setattr(provider_execution, "_inspect_media_metadata", interrupted_result)
+            with pytest.raises(asyncio.CancelledError):
+                await execute_media_node_run(session, node_run_id=run.id, store=store)
+            await session.rollback()
+            for entity in (project, owner, connection, binding, shot, run, scene, contract,
+                           *artifacts, *bindings):
+                await session.refresh(entity)
+            monkeypatch.setattr(provider_execution, "_inspect_media_metadata", inspect_media)
+            result = await execute_media_node_run(
+                session, node_run_id=run.id, store=store, already_claimed=True,
+            )
+        else:
+            result = await execute_media_node_run(session, node_run_id=run.id, store=store)
         operation = (
             await session.scalars(
                 select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
@@ -426,10 +473,14 @@ async def test_two_configured_models_produce_separate_artifacts_through_the_cano
             workspace_id=project.workspace_id, connection_id=connection.id
         )
         assert revision_id == plan.connection_revision_id and generation_ids == {binding.id}
-        # A lost synchronous response remains unrecoverable, but a deliberate
-        # no-auth identity must never be reported as a missing encrypted key.
+        # Durable synchronous receipts need no invented remote token, while
+        # an explicitly unknown submission still requires reconciliation.
         from app.execution.provider_recovery_audit import inspect_provider_operation
 
+        audit = await inspect_provider_operation(
+            session, operation=operation, run=run, workspace_id=project.workspace_id,
+        )
+        assert not audit.blockers
         operation.status = "unknown_submission"
         await session.flush()
         audit = await inspect_provider_operation(
@@ -437,7 +488,6 @@ async def test_two_configured_models_produce_separate_artifacts_through_the_cano
         )
         assert "EXECUTION_IDENTITY_CREDENTIAL_UNAVAILABLE" not in audit.blockers
         assert "PROVIDER_SUBMISSION_UNKNOWN" in audit.blockers
-        assert "RESUME_TOKEN_UNAVAILABLE" in audit.blockers
         assert audit.as_dict()["provider_calls"] == 0
         assert not session.new and not session.dirty and not session.deleted
         _, generation_ids = await service.generation_verified_bindings(

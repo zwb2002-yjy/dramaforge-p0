@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.events.models import OutboxDeadLetter, OutboxEvent
 from app.events.sse import SseHub, default_sse_hub
 from app.shared.enums import OutboxStatus
-from app.shared.errors import NotFoundError, ValidationAppError
+from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 from app.shared.observability import (
     OUTBOX_DEAD_LETTER_TOTAL,
     OUTBOX_OLDEST_WAIT_SECONDS,
@@ -22,7 +22,7 @@ from app.shared.observability import (
 
 
 class StreamPublisher:
-    """Port for Redis Streams; in-memory fake used when Redis unavailable."""
+    """Explicit in-memory test publisher; production injects RedisStreamPublisher."""
 
     def __init__(self) -> None:
         self.messages: list[tuple[str, dict[str, object]]] = []
@@ -37,7 +37,7 @@ class OutboxDispatcher:
     def __init__(
         self,
         session: AsyncSession,
-        publisher: StreamPublisher | None = None,
+        publisher: StreamPublisher,
         *,
         max_attempts: int = 3,
         lease_seconds: int = 30,
@@ -46,7 +46,7 @@ class OutboxDispatcher:
         sse_hub: SseHub | None = default_sse_hub,
     ) -> None:
         self._session = session
-        self._publisher = publisher or StreamPublisher()
+        self._publisher = publisher
         self._max_attempts = max_attempts
         self._lease_seconds = lease_seconds
         self._retry_base_seconds = retry_base_seconds
@@ -76,7 +76,7 @@ class OutboxDispatcher:
                 OutboxEvent.status == OutboxStatus.LEASED.value,
                 OutboxEvent.leased_until.is_not(None),
                 OutboxEvent.leased_until < ts,
-            )
+            ).with_for_update(skip_locked=True).execution_options(populate_existing=True)
         )
         n = 0
         for row in result.scalars().all():
@@ -107,6 +107,7 @@ class OutboxDispatcher:
         dialect = getattr(getattr(bind, "dialect", None), "name", "") or ""
         if dialect.startswith("postgres"):
             stmt = stmt.with_for_update(skip_locked=True)
+        stmt = stmt.execution_options(populate_existing=True)
 
         result = await self._session.execute(stmt)
         rows = list(result.scalars().all())
@@ -141,6 +142,7 @@ class OutboxDispatcher:
         dialect = getattr(getattr(bind, "dialect", None), "name", "") or ""
         if dialect.startswith("postgres"):
             stmt = stmt.with_for_update(skip_locked=True)
+        stmt = stmt.execution_options(populate_existing=True)
         result = await self._session.execute(stmt)
         row = result.scalar_one_or_none()
         if row is None:
@@ -259,16 +261,30 @@ class OutboxDispatcher:
         dl = result.scalar_one_or_none()
         if dl is None:
             raise NotFoundError("dead letter not found")
-
-        published = await self._published_by_event_id(dl.event_id)
-        if published is not None:
-            OUTBOX_REPLAY_TOTAL.labels(result="idempotent").inc()
-            return published
-
+        # Every writer locks event before dead letter (including fail_leased).
+        # Refresh after waiting: a concurrent replay may have published it.
         existing = await self._session.execute(
             select(OutboxEvent).where(OutboxEvent.id == dl.outbox_event_id)
+            .with_for_update().execution_options(populate_existing=True)
         )
         event = existing.scalar_one_or_none()
+        dl = await self._session.scalar(
+            select(OutboxDeadLetter).where(OutboxDeadLetter.id == dead_letter_id)
+            .with_for_update().execution_options(populate_existing=True)
+        )
+        if dl is None:
+            raise NotFoundError("dead letter not found")
+        if event is None:
+            # The dead-letter lock also serializes reconstruction of a missing
+            # event; another replay may have recreated it while we waited.
+            event = await self._session.scalar(
+                select(OutboxEvent).where(OutboxEvent.id == dl.outbox_event_id)
+                .with_for_update(skip_locked=True).execution_options(populate_existing=True)
+            )
+            if event is None and await self._session.scalar(
+                select(OutboxEvent.id).where(OutboxEvent.id == dl.outbox_event_id)
+            ) is not None:
+                raise ConflictError("recreated outbox event has an active dispatcher")
         if event is None:
             event = OutboxEvent(
                 id=dl.outbox_event_id,
@@ -285,6 +301,12 @@ class OutboxDispatcher:
             OUTBOX_REPLAY_TOTAL.labels(result="idempotent").inc()
             return event
         else:
+            if event.status == OutboxStatus.LEASED.value:
+                expires = event.leased_until
+                if expires is None or expires.replace(
+                    tzinfo=expires.tzinfo or UTC,
+                ) > datetime.now(UTC):
+                    raise ConflictError("outbox event has an active or unverified publisher lease")
             # Only reset non-published rows (pending/leased/dead_letter)
             event.status = OutboxStatus.PENDING.value
             event.attempt_count = 0
@@ -302,7 +324,7 @@ class OutboxDispatcher:
             return published
 
         # Lease and publish ONLY this dead letter's outbox row — never bulk-claim siblings.
-        target = await self._claim_one(
+        target = await self.claim_one_by_event_id(
             event_id=dl.event_id, worker_id=f"replay:{operator}"
         )
         if target is None:
@@ -314,25 +336,6 @@ class OutboxDispatcher:
         await self.publish_leased(target)
         OUTBOX_REPLAY_TOTAL.labels(result="applied").inc()
         return target
-
-    async def _claim_one(self, *, event_id: UUID, worker_id: str) -> OutboxEvent | None:
-        """Lease a single pending outbox row by event_id without touching siblings."""
-        now = datetime.now(UTC)
-        result = await self._session.execute(
-            select(OutboxEvent)
-            .where(OutboxEvent.event_id == event_id)
-            .where(OutboxEvent.status == OutboxStatus.PENDING.value)
-            .where(OutboxEvent.next_attempt_at <= now)
-        )
-        row = result.scalar_one_or_none()
-        if row is None:
-            return None
-        row.status = OutboxStatus.LEASED.value
-        row.locked_by = worker_id
-        row.leased_until = now + timedelta(seconds=self._lease_seconds)
-        row.attempt_count += 1
-        await self._session.flush()
-        return row
 
     async def pending_count(self) -> int:
         bind = self._session.get_bind()

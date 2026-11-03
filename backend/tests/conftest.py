@@ -56,7 +56,10 @@ def _mirror_postgresql_partial_indexes_on_sqlite() -> None:
     for table in Base.metadata.tables.values():
         for index in table.indexes:
             postgres_where = index.dialect_options["postgresql"].get("where")
-            if postgres_where is not None:
+            sqlite_where = index.dialect_options["sqlite"].get("where")
+            # An explicit SQLite predicate already expresses the same partial
+            # rule in SQLite syntax; never overwrite it with PostgreSQL syntax.
+            if postgres_where is not None and sqlite_where is None:
                 index.dialect_options["sqlite"]["where"] = text(str(postgres_where))
 
 

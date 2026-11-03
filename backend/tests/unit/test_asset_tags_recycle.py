@@ -39,6 +39,7 @@ def _asset(
     name: str,
     kind: str = "character",
     tags: list[str] | None = None,
+    status: str = "active",
 ) -> str:
     created = client.post(
         f"/api/v1/projects/{project_id}/assets",
@@ -46,7 +47,7 @@ def _asset(
             "kind": kind,
             "name": name,
             "description": "",
-            "status": "active",
+            "status": status,
             "tags": tags or [],
         },
         headers={CSRF_HEADER: _csrf(client)},
@@ -183,3 +184,23 @@ def test_recycle_and_restore(client: TestClient) -> None:
     )
     assert restored.status_code == 200, restored.text
     assert restored.json()["status"] == "active"
+
+
+def test_restore_keeps_the_pre_recycle_status(client: TestClient) -> None:
+    """A recycled draft returns to draft; restore must not promote it to active."""
+    project_id = _project(client)
+    asset_id = _asset(client, project_id, "草图角色", status="draft")
+
+    recycled = client.post(
+        f"/api/v1/projects/{project_id}/assets/{asset_id}/recycle",
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert recycled.status_code == 200, recycled.text
+
+    restored = client.post(
+        f"/api/v1/projects/{project_id}/assets/{asset_id}/restore",
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["status"] == "draft"
+    assert "recycled_from_status" not in (restored.json().get("metadata") or {})

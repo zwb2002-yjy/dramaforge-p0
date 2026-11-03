@@ -228,46 +228,6 @@ class OpenAICompatibleMediaClient:
             return {}
         return {"Authorization": f"Bearer {self._key}"}
 
-    async def create_image(
-        self,
-        *,
-        prompt: str,
-        size: str = "1024x1024",
-        ratio: str | None = None,
-        canonical_image_bytes: bytes | None = None,
-        canonical_image_mime: str = "image/png",
-        reference_artifact_id: str | None = None,
-    ) -> dict[str, Any]:
-        if not self.configured():
-            raise RuntimeError("OpenAI-compatible media connection is not configured")
-        payload: dict[str, Any] = {
-            "model": self._image_model,
-            "prompt": prompt,
-            "size": size,
-            "n": 1,
-            "response_format": "url",
-        }
-        if ratio:
-            payload["aspect_ratio"] = ratio
-        if reference_artifact_id:
-            payload["reference_artifact_ids"] = [reference_artifact_id]
-        response = await self._post_image(payload, canonical_image_bytes, canonical_image_mime)
-        data = _json_object(response)
-        image_url = _first_url(data)
-        if response.status_code >= 400 or image_url is None:
-            return {
-                "status": "failed",
-                "http_status": response.status_code,
-                "error_code": _error_code(response.status_code),
-                "retry_after_seconds": _retry_after(response),
-            }
-        return {
-            "status": "succeeded",
-            "remote_task_id": None,
-            "artifact_uri": image_url,
-            "http_status": response.status_code,
-        }
-
     async def _post_image(
         self,
         payload: dict[str, Any],
@@ -309,42 +269,6 @@ class OpenAICompatibleMediaClient:
                 data=data,
                 files={"image": ("reference", image_bytes, image_mime)},
             )
-
-    async def create_video(
-        self,
-        *,
-        prompt: str,
-        image_bytes: bytes | None = None,
-        image_mime: str = "image/png",
-        reference_artifact_ids: list[str] | None = None,
-        reference_fingerprints: list[str] | None = None,
-    ) -> dict[str, Any]:
-        if not self.configured():
-            raise RuntimeError("OpenAI-compatible media connection is not configured")
-        payload: dict[str, Any] = {
-            "model": self._video_model,
-            "prompt": prompt,
-            "seconds": "5",
-            "size": "720x1280",
-        }
-        if image_bytes is not None:
-            payload["input_reference"] = "file"
-        response = await self._post_video(payload, image_bytes, image_mime)
-        data = _json_object(response)
-        remote_id = _task_id(data)
-        if response.status_code >= 400 or remote_id is None:
-            return {
-                "status": "failed",
-                "http_status": response.status_code,
-                "error_code": _error_code(response.status_code),
-                "retry_after_seconds": _retry_after(response),
-            }
-        return {
-            "status": _status(data.get("status"), default="queued"),
-            "remote_task_id": remote_id,
-            "http_status": response.status_code,
-            "query_kind": "video_id",
-        }
 
     async def _post_video(
         self,
@@ -909,7 +833,7 @@ class OpenAICompatibleMediaRuntime:
         else:
             image_bytes = None
         if self.protocol_profile == OPENAI_IMAGES_PROFILE:
-            from app.providers.image_results import image_result
+            from app.providers.image_results import ImageResultError, image_result
 
             if (
                 set(payload) != {"model", "prompt", "size", "n"}
@@ -928,16 +852,34 @@ class OpenAICompatibleMediaRuntime:
 
             try:
                 response = await self._client._post_image(payload, image_bytes, image_mime)
-                if response.status_code >= 400:
-                    uncertain = response.status_code in {408, 429} or response.status_code >= 500
-                    return SubmissionResult(
-                        status="unknown_submission" if uncertain else "failed",
-                        error_code="PROVIDER_SUBMISSION_UNKNOWN"
-                        if uncertain
-                        else _error_code(response.status_code),
-                        http_status=response.status_code,
-                        request_summary=request.safe_request_summary,
-                    )
+            except ImageResultError as exc:
+                # The POST reached the Provider but its bounded response could not
+                # be read; the paid create may exist, so never retry it blindly.
+                return SubmissionResult(
+                    status="unknown_submission",
+                    error_code="PROVIDER_SUBMISSION_UNKNOWN",
+                    error=type(exc).__name__,
+                    request_summary=request.safe_request_summary,
+                )
+            except httpx.TransportError as exc:
+                # The POST itself is ambiguous: the Provider may have accepted it.
+                return SubmissionResult(
+                    status="unknown_submission",
+                    error_code="PROVIDER_SUBMISSION_UNKNOWN",
+                    error=type(exc).__name__,
+                    request_summary=request.safe_request_summary,
+                )
+            if response.status_code >= 400:
+                uncertain = response.status_code in {408, 429} or response.status_code >= 500
+                return SubmissionResult(
+                    status="unknown_submission" if uncertain else "failed",
+                    error_code="PROVIDER_SUBMISSION_UNKNOWN"
+                    if uncertain
+                    else _error_code(response.status_code),
+                    http_status=response.status_code,
+                    request_summary=request.safe_request_summary,
+                )
+            try:
                 async with provider_http_client(
                     timeout=self._settings.openai_compatible_media_timeout_seconds,
                     transport=self._client._transport,
@@ -948,20 +890,25 @@ class OpenAICompatibleMediaRuntime:
                         client=client,
                         headers=self._client._headers(),
                     )
-                return SubmissionResult(
-                    status="succeeded",
-                    artifact_bytes=content,
-                    http_status=response.status_code,
-                    request_summary=request.safe_request_summary,
-                    request_fingerprint=_fingerprint(request.wire_request),
-                )
             except (httpx.HTTPError, ValueError) as exc:
+                # HTTP 200 already accepted the paid create; only retrieving the
+                # media failed. Stay fail-stop (the remote result is ambiguous
+                # without a URL) but report the real reason instead of a protocol
+                # mismatch.
                 return SubmissionResult(
                     status="unknown_submission",
-                    error_code="PROVIDER_PROTOCOL_MISMATCH",
+                    error_code="PROVIDER_MEDIA_MISSING",
                     error=type(exc).__name__,
+                    http_status=response.status_code,
                     request_summary=request.safe_request_summary,
                 )
+            return SubmissionResult(
+                status="succeeded",
+                artifact_bytes=content,
+                http_status=response.status_code,
+                request_summary=request.safe_request_summary,
+                request_fingerprint=_fingerprint(request.wire_request),
+            )
         try:
             response = await self._client._post_image(payload, image_bytes, image_mime)
         except httpx.TransportError as exc:

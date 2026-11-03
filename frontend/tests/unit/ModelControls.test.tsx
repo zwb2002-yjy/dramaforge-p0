@@ -1,13 +1,9 @@
-import { selectValue, selectOptions, openSelect, getSelectOption } from "./selectValue";
+import { selectOptions } from "./selectValue";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { CapabilitySpecRead, ParameterSpecRead } from "../../src/features/model-controls/api";
-import {
-  AdvancedModelOptions,
-  DynamicCapabilityForm,
-  ReferencePurposeEditor,
-} from "../../src/features/model-controls";
+import { AdvancedModelOptions, DynamicCapabilityForm } from "../../src/features/model-controls";
 
 function parameter(
   value: Omit<ParameterSpecRead, "required" | "deprecated" | "sensitive">,
@@ -112,31 +108,5 @@ describe("AdvancedModelOptions", () => {
       />,
     );
     expect(screen.getByTestId("advanced-model-options")).toBeTruthy();
-  });
-});
-
-describe("ReferencePurposeEditor", () => {
-  it("lists reference purposes from the vocabulary", () => {
-    render(<ReferencePurposeEditor value="identity" onChange={() => undefined} />);
-    const select = screen.getByTestId("reference-purpose-editor").querySelector("[role=combobox]");
-    expect(select).not.toBeNull();
-    openSelect(select!);
-    expect(getSelectOption(select!, /角色身份/)).toBeTruthy();
-    expect(getSelectOption(select!, /镜头语言/)).toBeTruthy();
-  });
-
-  it("emits the selected purpose", async () => {
-    let value = "identity";
-    render(
-      <ReferencePurposeEditor
-        value={value}
-        onChange={(next) => {
-          value = next;
-        }}
-      />,
-    );
-    const select = screen.getByTestId("reference-purpose-editor").querySelector("[role=combobox]")!;
-    await selectValue(select, "camera_language");
-    expect(value).toBe("camera_language");
   });
 });

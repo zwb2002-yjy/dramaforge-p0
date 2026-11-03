@@ -169,6 +169,12 @@ class Settings(BaseSettings):
     volcengine_base_url: str = Field(default="https://ark.cn-beijing.volces.com/api/v3")
     volcengine_image_model: str = Field(default="doubao-seedream-4-0-250828")
     volcengine_video_model: str = Field(default="doubao-seedance-2-0-260128")
+    volcengine_max_concurrent_submissions: int = Field(
+        default=1,
+        ge=1,
+        le=4,
+        description="Maximum concurrent Ark paid create requests per worker process",
+    )
 
     # MiniMax China profile (local BYOK). Never log the raw key.
     minimax_enabled: bool = False
@@ -176,6 +182,12 @@ class Settings(BaseSettings):
     minimax_base_url: str = Field(default="https://api.minimaxi.com")
     minimax_image_model: str = Field(default="image-01")
     minimax_video_model: str = Field(default="MiniMax-H3")
+    minimax_max_concurrent_submissions: int = Field(
+        default=1,
+        ge=1,
+        le=4,
+        description="Maximum concurrent MiniMax paid create requests per worker process",
+    )
     reference_public_base_url: str = Field(
         default="",
         description="Public HTTPS API origin used for short-lived Provider references",

@@ -2,8 +2,8 @@
  * Shared Playwright API mock for the professional V1 E2E suites (P10-07).
  *
  * Mirrors the professional pages' API surface: scene workspace, production
- * snapshot/shots, workbench assets/experiments/review/OpenCut,
- * change proposals, and professional shot dispatch. No backend required.
+ * snapshot/shots, workbench assets/experiments/review/OpenCut, and
+ * professional shot dispatch. No backend required.
  */
 import type { Page, Route } from "@playwright/test";
 
@@ -72,7 +72,6 @@ export type ProfessionalMockState = {
   candidates: Array<Record<string, unknown>>;
   annotations: Array<Record<string, unknown>>;
   revisions: Array<Record<string, unknown>>;
-  proposals: Array<Record<string, unknown>>;
   shotVersion: number;
   formalKeyframeArtifactId: string | null;
   formalVideoArtifactId: string | null;
@@ -418,7 +417,6 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
     candidates: [],
     annotations: [],
     revisions: [],
-    proposals: [],
     shotVersion: 1,
     formalKeyframeArtifactId: null,
     formalVideoArtifactId: null,
@@ -948,36 +946,6 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
         revision_number: revision.revision_number,
       });
     }
-    if (path.endsWith("/change-proposals") && method === "POST") {
-      const proposal = {
-        id: `proposal-${state.proposals.length + 1}`,
-        shot_id: SHOT_ID,
-        summary: body.summary,
-        base_shot_version: body.expected_version,
-        replacement_payload: body.replacement_payload,
-        affected_node_keys: body.affected_node_keys,
-        reusable_artifact_ids: body.reusable_artifact_ids,
-        status: "awaiting_confirmation",
-        confirmed_revision_id: null,
-        created_at: new Date().toISOString(),
-        confirmed_at: null,
-      };
-      state.proposals.push(proposal);
-      return json(
-        route,
-        {
-          proposal,
-          impact: {
-            affected_shot_ids: [SHOT_ID],
-            invalidated_node_keys: body.affected_node_keys,
-            reusable_artifact_ids: body.reusable_artifact_ids,
-          },
-        },
-        201,
-      );
-    }
-    if (path.includes("/change-proposals/") && path.endsWith("/confirm"))
-      return json(route, { status: "applied" });
     if (path.endsWith("/experiments") && method === "GET") return json(route, state.experiments);
     if (path.endsWith("/experiments") && method === "POST") {
       const experiment = {

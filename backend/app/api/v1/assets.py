@@ -413,8 +413,9 @@ async def recycle_asset(
     asset = await AssetTagService(session).recycle_asset(
         project_id=project_id, asset_id=asset_id, actor=user
     )
+    response = _asset_read(asset, tags=await _asset_tag_names(session, asset.id))
     await session.commit()
-    return _asset_read(asset, tags=await _asset_tag_names(session, asset.id))
+    return response
 
 
 @router.post(
@@ -431,8 +432,9 @@ async def restore_asset(
     asset = await AssetTagService(session).restore_asset(
         project_id=project_id, asset_id=asset_id, actor=user
     )
+    response = _asset_read(asset, tags=await _asset_tag_names(session, asset.id))
     await session.commit()
-    return _asset_read(asset, tags=await _asset_tag_names(session, asset.id))
+    return response
 
 
 @router.post(
@@ -468,8 +470,9 @@ async def create_asset_from_artifact(
         ),
         request_key=idempotency_key,
     )
+    response = _asset_read(asset, tags=await _asset_tag_names(session, asset.id))
     await session.commit()
-    return _asset_read(asset, tags=await _asset_tag_names(session, asset.id))
+    return response
 
 
 @router.get("/projects/{project_id}/assets/{asset_id}/card", response_model=AssetCardRead)

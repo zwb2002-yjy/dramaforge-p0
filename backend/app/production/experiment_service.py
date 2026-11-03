@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access.models import Project
 from app.assets.models import Shot
 from app.execution.branches import experiment_id as run_experiment_id
 from app.execution.models import Artifact, GraphNode, NodeRun
@@ -80,6 +81,9 @@ async def create_experiment_branch(
     actor_id: UUID,
     body: ExperimentCreateBody,
 ) -> ExperimentBranch:
+    if await session.scalar(select(Project.id).where(Project.id == project_id)
+                            .with_for_update()) is None:
+        raise NotFoundError("project not found")
     if any(key.startswith("_creation_") for key in body.parameters):
         raise ValidationAppError("reserved experiment parameter")
     prompt_override = body.parameters.get("prompt_override")

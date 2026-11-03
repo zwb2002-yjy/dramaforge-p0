@@ -127,7 +127,6 @@ export type HealthResponse = {
   version: string;
   env: string;
   db?: string;
-  db_error?: string;
 };
 
 export function fetchHealth(): Promise<HealthResponse> {

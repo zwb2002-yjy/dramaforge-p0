@@ -500,13 +500,20 @@ class RepairService:
                 "video repair requires a formal keyframe", details={"code": "NO_FORMAL_KEYFRAME"}
             )
         stage: Literal["image_keyframe", "video"] = "image_keyframe" if image else "video"
+        prompt = (
+            (shot.image_prompt if image else shot.video_prompt) or shot.visual_description
+        ).strip()
+        if not prompt:
+            # A blank prompt is a user-facing precheck failure, not a server error.
+            raise ValidationAppError(
+                "this shot has no prompt to repair",
+                details={"code": "REPAIR_PROMPT_MISSING", "shot_id": str(shot.id)},
+            )
         return WorkbenchExecutionInput(
             project_id=project.id,
             shot_id=shot.id,
             stage=stage,
-            prompt=(
-                (shot.image_prompt if image else shot.video_prompt) or shot.visual_description
-            ).strip(),
+            prompt=prompt,
             semantic_intent={
                 "intent": "shot_keyframe" if image else "shot_video",
                 "repair": request.option,

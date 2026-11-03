@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.assets.models import Episode, Scene, Shot
 from app.director.workflows.contracts import (
@@ -92,18 +92,22 @@ class ShotWorkflowState(BaseModel):
         return self.workflow_template_key is not None
 
 
-def _load_participations(director_state: dict[str, object]) -> list[ParticipationEntry]:
+def _load_participations(
+    director_state: dict[str, object],
+) -> tuple[list[ParticipationEntry], bool]:
     raw = director_state.get("workflow_participations")
     entries: list[ParticipationEntry] = []
+    invalid = raw is not None and not isinstance(raw, list)
     if isinstance(raw, list):
         for item in raw:
             if not isinstance(item, dict):
+                invalid = True
                 continue
             try:
                 entries.append(ParticipationEntry.model_validate(item))
-            except Exception:  # noqa: BLE001 - read model must never fail a page
-                continue
-    return entries
+            except ValidationError:
+                invalid = True
+    return entries, invalid
 
 
 def _resolve_template(
@@ -166,39 +170,33 @@ def build_shot_workflow_state(
         if isinstance(template_key_raw, str) and template_key_raw
         else None
     )
-    participations = _load_participations(state)
+    participations, invalid_participations = _load_participations(state)
     visible_count = sum(
         1 for item in participations if item.screen_role != "offscreen"
     )
 
     resolution, spec = _resolve_template(template_key=template_key, registry=registry)
 
-    assessment: CapabilityAssessmentSummary | None = None
-    if assessment_manifest is not None and visible_count > 0:
-        from app.director.workflows.character_participation import (
-            ScreenRole,
-            ShotCharacterParticipation,
-            ShotParticipationPlan,
-        )
+    from app.director.workflows.character_participation import (
+        ShotCharacterParticipation,
+        ShotParticipationPlan,
+    )
 
+    try:
         plan = ShotParticipationPlan(
             participations=[
-                ShotCharacterParticipation(
-                    asset_id=UUID(entry.asset_id),
-                    asset_version_id=(
-                        UUID(entry.asset_version_id) if entry.asset_version_id else None
-                    ),
-                    screen_role=ScreenRole(entry.screen_role),
-                    importance=entry.importance,
-                    wardrobe_asset_version_id=(
-                        UUID(entry.wardrobe_asset_version_id)
-                        if entry.wardrobe_asset_version_id
-                        else None
-                    ),
-                )
+                ShotCharacterParticipation.model_validate(entry.model_dump(mode="json"))
                 for entry in participations
             ]
         )
+    except ValueError:
+        invalid_participations = True
+        # Empty input is used only to read the model's actual capacity below;
+        # the stored participation remains unchanged and is marked unsupported.
+        plan = ShotParticipationPlan(participations=[])
+
+    assessment: CapabilityAssessmentSummary | None = None
+    if assessment_manifest is not None and (visible_count > 0 or invalid_participations):
         from app.providers.capabilities import Capability
 
         result = assess_multi_character_capability(
@@ -208,11 +206,14 @@ def build_shot_workflow_state(
             plan=plan,
         )
         assessment = CapabilityAssessmentSummary(
-            status=result.status.value,
-            required_subject_references=result.required_subject_references,
+            status="UNSUPPORTED" if invalid_participations else result.status.value,
+            required_subject_references=(visible_count if invalid_participations
+                                         else result.required_subject_references),
             max_subject_references=result.max_subject_references,
-            reason=result.reason,
-            approximate_strategy_id=result.approximate_strategy_id,
+            reason=("已保存的角色参与数据无效，请检查角色、身份版本与唯一性后重新保存。"
+                    if invalid_participations else result.reason),
+            approximate_strategy_id=(None if invalid_participations
+                                     else result.approximate_strategy_id),
         )
 
     return ShotWorkflowState(

@@ -23,6 +23,11 @@ Director Runtime 是**独立于生产执行的编排 runtime**：它驱动导演
 三种身份不得混淆：DirectorThread（对话容器）、DirectorTurn（轮次业务身份）、
 `runtime_execution_id`（实现层检查点执行身份，与 Turn 及 engine_version 绑定）。
 
+接受提案时先按 Project → Proposal → 目标行顺序加锁；目标行刷新后检查版本，
+两个提案不能同时覆盖同一版本。引用命令校验 Asset 的项目以及待删除 Binding 的 Shot 归属。
+`editing.repair_proposal` 是有界的需求确认：重验 EditSession 版本、时间线镜头及项目归属后，
+只登记提案决议，不修改时间线或生产事实，不创建 NodeRun；实际 Repair 仍需独立用户确认。
+
 ## 引擎与检查点
 
 - `DIRECTOR_RUNTIME_ENGINE` 只接受 `langgraph`；执行、重放和恢复没有第二种引擎。

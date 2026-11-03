@@ -4,12 +4,41 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
 from app.shared.security import CSRF_HEADER
 from fastapi.testclient import TestClient
 
 
 def _csrf(client: TestClient) -> str:
     return str(client.get("/api/v1/auth/csrf").json()["csrf_token"])
+
+
+@pytest.mark.parametrize("operation", ["create", "update"])
+def test_reference_rejects_foreign_experiment_branch(client: TestClient, operation: str) -> None:
+    project_id, shot_id, asset_id = _project_with_shot_and_asset(client)
+    workspace_id = client.headers["X-Workspace-Id"]
+    other = client.post("/api/v1/projects",
+        json={"workspace_id": workspace_id, "name": "Other", "aspect_ratio": "16:9"},
+        headers={CSRF_HEADER: _csrf(client)})
+    assert other.status_code == 201, other.text
+    branch = client.post(f"/api/v1/projects/{other.json()['id']}/experiments",
+        json={"name": "Foreign", "idempotency_key": f"foreign-{uuid4()}"},
+        headers={CSRF_HEADER: _csrf(client)})
+    assert branch.status_code == 201, branch.text
+    base = {"purpose": "identity", "asset_id": asset_id, "resolution_mode": "current_formal"}
+    if operation == "create":
+        response = client.post(f"/api/v1/projects/{project_id}/shots/{shot_id}/references",
+            json={**base, "experiment_branch_id": branch.json()["id"]},
+            headers={CSRF_HEADER: _csrf(client)})
+    else:
+        created = client.post(f"/api/v1/projects/{project_id}/shots/{shot_id}/references",
+            json=base, headers={CSRF_HEADER: _csrf(client)})
+        assert created.status_code == 201, created.text
+        response = client.patch(f"/api/v1/projects/{project_id}/references/{created.json()['id']}",
+            json={"expected_version": 1, "experiment_branch_id": branch.json()["id"]},
+            headers={CSRF_HEADER: _csrf(client)})
+    assert response.status_code == 422, response.text
+    assert response.json()["details"]["code"] == "REFERENCE_PROJECT_MISMATCH"
 
 
 def _project_with_shot_and_asset(client: TestClient) -> tuple[str, str, str]:

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
 from app.execution.models import NodeRun, ProviderOperation
+from app.execution.synchronous_results import synchronous_image_receipt
 from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.execution_contract import execution_contract_gaps
@@ -67,6 +68,11 @@ async def inspect_provider_operation(
     session: AsyncSession, *, operation: ProviderOperation, run: NodeRun, workspace_id: UUID
 ) -> ProviderRecoveryAuditRow:
     gaps: list[str] = []
+    receipt = None
+    try:
+        receipt = synchronous_image_receipt(run=run, operation=operation)
+    except ValidationAppError:
+        gaps.append("SYNCHRONOUS_RESULT_INVALID")
     if operation.node_run_id != run.id:
         gaps.append("EXECUTION_OPERATION_OWNER_MISMATCH")
     if (
@@ -76,7 +82,7 @@ async def inspect_provider_operation(
         gaps.append("PROVIDER_SUBMISSION_UNKNOWN")
     if operation.status == "unknown_submission":
         gaps.append("PROVIDER_SUBMISSION_UNKNOWN")
-    if not operation.provider_operation_id:
+    if not operation.provider_operation_id and receipt is None:
         gaps.append("REMOTE_IDENTITY_MISSING")
     copies = [
         (operation.selection_plan or {}).get("execution_identity"),
@@ -94,6 +100,8 @@ async def inspect_provider_operation(
         except ValueError:
             gaps.append("EXECUTION_IDENTITY_INVALID")
     if identity is not None:
+        if receipt is not None and identity.capability != "image.generate":
+            gaps.append("SYNCHRONOUS_RESULT_INVALID")
         gaps.extend(execution_contract_gaps(identity.execution_contract))
         try:
             require_operation_identity(identity, operation)
@@ -158,21 +166,22 @@ async def inspect_provider_operation(
             ).first()
             if credential is None or credential.workspace_id != workspace_id:
                 gaps.append("EXECUTION_IDENTITY_CREDENTIAL_UNAVAILABLE")
-    try:
-        resume = ProviderResumeToken.model_validate(operation.resume_token)
-    except ValueError:
-        gaps.append("RESUME_TOKEN_UNAVAILABLE")
-    else:
+    if receipt is None:
         try:
-            require_resume_token_identity(
-                resume,
-                remote_task_id=operation.provider_operation_id,
-                provider_type=operation.actual_provider,
-                protocol_profile=operation.protocol_profile,
-                remote_secondary_id=operation.remote_secondary_id,
-            )
-        except ValidationAppError:
-            gaps.append("RESUME_TOKEN_IDENTITY_MISMATCH")
+            resume = ProviderResumeToken.model_validate(operation.resume_token)
+        except ValueError:
+            gaps.append("RESUME_TOKEN_UNAVAILABLE")
+        else:
+            try:
+                require_resume_token_identity(
+                    resume,
+                    remote_task_id=operation.provider_operation_id,
+                    provider_type=operation.actual_provider,
+                    protocol_profile=operation.protocol_profile,
+                    remote_secondary_id=operation.remote_secondary_id,
+                )
+            except ValidationAppError:
+                gaps.append("RESUME_TOKEN_IDENTITY_MISMATCH")
     return ProviderRecoveryAuditRow(
         operation_id=operation.id,
         node_run_id=run.id,

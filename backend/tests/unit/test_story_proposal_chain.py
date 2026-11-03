@@ -341,3 +341,36 @@ def test_story_proposal_api_create_preview_and_apply(client: TestClient) -> None
     assert workspace_after.json()["document"] is not None
     assert len(workspace_after.json()["episodes"]) == 1
     assert len(workspace_after.json()["episodes"][0]["scenes"]) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", ["draft", "brief", "filename"])
+async def test_story_key_cannot_be_reused_for_a_different_request(
+    session: AsyncSession, changed: str,
+) -> None:
+    from app.shared.errors import ConflictError
+    project, user = await _seed(session)
+    request = dict(project_id=project.id, actor=user, brief="first", filename="first.md",
+                   draft_text=DRAFT, idempotency_key="same-request")
+    first = await create_story_proposal(session, **request)
+    replay = await create_story_proposal(session, **request)
+    assert replay.proposal.id == first.proposal.id
+    field = {"draft": "draft_text", "brief": "brief", "filename": "filename"}[changed]
+    request[field] += " changed"
+    with pytest.raises(ConflictError):
+        await create_story_proposal(session, **request)
+
+
+@pytest.mark.asyncio
+async def test_story_apply_rejects_edit_session_scope(session: AsyncSession) -> None:
+    from app.api.v1.story import apply_project_story_proposal
+    from app.shared.errors import NotFoundError
+    project, user = await _seed(session)
+    result = await create_story_proposal(session, project_id=project.id, actor=user,
+        brief="test", filename="draft.md", draft_text=DRAFT, idempotency_key="scope")
+    result.proposal.scope_type = "edit_session"
+    await session.flush()
+    with pytest.raises(NotFoundError):
+        await apply_project_story_proposal(project_id=project.id, proposal_id=result.proposal.id,
+            body=PartialApplyInput(decisions=[ProposalDecision(item_id=result.items[0].id,
+                decision="accepted")]), user=user, session=session, _csrf=None)

@@ -571,8 +571,10 @@ export function ShotProductionActions({
       setApproximationsAccepted(true);
       setPreflightDrawerStage(stage);
     },
-    onError: (error) => {
-      const stage = pendingApproximation?.input.stage ?? "image_keyframe";
+    onError: (error, prepared) => {
+      // Read the stage from this attempt's own variables: pendingApproximation
+      // may already be cleared or replaced by the time the rejection arrives.
+      const stage = prepared.input.stage;
       setFeedback({ kind: "error", stage, message: errorMessage(error) });
     },
   });

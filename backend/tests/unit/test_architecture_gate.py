@@ -102,7 +102,10 @@ def test_reference_contract_is_the_same_class_for_existing_compiler_consumers():
 
 def test_full_and_fast_container_gates_enforce_dependencies():
     command = "python3 scripts/arch_import_scan.py --check"
+    # The quality image CMD runs the scan; the workflow must execute that exact
+    # image for the exact-source gate (the old dev-only fast jobs were removed
+    # because PR CI only listens on main).
     assert command in (ROOT / "backend/Dockerfile.quality").read_text()
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
-    assert command in workflow
+    assert "--exit-code-from backend-quality" in workflow
     assert "scripts/arch_import_scan.py|scripts/architecture-baseline.json" in workflow

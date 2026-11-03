@@ -16,6 +16,16 @@ driver = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(driver)
 
 
+def _stub_git(monkeypatch, changed_paths):
+    """Return synthetic git output for the two refs used by promotion tests."""
+
+    class _Result:
+        returncode = 0
+        stdout = "\n".join(changed_paths)
+
+    monkeypatch.setattr(driver.subprocess, "run", lambda *args, **kwargs: _Result())
+
+
 def test_evidence_removes_secrets_and_signed_url_queries():
     result = driver.sanitized(
         {
@@ -23,11 +33,21 @@ def test_evidence_removes_secrets_and_signed_url_queries():
             "headers": {"X-Api-Key": "hidden", "X-CSRF-Token": "hidden"},
             "url": "https://user:pass@example.com/path?signature=secret#fragment",
             "text": "sk-abcdefghijklmnop",
+            "env": {
+                "MINIO_SECRET_KEY": "hidden",
+                "MINIO_ROOT_PASSWORD": "hidden",
+                "LITELLM_SALT_KEY": "hidden",
+            },
+            "authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.c2lnbmF0dXJl",
+            "token_usage": {"total_tokens": 88},
         }
     )
     encoded = json.dumps(result)
     assert "hidden" not in encoded and "signature" not in encoded and "user:pass" not in encoded
     assert "https://example.com/path" in encoded and "sk-abc" not in encoded
+    assert "eyJhbGci" not in encoded
+    # Useful, non-secret counters survive the stricter composite-key filter.
+    assert result["token_usage"] == {"total_tokens": 88}
 
 
 def test_paid_phase_requires_opt_in_before_checkpoint_or_http(tmp_path):
@@ -232,7 +252,10 @@ def test_unknown_free_video_is_revised_with_distinct_request_and_never_replayed(
                 json={
                     "plan": {"capability_gaps": []},
                     "plan_fingerprint": "plan-new",
-                    "compiler_contract_preview": {"wire_fingerprint": "d" * 64},
+                    "compiler_contract_preview": {
+                        "readiness": "contract_validated",
+                        "wire_fingerprint": "d" * 64,
+                    },
                 },
             )
         if request.method == "POST" and path.endswith("/executions"):
@@ -334,7 +357,10 @@ def test_review_submit_uses_staged_repair_api_and_marks_only_step_as_paid(tmp_pa
             "review:repair-step-plan": {
                 "step_ordinal": 1,
                 "plan": {"plan_fingerprint": "b" * 64},
-                "compiler_contract_preview": {"wire_fingerprint": "d" * 64},
+                "compiler_contract_preview": {
+                    "readiness": "contract_validated",
+                    "wire_fingerprint": "d" * 64,
+                },
             },
             "review:repair-submit": {"node_run_id": "repair-run-1"},
         }
@@ -361,20 +387,24 @@ def test_review_submit_uses_staged_repair_api_and_marks_only_step_as_paid(tmp_pa
     assert run.state["review_repair"]["repair_run_id"] == "repair-run-1"
 
 
-def test_candidate_promotion_preserves_prior_media_source_with_bounded_proof(tmp_path):
+def test_candidate_promotion_preserves_prior_media_source_with_bounded_proof(
+    tmp_path, monkeypatch
+):
     previous = "a" * 40
     candidate = "b" * 40
+    changed_paths = [
+        "backend/app/execution/artifact_lineage.py",
+        "backend/tests/integration/test_artifact_lineage_pg.py",
+        "scripts/prove_v1_r7_acceptance.py",
+    ]
+    _stub_git(monkeypatch, changed_paths)
     proof_path = tmp_path / "candidate-equivalence.json"
     proof_path.write_text(
         json.dumps(
             {
                 "previous_candidate": previous,
                 "candidate_sha": candidate,
-                "changed_paths": [
-                    "backend/app/execution/artifact_lineage.py",
-                    "backend/tests/integration/test_artifact_lineage_pg.py",
-                    "scripts/prove_v1_r7_acceptance.py",
-                ],
+                "changed_paths": changed_paths,
                 "provider_submission_diff_empty": True,
                 "full_quality_gate": "PASS",
                 "concurrent_artifact_pg_regression": "PASS",
@@ -400,7 +430,7 @@ def test_candidate_promotion_preserves_prior_media_source_with_bounded_proof(tmp
     assert run.state["assertions"]["candidate_source_equivalence"] == "PASS"
 
 
-def test_candidate_promotion_accepts_only_bounded_formal_composite_fix(tmp_path):
+def test_candidate_promotion_accepts_only_bounded_formal_composite_fix(tmp_path, monkeypatch):
     previous = "a" * 40
     candidate = "b" * 40
     proof_path = tmp_path / "candidate-equivalence.json"
@@ -414,6 +444,7 @@ def test_candidate_promotion_accepts_only_bounded_formal_composite_fix(tmp_path)
         "backend/tests/unit/test_r7_acceptance_driver.py",
         "scripts/prove_v1_r7_acceptance.py",
     ]
+    _stub_git(monkeypatch, changed_paths)
     proof_path.write_text(
         json.dumps(
             {
@@ -446,6 +477,44 @@ def test_candidate_promotion_accepts_only_bounded_formal_composite_fix(tmp_path)
     assert run.state["candidate_history"][-1]["reason"] == ("formal_composite_repair_isolation")
 
 
+def test_candidate_promotion_rejects_paths_outside_the_real_diff(tmp_path, monkeypatch):
+    previous = "a" * 40
+    candidate = "b" * 40
+    _stub_git(monkeypatch, ["backend/app/execution/artifact_lineage.py"])
+    proof_path = tmp_path / "candidate-equivalence.json"
+    proof_path.write_text(
+        json.dumps(
+            {
+                "previous_candidate": previous,
+                "candidate_sha": candidate,
+                "changed_paths": [
+                    "backend/app/execution/artifact_lineage.py",
+                    "backend/tests/integration/test_artifact_lineage_pg.py",
+                ],
+                "provider_submission_diff_empty": True,
+                "full_quality_gate": "PASS",
+                "concurrent_artifact_pg_regression": "PASS",
+            }
+        ),
+        encoding="utf-8",
+    )
+    with httpx.Client() as client:
+        run = driver.Acceptance(client, tmp_path / "state.json", real=True)
+        run.state["candidate_sha"] = previous
+        run.state["assertions"].update(
+            {
+                "template_auto:formal_media": "PASS",
+                "free_assist:formal_media": "PASS",
+            }
+        )
+        run.save()
+
+        with pytest.raises(RuntimeError, match="absent from the real commit diff"):
+            run.promote_candidate(candidate, proof_path)
+
+    assert run.state["candidate_sha"] == previous
+
+
 def test_local_editing_recovery_rejects_unrelated_failure_before_http(tmp_path):
     with httpx.Client() as client:
         run = driver.Acceptance(client, tmp_path / "state.json", real=False)
@@ -472,3 +541,52 @@ def test_remote_media_operations_include_canonical_keyframe_kind():
         driver.Acceptance.remote_media_operations({"provider_operations": operations})
         == (operations[:2])
     )
+
+
+def test_local_ffprobe_verifies_the_downloaded_bytes(tmp_path):
+    import shutil
+    import subprocess
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        pytest.skip("ffmpeg is required to build an independent probe fixture")
+    clip = tmp_path / "clip.mp4"
+    subprocess.run(
+        [
+            ffmpeg,
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=red:s=160x90:r=12",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=22050",
+            "-t",
+            "0.8",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            str(clip),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    probe = driver.local_ffprobe(clip.read_bytes())
+    assert probe["video_codec"] == "h264"
+    assert probe["audio_codec"] == "aac"
+    assert 0.5 <= float(probe["duration_seconds"]) <= 1.5
+
+
+def test_local_ffprobe_fails_closed_without_the_binary(monkeypatch):
+    monkeypatch.setattr(driver.shutil, "which", lambda _name: None)
+    with pytest.raises(RuntimeError, match="ffprobe is required"):
+        driver.local_ffprobe(b"not a video")

@@ -14,7 +14,11 @@ function json(route: Route, body: unknown, status = 200) {
  * review run, which is exactly what the person sees after regenerating a Shot
  * whose previous review already ran.
  */
-async function installMock(page: Page, state: { evidencePosts: number; summaryCalls: number }) {
+async function installMock(
+  page: Page,
+  state: { evidencePosts: number; summaryCalls: number; unmatched?: string[] },
+) {
+  state.unmatched = [];
   await page.addInitScript((workspaceId) => {
     sessionStorage.setItem("dramaforge.selected-workspace-id", workspaceId);
   }, WORKSPACE_ID);
@@ -25,6 +29,25 @@ async function installMock(page: Page, state: { evidencePosts: number; summaryCa
     const path = url.pathname;
     const method = request.method();
     if (path === "/health") return json(route, { status: "ok", db: "up" });
+    // Explicit background surfaces the Review workspace reads. They stay
+    // explicit so the catch-all below really means "unexpected request".
+    if (path === `/api/v1/projects/${PROJECT_ID}`) return json(route, { id: PROJECT_ID });
+    if (path === "/api/v1/events/stream") {
+      return route.fulfill({ status: 200, contentType: "text/event-stream", body: "" });
+    }
+    if (path === `/api/v1/projects/${PROJECT_ID}/workspace-state`) {
+      return json(route, method === "PATCH" ? {} : { selected_shot_id: null });
+    }
+    if (path.includes("/artifacts/") && path.endsWith("/content")) {
+      return route.fulfill({
+        status: 200,
+        contentType: "image/png",
+        body: Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+          "base64",
+        ),
+      });
+    }
     if (path.endsWith("/auth/csrf")) return json(route, { csrf_token: "csrf-e2e" });
     if (path.endsWith("/auth/me")) {
       return json(route, {
@@ -113,12 +136,15 @@ async function installMock(page: Page, state: { evidencePosts: number; summaryCa
     }
     if (path.endsWith("/annotations") && method === "GET") return json(route, []);
     if (path.endsWith("/artifacts") && method === "GET") return json(route, []);
+    // Unknown API calls are recorded and asserted empty by the test instead of
+    // being silently satisfied with 200 {}.
+    state.unmatched!.push(`${method} ${path}`);
     return json(route, {});
   });
 }
 
 test("a candidate without review evidence can obtain the review it needs", async ({ page }) => {
-  const state = { evidencePosts: 0, summaryCalls: 0 };
+  const state = { evidencePosts: 0, summaryCalls: 0, unmatched: [] as string[] };
   await installMock(page, state);
   await page.goto(
     `/projects/${PROJECT_ID}/review?shotId=${SHOT_ID}&artifactId=${ARTIFACT_ID}&stage=formal_keyframe&reviewKind=identity`,
@@ -139,4 +165,5 @@ test("a candidate without review evidence can obtain the review it needs", async
     .getByRole("textbox", { name: "关键帧身份审查判断理由" })
     .fill("Owner 人工审查：通过。");
   await expect(page.getByTestId("review-approve-identity")).toBeEnabled();
+  expect(state.unmatched).toEqual([]);
 });

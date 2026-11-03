@@ -11,9 +11,8 @@ import asyncio
 import json
 import os
 
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from app.providers.catalog_sync import sync_model_catalog
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 async def _run(*, apply: bool) -> None:

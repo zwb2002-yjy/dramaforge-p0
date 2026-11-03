@@ -65,7 +65,8 @@ async def test_ark_image_t2i_path_and_body() -> None:
     assert "image" not in body  # T2I sends no reference array
     assert result.status == "succeeded"
     assert result.artifact_uri == "https://tos.example.com/a.png"
-    assert result.resume_token.protocol_profile == "ark_cn_v1"
+    assert result.remote_task_id is None
+    assert result.resume_token is None
     assert client.provider == "volcengine"
 
 

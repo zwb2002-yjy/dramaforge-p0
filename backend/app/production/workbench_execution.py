@@ -235,7 +235,7 @@ async def _queue_stage_review_run(
         select(GraphNode).where(
             GraphNode.graph_version_id == run.graph_version_id,
             GraphNode.node_key == review_key,
-        )
+        ).with_for_update()
     )
     if node is None:
         # The graph was published without the review node (a shot created before
@@ -2074,9 +2074,14 @@ class WorkbenchExecutionService:
             (
                 await self._session.execute(
                     select(NodeRun)
+                    .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
                     .where(
                         NodeRun.project_id == project_id,
                         NodeRun.input_snapshot["shot_id"].as_string() == str(shot_id),
+                        GraphNode.node_type == (
+                            "keyframe" if stage == "image_keyframe" else "video"
+                        ),
+                        NodeRun.input_snapshot["workbench_plan"]["stage"].as_string() == stage,
                     )
                     .order_by(NodeRun.created_at.desc())
                     .limit(limit)

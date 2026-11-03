@@ -277,18 +277,12 @@ export function ProductionPage({
                     await startExperiment(projectId, experimentId, targetNodeKey);
                     await qc.invalidateQueries({ queryKey: queryKeys.experiment.list(projectId) });
                     await qc.invalidateQueries({
-                      queryKey: queryKeys.production.snapshot(projectId),
-                    });
-                    await qc.invalidateQueries({
                       queryKey: queryKeys.production.summary(projectId),
                     });
                   }}
                   onDecideExperiment={async (experimentId, input) => {
                     await decideExperiment(projectId, experimentId, input);
                     await qc.invalidateQueries({ queryKey: queryKeys.experiment.list(projectId) });
-                    await qc.invalidateQueries({
-                      queryKey: queryKeys.production.snapshot(projectId),
-                    });
                     await qc.invalidateQueries({
                       queryKey: queryKeys.production.summary(projectId),
                     });

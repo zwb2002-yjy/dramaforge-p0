@@ -207,7 +207,10 @@ export function listModelSlots(): Promise<ModelSlotRead[]> {
 }
 
 export function listWorkspaceModelProfiles(workspaceId: string): Promise<ModelProfileSummary[]> {
-  return apiGet(`/api/v1/workspaces/${workspaceId}/model-profiles`, workspaceId);
+  return apiGetList<ModelProfileSummary>(
+    `/api/v1/workspaces/${workspaceId}/model-profiles`,
+    workspaceId,
+  );
 }
 
 export function getWorkspaceModelProfile(
@@ -266,7 +269,7 @@ export async function putProjectModelProfile(
 }
 
 export function getEffectiveBindings(projectId: string): Promise<EffectiveBindingRead[]> {
-  return apiGet(`/api/v1/projects/${projectId}/model-bindings/effective`);
+  return apiGetList<EffectiveBindingRead>(`/api/v1/projects/${projectId}/model-bindings/effective`);
 }
 
 export function getExecutionModelPreflight(

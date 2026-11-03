@@ -303,7 +303,11 @@ async def list_resumable_provider_node_run_rls_scopes(
                 ProviderOperation.status.in_(
                     {"submitted", "running", "timed_out", "cancel_requested"}
                 )
-                & ProviderOperation.provider_operation_id.is_not(None),
+                & or_(
+                    ProviderOperation.provider_operation_id.is_not(None),
+                    ProviderOperation.response_summary["synchronous_result"]["schema_version"]
+                    .as_integer() == 1,
+                ),
                 (ProviderOperation.status == "submission_started")
                 & ProviderOperation.provider_operation_id.is_(None)
                 & (ProviderOperation.created_at < cutoff),

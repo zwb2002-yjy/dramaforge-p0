@@ -73,7 +73,8 @@ async def get_shot_workflow_state(
         session, project_id=project_id, shot_id=shot_id, actor_user=user
     )
     project = await session.get(Project, project_id)
-    assert project is not None
+    if project is None:
+        raise NotFoundError("project not found")
     assessment_manifest: ModelManifest | None = None
     try:
         manifest = await resolve_project_keyframe_manifest(

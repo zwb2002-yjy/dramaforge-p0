@@ -344,7 +344,9 @@ class ShotHumanLock(Base):
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
-    shot_id: Mapped[UUID] = mapped_column(nullable=False)
+    shot_id: Mapped[UUID] = mapped_column(
+        ForeignKey("shots.id", ondelete="CASCADE"), nullable=False
+    )
     locked: Mapped[bool] = mapped_column(nullable=False, default=True)
     locked_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True

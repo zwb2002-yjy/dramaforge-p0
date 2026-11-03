@@ -67,7 +67,8 @@ class GeneratedStoryProposalRead(BaseModel):
 
 
 def _operation_read(item: DirectorProposalItem) -> StoryOperationRead:
-    payload = dict(item.payload or {})
+    payload = {key: value for key, value in (item.payload or {}).items()
+               if key != "_story_request_fingerprint"}
     return StoryOperationRead(
         id=item.id,
         command=item.command,
@@ -252,6 +253,7 @@ async def apply_project_story_proposal(
         select(DirectorProposal).where(
             DirectorProposal.id == proposal_id,
             DirectorProposal.project_id == project.id,
+            DirectorProposal.scope_type == "project",
         )
     )
     if proposal is None:

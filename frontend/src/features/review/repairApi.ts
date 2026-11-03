@@ -97,10 +97,13 @@ function repairPath(projectId: string, shotId: string, repairId?: string): strin
   return repairId ? `${path}/${encodeURIComponent(repairId)}` : path;
 }
 
-export function fetchRepairPlan(projectId: string, shotId: string): Promise<RepairPlanRead> {
+export async function fetchRepairPlan(projectId: string, shotId: string): Promise<RepairPlanRead> {
+  const csrf = await fetchCsrf();
   return apiSend<RepairPlanRead>(
     "POST",
     `/api/v1/projects/${encodeURIComponent(projectId)}/shots/${encodeURIComponent(shotId)}/repair-plan`,
+    undefined,
+    csrf,
   );
 }
 
@@ -126,16 +129,18 @@ export async function createRepair(
 }
 
 /** No provider call. Omit the body for the default, unaccepted approximation preview. */
-export function previewRepairStep(
+export async function previewRepairStep(
   projectId: string,
   shotId: string,
   repairId: string,
   input?: RepairStepPlanBody,
 ): Promise<RepairStepPlanRead> {
+  const csrf = await fetchCsrf();
   return apiSend<RepairStepPlanRead>(
     "POST",
     `${repairPath(projectId, shotId, repairId)}/step-plan`,
     input,
+    csrf,
   );
 }
 

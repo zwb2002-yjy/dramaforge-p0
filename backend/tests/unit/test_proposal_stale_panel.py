@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
-from app.assets.models import Shot
+from app.assets.models import Asset, Shot
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.proposal_service import PartialApplyInput, ProposalDecision, ProposalService
 from app.production.models import ExperimentBranch, ShotReferenceBinding
@@ -68,6 +68,10 @@ async def _proposal_with_items(
     shot: Shot,
     user: User,
 ) -> tuple[DirectorProposal, dict[str, DirectorProposalItem]]:
+    reference_asset = Asset(project_id=project.id, kind="character",
+                            name=f"Proposal reference {uuid4().hex[:8]}")
+    session.add(reference_asset)
+    await session.flush()
     proposal = DirectorProposal(
         project_id=project.id,
         thread_id=uuid4(),
@@ -98,7 +102,8 @@ async def _proposal_with_items(
         proposal_id=proposal.id,
         project_id=project.id,
         command="shot_reference.add",
-        payload={"shot_id": str(shot.id), "purpose": "identity", "asset_id": str(uuid4())},
+        payload={"shot_id": str(shot.id), "purpose": "identity",
+                 "asset_id": str(reference_asset.id)},
         expected_target_version=shot.version,
         status="pending",
     )
@@ -168,11 +173,8 @@ async def test_phase7_gate_manual_edit_makes_old_proposal_stale(session: AsyncSe
     await session.flush()
 
     service = ProposalService(session, actor=user)
-    marked = await service.mark_proposals_stale_for_shot(
-        project_id=project.id, shot_id=shot.id, current_version=shot.version
-    )
-    assert marked == 3
-    # old accepted attempt is recorded as failed (stale), never applied
+    # The apply-time CAS is the gate: the item's expected version is behind the
+    # saved shot, so applying it must refuse and mark it stale.
     result = await service.partial_apply(
         project=project,
         proposal_id=proposal.id,

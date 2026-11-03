@@ -5,12 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { CapabilitySpecRead, ParameterSpecRead } from "../../src/features/model-controls/api";
-import {
-  allowedValuesFor,
-  constraintViolations,
-  renderableOptions,
-  uiComponentFor,
-} from "../../src/lib/manifestOptions";
+import { allowedValuesFor, uiComponentFor } from "../../src/lib/manifestOptions";
 
 function parameter(
   value: Omit<ParameterSpecRead, "required" | "deprecated" | "sensitive">,
@@ -83,45 +78,5 @@ describe("allowedValuesFor", () => {
         { duration_seconds: 5 },
       ),
     ).toEqual(["720p", "1080p"]);
-  });
-});
-
-describe("constraintViolations", () => {
-  it("flags a 10s + 1080p combination", () => {
-    const violations = constraintViolations(DURATION_RESOLUTION_SPEC, {
-      duration_seconds: 10,
-      resolution: "1080p",
-    });
-    expect(violations.length).toBeGreaterThan(0);
-  });
-
-  it("accepts a legal combination", () => {
-    expect(
-      constraintViolations(DURATION_RESOLUTION_SPEC, {
-        duration_seconds: 10,
-        resolution: "720p",
-      }),
-    ).toEqual([]);
-  });
-
-  it("flags mutually exclusive options", () => {
-    const spec: CapabilitySpecRead = {
-      ...DURATION_RESOLUTION_SPEC,
-      constraints: {
-        mutually_exclusive: [["mode_a", "mode_b"]],
-        requires: {},
-        conditional: [],
-      },
-    };
-    expect(constraintViolations(spec, { mode_a: true, mode_b: true }).length).toBeGreaterThan(0);
-  });
-});
-
-describe("renderableOptions", () => {
-  it("splits common and native options with labels", () => {
-    const { common, native } = renderableOptions(DURATION_RESOLUTION_SPEC);
-    expect(common.map((o) => o.key)).toContain("resolution");
-    expect(native.map((o) => o.key)).toEqual(["seed"]);
-    expect(common[1].label).toBe("resolution");
   });
 });

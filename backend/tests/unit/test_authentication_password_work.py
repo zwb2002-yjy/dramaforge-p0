@@ -6,7 +6,7 @@ import pytest
 from app.access.models import User
 from app.access.service import AccessService
 from app.shared.errors import UnauthorizedError
-from app.shared.security import hash_password
+from app.shared.security import PASSWORD_HASH_ITERATIONS, hash_password
 
 
 @pytest.mark.parametrize("state", ["missing", "inactive", "wrong_password", "valid"])
@@ -39,7 +39,7 @@ async def test_authentication_does_exactly_one_password_kdf_for_every_identity(m
     else:
         with pytest.raises(UnauthorizedError, match="invalid credentials"):
             await service.authenticate(email="User@example.com", password=password)
-    assert calls == [120_000]
+    assert calls == [PASSWORD_HASH_ITERATIONS]
 
 
 def test_login_failures_have_identical_public_response_for_known_and_unknown_user(client):

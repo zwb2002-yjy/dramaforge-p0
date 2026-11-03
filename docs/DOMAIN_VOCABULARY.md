@@ -114,7 +114,7 @@ explicit user value > accepted proposal > project override > pack default
 | **DirectorInbox** | 传给导演的事件收件箱 | `director/inbox_models.py::DirectorInbox`、`inbox.py` |
 | **DirectorWakeup** | 唤醒导演的信号（含重放） | `director/inbox_models.py::DirectorWakeup`、`wakeup.py`、`wakeup_replay.py` |
 | **Director autonomy** | AUTO / ASSIST / MANUAL：**只是 Director 参与模式**，不创建第二条生产链 | `director/autonomy_policy.py`、`ProjectCreativeProfile.director_autonomy` |
-| **Checkpoint** | Director 轮次的可恢复检查点 | `director/runtime/checkpoint.py`、`business_checkpoints.py` |
+| **Checkpoint** | Director 轮次的可恢复检查点 | `director/runtime/checkpoint.py`；旧 BusinessCheckpoints 已退役 |
 
 **用户门（不可绕过）：** Apply / Save / Formal / Export。Director 自主度任何时候都
 不得绕过这四个显式用户门。
@@ -192,6 +192,6 @@ explicit user value > accepted proposal > project override > pack default
 
 | 词 | 现状 | 处置 |
 |---|---|---|
-| `Experiment`（`ExperimentBranch`） | 唯一当前实验分支；`ProductionExperiment` / `ShotExperiment` 为历史持久记录 | 旧 ORM 留存数据，不再拥有运行时创建、上下文或采用入口 |
+| `Experiment`（`ExperimentBranch`） | 唯一当前实验分支；旧 `ProductionExperiment` / `ShotExperiment` 已删除 | 旧 ORM/表不在当前 schema；历史实例数据与证据独立保留 |
 | `Node` 与 `GraphNode` | `Node` 是概念，`GraphNode` 是持久化实例 | KEEP，成对使用 |
 | `Workflow` | 仅存在于 `director/workflows/`，指"镜头生产模板目录" | RENAME/MERGE，见映射文档 |

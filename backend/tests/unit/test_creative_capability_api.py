@@ -88,3 +88,20 @@ def test_creation_choices_use_the_same_catalog_and_persist_via_api(client: TestC
     assert profile["selected_genre"] == genre_key
     assert profile["selected_style_ids"] == [style_key]
     assert profile["strategy_snapshot"]["creative_capabilities"]["compiled_hash"]
+
+
+def test_unknown_scene_and_shot_targets_are_not_found(client: TestClient) -> None:
+    """Missing Scene/Shot targets follow the global 404 convention, not 422."""
+    project_id = _project(client)
+    scene = client.get(
+        f"/api/v1/projects/{project_id}/creative-capabilities/provenance",
+        params={"scene_id": str(uuid4())},
+    )
+    assert scene.status_code == 404, scene.text
+    assert scene.json()["details"]["code"] == "SCENE_NOT_FOUND"
+    shot = client.get(
+        f"/api/v1/projects/{project_id}/creative-capabilities/provenance",
+        params={"shot_id": str(uuid4())},
+    )
+    assert shot.status_code == 404, shot.text
+    assert shot.json()["details"]["code"] == "SHOT_NOT_FOUND"

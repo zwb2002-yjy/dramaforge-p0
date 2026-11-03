@@ -107,7 +107,7 @@ Director 需要文本 LLM 才能工作，因此存在受限例外：
   `app.director.turn_service` 等 Director 业务模块。
 - 允许 `production → creative.contracts`：Production 可以消费 Creative 的**契约**
   （如引用意图、参与计划），但不得消费 Director Runtime 的会话/提案状态。
-- 现状有 4 条越界边，见映射文档 §4 问题 2。
+- 该方向当前有 2 条越界边，见映射文档 §4 问题 2；以 `arch_import_scan.py --violations` 为准。
 
 ### 4.5 Contract 层必须保持中立
 

@@ -121,11 +121,6 @@ export function parseShotCandidates(values: unknown): ShotCandidate[] {
   return parsed;
 }
 
-// Short aliases keep the read-side parser easy to reuse in focused tests and
-// older feature imports without introducing another candidate implementation.
-export const parseCandidate = parseShotCandidate;
-export const parseCandidates = parseShotCandidates;
-
 /** Only successful, available candidates can be shown as formal options. */
 export function isConfirmableShotCandidate(candidate: ShotCandidate): boolean {
   const status = candidate.status.toLowerCase();
@@ -134,8 +129,6 @@ export function isConfirmableShotCandidate(candidate: ShotCandidate): boolean {
     !candidate.storageState || AVAILABLE_STORAGE_STATES.has(candidate.storageState.toLowerCase())
   );
 }
-
-export const isArtifactMediaCandidate = isConfirmableShotCandidate;
 
 export function shotCandidateKey(candidate: Pick<ShotCandidate, "stage" | "artifactId">): string {
   return `${candidate.stage}:${candidate.artifactId}`;

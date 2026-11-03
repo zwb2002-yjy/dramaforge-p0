@@ -250,7 +250,7 @@ export function EditingWorkspace({
       setFeedback("时间线已保存。");
       setExported(null);
       clearAfterSave();
-      queryClient.setQueryData(["edit-session", projectId, sessionId], saved);
+      queryClient.setQueryData(queryKeys.editing.session(projectId, sessionId), saved);
       void queryClient.invalidateQueries({ queryKey: queryKeys.editing.sessions(projectId) });
     },
     onError: (error: unknown, input: TimelineSaveInput) => {

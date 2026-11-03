@@ -33,6 +33,7 @@ from app.events.models import OutboxDeadLetter, OutboxEvent
 from app.events.outbox import OutboxDispatcher, StreamPublisher
 from app.events.service import EventService
 from app.execution.models import GraphNode, NodeRun, ProviderOperation
+from app.execution.synchronous_results import synchronous_image_receipt
 from app.runtime.scheduler import NodeRunScheduler, RedisStreamPublisher
 from app.shared.enums import OutboxStatus
 from app.shared.errors import ConflictError, ForbiddenError, NotFoundError
@@ -156,7 +157,11 @@ async def list_recovery_items(
                     NodeRun.result_artifact_id.is_(None),
                     NodeRun.id.in_(
                         select(ProviderOperation.node_run_id).where(
-                            ProviderOperation.provider_operation_id.is_not(None)
+                            or_(
+                                ProviderOperation.provider_operation_id.is_not(None),
+                                ProviderOperation.response_summary["synchronous_result"]
+                                ["schema_version"].as_integer() == 1,
+                            )
                         )
                     ),
                 )
@@ -217,12 +222,14 @@ async def replay_media_node_run(
         select(ProviderOperation)
         .where(
             ProviderOperation.node_run_id == node_run_id,
-            ProviderOperation.provider_operation_id.is_not(None),
         )
-        .order_by(ProviderOperation.attempt_no.desc())
+        .order_by(ProviderOperation.attempt_no.desc(), ProviderOperation.created_at.desc())
         .limit(1)
     )
-    if operation is None:
+    if operation is None or operation.status == "unknown_submission" or (
+        not operation.provider_operation_id
+        and synchronous_image_receipt(run=run, operation=operation) is None
+    ):
         # Nothing remote to resume: a fresh retry would be a new paid
         # submission, which this surface deliberately does not perform.
         raise ConflictError(
@@ -235,29 +242,36 @@ async def replay_media_node_run(
     run.error_summary = None
     run.finished_at = None
     await session.flush()
-    await NodeRunScheduler(session).enqueue_node_run_only(node_run_id)
-    run.output_summary = {
-        **(run.output_summary or {}),
-        "recovery": {
-            "replayed_from": previous_status,
-            "operation_id": str(operation.id),
-            "resumed": True,
-        },
-    }
-    settings = get_settings()
-    if settings.app_env != "test":
-        await EventService(session).append_with_outbox(
-            project_id=project_id,
-            aggregate_type="node_run",
-            aggregate_id=node_run_id,
-            event_type="maintenance.media_node_run.replayed",
-            topic="maintenance.media_node_run.replayed",
-            payload={
-                "node_run_id": str(node_run_id),
-                "provider_operation_id": str(operation.id),
-                "actor_id": str(actor.id),
+
+    async def _record_replay() -> None:
+        # Runs inside the enqueue transaction: the queue transition and the
+        # audit fact that explains it are committed together, so a crash can
+        # never leave a replayed run without its audit record.
+        run.output_summary = {
+            **(run.output_summary or {}),
+            "recovery": {
+                "replayed_from": previous_status,
+                "operation_id": str(operation.id),
+                "resumed": True,
             },
-        )
+        }
+        if get_settings().app_env != "test":
+            await EventService(session).append_with_outbox(
+                project_id=project_id,
+                aggregate_type="node_run",
+                aggregate_id=node_run_id,
+                event_type="maintenance.media_node_run.replayed",
+                topic="maintenance.media_node_run.replayed",
+                payload={
+                    "node_run_id": str(node_run_id),
+                    "provider_operation_id": str(operation.id),
+                    "actor_id": str(actor.id),
+                },
+            )
+
+    await NodeRunScheduler(session).enqueue_node_run_only(
+        node_run_id, before_commit=_record_replay
+    )
     return True
 
 async def replay_director_wakeup(
@@ -307,19 +321,34 @@ async def replay_outbox_dead_letter(
     dead_letter = await session.scalar(
         select(OutboxDeadLetter)
         .where(OutboxDeadLetter.id == dead_letter_id)
-        .with_for_update()
         .execution_options(populate_existing=True)
     )
     if dead_letter is None:
         raise NotFoundError("outbox dead letter not found")
     await _require_dead_letter_owner(session, actor=actor, dead_letter=dead_letter)
+    current = await session.scalar(
+        select(OutboxEvent).where(OutboxEvent.event_id == dead_letter.event_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
+    # Match dispatcher failure lock order: event, then failure identity.
+    dead_letter = await session.scalar(
+        select(OutboxDeadLetter).where(OutboxDeadLetter.id == dead_letter_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
+    if dead_letter is None:
+        raise NotFoundError("outbox dead letter not found")
     failed_at = _as_utc(dead_letter.dead_lettered_at)
     if _as_utc(expected_dead_lettered_at) != failed_at:
         raise ConflictError("outbox failure changed; reload before replay")
-
-    current = await session.scalar(
-        select(OutboxEvent).where(OutboxEvent.event_id == dead_letter.event_id)
-    )
+    if current is None:
+        current = await session.scalar(
+            select(OutboxEvent).where(OutboxEvent.event_id == dead_letter.event_id)
+            .with_for_update(skip_locked=True).execution_options(populate_existing=True)
+        )
+        if current is None and await session.scalar(
+            select(OutboxEvent.id).where(OutboxEvent.event_id == dead_letter.event_id)
+        ) is not None:
+            raise ConflictError("recreated outbox event has an active dispatcher")
     applied = current is None or current.status != OutboxStatus.PUBLISHED.value
 
     redis_publisher: RedisStreamPublisher | None = None

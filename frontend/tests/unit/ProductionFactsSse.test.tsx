@@ -90,8 +90,8 @@ describe("ProductionFactsSse", () => {
     const options = invalidate.mock.calls[0]?.[0];
     expect(options).toEqual(expect.objectContaining({ predicate: expect.any(Function) }));
     const predicate = options && "predicate" in options ? options.predicate : undefined;
-    expect(predicate?.({ queryKey: ["snapshot", "project-1"] } as never)).toBe(true);
-    expect(predicate?.({ queryKey: ["snapshot", "project-2"] } as never)).toBe(false);
+    expect(predicate?.({ queryKey: ["production-summary", "project-1"] } as never)).toBe(true);
+    expect(predicate?.({ queryKey: ["production-summary", "project-2"] } as never)).toBe(false);
 
     view.unmount();
     expect(source?.closed).toBe(true);

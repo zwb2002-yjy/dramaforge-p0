@@ -23,6 +23,7 @@ from app.execution.media_io import (
     _apply_media_metadata,
     _detected_media_format,
     _inspect_media_metadata,
+    _materialize_provider_media,
     _mime_for_node,
     _resolve_media_file,
     _validate_provider_media,
@@ -35,6 +36,10 @@ from app.execution.run_state import (
     _commit_terminal_failure,
 )
 from app.execution.scheduling import node_run_dispatch_generation
+from app.execution.synchronous_results import (
+    persist_synchronous_image_result,
+    synchronous_image_receipt,
+)
 from app.providers.runtime import PROVIDER_CONTENT_URI, require_resume_token_identity
 from app.shared.db import set_node_run_rls_context
 from app.shared.errors import (
@@ -48,6 +53,10 @@ from app.storage.scratch import OwnedMediaDirectory
 
 POLL_OBSERVATION_TIMEOUT_SECONDS = 30.0
 MAX_POLL_ERROR_BACKOFF_SECONDS = 300.0
+# A remote task that never reaches a terminal state must not be polled forever.
+# The cap is generous for long video queues and is anchored to the frozen
+# submission time, not to the current attempt.
+MAX_REMOTE_TASK_AGE_SECONDS = 24 * 60 * 60
 
 
 def _counter(value: object) -> int:
@@ -56,14 +65,14 @@ def _counter(value: object) -> int:
     return value
 
 
-def _same_attempt(first: datetime | None, second: datetime | None) -> bool:
+def same_provider_attempt(first: datetime | None, second: datetime | None) -> bool:
     def utc(value: datetime | None) -> datetime | None:
         return value.replace(tzinfo=value.tzinfo or UTC) if value is not None else None
 
     return utc(first) == utc(second)
 
 
-async def _defer_remote_poll(
+async def defer_remote_poll(
     session: AsyncSession,
     *,
     run: NodeRun,
@@ -73,7 +82,7 @@ async def _defer_remote_poll(
 ) -> None:
     """Release the attempt and schedule the same remote identity atomically."""
     await session.refresh(run, with_for_update=True)
-    if not _same_attempt(run.started_at, expected_started_at):
+    if not same_provider_attempt(run.started_at, expected_started_at):
         raise NodeRunAlreadyClaimedError()
     now = datetime.now(UTC)
     # Preserve Retry-After, even when longer than our normal error backoff.
@@ -343,8 +352,13 @@ async def _execute_unified_media_node_run(
     runtime: ProviderRuntime | None = None
     resume: ProviderResumeToken | None = None
     synchronous_image = False
+    sync_receipt = None
     result: SubmissionResult | None = None
 
+    if op is not None and op.status == "rejected" and (
+        op.response_summary or {}
+    ).get("synchronous_result") is not None:
+        raise ValidationAppError("SYNCHRONOUS_RESULT_INVALID: rejected operation has a result")
     resubmit = bool(op is not None and op.status == "rejected" and not op.provider_operation_id)
     if op is not None and not resubmit:
         if op.status == "unknown_submission":
@@ -352,6 +366,11 @@ async def _execute_unified_media_node_run(
                 "提交结果未知，必须人工核对，不能自动重发",
                 details={"code": "PROVIDER_SUBMISSION_UNKNOWN"},
             )
+        sync_receipt = synchronous_image_receipt(run=run, operation=op)
+        synchronous_image = sync_receipt is not None
+        if synchronous_image and (node_type != "keyframe" or frozen_identity is None
+                                  or frozen_identity.capability != "image.generate"):
+            raise ValidationAppError("SYNCHRONOUS_RESULT_INVALID")
         # A crash between the submission_started commit and the remote-id write
         # leaves an op with no remote id. Its outcome is unknown; escalate to
         # manual reconciliation instead of risking a duplicate POST.
@@ -375,19 +394,20 @@ async def _execute_unified_media_node_run(
                 "历史任务缺少已冻结的执行身份，必须人工核对，不能使用当前连接恢复",
                 details={"code": "EXECUTION_IDENTITY_MISSING"},
             )
-        try:
-            resume = ProviderResumeToken.model_validate(op.resume_token)
-        except ValueError as exc:
-            raise ValidationAppError(
-                "已提交任务缺少有效恢复令牌", details={"code": "RESUME_TOKEN_UNAVAILABLE"}
-            ) from exc
-        require_resume_token_identity(
-            resume,
-            remote_task_id=op.provider_operation_id,
-            provider_type=op.actual_provider,
-            protocol_profile=op.protocol_profile,
-            remote_secondary_id=op.remote_secondary_id,
-        )
+        if not synchronous_image:
+            try:
+                resume = ProviderResumeToken.model_validate(op.resume_token)
+            except ValueError as exc:
+                raise ValidationAppError(
+                    "已提交任务缺少有效恢复令牌", details={"code": "RESUME_TOKEN_UNAVAILABLE"}
+                ) from exc
+            require_resume_token_identity(
+                resume,
+                remote_task_id=op.provider_operation_id,
+                provider_type=op.actual_provider,
+                protocol_profile=op.protocol_profile,
+                remote_secondary_id=op.remote_secondary_id,
+            )
         # Resume only. Never create a second remote task. Rebuild the runtime
         # exclusively from the persisted execution identity.
         runtime = await ProviderRuntimeResolver(session).resume_runtime_for_identity(
@@ -511,7 +531,7 @@ async def _execute_unified_media_node_run(
             raise ValidationAppError("PROVIDER_RESPONSE_INVALID")
         op.provider_operation_id = remote or None
         op.remote_secondary_id = result.remote_secondary_id
-        op.status = "submission_started" if synchronous_image and not remote else "submitted"
+        op.status = "submitted"
         if result.resume_token is not None:
             op.resume_token = result.resume_token.model_dump(mode="json")
             resume = result.resume_token
@@ -519,6 +539,14 @@ async def _execute_unified_media_node_run(
             "create_status": result.status,
             "query_kind": result.query_kind,
         }
+        if synchronous_image:
+            sync_receipt = await persist_synchronous_image_result(
+                run=run, operation=op, result=result, store=obj_store,
+            )
+            op.response_summary = {
+                **op.response_summary,
+                "synchronous_result": sync_receipt.model_dump(mode="json"),
+            }
         # Synchronous image submissions already carry the result URL; no poll.
         op.request_summary = {
             **op.request_summary,
@@ -564,7 +592,7 @@ async def _execute_unified_media_node_run(
         poll_interval_s = 5.0 if node_type in {"video", "video_review"} else 3.0
         poll_count = _counter((op.response_summary or {}).get("poll_count", 0))
         if create_status != "resumed":
-            await _defer_remote_poll(
+            await defer_remote_poll(
                 session,
                 run=run,
                 operation=op,
@@ -601,40 +629,58 @@ async def _execute_unified_media_node_run(
             )
             raise ProviderTaskCancelledError()
         if status not in {"succeeded", "completed", "success", "failed"}:
-            _cancel_requested, cancel_confirmed = await _request_remote_cancellation_once(
-                session,
-                run=run,
-                operation=op,
-                runtime=runtime,
-                resume=resume,
-            )
-            if cancel_confirmed:
-                await _commit_provider_cancelled(
+            age_anchor = op.submitted_at or op.created_at
+            if age_anchor is not None and age_anchor.tzinfo is None:
+                # SQLite fixtures return naive timestamps; PostgreSQL returns
+                # aware ones. Normalize before comparing with UTC now.
+                age_anchor = age_anchor.replace(tzinfo=UTC)
+            if (
+                age_anchor is not None
+                and (datetime.now(UTC) - age_anchor).total_seconds()
+                > MAX_REMOTE_TASK_AGE_SECONDS
+            ):
+                # Stop polling a task that never terminates. This is a
+                # terminal observation failure, never a reason to create again.
+                poll = PollResult(
+                    status="failed",
+                    error_code="PROVIDER_POLL_BUDGET_EXHAUSTED",
+                )
+                status = "failed"
+                summary["poll_budget_exhausted"] = True
+                op.response_summary = summary
+            else:
+                _cancel_requested, cancel_confirmed = await _request_remote_cancellation_once(
                     session,
                     run=run,
                     operation=op,
-                    reason="provider_confirmed_cancellation",
+                    runtime=runtime,
+                    resume=resume,
                 )
-                raise ProviderTaskCancelledError()
-            poll_retry_after = poll.retry_after_seconds
-            delay = poll_interval_s
-            if poll.error_code:
-                errors = _counter(summary.get("poll_error_count", 0))
-                delay = min(MAX_POLL_ERROR_BACKOFF_SECONDS, delay * 2 ** min(errors, 6))
-            if isinstance(poll_retry_after, int | float) and math.isfinite(poll_retry_after):
-                delay = max(delay, float(poll_retry_after))
-            await _defer_remote_poll(
-                session,
-                run=run,
-                operation=op,
-                delay_seconds=delay,
-                expected_started_at=attempt_started_at,
-            )
+                if cancel_confirmed:
+                    await _commit_provider_cancelled(
+                        session,
+                        run=run,
+                        operation=op,
+                        reason="provider_confirmed_cancellation",
+                    )
+                    raise ProviderTaskCancelledError()
+                poll_retry_after = poll.retry_after_seconds
+                delay = poll_interval_s
+                if poll.error_code:
+                    errors = _counter(summary.get("poll_error_count", 0))
+                    delay = min(MAX_POLL_ERROR_BACKOFF_SECONDS, delay * 2 ** min(errors, 6))
+                if isinstance(poll_retry_after, int | float) and math.isfinite(poll_retry_after):
+                    delay = max(delay, float(poll_retry_after))
+                await defer_remote_poll(
+                    session,
+                    run=run,
+                    operation=op,
+                    delay_seconds=delay,
+                    expected_started_at=attempt_started_at,
+                )
     else:
-        assert result is not None and (
-            result.artifact_uri is not None or result.artifact_bytes is not None
-        )
-        poll = PollResult(status="succeeded", artifact_uri=result.artifact_uri)
+        assert sync_receipt is not None
+        poll = PollResult(status="succeeded", artifact_uri=sync_receipt.artifact_uri)
         poll_count = 0
 
     cost = (
@@ -676,14 +722,17 @@ async def _execute_unified_media_node_run(
     op.error_code = None
     op.error_summary = None
     op.completed_at = datetime.now(UTC)
-    uri: object = (
-        result.artifact_bytes
-        if synchronous_image and result and result.artifact_bytes is not None
-        else poll.artifact_uri
-    )
+    uri: object = poll.artifact_uri
     with OwnedMediaDirectory(operation_id=run.id) as scratch:
         destination = Path(scratch) / "result.media"
-        if uri == PROVIDER_CONTENT_URI:
+        if sync_receipt is not None and sync_receipt.object_key is not None:
+            media = await _materialize_provider_media(
+                kind=node_type, chunks=obj_store.iter_bytes(object_key=sync_receipt.object_key),
+                destination=destination, content_type=None, expected_size=sync_receipt.byte_size,
+            )
+            if media.content_hash != sync_receipt.content_hash:
+                raise ValidationAppError("SYNCHRONOUS_RESULT_INVALID: stored image hash mismatch")
+        elif uri == PROVIDER_CONTENT_URI:
             assert resume is not None
             fetch_artifact = getattr(runtime, "fetch_artifact", None)
             if not callable(fetch_artifact):
@@ -725,7 +774,7 @@ async def _execute_unified_media_node_run(
     # If cancellation committed first, retain the immutable late Artifact but
     # never make it the graph's latest successful/Formal input.
     await session.refresh(run, with_for_update=True)
-    if not _same_attempt(run.started_at, attempt_started_at):
+    if not same_provider_attempt(run.started_at, attempt_started_at):
         raise NodeRunAlreadyClaimedError()
     completed_after_cancel = _cancellation_requested(run)
     run.status = "completed_after_cancel" if completed_after_cancel else "completed"

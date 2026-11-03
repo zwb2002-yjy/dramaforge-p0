@@ -161,6 +161,12 @@ class AssetTagService:
         asset = await self._get_asset(project_id=project_id, asset_id=asset_id, actor=actor)
         if asset.status == "recycled":
             raise ValidationAppError("asset is already recycled")
+        # Preserve the pre-recycle status so restore returns a draft to draft
+        # instead of silently promoting it to active.
+        asset.metadata_json = {
+            **(asset.metadata_json or {}),
+            "recycled_from_status": asset.status,
+        }
         asset.status = "recycled"
         await self._session.flush()
         return asset
@@ -171,7 +177,12 @@ class AssetTagService:
         asset = await self._get_asset(project_id=project_id, asset_id=asset_id, actor=actor)
         if asset.status != "recycled":
             raise ValidationAppError("only recycled assets can be restored")
-        asset.status = "active"
+        metadata = dict(asset.metadata_json or {})
+        previous = metadata.pop("recycled_from_status", None)
+        # Only the two live card states are restorable; anything older or
+        # missing falls back to active because the card existed before recycle.
+        asset.status = previous if previous in {"draft", "active"} else "active"
+        asset.metadata_json = metadata
         await self._session.flush()
         return asset
 

@@ -169,7 +169,9 @@ class Export(Base):
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
-    episode_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    episode_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("episodes.id", ondelete="SET NULL"), nullable=True
+    )
     format: Mapped[str] = mapped_column(String(40), nullable=False, default="timeline_json")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     requested_by: Mapped[UUID] = mapped_column(

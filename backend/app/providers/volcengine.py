@@ -25,13 +25,19 @@ import hashlib
 import json
 from typing import Any
 from urllib.parse import urlsplit
-from uuid import uuid4
 
 import httpx
 
 from app.config import Settings, get_settings
 from app.providers.egress import guarded_provider_transport
 from app.providers.http_client import provider_http_client
+from app.providers.submission_gate import submission_gate
+from app.providers.transport_errors import (
+    error_code_for_status as _error_code,
+)
+from app.providers.transport_errors import (
+    retry_after_seconds as _retry_after_seconds,
+)
 
 ARK_CN_PROFILE = "ark_cn_v1"
 ARK_CN_HOST = "https://ark.cn-beijing.volces.com/api/v3"
@@ -61,56 +67,12 @@ def _require_size(size: str) -> str:
     return value
 
 
-def _schema_fingerprint(body: dict[str, object]) -> str:
-    """Fingerprint field shape while replacing prompts, references, and tokens."""
-
-    def redacted(value: object, key: str = "") -> object:
-        if key == "prompt":
-            return "<prompt>"
-        if key in {"image", "url", "video_url", "text"}:
-            if isinstance(value, list):
-                return ["<reference>" for _ in value]
-            return "<reference>"
-        if isinstance(value, dict):
-            return {str(k): redacted(v, str(k)) for k, v in sorted(value.items())}
-        if isinstance(value, list):
-            return [redacted(item) for item in value]
-        return value
-
-    raw = json.dumps(redacted(body), sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-def _error_code(status_code: int) -> str:
-    if status_code == 400:
-        return "PROVIDER_BAD_REQUEST"
-    if status_code == 401:
-        return "PROVIDER_AUTH_FAILED"
-    if status_code == 403:
-        return "PROVIDER_FORBIDDEN"
-    if status_code == 429:
-        return "PROVIDER_RATE_LIMITED"
-    if status_code >= 500:
-        return "PROVIDER_UNAVAILABLE"
-    return "PROVIDER_REQUEST_FAILED"
-
-
 def _json_object(response: httpx.Response) -> dict[str, Any]:
     try:
         value = response.json()
     except Exception:
         return {}
     return value if isinstance(value, dict) else {}
-
-
-def _retry_after_seconds(response: httpx.Response) -> float | None:
-    retry_after = response.headers.get("Retry-After", "").strip()
-    if not retry_after:
-        return None
-    try:
-        return max(float(retry_after), 0.0)
-    except ValueError:
-        return None
 
 
 def _image_result_url(data: dict[str, Any]) -> str | None:
@@ -697,6 +659,7 @@ class ArkRuntime:
         self._host = (host or self._settings.volcengine_base_url).strip().rstrip("/")
         self._key = self._settings.volcengine_api_key.strip()
         self._enabled = self._settings.volcengine_enabled
+        self._submission_limit = self._settings.volcengine_max_concurrent_submissions
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -709,7 +672,6 @@ class ArkRuntime:
 
     async def submit_image(self, request: Any) -> Any:
         from app.providers.runtime import (
-            ProviderResumeToken,
             SubmissionResult,
             validate_compiled_submission,
         )
@@ -723,14 +685,15 @@ class ArkRuntime:
         if not self._configured():
             raise RuntimeError("Volcengine Ark connection is not configured")
         try:
-            response = await _post_json(
-                self._host,
-                ARK_IMAGE_PATH,
-                headers=self._headers(),
-                body=request.wire_request,
-                timeout=self._IMAGE_REQUEST_TIMEOUT_S,
-                transport=self._transport,
-            )
+            async with submission_gate("volcengine", self._host, self._submission_limit):
+                response = await _post_json(
+                    self._host,
+                    ARK_IMAGE_PATH,
+                    headers=self._headers(),
+                    body=request.wire_request,
+                    timeout=self._IMAGE_REQUEST_TIMEOUT_S,
+                    transport=self._transport,
+                )
         except httpx.TransportError as exc:
             return SubmissionResult(
                 status="unknown_submission",
@@ -755,19 +718,11 @@ class ArkRuntime:
                 request_fingerprint=_request_fingerprint(request.wire_request),
                 request_summary=request.safe_request_summary,
             )
-        remote_id = f"ark-image-{uuid4()}"
-        token = ProviderResumeToken(
-            provider_type="volcengine",
-            protocol_profile=ARK_CN_PROFILE,
-            remote_task_id=remote_id,
-        )
         return SubmissionResult(
-            remote_task_id=remote_id,
             status="succeeded",
             artifact_uri=image_url,
             request_fingerprint=_request_fingerprint(request.wire_request),
             request_summary=request.safe_request_summary,
-            resume_token=token,
         )
 
     async def submit_video(self, request: Any) -> Any:
@@ -786,14 +741,15 @@ class ArkRuntime:
         if not self._configured():
             raise RuntimeError("Volcengine Ark connection is not configured")
         try:
-            response = await _post_json(
-                self._host,
-                ARK_VIDEO_CREATE_PATH,
-                headers=self._headers(),
-                body=request.wire_request,
-                timeout=self._VIDEO_REQUEST_TIMEOUT_S,
-                transport=self._transport,
-            )
+            async with submission_gate("volcengine", self._host, self._submission_limit):
+                response = await _post_json(
+                    self._host,
+                    ARK_VIDEO_CREATE_PATH,
+                    headers=self._headers(),
+                    body=request.wire_request,
+                    timeout=self._VIDEO_REQUEST_TIMEOUT_S,
+                    transport=self._transport,
+                )
         except httpx.TransportError as exc:
             return SubmissionResult(
                 status="unknown_submission",
@@ -805,7 +761,9 @@ class ArkRuntime:
         data = _json_object(response)
         task_id = data.get("id")
         task_id_value = str(task_id) if task_id is not None and str(task_id) else None
-        if response.status_code >= 400 or task_id_value is None:
+        # A returned task identity means create may already have taken effect,
+        # even on a throttled response. Preserve it and poll; never resubmit.
+        if task_id_value is None:
             return SubmissionResult(
                 status="failed",
                 error_code=(
@@ -843,7 +801,7 @@ class ArkRuntime:
                 self._host,
                 f"{ARK_VIDEO_CREATE_PATH}/{resume.remote_task_id}",
                 headers=self._headers(),
-                timeout=60.0,
+                timeout=20.0,
                 transport=self._transport,
             )
         except httpx.TransportError:
@@ -888,18 +846,23 @@ class ArkRuntime:
 
         try:
             async with provider_http_client(timeout=30.0, transport=self._transport) as client:
-                await client.delete(
+                response = await client.delete(
                     f"{self._host}{ARK_VIDEO_CREATE_PATH}/{resume.remote_task_id}",
                     headers=self._headers(),
                 )
         except httpx.TransportError:
-            pass
-        return CancelResult(status="cancelled")
+            return CancelResult(status="unknown")
+        if response.status_code >= 400:
+            return CancelResult(status="failed")
+        status = str(_json_object(response).get("status") or "").lower()
+        return CancelResult(
+            status="cancelled" if status in {"cancelled", "canceled"} else "requested"
+        )
 
     async def fetch_cost(self, resume: Any) -> Any:
         from app.providers.runtime import CostResult
 
-        return CostResult(amount=0.0, currency="USD", units=1.0)
+        return CostResult(amount=None, currency="USD", units=1.0, cost_status="not_reported")
 
 
 def _ark_runtime_factory(

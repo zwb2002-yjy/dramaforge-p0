@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from uuid import uuid4
 
 import httpx
@@ -85,7 +86,7 @@ def _manifest(model_id: str, revision: str | None = None) -> ModelCapabilityMani
 
 
 @pytest.mark.asyncio
-async def test_protocol_client_uses_openai_compatible_image_and_video_shapes() -> None:
+async def test_runtime_uses_openai_compatible_image_and_video_shapes() -> None:
     seen: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -108,28 +109,57 @@ async def test_protocol_client_uses_openai_compatible_image_and_video_shapes() -
             )
         raise AssertionError(f"unexpected request: {request.method} {request.url}")
 
-    client = OpenAICompatibleMediaClient(
-        _settings(),
+    runtime = OpenAICompatibleMediaRuntime(
+        protocol_profile=OPENAI_MEDIA_PROFILE,
+        settings=_settings(),
         transport=httpx.MockTransport(handler),
     )
-    image = await client.create_image(prompt="portrait")
-    video = await client.create_video(
-        prompt="subtle motion", image_bytes=b"png", image_mime="image/png"
+    image = await runtime.submit_image(
+        CompiledImageRequest(
+            provider_type="openai_compatible_media",
+            protocol_profile=OPENAI_MEDIA_PROFILE,
+            model_id="image-model",
+            operation="image.generate",
+            wire_request={"model": "image-model", "prompt": "portrait"},
+            request_schema_version="1",
+        )
     )
-    poll = await client.poll_video("vid-1")
+    video = await runtime.submit_video(
+        CompiledVideoRequest(
+            provider_type="openai_compatible_media",
+            protocol_profile=OPENAI_MEDIA_PROFILE,
+            model_id="video-model",
+            operation="video.generate",
+            wire_request={
+                "model": "video-model",
+                "prompt": "subtle motion",
+                "input_image_b64": base64.b64encode(b"png").decode("ascii"),
+                "input_image_mime": "image/png",
+            },
+            request_schema_version="1",
+        )
+    )
+    poll = await runtime.poll_video(
+        ProviderResumeToken(
+            provider_type="openai_compatible_media",
+            protocol_profile=OPENAI_MEDIA_PROFILE,
+            remote_task_id="vid-1",
+        )
+    )
 
-    assert image["status"] == "succeeded"
-    assert video["remote_task_id"] == "vid-1"
-    assert poll["status"] == "succeeded"
-    assert poll["artifact_uri"] == "https://cdn.example/video.mp4"
+    assert image.status == "succeeded"
+    assert image.artifact_uri == "https://cdn.example/image.png"
+    assert video.remote_task_id == "vid-1"
+    assert poll.status == "succeeded"
+    assert poll.artifact_uri == "https://cdn.example/video.mp4"
     assert seen[0].headers["authorization"] == "Bearer test-key"
     assert seen[0].url.path == "/v1/images/generations"
     assert seen[1].url.path == "/v1/videos"
     assert seen[1].headers["content-type"].startswith("multipart/form-data")
 
 
-@pytest.mark.parametrize("surface", ["client", "runtime"])
-async def test_generations_array_response_cannot_be_adopted_as_videos_contract(surface):
+@pytest.mark.asyncio
+async def test_generations_array_response_cannot_be_adopted_as_videos_contract():
     """Observed /videos/generations dialect is not the installed /videos profile."""
     seen: list[httpx.Request] = []
 
@@ -144,29 +174,23 @@ async def test_generations_array_response_cannot_be_adopted_as_videos_contract(s
             },
         )
 
-    transport = httpx.MockTransport(handler)
-    if surface == "client":
-        result = await OpenAICompatibleMediaClient(_settings(), transport=transport).create_video(
-            prompt="synthetic motion"
+    runtime = OpenAICompatibleMediaRuntime(
+        settings=_settings(), transport=httpx.MockTransport(handler)
+    )
+    submitted = await runtime.submit_video(
+        CompiledVideoRequest(
+            provider_type="openai_compatible_media",
+            protocol_profile=OPENAI_MEDIA_PROFILE,
+            model_id="configured-video",
+            operation="video.generate",
+            wire_request={"model": "configured-video", "prompt": "synthetic motion"},
+            request_schema_version="1",
         )
-        assert result["status"] == "failed"
-        assert result.get("remote_task_id") is None
-    else:
-        runtime = OpenAICompatibleMediaRuntime(settings=_settings(), transport=transport)
-        submitted = await runtime.submit_video(
-            CompiledVideoRequest(
-                provider_type="openai_compatible_media",
-                protocol_profile=OPENAI_MEDIA_PROFILE,
-                model_id="configured-video",
-                operation="video.generate",
-                wire_request={"model": "configured-video", "prompt": "synthetic motion"},
-                request_schema_version="1",
-            )
-        )
-        # The unknown envelope cannot prove that this POST did not create work.
-        assert submitted.status == "unknown_submission"
-        assert submitted.error_code == "PROVIDER_SUBMISSION_UNKNOWN"
-        assert submitted.remote_task_id is submitted.resume_token is None
+    )
+    # The unknown envelope cannot prove that this POST did not create work.
+    assert submitted.status == "unknown_submission"
+    assert submitted.error_code == "PROVIDER_SUBMISSION_UNKNOWN"
+    assert submitted.remote_task_id is submitted.resume_token is None
     assert len(seen) == 1  # No alternate path, fake resume, poll or retry.
 
 

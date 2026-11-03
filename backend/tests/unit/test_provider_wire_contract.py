@@ -87,11 +87,15 @@ async def test_runtime_sends_compiler_body_unchanged_and_binds_credentials(
     assert seen[0].headers["Authorization"] == "Bearer runtime-only-test-key"
     assert seen[0].headers["Content-Type"] == "application/json"
     assert compiled.model_dump(mode="json") == before
-    assert result.resume_token is not None
-    persisted = result.resume_token.model_dump_json()
-    assert "runtime-only-test-key" not in persisted
-    assert "compiled prompt" not in persisted
-    assert ProviderResumeToken.model_validate_json(persisted) == result.resume_token
+    if kind == "image":
+        assert result.resume_token is None and result.remote_task_id is None
+        assert result.artifact_uri == "https://media.invalid/image.png"
+    else:
+        assert result.resume_token is not None
+        persisted = result.resume_token.model_dump_json()
+        assert "runtime-only-test-key" not in persisted
+        assert "compiled prompt" not in persisted
+        assert ProviderResumeToken.model_validate_json(persisted) == result.resume_token
 
 
 @pytest.mark.parametrize("runtime_type", RUNTIMES)

@@ -13,9 +13,9 @@ import json
 import os
 import subprocess
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from collections.abc import Mapping
 from typing import Any
 from uuid import uuid4
 
@@ -431,8 +431,13 @@ Camera: static
         report["paid_provider_calls"] = sum(
             1
             for item in operations
-            if item.get("status") in {"submitted", "running", "succeeded", "completed"}
+            if item.get("status") in {"submitted", "running", "succeeded"}
         )
+        if report["paid_provider_calls"] < 2:
+            raise RuntimeError(
+                "golden run did not produce the expected two paid Provider calls "
+                f"(got {report['paid_provider_calls']}; operations={operations})"
+            )
         opencut = require_ok(
             client.get(f"/projects/{project_id}/opencut-manifest", headers=headers),
             "OpenCut manifest",

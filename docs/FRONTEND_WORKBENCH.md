@@ -31,16 +31,16 @@ React 18 + TypeScript + Vite；TanStack Router / Query。基础控件唯一采�
 frontend/src/
 ├── routes/        路由定义与页面装配（当前为 createRoute 显式注册）
 ├── features/      业务域模块：project, script, assets, scenes, shots,
-│                  production, review, editing, experiments, director,
+│                  production, review, editing, director, access,
 │                  model-controls, maintenance, resonance
 ├── components/    跨域共享组件
 ├── lib/           API client 与工具
-├── hooks/ stores/ 共享 hooks 与 store
+├── hooks/         共享 hooks
 ├── shared/        生成产物（api/generated.ts）与共享定义
 └── styles/        全局样式
 ```
 
-- 服务端状态只存在于 TanStack Query；Zustand 只保存布局/选择类 UI 状态。
+- 服务端状态只存在于 TanStack Query；布局、选择和临时交互使用组件 state 或路由状态，当前没有 Zustand store。
 - 路由提供中文加载、错误恢复及404入口；部署后的旧chunk失败可显式重试或重载。
   回执读取失败/暂不存在显示“待核对”，只按原Idempotency-Key查询，不重新生成或提交。
   执行详情Query绑定Project/Shot/Run并传递AbortSignal；切镜头立即隐藏旧详情，晚到响应
@@ -272,7 +272,7 @@ WorkstationShell：全局项目入口、工作空间切换、设置、全局导�
 | 可导航上下文 | Router path/search 参数                 | 项目、场景及需深链接的选中对象                       |
 | 编辑草稿     | 所属编辑器本地 state/reducer/controller | 持有基线版本、dirty、提交状态                        |
 | 临时交互     | 最近共同父组件                          | 面板开关、候选预览、临时选择                         |
-| 跨页 UI 偏好 | 现有 UI store                           | 仅面板偏好与导航记忆，按上下文隔离                   |
+| 跨页 UI 偏好 | 所属功能的现有状态                       | 当前没有独立 UI store；按上下文隔离                   |
 
 - 区分 loading、empty、error、blocked、stale、saving、succeeded；不用空列表伪装失败。
 - 409 保留草稿并说明冲突；401/403 提供登录/权限反馈；Provider 错误使用领域词表。
@@ -414,6 +414,8 @@ EditSession 继续拥有各自事实；页面状态、分镜播放和导航进�
   清晰的次级区域，不能因引导隐藏已经生成的候选或阻止回看。
 - 针对镜头的「导演协助」从当前项目/场景/镜头上下文打开，先返回提案及改动差异。Apply
   只进入草稿，Save 后才影响生成；AUTO / ASSIST / MANUAL 不增加另一套生成主按钮。
+  步数护栏触发时只说明本轮已停止；面板不提供独立「继续」按钮，继续协作由用户发送新指令
+  开始下一轮（运行时 resume 信号属于 API 控制面，不是该面板的隐式操作）。
 - 生成入口显示实际模型、当前引用和明确阻塞；缺配置时提供带返回上下文的设置入口。
   运行、排队和提交未知时显示事实状态，不出现可造成盲重试的同阶段主按钮。
 

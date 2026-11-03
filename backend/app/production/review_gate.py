@@ -17,6 +17,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access.models import Project
 from app.delivery.models import HumanReviewDecision
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.shared.errors import ConflictError, ValidationAppError
@@ -489,6 +490,9 @@ async def record_human_decision(
     request_key: str,
 ) -> HumanReviewDecision:
     """Append one human decision; a retry with the same key returns the original."""
+    if await session.scalar(select(Project.id).where(Project.id == project_id)
+                            .with_for_update()) is None:
+        raise ValidationAppError("project not found")
     if review_kind not in REVIEW_NODE_KEYS:
         raise ValidationAppError(
             f"unsupported review kind: {review_kind}",

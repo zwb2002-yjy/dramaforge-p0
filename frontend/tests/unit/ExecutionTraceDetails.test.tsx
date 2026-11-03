@@ -6,10 +6,6 @@ import { ShotDetailsBody } from "../../src/features/shots/ShotDetailsPanel";
 import { fetchExecutionTrace } from "../../src/features/shots/api";
 
 vi.mock("../../src/features/shots/api", () => ({ fetchExecutionTrace: vi.fn() }));
-vi.mock("../../src/features/shots/changeProposalsApi", () => ({
-  listShotChangeProposals: vi.fn().mockResolvedValue([]),
-  confirmShotChangeProposal: vi.fn(),
-}));
 
 afterEach(() => vi.clearAllMocks());
 

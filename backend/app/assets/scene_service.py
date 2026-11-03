@@ -192,9 +192,12 @@ class SceneStructureService:
             raise ValidationAppError("no shots to move")
         siblings = await self._episode_scene_numbers(episode_id=scene.episode_id)
         new_number = scene.scene_number + 1
-        for sibling in siblings:
+        # Flush each descending move: uniqueness is checked immediately, and
+        # ORM UPDATE batching does not preserve a safe numbering order.
+        for sibling in reversed(siblings):
             if sibling.id != scene.id and sibling.scene_number >= new_number:
                 sibling.scene_number += 1
+                await self._session.flush()
         new_scene = Scene(
             episode_id=scene.episode_id,
             scene_number=new_number,
@@ -208,6 +211,7 @@ class SceneStructureService:
         for shot in moving:
             shot.scene_id = new_scene.id
             shot.sort_order = shot.shot_number
+            shot.version += 1
         await self._session.flush()
         return new_scene
 
@@ -249,15 +253,16 @@ class SceneStructureService:
             shot.scene_id = scene.id
             shot.shot_number = max_number + offset
             shot.sort_order = max_number + offset
+            shot.version += 1
         await self._session.delete(target)
+        await self._session.flush()
         # Renumber remaining scenes after the absorbed one.
         siblings = await self._episode_scene_numbers(episode_id=scene.episode_id)
         expected = 1
         for sibling in siblings:
-            if sibling.id == scene.id:
-                continue
             if sibling.scene_number != expected:
                 sibling.scene_number = expected
+                await self._session.flush()
             expected += 1
         await self._session.flush()
         return scene

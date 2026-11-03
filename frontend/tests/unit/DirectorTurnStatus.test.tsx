@@ -72,7 +72,7 @@ describe("DirectorTurnStatus product vocabulary", () => {
     renderStatus([turn({ status: "failed", last_error: "step_limit_reached at step 4" })]);
 
     expect(screen.getByTestId("director-stop-summary")).toHaveTextContent(
-      "本轮导演协作步数已用完，确认后可继续。",
+      "本轮导演协作步数已用完；如需继续，请发送新的指令。",
     );
     expect(ordinarySurfaceText()).not.toContain("step_limit_reached");
   });

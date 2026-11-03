@@ -69,8 +69,6 @@ export async function suggestShotDesign(
   return apiSend("POST", directorPath(projectId, "suggestion", { shot_id: shotId }), input, csrf);
 }
 
-export const requestShotDirectorSuggestion = suggestShotDesign;
-
 /** Request one proactive server-fact recommendation without a user instruction. */
 export async function recommendShotDesign(
   projectId: string,

@@ -148,7 +148,8 @@ async def test_director_turn_migration_constraints_and_rls() -> None:
             provider_recovery_definition = connection.execute(
                 text(
                     "SELECT pg_get_functiondef("
-                    "'app.resumable_provider_node_run_contexts(integer,text)'::regprocedure)"
+                    "'app.resumable_provider_node_run_contexts(integer,text,uuid,timestamptz)'"
+                    "::regprocedure)"
                 )
             ).scalar_one()
             assert "cancel_requested" in provider_recovery_definition
@@ -160,7 +161,8 @@ async def test_director_turn_migration_constraints_and_rls() -> None:
                     "AND a.privilege_type = 'EXECUTE') AS no_public "
                     "FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner "
                     "WHERE p.oid = "
-                    "'app.resumable_provider_node_run_contexts(integer,text)'::regprocedure"
+                    "'app.resumable_provider_node_run_contexts(integer,text,uuid,timestamptz)'"
+                    "::regprocedure"
                 )
             ).one()
             assert provider_recovery_security.prosecdef

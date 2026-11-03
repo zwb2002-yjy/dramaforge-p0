@@ -404,11 +404,13 @@ async def create_experiment(
     row = await create_experiment_branch(
         session, project_id=project_id, actor_id=user.id, body=body
     )
-    await session.commit()
     if row.status == "draft":
-        return _read(row)
-    candidate_ids, comparison, _runs = await _candidate_state(session, row)
-    return _read(row, candidate_artifact_ids=candidate_ids, comparison=comparison)
+        response = _read(row)
+    else:
+        candidate_ids, comparison, _runs = await _candidate_state(session, row)
+        response = _read(row, candidate_artifact_ids=candidate_ids, comparison=comparison)
+    await session.commit()
+    return response
 
 
 @router.post(
@@ -568,7 +570,8 @@ async def decide_experiment(
     if body.adoption_scope == "keyframe_keep_video":
         stale_nodes = list(_DOWNSTREAM_AFTER_KEYFRAME)
     elif body.adoption_scope == "keyframe_rerun_downstream":
-        assert row.source_shot_id is not None
+        if row.source_shot_id is None:
+            raise ConflictError("experiment branch has no source shot")
         downstream_run_ids = await queue_branch_nodes(
             session,
             project_id=project_id,

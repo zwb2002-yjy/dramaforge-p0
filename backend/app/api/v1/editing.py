@@ -369,15 +369,6 @@ async def reject_editing_suggestion(
     _csrf: CsrfDep,
 ) -> EditingSuggestionRejectRead:
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    edit = await session.scalar(
-        select(EditSession)
-        .where(
-            EditSession.id == session_id,
-            EditSession.project_id == project_id,
-        )
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
     proposal = await session.scalar(
         select(DirectorProposal)
         .where(
@@ -388,6 +379,11 @@ async def reject_editing_suggestion(
         )
         .with_for_update()
         .execution_options(populate_existing=True)
+    )
+    edit = await session.scalar(
+        select(EditSession)
+        .where(EditSession.id == session_id, EditSession.project_id == project_id)
+        .with_for_update().execution_options(populate_existing=True)
     )
     if edit is None or proposal is None:
         raise NotFoundError("Editing suggestion not found in this session")

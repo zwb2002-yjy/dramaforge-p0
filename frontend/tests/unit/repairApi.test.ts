@@ -50,10 +50,12 @@ describe("staged repair transport", () => {
   it("previews the step without a body or production write", async () => {
     const calls = mockTransport();
     await previewRepairStep(PROJECT, SHOT, REPAIR);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]?.url).toBe(`${PATH}/step-plan`);
-    expect(calls[0]?.init?.method).toBe("POST");
-    expect(calls[0]?.init?.body).toBeUndefined();
+    const posts = calls.filter((call) => !call.url.endsWith("/auth/csrf"));
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.url).toBe(`${PATH}/step-plan`);
+    expect(posts[0]?.init?.method).toBe("POST");
+    expect(posts[0]?.init?.body).toBeUndefined();
+    expect(posts[0]?.init?.headers).toMatchObject({ "X-CSRF-Token": "csrf" });
   });
 
   it.each([false, true])(
@@ -61,9 +63,10 @@ describe("staged repair transport", () => {
     async (accepted) => {
       const calls = mockTransport();
       await previewRepairStep(PROJECT, SHOT, REPAIR, { accept_approximations: accepted });
-      expect(calls).toHaveLength(1);
-      expect(calls[0]?.url).toBe(`${PATH}/step-plan`);
-      expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ accept_approximations: accepted });
+      const posts = calls.filter((call) => !call.url.endsWith("/auth/csrf"));
+      expect(posts).toHaveLength(1);
+      expect(posts[0]?.url).toBe(`${PATH}/step-plan`);
+      expect(JSON.parse(String(posts[0]?.init?.body))).toEqual({ accept_approximations: accepted });
     },
   );
 

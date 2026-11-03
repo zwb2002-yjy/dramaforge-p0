@@ -270,14 +270,13 @@ async def update_project_creative_profile(
         )
     if profile.director_autonomy == body.director_autonomy:
         return _profile_read(profile)
-    if profile.director_autonomy != body.director_autonomy:
-        await DirectorTurnService(session).mark_project_stale(
-            project_id=project_id,
-            reason=f"User changed Director autonomy to {body.director_autonomy}.",
-        )
-        await DirectorRuntimeControlService(session).mark_project_stale(
-            project_id=project_id,
-        )
+    await DirectorTurnService(session).mark_project_stale(
+        project_id=project_id,
+        reason=f"User changed Director autonomy to {body.director_autonomy}.",
+    )
+    await DirectorRuntimeControlService(session).mark_project_stale(
+        project_id=project_id,
+    )
     profile.director_autonomy = body.director_autonomy
     profile.version = (profile.version or 1) + 1
     profile.updated_at = datetime.now(UTC)

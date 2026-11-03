@@ -44,7 +44,11 @@ from app.providers.models import (
 from app.providers.registry import ProviderPlugin, get_plugin
 from app.providers.runtime import ProviderResumeToken
 from app.providers.workspace_credentials import configured_byok_keyring
-from app.security.credentials import read_credential_by_id, store_credential
+from app.security.credentials import (
+    lock_workspace_credentials,
+    read_credential_by_id,
+    store_credential,
+)
 from app.security.models import EncryptedProviderCredential
 from app.shared.db import set_artifact_rls_context
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
@@ -161,14 +165,16 @@ class ProviderConnectionService:
         )
 
     async def get_connection(
-        self, *, workspace_id: UUID, connection_id: UUID
+        self, *, workspace_id: UUID, connection_id: UUID, for_update: bool = False,
     ) -> ProviderConnection:
-        connection = await self._session.scalar(
-            select(ProviderConnection).where(
-                ProviderConnection.id == connection_id,
-                ProviderConnection.workspace_id == workspace_id,
-            )
+        statement = select(ProviderConnection).where(
+            ProviderConnection.id == connection_id,
+            ProviderConnection.workspace_id == workspace_id,
         )
+        if for_update:
+            await lock_workspace_credentials(self._session, workspace_id=workspace_id)
+            statement = statement.with_for_update().execution_options(populate_existing=True)
+        connection = await self._session.scalar(statement)
         if connection is None:
             raise NotFoundError("provider connection not found")
         return connection
@@ -185,6 +191,11 @@ class ProviderConnectionService:
         the light revision table from becoming a second mutable connection
         truth while still making operation identity durable.
         """
+        await lock_workspace_credentials(self._session, workspace_id=connection.workspace_id)
+        with self._session.no_autoflush:
+            await self._session.scalar(select(ProviderConnection.id).where(
+                ProviderConnection.id == connection.id,
+            ).with_for_update())
         plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
         credential = await self._session.scalar(
             select(EncryptedProviderCredential).where(
@@ -272,7 +283,7 @@ class ProviderConnectionService:
         protocol_profile: str | None = None,
     ) -> ProviderConnection:
         connection = await self.get_connection(
-            workspace_id=workspace_id, connection_id=connection_id
+            workspace_id=workspace_id, connection_id=connection_id, for_update=True,
         )
         if connection.provider_type == "litellm" and (
             base_url is not None or protocol_profile is not None
@@ -366,7 +377,7 @@ class ProviderConnectionService:
         api_key: str,
     ) -> ProviderConnection:
         connection = await self.get_connection(
-            workspace_id=workspace_id, connection_id=connection_id
+            workspace_id=workspace_id, connection_id=connection_id, for_update=True,
         )
         if connection.auth_mode == "none":
             raise ValidationAppError(

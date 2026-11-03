@@ -152,7 +152,10 @@ async def test_golden_professional_project_covers_p10_06_pg(pg_session: AsyncSes
     # Edit session.
     edit = await pg_session.get(EditSession, golden.edit_session_id)
     assert edit is not None and edit.project_id == golden.project.id
-    assert edit.timeline.get("clips")
+    clips = edit.timeline["clips"]
+    assert [(clip["shot_id"], clip["artifact_id"]) for clip in clips] == [
+        (str(shot_one.id), str(golden.video.id))
+    ]
 
     # Export.
     export = await pg_session.get(Export, golden.export.id)

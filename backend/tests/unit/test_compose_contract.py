@@ -229,10 +229,12 @@ def test_installers_use_images_without_host_package_installers() -> None:
 def test_development_override_exposes_infrastructure_debug_ports_only() -> None:
     services = yaml.safe_load(DEV_COMPOSE.read_text(encoding="utf-8"))["services"]
     assert "api" not in services or not services["api"].get("ports")
-    assert services["postgres"]["ports"] == ["5432:5432"]
-    assert services["redis"]["ports"] == ["6379:6379"]
-    assert services["minio"]["ports"] == ["9000:9000", "9001:9001"]
-    assert services["litellm-network"]["ports"] == ["4000:4000"]
+    # Debug ports bind loopback only: the opt-in override must not publish an
+    # unauthenticated PostgreSQL/Redis/MinIO/LiteLLM to the LAN.
+    assert services["postgres"]["ports"] == ["127.0.0.1:5432:5432"]
+    assert services["redis"]["ports"] == ["127.0.0.1:6379:6379"]
+    assert services["minio"]["ports"] == ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+    assert services["litellm-network"]["ports"] == ["127.0.0.1:4000:4000"]
     assert "frontend" not in services
 
 

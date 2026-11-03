@@ -326,8 +326,8 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                     run2 = await s2.get(NodeRun, run_uuid)
                     if isinstance(exc, DBAPIError) and run2 is not None:
                         from app.execution.provider_execution import (
-                            _defer_remote_poll,
-                            _same_attempt,
+                            defer_remote_poll,
+                            same_provider_attempt,
                         )
 
                         run2 = await s2.scalar(
@@ -336,7 +336,9 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                             .with_for_update(skip_locked=True)
                             .execution_options(populate_existing=True)
                         )
-                        if run2 is None or not _same_attempt(run2.started_at, claimed_started_at):
+                        if run2 is None or not same_provider_attempt(
+                            run2.started_at, claimed_started_at
+                        ):
                             return {"status": "already_claimed", "node_run_id": node_run_id}
                         operation = await s2.scalar(
                             select(ProviderOperation)
@@ -350,13 +352,18 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
                             )
                             .limit(1)
                         )
-                        if operation is not None and operation.provider_operation_id:
+                        from app.execution.synchronous_results import synchronous_image_receipt
+
+                        if operation is not None and (
+                            operation.provider_operation_id
+                            or synchronous_image_receipt(run=run2, operation=operation) is not None
+                        ):
                             operation.response_summary = {
                                 **dict(operation.response_summary or {}),
                                 "last_poll_error": "PERSISTENCE_OBSERVATION_LOST",
                             }
                             try:
-                                await _defer_remote_poll(
+                                await defer_remote_poll(
                                     s2,
                                     run=run2,
                                     operation=operation,

@@ -99,6 +99,10 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.asset.root(projectId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.asset.tags(projectId) });
+    // Version decisions and card projections live under their own prefixes; the
+    // list root alone does not refresh them.
+    void queryClient.invalidateQueries({ queryKey: queryKeys.asset.versionsRoot(projectId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.asset.cardRoot(projectId) });
   };
 
   const recycle = useMutation({

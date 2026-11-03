@@ -408,3 +408,64 @@ async def test_test_mode_render_is_marked_and_cannot_prove_delivery(
         "The test-mode stub unexpectedly decoded as real media; a delivery proof "
         "would then accept rendered test artifacts"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("duration", [1.0, 2.0, 8.0])
+async def test_trimmed_retimed_audio_uses_same_source_clock(
+    tmp_path: Path, duration: float,
+) -> None:
+    import wave
+    video = tmp_path / "source.mp4"
+    audio = tmp_path / "speech.wav"
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg
+    await renderer._run([ffmpeg, "-y", "-f", "lavfi", "-i",
+                         "testsrc2=size=128x72:rate=10:duration=6", "-an", str(video)], timeout=30)
+    # Loud source prefix must never leak into a clip trimmed to the silent tail.
+    with wave.open(str(audio), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(22050)
+        wav.writeframes(b"".join(struct.pack("<h", int(12000 * math.sin(i * 0.3)))
+                                 for i in range(22050)) + b"\0\0" * (22050 * 5))
+    clip = TimelineRenderClip(clip_id="trim-audio", video_artifact_id="source",
+        subtitle_text="", video_path=video, audio_path=audio,
+        source_in_seconds=4, source_out_seconds=6, duration_seconds=duration)
+    output = await renderer._render_clip(clip, directory=tmp_path, index=0)
+    assert await _mean_volume_db(output) < -80
+    assert await _decode_whole_file(output) == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("duration", [1.0, 8.0])
+async def test_audio_retiming_moves_audible_interval(tmp_path: Path, duration: float) -> None:
+    import wave
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg
+    video, audio = tmp_path / "video.mp4", tmp_path / "pulse.wav"
+    await renderer._run([ffmpeg, "-y", "-f", "lavfi", "-i",
+        "testsrc2=size=128x72:rate=10:duration=2", "-an", str(video)], timeout=30)
+    rate = 22050
+    with wave.open(str(audio), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(b"".join(struct.pack("<h", int(12000 * math.sin(i * 0.3))
+            if rate // 2 <= i < rate else 0) for i in range(rate * 2)))
+    clip = TimelineRenderClip(clip_id="speed-audio", video_artifact_id="source",
+        subtitle_text="", video_path=video, audio_path=audio,
+        source_in_seconds=0, source_out_seconds=2, duration_seconds=duration)
+    output = await renderer._render_clip(clip, directory=tmp_path, index=0)
+    pcm, _ = await renderer._run([ffmpeg, "-v", "error", "-i", str(output), "-map", "0:a:0",
+        "-f", "s16le", "-ac", "1", "-ar", str(rate), "pipe:1"], timeout=30)
+    samples = struct.unpack(f"<{len(pcm) // 2}h", pcm)
+
+    def rms(start: float, end: float) -> float:
+        window = samples[int(start * rate):int(end * rate)]
+        assert window
+        return math.sqrt(sum(value * value for value in window) / len(window))
+
+    assert rms(duration * 0.30, duration * 0.45) > 2000
+    assert rms(duration * 0.05, duration * 0.15) < 100
+    assert rms(duration * 0.70, duration * 0.85) < 100

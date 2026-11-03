@@ -289,6 +289,11 @@ async def _load_timeline_refs(
                 details={"code": "INVALID_TIMELINE_ORDER", "clip_id": clip_id},
             )
         order = int(order_value)
+        if order < 1:
+            raise ValidationAppError(
+                "Timeline order must be a positive integer",
+                details={"code": "INVALID_TIMELINE_ORDER", "clip_id": clip_id},
+            )
         if order in seen_orders:
             raise ValidationAppError(
                 "Timeline order values must be unique",
@@ -441,6 +446,16 @@ async def prepare_formal_tail(
     actor_id: UUID,
 ) -> FinalFilmPrepareRead:
     await _project_or_404(session, project_id)
+    # Serialize prepares for one EditSession: two concurrent requests must not
+    # each force a tail refresh and duplicate the same local runs.
+    locked = await session.scalar(
+        select(EditSession)
+        .where(EditSession.id == edit_session_id, EditSession.project_id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked is None:
+        raise NotFoundError("edit session not found")
     edit_session, refs = await _load_timeline_refs(
         session,
         project_id=project_id,
@@ -641,6 +656,39 @@ async def _latest_formal_composite(
     )
 
 
+def _snapshot_order(value: object, *, fallback: int) -> int:
+    """Read a frozen clip order without silently renumbering it.
+
+    The prepare step rejects ``order < 1``; a snapshot that still carries such a
+    value (or a non-integer) is corrupt and must fail closed instead of being
+    rewritten into a different edit.
+    """
+    if value is None:
+        return fallback
+    if isinstance(value, bool):
+        raise ValidationAppError(
+            "Final Film Timeline order is invalid",
+            details={"code": "TIMELINE_SNAPSHOT_INVALID"},
+        )
+    if isinstance(value, int):
+        order = value
+    elif isinstance(value, float) and value.is_integer():
+        order = int(value)
+    elif isinstance(value, str) and value.strip().isdigit():
+        order = int(value.strip())
+    else:
+        raise ValidationAppError(
+            "Final Film Timeline order is invalid",
+            details={"code": "TIMELINE_SNAPSHOT_INVALID"},
+        )
+    if order < 1:
+        raise ValidationAppError(
+            "Final Film Timeline order must be positive",
+            details={"code": "TIMELINE_SNAPSHOT_INVALID"},
+        )
+    return order
+
+
 def _snapshot_refs(snapshot: dict[str, object]) -> list[_TimelineRef]:
     timeline = snapshot.get("timeline")
     raw_clips = timeline.get("clips") if isinstance(timeline, dict) else None
@@ -672,7 +720,7 @@ def _snapshot_refs(snapshot: dict[str, object]) -> list[_TimelineRef]:
                 clip_id=clip_id,
                 shot_id=shot_id,
                 artifact_id=artifact_id,
-                order=int(raw.get("order") or len(refs) + 1),
+                order=_snapshot_order(raw.get("order"), fallback=len(refs) + 1),
                 source_in_seconds=float(
                     raw.get("source_in_seconds") or raw.get("trim_start_seconds") or 0
                 ),

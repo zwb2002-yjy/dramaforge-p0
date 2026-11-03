@@ -524,7 +524,11 @@ function toExecutionReference(reference: ResolvedReferenceRead): ShotExecutionRe
     asset_version_id: reference.asset_version_id ?? null,
     artifact_id: reference.artifact_id,
     resolution_mode: resolutionMode,
-    mime_type: reference.mime_type || "image/png",
+    // The server-resolved media type is authoritative (image/video/audio).
+    // Never substitute a default: a fabricated image/png would send a video or
+    // audio reference down the image branch, and an empty value must fail
+    // closed on the server instead.
+    mime_type: reference.mime_type,
     fingerprint: reference.fingerprint ?? null,
   };
 }

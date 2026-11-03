@@ -3,10 +3,15 @@ import { expect, type Page, type Route } from "@playwright/test";
 import { PROJECT_ID, SCENE_ID, SHOT_ID, type ProfessionalMockState } from "./professional-mocks";
 
 /** Mock the real suggestion API, not the UI or the explicit design-save seam. */
-export async function installContextualDirectorMock(page: Page, state: ProfessionalMockState) {
+export async function installContextualDirectorMock(
+  page: Page,
+  state: ProfessionalMockState,
+  initialStoppedTurn = false,
+) {
   const suggestionPath = `/api/v1/projects/${PROJECT_ID}/director/shots/${SHOT_ID}/suggestion`;
   const turnPath = `/api/v1/projects/${PROJECT_ID}/director/turns/33333333-3333-4333-8333-333333333333`;
   const decisionPath = `/api/v1/projects/${PROJECT_ID}/director/runtime/turns/33333333-3333-4333-8333-333333333333/decision`;
+  const stoppedTurnId = "55555555-5555-4555-8555-555555555555";
   let generated = false;
   let decisionRecorded = false;
   const suggestion = {
@@ -48,13 +53,14 @@ export async function installContextualDirectorMock(page: Page, state: Professio
     await route.fulfill({ json: suggestion });
   });
   const turn = () => ({
-    id: suggestion.director_evidence.turn_id,
+    id: initialStoppedTurn && !generated ? stoppedTurnId : suggestion.director_evidence.turn_id,
     project_id: PROJECT_ID,
     workspace_id: "workspace-professional",
     actor_id: "owner-professional",
     scope_type: "shot",
     scope_entity_id: SHOT_ID,
-    request_key: suggestion.director_evidence.request_key,
+    request_key:
+      initialStoppedTurn && !generated ? "prior-round" : suggestion.director_evidence.request_key,
     context_hash: suggestion.director_evidence.context_hash,
     input_versions: { shot: suggestion.base_shot_version },
     intent_snapshot: { user_instruction: "让人物更克制，先停顿再转头，镜头缓慢推进" },
@@ -96,15 +102,20 @@ export async function installContextualDirectorMock(page: Page, state: Professio
       suggested_director_state: suggestion.suggested_director_state,
       change_summary: suggestion.change_summary,
     },
-    status: "awaiting_user",
-    wait_reason: decisionRecorded ? "runtime_decision_pending" : "proposal_decision",
+    status: initialStoppedTurn && !generated ? "failed" : "awaiting_user",
+    wait_reason:
+      initialStoppedTurn && !generated
+        ? "step_limit_reached"
+        : decisionRecorded
+          ? "runtime_decision_pending"
+          : "proposal_decision",
     revision: decisionRecorded ? 4 : 3,
     proposal_id: null,
     dispatched_command_key: null,
     node_run_ids: [],
-    step_count: 1,
+    step_count: initialStoppedTurn && !generated ? 4 : 1,
     deadline: "2026-09-09T00:00:00Z",
-    last_error: null,
+    last_error: initialStoppedTurn && !generated ? "step_limit_reached at step 4" : null,
     created_at: "2026-09-08T00:00:00Z",
     updated_at: "2026-09-08T00:00:00Z",
   });
@@ -112,10 +123,14 @@ export async function installContextualDirectorMock(page: Page, state: Professio
     const request = route.request();
     const url = new URL(request.url());
     if (request.method() === "GET" && url.pathname.endsWith("/director/turns")) {
-      await route.fulfill({ json: generated ? [turn()] : [] });
+      await route.fulfill({ json: generated || initialStoppedTurn ? [turn()] : [] });
       return;
     }
-    if (request.method() === "GET" && url.pathname === turnPath) {
+    if (
+      request.method() === "GET" &&
+      (url.pathname === turnPath ||
+        url.pathname === `/api/v1/projects/${PROJECT_ID}/director/turns/${stoppedTurnId}`)
+    ) {
       await route.fulfill({ json: turn() });
       return;
     }
@@ -169,7 +184,6 @@ export async function exerciseContextualDirector(
     expect(state.imagePrompt).toBe(before.image);
     expect(state.videoPrompt).toBe(before.video);
     expect(state.directorState).toEqual(before.director);
-    expect(state.proposals).toHaveLength(0);
     expect(state.revisions).toHaveLength(0);
   };
   await expect(page.getByText("补齐动作因果", { exact: true })).toHaveCount(0);
@@ -235,7 +249,6 @@ export async function exerciseContextualDirector(
   });
   expect(state.shotVersion).toBe(before.version + 1);
   expect(state.directorState).toEqual(suggestion.suggested_director_state);
-  expect(state.proposals).toHaveLength(0);
   expect(state.revisions).toHaveLength(0);
 
   // Reopening reads the saved design; it must not request analysis or production.

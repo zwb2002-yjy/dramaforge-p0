@@ -52,6 +52,11 @@ class ProposalService:
         proposal_id: UUID,
         apply_input: PartialApplyInput,
     ) -> PartialApplyResult:
+        # Accepted commands may create project-keyed facts after editing a
+        # target. Keep the common lock order Project -> proposal -> target.
+        if any(decision.decision == "accepted" for decision in apply_input.decisions):
+            await self._session.scalar(select(Project.id).where(Project.id == project.id)
+                                       .with_for_update())
         proposal = await self._session.scalar(
             select(DirectorProposal).where(
                 DirectorProposal.id == proposal_id,
@@ -136,36 +141,3 @@ class ProposalService:
             else:
                 await self._session.flush()
         return result
-
-    async def mark_proposals_stale_for_shot(
-        self,
-        *,
-        project_id: UUID,
-        shot_id: UUID,
-        current_version: int,
-    ) -> int:
-        """P7-08: after a manual edit, pending proposal items for the shot whose
-        expected_target_version is behind become stale."""
-        rows = (
-            await self._session.execute(
-                select(DirectorProposalItem)
-                .join(DirectorProposal, DirectorProposal.id == DirectorProposalItem.proposal_id)
-                .where(
-                    DirectorProposal.project_id == project_id,
-                    DirectorProposal.scope_type == "shot",
-                    DirectorProposal.scope_entity_id == shot_id,
-                    DirectorProposalItem.status == "pending",
-                )
-            )
-        ).scalars().all()
-        marked = 0
-        for item in rows:
-            if (
-                item.expected_target_version is not None
-                and item.expected_target_version < current_version
-            ):
-                item.status = "stale"
-                item.decided_at = datetime.now(UTC)
-                marked += 1
-        await self._session.flush()
-        return marked

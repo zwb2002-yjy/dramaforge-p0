@@ -6,11 +6,11 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Header, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.access.projects import ProjectService
-from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.api.deps import CsrfDep, CurrentUser, SessionDep
 from app.api.v1.schemas.workbench import ShotWorkbenchRead
 from app.assets.schemas import ShotDirectorState
 from app.assets.voice import VoiceOptionsRead
@@ -45,7 +45,7 @@ from app.workbench.scene_service import ShotWorkbenchService
 from app.workbench.shot_service import ShotDesignService
 from app.workbench.workspace_state_service import WorkspaceStateService
 
-router = APIRouter(tags=["workbench"], dependencies=[Depends(require_selected_workspace)])
+router = APIRouter(tags=["workbench"])
 
 
 class WorkspaceStateRead(BaseModel):
@@ -329,7 +329,8 @@ async def set_shot_formal_keyframe(
         artifact_id=body.artifact_id,
     )
     await session.commit()
-    assert shot.formal_keyframe_artifact_id is not None
+    if shot.formal_keyframe_artifact_id is None:
+        raise RuntimeError("formal keyframe selection was not persisted")
     return FormalKeyframeRead(
         shot_id=shot.id,
         formal_keyframe_artifact_id=shot.formal_keyframe_artifact_id,
@@ -388,7 +389,8 @@ async def set_shot_formal_video(
         artifact_id=body.artifact_id,
     )
     await session.commit()
-    assert shot.formal_video_artifact_id is not None
+    if shot.formal_video_artifact_id is None:
+        raise RuntimeError("formal video selection was not persisted")
     return FormalVideoRead(
         shot_id=shot.id,
         formal_video_artifact_id=shot.formal_video_artifact_id,

@@ -277,6 +277,11 @@ Protocol/DTO，以及无调用方的 `providers/openai.py`、`providers/fake.py`
 - `auth_models` 是只读目录探测：使用当前连接修订的 URL 与认证方式读取精确远端 ID，
   不证明生成、参考素材或高级参数可用。新文本执行只接受已通过内部 Proxy 管理登记的
   冻结引用；历史静态别名及直连目录不再成为新文本模型。
+- Agnes / MiniMax / Ark 视频 Create 返回远端任务 ID 时，即使 HTTP 为 429 或其他错误，
+  也保留该身份进入查询路径；不能丢弃任务 ID 后按限流重新提交 Create。
+  MiniMax / Ark 未返回费用时记录 `not_reported`，不伪造零费用。取消仅在响应明确给出
+  `cancelled/canceled` 时记作远端确认；请求已受理、失败或响应丢失继续查询原任务。
+  Agnes 当前没有实现取消协议，返回 `unsupported`，不能记作已取消。
 - `openai_media_v1` 保留已有媒体合同及历史 resume 的解析。新同步图片使用独立版本
   `openai_images_v2`，在同一 Catalog/Binding 体系选择 `@contract/openai-images-v2 / v1`，
   远端 ID 手填或目录发现，不能按模型名称推断能力。管理员 API 允许先保存手填绑定，
@@ -596,7 +601,7 @@ create。能力边界细节见 [PRODUCTION_RUNTIME.md](PRODUCTION_RUNTIME.md)。
 | 文本发现仅可见；新文本生产只使用空间拥有的版本化 Proxy 引用，静态/历史直连不参与新执行 | 真实上游能力与账号实测仍须独立证据 | `litellm_gateway/workspace_registry.py`、`litellm_gateway/model_catalog.py` |
 | Workbench 已在 execution-plan 返回只读 Compiler 脱敏 wire 投影及确认指纹，受理和 Worker 在付费提交前复核同源编译；创意上下文仍经既有 Prompt 组装 | 临时素材传输值仅在 Worker 晚绑定；尚无真实账号/付费发送端到端证明，Prompt 策略及跨供应商映射证据仍需统一 | `providers/compile_preview.py`、`production/workbench_execution.py`、`production/application/commands.py`、`execution/media_submission.py` |
 | 编译器摘要字段形状不同，执行层从摘要顶层读取生效参数 | wire 已有参数仍可能在统一转换记录中缺失 | `providers/minimax.py::MiniMaxVideoCompiler`、`providers/openai_compatible_media.py`、`execution/media_submission.py` |
-| ProbeRequest 只有布尔付费确认，后端拒绝派发计费探测 | 受控首次验证授权尚未交付 | `api/v1/provider_connections.py::ProbeRequest`、`connection_service.py::probe` |
+| ProbeRequest 不接受付费确认字段；后端拒绝计费生成探测 | 独立 Owner 付费探测授权合同尚未交付 | `api/v1/provider_connections.py::ProbeRequest`、`connection_service.py::probe` |
 
 ### 复用实体、接口与验收口径
 

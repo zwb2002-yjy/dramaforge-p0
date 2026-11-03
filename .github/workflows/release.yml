@@ -66,6 +66,12 @@ jobs:
             postgres-quality backend-quality
           docker compose -f docker-compose.quality.yml run --rm --no-deps frontend-quality
           docker compose -f docker-compose.quality.yml up \
+            --no-build --abort-on-container-exit --exit-code-from media-resource-quality \
+            media-resource-quality
+          docker compose -f docker-compose.quality.yml up \
+            --no-build --abort-on-container-exit --exit-code-from auth-gateway-integration-quality \
+            auth-gateway-integration-quality
+          docker compose -f docker-compose.quality.yml up \
             --no-build --abort-on-container-exit --exit-code-from litellm-integration-quality \
             litellm-quality litellm-integration-quality
       - name: Resolve single migration head

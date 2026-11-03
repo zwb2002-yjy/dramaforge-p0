@@ -9,9 +9,9 @@ import asyncio
 import json
 import os
 
+from app.shared.migration_safety import inspect_retired_tables as inspect_connection
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from app.shared.migration_safety import inspect_retired_tables as inspect_connection
 
 
 async def inspect_retired_tables(session):

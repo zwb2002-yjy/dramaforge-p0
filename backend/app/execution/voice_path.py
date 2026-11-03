@@ -23,7 +23,7 @@ from app.execution.models import GraphNode, NodeRun, ProviderOperation
 from app.providers.voice_config import voice_identity
 from app.providers.voice_runtime import get_voice_adapter
 from app.shared.db import set_node_run_rls_context
-from app.shared.errors import ValidationAppError
+from app.shared.errors import ProviderTaskCancelledError, ValidationAppError
 from app.storage.minio_store import ObjectStore
 
 if TYPE_CHECKING:
@@ -103,6 +103,21 @@ async def execute_voice_node_run(
     # Artifact and updating the operation/run lineage.
     if await set_node_run_rls_context(session, node_run_id=run.id) is None:
         raise ValidationAppError("voice node ownership context unavailable")
+
+    # A cancellation committed while the operation row was being written wins
+    # before the create boundary: no speech request is sent for a cancelled run.
+    await session.refresh(run)
+    if run.status == "cancel_requested" or bool(
+        (run.output_summary or {}).get("cancel_requested")
+    ):
+        operation.status = "cancelled"
+        operation.error_code = "PROVIDER_TASK_CANCELLED"
+        operation.error_summary = "cancelled before provider submission"
+        operation.completed_at = datetime.now(UTC)
+        run.status = "cancelled"
+        run.finished_at = datetime.now(UTC)
+        await session.commit()
+        raise ProviderTaskCancelledError()
 
     created = await adapter.create({"prompt": prompt, "kind": "voice"})
     remote = str(created.get("remote_task_id") or "")

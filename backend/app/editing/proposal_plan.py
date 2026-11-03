@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _FORBIDDEN_FIELDS = frozenset(
     {
@@ -171,19 +171,27 @@ class EditSessionTimelineCommand(_StrictPlanModel):
         return value
 
 
+class EditingRepairProposalCommand(BaseModel):
+    """Acknowledge a production-repair scope; never authorizes execution."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    edit_session_id: UUID
+    shot_ids: list[UUID] = Field(min_length=1, max_length=1000)
+    no_auto_execute: Literal[True]
+
+
 def validate_edit_session_timeline_command(
     payload: Mapping[str, object],
 ) -> EditSessionTimelineCommand:
     """Validate untrusted proposal JSON into the narrow typed command shape."""
 
-    try:
-        return EditSessionTimelineCommand.model_validate(payload)
-    except ValidationError:
-        raise
+    return EditSessionTimelineCommand.model_validate(payload)
 
 
 __all__ = [
     "EditSessionTimelineCommand",
+    "EditingRepairProposalCommand",
     "EditSessionTimelineOperation",
     "EditSessionTimelinePlan",
     "ReorderClipsOperation",

@@ -289,5 +289,5 @@ export async function resolveShotReferences(
 }
 
 export function fetchProjectAssets(projectId: string): Promise<AssetRead[]> {
-  return apiGet(`/api/v1/projects/${projectId}/assets`);
+  return apiGetList<AssetRead>(`/api/v1/projects/${projectId}/assets`);
 }

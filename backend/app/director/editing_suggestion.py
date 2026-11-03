@@ -10,7 +10,6 @@ or touches production/execution facts.
 from __future__ import annotations
 
 import math
-import re
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -33,6 +32,7 @@ from app.access.models import User
 from app.access.projects import ProjectService
 from app.config import get_settings
 from app.director.assistant_models import DirectorThread
+from app.director.forbidden_fields import is_forbidden_field, reject_forbidden_fields
 from app.director.proposal_creation import ProposalItemDraft, create_proposal
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.runtime.capabilities import require_director_runtime_available
@@ -106,76 +106,31 @@ class EditingDirectorSuggestionContext(BaseModel):
     user_instruction: str = Field(min_length=1, max_length=4000)
 
 
-_FORBIDDEN_PLAN_FIELDS = frozenset(
+_FORBIDDEN_PLAN_EXTRAS = frozenset(
     {
-        "artifact",
-        "artifact_id",
-        "artifact_ids",
-        "artifact_url",
-        "column",
-        "execution",
-        "execution_id",
-        "execution_plan",
         "field_path",
         "from",
         "json_patch",
-        "node_run",
-        "node_run_id",
-        "node_run_ids",
-        "patch",
         "path",
-        "production_lineage",
-        "provider",
-        "provider_model_id",
-        "provider_operation",
         "raw_replacement",
-        "raw_sql",
         "replacement",
         "replacement_payload",
-        "runtime",
-        "runtime_id",
-        "sql",
-        "sql_query",
-        "table",
         "to",
-        "worker",
-        "worker_queue",
     }
 )
 
 
-def _normalize_key(key: object) -> str:
-    text = str(key).strip().replace("-", "_").replace(" ", "_")
-    text = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", text)
-    text = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", text)
-    return re.sub(r"_+", "_", text).lower()
-
-
 def _is_forbidden_plan_field(key: object) -> bool:
-    normalized = _normalize_key(key)
-    return normalized in _FORBIDDEN_PLAN_FIELDS or normalized.startswith(
-        (
-            "artifact_",
-            "execution_",
-            "node_run_",
-            "provider_",
-            "raw_sql_",
-            "runtime_",
-            "sql_",
-            "worker_",
-        )
-    )
+    return is_forbidden_field(key, extra_keys=_FORBIDDEN_PLAN_EXTRAS)
 
 
 def _reject_forbidden_plan_fields(value: object, *, path: str = "candidate") -> None:
-    if isinstance(value, Mapping):
-        for key, nested in value.items():
-            if _is_forbidden_plan_field(key):
-                raise ValueError(f"{path} contains forbidden field: {key}")
-            _reject_forbidden_plan_fields(nested, path=f"{path}.{key}")
-    elif isinstance(value, list | tuple):
-        for index, nested in enumerate(value):
-            _reject_forbidden_plan_fields(nested, path=f"{path}[{index}]")
+    reject_forbidden_fields(
+        value,
+        path=path,
+        extra_keys=_FORBIDDEN_PLAN_EXTRAS,
+        message="contains forbidden field",
+    )
 
 
 def _sanitize_design_metadata(value: object) -> object:

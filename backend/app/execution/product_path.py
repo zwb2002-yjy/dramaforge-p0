@@ -124,7 +124,6 @@ async def execute_media_node_run(
     already_claimed: bool = False,
 ) -> ExecuteNodeResult:
     """Worker entry for shot-p0-v1 media nodes. Never called from user Route."""
-    from datetime import UTC, datetime
 
     run = await session.get(NodeRun, node_run_id)
     if run is None:
@@ -141,24 +140,12 @@ async def execute_media_node_run(
         if run.status not in {"running", "cancel_requested"}:
             raise ValidationAppError(f"claimed node_run cannot execute from status={run.status}")
     else:
-        now = datetime.now(UTC)
-        if not node_run_is_due(run, now=now):
-            raise NodeRunAlreadyClaimedError()
-        claimed = await session.execute(
-            update(NodeRun)
-            .where(NodeRun.id == node_run_id, due_node_runs(now))
-            .values(status="running", started_at=now, next_attempt_at=None)
-            .returning(NodeRun.id)
-            .execution_options(synchronize_session="fetch")
-        )
-        if claimed.scalar_one_or_none() is None:
-            await session.refresh(run)
-            if run.status in {"completed", "cached", "completed_after_cancel"}:
-                return await _completed_result(session, run=run, node_type=node_type)
-            if run.status == "running":
-                raise NodeRunAlreadyClaimedError()
-            raise ValidationAppError(f"node_run cannot execute from status={run.status}")
-        await session.refresh(run)
+        # One claim implementation for both worker and direct callers; the old
+        # inline UPDATE did not preserve cancel_requested or active resumable
+        # attempts.
+        run = await claim_media_node_run(session, node_run_id=node_run_id)
+        if run.status in {"completed", "cached", "completed_after_cancel"}:
+            return await _completed_result(session, run=run, node_type=node_type)
 
     obj_store = store or get_object_store()
     if node.node_key == "final_film_assembly":

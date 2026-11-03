@@ -15,7 +15,8 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
 前端网关是唯一宿主应用入口：http://127.0.0.1:8080。
-`docker-compose.dev.yml` 额外开放基础设施调试端口，不得用于不受信网络。
+`docker-compose.dev.yml` 只把 PostgreSQL/Redis/MinIO/LiteLLM 调试端口发布到回环地址，
+不改变基础栈的内部网络边界；该 opt-in 文件仍不得用于不受信网络。
 
 ## 权威质量门
 
@@ -71,6 +72,16 @@ LiteLLM 集成进程共享受限网络命名空间，使用镜像构建阶段已
 - Trivy filesystem scan 在高风险/依赖变更、`dev -> main` 或手动完整门执行；
 - 同一 PR 的新 commit 会取消旧的未完成 CI，避免验证已过期 SHA。
 
+当前 dev 分支不跑 PR CI（fast-development）；main PR 与 workflow_dispatch 仍执行完整
+`container-gates`。单元测试的共享 SQLite client 夹具只证明功能路径；RLS、迁移和真实
+并发必须由 `tests/integration` 的 PostgreSQL 套件证明（种子阶段用管理员角色建库/种数据，
+测试主体再 `SET ROLE dramaforge_app`）。Worker 测试中注入 typed error 或 claim 是为了
+隔离编排行为，不替代 PG 的 claim/RLS 语义。
+
+当前前端 dev 工具链的 critical/high 已通过 vitest 5 / vite 补丁升级消除；剩余
+moderate 项来自 minimatch/eslint/openapi 工具链，不进入生产 bundle。依赖审计结果只对
+当次 lockfile 有效，任何依赖变化都必须重新核对，不能把一次审计当作长期结论。
+
 常规 merge 到 `dev` 后不再原样重复 PR 全量质量门；发布候选和
 `dev -> main` 仍执行完整验证。周度完整安全扫描由
 `.github/workflows/security.yml` 独立执行。
@@ -107,7 +118,7 @@ Owner 发布门禁；不会运行真实 Provider 生成。
 
 | 脚本 | 实际边界 | 使用要求 |
 |---|---|---|
-| [prove_formal_live_chain.py](../scripts/prove_formal_live_chain.py) | 有注册/创建工作空间、项目和 executions 写入；无 `--real` / 数字预算参数 | 不作只读或免费检查；先核对实例、身份、具体调用及逐操作授权 |
+| [prove_formal_live_chain.py](../scripts/prove_formal_live_chain.py) | 有注册/创建工作空间、项目和 executions 写入；paid dispatch 需 `--real` 确认，无数字预算参数 | 注册/导入/预览不付费；`--real` 前先核对实例、身份、具体调用及逐操作授权 |
 | [prove_professional_agnes_golden.py](../scripts/prove_professional_agnes_golden.py) | 创建并生成真实关键帧/视频；无 `--real` / 数字预算参数 | 是真实 Provider 驱动，不能以脚本名称代替预算/授权 |
 | [prove_v1_r7_acceptance.py](../scripts/prove_v1_r7_acceptance.py) | 付费阶段有 `--real`/candidate 检查；preflight 无 Provider 调用但会写 profile、项目、绑定 | preflight 也需要明确的测试环境与写入范围；`--real` 不是 Owner 授权或费用上限 |
 
@@ -115,6 +126,22 @@ Owner 发布门禁；不会运行真实 Provider 生成。
 已经安排的目标实例，不能只把端口改成当前可访问实例。脚本支持的参数以 argparse 为准，
 不向没有该参数的脚本追加 `--real` 并声称安全。源码阅读可以发现边界，不代表脚本在新
 候选上已验证；恢复与脱敏仍需在相应候选上用证据确认。
+
+`prove_v1_r7_acceptance.py` 的 `--recovery-proof` / `--runtime-proof` / `--browser-proof`
+是操作者提供的 JSON 证明。其中的 worker 停止/重启、Provider 操作计数和远端 ID 哈希
+在仓库内没有程序化生产者，因此这些字段是**操作者证明（attestation）**，不是机器验证：
+脚本会交叉核对 candidate、repair_run_id、entry_port、migration head 与项目身份，
+但无法证明这些事件真的发生。它们只能作为发布评审的输入，不能单独充当发布授权或
+“机器已验证”结论；需要强绑定时应另建带产生器与签名的证明合同。
+
+`prove_v1_r7_acceptance.py` 的 delivery 阶段会独立调用本机 `ffprobe` 检查下载到的
+Final Film 字节（视频+音频流、时长与渲染结果一致），不再只依赖渲染节点自报的 probe
+字典；运行该阶段需要宿主安装 FFmpeg/ffprobe，缺失时脚本 fail-closed。
+
+上述 proof 脚本与 live acceptance spec 默认使用一次性本地合成账号
+（`professional-proof@example.com` 与合成口令），并支持
+`DRAMAFORGE_PROOF_EMAIL` / `DRAMAFORGE_PROOF_PASSWORD` 覆盖。这些默认值只服务于
+本地临时实例，不是可复用的生产凭据，也不得用于任何公开或共享实例；执行前应显式覆盖。
 
 ## 真实 Provider 证据（付费边界）
 

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.assets.models import Shot
 from app.editing.adapter import EditingAdapter
 from app.execution.models import Artifact
+from app.shared.errors import ValidationAppError
 
 
 async def build_edit_session_from_shots(
@@ -29,9 +30,11 @@ async def build_edit_session_from_shots(
     for order, shot_id in enumerate(shot_ids, start=1):
         shot = await session.get(Shot, shot_id)
         if shot is None or shot.project_id != project_id:
-            continue
+            raise ValidationAppError("selected shot is unavailable",
+                details={"code": "EDIT_SHOT_NOT_READY", "shot_id": str(shot_id)})
         if shot.formal_video_artifact_id is None:
-            continue
+            raise ValidationAppError("selected shot has no formal video",
+                details={"code": "EDIT_SHOT_NOT_READY", "shot_id": str(shot_id)})
         artifact = await session.get(Artifact, shot.formal_video_artifact_id)
         if (
             artifact is None
@@ -39,7 +42,8 @@ async def build_edit_session_from_shots(
             or artifact.artifact_type != "video"
             or artifact.deleted_at is not None
         ):
-            continue
+            raise ValidationAppError("selected shot's formal video is unavailable",
+                details={"code": "EDIT_SHOT_NOT_READY", "shot_id": str(shot_id)})
         duration = (
             float(artifact.duration_seconds)
             if artifact.duration_seconds

@@ -52,6 +52,32 @@ def main() -> None:
     Image.new("RGB", (160, 90), (40, 90, 140)).save(target / "blue-frame.png")
     make_video(target, "red", 440)
     make_video(target, "blue", 660)
+    # Short excerpt for replacement-duration checks (independent of the planned
+    # duration). Previously only the README's manual ffmpeg command created it.
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(target / "blue-tone.mp4"),
+            "-t",
+            "0.25",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-movflags",
+            "+faststart",
+            str(target / "short-tone.mp4"),
+        ],
+        check=True,
+    )
     subprocess.run(
         [
             "ffmpeg",

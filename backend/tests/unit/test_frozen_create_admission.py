@@ -12,8 +12,8 @@ from app.providers.create_admission import require_frozen_create_admission
 from app.providers.execution_identity import ExecutionIdentitySnapshot
 from app.providers.models import ProviderConnectionRevision
 from app.shared.errors import ValidationAppError
-from tests.unit.test_runtime_model_resolution import _seed_two_models
-from tests.unit.test_runtime_model_resolution import session as session
+from tests.unit.runtime_model_fixtures import _seed_two_models
+from tests.unit.runtime_model_fixtures import session as session
 
 
 async def _setup(session):

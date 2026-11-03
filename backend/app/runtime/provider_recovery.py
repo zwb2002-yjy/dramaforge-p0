@@ -46,6 +46,7 @@ async def recover_interrupted_provider_jobs(
     from sqlalchemy import select
 
     from app.execution.models import NodeRun, ProviderOperation
+    from app.execution.synchronous_results import synchronous_image_receipt
     from app.runtime.scheduler import NodeRunScheduler
     from app.shared.db import (
         list_resumable_provider_node_run_rls_scopes,
@@ -121,7 +122,8 @@ async def recover_interrupted_provider_jobs(
                         ):
                             await session.rollback()
                             continue
-                        if operation.provider_operation_id is None:
+                        receipt = synchronous_image_receipt(run=run, operation=operation)
+                        if operation.provider_operation_id is None and receipt is None:
                             if operation.status == "submission_started" and _older_than(
                                 operation.created_at, cutoff
                             ):

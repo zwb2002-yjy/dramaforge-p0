@@ -46,6 +46,6 @@ describe("director API routes match the generated OpenAPI contract", () => {
 
   it("exposes the recommendation request used by the Shot panel", () => {
     expect(typeof directorApi.recommendShotDesign).toBe("function");
-    expect(directorApi.requestShotDirectorSuggestion).toBe(directorApi.suggestShotDesign);
+    expect(typeof directorApi.suggestShotDesign).toBe("function");
   });
 });

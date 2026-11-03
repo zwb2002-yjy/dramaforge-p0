@@ -1,20 +1,23 @@
 services:
+  # Opt-in local development overrides. Every published port binds loopback so
+  # an unauthenticated PostgreSQL/Redis/MinIO/LiteLLM is never exposed to the
+  # LAN; the base compose file keeps these services on the internal network.
   postgres:
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
 
   redis:
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 
   minio:
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
 
   litellm-network:
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
 
   # The frontend gateway remains the only application entry on host port 8080.
   # The API keeps its container-only port 8000 and is reached by the gateway.

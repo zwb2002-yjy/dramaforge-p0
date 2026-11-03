@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from app.config import clear_settings_cache
+from app.config import clear_settings_cache, get_settings
 from app.shared.security import CSRF_HEADER
 from fastapi.testclient import TestClient
 
@@ -34,6 +34,9 @@ def test_clean_instance_bootstraps_one_owner_then_closes_registration(
 ) -> None:
     monkeypatch.setenv("PUBLIC_REGISTRATION_ENABLED", "false")
     clear_settings_cache()
+    # Settings are fixed when the app is created; mirror the configured value on
+    # the running test app instead of relying on per-request environment rereads.
+    client.app.state.settings = get_settings()  # type: ignore[attr-defined]
 
     before = client.get("/api/v1/auth/bootstrap-status")
     assert before.status_code == 200

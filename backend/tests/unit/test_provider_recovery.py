@@ -640,7 +640,7 @@ async def test_single_poll_releases_lease_then_cancel_wakes_same_remote_id(
     if persistence_error:
         from sqlalchemy.exc import DBAPIError
 
-        defer = provider_execution._defer_remote_poll
+        defer = provider_execution.defer_remote_poll
         writes = 0
 
         async def lose_one_write(*args, **kwargs):
@@ -652,7 +652,7 @@ async def test_single_poll_releases_lease_then_cancel_wakes_same_remote_id(
                 )
             await defer(*args, **kwargs)
 
-        monkeypatch.setattr(provider_execution, "_defer_remote_poll", lose_one_write)
+        monkeypatch.setattr(provider_execution, "defer_remote_poll", lose_one_write)
     monkeypatch.setattr("app.execution.product_path.get_object_store", lambda: SimpleNamespace())
     pending = await jobs.execute_node_run({"job_try": 1}, str(run_id))
     assert pending == {"status": "provider_pending", "node_run_id": str(run_id)}
@@ -747,3 +747,29 @@ async def test_dispatcher_retries_recovery_errors_without_blocking_outbox_and_jo
     assert not any(
         task.get_name() in {"provider-recovery", "outbox-dispatch"} for task in asyncio.all_tasks()
     )
+
+
+@pytest.mark.parametrize("valid", [True, False])
+async def test_synchronous_result_recovery_uses_receipt_not_remote_id(recovery, valid):
+    from app.execution.synchronous_results import SynchronousImageReceipt
+
+    (run_id,) = await seed(recovery, remote=False)
+    async with recovery.factory() as session:
+        operation = await session.scalar(select(ProviderOperation).where(
+            ProviderOperation.node_run_id == run_id))
+        operation.status = "submitted"
+        operation.response_summary = {"synchronous_result": SynchronousImageReceipt(
+            operation_id=operation.id if valid else UUID(int=999), node_run_id=run_id,
+            artifact_uri="https://media.example/already-created.png",
+        ).model_dump(mode="json")}
+        await session.commit()
+    result = await provider_recovery.recover_interrupted_provider_jobs(
+        {}, session_factory=recovery.factory,
+    )
+    assert result["resumed"] == int(valid)
+    assert result["failed"] == int(not valid)
+    assert len(recovery.queue.admitted) == int(valid)
+    async with recovery.factory() as session:
+        operation = await session.scalar(select(ProviderOperation).where(
+            ProviderOperation.node_run_id == run_id))
+        assert operation.status == "submitted" and operation.provider_operation_id is None

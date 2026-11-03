@@ -16,21 +16,25 @@ MAX_RESPONSE_BYTES = 24 * 1024 * 1024
 IMAGE_MIMES = {"image/png", "image/jpeg", "image/webp"}
 
 
+class ImageResultError(ValueError):
+    """A bounded image response could not be read within the frozen contract."""
+
+
 async def bounded_response(
     client: httpx.AsyncClient, method: str, url: str, **kwargs: Any
 ) -> httpx.Response:
     kwargs["headers"] = {**kwargs.get("headers", {}), "Accept-Encoding": "identity"}
     async with client.stream(method, url, **kwargs) as response:
         if response.headers.get("content-encoding", "identity").lower() != "identity":
-            raise ValueError("compressed image responses are outside the bounded contract")
+            raise ImageResultError("compressed image responses are outside the bounded contract")
         raw_size = response.headers.get("content-length")
         if raw_size and (not raw_size.isdecimal() or int(raw_size) > MAX_RESPONSE_BYTES):
-            raise ValueError("image response exceeds the protocol limit")
+            raise ImageResultError("image response exceeds the protocol limit")
         body = bytearray()
         async for chunk in response.aiter_bytes(65536):
             body.extend(chunk)
             if len(body) > MAX_RESPONSE_BYTES:
-                raise ValueError("image response exceeds the protocol limit")
+                raise ImageResultError("image response exceeds the protocol limit")
         return httpx.Response(
             response.status_code,
             headers=response.headers,

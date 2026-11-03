@@ -15,5 +15,6 @@ runs with the backend quality image's locked Pillow and FFmpeg dependencies.
 Tests assert decoding, media time, planned cut duration, native mute state, and
 sample availability. They do not evaluate visual quality or synthesize audio.
 
-Regenerate the short excerpt from `blue-tone.mp4` with the backend quality image's FFmpeg:
-`ffmpeg -i blue-tone.mp4 -t 0.2 -c:v libx264 -pix_fmt yuv420p -c:a aac -movflags +faststart short-tone.mp4`.
+`scripts/generate_playback_fixtures.py` now also derives `short-tone.mp4` from
+`blue-tone.mp4`, so this directory can be rebuilt with one command instead of a
+separate manual FFmpeg step.

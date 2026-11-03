@@ -8,16 +8,11 @@ caller cannot accidentally hide a duplicate POST inside the adapter.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import hashlib
 import json
-from datetime import UTC, datetime
-from email.utils import parsedate_to_datetime
 from typing import Any, cast
 from urllib.parse import urlsplit
-from uuid import uuid4
-from weakref import WeakKeyDictionary
 
 import httpx
 from pydantic import JsonValue
@@ -25,6 +20,13 @@ from pydantic import JsonValue
 from app.config import Settings, get_settings
 from app.providers.egress import guarded_provider_transport
 from app.providers.http_client import provider_http_client
+from app.providers.submission_gate import submission_gate
+from app.providers.transport_errors import (
+    error_code_for_status as _error_code,
+)
+from app.providers.transport_errors import (
+    retry_after_seconds as _retry_after_seconds,
+)
 
 AGNES_CN_PROFILE = "agnes_cn_v1"
 AGNES_CN_HOST = "https://api.agnes-ai.cn"
@@ -40,22 +42,6 @@ _AGNES_IMAGE_HEIGHT = 1312
 _AGNES_VIDEO_NUM_FRAMES = 121
 _AGNES_VIDEO_FRAME_RATE = 24
 _AGNES_VIDEO_DURATION_SECONDS = 5
-_SUBMISSION_GATES: WeakKeyDictionary[
-    asyncio.AbstractEventLoop, dict[tuple[str, int], asyncio.Semaphore]
-] = WeakKeyDictionary()
-
-
-def _submission_gate(host: str, limit: int) -> asyncio.Semaphore:
-    """Limit paid Agnes creates per host while leaving task polling parallel."""
-
-    loop = asyncio.get_running_loop()
-    loop_gates = _SUBMISSION_GATES.setdefault(loop, {})
-    key = (host, limit)
-    gate = loop_gates.get(key)
-    if gate is None:
-        gate = asyncio.Semaphore(limit)
-        loop_gates[key] = gate
-    return gate
 
 
 def normalize_agnes_host(value: str) -> str:
@@ -102,56 +88,6 @@ def _validate_video_shape(*, num_frames: int, frame_rate: int) -> None:
         raise ValueError("Agnes Video V2.0 requires exactly 121 frames")
     if frame_rate != _AGNES_VIDEO_FRAME_RATE:
         raise ValueError("Agnes Video V2.0 requires exactly 24 fps")
-
-
-def _schema_fingerprint(body: dict[str, object]) -> str:
-    """Fingerprint field shape while replacing prompts, references, and tokens."""
-
-    def redacted(value: object, key: str = "") -> object:
-        if key == "prompt":
-            return "<prompt>"
-        if key in {"image", "url", "video_url"}:
-            if isinstance(value, list):
-                return ["<reference>" for _ in value]
-            return "<reference>"
-        if isinstance(value, dict):
-            return {str(k): redacted(v, str(k)) for k, v in sorted(value.items())}
-        if isinstance(value, list):
-            return [redacted(item) for item in value]
-        return value
-
-    raw = json.dumps(redacted(body), sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-def _error_code(status_code: int) -> str:
-    if status_code == 400:
-        return "PROVIDER_BAD_REQUEST"
-    if status_code == 401:
-        return "PROVIDER_AUTH_FAILED"
-    if status_code == 403:
-        return "PROVIDER_FORBIDDEN"
-    if status_code == 429:
-        return "PROVIDER_RATE_LIMITED"
-    if status_code >= 500:
-        return "PROVIDER_UNAVAILABLE"
-    return "PROVIDER_REQUEST_FAILED"
-
-
-def _retry_after_seconds(response: httpx.Response) -> float | None:
-    retry_after = response.headers.get("Retry-After", "").strip()
-    if not retry_after:
-        return None
-    try:
-        return max(float(retry_after), 0.0)
-    except ValueError:
-        try:
-            return max(
-                (parsedate_to_datetime(retry_after) - datetime.now(UTC)).total_seconds(),
-                0.0,
-            )
-        except (TypeError, ValueError):
-            return None
 
 
 def _json_object(response: httpx.Response) -> dict[str, Any]:
@@ -882,7 +818,6 @@ class AgnesRuntime:
 
     async def submit_image(self, request: Any) -> Any:
         from app.providers.runtime import (
-            ProviderResumeToken,
             SubmissionResult,
             validate_compiled_submission,
         )
@@ -896,7 +831,7 @@ class AgnesRuntime:
         if not self._configured():
             raise RuntimeError("Agnes China connection is not configured")
         try:
-            async with _submission_gate(self._host, self._submission_limit):
+            async with submission_gate("agnes", self._host, self._submission_limit):
                 response = await _post_json(
                     self._host,
                     AGNES_IMAGE_PATH,
@@ -929,19 +864,11 @@ class AgnesRuntime:
                 request_fingerprint=_request_fingerprint(request.wire_request),
                 request_summary=request.safe_request_summary,
             )
-        remote_id = f"agnes-image-{uuid4()}"
-        token = ProviderResumeToken(
-            provider_type="agnes",
-            protocol_profile=AGNES_CN_PROFILE,
-            remote_task_id=remote_id,
-        )
         return SubmissionResult(
-            remote_task_id=remote_id,
             status="succeeded",
             artifact_uri=image_url,
             request_fingerprint=_request_fingerprint(request.wire_request),
             request_summary=request.safe_request_summary,
-            resume_token=token,
         )
 
     async def submit_video(self, request: Any) -> Any:
@@ -960,7 +887,7 @@ class AgnesRuntime:
         if not self._configured():
             raise RuntimeError("Agnes China connection is not configured")
         try:
-            async with _submission_gate(self._host, self._submission_limit):
+            async with submission_gate("agnes", self._host, self._submission_limit):
                 response = await _post_json(
                     self._host,
                     AGNES_VIDEO_CREATE_PATH,
@@ -982,7 +909,8 @@ class AgnesRuntime:
         task_id = data.get("task_id")
         video_id_value = str(video_id) if video_id is not None and str(video_id) else None
         task_id_value = str(task_id) if task_id is not None and str(task_id) else None
-        if response.status_code >= 400 or (video_id_value is None and task_id_value is None):
+        # A task returned alongside 429 must be resumed, never created again.
+        if video_id_value is None and task_id_value is None:
             return SubmissionResult(
                 status="failed",
                 error_code=(
@@ -1037,7 +965,7 @@ class AgnesRuntime:
                 path,
                 headers=self._headers(),
                 params=params,
-                timeout=60.0,
+                timeout=20.0,
                 transport=self._transport,
             )
         except httpx.TransportError:
@@ -1088,7 +1016,9 @@ class AgnesRuntime:
     async def cancel_video(self, resume: Any) -> Any:
         from app.providers.runtime import CancelResult
 
-        return CancelResult(status="cancelled")
+        # No cancellation endpoint is implemented for this protocol. The
+        # caller must keep observing the original task, including late output.
+        return CancelResult(status="unsupported")
 
     async def fetch_cost(self, resume: Any) -> Any:
         from app.providers.runtime import CostResult

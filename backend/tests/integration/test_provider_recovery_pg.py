@@ -31,7 +31,7 @@ from tests.unit.test_provider_recovery import Queue
 
 async def test_short_poll_due_scope_and_overlapping_workers_share_one_remote(monkeypatch):
     from app.events.outbox import StreamPublisher
-    from app.execution.provider_execution import _defer_remote_poll
+    from app.execution.provider_execution import defer_remote_poll
     from app.production.run_control import ProductionRunControl
     from app.runtime.scheduler import NodeRunScheduler
 
@@ -101,7 +101,7 @@ async def test_short_poll_due_scope_and_overlapping_workers_share_one_remote(mon
             entered.set()
             await release.wait()
             operation.last_polled_at, operation.status = datetime.now(UTC), "running"
-            await _defer_remote_poll(
+            await defer_remote_poll(
                 session,
                 run=run,
                 operation=operation,
@@ -257,7 +257,9 @@ async def test_periodic_recovery_rls_paging_locks_and_worker_lease(monkeypatch):
             assert acl.prosecdef is True
             assert acl.owner == "dramaforge_worker_resolver"
             assert acl.public_execute is False
-            assert "search_path=public, pg_temp" in acl.proconfig
+            # 0093 pins built-ins before public and fully qualifies application
+            # tables; a caller's temporary schema must never shadow this scanner.
+            assert "search_path=pg_catalog, public" in acl.proconfig
 
         async with factory() as session:
             assert await session.scalar(text("SELECT current_user")) == "dramaforge_app"
