@@ -2,6 +2,7 @@
    Structure is carried by spacing and type; only interactive rows get edges. */
 
 .df-model-settings {
+  container-type: inline-size;
   display: grid;
   gap: var(--df-space-6);
   width: min(100%, var(--df-settings-page-max));
@@ -312,6 +313,7 @@
 }
 .df-model-list li {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--df-space-3);
   padding: var(--df-space-3) 0;
@@ -319,6 +321,14 @@
 }
 .df-model-list li:last-child {
   border-bottom: 0;
+}
+.df-model-list .df-model-name {
+  flex-basis: calc(100% - var(--df-space-8));
+}
+.df-model-list .df-status {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .df-model-facts {
   display: flex;
@@ -400,5 +410,15 @@
   }
   .df-model-list li {
     flex-wrap: wrap;
+  }
+}
+
+@container (max-width: 740px) {
+  .df-provider-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .df-provider-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--df-border-subtle);
   }
 }

@@ -350,8 +350,17 @@ async def test_catalog_service_is_read_only_and_resolves_active_entries(
 
     service = ModelCatalogService(session)
     entries = await service.list_entries(provider_type="agnes", media_kind="image")
-    assert len(entries) == 1
-    assert entries[0].model_id == "agnes-image-2.1-flash"
+    assert {entry.model_id for entry in entries} == {
+        "agnes-image-2.1-flash",
+        "agnes-image-2.5-flash",
+    }
+    flash = await service.active_entry_for(
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="agnes-image-2.5-flash",
+    )
+    assert flash is not None
+    assert flash.model_revision == "cn-2026-11-03-r1"
 
     active = await service.active_entry_for(
         provider_type="agnes",

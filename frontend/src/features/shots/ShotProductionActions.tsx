@@ -21,6 +21,7 @@ import {
   activeStageStatus,
   stageOutcomeUnknown,
   stageQueueEstimate,
+  latestEffectiveTraceRows,
 } from "../production/sceneRunState";
 import { fetchDirectorCapabilities } from "../director/api";
 import { fetchShotReferences } from "../assets/api";
@@ -287,6 +288,14 @@ export function ShotProductionActions({
   const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
   const [receiptCheck, setReceiptCheck] = useState(0);
   const receiptScope = `${workspaceId}:${projectId}:${shot.id}`;
+  const receiptTraceKey = JSON.stringify(
+    latestEffectiveTraceRows(trace).map((row) => [
+      row.node_run_id,
+      row.node_key,
+      row.status,
+      row.operation_outcome_unknown,
+    ]),
+  );
   const [receiptState, setReceiptState] = useState<{
     scope: string;
     stages: Partial<Record<ShotExecutionStage, "checking" | "unknown" | "failed">>;
@@ -365,7 +374,7 @@ export function ShotProductionActions({
     return () => {
       cancelled = true;
     };
-  }, [projectId, shot.id, workspaceId, receiptScope, receiptCheck]);
+  }, [projectId, shot.id, workspaceId, receiptScope, receiptCheck, receiptTraceKey]);
 
   function executionInput(stage: ShotExecutionStage): ShotExecutionInput {
     const configuredPrompt =
@@ -846,18 +855,26 @@ export function ShotProductionActions({
       ? "video"
       : "image_keyframe";
   const focusPreflight = focusStage === "video" ? videoPreflight : keyframePreflight;
+  const focusedTrace = latestEffectiveTraceRows(trace).find(
+    (row) => row.node_key === (focusStage === "video" ? "video" : "keyframe"),
+  );
+  const executionFailed =
+    feedback?.kind === "success" &&
+    TERMINAL_EXECUTION_STATUSES.has(feedback.message) &&
+    !["completed", "cached", "completed_after_cancel"].includes(feedback.message);
+  const selectedModelId = focusPreflight?.resolved_model_id ?? focusPreflight?.requested_model_id;
   const modelText = modelPreflight.isPending
     ? "正在确认…"
     : modelPreflight.isError
       ? "无法确认"
-      : focusPreflight?.ready && focusPreflight.resolved_model_id
+      : selectedModelId
         ? `${
-            focusPreflight.contract_display_name ??
+            focusPreflight?.contract_display_name ??
             executionModelLabel(
-              focusPreflight.resolved_model_id,
+              selectedModelId,
               Array.isArray(models.data) ? models.data : undefined,
             ).label
-          }${focusPreflight.model_revision ? ` · ${focusPreflight.model_revision}` : ""}`
+          }${focusPreflight?.model_revision ? ` · ${focusPreflight.model_revision}` : ""}${focusPreflight?.ready ? "" : " · 不可用"}`
         : "未选择";
   const inputText =
     focusStage === "video"
@@ -1004,7 +1021,7 @@ export function ShotProductionActions({
         </div>
         <div data-testid={`production-preflight-${focusStage}`}>
           <dt>{focusStage === "video" ? "视频模型" : "生图模型"}</dt>
-          <dd title={focusPreflight?.resolved_model_id ?? undefined}>{modelText}</dd>
+          <dd title={selectedModelId ?? undefined}>{modelText}</dd>
         </div>
         <div>
           <dt>{focusStage === "video" ? "视频输入" : "画面输入"}</dt>
@@ -1019,6 +1036,31 @@ export function ShotProductionActions({
             </div>
           )}
       </dl>
+
+      {focusedTrace?.status === "failed" && (
+        <p className="df-shot-hint err" role="alert" data-testid="shot-last-execution-failure">
+          上次{focusStage === "video" ? "视频" : "画面"}执行失败。
+          {onOpenDetails && (
+            <Button tone="ghost" onClick={onOpenDetails}>
+              查看失败步骤
+            </Button>
+          )}
+        </p>
+      )}
+
+      <ExternalLink
+        type="link"
+        href={settingsHref}
+        role="button"
+        onClick={(event) => {
+          if (onOpenModelSettings) {
+            event.preventDefault();
+            onOpenModelSettings();
+          }
+        }}
+      >
+        选择或更换模型
+      </ExternalLink>
 
       <Button
         tone="primary"
@@ -1257,13 +1299,18 @@ export function ShotProductionActions({
 
       {feedback?.kind === "success" && (
         <p
-          className="df-shot-hint ok"
+          className={`df-shot-hint ${executionFailed ? "err" : "ok"}`}
           data-testid="shot-production-status"
           data-status={feedback.message}
-          role="status"
+          role={executionFailed ? "alert" : "status"}
         >
           {feedback.message === "director_queued" ? (
             <>{STAGE_NOUN[feedback.stage]}已交给导演执行。</>
+          ) : executionFailed ? (
+            <>
+              {STAGE_NOUN[feedback.stage]}执行{serverStatusLabel(feedback.message)}
+              ，请查看记录中的原因。
+            </>
           ) : (
             <>
               {STAGE_NOUN[feedback.stage]}已提交：{serverStatusLabel(feedback.message)}

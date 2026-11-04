@@ -3,6 +3,7 @@ import { Button, Field, Select, Alert } from "../ui";
 import { useSettingsWorkspace } from "../../hooks/useSettingsWorkspace";
 import type { WorkspaceRead } from "../../features/access/api";
 import { ProviderList } from "./ProviderList";
+import { ProjectModelInheritance } from "./ProjectModelInheritance";
 
 function WorkspaceSelector({
   workspaces,
@@ -31,7 +32,7 @@ function WorkspaceSelector({
   );
 }
 
-export function ModelConnectionSettings() {
+export function ModelConnectionSettings({ projectId }: { projectId?: string } = {}) {
   const { workspaces, selectedWorkspaceId, selectWorkspace } = useSettingsWorkspace();
   const [adding, setAdding] = useState(false);
 
@@ -61,6 +62,12 @@ export function ModelConnectionSettings() {
       ) : null}
       {selectedWorkspaceId ? (
         <>
+          {projectId && (
+            <ProjectModelInheritance projectId={projectId} workspaceId={selectedWorkspaceId} />
+          )}
+          <p className="muted">
+            在下方连接中选择模型，点击「用于生图」或「用于视频」。选择会保存为当前工作空间的默认模型；已有项目覆盖以生成预检为准。
+          </p>
           <ProviderList
             key={`providers-${selectedWorkspaceId}`}
             workspaceId={selectedWorkspaceId}

@@ -217,8 +217,21 @@ def main() -> None:
     args = parser.parse_args()
     content = render_model_support(binding_snapshot=args.binding_status_json)
     if args.check:
-        if not args.output.exists() or args.output.read_text(encoding="utf-8") != content:
-            raise SystemExit(f"generated model support document is stale: {args.output}")
+        existing = args.output.read_text(encoding="utf-8") if args.output.exists() else ""
+        if existing != content:
+            import difflib
+
+            diff = "".join(
+                difflib.unified_diff(
+                    existing.splitlines(keepends=True),
+                    content.splitlines(keepends=True),
+                    fromfile=str(args.output),
+                    tofile="generated model support",
+                )
+            )
+            raise SystemExit(
+                f"generated model support document is stale: {args.output}\n{diff}"
+            )
         return
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(content, encoding="utf-8")

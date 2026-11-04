@@ -202,6 +202,82 @@ async function confirmPreviewReady(): Promise<void> {
 }
 
 describe("ShotProductionActions", () => {
+  it.each(["completed", "failed"])(
+    "reconciles the same command when the server trace finishes as %s without a reload",
+    async (terminalStatus) => {
+      const scope = productionOperationScope(null, SHOT.project_id, SHOT.id, "image_keyframe");
+      recordProductionOperation(scope, {
+        operationKey: "same-command",
+        planFingerprint: "a".repeat(64),
+        stage: "image_keyframe",
+        recordedAt: new Date().toISOString(),
+        nodeRunId: "run",
+      });
+      let status = "running";
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockImplementation((input) =>
+          String(input).includes("/executions/receipt")
+            ? json({ node_run_id: "run", status })
+            : json([]),
+        );
+      const view = renderActions(
+        [],
+        [{ node_key: "keyframe", node_run_id: "run", status: "running" }],
+      );
+      await screen.findByTestId("shot-production-status");
+      status = terminalStatus;
+      view.rerender(
+        <QueryClientProvider client={view.queryClient}>
+          <ShotProductionActions
+            projectId={SHOT.project_id}
+            shot={SHOT}
+            trace={[{ node_key: "keyframe", node_run_id: "run", status: terminalStatus }]}
+          />
+        </QueryClientProvider>,
+      );
+      await waitFor(() => expect(readProductionOperation(scope)).toBeNull());
+      expect(screen.queryByTestId("shot-production-outcome-unknown")).not.toBeInTheDocument();
+      if (terminalStatus === "failed") {
+        expect(screen.getByTestId("shot-production-status")).toHaveAttribute("role", "alert");
+        expect(screen.getByTestId("shot-production-status")).not.toHaveTextContent("候选中检查");
+      }
+      expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    },
+  );
+
+  it("shows the configured but blocked model and always offers model selection", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => json([]));
+    const { queryClient } = renderActions();
+    await act(async () => {
+      queryClient.setQueryData(queryKeys.model.executionPreflight(SHOT.project_id), {
+        project_id: SHOT.project_id,
+        ready: false,
+        stages: [
+          {
+            stage: "image_keyframe",
+            slot: "visual.keyframe",
+            purpose: "keyframe",
+            ready: false,
+            source: "workspace_profile",
+            requested_model_id: "agnes/agnes-image-2.5-flash",
+            resolved_model_id: null,
+            provider_model_binding_id: null,
+            reason: "MODEL_OFFICIAL_EVIDENCE_GAP",
+          },
+        ],
+      });
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("production-preflight-image_keyframe")).toHaveTextContent(
+        "agnes-image-2.5-flash",
+      ),
+    );
+    expect(screen.getByTestId("production-preflight-image_keyframe")).toHaveTextContent("不可用");
+    expect(screen.getByRole("button", { name: "选择或更换模型" })).toBeVisible();
+    expect(screen.getByTestId("generate-keyframe")).toBeDisabled();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
     window.localStorage.clear();

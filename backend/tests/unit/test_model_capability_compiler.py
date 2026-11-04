@@ -372,6 +372,17 @@ async def test_every_seed_compiler_has_a_side_effect_free_contract_preview(model
             output=VideoOutputIntent.model_validate(output),
         )
         role = "first_frame"
+    expected_contract = None
+    operation = manifest.operations[intent.operation]
+    if operation.input_contracts:
+        from app.providers.workbench_contract import select_workbench_contract
+
+        expected_contract = select_workbench_contract(
+            operation=operation,
+            media_kind=manifest.media_kind,
+            references=[(role, "image/png")],
+            ui_mode_id="first_frame" if manifest.media_kind == "video" else None,
+        ).contract_id
     result = await preview_compile(
         manifest=manifest,
         invoke_model_value=model_id,
@@ -381,6 +392,7 @@ async def test_every_seed_compiler_has_a_side_effect_free_contract_preview(model
                 role=role, artifact_id=reference_id, fingerprint="a" * 64, mime_type="image/png"
             )
         ],
+        expected_mode_id=expected_contract,
     )
     assert result.readiness == "contract_validated", result.errors
     assert result.transport_verified is False

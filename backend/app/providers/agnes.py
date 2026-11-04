@@ -11,7 +11,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from typing import Any, cast
+import re
+import time
+from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 
 import httpx
@@ -119,6 +121,106 @@ def _video_result_url(data: dict[str, Any]) -> str | None:
         if isinstance(candidate, str) and candidate:
             return candidate
     return None
+
+
+def _video_submission_diagnostics(
+    *,
+    host: str,
+    started: float,
+    phase: Literal[
+        "not_sent", "connection_failed", "outcome_unknown", "response_received", "accepted"
+    ],
+    key: str,
+    wire: dict[str, Any],
+    response: httpx.Response | None = None,
+    network_error: str | None = None,
+) -> Any:
+    from app.providers.runtime import SubmissionDiagnostics
+
+    # Store only selected error text, never the full body, request or headers.
+    def redact(value: str) -> str:
+        sensitive = [key]
+
+        def collect(item: Any) -> None:
+            if isinstance(item, str):
+                sensitive.append(item)
+            elif isinstance(item, list):
+                for child in item:
+                    collect(child)
+            elif isinstance(item, dict):
+                for child in item.values():
+                    collect(child)
+
+        collect(
+            {
+                k: v
+                for k, v in wire.items()
+                if k not in {"model", "mode", "seconds", "size", "aspect_ratio", "n"}
+            }
+        )
+        for secret in sorted(set(sensitive), key=len, reverse=True):
+            if secret:
+                value = value.replace(secret, "[redacted]")
+                value = value.replace(json.dumps(secret, ensure_ascii=True)[1:-1], "[redacted]")
+        value = re.sub(r"(?i)bearer\s+[^\s,;]+", "Bearer [redacted]", value)
+        value = re.sub(r"https?://[^\s<>\"']+|data:[^\s]+", "[url redacted]", value)
+        return " ".join(value.split())
+
+    def header(name: str, limit: int) -> str | None:
+        value = response.headers.get(name) if response is not None else None
+        if not value or len(value) > limit or not re.fullmatch(r"[A-Za-z0-9_./: -]+", value):
+            return None
+        return redact(value)[:limit]
+
+    response_type: Literal["json", "html", "text", "empty", "other"] | None = None
+    error = None
+    if response is not None:
+        content_type = response.headers.get("content-type", "").lower()
+        response_type = (
+            "empty"
+            if not response.content
+            else "json"
+            if "json" in content_type
+            else "html"
+            if "html" in content_type
+            else "text"
+            if content_type.startswith("text/")
+            else "other"
+        )
+        if response.status_code >= 400:
+            data = _json_object(response)
+            detail = data.get("detail") or data.get("error") or data.get("message")
+            if isinstance(detail, dict):
+                detail = detail.get("message") or detail.get("code")
+            if isinstance(detail, str):
+                error = redact(detail)[:500]
+            elif response_type in {"html", "text"}:
+                # HTML errors may originate at an edge, before task creation.
+                title = re.search(r"<(?:title|h1)[^>]*>([^<]{1,1000})", response.text, re.I)
+                error = (
+                    redact(title.group(1) if title else response.text)[:500]
+                    if response_type == "text" or title
+                    else "HTML error response (no title)"
+                )
+    origin = urlsplit(host)
+    hostname = origin.hostname or "invalid-host"
+    authority = f"[{hostname}]" if ":" in hostname else hostname
+    if origin.port is not None:
+        authority += f":{origin.port}"
+    return SubmissionDiagnostics(
+        phase=phase,
+        endpoint=f"{origin.scheme}://{authority}{AGNES_VIDEO_CREATE_PATH}",
+        duration_ms=round((time.perf_counter() - started) * 1000, 3),
+        http_status=response.status_code if response is not None else None,
+        response_request_id=header("x-request-id", 200)
+        or header("request-id", 200)
+        or header("x-correlation-id", 200),
+        edge_request_id=header("cf-ray", 200),
+        response_server=header("server", 100),
+        response_type=response_type,
+        response_error=error,
+        network_error=network_error,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -884,8 +986,20 @@ class AgnesRuntime:
             protocol_profile=self.protocol_profile,
             operation="video.generate",
         )
+        started = time.perf_counter()
         if not self._configured():
-            raise RuntimeError("Agnes China connection is not configured")
+            return SubmissionResult(
+                status="failed",
+                error_code="PROVIDER_NOT_CONFIGURED",
+                error="Agnes connection is not configured; no HTTP request sent",
+                submission_diagnostics=_video_submission_diagnostics(
+                    host=self._host,
+                    started=started,
+                    phase="not_sent",
+                    key=self._key,
+                    wire=request.wire_request,
+                ),
+            )
         try:
             async with submission_gate("agnes", self._host, self._submission_limit):
                 response = await _post_json(
@@ -897,12 +1011,23 @@ class AgnesRuntime:
                     transport=self._transport,
                 )
         except httpx.TransportError as exc:
+            connection_failed = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout))
             return SubmissionResult(
-                status="unknown_submission",
-                error_code="PROVIDER_SUBMISSION_UNKNOWN",
+                status="failed" if connection_failed else "unknown_submission",
+                error_code="PROVIDER_CONNECTION_FAILED"
+                if connection_failed
+                else "PROVIDER_SUBMISSION_UNKNOWN",
                 error=type(exc).__name__,
                 request_fingerprint=_request_fingerprint(request.wire_request),
                 request_summary=request.safe_request_summary,
+                submission_diagnostics=_video_submission_diagnostics(
+                    host=self._host,
+                    started=started,
+                    phase="connection_failed" if connection_failed else "outcome_unknown",
+                    key=self._key,
+                    wire=request.wire_request,
+                    network_error=type(exc).__name__,
+                ),
             )
         data = _json_object(response)
         video_id = data.get("video_id")
@@ -911,6 +1036,14 @@ class AgnesRuntime:
         task_id_value = str(task_id) if task_id is not None and str(task_id) else None
         # A task returned alongside 429 must be resumed, never created again.
         if video_id_value is None and task_id_value is None:
+            diagnostics = _video_submission_diagnostics(
+                host=self._host,
+                started=started,
+                phase="response_received",
+                key=self._key,
+                wire=request.wire_request,
+                response=response,
+            )
             return SubmissionResult(
                 status="failed",
                 error_code=(
@@ -918,11 +1051,13 @@ class AgnesRuntime:
                     if response.status_code >= 400
                     else "PROVIDER_RESPONSE_INVALID"
                 ),
-                error=f"Agnes video request failed ({response.status_code})",
+                error=f"Agnes video HTTP {response.status_code}; no task ID"
+                + (f": {diagnostics.response_error}" if diagnostics.response_error else ""),
                 retry_after_seconds=_retry_after_seconds(response),
                 http_status=response.status_code,
                 request_fingerprint=_request_fingerprint(request.wire_request),
                 request_summary=request.safe_request_summary,
+                submission_diagnostics=diagnostics,
             )
         remote_id = video_id_value or task_id_value
         assert remote_id is not None
@@ -934,15 +1069,28 @@ class AgnesRuntime:
             remote_task_id=remote_id,
             remote_secondary_id=remote_secondary_id,
             query_kind=query_kind,
+            opaque_state={"model_name": request.model_id} if "mode" in request.wire_request else {},
         )
         return SubmissionResult(
             remote_task_id=remote_id,
             remote_secondary_id=remote_secondary_id,
             query_kind=query_kind,
-            status=str(data.get("status") or "queued"),
+            status=(
+                "submitted"
+                if str(data.get("status")).lower() in {"failed", "error", "cancelled", "canceled"}
+                else str(data.get("status") or "queued")
+            ),
             request_fingerprint=_request_fingerprint(request.wire_request),
             request_summary=request.safe_request_summary,
             resume_token=token,
+            submission_diagnostics=_video_submission_diagnostics(
+                host=self._host,
+                started=started,
+                phase="accepted",
+                key=self._key,
+                wire=request.wire_request,
+                response=response,
+            ),
         )
 
     async def poll_video(self, resume: Any) -> Any:
@@ -956,6 +1104,14 @@ class AgnesRuntime:
         if query_kind == "video_id":
             path = AGNES_VIDEO_BY_ID_PATH
             params = {"video_id": resume.remote_task_id}
+            # 2.5 keyframe/reference tasks require the submitted model name.
+            # Old tokens retain their exact historical query; never infer it
+            # from a current default or reinterpret an existing remote task.
+            model_name = resume.opaque_state.get("model_name")
+            if model_name is not None:
+                if not isinstance(model_name, str) or not model_name.strip():
+                    raise ValueError("Agnes resume model name is invalid")
+                params["model_name"] = model_name
         else:
             path = f"{AGNES_VIDEO_CREATE_PATH}/{resume.remote_task_id}"
             params = None

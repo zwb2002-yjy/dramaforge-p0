@@ -4654,6 +4654,11 @@ export interface components {
              * @default false
              */
             operation_outcome_unknown: boolean;
+            /** Error Code */
+            error_code?: string | null;
+            /** Error Summary */
+            error_summary?: string | null;
+            submission_diagnostics?: components["schemas"]["SubmissionDiagnostics"] | null;
             /** Effective Request Redacted */
             effective_request_redacted?: {
                 [key: string]: components["schemas"]["JsonValue"];
@@ -8221,6 +8226,41 @@ export interface components {
             created_at: string;
             /** Operations */
             operations: components["schemas"]["StoryOperationRead"][];
+        };
+        /**
+         * SubmissionDiagnostics
+         * @description Observed submission boundary, never a claim of billing or inference.
+         */
+        SubmissionDiagnostics: {
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "not_sent" | "connection_failed" | "outcome_unknown" | "response_received" | "accepted";
+            /** Endpoint */
+            endpoint: string;
+            /**
+             * Method
+             * @default POST
+             * @constant
+             */
+            method: "POST";
+            /** Duration Ms */
+            duration_ms: number;
+            /** Http Status */
+            http_status?: number | null;
+            /** Response Request Id */
+            response_request_id?: string | null;
+            /** Edge Request Id */
+            edge_request_id?: string | null;
+            /** Response Server */
+            response_server?: string | null;
+            /** Response Type */
+            response_type?: ("json" | "html" | "text" | "empty" | "other") | null;
+            /** Response Error */
+            response_error?: string | null;
+            /** Network Error */
+            network_error?: string | null;
         };
         /**
          * SuggestionDirectorState

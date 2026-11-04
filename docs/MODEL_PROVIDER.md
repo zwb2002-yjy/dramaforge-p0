@@ -218,7 +218,16 @@ Ark 图片新合同也用同一编译器处理有序多参考 `image[]`，数量
 Agnes 图片与视频编译器保留旧 revision 的冻结请求，同时可按 InputContract 编译
 2.5 候选的多图、首尾帧及视频参考请求；未核实的音频参考 wire shape 明确失败。
 2.5 的官方资料使用 `apihub.agnes-ai.com`，当前运行 Profile 使用 China host，
-因此候选仍为 preview，不能仅凭静态资料启用当前 Profile 或账号 Binding。
+  因此旧候选仍为 preview，不能仅凭静态资料启用当前 Profile 或账号 Binding。
+  2026-11-03 核对官方中国区文档后，Image / Video 2.5 Flash 增加独立的
+  `cn-2026-11-03-r1` 可执行修订，复用现有 schema-1 InputContract Compiler 和 Runtime。
+  生图开放文生图及单图参考、URL 输出；视频开放文字、首尾帧及图片/音频参考，固定 720P、4–12 秒。
+  该修订的官方字段来源和编译合同分别记录，当前账号仍须精确目录验证；不升级旧候选或退役 Binding。
+  新视频任务在恢复令牌中冻结模型名，用于 `/agnesapi` 查询的 `model_name`；旧令牌不从当前设置补造模型。
+  Agnes 视频提交另外在同一 ProviderOperation 的 response_summary 中保存发送边界诊断：
+  配置未发送、连接失败、结果未知、收到 HTTP 响应、已取得任务 ID 分别记录；仅保存白名单追踪头、
+  脱敏错误摘要及耗时，不保存 Key、完整提示词或原始响应正文。执行详情返回这些原始事实，
+  历史记录没有诊断时明确缺失，不根据当前配置补造。HTTP 响应不等于模型任务已经受理。
 MiniMax 视频新合同也要求显式产品策略；同一个 V2 编译器按 Manifest 的时长、分辨率、
 比例和可选 `extra` 生成 H3 / H3-Max 请求，旧 H3 revision 保持原首帧请求形状。
 Workbench 对声明 `input_contracts` 的新 revision 从实际素材自动选合同；该入口的视频
