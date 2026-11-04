@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 import pytest
 from app.access.models import Project, User, Workspace
 from app.assets.models import Scene, Shot
+from app.contracts.reference_capability import MultiCharacterCapabilityStatus
 from app.director.workflows.character_participation import (
     ScreenRole,
     ShotCharacterParticipation,
@@ -43,7 +44,6 @@ from app.director.workflows.layered_planning import (
 )
 from app.director.workflows.library import get_default_registry
 from app.director.workflows.reference_capability import (
-    MultiCharacterCapabilityStatus,
     assess_multi_character_capability,
 )
 from app.director.workflows.resolver import WorkflowTemplateResolver

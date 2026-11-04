@@ -182,24 +182,24 @@ test("two configured no-key Images services share one contract and switch existi
     await dialog.getByRole("button", { name: "添加 1 个模型" }).click();
     await expect(dialog).not.toBeVisible();
     await expect(
-      page.getByRole("button", { name: `启用 model-${label}`, exact: true }),
+      page.getByRole("button", { name: `用于生图 model-${label}`, exact: true }),
     ).toBeEnabled();
-    await page.getByRole("button", { name: `启用 model-${label}`, exact: true }).click();
+    await page.getByRole("button", { name: `用于生图 model-${label}`, exact: true }).click();
     await expect(
-      page.getByRole("button", { name: `已启用 model-${label}`, exact: true }),
+      page.getByRole("button", { name: `当前生图模型 model-${label}`, exact: true }),
     ).toBeDisabled();
     await expect(page.getByText("真实生成待验证", { exact: true })).toBeVisible();
   }
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole("button", { name: "管理 alpha", exact: true }).click();
-  await page.getByRole("button", { name: "启用 model-alpha", exact: true }).click();
+  await page.getByRole("button", { name: "用于生图 model-alpha", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "已启用 model-alpha", exact: true }),
+    page.getByRole("button", { name: "当前生图模型 model-alpha", exact: true }),
   ).toBeDisabled();
   await page.reload();
   await page.getByRole("button", { name: "管理 alpha", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "已启用 model-alpha", exact: true }),
+    page.getByRole("button", { name: "当前生图模型 model-alpha", exact: true }),
   ).toBeDisabled();
   expect(creates).toHaveLength(2);
   expect(creates.every((item) => item.auth_mode === "none" && !("api_key" in item))).toBe(true);

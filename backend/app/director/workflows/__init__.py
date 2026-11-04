@@ -54,14 +54,9 @@ from app.director.workflows.quality_report import (
     PerCharacterIdentityResult,
 )
 from app.director.workflows.reference_capability import (
-    MultiCharacterCapabilityStatus,
-    ReferenceCapabilityAssessment,
     assess_multi_character_capability,
-    dispatch_capability_gate,
     max_subject_references,
-    max_subject_references_from_catalog_manifest,
     required_subject_references,
-    visible_subject_count_from_snapshot,
 )
 from app.director.workflows.registry import WorkflowTemplateRegistry, build_registry
 from app.director.workflows.resolver import WorkflowTemplateResolver
@@ -87,10 +82,8 @@ __all__ = [
     "GraphFactory",
     "IdentityResultStatus",
     "MAX_VISIBLE_CONTROLLED_CHARACTERS",
-    "MultiCharacterCapabilityStatus",
     "MultiCharacterIdentityReport",
     "PerCharacterIdentityResult",
-    "ReferenceCapabilityAssessment",
     "ScreenRole",
     "ShotCharacterParticipation",
     "ShotParticipationPlan",
@@ -134,13 +127,10 @@ __all__ = [
     "is_scene_failure_isolated",
     "load_continuity_context",
     "max_subject_references",
-    "max_subject_references_from_catalog_manifest",
     "participation_director_state",
     "persist_continuity_context",
     "scene_production_status",
     "required_subject_references",
-    "visible_subject_count_from_snapshot",
-    "dispatch_capability_gate",
     "workflow_template_contract_hash",
     "ContinuityVerdict",
 ]

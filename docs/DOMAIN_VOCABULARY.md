@@ -3,12 +3,13 @@
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
 Updated: 2026-10-08；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 
-本文件是 DramaForge 的**唯一词典**。任何模块、PR、Review、文档只能使用这里的词。
+本文件是 DramaForge **共享领域概念、持久事实与公共合同的唯一词典**。
+局部变量名、通用技术词和普通说明文字不要求逐词登记；不得借此为同一领域事实另造名称。
 
 规则：
 
 1. 每个词在此处**只有一个含义**，并给出当前代码锚点。
-2. 想表达的意思不在下表 → 先在本文件补词条，再写代码；不得临时造词。
+2. 新共享领域概念不在下表 → 先明确含义及权威归属，再补词条和代码；不得临时造同义词。
 3. 同一含义已有词条 → 禁止新增同义词。
 4. 世界观与依赖约束见
    [CANONICAL_ARCHITECTURE.md](CANONICAL_ARCHITECTURE.md) /
@@ -28,7 +29,7 @@ Updated: 2026-10-08；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 | **Script** | 剧本文档；导入或生成的脚本事实 | `assets/models.py::ScriptDocument`、`assets/script_import.py` |
 | **Episode** | 剧集容器，Scene 的父级 | `assets/models.py::Episode` |
 | **Scene** | 场；Shot 的容器，带场景级空间与影响面报告 | `assets/models.py::Scene`、`assets/scene_service.py` |
-| **Shot** | 镜头；**生产的最小单位**，ProductionGraph 的 `scope_type="shot"` 对应实体 | `assets/models.py::Shot` |
+| **Shot** | 镜头级媒体生产单位，ProductionGraph 的 `scope_type="shot"` 对应实体；不排除 Project 级成片渲染图 | `assets/models.py::Shot` |
 | **Asset** | 可复用创作资产（角色、场景、道具等） | `assets/models.py::Asset` |
 | **AssetVersion** | Asset 的一次不可变版本；身份引用只认版本 | `assets/models.py::AssetVersion` |
 | **AssetVersionReference** | Shot/Production 对某个 AssetVersion 的显式身份引用——**唯一身份引用源**，不存在 Character/CharacterReference 兼容层 | `assets/models.py::AssetVersionReference` |

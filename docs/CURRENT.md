@@ -62,6 +62,19 @@ Director Runtime 负责提案和编排；Production Runtime 负责真实生产�
 文档发生冲突时，以代码、迁移、自动化测试和实际运行结果为当前事实；
 目标架构冲突记录在 `ARCHITECTURE_MAPPING.md`，不要重新引入第二套方案文档。
 
+## 约束执行索引
+
+约束执行入口：模块依赖由 `MODULE_BOUNDARIES.md` 定义，
+`scripts/arch_import_scan.py --check` 与 `backend/tests/unit/test_architecture_gate.py`
+检查新增依赖债务及过期豁免；通过仅证明扫描覆盖范围内无新增债务，不代表架构完全合规。
+现存债务与收敛顺序归 `ARCHITECTURE_MAPPING.md`，不得自动重建 baseline 消除失败。
+退役面、目录和 Provider 权威分别由 `scripts/check_canonical_surface.py`、
+`scripts/check_directory_compliance.py`、`scripts/check_provider_authority.py` 执行。
+验证时点及产物生命周期归 `DEVELOPMENT.md`；分支策略归 `RELEASE.md`，
+workflow 合同由 `backend/tests/unit/test_ci_workflow_contract.py` 检查。
+静态门不证明业务授权、RLS、并发或恢复；这些由对应行为/集成测试验证。
+架构原则、豁免扩展与付费执行权限的变更由 Owner 决定，检查失败不构成放宽规则的授权。
+
 ## 创作体验改进：开发入口
 
 “先做顺创作流程与模型接入，再补 LibTV 能力”的开发合同位于

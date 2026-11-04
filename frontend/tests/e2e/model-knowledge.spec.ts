@@ -87,7 +87,7 @@ test("knowledge browsing explains blockers and stays read-only with a verified a
   const row = detail.getByTestId(`provider-model-${binding.id}`);
   await expect(row).toContainText("官方证据尚未覆盖当前合同的全部执行字段");
   await expect(
-    row.getByRole("button", { name: `启用 ${binding.model_id}`, exact: true }),
+    row.getByRole("button", { name: `用于视频 ${binding.model_id}`, exact: true }),
   ).toBeDisabled();
   const panel = detail.getByTestId("provider-model-knowledge");
   await panel.getByText("模型能力说明", { exact: true }).click();

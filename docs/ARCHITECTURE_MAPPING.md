@@ -64,9 +64,11 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 的交叉引用一致。
 
 1. **（预留）** 宏观依赖方向与组合根边界总述；新债务先归入下条之一再开新号。
-2. **production → director 越界**：`execution.media_submission → director.workflows`、
-   `workbench.shot_service → director.turn_service` 等约 4 条边仍由 Production/Workbench
-   编排 Director 业务，违反 MODULE_BOUNDARIES §4.4。收敛顺序中应最先处理。
+2. **production → director 越界**：多主体容量与提交门的纯合同已归
+   `contracts/reference_capability.py`，规划输入转换保留在 Director；Production 不再经
+   Director 获取该能力。`workbench.shot_service → director.turn_service` 仍在 Save 的
+   同事务中传播 stale；必须保留 ownership、expected version、revision 和失败回滚。
+   剩余调用边违反 MODULE_BOUNDARIES §4.4，按既定顺序优先收敛，不以静态改名隐藏。
 3. **Director 文本推理直连 Provider adapter**：`director/text_transport.py` 仍直接接触
    Provider adapter；若收敛为 contract 端口，必须保留精确模型身份、冻结上下文、
    错误语义和测试 seam，不能用空壳转发掩盖依赖。
@@ -89,10 +91,43 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
     `backend/tests/golden_project.py`，测试资产保留。测试种子显式建立审片事实再通过正式门，
     不再从生产模块提供绕门 fixture；两条 production → director 豁免随迁移移除。
 11. **实验分支身份**：当前 DTO/ORM/计划统一为 `experiment_branch_id`，不保留旧字段别名。
+12. **Director 对生产应用与事实的依赖**：assistant context、proposal Apply、runtime
+    delegation/domain_tools/reconcile/start 和 wakeup 直接消费 Production 的授权、计划、
+    receipt、facts 或 ORM。应由注入的 typed application/fact ports 收敛，保留单次授权、
+    同锁计划复核、显式 Apply、事务与恢复；不能另建 Director 生产事实库。
+13. **领域应用服务读取生产事实**：`assets/from_artifact_service → execution.models`、
+    `assets/scene_service → production.models`、`editing/timeline_builder → execution.models`
+    分别验证 Artifact、读取影响的 ExperimentBranch、读取 Formal 媒体。需明确应用/事实
+    查询边界，保留归属、可用性、幂等和 Editing 不改写生产事实的约束，不能放宽 domain 方向。
+
+上述是物理包中的真实差距。Backend API / Worker 标签拆分仅纠正入站分类，未扩大 import
+允许集，也不能证明应用职责已全部分离。`api/v1/worker.py` 的 `/worker/tick` 仍是
+development + worker token 限定的同步调试入口，经同一 WorkerRuntime/生产链执行；
+其保留或退役须单独决定，不能把“生产环境拒绝”表述成“入口已删除”。
 
 收敛优先级（Owner 已定）：问题 2 → 问题 3（text_transport 端口化）→ 问题 9（shared
 组合根分类）→ 问题 6（domain→creative 初始化依赖）→ 再逐步清剩余
 `architecture-baseline.json` 豁免。
+
+### 治理专项任务的执行边界
+
+主 Agent 独占权威文档、baseline、构建与 CI；下表是尚需独立验收的切片，不是完成记录。
+任务开始时重新核对消费者和工作区，不能把表中路径直接当作删除清单。每个切片仅回滚
+自身代码与对应基线变更；不回滚迁移数据、不重放旧执行、不删除原始证据。
+
+| 顺序/任务 | 专项可写范围与目标 | 不可改变的边界 | 最小验证与完成标准 |
+|---|---|---|---|
+| 问题2：Save失效传播 | `workbench/shot_service.py`、明确的应用编排/端口及直接调用测试；移除对 DirectorTurnService 的直接依赖 | 同事务、权限、expected version、stale revision、失败回滚 | `test_director_turn_service.py` 及对应 API/PG 并发回归；原边消失、无新增边，再过 Full |
+| 问题3：文本端口 | `director/text_model.py`、`text_transport.py`、中立文本DTO及实现注入；先提出具体所有权方案 | 模型/连接精确身份、未知提交不重放、错误语义、测试 seam | 现有文本调用/网关/Director恢复单测与 PG；Protocol、DTO、构造同时解耦，不保留旧转发别名 |
+| 问题9：组合根分类 | `shared/model_registry.py`、`rls_scopes.py` 及其进程初始化消费者；写前固定所有权方案 | ORM注册完整、RLS、不信任队列声称的归属 | Alembic metadata、Worker recovery、跨租户 PG；不能仅搬目录放行 |
+| 问题6：创意初始化 | `access/projects.py` 与应用层初始化输入及对应测试 | Project/Profile 原子创建、归属、编译/冻结版本 | Project/Creative初始化单测与事务失败回归；不复制模板/编译规则 |
+| 媒体底层审计 | 先只读 `execution/composite_media.py`、`media_io.py`、`production/timeline_renderer.py` | 镜头复合与时间线渲染职责、Formal、源 Artifact | 比较超时/取消/临时文件/probe；无等价证据则 KEEP；获具体写权后跑真实FFmpeg集成 |
+| 测试/夹具治理 | 指定业务模块的现有测试与fixture，先交行为/风险覆盖对照 | 用户门、幂等、RLS、恢复、未知提交等独立风险覆盖 | 先证明重复断言等价，再合并；按 DEVELOPMENT 容器定向命令及受影响PG/E2E，不按文件数验收 |
+| 配置/脚本审计 | 只读 Compose 角色环境及指定脚本的调用者/副作用；修改提案交主Agent | 不合并数据库/队列、不放宽ACL、不删除卷、不绕过真实调用授权 | Compose解析后语义对照、`test_compose_contract.py`、网络guard和必要集成；孤立名称不是删除证据 |
+
+实际可运行命令取自 DEVELOPMENT、package/pyproject 与当前质量容器，禁止虚构已不存在的
+fast jobs。专项 Agent只执行本切片聚焦回归，主 Agent在最终整合源码上统一执行完整门。
+新增豁免、改变宪法/分支保护、改变付费授权或不可逆数据操作，须按当前 Owner 边界另行决定。
 
 ## 5. Director Agent 目标设计的详细映射
 
@@ -120,7 +155,7 @@ Agent runtime/ToolRegistry/会话迁移仍为未实现目标；模型能力查�
     docker compose -f docker-compose.quality.yml run --rm --no-deps backend-quality python scripts/arch_import_scan.py --violations
 
 上述两个模式只报告 import 结构，退出 0 不代表不存在架构违规或产品缺口。
-`arch_import_scan.py --check` 则由 backend full/fast 容器门强制：当前结构与逐边债务基线
+`arch_import_scan.py --check` 则由 backend 完整容器门强制：当前结构与逐边债务基线
 比较，拒绝新增越界依赖和过期豁免。基线不是放宽依赖方向的许可，详见 MODULE_BOUNDARIES §六。
 静态图也不能独自证明反射、注册、HTTP、Worker 或仓库外调用已不存在。
 

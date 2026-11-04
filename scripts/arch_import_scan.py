@@ -55,14 +55,21 @@ LAYERS: tuple[tuple[str, str], ...] = (
     ("app.storage", "shared"),
     ("app.security", "shared"),
     ("app.events", "shared"),
-    ("app.api", "frontend"),
-    ("app.workers", "frontend"),
+    ("app.api", "backend_api"),
+    ("app.workers", "backend_worker"),
 )
 
 # Explicit permissions from MODULE_BOUNDARIES §two/four. Existing violations
 # are individual debts, not a reason to widen these permissions.
+# Split the old inbound label without widening its import permissions. Imports
+# alone do not prove that an entrypoint delegates through an application use case.
+INBOUND_IMPORTS = {
+    "contract", "director", "creative", "production", "provider", "domain", "shared",
+    "backend_api", "backend_worker",
+}
 ALLOWED = {
-    "frontend": {"contract", "director", "creative", "production", "provider", "domain", "shared"},
+    "backend_api": INBOUND_IMPORTS,
+    "backend_worker": INBOUND_IMPORTS,
     "contract": {"shared"},
     "director": {"creative", "domain", "contract", "shared"},
     "creative": {"domain", "shared"},

@@ -204,6 +204,67 @@ async def _setup(session, count=1, *, supported=1):
     return project, user, shot, image_binding, entry, command, bindings, assets, blobs
 
 
+async def test_multi_subject_dispatch_stops_before_provider_http(session, monkeypatch):
+    project, user, shot, binding, entry, command, _bindings, _assets, _blobs = await _setup(
+        session, count=0
+    )
+    service = WorkbenchExecutionService(session, user_id=user.id)
+    plan = await service.build_plan(project=project, execution_input=command)
+    proof = await service.preview_compiler_contract(project=project, plan=plan)
+    assert proof is not None and proof.wire_fingerprint is not None
+    run = await service.create_and_dispatch(
+        project=project, execution_input=command, prepared_plan=plan,
+        confirmed_compiler_wire_fingerprint=proof.wire_fingerprint,
+    )
+    # Preserve the existing submission boundary: it reads the shot's participation
+    # facts while model identity and execution parameters remain frozen in the plan.
+    shot.director_state = {"workflow_participations": [
+        {"screen_role": "primary"}, {"screen_role": "secondary"},
+    ]}
+    await session.flush()
+    captured = []
+
+    def receive(request):
+        captured.append(request)
+        raise AssertionError("Unsupported multi-subject requests must never reach HTTP")
+
+    runtime = AgnesRuntime(
+        settings=Settings(agnes_enabled=True, agnes_api_key="isolated-mock-key"),
+        transport=httpx.MockTransport(receive),
+    )
+    connection = await session.get(ProviderConnection, binding.connection_id)
+    resolved = ResolvedRuntime(
+        runtime=runtime, image_compiler=AgnesImageCompiler(), video_compiler=None,
+        connection=connection, binding=binding, catalog_entry=entry,
+        model_id=binding.model_id, invoke_model_value=binding.invoke_model_value,
+        manifest_hash=entry.contract_manifest_hash,
+    )
+
+    async def resolve(_self, **kwargs):
+        return resolved
+
+    monkeypatch.setattr(ProviderRuntimeResolver, "resolve_runtime_for_resolution", resolve)
+    monkeypatch.setattr(ProviderRuntimeResolver, "resolve_runtime_for_identity", resolve)
+
+    class NoReferences:
+        async def get_bytes(self, *, object_key):
+            raise AssertionError("No references should be loaded before the rejection")
+
+    with pytest.raises(ValidationAppError) as caught:
+        prepared = await prepare_media_submission(
+            session, project=project, run=run, node_type="keyframe",
+            snap=dict(run.input_snapshot), obj_store=NoReferences(), prompt=plan.prompt,
+            canonical_image_bytes=None, has_canonical_binding=False, canonical_artifact=None,
+            frozen_identity=None, workbench_plan=plan, op=None, now=datetime.now(UTC),
+        )
+        await prepared.runtime.submit_image(prepared.compiled)
+    assert caught.value.details["code"] == "MULTI_SUBJECT_UNSUPPORTED"
+    assert captured == []
+    await session.refresh(run)
+    assert run.status == "failed"
+    assert run.error_code == "MULTI_SUBJECT_UNSUPPORTED"
+
+
 @pytest.mark.parametrize("count", [1, 2])
 async def test_mentions_reach_the_actual_http_body_in_saved_order(session, monkeypatch, count):
     project, user, shot, binding, entry, command, bindings, assets, blobs = await _setup(

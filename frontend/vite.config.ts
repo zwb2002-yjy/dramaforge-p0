@@ -54,7 +54,6 @@ export default defineConfig({
           if (id.includes("react-dom")) return "vendor-react";
           if (id.includes("react-router")) return "vendor-tanstack";
           if (id.includes("@tanstack")) return "vendor-tanstack";
-          if (id.includes("zustand")) return "vendor-zustand";
           if (
             id.includes("/antd/") ||
             id.includes("/@ant-design/") ||

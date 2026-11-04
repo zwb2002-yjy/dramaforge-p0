@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { eventStreamUrl } from "../../lib/api";
+import { openEventStream } from "../../lib/api";
 import {
   parseProductionChange,
   productionQueryAffected,
@@ -16,8 +16,9 @@ export type ProductionFactsSseProps = { workspaceId: string | null };
 export function ProductionFactsSse({ workspaceId }: ProductionFactsSseProps) {
   const queryClient = useQueryClient();
   useEffect(() => {
-    if (!workspaceId || typeof EventSource === "undefined") return;
-    const source = new EventSource(eventStreamUrl(workspaceId), { withCredentials: true });
+    if (!workspaceId) return;
+    const source = openEventStream(workspaceId);
+    if (!source) return;
     const pending = new Map<string, ProductionChange>();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const flush = () => {

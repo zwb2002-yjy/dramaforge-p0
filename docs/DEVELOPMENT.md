@@ -20,6 +20,64 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 ## 权威质量门
 
+### 日常反馈与收尾
+
+开发期间使用现有入口的定向模式（每次构建当前源码，复用锁定依赖的 Docker 缓存）：
+
+```powershell
+.\scripts\run_quality_in_docker.ps1 -Stage BackendTests -TestArgs @('tests/unit/test_ci_workflow_contract.py', '-q')
+.\scripts\run_quality_in_docker.ps1 -Stage FrontendTests
+```
+
+BackendTests 默认执行后端 unit；FrontendTests 默认执行 Vitest，可用 TestArgs 传递
+测试路径/过滤参数。参数直接传给测试程序，不拼接 shell。定向模式禁用容器网络，
+不启动 PostgreSQL、Redis 或真实 Provider，不执行 Compose down，不生成额外报告目录。
+因此它不适用于需要外部服务的集成测试，也不代表 Full Gate 通过。
+
+一次任务按“修改 → 相关测试 → 修复失败 → 受影响回归 → 合同要求的完整门”推进。
+已通过检查仅在相关源码、依赖、环境变化或存在未解决疑点时重跑；小修改无需每次
+执行完整门。文档改动检查差异、相关链接与合同；高风险变更和发布的完整门要求仍有效。
+最终报告给出改动范围、源码/工作区状态、实际命令及结果、未运行项和剩余决策即可。
+修改历史由 Git 保存，日常结果记在对话中；不要每轮新增日期命名的测试、审计或计划文件。
+
+不带参数（或 `-Stage Full`）仍运行下述完整门。Full 拒绝 TestArgs，防止过滤测试后
+误报全量通过。前端完整门的类型检查由 `npm run build` 执行一次。
+
+后端本地项目安装使用共享 BuildKit uv 缓存。已有基础镜像与锁定依赖层、并且 uv
+构建依赖缓存完整时，可加 `-OfflineProjectInstall` 让源码复制后的本地包安装禁止联网；
+缓存缺失会失败，不切换包源、不安装宿主依赖。此参数只约束本地 Python 包安装步骤，
+不宣称整个 Docker 构建或 Full Gate 都无需网络。缓存不是验收结果：仍须构建当前源码，
+以本次镜像身份运行测试；依赖锁文件匹配不能证明旧镜像的源码匹配。
+质量容器运行阶段统一使用已安装的环境：`uv run --offline --no-sync` 或直接调用
+`.venv/bin`。依赖安装只发生在构建阶段，不能在每个检查开始时再次解析/重装项目。
+
+### 产物生命周期
+
+- 测试代码按行为维护，修复优先扩展现有用例；删合用例前核对独立风险、拒绝路径与覆盖。
+- 临时运行产物归任务自己的 gitignored `tmp/`；优先复用 Docker 构建缓存，避免复制
+  node_modules、完整源码和重复镜像包。需要脱离源码的安装验证仍使用独立目录。
+- 本任务创建的可再生中间产物，在问题解决、验证完成且确认不再引用后可收尾；失败
+  尚未解释的日志/trace/截图保留。不能仅按年龄、文件名或“提交已合并”判断可删除。
+- 原始验收截图、正式候选证据、付费操作事实、备份和持久数据按既有规则保留；
+  哈希不替代原件。跨任务的历史资源先列出绝对路径、用途、占用、引用和归属，
+  获得 Owner 明确处置范围后再归档或删除，不自动执行 TTL 清理。
+- worktree 有未提交修改、未集成提交或使用状态不明时不回收；不终止其他会话。
+
+### 专项 Agent 合同与集成
+
+主 Agent 独占 CURRENT、架构权威、baseline、共享 CI/Compose 和最终验收；专项 Agent
+按明确目录/文件拥有写权，不能同时修改同一权威。每个合同必须给出目标、可写范围、
+不可变边界、验收标准、来自现有配置的验证命令、回滚边界；未授权文件只提交建议。
+只读审计先列真实消费者、职责、替代影响和验证成本；再决定 KEEP/收敛/Owner 决策。
+LangGraph、生产事实链、用户门、执行身份和付费授权不是依赖精简的可选项。
+
+专项执行聚焦回归，主 Agent 在整合后的当前源码上统一运行受影响门及必要完整门。
+提交前核对其他会话改动；回滚只还原本切片代码，不删除历史事实、证据或数据卷。
+活跃跨模块任务归 ARCHITECTURE_MAPPING；结果在对话/既有证据中报告，完成后不保留
+逐轮任务副本或新建平行治理规则库。
+
+### 完整验证
+
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_docker.ps1
 ```
@@ -55,7 +113,10 @@ LiteLLM 集成进程共享受限网络命名空间，使用镜像构建阶段已
 生产与发布制品仍保留原上游多架构镜像引用。
 
 本地完整质量门与 GitHub Full Gate 共用 `docker-compose.quality.yml`，不维护第二套
-测试实现。当前 dev 处于快速开发模式，PR CI 只监听 `main`（见 RELEASE.md）；
+测试实现；本地、CI、Release 的完整编排统一调用 `scripts/run_quality_in_docker.ps1 -Stage Full`。
+CI/Release 另保留 `always()` 回收以覆盖取消场景；仅当入口通过资源归属预检并输出
+`cleanup_owned=true` 时执行，预检拒绝的旧资源不回收。不复制质量步骤。
+当前 dev 处于快速开发模式，PR CI 只监听 `main`（见 RELEASE.md）；
 所有指向 `main` 的 PR（包括 docs-only）及手动 dispatch 仍执行完整质量和安全门。
 以下 Fast Gate / docs-only 分层规则只在恢复 dev PR CI 后生效：
 
@@ -95,9 +156,14 @@ Node 跨主版本、Python 跨次版本升级由独立任务评估。安全更�
 默认分支机制处理；本地版本选择文件位于 `frontend/.nvmrc` 和
 `backend/.python-version`。
 
-完整脚本在开头及结束时对 quality Compose 执行 `down --volumes --remove-orphans`。
-运行前核对它的项目名和资源归属，不与使用同一 quality 项目的其它会话并行；它不是
-现有开发/生产实例的清理工具。普通 docs-only 改动不因新增验收文字就运行完整门。
+完整脚本默认分配独立的 `df-quality-<随机标识>` Compose 项目与合同输出目录；
+CI/Release 用 run ID 和 attempt 绑定项目。显式设置 `COMPOSE_PROJECT_NAME` 时必须
+使用 `df-quality-` 前缀；项目已有容器（含停止状态）、网络或卷时拒绝运行，输出目录非空
+也拒绝覆盖。结束时只回收本次创建的资源，不再在启动时清空旧质量栈。可通过
+`QUALITY_CONTRACT_DIR` 指定本任务的空输出目录。镜像标签仍共享，因此完整构建不要并行。
+Playwright 结果写入该目录的 `playwright-results/`，不随临时容器删除；CI/Release
+仅在失败时上传已有结果，远端保留期服从仓库 artifact 设置。本地失败原件按上述生命周期保留。
+普通 docs-only 改动不因新增验收文字就运行完整门。
 
 ## 本地离线安装验证
 
@@ -174,6 +240,10 @@ Final Film 字节（视频+音频流、时长与渲染结果一致），不再�
 当前不提供不存在的命令。性能证据必须注明缓存、采样数量、并发、容器限制与排除项。
 
 `workbench-resource.spec.ts` 在 1/30/100 镜头固定负载下记录首屏、请求、堆内存与缓存切换。
+它由独立 `chromium-resource` Playwright 项目执行，普通 `chromium` 项目排除同一文件；
+完整门仍覆盖全部场景，只隔离功能套件留下的浏览器进程状态，不修改浏览器版本、视口、
+1→30→100 顺序、200ms 阈值或重试策略。单独验证可用现有 `test:e2e` 命令追加
+`--project=chromium-resource`，不能以独立复测通过覆盖原始失败记录。
 时间条有溢出时另验证真实横向滚轮可移动，并采样 30 次两端滚动到下一动画帧的耗时、
 目标位置与实际位置；无溢出的单镜头记为不适用。滚动不得改变当前镜头，采样结果用于
 建立该环境的基线，不冒称输入到屏幕呈现的完整延迟或真实后端性能。

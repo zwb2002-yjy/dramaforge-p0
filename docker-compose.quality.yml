@@ -66,6 +66,7 @@ services:
       DRAMAFORGE_OPENAPI_JSON: /contract/openapi.json
     volumes:
       - ${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}:/contract:ro
+      - ${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}/playwright-results:/workspace/frontend/test-results
 
   minio-quality:
     # Verified amd64 CI mirror; pin the manifest digest to avoid mutable-tag drift.

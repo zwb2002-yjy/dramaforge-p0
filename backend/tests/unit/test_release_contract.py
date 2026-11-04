@@ -85,8 +85,7 @@ def test_release_workflow_cannot_publish_before_verification() -> None:
     assert "docker-compose.quality.yml" in workflow
     assert "docker run --rm" in workflow
     assert "release_contract.py check" in workflow
-    assert "litellm-integration-quality" in workflow
-    assert "frontend-quality" in workflow
+    assert "run_quality_in_docker.ps1 -Stage Full" in workflow
     assert "DRAMAFORGE_VERSION=${{ needs.verify-release-source.outputs.version }}" in workflow
     assert "DRAMAFORGE_SOURCE_COMMIT=${{ github.sha }}" in workflow
     assert "release-manifest.json" in workflow

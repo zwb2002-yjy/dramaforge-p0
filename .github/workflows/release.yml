@@ -21,6 +21,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/dev' && contains(github.event.head_commit.message, '[release-candidate]')) }}
     env:
       QUALITY_CONTRACT_DIR: ./tmp/quality-contract
+      COMPOSE_PROJECT_NAME: df-quality-release-${{ github.run_id }}-${{ github.run_attempt }}
     outputs:
       version: ${{ steps.identity.outputs.version }}
       migration_head: ${{ steps.migration-head.outputs.migration_head }}
@@ -57,23 +58,9 @@ jobs:
               python scripts/repo_guardrails.py policy --repo-root /workspace
             '
       - name: Run the exact source quality gate in containers
-        run: |
-          set -euo pipefail
-          mkdir -p tmp/quality-contract
-          docker compose -f docker-compose.quality.yml build backend-quality frontend-quality
-          docker compose -f docker-compose.quality.yml up \
-            --no-build --abort-on-container-exit --exit-code-from backend-quality \
-            postgres-quality backend-quality
-          docker compose -f docker-compose.quality.yml run --rm --no-deps frontend-quality
-          docker compose -f docker-compose.quality.yml up \
-            --no-build --abort-on-container-exit --exit-code-from media-resource-quality \
-            media-resource-quality
-          docker compose -f docker-compose.quality.yml up \
-            --no-build --abort-on-container-exit --exit-code-from auth-gateway-integration-quality \
-            auth-gateway-integration-quality
-          docker compose -f docker-compose.quality.yml up \
-            --no-build --abort-on-container-exit --exit-code-from litellm-integration-quality \
-            litellm-quality litellm-integration-quality
+        id: quality
+        shell: pwsh
+        run: ./scripts/run_quality_in_docker.ps1 -Stage Full
       - name: Resolve single migration head
         id: migration-head
         shell: bash
@@ -81,7 +68,7 @@ jobs:
           set -euo pipefail
           mapfile -t heads < <(
             docker run --rm dramaforge-backend-quality:local \
-              sh -ec 'uv run --directory backend alembic heads' | awk 'NF {print $1}'
+              sh -ec 'uv run --offline --no-sync --directory backend alembic heads' | awk 'NF {print $1}'
           )
           if [[ "${#heads[@]}" -ne 1 ]]; then
             echo "Release requires exactly one Alembic head; found ${#heads[@]}." >&2
@@ -89,8 +76,15 @@ jobs:
           fi
           echo "migration_head=${heads[0]}" >> "$GITHUB_OUTPUT"
       - name: Remove verification resources
-        if: always()
+        if: always() && steps.quality.outputs.cleanup_owned == 'true'
         run: docker compose -f docker-compose.quality.yml down --volumes --remove-orphans
+      - name: Preserve failed browser evidence
+        if: failure() && steps.quality.outputs.cleanup_owned == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tmp/quality-contract/playwright-results
+          if-no-files-found: ignore
 
   containers-and-sbom:
     name: Build, smoke, and publish containers

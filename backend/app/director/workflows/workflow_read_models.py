@@ -13,6 +13,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.assets.models import Episode, Scene, Shot
+from app.contracts.reference_capability import REGISTERED_STAGED_STRATEGIES
 from app.director.workflows.contracts import (
     TemplateResolveSource,
     TemplateResolveStatus,
@@ -21,7 +22,6 @@ from app.director.workflows.contracts import (
 )
 from app.director.workflows.library import get_default_registry
 from app.director.workflows.reference_capability import (
-    REGISTERED_STAGED_STRATEGIES,
     assess_multi_character_capability,
 )
 from app.director.workflows.registry import WorkflowTemplateRegistry

@@ -30,11 +30,8 @@ def test_container_gate_owns_all_project_toolchains_and_quality_commands() -> No
     container_job = _job(workflow, "container-gates")
 
     assert "docker-compose.quality.yml" in container_job
-    assert "docker compose -f docker-compose.quality.yml build" in container_job
-    assert "--exit-code-from backend-quality" in container_job
-    assert "postgres-quality backend-quality" in container_job
-    assert "run --rm --no-deps frontend-quality" in container_job
-    assert "litellm-integration-quality" in container_job
+    assert "run_quality_in_docker.ps1 -Stage Full" in container_job
+    assert "shell: pwsh" in container_job
     assert "--volumes --remove-orphans" in container_job
     assert "if: always()" in container_job
     assert "actions/setup-python" not in container_job
@@ -94,7 +91,7 @@ def test_quality_images_own_browser_and_canonical_surface_gates() -> None:
         Path(__file__).resolve().parents[3] / "frontend" / "Dockerfile.quality"
     ).read_text(encoding="utf-8")
     assert "scripts/check_canonical_surface.py" in backend_dockerfile
-    assert "uv run --directory backend mypy app" in backend_dockerfile
+    assert "uv run --offline --no-sync --directory backend mypy app" in backend_dockerfile
     assert "chromium" in frontend_dockerfile
     assert "npm run --prefix frontend test:e2e" in frontend_dockerfile
 
@@ -109,9 +106,44 @@ def test_quality_images_cache_dependencies_before_copying_source() -> None:
 
     backend_dependencies = "COPY backend/pyproject.toml backend/uv.lock backend/README.md"
     assert backend.index(backend_dependencies) < backend.index("COPY . .")
-    assert backend.index("COPY . .") < backend.rindex("RUN uv sync")
+    assert backend.index("COPY . .") < backend.rindex("uv sync --locked")
+    assert "id=dramaforge-quality-uv" in backend
+    assert "UV_OFFLINE=${QUALITY_UV_OFFLINE}" in backend
     assert frontend.index("COPY frontend/package.json") < frontend.index("COPY . .")
     assert frontend.index("npm ci --prefix") < frontend.index("COPY . .")
+
+
+def test_quality_runtime_never_resolves_or_reinstalls_dependencies() -> None:
+    import json
+    import shlex
+
+    dockerfile = (Path(__file__).resolve().parents[3] / "backend/Dockerfile.quality").read_text()
+    command = json.loads(dockerfile.split("\nCMD ", 1)[1])[2]
+    uv_commands = [shlex.split(part) for part in command.split(";") if "uv run " in part]
+    assert uv_commands
+    for tokens in uv_commands:
+        assert "--offline" in tokens and "--no-sync" in tokens
+    assert "uv sync" not in command
+
+
+def test_browser_failure_evidence_survives_ephemeral_quality_container() -> None:
+    import yaml
+
+    root = Path(__file__).resolve().parents[3]
+    services = yaml.safe_load((root / "docker-compose.quality.yml").read_text())["services"]
+    assert (
+        "${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}/playwright-results:"
+        "/workspace/frontend/test-results"
+    ) in services["frontend-quality"]["volumes"]
+    for filename, job in (("ci.yml", "container-gates"), ("release.yml", "verify-release-source")):
+        steps = yaml.safe_load((root / ".github/workflows" / filename).read_text())["jobs"][job][
+            "steps"
+        ]
+        evidence = next(
+            step for step in steps if step.get("name") == "Preserve failed browser evidence"
+        )
+        assert evidence["if"] == "failure() && steps.quality.outputs.cleanup_owned == 'true'"
+        assert evidence["with"]["path"] == "tmp/quality-contract/playwright-results"
 
 
 def test_main_pr_preserves_every_required_check_context() -> None:

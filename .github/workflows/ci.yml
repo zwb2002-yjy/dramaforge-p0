@@ -189,45 +189,23 @@ jobs:
     runs-on: ubuntu-latest
     env:
       QUALITY_CONTRACT_DIR: ./tmp/quality-contract
+      COMPOSE_PROJECT_NAME: df-quality-ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v7
-      - name: Build the exact quality images
-        run: |
-          set -euo pipefail
-          mkdir -p tmp/quality-contract
-          docker compose -f docker-compose.quality.yml build \
-            backend-quality frontend-quality
-      - name: Run backend, PostgreSQL, migration and API contract gates
-        run: |
-          set -euo pipefail
-          docker compose -f docker-compose.quality.yml up \
-            --no-build --abort-on-container-exit --exit-code-from backend-quality \
-            postgres-quality backend-quality
-      - name: Run frontend, generated API, build and browser gates
-        run: |
-          set -euo pipefail
-          docker compose -f docker-compose.quality.yml run --rm --no-deps frontend-quality
-      - name: Run pinned HTTPS and MinIO media resource proofs
-        run: |
-          set -euo pipefail
-          docker compose -f docker-compose.quality.yml up \
-            --no-build --abort-on-container-exit --exit-code-from media-resource-quality \
-            media-resource-quality
-      - name: Run the real Nginx authentication boundary in containers
-        run: |
-          set -euo pipefail
-          docker compose -f docker-compose.quality.yml up \
-            --no-build --abort-on-container-exit --exit-code-from auth-gateway-integration-quality \
-            auth-gateway-integration-quality
-      - name: Run the real pinned LiteLLM integration in containers
-        run: |
-          set -euo pipefail
-          docker compose -f docker-compose.quality.yml up \
-            --no-build --abort-on-container-exit --exit-code-from litellm-integration-quality \
-            litellm-quality litellm-integration-quality
+      - name: Run the shared full quality gate
+        id: quality
+        shell: pwsh
+        run: ./scripts/run_quality_in_docker.ps1 -Stage Full
       - name: Remove quality containers and volumes
-        if: always()
+        if: always() && steps.quality.outputs.cleanup_owned == 'true'
         run: docker compose -f docker-compose.quality.yml down --volumes --remove-orphans
+      - name: Preserve failed browser evidence
+        if: failure() && steps.quality.outputs.cleanup_owned == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tmp/quality-contract/playwright-results
+          if-no-files-found: ignore
 
   dependency-review:
     name: dependency-review

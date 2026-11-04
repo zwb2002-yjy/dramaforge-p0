@@ -29,5 +29,18 @@ export default defineConfig({
         }
       : undefined,
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      testIgnore: "**/workbench-resource.spec.ts",
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // Isolate resource samples from the functional suite's browser process.
+      // Keep the same browser, 1 -> 30 -> 100 order, thresholds and retry policy.
+      name: "chromium-resource",
+      testMatch: "**/workbench-resource.spec.ts",
+      use: { ...devices["Desktop Chrome"] },
+    },
+  ],
 });

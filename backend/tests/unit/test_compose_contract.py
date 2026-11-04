@@ -46,10 +46,8 @@ def test_auth_gateway_gate_uses_deployed_config_and_remains_private() -> None:
     command = services["auth-gateway-integration-quality"]["command"][-1]
     assert "--offline --no-sync" in command
     assert "tests/gateway" in command and "--fail-on-skip" in command
-    for runner in ("scripts/run_quality_in_docker.ps1", ".github/workflows/ci.yml"):
-        assert "--exit-code-from auth-gateway-integration-quality" in (
-            REPO_ROOT / runner
-        ).read_text(encoding="utf-8")
+    # Stage ordering and CI/Release delegation are owned by test_run_quality_script.
+    # This contract owns the deployed gateway config and private test topology.
 
 
 def test_compose_defines_required_boot0_services() -> None:

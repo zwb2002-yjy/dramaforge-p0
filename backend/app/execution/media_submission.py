@@ -752,7 +752,7 @@ async def prepare_media_submission(
     # from the snapshot, because the snapshot is deliberately minimized.
     if node_type == "keyframe":
         from app.assets.models import Shot as _ShotModel
-        from app.director.workflows.reference_capability import dispatch_capability_gate
+        from app.contracts.reference_capability import dispatch_capability_gate
 
         participation_snapshot: Mapping[str, object] = {}
         raw_shot_id = snap.get("shot_id")

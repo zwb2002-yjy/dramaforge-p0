@@ -1,14 +1,85 @@
-param()
+param(
+    [ValidateSet('Full', 'BackendTests', 'FrontendTests')]
+    [string]$Stage = 'Full',
+    [string[]]$TestArgs = @(),
+    [switch]$OfflineProjectInstall
+)
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$QualityContractDir = Join-Path $RepoRoot "tmp\quality-contract"
-New-Item -ItemType Directory -Force -Path $QualityContractDir | Out-Null
-$env:QUALITY_CONTRACT_DIR = "./tmp/quality-contract"
+$BuildArgs = @()
+if ($OfflineProjectInstall) { $BuildArgs = @('--build-arg', 'QUALITY_UV_OFFLINE=true') }
+if ($Stage -eq 'Full' -and $TestArgs.Count -gt 0) {
+    throw 'TestArgs is only supported for targeted test stages; Full must not be filtered.'
+}
+
+# Targeted feedback builds current source with cached locked dependencies. It
+# never starts or tears down a shared Compose stack and cannot call providers.
+if ($Stage -ne 'Full') {
+    $target = if ($Stage -eq 'BackendTests') { 'backend' } else { 'frontend' }
+    $image = "dramaforge-targeted-${target}:local"
+    $imageIdFile = Join-Path ([IO.Path]::GetTempPath()) ('df-quality-' + [guid]::NewGuid().ToString('N') + '.iid')
+    Push-Location $RepoRoot
+    try {
+        docker build -f "$target/Dockerfile.quality" -t $image --iidfile $imageIdFile @BuildArgs .
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        # Bind tests to this build, even if another invocation retags the image.
+        $imageId = (Get-Content -LiteralPath $imageIdFile -Raw).Trim()
+        if ($imageId -notmatch '^sha256:[0-9a-f]{64}$') { throw 'Build did not produce a valid image ID.' }
+        if ($target -eq 'backend') {
+            if ($TestArgs.Count -eq 0) { $TestArgs = @('tests/unit', '-q') }
+            docker run --rm --network none -w /workspace/backend $imageId /workspace/backend/.venv/bin/pytest @TestArgs
+        } else {
+            docker run --rm --network none -w /workspace/frontend $imageId npm test -- @TestArgs
+        }
+        exit $LASTEXITCODE
+    }
+    finally {
+        if (Test-Path -LiteralPath $imageIdFile) { Remove-Item -LiteralPath $imageIdFile }
+        Pop-Location
+    }
+}
+
+$PreviousProject = $env:COMPOSE_PROJECT_NAME
+$PreviousContract = $env:QUALITY_CONTRACT_DIR
+$QualityProject = if ($PreviousProject) { $PreviousProject } else { 'df-quality-' + [guid]::NewGuid().ToString('N') }
+if ($QualityProject -notmatch '^df-quality-[a-z0-9-]+$') {
+    throw 'Full requires a dedicated COMPOSE_PROJECT_NAME starting with df-quality-.'
+}
+$QualityContractDir = if ($PreviousContract) {
+    if ([IO.Path]::IsPathRooted($PreviousContract)) {
+        [IO.Path]::GetFullPath($PreviousContract)
+    } else {
+        [IO.Path]::GetFullPath((Join-Path $RepoRoot $PreviousContract))
+    }
+} else {
+    Join-Path $RepoRoot "tmp/quality-contract/$QualityProject"
+}
+$OwnResources = $false
+$ChecksPassed = $false
 Push-Location $RepoRoot
 try {
-    docker compose -f docker-compose.quality.yml down --volumes --remove-orphans
-    docker compose -f docker-compose.quality.yml build backend-quality frontend-quality
+    # Refuse existing resources rather than tearing down another session.
+    foreach ($kind in @('container', 'volume', 'network')) {
+        $listArgs = @($kind, 'ls', '-q', '--filter', "label=com.docker.compose.project=$QualityProject")
+        if ($kind -eq 'container') { $listArgs += '--all' }
+        $existing = @(docker @listArgs)
+        if ($LASTEXITCODE -ne 0) { throw "Cannot inspect quality $kind resources." }
+        if ($existing.Count -gt 0) { throw "Quality project $QualityProject already has $kind resources; select a fresh project." }
+    }
+    if ((Test-Path -LiteralPath $QualityContractDir) -and
+        @(Get-ChildItem -LiteralPath $QualityContractDir -Force).Count -gt 0) {
+        throw 'Quality contract directory is not empty; preserve it and select a fresh directory.'
+    }
+    New-Item -ItemType Directory -Force -Path $QualityContractDir | Out-Null
+    $env:COMPOSE_PROJECT_NAME = $QualityProject
+    $env:QUALITY_CONTRACT_DIR = $QualityContractDir
+    $OwnResources = $true
+    if ($env:GITHUB_OUTPUT) {
+        # The runner fallback must not clean a project rejected by preflight.
+        Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'cleanup_owned=true' -Encoding utf8
+    }
+    docker compose -f docker-compose.quality.yml build backend-quality frontend-quality @BuildArgs
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     # Start the stateful test dependencies independently. Waiting for their
@@ -56,8 +127,18 @@ try {
     # provider; the integration fixture supplies deterministic mock models.
     docker compose -f docker-compose.quality.yml up --no-build --abort-on-container-exit --exit-code-from litellm-integration-quality litellm-quality litellm-integration-quality
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $ChecksPassed = $true
 }
 finally {
-    docker compose -f docker-compose.quality.yml down --volumes --remove-orphans
+    $CleanupExit = 0
+    if ($OwnResources) {
+        docker compose -f docker-compose.quality.yml down --volumes --remove-orphans
+        $CleanupExit = $LASTEXITCODE
+    }
+    $env:COMPOSE_PROJECT_NAME = $PreviousProject
+    $env:QUALITY_CONTRACT_DIR = $PreviousContract
     Pop-Location
+    if ($ChecksPassed -and $CleanupExit -ne 0) {
+        throw "Quality checks passed but resource cleanup failed (exit $CleanupExit)."
+    }
 }

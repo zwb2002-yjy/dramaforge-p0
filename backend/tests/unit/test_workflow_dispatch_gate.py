@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from app.director.workflows.reference_capability import (
+from app.contracts.reference_capability import (
     MultiCharacterCapabilityStatus,
     dispatch_capability_gate,
     max_subject_references_from_catalog_manifest,

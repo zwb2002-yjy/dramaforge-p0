@@ -9,7 +9,8 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 - `dev` 是常规集成分支，当前处于快速开发模式：不运行 PR CI，不启用 ruleset，
   允许直接 push 或直接合并分支；完整质量与安全验证集中在 `dev -> main`。
   恢复 dev 门禁时，在 `ci.yml` 的 `pull_request.branches` 加回 `dev`
-  （`backend-fast` / `frontend-fast` 分层作业仍保留），并重新启用 `dev` ruleset。
+  并先实现、验证对应分层作业；当前 workflow 没有 `backend-fast` / `frontend-fast`。
+  Ruleset 的变更须由 Owner 另行决定，不能只加监听分支就声称门禁闭环。
 - 发布的唯一正常方向：`dev -> main` PR。该 PR 必须执行完整质量与安全
   required checks；合并后本地 `main` fast-forward，并在历史分叉时把
   `main` 合回 `dev`。

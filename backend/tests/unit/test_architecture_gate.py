@@ -53,6 +53,28 @@ def test_documented_permissions_are_not_widened_for_current_code(source, target,
     assert scan.forbidden(source, target) is blocked
 
 
+def test_inbound_roles_are_distinct_without_reclassifying_application_debt():
+    assert scan.layer_of("app.api.v1.workbench") == "backend_api"
+    assert scan.layer_of("app.workers.jobs") == "backend_worker"
+    assert scan.layer_of("app.production.application.commands") == "production"
+    # An application responsibility in a mixed domain package is still debt;
+    # calling it Application must not silently grant new import permissions.
+    assert scan.layer_of("app.access.projects") == "domain"
+    assert scan.forbidden("app.access.projects", "app.director.creative_capabilities.freeze")
+
+
+@pytest.mark.parametrize("entry", ["app.api.v1.workbench", "app.workers.jobs"])
+@pytest.mark.parametrize("target", [
+    "app.contracts.command", "app.director.turn_service", "app.production.service",
+    "app.providers.runtime", "app.assets.models", "app.shared.errors",
+    "app.api.v1.workbench", "app.workers.jobs",
+])
+def test_inbound_split_preserves_import_matrix_and_reverse_boundaries(entry, target):
+    assert not scan.forbidden(entry, target)
+    if not target.startswith(("app.api.", "app.workers.")):
+        assert scan.forbidden(target, entry)
+
+
 def baseline(path, dependencies):
     path.write_text(json.dumps({"version": 1, "dependencies": dependencies}))
     return path
@@ -100,12 +122,15 @@ def test_reference_contract_is_the_same_class_for_existing_compiler_consumers():
     assert CompilerIntent.model_validate_json(intent.model_dump_json()) == intent
 
 
-def test_full_and_fast_container_gates_enforce_dependencies():
+def test_shared_full_container_gate_enforces_dependencies():
     command = "python3 scripts/arch_import_scan.py --check"
     # The quality image CMD runs the scan; the workflow must execute that exact
     # image for the exact-source gate (the old dev-only fast jobs were removed
     # because PR CI only listens on main).
     assert command in (ROOT / "backend/Dockerfile.quality").read_text()
     workflow = (ROOT / ".github/workflows/ci.yml").read_text()
-    assert "--exit-code-from backend-quality" in workflow
+    assert "run_quality_in_docker.ps1 -Stage Full" in workflow
+    runner = (ROOT / "scripts/run_quality_in_docker.ps1").read_text()
+    backend_run = "docker compose -f docker-compose.quality.yml run --rm --no-deps backend-quality"
+    assert backend_run in runner
     assert "scripts/arch_import_scan.py|scripts/architecture-baseline.json" in workflow

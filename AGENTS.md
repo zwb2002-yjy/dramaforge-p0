@@ -5,8 +5,9 @@
 - The single documentation entry point is [`docs/CURRENT.md`](docs/CURRENT.md).
   Each core domain has exactly one authoritative document listed there.
 - Code, migrations, tests, runtime state, and evidence establish current facts;
-  the authoritative docs describe intended behavior. When they conflict, code
-  wins and the doc must be updated.
+  the authoritative docs describe intended behavior. A conflict requires diagnosis:
+  fix defective code or outdated documentation against current requirements and
+  valid decisions; never redefine intended behavior merely to match a defect.
 - Historical designs, deleted task contracts, reviews, and execution records
   live only in Git history (`git log` / `git show`). They never justify new
   work or override current authority.
@@ -34,6 +35,12 @@
 
 ## Verification
 
+- Before editing, identify branch/SHA, existing changes, affected authority and
+  the smallest relevant verification scope. Record results in the conversation;
+  do not create a new task report or copy of the plan for every iteration.
+- Use the development feedback and evidence lifecycle in
+  [DEVELOPMENT.md](docs/DEVELOPMENT.md). Re-run passed checks only after relevant
+  source/dependency/environment changes, failures or unresolved concerns.
 - Choose verification proportionate to the change (focused tests plus affected
   regression); formal gates required by CI are not reduced.
 - Command facts come from [`frontend/package.json`](frontend/package.json),
