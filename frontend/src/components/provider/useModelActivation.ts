@@ -36,6 +36,7 @@ export function useModelActivation(workspaceId: string) {
       queryClient.invalidateQueries({ queryKey: ["workspace-model-profile", workspaceId] }),
       queryClient.invalidateQueries({ queryKey: ["model-bindings-effective"] }),
       queryClient.invalidateQueries({ queryKey: ["execution-model-preflight"] }),
+      queryClient.invalidateQueries({ queryKey: ["model-generation-options"] }),
     ]);
   };
   const ready = profiles.isSuccess && models.isSuccess && (!defaultId || profile.isSuccess);

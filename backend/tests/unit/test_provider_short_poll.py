@@ -17,6 +17,7 @@ from app.providers.runtime import (
     PollResult,
     ProviderResumeToken,
     ProviderRuntimeResolver,
+    SubmissionDiagnostics,
     SubmissionResult,
 )
 from app.runtime.scheduler import NodeRunScheduler
@@ -26,6 +27,99 @@ from sqlalchemy import select
 from tests.unit.test_provider_recovery import recovery, seed
 
 __all__ = ["recovery"]
+
+
+async def test_http_failure_evidence_survives_worker_commit(recovery, monkeypatch):
+    import httpx
+    import pytest
+    from app.config import Settings
+    from app.execution import provider_execution
+    from app.providers.agnes import AgnesRuntime
+    from app.providers.runtime import CompiledVideoRequest
+    from app.shared.errors import ValidationAppError
+
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(
+            503,
+            headers={"x-request-id": "req-persisted"},
+            json={"detail": "No healthy video upstream"},
+        )
+
+    runtime = AgnesRuntime(
+        settings=Settings(agnes_enabled=True, agnes_api_key="synthetic-key"),
+        transport=httpx.MockTransport(handler),
+    )
+    compiled = CompiledVideoRequest(
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="agnes-video-2.5-flash",
+        operation="video.generate",
+        request_schema_version="2026-11-03",
+        wire_request={"model": "agnes-video-2.5-flash", "prompt": "test", "mode": "text"},
+    )
+
+    async def prepare(session, *, run, **kwargs):
+        op = ProviderOperation(
+            node_run_id=run.id,
+            operation_kind="video.generate",
+            actual_provider="agnes",
+            actual_model="agnes-video-2.5-flash",
+            status="submission_started",
+            request_fingerprint="a" * 64,
+            execution_path_version="unified-v1",
+        )
+        session.add(op)
+        await session.commit()
+        return SimpleNamespace(operation=op, compiled=compiled, runtime=runtime, identity_json={})
+
+    monkeypatch.setattr(provider_execution, "prepare_media_submission", prepare)
+    async with recovery.factory() as session:
+        node = await session.get(GraphNode, recovery.node.id)
+        run = NodeRun(
+            project_id=recovery.project.id,
+            graph_version_id=node.graph_version_id,
+            graph_node_id=node.id,
+            idempotency_key=uuid4().hex,
+            input_hash="a" * 64,
+            status="running",
+            created_by=recovery.user.id,
+            input_snapshot={},
+        )
+        session.add(run)
+        await session.commit()
+        with pytest.raises(ValidationAppError, match="PROVIDER_CREATE_FAILED"):
+            await provider_execution._execute_unified_media_node_run(
+                session,
+                run=run,
+                node=node,
+                node_type="video",
+                snap={},
+                obj_store=SimpleNamespace(),
+                prompt="test",
+                canonical_image_bytes=None,
+                lead_identity_required=False,
+                has_canonical_binding=False,
+            )
+        run_id = run.id
+    async with recovery.factory() as session:
+        op = (
+            await session.scalars(
+                select(ProviderOperation).where(ProviderOperation.node_run_id == run_id)
+            )
+        ).one()
+        assert (
+            op.response_summary["submission_diagnostics"]["response_request_id"] == "req-persisted"
+        )
+        assert (
+            op.response_summary["submission_diagnostics"]["response_error"]
+            == "No healthy video upstream"
+        )
+        assert op.response_summary["create_http_status"] == 503
+        assert (await session.get(NodeRun, run_id)).status == "failed"
+    assert len(calls) == 1
 
 
 async def test_lost_submission_persistence_without_remote_id_never_resubmits(recovery, monkeypatch):
@@ -115,6 +209,13 @@ async def test_submit_exits_then_one_poll_per_due_job_without_extra_create(recov
                 status="queued",
                 remote_task_id="remote-1",
                 resume_token=resume,
+                submission_diagnostics=SubmissionDiagnostics(
+                    phase="accepted",
+                    endpoint="https://unit.invalid/v1/videos",
+                    duration_ms=12,
+                    http_status=200,
+                    response_request_id="req-retained",
+                ),
             )
         ),
         submit_video=AsyncMock(side_effect=AssertionError("no video create")),
@@ -219,6 +320,10 @@ async def test_submit_exits_then_one_poll_per_due_job_without_extra_create(recov
             operation = (await session.scalars(select(ProviderOperation))).one()
             assert run.input_snapshot == frozen
             assert operation.provider_operation_id == "remote-1"
+            assert (
+                operation.response_summary["submission_diagnostics"]["response_request_id"]
+                == "req-retained"
+            )
             assert operation.resume_token == resume.model_dump(mode="json")
             assert operation.response_summary.get("poll_count") == index + 1, {
                 "iteration": index,

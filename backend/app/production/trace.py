@@ -9,6 +9,7 @@ Builds a structured, secret-free trace of one NodeRun from:
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any, cast
 from uuid import UUID
 
@@ -17,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.execution.models import Artifact, NodeRun, ProviderOperation
+from app.providers.runtime import SubmissionDiagnostics
 from app.shared.errors import NotFoundError
 
 
@@ -41,6 +43,9 @@ class ExecutionTraceRead(BaseModel):
     # unknown, reconcile before retrying" instead of offering a blind retry.
     operation_status: str | None = None
     operation_outcome_unknown: bool = False
+    error_code: str | None = None
+    error_summary: str | None = None
+    submission_diagnostics: SubmissionDiagnostics | None = None
     effective_request_redacted: dict[str, JsonValue] = Field(default_factory=dict)
     artifact: dict[str, JsonValue] | None = None
 
@@ -80,12 +85,24 @@ async def build_execution_trace(
     ).scalar_one_or_none()
 
     artifact = (
-        await session.execute(
-            select(Artifact).where(Artifact.produced_by_run_id == run.id).limit(1)
+        (
+            await session.execute(
+                select(Artifact).where(Artifact.produced_by_run_id == run.id).limit(1)
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
     references = plan.get("planned_references")
+    submission = None
+    stored_submission = (
+        (operation.response_summary or {}).get("submission_diagnostics") if operation else None
+    )
+    if isinstance(stored_submission, dict):
+        # Historical/invalid metadata is not reconstructed into new proof.
+        with suppress(ValueError):
+            submission = SubmissionDiagnostics.model_validate(stored_submission)
     resolved_versions: list[dict[str, JsonValue]] = []
     if isinstance(references, list):
         for reference in references:
@@ -131,6 +148,9 @@ async def build_execution_trace(
         operation_status=(operation.status or None) if operation else None,
         operation_outcome_unknown=operation is not None
         and operation.status == "unknown_submission",
+        error_code=run.error_code,
+        error_summary=run.error_summary,
+        submission_diagnostics=submission,
         effective_request_redacted=(
             cast(dict[str, JsonValue], operation.request_summary) if operation else {}
         ),

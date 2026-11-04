@@ -730,7 +730,7 @@ export function SceneWorkspace({
         size="wide"
         testId="scene-model-settings-drawer"
       >
-        <ModelConnectionSettings />
+        <ModelConnectionSettings projectId={projectId} />
       </Drawer>
       <Dialog
         open={animaticOpen}

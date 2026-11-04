@@ -680,3 +680,12 @@ async def test_binding_created_after_catalog_read_inherits_its_account_visibilit
     )
     assert visible.account_verified is True
     assert hidden.account_verified is False
+    projection = await session.scalar(
+        select(ProviderModelAvailability).where(
+            ProviderModelAvailability.connection_id == connection.id,
+            ProviderModelAvailability.remote_model_id == visible.model_id,
+        )
+    )
+    assert projection is not None
+    assert projection.effective_status == "visible"
+    assert projection.positive_evidence_id is not None

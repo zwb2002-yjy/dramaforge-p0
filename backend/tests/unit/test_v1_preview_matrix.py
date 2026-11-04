@@ -134,6 +134,45 @@ def _case(
 # (model_id, mode, with_reference, expected readiness, expected error subset)
 # Complete over the active schema-1 catalog: one entry per legal combination.
 MATRIX: list[object] = [
+    # China Flash input contracts. Names frozen in plans and Workbench modes
+    # share the same preview mapping; missing media remains a blocked input.
+    _case("agnes-image-2.5-flash", "text", False, "contract_validated"),
+    _case("agnes-image-2.5-flash", "reference", False, "blocked", ("CONTRACT_MODE_MISMATCH",)),
+    _case("agnes-image-2.5-flash", "reference", True, "contract_validated"),
+    _case("agnes-image-2.5-flash", "text_to_image", False, "contract_validated"),
+    _case("agnes-image-2.5-flash", "text_to_image", True, "contract_validated"),
+    _case("agnes-video-2.5-flash", "text", False, "contract_validated"),
+    _case("agnes-video-2.5-flash", "text_to_video", False, "contract_validated"),
+    _case("agnes-video-2.5-flash", "frame", False, "blocked", ("PROVIDER_CONTRACT_UNSUPPORTED",)),
+    _case("agnes-video-2.5-flash", "frame", True, "contract_validated"),
+    _case(
+        "agnes-video-2.5-flash", "reference", False, "blocked", ("PROVIDER_CONTRACT_UNSUPPORTED",)
+    ),
+    _case("agnes-video-2.5-flash", "reference", True, "contract_validated"),
+    _case(
+        "agnes-video-2.5-flash", "first_frame", False, "blocked", ("PROVIDER_CONTRACT_UNSUPPORTED",)
+    ),
+    _case("agnes-video-2.5-flash", "first_frame", True, "contract_validated"),
+    _case(
+        "agnes-video-2.5-flash", "last_frame", False, "blocked", ("PROVIDER_CONTRACT_UNSUPPORTED",)
+    ),
+    _case("agnes-video-2.5-flash", "last_frame", True, "contract_validated"),
+    _case(
+        "agnes-video-2.5-flash",
+        "first_last_frame",
+        False,
+        "blocked",
+        ("PROVIDER_CONTRACT_UNSUPPORTED",),
+    ),
+    _case("agnes-video-2.5-flash", "first_last_frame", True, "contract_validated"),
+    _case(
+        "agnes-video-2.5-flash",
+        "omni_reference",
+        False,
+        "blocked",
+        ("PROVIDER_CONTRACT_UNSUPPORTED",),
+    ),
+    _case("agnes-video-2.5-flash", "omni_reference", True, "contract_validated"),
     # Agnes image (@contract/agnes-video-openai-async-v2 retired via
     # catalog publication event: no compiler branch accepts its dialect)
     _case("agnes-image-2.1-flash", "text_to_image", False, "contract_validated"),
@@ -518,7 +557,12 @@ def _derived_combinations() -> set[tuple[str, str, bool]]:
         modes = set(LEGACY_WORKBENCH_MODES[manifest.media_kind])
         modes.update(mode for spec in specs.values() for mode in spec.modes)
         for mode in modes:
-            if mode == "text_to_video":
+            contract = next(iter(manifest.operations.values())).input_contracts.get(mode)
+            if mode == "text_to_video" or (
+                contract is not None
+                and not contract.input_slots
+                and contract.maximum_total_references == 0
+            ):
                 combinations.add((entry.identity[2], mode, False))
             else:
                 combinations.add((entry.identity[2], mode, False))
@@ -602,6 +646,8 @@ async def test_v1_preview_matrix(
     expected_errors: frozenset[str],
 ) -> None:
     manifest = _active_manifest(model_id)
+    operation = next(iter(manifest.operations.values()))
+    expected_contract = None
     if manifest.media_kind == "image":
         intent, references = _image_intent(
             manifest.provider_type, mode, with_reference=with_reference
@@ -609,14 +655,39 @@ async def test_v1_preview_matrix(
         if manifest.protocol_profile == "openai_images_v2":
             intent = intent.model_copy(update={"aspect_ratio": "1:1"})
     else:
+        if operation.input_contracts:
+            mode = {
+                "text": "text_to_video",
+                "frame": "first_frame",
+                "reference": "omni_reference",
+            }.get(mode, mode)
         intent, references = _video_intent(
             manifest.provider_type, mode, with_reference=with_reference
         )
+    if operation.input_contracts:
+        # Production freezes the matched contract separately from the UI mode.
+        # Keep the same seam instead of asking the legacy mode validator to
+        # interpret a UI alias as a provider contract name.
+        if manifest.media_kind == "image":
+            expected_contract = (
+                "reference"
+                if mode == "reference" or (mode == "text_to_image" and with_reference)
+                else "text"
+            )
+        else:
+            expected_contract = (
+                "text"
+                if mode == "text_to_video"
+                else "reference"
+                if mode == "omni_reference"
+                else "frame"
+            )
     preview = await preview_compile(
         manifest=manifest,
         invoke_model_value=model_id,
         intent=intent,
         references=references,
+        expected_mode_id=expected_contract,
     )
     assert preview.readiness == readiness, preview.errors
     if readiness == "blocked":

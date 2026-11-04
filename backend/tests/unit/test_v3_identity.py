@@ -36,10 +36,12 @@ class TestAgnesIdentity:
         model_registry, _ = build_v3_registry()
         models = model_registry.list_models()
         agnes_models = [m for m in models if m.manifest.provider_id == "agnes"]
-        assert len(agnes_models) == 1
+        assert len(agnes_models) == 3
         # model id = <provider_id>/<actual-model>, never a downstream family label
         assert {m.manifest.id for m in agnes_models} == {
             "agnes/agnes-image-2.1-flash",
+            "agnes/agnes-image-2.5-flash",
+            "agnes/agnes-video-2.5-flash",
         }
         # model_family is a separate optional axis; not set for native models
         assert all(m.manifest.model_family is None for m in agnes_models)

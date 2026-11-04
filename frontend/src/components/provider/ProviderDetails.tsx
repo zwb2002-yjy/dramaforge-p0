@@ -201,14 +201,22 @@ function LegacyProviderDetails({
   const discoveredIds = catalog?.discovered_model_ids ?? [];
   const activationButton = (role: "llm" | "image" | "video", modelId: string, label: string) => {
     const active = usage.isActive(role, modelId);
+    const actionLabel =
+      role === "llm"
+        ? active
+          ? "已启用"
+          : "启用"
+        : active
+          ? `当前${role === "image" ? "生图" : "视频"}模型`
+          : `用于${role === "image" ? "生图" : "视频"}`;
     return (
       <Button
         tone={active ? "ghost" : "default"}
-        aria-label={`${active ? "已启用" : "启用"} ${label}`}
+        aria-label={`${actionLabel} ${label}`}
         disabled={busy || active || !connection.enabled || !usage.canActivate(role, modelId)}
         onClick={() => usage.activate.mutate({ role, modelId })}
       >
-        {active ? "已启用" : "启用"}
+        {actionLabel}
       </Button>
     );
   };

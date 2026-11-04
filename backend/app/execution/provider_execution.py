@@ -355,9 +355,11 @@ async def _execute_unified_media_node_run(
     sync_receipt = None
     result: SubmissionResult | None = None
 
-    if op is not None and op.status == "rejected" and (
-        op.response_summary or {}
-    ).get("synchronous_result") is not None:
+    if (
+        op is not None
+        and op.status == "rejected"
+        and (op.response_summary or {}).get("synchronous_result") is not None
+    ):
         raise ValidationAppError("SYNCHRONOUS_RESULT_INVALID: rejected operation has a result")
     resubmit = bool(op is not None and op.status == "rejected" and not op.provider_operation_id)
     if op is not None and not resubmit:
@@ -368,8 +370,11 @@ async def _execute_unified_media_node_run(
             )
         sync_receipt = synchronous_image_receipt(run=run, operation=op)
         synchronous_image = sync_receipt is not None
-        if synchronous_image and (node_type != "keyframe" or frozen_identity is None
-                                  or frozen_identity.capability != "image.generate"):
+        if synchronous_image and (
+            node_type != "keyframe"
+            or frozen_identity is None
+            or frozen_identity.capability != "image.generate"
+        ):
             raise ValidationAppError("SYNCHRONOUS_RESULT_INVALID")
         # A crash between the submission_started commit and the remote-id write
         # leaves an op with no remote id. Its outcome is unknown; escalate to
@@ -459,6 +464,11 @@ async def _execute_unified_media_node_run(
             result = await runtime.submit_image(compiled)
         else:
             result = await runtime.submit_video(compiled)
+        if result.submission_diagnostics is not None:
+            op.response_summary = {
+                **(op.response_summary or {}),
+                "submission_diagnostics": result.submission_diagnostics.model_dump(mode="json"),
+            }
         if result.status == "unknown_submission":
             op.status = "unknown_submission"
             op.error_code = str(result.error_code or "PROVIDER_SUBMISSION_UNKNOWN")
@@ -493,6 +503,7 @@ async def _execute_unified_media_node_run(
             op.error_code = "PROVIDER_CREATE_FAILED"
             op.error_summary = error_text
             failure_summary: dict[str, object] = {
+                **(op.response_summary or {}),
                 "create_status": result.status,
                 "create_error": error_text[:300],
             }
@@ -536,12 +547,16 @@ async def _execute_unified_media_node_run(
             op.resume_token = result.resume_token.model_dump(mode="json")
             resume = result.resume_token
         op.response_summary = {
+            **(op.response_summary or {}),
             "create_status": result.status,
             "query_kind": result.query_kind,
         }
         if synchronous_image:
             sync_receipt = await persist_synchronous_image_result(
-                run=run, operation=op, result=result, store=obj_store,
+                run=run,
+                operation=op,
+                result=result,
+                store=obj_store,
             )
             op.response_summary = {
                 **op.response_summary,
@@ -636,8 +651,7 @@ async def _execute_unified_media_node_run(
                 age_anchor = age_anchor.replace(tzinfo=UTC)
             if (
                 age_anchor is not None
-                and (datetime.now(UTC) - age_anchor).total_seconds()
-                > MAX_REMOTE_TASK_AGE_SECONDS
+                and (datetime.now(UTC) - age_anchor).total_seconds() > MAX_REMOTE_TASK_AGE_SECONDS
             ):
                 # Stop polling a task that never terminates. This is a
                 # terminal observation failure, never a reason to create again.
@@ -727,8 +741,11 @@ async def _execute_unified_media_node_run(
         destination = Path(scratch) / "result.media"
         if sync_receipt is not None and sync_receipt.object_key is not None:
             media = await _materialize_provider_media(
-                kind=node_type, chunks=obj_store.iter_bytes(object_key=sync_receipt.object_key),
-                destination=destination, content_type=None, expected_size=sync_receipt.byte_size,
+                kind=node_type,
+                chunks=obj_store.iter_bytes(object_key=sync_receipt.object_key),
+                destination=destination,
+                content_type=None,
+                expected_size=sync_receipt.byte_size,
             )
             if media.content_hash != sync_receipt.content_hash:
                 raise ValidationAppError("SYNCHRONOUS_RESULT_INVALID: stored image hash mismatch")

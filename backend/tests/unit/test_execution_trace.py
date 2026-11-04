@@ -180,6 +180,40 @@ async def test_trace_raises_for_unknown_run(session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_trace_exposes_stored_http_evidence_and_does_not_invent_it_for_history(session):
+    from sqlalchemy import select
+
+    project, run, _ = await _seed_run_with_trace(session)
+    op = (
+        await session.scalars(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+    ).one()
+    op.response_summary = {
+        "submission_diagnostics": {
+            "phase": "response_received",
+            "endpoint": "https://api.agnes-ai.cn/v1/videos",
+            "duration_ms": 145,
+            "http_status": 503,
+            "response_request_id": "req-503",
+            "response_error": "No healthy upstream",
+        }
+    }
+    run.status = "failed"
+    run.error_code = "PROVIDER_CREATE_FAILED"
+    run.error_summary = "Video HTTP 503; no task ID"
+    await session.flush()
+    trace = await build_execution_trace(session, project_id=project.id, run_id=run.id)
+    assert trace.submission_diagnostics.response_request_id == "req-503"
+    assert trace.submission_diagnostics.http_status == 503
+    assert trace.error_code == "PROVIDER_CREATE_FAILED"
+    op.response_summary = {"create_http_status": 503}
+    await session.flush()
+    historical = await build_execution_trace(session, project_id=project.id, run_id=run.id)
+    assert historical.submission_diagnostics is None
+
+
+@pytest.mark.asyncio
 async def test_trace_exposes_unknown_submission_for_manual_reconciliation(
     session: AsyncSession,
 ) -> None:

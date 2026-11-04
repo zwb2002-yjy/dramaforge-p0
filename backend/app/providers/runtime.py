@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 from uuid import UUID
 
-from pydantic import BaseModel, Field, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from sqlalchemy import select
 
 from app.providers.catalog_models import ModelCatalogEntry
@@ -142,6 +142,26 @@ def validate_compiled_submission(
         raise ValueError("compiled wire model does not match request model_id")
 
 
+class SubmissionDiagnostics(BaseModel):
+    """Observed submission boundary, never a claim of billing or inference."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    phase: Literal[
+        "not_sent", "connection_failed", "outcome_unknown", "response_received", "accepted"
+    ]
+    endpoint: str = Field(max_length=500)
+    method: Literal["POST"] = "POST"
+    duration_ms: float = Field(ge=0)
+    http_status: int | None = None
+    response_request_id: str | None = Field(default=None, max_length=200)
+    edge_request_id: str | None = Field(default=None, max_length=200)
+    response_server: str | None = Field(default=None, max_length=100)
+    response_type: Literal["json", "html", "text", "empty", "other"] | None = None
+    response_error: str | None = Field(default=None, max_length=500)
+    network_error: str | None = Field(default=None, max_length=100)
+
+
 class SubmissionResult(BaseModel):
     """One create attempt outcome. ``status`` mirrors the provider_operation
     status vocabulary so the caller can persist it directly. Synchronous image
@@ -161,6 +181,7 @@ class SubmissionResult(BaseModel):
     error: str | None = None
     retry_after_seconds: float | None = None
     http_status: int | None = None
+    submission_diagnostics: SubmissionDiagnostics | None = None
 
 
 class PollResult(BaseModel):

@@ -24,7 +24,18 @@ type ShotDetailsBodyProps = {
  */
 export function ShotDetailsBody({ projectId, shot, trace }: ShotDetailsBodyProps) {
   const [selection, setSelection] = useState<{ shotId: string; runId: string } | null>(null);
-  const selectedRunId = selection?.shotId === shot.id ? selection.runId : null;
+  const latestFailureRunId =
+    trace.flatMap((row) =>
+      typeof row === "object" &&
+      row !== null &&
+      "status" in row &&
+      row.status === "failed" &&
+      "node_run_id" in row &&
+      typeof row.node_run_id === "string"
+        ? [row.node_run_id]
+        : [],
+    )[0] ?? null;
+  const selectedRunId = selection?.shotId === shot.id ? selection.runId : latestFailureRunId;
   const detail = useQuery({
     queryKey: queryKeys.shot.executionTrace(projectId, shot.id, selectedRunId),
     queryFn: ({ signal }) => fetchExecutionTrace(projectId!, selectedRunId!, signal),
@@ -90,6 +101,40 @@ export function ShotDetailsBody({ projectId, shot, trace }: ShotDetailsBodyProps
           {traceDetail.operation_outcome_unknown && (
             <p className="df-shot-hint warn">提交结果未知，请先核对，不要直接重试。</p>
           )}
+          <dl className="df-shot-details-facts" data-testid="execution-submission-status">
+            <dt>发送步骤</dt>
+            <dd>
+              {traceDetail.submission_diagnostics
+                ? {
+                    not_sent: "配置检查未通过，尚未发送",
+                    connection_failed: "连接失败，尚未发送 HTTP 请求",
+                    outcome_unknown: "等待响应时中断，发送结果未知",
+                    response_received: "已收到 HTTP 响应，未取得远端任务 ID",
+                    accepted: "已取得远端任务 ID",
+                  }[traceDetail.submission_diagnostics.phase]
+                : traceDetail.operation_status
+                  ? "该历史记录未保存发送诊断，无法补造"
+                  : "尚未发现模型调用记录"}
+            </dd>
+            {traceDetail.submission_diagnostics?.http_status != null && (
+              <>
+                <dt>接口回应</dt>
+                <dd>HTTP {traceDetail.submission_diagnostics.http_status}</dd>
+              </>
+            )}
+            {traceDetail.submission_diagnostics?.response_error && (
+              <>
+                <dt>接口错误摘要</dt>
+                <dd>{traceDetail.submission_diagnostics.response_error}</dd>
+              </>
+            )}
+            {traceDetail.error_summary && !traceDetail.submission_diagnostics?.response_error && (
+              <>
+                <dt>失败信息</dt>
+                <dd>{traceDetail.error_summary}</dd>
+              </>
+            )}
+          </dl>
           <Disclosure
             compact
             className="editing-diagnostics"
@@ -100,6 +145,24 @@ export function ShotDetailsBody({ projectId, shot, trace }: ShotDetailsBodyProps
               运行 {traceDetail.run_id} · 节点 {traceDetail.node_key ?? "无"} · 状态{" "}
               {traceDetail.status} · Provider {traceDetail.actual_provider ?? "无"} · 操作状态{" "}
               {traceDetail.operation_status ?? "无"}
+              {traceDetail.submission_diagnostics && (
+                <>
+                  <br />
+                  请求 {traceDetail.submission_diagnostics.method}{" "}
+                  {traceDetail.submission_diagnostics.endpoint}
+                  <br />
+                  耗时 {traceDetail.submission_diagnostics.duration_ms} 毫秒
+                  <br />
+                  接口追踪 ID{" "}
+                  {traceDetail.submission_diagnostics.response_request_id ?? "接口未返回"}
+                  <br />
+                  边缘追踪 ID {traceDetail.submission_diagnostics.edge_request_id ?? "接口未返回"}
+                  <br />
+                  响应服务 {traceDetail.submission_diagnostics.response_server ?? "接口未返回"}
+                  <br />
+                  网络错误 {traceDetail.submission_diagnostics.network_error ?? "无"}
+                </>
+              )}
             </small>
           </Disclosure>
         </section>

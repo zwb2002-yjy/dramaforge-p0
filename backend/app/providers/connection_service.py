@@ -165,7 +165,11 @@ class ProviderConnectionService:
         )
 
     async def get_connection(
-        self, *, workspace_id: UUID, connection_id: UUID, for_update: bool = False,
+        self,
+        *,
+        workspace_id: UUID,
+        connection_id: UUID,
+        for_update: bool = False,
     ) -> ProviderConnection:
         statement = select(ProviderConnection).where(
             ProviderConnection.id == connection_id,
@@ -193,9 +197,13 @@ class ProviderConnectionService:
         """
         await lock_workspace_credentials(self._session, workspace_id=connection.workspace_id)
         with self._session.no_autoflush:
-            await self._session.scalar(select(ProviderConnection.id).where(
-                ProviderConnection.id == connection.id,
-            ).with_for_update())
+            await self._session.scalar(
+                select(ProviderConnection.id)
+                .where(
+                    ProviderConnection.id == connection.id,
+                )
+                .with_for_update()
+            )
         plugin = _resolve_plugin(connection.provider_type, connection.protocol_profile)
         credential = await self._session.scalar(
             select(EncryptedProviderCredential).where(
@@ -283,7 +291,9 @@ class ProviderConnectionService:
         protocol_profile: str | None = None,
     ) -> ProviderConnection:
         connection = await self.get_connection(
-            workspace_id=workspace_id, connection_id=connection_id, for_update=True,
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            for_update=True,
         )
         if connection.provider_type == "litellm" and (
             base_url is not None or protocol_profile is not None
@@ -377,7 +387,9 @@ class ProviderConnectionService:
         api_key: str,
     ) -> ProviderConnection:
         connection = await self.get_connection(
-            workspace_id=workspace_id, connection_id=connection_id, for_update=True,
+            workspace_id=workspace_id,
+            connection_id=connection_id,
+            for_update=True,
         )
         if connection.auth_mode == "none":
             raise ValidationAppError(
@@ -1159,7 +1171,7 @@ class ProviderConnectionService:
         )
         self._session.add(binding)
         await self._session.flush()
-        if discovered and connection.verification_status == "verified" and plugin.manual_model_ids:
+        if discovered and connection.verification_status == "verified":
             await self._record_model_list_availability(
                 workspace_id=workspace_id,
                 connection=connection,
