@@ -230,7 +230,7 @@ def main() -> None:
                 )
             )
             raise SystemExit(
-                f"generated model support document is stale: {args.output}\\n{diff}"
+                f"generated model support document is stale: {args.output}\n{diff}"
             )
         return
     args.output.parent.mkdir(parents=True, exist_ok=True)
