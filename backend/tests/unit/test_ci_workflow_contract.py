@@ -57,12 +57,12 @@ def test_policy_checks_run_inside_a_python_container() -> None:
     assert "scripts/repo_guardrails.py policy" in policy_job
 
 
-def test_pr_ci_only_listens_on_main_while_dev_is_in_fast_development() -> None:
+def test_pr_ci_listens_on_main_and_dev() -> None:
     import yaml
 
     parsed = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
     triggers = parsed[True]
-    assert triggers["pull_request"]["branches"] == ["main"]
+    assert triggers["pull_request"]["branches"] == ["main", "dev"]
     assert "workflow_dispatch" in triggers
 
 
