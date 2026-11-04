@@ -134,7 +134,7 @@ jobs:
             esac
           done <<< "$changed"
 
-          if [[ "$backend" == true && "$frontend" == true ]]; then
+          if [[ "$backend" == true || "$frontend" == true ]]; then
             full_quality=true
           fi
           if [[ "$migrations" == true || "$api_contract" == true || "$runtime" == true || "$infra" == true ]]; then

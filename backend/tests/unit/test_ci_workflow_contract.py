@@ -57,12 +57,12 @@ def test_policy_checks_run_inside_a_python_container() -> None:
     assert "scripts/repo_guardrails.py policy" in policy_job
 
 
-def test_pr_ci_only_listens_on_main_while_dev_is_in_fast_development() -> None:
+def test_pr_ci_listens_on_main_and_dev() -> None:
     import yaml
 
     parsed = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
     triggers = parsed[True]
-    assert triggers["pull_request"]["branches"] == ["main"]
+    assert triggers["pull_request"]["branches"] == ["main", "dev"]
     assert "workflow_dispatch" in triggers
 
 
@@ -137,11 +137,11 @@ def test_changed_path_classifier_routes_fast_and_full_gates(tmp_path: Path) -> N
         "docs": (["docs/guide.md"], {"docs_only": "true", "full_quality": "false"}),
         "backend": (
             ["backend/app/shared/json.py"],
-            {"backend": "true", "full_quality": "false"},
+            {"backend": "true", "full_quality": "true"},
         ),
         "frontend": (
             ["frontend/src/lib/api.ts"],
-            {"frontend": "true", "full_quality": "false"},
+            {"frontend": "true", "full_quality": "true"},
         ),
         "migration": (
             ["backend/alembic/versions/new.py"],
@@ -153,7 +153,7 @@ def test_changed_path_classifier_routes_fast_and_full_gates(tmp_path: Path) -> N
         ),
         "script": (
             ["scripts/prove_new_flow.py"],
-            {"backend": "true", "full_quality": "false"},
+            {"backend": "true", "full_quality": "true"},
         ),
         "cross-stack": (
             ["backend/tests/unit/test_x.py", "frontend/tests/unit/x.test.ts"],
