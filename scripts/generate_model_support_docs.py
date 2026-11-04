@@ -111,7 +111,8 @@ def _support_state(
     manifest: ModelCapabilityManifest,
     lifecycle: str,
     bindings: list[dict[str, Any]] | None,
-    *, new_create_blocker: str | None = None,
+    *,
+    new_create_blocker: str | None = None,
 ) -> tuple[str, str, str]:
     if bindings is None:
         return (
@@ -161,11 +162,23 @@ def render_model_support(*, binding_snapshot: Path | None = None) -> str:
             refs = []
             for contract in operation.input_contracts.values():
                 for role, slot in contract.input_slots.items():
-                    refs.append(f"{role} ≤ {slot.maximum.value}" if slot.maximum.kind == "bounded"
-                                else f"{role} ({slot.maximum.kind})")
-            cells = (manifest.provider_type, f"`{manifest.model_id}` / `{manifest.model_revision}`",
-                item.publication_lifecycle, manifest.media_kind, ", ".join(sorted(set(refs))) or "unknown",
-                "typed candidate", "see Manifest", "not checked", "no (not implemented)", "not checked")
+                    refs.append(
+                        f"{role} ≤ {slot.maximum.value}"
+                        if slot.maximum.kind == "bounded"
+                        else f"{role} ({slot.maximum.kind})"
+                    )
+            cells = (
+                manifest.provider_type,
+                f"`{manifest.model_id}` / `{manifest.model_revision}`",
+                item.publication_lifecycle,
+                manifest.media_kind,
+                ", ".join(sorted(set(refs))) or "unknown",
+                "typed candidate",
+                "see Manifest",
+                "not checked",
+                "no (not implemented)",
+                "not checked",
+            )
             rows.append("| " + " | ".join(str(cell).replace("|", "\\|") for cell in cells) + " |")
             continue
         operation = next(iter(manifest.operations.values()), None)
@@ -174,12 +187,16 @@ def render_model_support(*, binding_snapshot: Path | None = None) -> str:
         resolution = (
             _option(operation, "resolution")
             if manifest.media_kind == "video" and operation is not None
-            else _option(operation, "size") if operation is not None else "—"
+            else _option(operation, "size")
+            if operation is not None
+            else "—"
         )
         if resolution == "—" and operation is not None:
             resolution = _option(operation, "aspect_ratio")
         blocker = catalog_new_create_blocker(
-            *item.identity, item.manifest_hash, lifecycle=item.publication_lifecycle,
+            *item.identity,
+            item.manifest_hash,
+            lifecycle=item.publication_lifecycle,
             catalog_source=manifest.catalog_source,
         )
         account, executable, certified = _support_state(
@@ -217,8 +234,19 @@ def main() -> None:
     args = parser.parse_args()
     content = render_model_support(binding_snapshot=args.binding_status_json)
     if args.check:
-        if not args.output.exists() or args.output.read_text(encoding="utf-8") != content:
-            raise SystemExit(f"generated model support document is stale: {args.output}")
+        existing = args.output.read_text(encoding="utf-8") if args.output.exists() else ""
+        if existing != content:
+            import difflib
+
+            diff = "".join(
+                difflib.unified_diff(
+                    existing.splitlines(keepends=True),
+                    content.splitlines(keepends=True),
+                    fromfile=str(args.output),
+                    tofile="generated model support",
+                )
+            )
+            raise SystemExit(f"generated model support document is stale: {args.output}\n{diff}")
         return
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(content, encoding="utf-8")
