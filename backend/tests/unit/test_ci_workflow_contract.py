@@ -153,7 +153,7 @@ def test_changed_path_classifier_routes_fast_and_full_gates(tmp_path: Path) -> N
         ),
         "script": (
             ["scripts/prove_new_flow.py"],
-            {"backend": "true", "full_quality": "false"},
+            {"backend": "true", "full_quality": "true"},
         ),
         "cross-stack": (
             ["backend/tests/unit/test_x.py", "frontend/tests/unit/x.test.ts"],
