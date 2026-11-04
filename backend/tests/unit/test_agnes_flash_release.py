@@ -94,3 +94,18 @@ async def test_flash_poll_uses_model_frozen_at_submission() -> None:
     result = await runtime.poll_video(submitted.resume_token)
     assert result.status == "succeeded"
     assert [call.method for call in calls] == ["POST", "GET"]
+
+
+def test_flash_model_support_matrix_rows_are_complete_and_revision_sorted() -> None:
+    root = Path(__file__).resolve().parents[3]
+    matrix = (root / "docs/generated/MODEL_SUPPORT.md").read_text(encoding="utf-8")
+    for model_id in ("agnes-image-2.5-flash", "agnes-video-2.5-flash"):
+        rows = [
+            line
+            for line in matrix.splitlines()
+            if line.startswith(f"| agnes | `{model_id}` /")
+        ]
+        assert len(rows) == 3
+        assert all(row.endswith("|") and len(row.split("|")) == 12 for row in rows)
+        revisions = [row.split(" / `", 1)[1].split("`", 1)[0] for row in rows]
+        assert revisions == sorted(revisions)
