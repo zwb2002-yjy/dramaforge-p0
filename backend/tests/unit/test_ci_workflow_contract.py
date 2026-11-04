@@ -137,11 +137,11 @@ def test_changed_path_classifier_routes_fast_and_full_gates(tmp_path: Path) -> N
         "docs": (["docs/guide.md"], {"docs_only": "true", "full_quality": "false"}),
         "backend": (
             ["backend/app/shared/json.py"],
-            {"backend": "true", "full_quality": "false"},
+            {"backend": "true", "full_quality": "true"},
         ),
         "frontend": (
             ["frontend/src/lib/api.ts"],
-            {"frontend": "true", "full_quality": "false"},
+            {"frontend": "true", "full_quality": "true"},
         ),
         "migration": (
             ["backend/alembic/versions/new.py"],
