@@ -74,10 +74,8 @@ Director Runtime 是**独立于生产执行的编排 runtime**：它驱动导演
 
 目标是在现有模型调用/审计基础上增量增加 DramaForge-owned Agent Loop；
 其只读工具上限、模型调用上限、可恢复工具错误及压缩策略是待实现合同，不是当前能力。
-详细[当前行为](architecture/DIRECTOR_AGENT_CURRENT_STATE.md)、
-[目标架构](architecture/DIRECTOR_AGENT_TARGET_ARCHITECTURE.md)和
-[依赖有序实施计划](architecture/DIRECTOR_AGENT_IMPLEMENTATION_PLAN.md)
-由 [ARCHITECTURE_MAPPING](ARCHITECTURE_MAPPING.md) 统一挂接；不新建平行领域权威。
+目标合同收拢在本文末尾，依赖顺序见
+[ARCHITECTURE_MAPPING §5](ARCHITECTURE_MAPPING.md#director-agent-sequence)。
 
 ## 状态权威
 
@@ -143,3 +141,109 @@ Assistant context 只读取当前 Shot 的 ExperimentBranch，返回 experiment_
 selected_model 与参数；后续 start / decision 仍通过现有显式用户 Gate。
 ProductionExperiment / ShotExperiment 只保留历史存储，不再创建、采用或作为
 Assistant 当前事实；旧 Phase 5 服务测试由当前分支回归测试替代。
+
+
+<a id="director-agent-target"></a>
+## Director Agent 工具循环合同（目标，未实现）
+
+本节保留待实施设计，不授权启动新功能或付费验证。当前固定文本任务与 LangGraph
+编排仍按上文运行。选择是在现有 Python / TextModelPort / Invocation 基础上增加自有
+小型工具循环；LangGraph 继续拥有跨用户、跨 Worker 等待的流程位置，Production
+继续拥有全部生产事实。不引入第二套模型注册表、调用日志、通用 Agent 平台或领域服务。
+引擎选型决策及启用备选的条件仍由 [ADR 0007](adr/0007-director-runtime-langgraph.md) 管理。
+
+### 现有实现定位
+
+| 职责 | 现有入口及边界 |
+|---|---|
+| 固定结构化文本任务 | [text_transport.py](../backend/app/director/text_transport.py) 组合 Turn、模型解析、Invocation 与同模型 schema repair；保留原 generate_structured 行为 |
+| 模型调用接口 | [text_model.py](../backend/app/director/text_model.py) 的 session-free TextModelPort；在同一接口增补 generate_turn，不另建 resolver |
+| 上下文 | [assistant_context.py](../backend/app/director/assistant_context.py) 负责授权 DB 聚合，[context_builder.py](../backend/app/director/context_builder.py) 负责纯 JSON 冻结；二者组合而非互相替换 |
+| 持久流程 | [langgraph_adapter.py](../backend/app/director/runtime/langgraph_adapter.py) 与 [domain_tools.py](../backend/app/director/runtime/domain_tools.py)；propose 读取已存提案，不能把含执行命令的 workflow ports 整包暴露给模型 |
+| 事实读取与提案 | ProjectService、Scene/ShotWorkbenchService、AssetCardReadService、ModelInspectionService 和 proposal_creation；工具直接复用授权 service，不调用本机 API 或复制业务 SQL |
+
+DirectorTurn.revision 是业务 CAS，runtime_revision 是引擎投影水位，不能合并比较。
+checkpoint 中的 proposal、receipt、production fact 仅为观察和重放线索；恢复时重读领域
+事实。Assistant 的 Shot suggestion 与持久 Proposal 不是同一对象。
+
+### 模型与工具合同
+
+以下类型均为目标合同；先扩展当前 LiteLLM 通道，不增加未经验证的厂商直连。
+
+| 类型 | 必要内容 |
+|---|---|
+| AgentMessage / AgentToolCall | system/user/assistant/tool；assistant 的调用列表；tool 的 call_id、name、结构化结果；arguments 必须为 JSON object，不接受可执行代码 |
+| AgentModelRequest | 有序消息、获准 ToolSpec、tool_choice、输出 schema、冻结模型解析、limits |
+| AgentModelResponse | text、tool_calls、usage、stop_reason、白名单 metadata；文本和工具皆空判 malformed |
+| AgentTurnResult | turn/thread、status、assistant_message_id、实际 proposal_ids、stop_reason、usage、version |
+| ToolSpec | name/version、description、输入/输出 schema、risk/side_effect、requires_confirmation、timeout_ms、source、schema_hash、结果大小上限 |
+| ToolContext | 服务端认证的 actor/workspace/project、turn/thread/UI scope、expected_versions、trace、cancel/deadline、只读 service factory；不交付 session 或凭据给模型 |
+| ToolResult / ToolError | call_id、ok、data 或安全错误 code/message/recoverable/retry_class/details、observed_versions、provenance、truncated、result_hash |
+
+ToolRegistry 返回按 scope 过滤的不可变 ToolSpec 集，并按 name/version 解析 handler。
+ToolExecutor 统一校验 schema（extra=forbid）、权限、归属、版本、超时、幂等及审计。
+模型能力元数据须区分 structured_json、tool_calling、tool_results、parallel_calls、上下文
+上限与已验证证据；未知能力拒绝，不按模型名称猜。精确模型、连接/部署修订与 invocation
+沿用 [MODEL_PROVIDER](MODEL_PROVIDER.md)，不能仅冻结可重新绑定的逻辑别名。
+
+首版仅开放 READ 和无网络、无生产副作用的 ANALYZE；后续 PROPOSE 只能幂等创建
+真实 typed Proposal，不能 Apply 或执行生产。MUTATE、EXECUTE、DESTRUCTIVE 不向模型
+开放。工具描述、返回内容及 MCP annotations 均是不可信数据，不能提升权限或确认级别。
+
+### 循环、恢复与状态所有权
+
+1. 验证 thread/scope、request_key、UI context 和观察版本；同 key 同 payload 读取原
+   Turn/回执，异 payload 冲突。冻结模型、工具集合版本与 context_hash，领取单 Turn lease。
+2. 每次模型网络调用前持久记录 Invocation submission；工具先串行执行，每次重验权限
+   和 expected versions。工具参数、响应和错误保留 call_id，成对追加 assistant/tool 消息。
+3. 模型选择下一工具，runtime 仅校验与调度，不按用户关键词硬编码业务路径。
+   ToolNotFound、ToolInputInvalid、ModelToolCallInvalid、ToolExecutionFailed/SHOT_NOT_FOUND
+   作为安全且可恢复的 ToolResult 返回模型；权限拒绝不扩大 scope。ModelUnavailable 或
+   malformed 响应不换模型，仅执行已允许的同模型修复；未知模型提交阻塞并查 journal。
+4. 初始工程上限仍待校准：每 Turn 6 次模型请求、12 次工具调用、120 秒总时限；单工具
+   默认 5 秒且受总 deadline 约束；schema repair 最多一次并计入模型请求数。同工具、
+   规范化参数及观察版本连续重复 3 次即停止；参数纠正后的调用仍允许。
+5. 工具去重绑定 turn_id + step + call_id + args_hash + tool_version；同 call_id 异参数冲突。
+   READ 明确未执行或瞬时失败可有界重试；PROPOSE 超时先查 receipt。可能计费或
+   unknown_submission 的模型请求不盲重发。网络期间不持有 DB 事务，工具用短事务。
+6. stop 持久更新 epoch 后阻止新调用，不能撤销已提交网络操作，也不隐式取消既有授权
+   Production/Workflow。ContextStale/RevisionConflict 要求重读并重新提案，不改批准计划。
+7. 输出必须引用实际存在的 Proposal；达到 step/call/deadline 限制时返回已完成部分和原因。
+   Agent 输出提案后结束推理；用户接受后，独立授权才交给新的 Workflow Turn，关联
+   origin_agent_turn_id。Agent CAS 与 graph projector 不同时写同一 Turn。
+
+数据演进归 [DATA_MODEL](DATA_MODEL.md#director-agent-data)，API/宿主选择归
+[API](API.md#director-agent-api)。完成回答/提案用 completed；限额或不可恢复错误用
+failed + stop_reason，用户 stop 用 cancelled，版本冲突用 stale；blocked 是结果/UI 分类，
+不另增数据库状态。旧引擎身份、checkpoint、submission 与历史记录不补造、不改义。
+
+### 上下文、Skill/Style 与可选外部工具
+
+上下文分为版本化安全/工具合同、服务端验证的 UI scope、有来源及覆盖范围的历史摘要、
+带 observed_versions 的实时领域读取。压缩保留当前请求、安全规则、scope/versions 与
+未闭合 call/result 对；先确定性裁剪，LLM 摘要计入调用上限。未知提交不重算历史。
+只保留业务所需 transcript、动作和结果摘要，不保存隐藏思维链；公开事件不含 Key、
+Authorization、签名 URL、完整敏感 payload 或原始素材。
+
+复用 Thread/Message、ProjectCreativeProfile 和可失效的 ThreadSummary，不引入向量库。
+Formal、模型 Binding、生产状态实时读取，不由 Memory 认定。Skill 是方法，Style 是表达；
+复用 CreativeSkillSpec/Stack、StylePack、ShotLanguageCompiler 与已有编译快照。
+优先级仍为显式用户 > 已接受提案 > project override > pack default；未采纳推荐保持 pending。
+人物一致性仍依赖参考素材、模型、冻结参数和审核，不能承诺开启 Skill 就能保证一致。
+
+MCP 延后且不是首版阻塞项：受控 connect → tools/list → schema/大小/风险校验 →
+带 server 身份的 namespace registry → tools/call → ToolResult。schema 变化生成新版本/hash，
+不改变运行中 Turn 的工具定义。凭据在服务端，文件与网络均受限；外部工具不管理循环或
+领域事实。不强制把内部服务 MCP 化，不开放 unrestricted shell/filesystem/browser control，
+也不因厂商 hosted tool 或 readOnly 标注而继承执行权限。
+
+### 验收边界
+
+依赖顺序见 [ARCHITECTURE_MAPPING](ARCHITECTURE_MAPPING.md#director-agent-sequence)。
+只读组合验收仍须分别证明：模型能按上下文选择不同工具顺序、实际调用授权 service、
+错误带 call_id 回到模型、模型能改参/list 后纠正、step/call/deadline 均能终止、重启/stop/
+租约/幂等成立、压缩不拆工具对、数据库前后无 Shot/Asset/Formal/NodeRun/ProviderOperation
+写入（会话与审计允许）。每步模型身份、上下文 hash、工具版本、参数 hash、观察版本、
+延迟、错误及 usage/cost_status 可追溯；未知费用不猜值。
+Mock 只证明程序机制；真实模型工具选择质量须单独授权与验收，不继承历史付费许可。
+各阶段退出时停止新受理、保留既有提案/审计/冻结 Workflow 的恢复，不删除历史数据。

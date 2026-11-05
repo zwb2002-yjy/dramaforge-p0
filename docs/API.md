@@ -564,3 +564,23 @@ re-resolving mutable settings; it cannot advance to the next step. No blind repa
 retry exists for failed/unknown provider work. `node_run_error_code` exposes
 `PROVIDER_SUBMISSION_UNKNOWN` even though the NodeRun status is `failed`; such a
 repair cannot be abandoned to unlock another submission before reconciliation.
+
+
+<a id="director-agent-api"></a>
+## Director Agent API（目标，未实现）
+
+[工具循环合同](DIRECTOR_RUNTIME.md#director-agent-target) 不改变当前 HTTP 表面。
+未来在现有 project-scoped routes 增补以下合同，不提前生成 DTO 或注册空入口：
+
+| `/api/v1` 下的目标接口 | 合同 |
+|---|---|
+| `POST /projects/{project_id}/director/threads/{thread_id}/messages` | content、request_key、UI context、观察版本；actor 来自认证。同步返回 AgentTurnResult 及 message/turn ID；同 key 重入只读回执 |
+| `GET /projects/{project_id}/director/threads/{thread_id}` | 分页消息、summary 引用、关联 Turn；不返回凭据或原始大工具结果 |
+| `GET /projects/{project_id}/director/turns/{turn_id}` | 扩展既有读取，展示消息、工具活动、提案及等待/完成/失败状态 |
+| `POST /projects/{project_id}/director/turns/{turn_id}/stop` | expected_revision + request_key，按 turn_kind 路由既有 stop 语义 |
+
+首版由 API-owned handler 有界同步执行，GET/stop 可并发；断线后读取持久结果/未知提交
+状态，不能重放可能计费调用。worker-director 仍无 Provider 权限。202 后台受理须另行
+设计 text-only 宿主和可靠 Outbox，不能用内存 background task 冒充持久执行。
+事件复用现有 SSE，携带 event_id/turn_id/sequence/type/version；重连后 GET 为权威，
+不新增 WebSocket 状态源，token streaming 非首版阻塞项，前端不从事件推导执行权限。

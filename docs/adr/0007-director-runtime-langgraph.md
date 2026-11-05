@@ -60,4 +60,4 @@ PostgreSQL checkpointer 的 `JsonPlusSerializer` 使用空扩展模块白名单�
 - [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
 - [LangGraph interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)
 - [LangGraph PostgreSQL checkpointer](https://github.com/langchain-ai/langgraph/tree/main/libs/checkpoint-postgres)
-- [Director 当前调用链](../architecture/DIRECTOR_AGENT_CURRENT_STATE.md)；历史实施合同仅通过 Git 追溯。
+- [Director 当前调用链与工具循环边界](../DIRECTOR_RUNTIME.md#director-agent-target)；历史实施合同仅通过 Git 追溯。
