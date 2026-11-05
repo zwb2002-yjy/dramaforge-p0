@@ -8,10 +8,18 @@ retry hints identical regardless of which adapter made the call.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 
 import httpx
+
+
+def public_error_summary(value: str | None) -> str | None:
+    """Remove old Agnes submission response excerpts without rewriting evidence."""
+    if value and (match := re.match(r"Agnes video HTTP ([0-9]{3}); no task ID", value)):
+        return f"Agnes video HTTP {match[1]}; no task ID"
+    return value
 
 
 def error_code_for_status(status_code: int) -> str:

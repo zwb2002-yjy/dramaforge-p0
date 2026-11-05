@@ -11,7 +11,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import re
 import time
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit
@@ -137,8 +136,10 @@ def _video_submission_diagnostics(
 ) -> Any:
     from app.providers.runtime import SubmissionDiagnostics
 
-    # Store only selected error text, never the full body, request or headers.
-    def redact(value: str) -> str:
+    # Only opaque diagnostic IDs may leave this boundary; the contract also
+    # validates their shape when old stored diagnostics are read. Drop known
+    # request values even when they happen to look like a valid opaque ID.
+    def contains_private_value(value: str) -> bool:
         sensitive = [key]
 
         def collect(item: Any) -> None:
@@ -151,29 +152,24 @@ def _video_submission_diagnostics(
                 for child in item.values():
                     collect(child)
 
-        collect(
-            {
-                k: v
-                for k, v in wire.items()
-                if k not in {"model", "mode", "seconds", "size", "aspect_ratio", "n"}
-            }
-        )
-        for secret in sorted(set(sensitive), key=len, reverse=True):
-            if secret:
-                value = value.replace(secret, "[redacted]")
-                value = value.replace(json.dumps(secret, ensure_ascii=True)[1:-1], "[redacted]")
-        value = re.sub(r"(?i)bearer\s+[^\s,;]+", "Bearer [redacted]", value)
-        value = re.sub(r"https?://[^\s<>\"']+|data:[^\s]+", "[url redacted]", value)
-        return " ".join(value.split())
+        collect({
+            name: value for name, value in wire.items()
+            if name not in {"model", "mode", "seconds", "size", "aspect_ratio", "n"}
+        })
+        return any(secret and secret in value for secret in sensitive)
 
     def header(name: str, limit: int) -> str | None:
         value = response.headers.get(name) if response is not None else None
-        if not value or len(value) > limit or not re.fullmatch(r"[A-Za-z0-9_./: -]+", value):
+        if (
+            not isinstance(value, str)
+            or not value
+            or len(value) > limit
+            or contains_private_value(value)
+        ):
             return None
-        return redact(value)[:limit]
+        return value
 
     response_type: Literal["json", "html", "text", "empty", "other"] | None = None
-    error = None
     if response is not None:
         content_type = response.headers.get("content-type", "").lower()
         response_type = (
@@ -187,21 +183,6 @@ def _video_submission_diagnostics(
             if content_type.startswith("text/")
             else "other"
         )
-        if response.status_code >= 400:
-            data = _json_object(response)
-            detail = data.get("detail") or data.get("error") or data.get("message")
-            if isinstance(detail, dict):
-                detail = detail.get("message") or detail.get("code")
-            if isinstance(detail, str):
-                error = redact(detail)[:500]
-            elif response_type in {"html", "text"}:
-                # HTML errors may originate at an edge, before task creation.
-                title = re.search(r"<(?:title|h1)[^>]*>([^<]{1,1000})", response.text, re.I)
-                error = (
-                    redact(title.group(1) if title else response.text)[:500]
-                    if response_type == "text" or title
-                    else "HTML error response (no title)"
-                )
     origin = urlsplit(host)
     hostname = origin.hostname or "invalid-host"
     authority = f"[{hostname}]" if ":" in hostname else hostname
@@ -218,7 +199,6 @@ def _video_submission_diagnostics(
         edge_request_id=header("cf-ray", 200),
         response_server=header("server", 100),
         response_type=response_type,
-        response_error=error,
         network_error=network_error,
     )
 
@@ -1051,8 +1031,7 @@ class AgnesRuntime:
                     if response.status_code >= 400
                     else "PROVIDER_RESPONSE_INVALID"
                 ),
-                error=f"Agnes video HTTP {response.status_code}; no task ID"
-                + (f": {diagnostics.response_error}" if diagnostics.response_error else ""),
+                error=f"Agnes video HTTP {response.status_code}; no task ID",
                 retry_after_seconds=_retry_after_seconds(response),
                 http_status=response.status_code,
                 request_fingerprint=_request_fingerprint(request.wire_request),
@@ -1075,6 +1054,7 @@ class AgnesRuntime:
             remote_task_id=remote_id,
             remote_secondary_id=remote_secondary_id,
             query_kind=query_kind,
+            http_status=response.status_code,
             status=(
                 "submitted"
                 if str(data.get("status")).lower() in {"failed", "error", "cancelled", "canceled"}

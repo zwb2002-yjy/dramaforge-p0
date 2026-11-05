@@ -9,6 +9,7 @@ never by current Feature Flags or the current Project binding.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 from uuid import UUID
@@ -145,6 +146,11 @@ def validate_compiled_submission(
 class SubmissionDiagnostics(BaseModel):
     """Observed submission boundary, never a claim of billing or inference."""
 
+    # accepted means a remote ID was obtained for reconciliation, including on
+    # an error HTTP response; it does not certify successful task acceptance.
+    # Free response text is unsafe even after token replacement. The same
+    # projection applies when reading older stored diagnostics.
+
     model_config = ConfigDict(extra="forbid")
 
     phase: Literal[
@@ -160,6 +166,36 @@ class SubmissionDiagnostics(BaseModel):
     response_type: Literal["json", "html", "text", "empty", "other"] | None = None
     response_error: str | None = Field(default=None, max_length=500)
     network_error: str | None = Field(default=None, max_length=100)
+
+    @model_validator(mode="after")
+    def restrict_response_metadata(self) -> SubmissionDiagnostics:
+        self.response_error = (
+            f"Provider returned HTTP {self.http_status}"
+            if self.http_status is not None and 400 <= self.http_status <= 599
+            else None
+        )
+        if self.response_request_id and not re.fullmatch(
+            r"(?:req[-_])?(?:[0-9a-fA-F]{16,64}|"
+            r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})",
+            self.response_request_id,
+        ):
+            self.response_request_id = None
+        if self.edge_request_id and not re.fullmatch(
+            r"[0-9a-fA-F]{16,32}(?:-[A-Z]{3})?", self.edge_request_id
+        ):
+            self.edge_request_id = None
+        if self.response_server and not re.fullmatch(
+            r"(?:nginx|cloudflare|envoy|Apache)(?:/[0-9.]+)?", self.response_server
+        ):
+            self.response_server = None
+        if self.network_error not in {
+            None, "ConnectError", "ConnectTimeout", "ReadError", "ReadTimeout",
+            "WriteError", "WriteTimeout", "CloseError", "PoolTimeout", "ProxyError",
+            "LocalProtocolError", "RemoteProtocolError", "UnsupportedProtocol",
+            "TransportError",
+        }:
+            self.network_error = "TransportError"
+        return self
 
 
 class SubmissionResult(BaseModel):

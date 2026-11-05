@@ -370,7 +370,7 @@ async def test_scene_and_shot_render_the_same_node_run_identically() -> None:
             session, project_id=project.id, shot_id=shot.id, user=user, status="failed"
         )
         run.error_code = "PROVIDER_FAILED"
-        run.error_summary = "agnes video generation failed"
+        run.error_summary = "Agnes video HTTP 503; no task ID: Old private prompt fragment"
         session.add(
             ProviderOperation(
                 node_run_id=run.id,
@@ -395,7 +395,8 @@ async def test_scene_and_shot_render_the_same_node_run_identically() -> None:
         shot_rows = {str(row["node_run_id"]): row for row in workbench["trace"]}
 
         assert scene_rows[str(run.id)] == shot_rows[str(run.id)]
-        assert scene_rows[str(run.id)]["error_summary"] == "agnes video generation failed"
+        assert scene_rows[str(run.id)]["error_summary"] == "Agnes video HTTP 503; no task ID"
+        assert "Old private prompt fragment" in run.error_summary
         assert scene_rows[str(run.id)]["operation_outcome_unknown"] is True
     finally:
         await session.close()

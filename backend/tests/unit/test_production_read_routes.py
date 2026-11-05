@@ -126,3 +126,19 @@ async def test_audio_filter_is_explicit_read_only_and_validated(http_env):
     assert audio_only.status_code == 200
     assert audio_only.json() == {"items": [], "next_cursor": None}
     assert (await client.get(path, params={"usable_audio": "not-a-boolean"})).status_code == 422
+
+
+@pytest.mark.parametrize("suffix", ["snapshot", "production-summary", "production-history/runs"])
+async def test_historical_provider_error_is_sanitized_without_rewriting_evidence(http_env, suffix):
+    client, app, user, project, run, *_ = http_env
+    app.dependency_overrides[get_current_user] = lambda: user
+    client.headers["X-Workspace-Id"] = str(project.workspace_id)
+    original = "Agnes video HTTP 503; no task ID: PRIVATE fragment token=synthetic-secret"
+    run.status = "failed"
+    run.error_summary = original
+    response = await client.get(f"/api/v1/projects/{project.id}/{suffix}")
+    assert response.status_code == 200, response.text
+    assert "Agnes video HTTP 503; no task ID" in response.text
+    assert "PRIVATE fragment" not in response.text
+    assert "synthetic-secret" not in response.text
+    assert run.error_summary == original

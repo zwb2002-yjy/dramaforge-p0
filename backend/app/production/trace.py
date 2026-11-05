@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.execution.models import Artifact, NodeRun, ProviderOperation
 from app.providers.runtime import SubmissionDiagnostics
+from app.providers.transport_errors import public_error_summary
 from app.shared.errors import NotFoundError
 
 
@@ -149,7 +150,7 @@ async def build_execution_trace(
         operation_outcome_unknown=operation is not None
         and operation.status == "unknown_submission",
         error_code=run.error_code,
-        error_summary=run.error_summary,
+        error_summary=public_error_summary(run.error_summary),
         submission_diagnostics=submission,
         effective_request_redacted=(
             cast(dict[str, JsonValue], operation.request_summary) if operation else {}

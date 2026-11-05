@@ -44,7 +44,7 @@ async def test_http_failure_evidence_survives_worker_commit(recovery, monkeypatc
         calls.append(request)
         return httpx.Response(
             503,
-            headers={"x-request-id": "req-persisted"},
+            headers={"x-request-id": "12345678-1234-1234-1234-123456789abc"},
             json={"detail": "No healthy video upstream"},
         )
 
@@ -111,11 +111,12 @@ async def test_http_failure_evidence_survives_worker_commit(recovery, monkeypatc
             )
         ).one()
         assert (
-            op.response_summary["submission_diagnostics"]["response_request_id"] == "req-persisted"
+            op.response_summary["submission_diagnostics"]["response_request_id"]
+            == "12345678-1234-1234-1234-123456789abc"
         )
         assert (
             op.response_summary["submission_diagnostics"]["response_error"]
-            == "No healthy video upstream"
+            == "Provider returned HTTP 503"
         )
         assert op.response_summary["create_http_status"] == 503
         assert (await session.get(NodeRun, run_id)).status == "failed"
@@ -214,7 +215,7 @@ async def test_submit_exits_then_one_poll_per_due_job_without_extra_create(recov
                     endpoint="https://unit.invalid/v1/videos",
                     duration_ms=12,
                     http_status=200,
-                    response_request_id="req-retained",
+                    response_request_id="abcdef12-1234-1234-1234-123456789abc",
                 ),
             )
         ),
@@ -322,7 +323,7 @@ async def test_submit_exits_then_one_poll_per_due_job_without_extra_create(recov
             assert operation.provider_operation_id == "remote-1"
             assert (
                 operation.response_summary["submission_diagnostics"]["response_request_id"]
-                == "req-retained"
+                == "abcdef12-1234-1234-1234-123456789abc"
             )
             assert operation.resume_token == resume.model_dump(mode="json")
             assert operation.response_summary.get("poll_count") == index + 1, {
