@@ -22,8 +22,8 @@ DramaForge 是面向专业个人创作者的开源 AI 短剧 / 漫剧导演工�
 | 项目总览 | 模板或自由创建、导演自主性设置、制作状态与批量补齐确认 |
 | 故事剧本 | 剧本导入与编辑，组织 Episode / Scene / Shot |
 | 角色与素材 | 资产版本、参考素材与显式身份绑定 |
-| 分镜制作 | 中央画布、镜头条、镜头检查器、候选托盘；保存设计后预览并确认生成 |
-| 审片确认 | 查看候选、人工审核、证据批注、局部修复与正式产物选择 |
+| 分镜制作 | 中央画布、镜头条、唯一检查器与候选托盘；保护未保存草稿，保存后预检并确认生成 |
+| 审片确认 | 候选就地审查与集中审片、人工审核、证据批注、局部修复与独立正式产物选择 |
 | 剪辑成片 | 时间线编辑与保存、配音及字幕、导出绑定时间线版本的 Final Film |
 
 视频输入包括文生视频、正式首帧、尾帧、首尾帧和已保存参考素材；可用方式由具体
@@ -31,19 +31,27 @@ DramaForge 是面向专业个人创作者的开源 AI 短剧 / 漫剧导演工�
 导演建议先应用到草稿，保存后才建立正式设计；Apply / Save / Formal / Export
 分别由用户明确触发。
 
+全片总览按镜头的正式产物、待审候选、运行与阻断状态组织制作；镜头检查器根据
+已保存事实和草稿显示下一步操作。模型配置可从场景内打开，关闭后重新读取资格，
+保留镜头草稿。后台事实刷新不覆盖未保存内容，版本冲突需要显式处理；
+提交结果未知时显示待核对，不将其当作可直接重试的失败。
+
 创作体验改进与 Director Agent 的后续设计仍有未完成的开发和验收项，
 范围见 [CURRENT.md](docs/CURRENT.md)，不能将目标章节视为已交付功能。
 
 ## 模型与供应商配置
 
-DramaForge 使用自带密钥（BYOK）。在「模型设置」中添加供应商名称、服务地址和 Key，
-读取模型目录后，分别启用所需的文本、图片与视频模型。界面提供 Agnes、MiniMax、
-Seedance 预设，以及自定义媒体服务和独立 LLM 连接；具体可执行能力以版本化模型合同
-和当前连接验证结果为准。
+DramaForge 使用自带密钥（BYOK）。在「模型设置」中管理工作空间连接，配置所需的
+文本、图片与视频模型。媒体连接支持供应商预设与自定义服务；文本连接通过内部
+LiteLLM Proxy 登记上游配置。具体可执行能力由版本化模型合同、连接身份和输入条件决定。
 
-- 多个连接独立保存地址与凭证；启用模型只切换对应用途，同名模型保留各自连接身份。
+- 媒体连接独立保存地址与凭证；文本连接保留受管引用。启用模型只切换对应用途，
+  同名模型保留各自连接身份。
 - 自定义模型必须匹配受支持的调用合同；目录中出现某个 ID 不等于支持任意生成方式。
-- 文本通道可连接官方 LiteLLM Proxy 或兼容端点；当前默认 Compose 包含本地 LiteLLM。
+- 新文本生产仅使用当前工作空间的内部 LiteLLM Proxy 受管版本引用；上游地址和密钥
+  由 Proxy 管理，旧直连配置与静态别名不自动成为新的执行目标。
+- 默认 Compose 包含内部 LiteLLM；文本上游需要按部署文档配置网络放行。
+  代理登记成功仅代表配置核验通过，不代表上游认证或真实生成成功。
 - 生成前预览并确认执行计划，模型、参数与参考素材身份随执行冻结；执行时不静默换模型。
 - 批量补齐在确认前列出生成、跳过和需处理的镜头，并绑定本次预览与操作数上限。
 
@@ -98,11 +106,17 @@ Director Runtime 使用 LangGraph 负责提案与编排；Production Runtime 负
 
 | 层 | 技术 |
 |---|---|
-| 前端 | React 18、TypeScript、Vite、TanStack Router / Query、Zustand，自有设计系统 |
+| 前端 | React 18、TypeScript、Vite、TanStack Router / Query、Ant Design 6；统一 Token 与产品语义组件 |
 | API 与领域服务 | FastAPI、Pydantic、SQLAlchemy、Alembic |
 | 导演与异步执行 | LangGraph、PostgreSQL checkpoint、Arq / Redis、dispatcher 与分队列 Workers |
 | 数据与媒体 | PostgreSQL 15、MinIO、FFmpeg |
 | 部署 | Docker Compose、Nginx 网关、独立 LiteLLM Proxy |
+
+前端由 Query 管理服务端事实，组件与路由管理临时交互及选择；各业务域的 API 经统一
+传输层访问后端。Ant Design 负责基础控件、键盘与焦点交互，`UiProvider` 统一暗色主题，
+`components/ui` 提供共享原语与业务组合。视觉规范见
+[前端骨架](frontend/design/README.md)，状态及创作门见
+[前端工作台](docs/FRONTEND_WORKBENCH.md)。
 
 ```text
 backend/    API、领域服务、Workers、迁移与测试
@@ -121,6 +135,10 @@ deploy/     部署交接描述
 宿主机不创建 Python venv、不安装 Node 依赖，也不直接启动 API 或 Vite。
 
 ```powershell
+# 定向前端单测（不启动外部服务）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_docker.ps1 -Stage FrontendTests
+
+# 完整容器质量门
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_docker.ps1
 ```
 
@@ -141,6 +159,8 @@ OpenAPI / 前端 API 合同、format / lint / typecheck / Vitest / 构建 / Play
 产品、架构、Runtime、模型、数据、API、前端、开发、部署和发布各有明确归属。
 代码、迁移、测试与运行证据建立当前事实；历史方案和执行记录通过 Git 历史追溯。
 编码 Agent 先读 [AGENTS.md](AGENTS.md)，再从该入口定位所需文档。
+涉及工作台布局、组件复用或前端骨架调整时，使用仓库的
+[frontend-skeleton 技能](.claude/skills/frontend-skeleton/SKILL.md)，沿用现有实现与验证边界。
 
 DramaForge 以 [Apache License 2.0](LICENSE) 开源。贡献前请阅读
 [贡献指南](CONTRIBUTING.md)、[安全策略](SECURITY.md)、
