@@ -397,6 +397,7 @@ async def test_scene_and_shot_render_the_same_node_run_identically() -> None:
 
         assert scene_rows[str(run.id)] == shot_rows[str(run.id)]
         assert scene_rows[str(run.id)]["error_summary"] == "Agnes video HTTP 503; no task ID"
+        assert "Old private prompt fragment" in run.error_summary
         assert scene_rows[str(run.id)]["operation_outcome_unknown"] is True
     finally:
         await session.close()

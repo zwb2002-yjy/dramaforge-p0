@@ -141,22 +141,27 @@ fast jobs。专项 Agent只执行本切片聚焦回归，主 Agent在最终整�
 也不授权专项 Agent 改权威、改门禁或“修成通过”。只读审计、测试增删和结果保留条件
 统一引用 DEVELOPMENT，不为每个专项建立一份重复规范或验收报告模板。
 
-## 5. Director Agent 目标设计的详细映射
+<a id="director-agent-sequence"></a>
+## 5. Director Agent 的依赖顺序（未启动）
 
-Director 当前为结构化文本任务加确定性持久编排，尚无完整自主工具循环。
-本领域只保留本表作为目标映射入口；下列文档是详细参考，不是第二套架构权威：
+当前是结构化文本任务加确定性持久编排。现状与目标合同统一见
+[DIRECTOR_RUNTIME](DIRECTOR_RUNTIME.md#director-agent-target)；模型能力查询、无副作用
+编译预览与生成快照已有授权 service/API，可复用，不重建同名能力。
 
-| 视图 | 用途 |
-|---|---|
-| [当前实现](architecture/DIRECTOR_AGENT_CURRENT_STATE.md) | 调用链、逐图节点行为、状态权威与保留/重构映射 |
-| [目标设计](architecture/DIRECTOR_AGENT_TARGET_ARCHITECTURE.md) | 自有 Agent Loop + 现有 TextModelPort + ToolRegistry；LangGraph 留作 durable workflow，Production 不重写 |
-| [实施计划](architecture/DIRECTOR_AGENT_IMPLEMENTATION_PLAN.md) | P1 合同 → 只读 loop → Proposal → Workflow → Memory/Skill → 可选 MCP，逐项验收与回滚 |
-| [模型/编译指南](architecture/MODEL_CAPABILITY_PROMPT_COMPILER.md) | 文件目录、官方模型与协议合同、逻辑文本和语音；区分源码支持、官方声明和账号证据 |
+| 顺序 | 交付范围 | 独立验收与退出边界 |
+|---|---|---|
+| P1 类型合同 | 既有 TextModelPort 增补 generate_turn；中立消息/工具/结果 DTO、ToolRegistry/Executor、LiteLLM 归一化；无迁移与 loop | call_id/usage/stop_reason 往返、非法 JSON/extra/工具名/version/scope/超大结果拒绝，旧 structured 调用回归；新接口未注册生产 |
+| P2a 只读循环 | API 同步 message + GET/stop、Turn/thread 关联、lease/control、工具审计与 RLS；复用 Project、Scene/Shot、Asset 读取 | 不同模型工具序列、错误反馈后纠正、上限/取消/重启/未知提交/压缩；零生产事实写入；停新受理仍保留审计读取 |
+| P2b 模型工具 | 对现有 ModelInspectionService、compile_preview、冻结快照增加工具接线 | 精确 revision、ordered references、native 参数正负测、语义 hash；零 Provider HTTP/NodeRun/Operation/token 写入；合同通过不等于账号/传输就绪 |
+| P3 提案 | 复用 proposal_creation/service/typed commands，仅创建 Proposal | 真实 ID、幂等、stale/跨项目/非法 operation 拒绝；超时查 receipt；Apply/部分接受/拒绝仍归用户，撤下工具后提案仍可处理 |
+| P4 Workflow 交接 | 接受后独立委托，创建关联的 Workflow Turn，复用现有授权/稳定 command_key/事件与 LangGraph | 一次授权最多受理原命令；乱序/重复事件、stop race、fencing、Worker 重启与未知提交无额外 Create；Manual 不依赖导演运行 |
+| P5 摘要与创意指导 | 有来源/版本的 ThreadSummary，复用 Skill/Style/Creative 编译体系 | 过期/权限变化、token 上限、工具对齐、用户优先级；关闭摘要仍可实时读 Formal/模型，不撤已保存事实 |
+| P6 可选 MCP | 确有外部需求时加入 client/adapter、显式 server allowlist、namespace/version | 恶意 schema/提示注入、工具变化、超时/断连/重复调用、路径和出网限制、脱敏；禁用外部服务不影响内部读链 |
 
-Agent runtime/ToolRegistry/会话迁移仍为未实现目标；模型能力查询、compiler dry-run及生成快照
-已提供共享只读 service/API（详见模型指南），并补 ImageEdit/严格参数校验。只读查询
-不替换执行模型、删除表或触发生产写入；目录 revision 的演进另按 MODEL_PROVIDER 管理。
-后续完成实施后继续收敛本表，过时计划仅留 Git 历史。
+不提前创建表、API、目录、wrapper 或第二套模型日志；不把规划中的文件清单当成已存在接口。
+实际代码切片按 [DEVELOPMENT](DEVELOPMENT.md) 验证，API/数据变化增加生成客户端和 PG/RLS，
+恢复/队列变化增加相应集成；已建立的质量门不削减。模型生命周期调整另按
+[MODEL_PROVIDER](MODEL_PROVIDER.md) 的资格、来源和冻结身份规则执行，不在 Agent 工具接线中自动换模型。
 
 ## 可重复核查与门禁
 

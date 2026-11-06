@@ -4,7 +4,7 @@ import httpx
 import pytest
 from app.config import Settings
 from app.providers.agnes import AgnesRuntime
-from app.providers.runtime import CompiledVideoRequest
+from app.providers.runtime import CompiledVideoRequest, SubmissionDiagnostics
 
 
 def request():
@@ -99,6 +99,7 @@ async def test_response_text_cannot_echo_partial_or_encoded_private_input(respon
         transport=httpx.MockTransport(lambda req: response),
     ).submit_video(request())
     assert result.submission_diagnostics.response_error == "Provider returned HTTP 503"
+    assert result.error == "Agnes video HTTP 503; no task ID"
     for value in ("private storyboard", "secret&#45;key", "other-secret"):
         assert value not in result.model_dump_json()
 
@@ -186,3 +187,23 @@ async def test_html_edge_error_and_unconfigured_connection_have_distinct_evidenc
     ).submit_video(request())
     assert missing.submission_diagnostics.phase == "not_sent"
     assert missing.status == "failed"
+
+
+def test_historical_diagnostic_metadata_is_projected_without_mutating_stored_input():
+    stored = {
+        "phase": "response_received",
+        "endpoint": "https://api.agnes-ai.cn/v1/videos",
+        "duration_ms": 12,
+        "http_status": 503,
+        "response_error": "PRIVATE fragment from an old response",
+        "response_request_id": "PRIVATE fragment",
+        "edge_request_id": "PRIVATE fragment",
+        "response_server": "PRIVATE fragment",
+        "network_error": "PRIVATE fragment",
+    }
+    original = dict(stored)
+    projection = SubmissionDiagnostics.model_validate(stored)
+    assert "PRIVATE" not in projection.model_dump_json()
+    assert projection.response_error == "Provider returned HTTP 503"
+    assert projection.network_error == "TransportError"
+    assert stored == original

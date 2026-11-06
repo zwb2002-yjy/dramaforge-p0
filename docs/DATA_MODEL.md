@@ -304,3 +304,28 @@ timeline schema 校验，预览/导出消费同一值。不得复用背景音乐
 - 候选 PostgreSQL 中执行 upgrade/head/check 及迁移/RLS 集成门；数据库回退/应用回退
   的兼容窗口与恢复办法写在该实施变更中，不假设 destructive downgrade 安全。
 - 部署前单独核实目标实例、备份和授权；文档开发与隔离 fixture 测试不授权生产迁移。
+
+
+<a id="director-agent-data"></a>
+## Director Agent 数据扩展（目标，未实现）
+
+依赖 [Agent 工具循环合同](DIRECTOR_RUNTIME.md#director-agent-target)，不代表当前迁移
+已包含以下字段。复用 Thread、Message、Turn、Invocation 和 Proposal；不新增 AgentSession
+或第二套模型调用日志。
+
+- Turn 计划增加 thread_id、turn_kind(agent/workflow)、origin_agent_turn_id；Message 增加
+  nullable turn_id 与 ordinal/idempotency linkage。历史关系不补造，原引擎绑定与
+  checkpoint/submission 状态不改义。
+- Agent 自己维护 agent_control_epoch、agent_lease_token、agent_lease_expires_at、
+  stop_requested_at，不借用要求 graph runtime_execution_id 的 Workflow 控制记录。
+  模型/工具调用数分别取自 Invocation/工具明细；计数缓存只能同事务更新。
+- 工具调用明细保存 turn/step/call_id、ToolSpec version/hash、脱敏参数、结果摘要/hash、
+  observed_versions、latency、status/error；唯一键支持重放，沿用项目 FK、RLS 和索引。
+  它不替代模型 Invocation，Agent/Workflow 不共同拥有同一 Turn 的状态写权。
+- ThreadSummary 仅在摘要阶段加入，保存 source message range/hash、版本和 stale 标记；
+  不复制 Shot、Model、Formal 等实时领域事实。CreativeDecision 优先复用既有提案决议，
+  没有独立生命周期前不新增表。
+
+实现时按当前迁移 head 直接演进未发布合同并更新全部调用方；保留历史数据，不生成
+空迁移、平行兼容写路径或无消费者的预备表。完成/失败/取消/stale 沿用现有 Turn 状态；
+blocked 只作结果/UI 分类，不扩展数据库 CHECK。

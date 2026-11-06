@@ -351,12 +351,9 @@ Manual production remains available independently of the Director worker.
 
 ## AIOS/AISphere handoff boundary
 
-No authoritative AIOS application-manifest schema, health contract or lifecycle
-API exists in this repository, and this release has not been installed or
-verified inside AIOS. `deploy/aios/compose-adapter.example.yaml` is therefore a
-neutral handoff descriptor, not an installable or certified AIOS manifest.
-
-An AIOS integrator must map the descriptor to the platform's official schema,
-inject secrets without committing them, retain the named volumes, route the
-single HTTP entrypoint, and execute the same smoke checks. Compatibility must be
-recorded only after a real target-environment deployment.
+AIOS/AISphere support has not been verified. This repository provides the standard
+Docker Compose topology, not a custom or certified platform manifest. An integrator
+must map that topology to the platform's official schema, inject secrets without
+committing them, preserve the named volumes, route the single HTTP entrypoint and
+verify installation, first-owner bootstrap, health and backup/restore in the target
+environment before claiming compatibility.

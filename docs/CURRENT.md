@@ -114,15 +114,12 @@ FRONTEND_WORKBENCH、MODEL_PROVIDER、API、DATA_MODEL，不新增平行权威�
 路线图索引。没有单独的 Phase 路线图文件。若条款与 Status: current 的权威文档冲突，
 以权威文档和代码为准；不要按 Phase 编号启动新工作。
 
-## Director Agent 详细参考
+## Director Agent 参考入口
 
-以下是现有权威文档的细化视图与尚未实施的设计，不增加第二套领域权威；
-目标/缺口归属仍由 ARCHITECTURE_MAPPING 维护，完成实施后同步收敛设计与计划。
-
-- [当前实现与职责审计](architecture/DIRECTOR_AGENT_CURRENT_STATE.md)
-- [目标架构与边界合同（未实现）](architecture/DIRECTOR_AGENT_TARGET_ARCHITECTURE.md)
-- [依赖有序实施计划（未启动）](architecture/DIRECTOR_AGENT_IMPLEMENTATION_PLAN.md)
-- [Model Capability / Prompt Compiler 指南](architecture/MODEL_CAPABILITY_PROMPT_COMPILER.md)
+现状与待实现的工具循环合同统一见 [DIRECTOR_RUNTIME](DIRECTOR_RUNTIME.md#director-agent-target)，
+实施依赖见 [ARCHITECTURE_MAPPING §5](ARCHITECTURE_MAPPING.md#director-agent-sequence)。
+模型支持只维护 [MODEL_PROVIDER](MODEL_PROVIDER.md) 与从源码生成的
+[支持矩阵](generated/MODEL_SUPPORT.md)，不另存逐模型手写矩阵或源码审计快照。
 
 ## 历史资料规则
 
@@ -145,7 +142,6 @@ frontend/   React/TypeScript 工作台与前端测试
 infra/      LiteLLM、Nginx 等运行配置
 scripts/    CI、发布、可重复验收与维护脚本
 fixtures/   自动化测试和验收固定输入
-deploy/     部署交接描述
 .github/    CI / Release / Security
 ```
 

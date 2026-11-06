@@ -146,19 +146,45 @@ JavaScript。提取正文、HTTP 200 和正文 Hash 都不授予能力支持；�
 位于 `tmp/` 的新目录，拒绝覆盖旧报告。一次性基线和误删审计不进入当前权威文档树。
 它不代替官方来源审核、只读历史恢复预检或发布质量 Gate。
 
-## Model Capability / Prompt Compiler 详细指南
+## Model Capability / Prompt Compiler 维护入口
 
-[逐模型能力与编译指南](architecture/MODEL_CAPABILITY_PROMPT_COMPILER.md) 维护当前
-文件目录中的官方模型、协议合同、候选与历史 revision，以及逻辑文本和语音实现的源码合同、参考槽位、参数/Prompt
-编译链及 Agent 查询设计。它不替代 Manifest，也不证明当前账号已通过 Probe。
-供应商页面声明、项目开放子集、账户执行证据必须分别标注；官方退役公告与固定 catalog
-的差异需显式呈现，不能自动换模型、扩能力或覆盖冻结执行身份。
-模型能力查询、无副作用编译预览与生成快照已由 production/model_inspection.py 的只读service及
-api/v1/model_inspection.py 提供。预览复用原compiler，使用占位reference且不证明账号/传输就绪；
-不写NodeRun/ProviderOperation或调用Provider。Agent ToolRegistry与自主工具循环仍未实现。
-无命名输入模式的目录仍按槽位和原 Compiler 校验；编译预览接受既有工作台关键帧的
-`text_to_image` 与视频的 `first_frame` 阶段名。跨媒体阶段名和未知模式仍会阻止预览，
-有命名合同的模型只接受实际声明的合同 ID。
+逐模型字段、模式、参考槽位和修订只维护在版本化 Catalog/Manifest、Compiler 和合同
+Fixture 中；可读矩阵由 [MODEL_SUPPORT](generated/MODEL_SUPPORT.md) 从源码生成。
+官方来源及生命周期声明由 `model_sources/`、`capability_sources.py` 与 Catalog 发布事件
+记录。供应商页面、项目开放子集和账户执行证据是三层不同证据；不能把历史来源日期或
+fixture 状态当作当前账号认证，也不能据旧手写矩阵覆盖本文件的新 Create 阻断规则。
+
+| 编译含义 | 必须证明的内容 |
+|---|---|
+| native | Manifest 声明、Compiler 实际写入 wire 且有 translation evidence；DTO 中有字段不等于已支持 |
+| prompt-only | 进入已保存创作语义，无跨模型 native 参数或精确遵循保证 |
+| unsupported | 精确修订未开放的参数/模式拒绝，不能夹入 extra_body 或丢弃输入伪装成功 |
+| approximate | 给出原因，必须由用户显式接受；Agent 和只读 compile-preview 不代为确认 |
+
+CreativeCapabilityCompiler / ShotLanguageCompiler 生成语义与 provenance/hash；Workbench
+从已保存事实形成冻结计划，唯一 Plan-to-Intent 转换供预览和 Worker 共享。Compiler
+拥有参数名及 wire 构造；Runtime 校验身份并发送，恢复使用原令牌，不重新选模型。
+CapabilityRouter 的 validate/translate 不是所有 Worker 的逐函数路径，不能为精简而删除
+有消费者的桥接层。参考始终保留 role、Artifact、指纹和次序，不按 role 去重。
+
+能力查询、编译预览和冻结快照由
+[ModelInspectionService](../backend/app/production/model_inspection.py) 提供，接口见
+[API](API.md#read-only-model-capability--prompt-compiler)。预览使用占位引用，只证明合同
+校验；账号、素材字节和传输可达性仍未验证。不输出原始 prompt/wire、Data URI、签名
+URL 或凭据，不调用 submit/poll、下载对象、启动 TTS，也不创建 NodeRun、Operation 或
+reference token。历史缺证据明确标缺失，不能用当前 Formal/Binding 补齐旧快照。
+无命名输入模式的目录接受既有 text_to_image / first_frame 阶段语义，有命名合同只接受
+实际声明的合同 ID；跨媒体阶段和未知模式拒绝。Agent ToolRegistry 接线仍未实现，未来
+工具直接复用授权 service，不绕经本机 HTTP 或复制 SQL。
+
+维护新能力时，以官方字段审核 → 限定产品子集 → 新 revision/fixture/hash →
+compiler/validator/translation → 正负回归为顺序；不覆盖旧冻结身份。核对 Catalog→消费
+Manifest、DTO→intent→wire→summary、有序参考、MIME/hash/scope、参数互斥和未知提交恢复。
+已有回归见 `test_model_capability_compiler.py`、`test_model_inspection.py`、
+`test_model_inspection_api.py`、`test_provider_wire_contract.py` 和
+`test_reference_plan_compiler.py`；真实账号及作品验证仍须本次 Owner 授权。
+文本模型与语音分别遵守下文的 Proxy 版本化身份及 voice_execution 合同，不从逻辑名称
+推断上游型号、工具能力或音色质量，不增加自动回退。
 
 ## 分层
 
@@ -226,11 +252,11 @@ Agnes 图片与视频编译器保留旧 revision 的冻结请求，同时可按 
   新视频任务在恢复令牌中冻结模型名，用于 `/agnesapi` 查询的 `model_name`；旧令牌不从当前设置补造模型。
   Agnes 视频提交另外在同一 ProviderOperation 的 response_summary 中保存发送边界诊断：
   配置未发送、连接失败、结果未知、收到 HTTP 响应、已取得任务 ID 分别记录；仅保存白名单追踪头、
-  本地生成的 HTTP 错误摘要及耗时，不复制供应商 JSON 错误文字、HTML 标题或文本正文；
-  替换已知 Key/完整提示词无法保证部分回显和编码文本安全。追踪头仅保留有界 hex/UUID
-  请求 ID、CF-Ray 格式 ID 与受限服务标识；无法识别的自由文本不保存。
-  新写入与旧诊断读取使用同一投影；历史 Agnes 提交错误摘要中的响应摘录在公开 trace
-  中移除，数据库原件不自动改写或删除。执行详情返回已安全投影的事实，
+  HTTP 状态生成的固定错误摘要及耗时，不提取 JSON/HTML/纯文本响应中的错误正文，
+  也不回显任意追踪头。替换已知 Key/完整提示词无法保证部分回显和编码文本安全。
+  仅保留有界 hex/UUID 请求 ID、CF-Ray 格式 ID、已知服务标识和传输错误类别；
+  新写入与历史诊断读取共用同一安全投影，制作总览、历史、快照及执行详情移除旧错误摘要中的
+  响应摘录。原始数据库证据不改写；不保存 Key、提示词片段或原始响应正文。
   历史记录没有诊断时明确缺失，不根据当前配置补造。HTTP 响应不等于模型任务已经受理。
 MiniMax 视频新合同也要求显式产品策略；同一个 V2 编译器按 Manifest 的时长、分辨率、
 比例和可选 `extra` 生成 H3 / H3-Max 请求，旧 H3 revision 保持原首帧请求形状。

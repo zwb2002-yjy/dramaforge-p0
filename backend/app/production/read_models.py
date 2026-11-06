@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.providers.transport_errors import public_error_summary
 
 
 class NodeRunRead(BaseModel):
@@ -24,6 +26,11 @@ class NodeRunRead(BaseModel):
     error_code: str | None = None
     error_summary: str | None = None
     upstream_dependencies: list[UpstreamDependencyRead] = Field(default_factory=list)
+
+    @field_validator("error_summary")
+    @classmethod
+    def sanitize_error_summary(cls, value: str | None) -> str | None:
+        return public_error_summary(value)
 
 
 class UpstreamDependencyRead(BaseModel):
@@ -95,6 +102,11 @@ class ProductionRunHistoryRead(ProductionRunStatusRead):
     created_at: datetime
     error_code: str | None
     error_summary: str | None
+
+    @field_validator("error_summary")
+    @classmethod
+    def sanitize_error_summary(cls, value: str | None) -> str | None:
+        return public_error_summary(value)
 
 
 class ProductionStageRead(BaseModel):

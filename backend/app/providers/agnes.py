@@ -1031,8 +1031,7 @@ class AgnesRuntime:
                     if response.status_code >= 400
                     else "PROVIDER_RESPONSE_INVALID"
                 ),
-                error=f"Agnes video HTTP {response.status_code}; no task ID"
-                + (f": {diagnostics.response_error}" if diagnostics.response_error else ""),
+                error=f"Agnes video HTTP {response.status_code}; no task ID",
                 retry_after_seconds=_retry_after_seconds(response),
                 http_status=response.status_code,
                 request_fingerprint=_request_fingerprint(request.wire_request),

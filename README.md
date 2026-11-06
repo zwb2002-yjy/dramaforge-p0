@@ -125,7 +125,6 @@ infra/      LiteLLM、Nginx 等运行配置
 scripts/    质量门、发布、验收与维护脚本
 fixtures/   自动化测试固定输入
 docs/       当前权威文档与技术决策
-deploy/     部署交接描述
 .github/    CI、Release 与安全工作流
 ```
 
@@ -165,4 +164,4 @@ OpenAPI / 前端 API 合同、format / lint / typecheck / Vitest / 构建 / Play
 DramaForge 以 [Apache License 2.0](LICENSE) 开源。贡献前请阅读
 [贡献指南](CONTRIBUTING.md)、[安全策略](SECURITY.md)、
 [社区行为准则](CODE_OF_CONDUCT.md) 与[第三方声明](THIRD_PARTY_NOTICES.md)。
-仓库提供 AIOS/AISphere 的 Compose 交接描述，尚未在真实 AIOS 环境验证。
+AIOS/AISphere 尚未经过真实部署验证；平台集成以 [部署边界](docs/DEPLOYMENT.md#aiosaisphere-handoff-boundary) 为准。

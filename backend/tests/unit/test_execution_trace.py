@@ -211,6 +211,10 @@ async def test_trace_exposes_stored_http_evidence_and_does_not_invent_it_for_his
     assert trace.submission_diagnostics.response_error == "Provider returned HTTP 503"
     assert "Old private prompt fragment" not in trace.model_dump_json()
     assert "Old private prompt fragment" in run.error_summary  # No rewrite of stored evidence.
+    assert (
+        op.response_summary["submission_diagnostics"]["response_error"]
+        == "Old private prompt fragment"
+    )
     assert trace.error_code == "PROVIDER_CREATE_FAILED"
     op.response_summary = {"create_http_status": 503}
     await session.flush()
