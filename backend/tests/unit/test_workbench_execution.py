@@ -399,9 +399,9 @@ async def test_reference_identity_is_hydrated_and_frozen_in_node_run_snapshot(
 
     project, video_binding, user = await _seed(session)
     from app.assets.models import Asset, AssetVersion, AssetVersionReference, Shot
+    from app.contracts.shot_reference import ShotReferenceIntent
     from app.execution.models import Artifact
     from app.production.models import ShotReferenceBinding
-    from app.contracts.shot_reference import ShotReferenceIntent
 
     # The shared seed only needs one additional image binding to exercise the
     # keyframe path; no provider call is made by WorkbenchExecutionService.
@@ -897,8 +897,8 @@ async def test_ref2va_plan_validates_saved_media_without_formal_keyframe(
     from decimal import Decimal
 
     from app.assets.models import Shot
-    from app.execution.models import Artifact
     from app.contracts.shot_reference import ShotReferenceIntent
+    from app.execution.models import Artifact
 
     project, binding, user = await _seed(session)
     entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
