@@ -16,7 +16,8 @@ os.environ.setdefault("SESSION_SECRET", "test-session-secret-32chars-min")
 os.environ.setdefault("BYOK_FERNET_KEY", "test-byok-fernet-key-replace==")
 # Keep live keys out of accidental adapter selection, including ones in root .env.
 os.environ["AGNES_ENABLED"] = "false"
-os.environ["TEXT_LLM_ENABLED"] = "false"
+os.environ["TTS_ENABLED"] = "false"
+# Disable the canonical text gateway even when the host or root .env configures it.
 os.environ["LITELLM_GATEWAY_URL"] = ""
 os.environ["LITELLM_API_KEY"] = ""
 os.environ["WORKER_TOKEN"] = ""
@@ -55,7 +56,10 @@ def _mirror_postgresql_partial_indexes_on_sqlite() -> None:
     for table in Base.metadata.tables.values():
         for index in table.indexes:
             postgres_where = index.dialect_options["postgresql"].get("where")
-            if postgres_where is not None:
+            sqlite_where = index.dialect_options["sqlite"].get("where")
+            # An explicit SQLite predicate already expresses the same partial
+            # rule in SQLite syntax; never overwrite it with PostgreSQL syntax.
+            if postgres_where is not None and sqlite_where is None:
                 index.dialect_options["sqlite"]["where"] = text(str(postgres_where))
 
 
@@ -84,6 +88,15 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 def _clear_settings() -> Iterator[None]:
     clear_settings_cache()
     yield
+    clear_settings_cache()
+
+
+@pytest.fixture
+def configured_director_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Configure admission for text-bridge tests; no checkpoint I/O is performed."""
+    monkeypatch.setenv(
+        "DIRECTOR_CHECKPOINT_DATABASE_URL", "postgresql://checkpoint.invalid/unit-test"
+    )
     clear_settings_cache()
 
 

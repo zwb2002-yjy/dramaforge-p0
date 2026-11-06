@@ -12,10 +12,11 @@ from uuid import UUID
 
 from app.providers.capabilities import Capability
 from app.providers.contracts.common import ArtifactRef
-from app.providers.contracts.image import ImageGenerateRequest
+from app.providers.contracts.image import ImageEditRequest, ImageGenerateRequest
 from app.providers.contracts.video import (
     FirstLastFrameVideoRequest,
     ImageToVideoRequest,
+    LastFrameVideoRequest,
     ReferenceToVideoRequest,
     TextToVideoRequest,
 )
@@ -89,6 +90,14 @@ def video_request_to_intent(
             mode_id=request.mode_id,
             selection=selection,
         )
+    if isinstance(request, LastFrameVideoRequest):
+        return VideoGenerationIntentV1(
+            prompt=request.prompt,
+            output=_video_output(request),
+            references=[_ref(request.last_frame, ReferenceRole.LAST_FRAME)],
+            mode_id=request.mode_id or "last_frame",
+            selection=selection,
+        )
     if isinstance(request, FirstLastFrameVideoRequest):
         return VideoGenerationIntentV1(
             prompt=request.prompt,
@@ -101,11 +110,11 @@ def video_request_to_intent(
             selection=selection,
         )
     if isinstance(request, ReferenceToVideoRequest):
-        references = [
-            _ref(ref, ReferenceRole.REFERENCE_IMAGE) for ref in request.reference_images
-        ] + [_ref(ref, ReferenceRole.REFERENCE_AUDIO) for ref in request.reference_audio] + [
-            _ref(ref, ReferenceRole.REFERENCE_VIDEO) for ref in request.reference_videos
-        ]
+        references = (
+            [_ref(ref, ReferenceRole.REFERENCE_IMAGE) for ref in request.reference_images]
+            + [_ref(ref, ReferenceRole.REFERENCE_AUDIO) for ref in request.reference_audio]
+            + [_ref(ref, ReferenceRole.REFERENCE_VIDEO) for ref in request.reference_videos]
+        )
         return VideoGenerationIntentV1(
             prompt=request.prompt,
             output=_video_output(request),
@@ -121,20 +130,22 @@ def image_request_to_intent(
     request: object,
 ) -> ImageGenerationIntent:
     selection = ModelSelectionIntent(mode="explicit_binding")
+    if isinstance(request, ImageEditRequest):
+        return ImageGenerationIntent(
+            prompt=request.prompt,
+            mode_id=request.mode_id,
+            reference_artifact_ids=[UUID(str(request.image.artifact_id))],
+            selection=selection,
+        )
     if isinstance(request, ImageGenerateRequest):
-        if len(request.reference_images) > 1:
-            raise ValueError(
-                "UNSUPPORTED_BY_LEGACY_BRIDGE: image intent supports at most one reference_image"
-            )
-        reference = request.reference_images[0] if request.reference_images else None
         return ImageGenerationIntent(
             prompt=request.prompt,
             size=request.size,
             seed=request.seed,
             mode_id=request.mode_id,
-            reference_artifact_id=(
-                UUID(str(reference.artifact_id)) if reference is not None else None
-            ),
+            reference_artifact_ids=[
+                UUID(str(reference.artifact_id)) for reference in request.reference_images
+            ],
             selection=selection,
         )
     raise CapabilityNotSupportedError(str(capability))
@@ -145,6 +156,7 @@ def request_to_intent(capability: Capability, request: object) -> object:
     if capability in {
         Capability.VIDEO_TEXT_TO_VIDEO,
         Capability.VIDEO_IMAGE_TO_VIDEO,
+        Capability.VIDEO_LAST_FRAME_TO_VIDEO,
         Capability.VIDEO_FIRST_LAST_FRAME,
         Capability.VIDEO_REFERENCE_TO_VIDEO,
     }:

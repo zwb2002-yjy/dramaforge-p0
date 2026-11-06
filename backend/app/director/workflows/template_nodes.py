@@ -103,7 +103,7 @@ def two_character_dialogue_definition(
     edges = [
         ["prompt", "keyframe"],
         [primary_character_reference_key, "keyframe"],
-        *[[key, "keyframe"] for key in reference_keys],
+        *[[key, "keyframe"] for key in reference_keys if key != primary_character_reference_key],
         ["keyframe", "identity_review"],
         ["keyframe", "video"],
         ["video", "video_drift_review"],

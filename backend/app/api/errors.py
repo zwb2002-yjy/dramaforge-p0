@@ -8,6 +8,8 @@ from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import DisconnectionError, InterfaceError, OperationalError
+from sqlalchemy.exc import TimeoutError as DatabasePoolTimeout
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.shared.errors import AppError
@@ -43,16 +45,19 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(RequestValidationError)
-    async def validation_handler(
-        _request: Request, exc: RequestValidationError
-    ) -> JSONResponse:
+    async def validation_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
         return problem_response(
             status_code=422,
             code="VALIDATION_ERROR",
             message="Request validation failed",
             details={
                 "errors": jsonable_encoder(
-                    exc.errors(),
+                    # Validation inputs (including root objects) can contain
+                    # plaintext keys/passwords even when fields use SecretStr.
+                    [
+                        {key: value for key, value in error.items() if key not in {"input", "ctx"}}
+                        for error in exc.errors()
+                    ],
                     custom_encoder={Exception: str, ValueError: str},
                 )
             },
@@ -73,29 +78,15 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def unhandled(_request: Request, exc: Exception) -> JSONResponse:
         """Map infrastructure failures to actionable Problem Details (not bare 500)."""
-        name = type(exc).__name__
-        msg = str(exc)
-        if "Connect" in name or "connection" in msg.lower() or "refused" in msg.lower():
-            return problem_response(
-                status_code=503,
-                code="DATABASE_UNAVAILABLE",
-                message=(
-                    "数据库不可用（PostgreSQL 连接失败）。"
-                    "请启动 Docker Compose PostgreSQL 后重试。"
-                ),
-                details={"error_type": name},
-            )
-        # sqlalchemy wraps asyncpg errors
-        if "OperationalError" in name or "InterfaceError" in name:
+        if isinstance(exc, (OperationalError, InterfaceError, DisconnectionError,
+                            DatabasePoolTimeout)):
             return problem_response(
                 status_code=503,
                 code="DATABASE_UNAVAILABLE",
                 message="数据库暂时不可用，请确认 PostgreSQL 已启动。",
-                details={"error_type": name},
             )
         return problem_response(
             status_code=500,
             code="INTERNAL_ERROR",
-            message=f"服务器错误: {name}",
-            details={"error_type": name},
+            message="服务器暂时无法完成请求。",
         )

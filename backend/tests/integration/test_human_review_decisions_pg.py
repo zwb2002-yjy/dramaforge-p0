@@ -16,7 +16,7 @@ from pathlib import Path
 
 import asyncpg
 import pytest
-from pg_support import alembic_head, alembic_parent, env_target
+from pg_support import alembic_parent, env_target
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 
@@ -81,9 +81,7 @@ def _alembic(dbname: str, *args: str) -> None:
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("TEST_PG_ENABLED") != "1" or not _pg_available_sync(),
-    reason=(
-        "set TEST_PG_ENABLED=1 with an explicitly configured isolated PostgreSQL target"
-    ),
+    reason=("set TEST_PG_ENABLED=1 with an explicitly configured isolated PostgreSQL target"),
 )
 
 
@@ -209,9 +207,7 @@ def _seed_scope(dbname: str) -> dict[str, str]:
             },
         )
         conn.execute(
-            text(
-                "UPDATE production_graphs SET current_version_id = :gv WHERE id = :g"
-            ),
+            text("UPDATE production_graphs SET current_version_id = :gv WHERE id = :g"),
             {"gv": graph_version_id, "g": graph_id},
         )
         conn.execute(
@@ -231,7 +227,7 @@ def _seed_scope(dbname: str) -> dict[str, str]:
                 " input_hash, status, input_snapshot, output_summary, result_artifact_id, "
                 " created_by) "
                 "VALUES (:r, :p, :gv, :gn, :key, :ih, 'completed', :snap, "
-                "        '{\"status\": \"needs_human\"}'::json, :ra, :u)"
+                '        \'{"status": "needs_human"}\'::json, :ra, :u)'
             ),
             {
                 "r": ids["review_run_id"],
@@ -270,13 +266,13 @@ async def test_human_review_decision_migration_and_rls_round_trip() -> None:
     dbname = f"dramaforge_review_{uuid.uuid4().hex[:10]}"
     try:
         await _create_db(dbname)
-        _alembic(dbname, "upgrade", "head")
+        _alembic(dbname, "upgrade", "20261007_0083")
         seeded = _seed_scope(dbname)
 
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             head = conn.execute(text("select version_num from alembic_version")).scalar()
-            assert head == alembic_head()
+            assert head == "20261007_0083"
             columns = {
                 row[0]
                 for row in conn.execute(
@@ -303,10 +299,7 @@ async def test_human_review_decision_migration_and_rls_round_trip() -> None:
             } <= columns
 
             policy = conn.execute(
-                text(
-                    "select policyname from pg_policies "
-                    "where tablename='human_review_decisions'"
-                )
+                text("select policyname from pg_policies where tablename='human_review_decisions'")
             ).scalar_one_or_none()
             assert policy == "human_review_decisions_scope"
             forced = conn.execute(
@@ -368,6 +361,6 @@ async def test_human_review_decision_migration_and_rls_round_trip() -> None:
             ).scalar_one()
             assert remaining == 0
         engine.dispose()
-        _alembic(dbname, "upgrade", "head")
+        _alembic(dbname, "upgrade", "20261007_0083")
     finally:
         await _drop_db(dbname)

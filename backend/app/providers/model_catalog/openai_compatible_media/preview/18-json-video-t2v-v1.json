@@ -1,0 +1,35 @@
+{
+  "manifest_version": "2026-10-30",
+  "provider_type": "openai_compatible_media",
+  "protocol_profile": "openai_json_video_v1",
+  "model_id": "@contract/json-video-t2v-v1",
+  "model_revision": "v1",
+  "media_kind": "video",
+  "display_name": "JSON 文生视频请求候选（请求5秒，832×480）",
+  "lifecycle": "preview",
+  "catalog_source": "protocol_contract",
+  "implementation_status": "documented",
+  "documented_at": "2026-10-30",
+  "operations": {
+    "video.generate": {
+      "operation": "video.generate",
+      "capabilities": ["video.t2v"],
+      "output_constraints": {
+        "duration_seconds": 5,
+        "resolution": "832x480",
+        "aspect_ratio": "adaptive"
+      },
+      "reference_constraints": {},
+      "exclusive_groups": []
+    }
+  },
+  "option_schema": {"namespace": "", "options": {}},
+  "documented_features": ["output.media_conformance_unverified"],
+  "evidence": {
+    "request_fixture": {
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit/test_json_video_contract.py",
+      "checked_at": "2026-10-30"
+    }
+  }
+}

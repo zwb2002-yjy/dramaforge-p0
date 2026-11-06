@@ -12,6 +12,7 @@ import hashlib
 import json
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assets.models import Episode, Scene, Shot
@@ -59,7 +60,10 @@ def serialize_compiled_creative_intent(intent: CompiledCreativeIntent) -> dict[s
 
 
 async def _scene_in_project(session: AsyncSession, scene_id: UUID, project_id: UUID) -> Scene:
-    scene = await session.get(Scene, scene_id)
+    scene = await session.scalar(
+        select(Scene).where(Scene.id == scene_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
     if scene is None:
         raise ValidationAppError("scene not found", details={"code": "SCENE_NOT_FOUND"})
     episode = await session.get(Episode, scene.episode_id)
@@ -95,7 +99,10 @@ async def freeze_shot_capabilities(
     actor_id: UUID,
 ) -> Shot:
     """Freeze the compiled creative provenance onto a Shot's director_state."""
-    shot = await session.get(Shot, shot_id)
+    shot = await session.scalar(
+        select(Shot).where(Shot.id == shot_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
     if shot is None or shot.project_id != project_id:
         raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
     state = dict(shot.director_state or {})

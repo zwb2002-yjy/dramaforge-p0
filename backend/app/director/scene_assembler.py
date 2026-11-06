@@ -86,7 +86,9 @@ class SceneAssembler:
             if character.enters_from is not None:
                 x, y = _POSITION_XY[character.enters_from]
             else:
-                x, y = (10, 10 + index * 2)
+                # Keep every default placement inside the normalized grid; a
+                # large cast must not produce coordinates above GRID_SIZE.
+                x, y = (10, min(10 + index * 2, GRID_SIZE))
             elements.append(
                 {
                     "kind": "character",

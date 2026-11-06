@@ -94,4 +94,25 @@ describe("ShotStrip", () => {
     fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
     expect(onSelectShot).toHaveBeenCalledWith("shot-2");
   });
+
+  it("uses the latest navigation guard and refreshes production facts on unchanged cards", () => {
+    const original = vi.fn();
+    const guarded = vi.fn();
+    const { rerender } = render(
+      <ShotStrip shots={SHOTS} selectedShotId="shot-1" onSelectShot={original} expanded />,
+    );
+    rerender(
+      <ShotStrip
+        shots={SHOTS}
+        selectedShotId="shot-1"
+        onSelectShot={guarded}
+        expanded
+        traceByShot={{ "shot-2": [{ status: "unknown_submission" }] }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("shot-strip-card-shot-2"));
+    expect(guarded).toHaveBeenCalledWith("shot-2");
+    expect(original).not.toHaveBeenCalled();
+    expect(screen.getByTestId("shot-strip-card-shot-2")).toHaveTextContent("生产失败风险");
+  });
 });

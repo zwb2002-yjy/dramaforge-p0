@@ -1,7 +1,7 @@
 """LiteLLM Gateway HTTP client + classified errors (spec §66–§70, F4–F7).
 
 Separation of concerns (spec §67): the :class:`LiteLLMGatewayClient` owns ALL
-HTTP to the official LiteLLM Proxy (URL join, auth header, single-attempt POST,
+HTTP to the official LiteLLM Proxy (URL join, auth header, bounded pre-send retry,
 classification, model discovery cache); the V3 :class:`LiteLLMModelAdapter`
 only does semantic mapping (TextGenerateRequest → OpenAI-compatible payload →
 ProviderCreateResult). The adapter never opens an httpx session itself.
@@ -17,7 +17,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from app.config import Settings, get_settings
-from app.providers.errors import SubmissionOutcomeUnknownError
+from app.providers.errors import ProviderError, SubmissionOutcomeUnknownError
 from app.providers.litellm_gateway.errors import (
     classify_http,
     gateway_unavailable,
@@ -26,8 +26,8 @@ from app.providers.litellm_gateway.metadata import (
     parse_allowlisted_headers,
 )
 
-# LiteLLM Router owns provider/deployment retry/fallback/cooldown (spec §5).
-# DramaForge does ONE POST per create — no blind client retry (spec §95/§96).
+# Proxy retries/fallbacks are disabled. Only DF→Proxy proven pre-send failures
+# may be retried once; a response never proves that upstream did not execute.
 DEFAULT_TIMEOUT_S = 120.0
 SHORT_TIMEOUT_S = 10.0
 MODELS_CACHE_TTL_S = 300.0
@@ -139,6 +139,7 @@ class LiteLLMGatewayClient:
             transport=self._transport,
             proxy=None,
             trust_env=False,
+            follow_redirects=False,
         )
 
     # ------------------------------------------------------------------
@@ -196,7 +197,7 @@ class LiteLLMGatewayClient:
         payload: dict[str, Any],
         extra_headers: dict[str, str] | None = None,
     ) -> GatewayResponse:
-        """ONE POST to ``/v1/chat/completions`` (spec §5/§95). No blind retry.
+        """Submit once, with at most one retry proven before DF→Proxy send.
 
         Failure classification (spec §63–§65):
         - connect/connect-timeout before send       → gateway unavailable
@@ -205,43 +206,57 @@ class LiteLLMGatewayClient:
         """
         body = {**payload, "model": model}
         headers = {**self._headers(), **(extra_headers or {})}
+        attempt = 0
+
+        def failure(error: ProviderError, phase: str) -> ProviderError:
+            error.details = {
+                **(error.details or {}),
+                "df_proxy_transport_attempts": attempt + 1,
+                "df_proxy_failure_phase": phase,
+            }
+            return error
+
         try:
             async with self._client(self._timeout_s) as client:
-                resp = await client.post(self.chat_url(), headers=headers, json=body)
-        except httpx.ConnectTimeout as exc:
-            raise gateway_unavailable(
-                f"connect timeout to LiteLLM gateway {self._base_url()}: {exc}"
+                for attempt in range(2):
+                    try:
+                        resp = await client.post(self.chat_url(), headers=headers, json=body)
+                        break
+                    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout):
+                        # Only this boundary is proven pre-send. This does not
+                        # infer anything from a Proxy response about upstream.
+                        if attempt:
+                            raise
+        except (httpx.ConnectTimeout, httpx.ConnectError, httpx.PoolTimeout) as exc:
+            raise failure(
+                gateway_unavailable("LiteLLM pre-send connection failed"), "df_proxy_pre_send"
             ) from exc
-        except httpx.ConnectError as exc:
-            raise gateway_unavailable(
-                f"cannot connect to LiteLLM gateway {self._base_url()}: {exc}"
+        except (
+            httpx.ReadTimeout,
+            httpx.WriteTimeout,
+            httpx.RemoteProtocolError,
+            httpx.NetworkError,
+        ) as exc:
+            raise failure(
+                SubmissionOutcomeUnknownError("LiteLLM transport failed after possible submission"),
+                "df_proxy_possible_send",
             ) from exc
-        except httpx.PoolTimeout as exc:
-            raise gateway_unavailable(
-                f"connection pool timeout to LiteLLM gateway: {exc}"
-            ) from exc
-        except httpx.ReadTimeout as exc:
-            # The request left this process; the gateway/provider may have
-            # accepted and billed it. Never auto re-POST (spec §64/§65).
-            raise SubmissionOutcomeUnknownError(
-                f"LiteLLM read timeout after submit: {exc}"
-            ) from exc
-        except httpx.WriteTimeout as exc:
-            raise SubmissionOutcomeUnknownError(
-                f"LiteLLM write timeout after submit: {exc}"
-            ) from exc
-        except httpx.RemoteProtocolError as exc:
-            raise SubmissionOutcomeUnknownError(
-                f"LiteLLM connection closed after submit: {exc}"
-            ) from exc
-        except httpx.NetworkError as exc:
-            raise gateway_unavailable(
-                f"network error reaching LiteLLM gateway: {exc}"
-            ) from exc
+        if resp.status_code == 408:
+            raise failure(
+                SubmissionOutcomeUnknownError("Proxy timeout may follow upstream execution"),
+                "proxy_response",
+            )
+        if resp.is_redirect:
+            raise failure(
+                gateway_unavailable("LiteLLM redirect rejected; no redirected request was sent"),
+                "proxy_response",
+            )
         if resp.status_code >= 400:
-            raise classify_http(resp.status_code, _error_message(resp))
+            raise failure(classify_http(resp.status_code, _error_message(resp)), "proxy_response")
         data = _json_body(resp)
         metadata = parse_allowlisted_headers(resp.headers)
+        metadata["df_proxy_transport_attempts"] = attempt + 1
+        metadata["df_proxy_failure_phase"] = None
         return GatewayResponse(
             status_code=resp.status_code,
             data=data,

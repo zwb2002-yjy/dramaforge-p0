@@ -8,13 +8,16 @@ system-default preference (§34/§103).
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 from app.config import Settings
-from app.providers.bootstrap import litellm_text_manifest
+from app.providers.bootstrap import default_text_manifest
 from app.providers.capabilities import Capability
+from app.providers.contracts.common import ExecutionContext
+from app.providers.contracts.text import TextGenerateRequest, TextMessage
 from app.providers.litellm_adapter import LiteLLMModelAdapter
 from app.providers.litellm_gateway.client import (
     LiteLLMGatewayClient,
@@ -28,6 +31,7 @@ from app.providers.litellm_gateway.model_catalog import (
 )
 from app.providers.registry import ModelRegistry
 from app.providers.selector import DefaultModelSelector
+from app.shared.errors import ValidationAppError
 
 _GATEWAY = Settings(
     app_env="development",
@@ -50,8 +54,7 @@ def _client(handler: Any, url: str = "https://gateway.example") -> LiteLLMGatewa
 class TestUrlNormalization:
     def test_base_url_gets_v1_chat_path(self) -> None:
         assert (
-            normalize_chat_url("http://litellm:4000")
-            == "http://litellm:4000/v1/chat/completions"
+            normalize_chat_url("http://litellm:4000") == "http://litellm:4000/v1/chat/completions"
         )
 
     def test_v1_suffixed_base(self) -> None:
@@ -68,16 +71,12 @@ class TestUrlNormalization:
 
     def test_trailing_slash_stripped(self) -> None:
         assert (
-            normalize_chat_url("http://litellm:4000/")
-            == "http://litellm:4000/v1/chat/completions"
+            normalize_chat_url("http://litellm:4000/") == "http://litellm:4000/v1/chat/completions"
         )
 
     def test_models_url(self) -> None:
         assert normalize_models_url("http://litellm:4000") == "http://litellm:4000/v1/models"
-        assert (
-            normalize_models_url("http://litellm:4000/v1")
-            == "http://litellm:4000/v1/models"
-        )
+        assert normalize_models_url("http://litellm:4000/v1") == "http://litellm:4000/v1/models"
 
 
 class TestChatCompletion:
@@ -186,28 +185,27 @@ class TestLogicalAliases:
         assert again == []
         assert registry.get_or_none("litellm/script-quality") is not None
 
-    def test_text_llm_is_bootstrap_bridge(self) -> None:
-        manifest = litellm_text_manifest()
-        assert manifest.metadata["bootstrap_bridge"] is True
-        assert manifest.metadata["legacy_compat"] is True
-        # gateway_model is the logical alias, not TEXT_LLM_MODEL (fix spec §32/§33).
-        assert manifest.metadata["backend"]["gateway_model"] == "legacy-text"
+    def test_default_text_model_uses_the_logical_catalog_contract(self) -> None:
+        manifest = default_text_manifest()
+        assert manifest.metadata["logical_alias"] == "script-quality"
+        assert "legacy_compat" not in manifest.metadata
+        # The bridge sends a logical alias; LiteLLM owns upstream model routing.
+        assert manifest.metadata["backend"]["gateway_model"] == "script-quality"
 
-    def test_system_default_prefers_bootstrap_bridge(self) -> None:
+    def test_system_default_selects_the_configured_logical_model(self) -> None:
         """script-fast sorts before text-llm, but the bootstrap bridge stays the
         text system default (fix spec §34/§103)."""
         registry = ModelRegistry()
         register_litellm_logical_models(registry)
-        from app.providers.bootstrap import LITELLM_TEXT_MODEL_ID
+        from app.providers.bootstrap import DEFAULT_TEXT_MODEL_ID
 
-        adapter = LiteLLMModelAdapter(litellm_text_manifest(), settings=_GATEWAY)
-        registry.register(litellm_text_manifest(), adapter)
+        assert registry.get_or_none(default_text_manifest().id) is not None
         selected = DefaultModelSelector().select(
             capability=Capability.TEXT_GENERATE,
             requested_model=None,
             registry=registry,
         )
-        assert selected.manifest.id == LITELLM_TEXT_MODEL_ID
+        assert selected.manifest.id == DEFAULT_TEXT_MODEL_ID
 
 
 class TestCatalogSync:
@@ -272,9 +270,7 @@ class TestProfileLogicalAliasRouting:
             )
 
         manifest = litellm_logical_manifest("script-quality")
-        adapter = LiteLLMModelAdapter(
-            manifest, settings=_GATEWAY, client=_client(handler)
-        )
+        adapter = LiteLLMModelAdapter(manifest, settings=_GATEWAY, client=_client(handler))
         registry = ModelRegistry()
         registry.register(manifest, adapter)
         router = CapabilityRouter(registry=registry)
@@ -290,3 +286,74 @@ class TestProfileLogicalAliasRouting:
         assert result.status.value == "succeeded"
         payload = json.loads(requests[0].content)
         assert payload["model"] == "script-quality"
+
+
+class TestRetiredTextSettings:
+    @pytest.mark.parametrize("source", ["environment", "dotenv"])
+    def test_legacy_knobs_are_ignored(
+        self, source: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        retired = {
+            "TEXT_LLM_ENABLED": "true",
+            "TEXT_LLM_API_KEY": "obsolete-test-key",
+            "TEXT_LLM_BASE_URL": "https://obsolete.example",
+            "TEXT_LLM_MODEL": "obsolete-model",
+            "TEXT_LLM_API_STYLE": "no-longer-validated",
+        }
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            ""
+            if source == "environment"
+            else "\n".join(f"{key}={value}" for key, value in retired.items()),
+            encoding="utf-8",
+        )
+        for key, value in retired.items():
+            monkeypatch.delenv(key, raising=False)
+            if source == "environment":
+                monkeypatch.setenv(key, value)
+        settings = Settings(_env_file=env_file, litellm_gateway_url="", litellm_api_key="")
+        for key in retired:
+            assert key.lower() not in Settings.model_fields
+            assert not hasattr(settings, key.lower())
+        assert not hasattr(settings, "text_llm_configured")
+        assert not LiteLLMModelAdapter(default_text_manifest(), settings=settings).configured()
+        # Explicit canonical configuration still enables the unchanged bridge.
+        gateway = Settings(
+            _env_file=env_file,
+            litellm_gateway_url="https://gateway.example",
+            litellm_api_key="gateway-key",
+        )
+        assert LiteLLMModelAdapter(default_text_manifest(), settings=gateway).configured()
+        assert gateway.litellm_text_gateway_model == "script-quality"
+
+    async def test_unit_defaults_override_dotenv_and_reject_before_http(
+        self, tmp_path: Path
+    ) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "LITELLM_GATEWAY_URL=https://gateway.example\nLITELLM_API_KEY=must-not-be-used\n",
+            encoding="utf-8",
+        )
+        # No explicit gateway overrides: conftest must blank inherited settings.
+        settings = Settings(_env_file=env_file)
+        assert settings.litellm_gateway_url == ""
+        assert settings.litellm_api_key == ""
+        requests: list[httpx.Request] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            raise AssertionError("disabled gateway must not attempt HTTP")
+
+        adapter = LiteLLMModelAdapter(
+            default_text_manifest(), settings=settings, transport=httpx.MockTransport(handler)
+        )
+        assert not adapter.configured()
+        with pytest.raises(ValidationAppError) as exc:
+            await adapter.create(
+                Capability.TEXT_GENERATE,
+                TextGenerateRequest(messages=[TextMessage(role="user", content="test")]),
+                ExecutionContext(trace_id="isolated-unit-test"),
+            )
+        assert exc.value.details["code"] == "MODEL_PROFILE_MODEL_NOT_CONFIGURED"
+        assert requests == []
+        assert adapter.calls == []

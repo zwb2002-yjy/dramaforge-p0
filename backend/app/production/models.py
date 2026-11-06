@@ -91,9 +91,7 @@ class ExperimentBranch(Base):
     comparison: Mapped[dict[str, object]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=dict
     )
-    adopted_shot_ids: Mapped[list[str]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=list
-    )
+    adopted_shot_ids: Mapped[list[str]] = mapped_column(JSON_DOCUMENT, nullable=False, default=list)
     parameters: Mapped[dict[str, object]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=dict
     )
@@ -108,7 +106,10 @@ class DirectorBoardState(Base):
     """Per-shot 2D/rough-3D staging state for camera and performance blocking."""
 
     __tablename__ = "director_board_states"
-    __table_args__ = (UniqueConstraint("shot_id", name="uq_director_board_shot"),)
+    __table_args__ = (
+        UniqueConstraint("shot_id", name="uq_director_board_shot"),
+        CheckConstraint("version > 0", name="ck_director_board_version_positive"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(
@@ -118,15 +119,11 @@ class DirectorBoardState(Base):
         ForeignKey("shots.id", ondelete="CASCADE"), nullable=False
     )
     mode: Mapped[str] = mapped_column(String(16), nullable=False, default="2d")
-    camera: Mapped[dict[str, object]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=dict
-    )
+    camera: Mapped[dict[str, object]] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
     characters: Mapped[list[dict[str, object]]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=list
     )
-    scene: Mapped[dict[str, object]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=dict
-    )
+    scene: Mapped[dict[str, object]] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     updated_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
@@ -180,10 +177,6 @@ def assert_graph_version_mutable(version: GraphVersion) -> None:
         GraphStatus.ARCHIVED.value,
     }:
         raise ValidationAppError("published graph version is immutable")
-
-
-# Backward-compatible alias used by older imports during transition.
-Graph = ProductionGraph
 
 
 
@@ -254,7 +247,7 @@ class ShotReferenceBinding(Base):
     shot_id: Mapped[UUID] = mapped_column(
         ForeignKey("shots.id", ondelete="RESTRICT"), nullable=False
     )
-    shot_experiment_id: Mapped[UUID | None] = mapped_column(
+    experiment_branch_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("experiment_branches.id", ondelete="SET NULL"), nullable=True
     )
     stage: Mapped[str] = mapped_column(String(16), nullable=False, default="both")
@@ -288,110 +281,6 @@ class ShotReferenceBinding(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
-class ProductionExperiment(Base):
-    """Phase 5 project-level A/B experiment grouping shot experiments (03 §45).
-
-    Formal results are never overwritten by an experiment; adoption (P5-06)
-    explicitly copies selected results onto the formal line.
-    """
-
-    __tablename__ = "production_experiments"
-    __table_args__ = (
-        UniqueConstraint(
-            "project_id",
-            "idempotency_key",
-            name="uq_production_experiment_idempotency",
-        ),
-    )
-
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
-    )
-    name: Mapped[str] = mapped_column(String(160), nullable=False)
-    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
-    experiment_type: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="model_swap"
-    )
-    status: Mapped[str] = mapped_column(
-        String(24), nullable=False, default="draft"
-    )
-    created_by: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-    decided_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-
-
-class ShotExperiment(Base):
-    """One shot's A/B experiment inside a :class:`ProductionExperiment` (03 §45).
-
-    Snapshots the source shot's execution inputs (version, director state,
-    prompts, references, common controls) and carries per-experiment model
-    overrides plus candidate result artifacts. Nothing here mutates the formal
-    shot graph.
-    """
-
-    __tablename__ = "shot_experiments"
-    __table_args__ = (
-        UniqueConstraint(
-            "production_experiment_id",
-            "shot_id",
-            name="uq_shot_experiment_shot",
-        ),
-    )
-
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    production_experiment_id: Mapped[UUID] = mapped_column(
-        ForeignKey("production_experiments.id", ondelete="CASCADE"), nullable=False
-    )
-    project_id: Mapped[UUID] = mapped_column(
-        ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
-    )
-    shot_id: Mapped[UUID] = mapped_column(
-        ForeignKey("shots.id", ondelete="CASCADE"), nullable=False
-    )
-    source_shot_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    director_state: Mapped[dict[str, object]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=dict
-    )
-    prompts: Mapped[dict[str, object]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=dict
-    )
-    references: Mapped[list[dict[str, object]]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=list
-    )
-    model_overrides: Mapped[dict[str, object]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=dict
-    )
-    common_controls: Mapped[dict[str, object]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=dict
-    )
-    status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
-    keyframe_artifact_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True
-    )
-    video_artifact_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True
-    )
-    comparison: Mapped[dict[str, object]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=dict
-    )
-    created_by: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
-    )
-    decided_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-
-
 class RepairRequest(Base):
     """One user-confirmed repair intent for a Shot.
 
@@ -403,6 +292,10 @@ class RepairRequest(Base):
     __tablename__ = "repair_requests"
     __table_args__ = (
         UniqueConstraint("project_id", "request_key", name="uq_repair_request_key"),
+        CheckConstraint(
+            "option IN ('rerun_video','regenerate_keyframe_then_video')",
+            name="ck_repair_request_option",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -418,9 +311,7 @@ class RepairRequest(Base):
     option: Mapped[str] = mapped_column(String(40), nullable=False)
     plan_schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     plan_hash: Mapped[str] = mapped_column(HASH_64, nullable=False)
-    annotation_ids: Mapped[list[str]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=list
-    )
+    annotation_ids: Mapped[list[str]] = mapped_column(JSON_DOCUMENT, nullable=False, default=list)
     annotation_summary: Mapped[dict[str, object]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=dict
     )
@@ -466,9 +357,7 @@ class RepairStep(Base):
     confirmed_by: Mapped[UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    confirmed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     adopted_artifact_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("artifacts.id", ondelete="SET NULL"), nullable=True
     )
@@ -497,4 +386,3 @@ Index(
     RepairStep.__table__.c.ordinal,
 )
 Index("ix_shot_reference_bindings_shot", ShotReferenceBinding.__table__.c.shot_id)
-Index("ix_shot_experiments_shot", ShotExperiment.__table__.c.shot_id)

@@ -107,6 +107,7 @@ class DirectorTurnService:
         intent_snapshot: Mapping[str, object] | None = None,
         max_steps: int = DEFAULT_TURN_MAX_STEPS,
         deadline: datetime | None = None,
+        allow_rejected_context_retry: bool = False,
     ) -> tuple[DirectorTurn, bool]:
         key = request_key.strip()
         if not key or len(key) > 200:
@@ -124,8 +125,16 @@ class DirectorTurnService:
                 f"Director max_steps must be between 1 and {MAX_TURN_STEPS}",
                 details={"code": "DIRECTOR_STEP_LIMIT_INVALID"},
             )
+        # Serialize new Director work with project deletion, as media commands do.
+        locked_project = await self._session.scalar(
+            select(Project).where(Project.id == project.id).with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if locked_project is None or locked_project.deleted_at is not None:
+            raise NotFoundError("project not found")
         fingerprint = _context_hash(context_snapshot)
-        await self.assert_context_not_rejected(project_id=project.id, context_hash=fingerprint)
+        if not allow_rejected_context_retry:
+            await self.assert_context_not_rejected(project_id=project.id, context_hash=fingerprint)
         existing = await self._by_request_key(project_id=project.id, request_key=key)
         if existing is not None:
             self._require_same_context(existing, fingerprint)
@@ -455,25 +464,21 @@ class DirectorTurnService:
                     "Shot changed since this suggestion was produced",
                     details={"code": "DIRECTOR_DECISION_STALE"},
                 )
+        if turn.runtime_execution_id is None:
+            raise ValidationAppError(
+                "Director decision requires a LangGraph runtime binding",
+                details={"code": "DIRECTOR_RUNTIME_BINDING_REQUIRED"},
+            )
         summary["user_decision"] = audit
-        runtime_managed = turn.runtime_execution_id is not None
         try:
             turn = await self.compare_and_set(
-                turn=turn, expected_statuses=("awaiting_user",),
-                target_status=(
-                    "awaiting_user"
-                    if runtime_managed
-                    else "completed" if decision == "reject" else "awaiting_user"
-                ),
+                turn=turn,
+                expected_statuses=("awaiting_user",),
+                target_status="awaiting_user",
                 updates={
                     "response_summary": summary,
-                    "wait_reason": (
-                        "runtime_decision_pending"
-                        if runtime_managed
-                        else "user_rejected" if decision == "reject" else "design_save"
-                    ),
+                    "wait_reason": "runtime_decision_pending",
                 },
-                increment_step=decision == "accept" and not runtime_managed,
             )
         except ConflictError:
             await self._session.refresh(turn)
@@ -565,6 +570,19 @@ class DirectorTurnService:
                     "last_error": (
                         "Interrupted text submission has no pollable remote identity; "
                         "automatic replay is forbidden. Start an explicit new request."
+                    ),
+                },
+            )
+        if turn.runtime_execution_id is None and turn.status in ACTIVE_TURN_STATUSES:
+            return await self.compare_and_set(
+                turn=turn,
+                expected_statuses=tuple(ACTIVE_TURN_STATUSES),
+                target_status="stale",
+                updates={
+                    "wait_reason": "runtime_binding_missing",
+                    "last_error": (
+                        "Director turn has no LangGraph runtime binding; "
+                        "legacy coordination is not resumed."
                     ),
                 },
             )

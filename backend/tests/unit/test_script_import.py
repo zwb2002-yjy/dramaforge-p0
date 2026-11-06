@@ -117,6 +117,42 @@ async def test_import_script_creates_variable_shot_count(session: AsyncSession) 
 
 
 @pytest.mark.asyncio
+async def test_duplicate_shot_number_is_rejected_before_any_insert(
+    session: AsyncSession,
+) -> None:
+    user, project = await _project(session)
+    text = SCRIPT.read_text(encoding="utf-8")
+    duplicated = text.replace("### Shot 2", "### Shot 1", 1)
+    assert duplicated != text
+    with pytest.raises(ValidationAppError) as exc:
+        await import_script(
+            session,
+            project_id=project.id,
+            actor_id=user.id,
+            filename="duplicate.md",
+            text=duplicated,
+            actor=user,
+        )
+    assert exc.value.details["code"] == "SCRIPT_DUPLICATE_NUMBER"
+    assert (
+        await session.scalar(select(func.count()).select_from(Shot))
+    ) == 0
+
+    duplicated_scene = text.replace("## Scene 2", "## Scene 1", 1)
+    assert duplicated_scene != text
+    with pytest.raises(ValidationAppError) as scene_exc:
+        await import_script(
+            session,
+            project_id=project.id,
+            actor_id=user.id,
+            filename="duplicate-scene.md",
+            text=duplicated_scene,
+            actor=user,
+        )
+    assert scene_exc.value.details["code"] == "SCRIPT_DUPLICATE_NUMBER"
+
+
+@pytest.mark.asyncio
 async def test_import_same_script_twice_is_idempotent(session: AsyncSession) -> None:
     user, project = await _project(session)
     text = SCRIPT.read_text(encoding="utf-8")
@@ -241,7 +277,8 @@ async def test_get_script_workspace_deterministic_latest_document(session: Async
     user, project = await _project(session)
     first_text = SCRIPT.read_text(encoding="utf-8")
     # A second, different script that parses to a valid scene/shot structure.
-    second_text = first_text.replace("Lin Xia", "Han Yu").replace("Neon Rain Lead", "Old Town")
+    second_text = first_text.replace("Lin Xia", "Han Yu")
+    assert second_text != first_text, "script fixture no longer contains the replaced name"
     await import_script(
         session,
         project_id=project.id,

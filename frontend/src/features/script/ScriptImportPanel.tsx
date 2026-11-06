@@ -1,3 +1,4 @@
+import { Field, Input, Textarea, Button, Alert } from "../../components/ui";
 import { useMutation } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
@@ -105,7 +106,7 @@ export function ScriptImportPanel({
         {SUPPORTED_FORMAT_EXAMPLE}
       </pre>
 
-      <label>
+      <Field>
         选择本地剧本文件
         <input
           ref={fileInput}
@@ -116,22 +117,22 @@ export function ScriptImportPanel({
             void loadFile(event.target.files?.[0]);
           }}
         />
-      </label>
+      </Field>
 
-      <label>
+      <Field>
         文件名
-        <input
+        <Input
           aria-label="导入文件名"
           value={filename}
           onChange={(event) => setFilename(event.target.value)}
           placeholder="episode_script.md"
           disabled={importMut.isPending}
         />
-      </label>
+      </Field>
 
-      <label>
+      <Field>
         剧本内容
-        <textarea
+        <Textarea
           aria-label="剧本内容"
           value={text}
           onChange={(event) => {
@@ -142,41 +143,49 @@ export function ScriptImportPanel({
           placeholder="粘贴或从上方选择文件"
           disabled={importMut.isPending}
         />
-      </label>
+      </Field>
       <p className="muted" data-testid="script-import-size">
         {byteCount} / {1024 * 1024} 字节
       </p>
 
-      <button
+      <Button
         type="button"
         data-testid="script-import-submit"
         disabled={submitDisabled}
         onClick={() => importMut.mutate()}
       >
         确认导入
-      </button>
+      </Button>
 
       {sizeError && (
-        <p className="flash err" data-testid="script-import-size-error" role="alert">
-          {sizeError}
-        </p>
+        <Alert
+          data-testid="script-import-size-error"
+          role="alert"
+          type="error"
+          showIcon
+          description={<>{sizeError}</>}
+        />
       )}
       {error && !sizeError && (
-        <p className="flash err" data-testid="script-import-error" role="alert">
-          {error}
-        </p>
+        <Alert
+          data-testid="script-import-error"
+          role="alert"
+          type="error"
+          showIcon
+          description={<>{error}</>}
+        />
       )}
       {summary && result && (
         <div data-testid="script-import-result" data-outcome={summary.tone} role="status">
           <p>{summary.message}</p>
-          <button
+          <Button
             type="button"
             data-testid="script-import-open-first-shot"
             onClick={() => onOpenFirstShot?.(result)}
             disabled={result.shot_ids.length === 0}
           >
             进入第一个镜头
-          </button>
+          </Button>
         </div>
       )}
     </section>

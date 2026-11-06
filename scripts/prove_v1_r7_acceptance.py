@@ -9,10 +9,14 @@ persisted responses, and media receipts are read by their original command key.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import time
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -27,6 +31,45 @@ REPO = Path(__file__).resolve().parents[1]
 WORKSPACE = os.environ.get(
     "DRAMAFORGE_PROOF_WORKSPACE", "c00b1899-b4ac-46c7-b4c7-25a230e9ebe2"
 )
+ALEMBIC_VERSIONS = REPO / "backend" / "alembic" / "versions"
+ENTRY_PORT = int(os.environ.get("DRAMAFORGE_PROOF_ENTRY_PORT", "8080"))
+
+
+def repository_migration_head() -> str:
+    """Return the single Alembic head declared by the candidate's own migrations.
+
+    The external runtime proof binds the running services to the candidate, and
+    the release workflow refuses to ship a tree whose migrations do not resolve
+    to exactly one head, so the head is derived from the repository instead of
+    being pinned to a revision that a later migration silently invalidates.
+    """
+    revisions: set[str] = set()
+    parents: set[str] = set()
+    for path in sorted(ALEMBIC_VERSIONS.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in tree.body:
+            if isinstance(node, ast.AnnAssign):
+                targets, value = [node.target], node.value
+            elif isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            else:
+                continue
+            for target in targets:
+                if not isinstance(target, ast.Name) or target.id not in {"revision", "down_revision"}:
+                    continue
+                identity = ast.literal_eval(value)
+                if target.id == "revision":
+                    revisions.add(identity)
+                elif isinstance(identity, str):
+                    parents.add(identity)
+                elif identity is not None:
+                    parents.update(identity)
+    heads = sorted(revisions - parents)
+    if len(heads) != 1:
+        raise RuntimeError(
+            f"expected exactly one Alembic head in {ALEMBIC_VERSIONS}, found {heads}"
+        )
+    return heads[0]
 SECRET_KEYS = {
     "authorization",
     "cookie",
@@ -100,26 +143,112 @@ FREE_UNKNOWN_VIDEO_REVISION = (
 )
 
 
+_SAFE_TOKEN_KEYS = {
+    "token_usage",
+    "token_count",
+    "token_limit",
+    "token_budget",
+}
+_SECRET_KEY_PARTS = (
+    "password",
+    "secret",
+    "apikey",
+    "authorization",
+    "cookie",
+    "ciphertext",
+)
+
+
+def local_ffprobe(data: bytes) -> dict[str, object]:
+    """Independently verify downloaded Final Film bytes with the operator's ffprobe.
+
+    The render node reports its own probe dictionary; this check makes the
+    delivery evidence depend on the downloaded artifact, not only on that
+    self-report.
+    """
+    binary = shutil.which("ffprobe")
+    if not binary:
+        raise RuntimeError(
+            "ffprobe is required to verify the downloaded Final Film independently; "
+            "install FFmpeg before running the delivery phase"
+        )
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as handle:
+        handle.write(data)
+        path = Path(handle.name)
+    try:
+        probe = subprocess.run(
+            [
+                binary,
+                "-v",
+                "error",
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        path.unlink(missing_ok=True)
+    if probe.returncode != 0:
+        raise RuntimeError(f"local ffprobe failed: {probe.stderr.strip()[:300]}")
+    payload = json.loads(probe.stdout)
+    streams = payload.get("streams") or []
+    video = [stream for stream in streams if stream.get("codec_type") == "video"]
+    audio = [stream for stream in streams if stream.get("codec_type") == "audio"]
+    if not video or not audio:
+        raise RuntimeError("downloaded Final Film has no independent video+audio streams")
+    return {
+        "duration_seconds": float((payload.get("format") or {}).get("duration") or 0),
+        "video_codec": video[0].get("codec_name"),
+        "audio_codec": audio[0].get("codec_name"),
+        "stream_count": len(streams),
+    }
+
+
+def _is_secret_key(key: str) -> bool:
+    """Composite keys such as ``minio_secret_key`` must be redacted too."""
+    lowered = key.lower()
+    normalized = re.sub(r"[^a-z]", "", lowered)
+    if lowered in SECRET_KEYS or normalized in {
+        "xapikey",
+        "xcsrftoken",
+        "passwordhash",
+        "secretkey",
+        "privatekey",
+        "accesskey",
+        "litellmsaltkey",
+        "litellmmasterkey",
+        "byokfernetkey",
+    }:
+        return True
+    if lowered in _SAFE_TOKEN_KEYS:
+        return False
+    if any(part in normalized for part in _SECRET_KEY_PARTS):
+        return True
+    return normalized == "token" or normalized.endswith("token")
+
+
 def sanitized(value):
     if isinstance(value, dict):
         return {
             key: sanitized(item)
             for key, item in value.items()
-            if key.lower() not in SECRET_KEYS
-            and re.sub(r"[^a-z]", "", key.lower())
-            not in {
-                "xapikey",
-                "xcsrftoken",
-                "passwordhash",
-                "secretkey",
-                "privatekey",
-                "accesskey",
-            }
+            if not _is_secret_key(key)
         }
     if isinstance(value, list):
         return [sanitized(item) for item in value]
     if isinstance(value, str):
         value = re.sub(r"(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]{12,}", "[REDACTED]", value)
+        # Bearer JWT triples are credentials even without an sk- prefix.
+        value = re.sub(
+            r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}",
+            "[REDACTED]",
+            value,
+        )
 
         def clean(match):
             parsed = urlsplit(match.group())
@@ -274,8 +403,15 @@ class Acceptance:
             raise RuntimeError(f"Step {name} failed: HTTP {response.status_code}, {code}")
         return result
 
-    def expect_error_once(self, name, method, path, payload, *, expected_statuses):
-        """Persist and execute one fail-closed HTTP probe without replaying unknown I/O."""
+    def expect_error_once(
+        self, name, method, path, payload, *, expected_statuses, expected_codes=None
+    ):
+        """Persist and execute one fail-closed HTTP probe without replaying unknown I/O.
+
+        Every probe must return a structured problem code, not merely a 4xx
+        status: an unrelated failure with the same status is not evidence that
+        the intended boundary held.
+        """
         previous = self.state["steps"].get(name)
         if previous is not None:
             if previous["status"] == "succeeded":
@@ -304,7 +440,12 @@ class Acceptance:
             result = response.json()
         except ValueError:
             result = {"error": "non-JSON response"}
-        accepted = response.status_code in set(expected_statuses)
+        code = result.get("code")
+        if not code and isinstance(result.get("details"), dict):
+            code = result["details"].get("code")
+        accepted = response.status_code in set(expected_statuses) and bool(code)
+        if expected_codes is not None:
+            accepted = accepted and code in expected_codes
         entry.update(
             status="succeeded" if accepted else "failed",
             http_status=response.status_code,
@@ -313,8 +454,9 @@ class Acceptance:
         self.save()
         if not accepted:
             raise RuntimeError(
-                f"Negative probe {name} returned HTTP {response.status_code}; "
-                f"expected {sorted(expected_statuses)}"
+                f"Negative probe {name} returned HTTP {response.status_code} "
+                f"code {code!r}; expected statuses {sorted(expected_statuses)}"
+                + (f" and codes {sorted(expected_codes)}" if expected_codes else "")
             )
         return result
 
@@ -327,6 +469,38 @@ class Acceptance:
             and operation.get("operation_kind")
             in {"image.generate", "keyframe.generate", "video.generate"}
         ]
+
+    @staticmethod
+    def remote_media_operation_ids(snapshot):
+        """Stable identities of remote media operations, not just their count."""
+        return sorted(
+            str(operation.get("id"))
+            for operation in Acceptance.remote_media_operations(snapshot)
+        )
+
+    @staticmethod
+    def require_row(rows, predicate, message):
+        """Return the first matching row or fail with a readable acceptance error."""
+        for row in rows:
+            if predicate(row):
+                return row
+        raise RuntimeError(message)
+
+    @staticmethod
+    def require_dispatchable_preview(preview, label):
+        """Refuse to submit a plan whose compiler preview is not validated.
+
+        A missing wire fingerprint would let the UI/server accept a dispatch the
+        acceptance run could not bind to an exact compiled request.
+        """
+        compiler = preview.get("compiler_contract_preview") or {}
+        wire = compiler.get("wire_fingerprint")
+        if compiler.get("readiness") != "contract_validated" or not wire:
+            raise RuntimeError(
+                f"{label} compiler preview is not dispatchable: "
+                f"readiness={compiler.get('readiness')!r} wire_fingerprint={wire!r}"
+            )
+        return wire
 
     def record_stage_decision(self, label, project_id, shot_id, artifact_id, review_kind, stage):
         """Record the human decision that admits one Formal selection.
@@ -360,21 +534,35 @@ class Acceptance:
                 f"after 180s (machine_status={summary.get('machine_status')}); "
                 "the pipeline did not produce the review the gate requires"
             )
-        return sanitized(
-            self.once(
-                f"{label}:decision:{review_kind}:{artifact_id}",
-                "POST",
-                f"/projects/{project_id}/shots/{shot_id}/review-decisions",
-                {
-                    "artifact_id": artifact_id,
-                    "review_node_run_id": run_id,
-                    "review_kind": review_kind,
-                    "decision": "approved",
-                    "reason": f"R7 人工审片（{review_kind}）：该素材可用，批准进入下一步。",
-                },
-                command_key=f"r7:{self.state['run_key']}:decision:{review_kind}:{artifact_id}",
-            )
+        self.once(
+            f"{label}:decision:{review_kind}:{artifact_id}",
+            "POST",
+            f"/projects/{project_id}/shots/{shot_id}/review-decisions",
+            {
+                "artifact_id": artifact_id,
+                "review_node_run_id": run_id,
+                "review_kind": review_kind,
+                "decision": "approved",
+                "reason": f"R7 人工审片（{review_kind}）：该素材可用，批准进入下一步。",
+            },
+            command_key=f"r7:{self.state['run_key']}:decision:{review_kind}:{artifact_id}",
         )
+        # A recorded decision is not the gate: re-read the summary and require
+        # that this exact artifact review now reports applies=true.
+        decision_deadline = time.monotonic() + 60
+        while True:
+            summary = self.read(
+                f"/projects/{project_id}/shots/{shot_id}/review-summary"
+                f"?artifact_id={artifact_id}&review_kind={review_kind}&stage={stage}"
+            )
+            if summary.get("decision") == "approved" and summary.get("applies"):
+                return sanitized(summary)
+            if time.monotonic() >= decision_deadline:
+                raise RuntimeError(
+                    f"{label} recorded a {review_kind} decision for artifact "
+                    f"{artifact_id} but the summary still does not apply it"
+                )
+            time.sleep(2)
 
     def record_delivery_decisions(
         self, label, project_id, timeline, *, edit_session_id, timeline_version
@@ -489,7 +677,11 @@ class Acceptance:
         return sorted(rows, key=lambda row: (row["sort_order"], row["id"]))
 
     def shot(self, project, shot_id):
-        basic = next(row for row in self.shots(project) if row["id"] == shot_id)
+        basic = self.require_row(
+            self.shots(project),
+            lambda row: row["id"] == shot_id,
+            f"Shot {shot_id} is not visible in project {project}",
+        )
         workbench = self.read(f"/projects/{project}/shots/{shot_id}/workbench")
         detailed = workbench.get("shot") if isinstance(workbench, dict) else None
         return {**basic, **(detailed if isinstance(detailed, dict) else {})}
@@ -527,19 +719,23 @@ class Acceptance:
         # this exact registered key/version (there is no template-list route).
         template = {"key": "single_monologue_v1", "version": "1"}
         connections = self.read(f"/workspaces/{WORKSPACE}/provider-connections")
-        agnes = next(
-            row for row in connections if row.get("provider_type") == "agnes" and row.get("enabled")
+        agnes = self.require_row(
+            connections,
+            lambda row: row.get("provider_type") == "agnes" and row.get("enabled"),
+            "No enabled Agnes connection is configured for the acceptance workspace",
         )
         bindings = self.read(
             f"/workspaces/{WORKSPACE}/provider-connections/{agnes['id']}/model-bindings"
         )
         self.state["bindings"] = {
-            purpose: next(
-                row
-                for row in bindings
-                if row.get("purpose") == purpose
-                and row.get("enabled")
-                and row.get("account_verified")
+            purpose: self.require_row(
+                bindings,
+                lambda row, purpose=purpose: (
+                    row.get("purpose") == purpose
+                    and row.get("enabled")
+                    and row.get("account_verified")
+                ),
+                f"No enabled, account-verified {purpose} binding is configured",
             )
             for purpose in ("keyframe", "video")
         }
@@ -676,14 +872,17 @@ class Acceptance:
                 paid=True,
             )
             turn_id = suggestion["director_evidence"]["turn_id"]
+            turn_state = self.read(f"/projects/{project}/director/turns/{turn_id}")
+            if not turn_state.get("runtime_execution_id") or turn_state.get("runtime_revision") is None:
+                raise RuntimeError("Director suggestion is missing its LangGraph runtime identity")
             self.once(
                 f"{label}:accept-shot",
                 "POST",
-                f"/projects/{project}/director/turns/{turn_id}/decision",
-                lambda project=project, turn_id=turn_id: {
-                    "expected_revision": self.read(f"/projects/{project}/director/turns/{turn_id}")[
-                        "revision"
-                    ],
+                f"/projects/{project}/director/runtime/turns/{turn_id}/decision",
+                lambda turn_state=turn_state: {
+                    "signal_id": str(uuid4()),
+                    "expected_revision": turn_state["revision"],
+                    "expected_runtime_revision": turn_state["runtime_revision"],
                     "decision": "accept",
                     "accepted_operation_indices": [0],
                 },
@@ -769,6 +968,13 @@ class Acceptance:
         self.state["assertions"].pop("story_and_user_decisions", None)
         self.state["assertions"].pop("template_auto:formal_media", None)
         self.state.get("formal_shot_ids", {}).pop("template_auto", None)
+        # Drop every projection derived from the abandoned project so later
+        # phases cannot read a stale snapshot/final job/provider identity.
+        for key in list(self.state):
+            if key.startswith("template_auto:"):
+                del self.state[key]
+        for derived in ("deliveries", "provider_identities", "media_execution_freeze"):
+            self.state.get(derived, {}).pop("template_auto", None)
         self.state.pop("failed_run", None)
         self.save()
 
@@ -833,6 +1039,9 @@ class Acceptance:
                         {
                             **body,
                             "plan_fingerprint": preview["plan_fingerprint"],
+                            "compiler_wire_fingerprint": self.require_dispatchable_preview(
+                                preview, "dispatch"
+                            ),
                             "accepted_approximations": [],
                         },
                         paid=True,
@@ -973,12 +1182,19 @@ class Acceptance:
             {
                 **preview_request,
                 "plan_fingerprint": preview["plan_fingerprint"],
+                "compiler_wire_fingerprint": self.require_dispatchable_preview(
+                    preview, "free-revision:video:dispatch"
+                ),
                 "accepted_approximations": [],
             },
             paid=True,
             command_key=replacement_key,
         )
         run = self.wait_run(project_id, receipt["node_run_id"])
+        self.record_stage_decision(
+            f"free-revision:{shot_id}:video", project_id, shot_id,
+            run["result_artifact_id"], "video_drift", "formal_video",
+        )
         formal = self.once(
             f"free-revision:{shot_id}:video:formal",
             "POST",
@@ -1058,7 +1274,10 @@ class Acceptance:
                     timeline.setdefault("metadata", {})["director_suggestion_applied"] = advice[
                         "suggestion"
                     ]["base_session_version"]
-                return {"timeline": timeline}
+                return {
+                    "timeline": timeline,
+                    "expected_session_version": edit["version"],
+                }
 
             saved = self.once(
                 label + ":timeline-save",
@@ -1169,7 +1388,7 @@ class Acceptance:
         if not isinstance(saved_step, dict) or saved_step.get("status") != "succeeded":
             raise RuntimeError("Local Editing recovery requires the prior saved Timeline")
         old_snapshot = self.read(f"/projects/{project_id}/snapshot")
-        remote_before = len(self.remote_media_operations(old_snapshot))
+        remote_before = self.remote_media_operation_ids(old_snapshot)
         prefix = f"local-recovery:{label}"
         edit = self.once(
             prefix + ":edit",
@@ -1181,7 +1400,10 @@ class Acceptance:
             prefix + ":timeline-save",
             "PATCH",
             f"/projects/{project_id}/edit-sessions/{edit['id']}/timeline",
-            {"timeline": saved_step["response"]["timeline"]},
+            {
+                "timeline": saved_step["response"]["timeline"],
+                "expected_session_version": edit["version"],
+            },
         )
         prepared = self.once(
             prefix + ":tail",
@@ -1215,8 +1437,8 @@ class Acceptance:
         )
         self.wait_run(project_id, job["node_run_id"])
         final_job = self.read(f"/projects/{project_id}/final-film/runs/{job['node_run_id']}")
-        remote_after = len(
-            self.remote_media_operations(self.read(f"/projects/{project_id}/snapshot"))
+        remote_after = self.remote_media_operation_ids(
+            self.read(f"/projects/{project_id}/snapshot")
         )
         if remote_after != remote_before:
             raise RuntimeError("Local Editing recovery unexpectedly generated remote media")
@@ -1226,8 +1448,8 @@ class Acceptance:
             "failed_node_run_id": failed["id"],
             "replacement_edit_session_id": edit["id"],
             "replacement_render_run_id": job["node_run_id"],
-            "remote_media_operation_count_before": remote_before,
-            "remote_media_operation_count_after": remote_after,
+            "remote_media_operation_ids_before": remote_before,
+            "remote_media_operation_ids_after": remote_after,
         }
         self.state[label + ":final_job"] = final_job
         self.state["assertions"]["local_artifact_race_recovery"] = "PASS"
@@ -1277,18 +1499,42 @@ class Acceptance:
             "video_drift",
             "formal_video",
         )
+        repair_request = self.once(
+            "review:repair-create",
+            "POST",
+            f"/projects/{project_id}/shots/{shot_id}/repairs",
+            {
+                "repair_option": "rerun_video",
+                "plan_hash": plan["plan_hash"],
+                "idempotency_key": self._repair_key("review-video", project_id, shot_id),
+            },
+        )
+        step_plan = self.once(
+            "review:repair-step-plan",
+            "POST",
+            f"/projects/{project_id}/shots/{shot_id}/repairs/{repair_request['id']}"
+            "/step-plan",
+            {"accept_approximations": False},
+        )
         repair = self.once(
             "review:repair-submit",
             "POST",
-            f"/projects/{project_id}/shots/{shot_id}/repair",
+            f"/projects/{project_id}/shots/{shot_id}/repairs/{repair_request['id']}/steps",
             {
-                "repair_option": "rerun_video",
+                "expected_plan_fingerprint": step_plan["plan"]["plan_fingerprint"],
+                "expected_compiler_wire_fingerprint": self.require_dispatchable_preview(
+                    step_plan, "review:repair-submit"
+                ),
+                "expected_step_ordinal": step_plan["step_ordinal"],
+                "accept_approximations": False,
                 # A repair request whose first step already ran is at its human
                 # gate, so re-submitting the same operation key would be answered
                 # with REPAIR_STEP_REQUIRES_REVIEW (correctly). Each explicit
                 # attempt therefore carries its own key, chosen once and kept in
                 # the state so a resume reuses it.
-                "idempotency_key": self._repair_key("review-video", project_id, shot_id),
+                "idempotency_key": self._repair_key(
+                    "review-video-step", project_id, shot_id
+                ),
             },
             paid=True,
         )
@@ -1296,6 +1542,7 @@ class Acceptance:
             "project_id": project_id,
             "shot_id": shot_id,
             "annotation_id": annotation["id"],
+            "repair_id": repair_request["id"],
             "repair_plan": sanitized(plan),
             "repair_run_id": repair["node_run_id"],
             "formal_video_before": shot["formal_video_artifact_id"],
@@ -1351,7 +1598,8 @@ class Acceptance:
                 "artifact_id": free_shot["formal_keyframe_artifact_id"],
                 "expected_shot_version": template_shot["version"],
             },
-            expected_statuses={404, 422},
+            expected_statuses={404},
+            expected_codes={"ARTIFACT_NOT_FOUND"},
         )
         self.expect_error_once(
             "negative:stale-shot-save",
@@ -1468,8 +1716,8 @@ class Acceptance:
         remote_before = {}
         for label in ("template_auto", "free_assist"):
             project_id = self.state["projects"][label]["id"]
-            remote_before[label] = len(
-                self.remote_media_operations(self.read(f"/projects/{project_id}/snapshot"))
+            remote_before[label] = self.remote_media_operation_ids(
+                self.read(f"/projects/{project_id}/snapshot")
             )
 
         free_edit = self.state["steps"]["free_assist:timeline-save"]["response"]
@@ -1481,7 +1729,10 @@ class Acceptance:
                 str(timeline["clips"][0].get("subtitle") or "") + " · 复核版"
             )
             timeline.setdefault("metadata", {})["r7_editing_only_rerender"] = self.state["run_key"]
-            return {"timeline": timeline}
+            return {
+                "timeline": timeline,
+                "expected_session_version": free_edit["version"],
+            }
 
         saved = self.once(
             "free_assist:rerender-save",
@@ -1565,6 +1816,12 @@ class Acceptance:
             subtitle_text = subtitle_response.content.decode("utf-8-sig")
             if "-->" not in subtitle_text or not subtitle_text.strip():
                 raise RuntimeError(f"{label} independent SRT is empty or invalid")
+            local_probe = local_ffprobe(film_response.content)
+            if abs(float(local_probe["duration_seconds"]) - duration) > 1.0:
+                raise RuntimeError(
+                    f"{label} local ffprobe duration {local_probe['duration_seconds']} "
+                    f"disagrees with the render result {duration}"
+                )
             deliveries[label] = {
                 "project_id": project_id,
                 "node_run_id": job["node_run_id"],
@@ -1579,6 +1836,7 @@ class Acceptance:
                 "subtitle_cue_count": result["subtitle_cue_count"],
                 "formal_reference_count": len(result["formal_references"]),
                 "ffprobe": sanitized(result["ffprobe"]),
+                "local_ffprobe": local_probe,
             }
             if self.evidence_dir is not None:
                 self.evidence_dir.mkdir(parents=True, exist_ok=True)
@@ -1589,26 +1847,27 @@ class Acceptance:
                 deliveries[label]["film_file"] = film_path.name
                 deliveries[label]["subtitle_file"] = subtitle_path.name
         remote_after = {
-            label: len(
-                self.remote_media_operations(
-                    self.read(f"/projects/{self.state['projects'][label]['id']}/snapshot")
-                )
+            label: self.remote_media_operation_ids(
+                self.read(f"/projects/{self.state['projects'][label]['id']}/snapshot")
             )
             for label in ("template_auto", "free_assist")
         }
         if remote_before != remote_after:
-            raise RuntimeError("Editing-only rerender created a remote image/video operation")
+            raise RuntimeError(
+                "Editing-only rerender changed the remote media operation set "
+                f"(before={remote_before}, after={remote_after})"
+            )
         self.state["deliveries"] = deliveries
         self.state["editing_only_rerender"] = {
-            "remote_media_operations_before": remote_before,
-            "remote_media_operations_after": remote_after,
+            "remote_media_operation_ids_before": remote_before,
+            "remote_media_operation_ids_after": remote_after,
             "delta": 0,
         }
         self.state["assertions"]["editing_only_rerender"] = "PASS"
         self.state["assertions"]["final_mp4_srt_download"] = "PASS"
         self.save()
 
-    def import_external_proof(self, kind, path):
+    def import_external_proof(self, kind, path, *, entry_port, migration_head):
         proof = json.loads(path.read_text(encoding="utf-8"))
         if proof.get("candidate_sha") != self.state.get("candidate_sha"):
             raise RuntimeError(f"{kind} proof belongs to another candidate")
@@ -1637,7 +1896,7 @@ class Acceptance:
             }
             assertions = proof.get("assertions")
             if (
-                proof.get("entry_port") != 8080
+                proof.get("entry_port") != entry_port
                 or proof.get("project_ids") != expected
                 or not isinstance(assertions, dict)
                 or not assertions
@@ -1649,8 +1908,8 @@ class Acceptance:
         elif kind == "runtime":
             services = proof.get("services")
             if (
-                proof.get("entry_port") != 8080
-                or proof.get("migration_head") != "20260908_0060"
+                proof.get("entry_port") != entry_port
+                or proof.get("migration_head") != migration_head
                 or not isinstance(services, dict)
                 or set(services)
                 != {"api", "dispatcher", "worker_default", "worker_heavy", "frontend"}
@@ -1674,25 +1933,84 @@ class Acceptance:
             raise RuntimeError("Candidate promotion requires a source-equivalence proof")
         proof = json.loads(proof_path.read_text(encoding="utf-8"))
         previous = self.state.get("candidate_sha")
-        allowed_paths = {
+        artifact_identity_paths = {
             "backend/app/execution/artifact_lineage.py",
             "backend/tests/integration/test_artifact_lineage_pg.py",
             "backend/tests/unit/test_r7_acceptance_driver.py",
             "frontend/tests/live/v1-r7-real-acceptance.spec.ts",
             "scripts/prove_v1_r7_acceptance.py",
         }
+        formal_composite_paths = {
+            "backend/app/execution/composite_media.py",
+            "backend/app/execution/experiment_nodes.py",
+            "backend/app/execution/local_nodes.py",
+            "backend/app/production/final_film.py",
+            "backend/tests/unit/test_composite_media.py",
+            "backend/tests/unit/test_final_film_timeline.py",
+            "backend/tests/unit/test_r7_acceptance_driver.py",
+            "scripts/prove_v1_r7_acceptance.py",
+        }
         changed_paths = set(proof.get("changed_paths") or [])
-        if (
-            not previous
-            or proof.get("previous_candidate") != previous
-            or proof.get("candidate_sha") != candidate_sha
-            or not changed_paths
-            or not changed_paths <= allowed_paths
-            or "backend/app/execution/artifact_lineage.py" not in changed_paths
-            or proof.get("provider_submission_diff_empty") is not True
-            or proof.get("full_quality_gate") != "PASS"
-            or proof.get("concurrent_artifact_pg_regression") != "PASS"
-        ):
+        if previous and proof.get("previous_candidate") == previous:
+            # The claimed change set must be real in this repository: neither
+            # candidate may be invented and every listed path must appear in the
+            # actual previous..candidate diff. Self-reported strings alone are
+            # not source-equivalence evidence.
+            for sha in (previous, candidate_sha):
+                exists = subprocess.run(
+                    ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+                    cwd=str(REPO),
+                    capture_output=True,
+                    text=True,
+                )
+                if exists.returncode != 0:
+                    raise RuntimeError(f"Equivalence proof names an unknown commit: {sha}")
+            actual_diff = set(
+                subprocess.run(
+                    ["git", "diff", "--name-only", previous, candidate_sha],
+                    cwd=str(REPO),
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                ).stdout.splitlines()
+            )
+            missing = changed_paths - actual_diff
+            if missing:
+                raise RuntimeError(
+                    "Equivalence proof lists paths absent from the real commit diff: "
+                    f"{sorted(missing)}"
+                )
+        common_valid = bool(previous) and (
+            proof.get("previous_candidate") == previous
+            and proof.get("candidate_sha") == candidate_sha
+            and bool(changed_paths)
+            and proof.get("provider_submission_diff_empty") is True
+            and proof.get("full_quality_gate") == "PASS"
+        )
+        kind = proof.get("equivalence_kind", "artifact_identity_concurrency")
+        if kind == "artifact_identity_concurrency":
+            kind_valid = (
+                changed_paths <= artifact_identity_paths
+                and "backend/app/execution/artifact_lineage.py" in changed_paths
+                and proof.get("concurrent_artifact_pg_regression") == "PASS"
+            )
+        elif kind == "formal_composite_repair_isolation":
+            required_paths = {
+                "backend/app/execution/composite_media.py",
+                "backend/app/execution/experiment_nodes.py",
+                "backend/app/execution/local_nodes.py",
+                "backend/app/production/final_film.py",
+                "scripts/prove_v1_r7_acceptance.py",
+            }
+            kind_valid = (
+                changed_paths <= formal_composite_paths
+                and required_paths <= changed_paths
+                and proof.get("formal_composite_pin_regression") == "PASS"
+                and proof.get("staged_repair_api_regression") == "PASS"
+            )
+        else:
+            kind_valid = False
+        if not common_valid or not kind_valid:
             raise RuntimeError("Candidate source-equivalence proof is incomplete")
         if self.state["assertions"].get("template_auto:formal_media") != "PASS" or self.state[
             "assertions"
@@ -1705,7 +2023,7 @@ class Acceptance:
                     label: self.state["assertions"].get(label + ":formal_media")
                     for label in ("template_auto", "free_assist")
                 },
-                "reason": "acceptance_discovered_artifact_identity_concurrency_fix",
+                "reason": kind,
             }
         )
         self.state["candidate_sha"] = candidate_sha
@@ -1776,6 +2094,26 @@ class Acceptance:
                 for step in dispatch_steps
                 if step.get("status") == "succeeded"
             }
+            # Every attempted dispatch run, including failed/unknown outcomes, so
+            # an ambiguous Provider submission cannot hide outside the happy set.
+            attempted_run_ids = {
+                step["response"]["node_run_id"]
+                for step in dispatch_steps
+                if isinstance(step.get("response"), dict)
+                and step["response"].get("node_run_id")
+            }
+            ambiguous_submissions = [
+                operation
+                for operation in self.remote_media_operations(snapshot)
+                if operation.get("node_run_id") in attempted_run_ids
+                and operation.get("status") in {"unknown_submission", "submission_started"}
+            ]
+            if ambiguous_submissions:
+                raise RuntimeError(
+                    f"{label} acceptance run contains ambiguous Provider submissions; "
+                    "reconcile them before claiming the happy path: "
+                    f"{[operation.get('id') for operation in ambiguous_submissions]}"
+                )
             frozen_runs = [
                 run
                 for run in snapshot.get("node_runs", [])
@@ -1851,6 +2189,12 @@ class Acceptance:
             ]
         self.state["provider_identities"] = provider_identities
         self.state["media_execution_freeze"] = media_execution_freeze
+        if set(provider_identities) != {"template_auto", "free_assist"} or any(
+            not rows for rows in provider_identities.values()
+        ):
+            raise RuntimeError(
+                "Dual-path runtime identities were not proven for both projects"
+            )
         self.state["assertions"]["provider_identity_no_fallback"] = "PASS"
         self.state["assertions"]["distinct_projects_shared_runtime"] = "PASS"
 
@@ -1942,6 +2286,14 @@ def main():
             ).json()
             if health.get("source_commit") != args.candidate or health.get("env") == "test":
                 raise RuntimeError("Runtime identity/environment does not match the paid candidate")
+            # A reachable database is not enough: the live schema revision must
+            # be the one this source tree expects, otherwise the identity gate
+            # would pass on an unmigrated database.
+            if health.get("migration_head") != repository_migration_head():
+                raise RuntimeError(
+                    "Runtime schema revision does not match the candidate source: "
+                    f"{health.get('migration_head')!r}"
+                )
             prior = run.state.get("candidate_sha")
             if prior and prior != args.candidate:
                 if args.phase != "promote-candidate":
@@ -1951,16 +2303,29 @@ def main():
                 run.promote_candidate(args.candidate, args.candidate_equivalence_proof)
             else:
                 if args.phase == "promote-candidate":
-                    raise RuntimeError("Candidate promotion target already matches the checkpoint")
+                    if not prior:
+                        raise RuntimeError(
+                            "Candidate promotion needs an existing previous candidate in the "
+                            "state file and a different --candidate SHA; nothing to promote"
+                        )
+                    raise RuntimeError(
+                        "Candidate promotion target already matches the recorded candidate"
+                    )
                 run.state["candidate_sha"] = args.candidate
                 run.save()
+        expected_migration_head = repository_migration_head()
         for kind, proof_path in (
             ("recovery", args.recovery_proof),
             ("browser", args.browser_proof),
             ("runtime", args.runtime_proof),
         ):
             if proof_path is not None:
-                run.import_external_proof(kind, proof_path)
+                run.import_external_proof(
+                    kind,
+                    proof_path,
+                    entry_port=ENTRY_PORT,
+                    migration_head=expected_migration_head,
+                )
         if args.phase != "promote-candidate":
             getattr(run, args.phase.replace("-", "_"))()
         print(

@@ -50,6 +50,7 @@ class ResolvedArtifact(BaseModel):
     signed_url: str | None = None
     provider_file_id: str | None = None
     content_bytes: bytes | None = None
+    duration_seconds: float | None = None
 
 
 class ExecutionContext(BaseModel):

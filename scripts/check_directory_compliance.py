@@ -11,6 +11,7 @@ Local build caches that are gitignored may exist on disk. This checker:
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -34,7 +35,6 @@ ALLOWED_ROOT = {
     "docker-compose.yml",
     "docker-compose.build.yml",
     "docker-compose.dev.yml",
-    "docker-compose.gpu.yml",
     "docker-compose.offline.yml",
     "docker-compose.quality.yml",
     "install.ps1",
@@ -74,6 +74,8 @@ LOCAL_ONLY_ROOT = {
     "node_modules",
     "dist",
     "coverage",
+    "test-results",
+    "playwright-report",
     ".venv",
     "venv",
     ".env",  # local secrets only; never committed
@@ -125,28 +127,26 @@ def check_sensitive_on_disk(root: Path) -> list[str]:
     """Fail if credential-like files exist under the tree (excluding venv/node_modules)."""
     errors: list[str] = []
     skip_parts = FORBIDDEN_TRACKED_PARTS | LOCAL_ONLY_ROOT | {".git"}
-    for path in root.rglob("*"):
-        rel_parts = path.relative_to(root).parts
-        if any(part in skip_parts for part in rel_parts):
-            continue
-        try:
+    for directory, subdirs, filenames in os.walk(root, followlinks=False):
+        # Prune before traversal: ignored evidence/dependencies can contain
+        # hundreds of thousands of files. The separate Git index check still
+        # rejects tracked caches and secrets inside these directories.
+        subdirs[:] = [name for name in subdirs if name not in skip_parts]
+        for name in filenames:
+            path = Path(directory) / name
             if not path.is_file():
                 continue
-        except OSError:
-            # Broken or access-controlled local tooling links are outside the
-            # registered source tree and cannot be credential evidence.
-            continue
-        name = path.name
-        # Local gitignored root .env is expected for dev; git index check still blocks commit.
-        if name == ".env" and path.parent == root:
-            continue
-        if name in FORBIDDEN_FILE_NAMES or (
-            name.startswith(".env.") and name != ".env.example"
-        ):
-            rel = path.relative_to(root).as_posix()
-            errors.append(f"forbidden env/credential file on disk: {rel}")
-        if path.suffix.lower() in FORBIDDEN_SUFFIXES:
-            errors.append(f"forbidden sensitive file on disk: {path.relative_to(root).as_posix()}")
+            # Only the root local .env is permitted, not backend/.env etc.
+            if name == ".env" and path.parent == root:
+                continue
+            if name in FORBIDDEN_FILE_NAMES or (
+                name.startswith(".env.") and name != ".env.example"
+            ):
+                rel = path.relative_to(root).as_posix()
+                errors.append(f"forbidden env/credential file on disk: {rel}")
+            if path.suffix.lower() in FORBIDDEN_SUFFIXES:
+                rel = path.relative_to(root).as_posix()
+                errors.append(f"forbidden sensitive file on disk: {rel}")
     return errors
 
 

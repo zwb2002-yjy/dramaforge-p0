@@ -71,7 +71,6 @@ def dialogue_post_dub_spec() -> WorkflowTemplateSpec:
         required_capabilities=(
             Capability.IMAGE_GENERATE,
             Capability.VIDEO_IMAGE_TO_VIDEO,
-            Capability.AUDIO_TTS,
         ),
         quality_policy_id=QUALITY_POLICY_V1,
         repair_policy_id="live-dialogue-repair-v1",
@@ -125,7 +124,6 @@ def single_character_monologue_spec() -> WorkflowTemplateSpec:
         required_capabilities=(
             Capability.IMAGE_GENERATE,
             Capability.VIDEO_IMAGE_TO_VIDEO,
-            Capability.AUDIO_TTS,
         ),
         quality_policy_id="monologue-quality-v1",
         repair_policy_id="monologue-repair-v1",
@@ -162,7 +160,6 @@ def two_character_dialogue_spec() -> WorkflowTemplateSpec:
         required_capabilities=(
             Capability.IMAGE_GENERATE,
             Capability.VIDEO_IMAGE_TO_VIDEO,
-            Capability.AUDIO_TTS,
         ),
         quality_policy_id="two-character-dialogue-quality-v1",
         repair_policy_id="two-character-repair-v1",

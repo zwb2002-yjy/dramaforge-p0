@@ -1,0 +1,37 @@
+{
+  "manifest_version": "2026-09-28",
+  "provider_type": "volcengine",
+  "protocol_profile": "ark_cn_v1",
+  "model_id": "doubao-seedance-2-0-mini-260615",
+  "model_revision": "2026-09-28-candidate",
+  "media_kind": "video",
+  "display_name": "doubao-seedance-2-0-mini-260615",
+  "lifecycle": "preview",
+  "catalog_source": "official_static",
+  "implementation_status": "documented",
+  "documented_at": "2026-09-28",
+  "operations": {
+    "video.generate": {
+      "operation": "video.generate",
+      "capabilities": [],
+      "output_options": {}
+    }
+  },
+  "documented_features": [],
+  "evidence": {
+    "model": {
+      "source_type": "official_model_list",
+      "source_url": "https://docs.volcengine.com/docs/ark/model-list?lang=zh",
+      "checked_at": "2026-09-28"
+    },
+    "video_guide": {
+      "source_type": "official_api_doc",
+      "source_url": "https://docs.volcengine.com/docs/ark/seedance-2-5-prompt-guide?lang=zh",
+      "checked_at": "2026-09-28"
+    }
+  },
+  "option_schema": {
+    "namespace": "",
+    "options": {}
+  }
+}

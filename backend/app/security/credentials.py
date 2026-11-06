@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.security.byok_keyring import ByokKeyring
 from app.security.models import EncryptedProviderCredential, KeyRotationAudit
+from app.shared.errors import NotFoundError
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,22 @@ class RotationResult:
     scanned: int
     reencrypted: int
     already_primary: int
+
+
+async def lock_workspace_credentials(session: AsyncSession, *, workspace_id: UUID) -> None:
+    """Serialize revision writers on their stable parent, including first writes.
+
+    Connection writers take this lock before a connection lock. SQLite fixtures
+    cannot prove this concurrency contract; PostgreSQL is the runtime authority.
+    """
+    if session.get_bind().dialect.name == "postgresql":
+        with session.no_autoflush:
+            parent = await session.scalar(
+                text("SELECT id FROM workspaces WHERE id = :id FOR UPDATE"),
+                {"id": workspace_id},
+            )
+        if parent is None:
+            raise NotFoundError("workspace not found")
 
 
 async def store_credential(
@@ -27,10 +44,10 @@ async def store_credential(
     plaintext: str,
     keyring: ByokKeyring,
 ) -> EncryptedProviderCredential:
+    await lock_workspace_credentials(session, workspace_id=workspace_id)
     encrypted = keyring.encrypt(plaintext)
-    # Account credential changes are revisions, never updates.  Lock the
-    # current head when the backend supports row locks; the revision unique
-    # constraint remains the final guard for concurrent writers.
+    # Read the head after the stable parent lock: waiting on the previous head
+    # alone could allocate its successor twice.
     latest = await session.scalar(
         select(EncryptedProviderCredential)
         .where(
@@ -40,6 +57,7 @@ async def store_credential(
         .order_by(EncryptedProviderCredential.revision_no.desc())
         .limit(1)
         .with_for_update()
+        .execution_options(populate_existing=True)
     )
     record = EncryptedProviderCredential(
         workspace_id=workspace_id,

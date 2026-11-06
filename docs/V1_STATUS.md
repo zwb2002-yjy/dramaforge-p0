@@ -1,97 +1,70 @@
-# V1_STATUS — 当前状态权威
+# V1_STATUS — 当前 V1 / 发布状态
 
-Status: current / Date: 2026-09-15（入口见 [CURRENT.md](CURRENT.md)）
+Status: current
+源码与文档同步日期：2026-10-07。运行实例版本必须另行核对，不能从 `dev` 的提交推断。
+迁移头及合并后的迁移历史统一见 [DATA_MODEL.md](DATA_MODEL.md)，以候选本身的
+`alembic heads` 为准。
 
-## 当前发布判定：REL-01 真实验收全链通过，等待 Owner 合并
+## 当前结论
 
-**候选**：`dev` = `d47d388`。产品代码（`backend/app`、`backend/alembic`、
-`frontend/src`、`docker-compose.yml`）与接受真实验收的 `cd6f202` **逐树相同**
-（`git rev-parse <sha>:<path>` 比对为 SAME），其后只有测试断言与验收驱动器变化。
+**首版尚未正式发布完成。** 运行候选、集成 PR 和发布基线必须分开看；本地质量门通过不等于真实双路径验收或正式发布完成。
 
-**REL-01 真实 DS＋Agnes 验收：全部阶段 PASS**（Owner 授权付费、无预算上限；隔离候选栈
-`dramaf-relcand`，仅发布 `127.0.0.1:8088`，`/health.source_commit = cd6f202`）：
+创作体验改进见 [开发合同](ARCHITECTURE_MAPPING.md#creation-improvement-contract)。
+PR/MP/UI/RT 与 AC-01–AC-18 是目标要求，文档完成不代表开发、制作验收或发布完成。
+新目标不能直接复用历史 `complete=true` 结论；最终候选须覆盖实际改动及新增验收。
+该开发合同不自动扩张已有发布候选，纳入哪一个发布版本须在该候选范围中明确。
 
-| 阶段 | 结果 |
+本文件**不钉死** PR 编号、测试计数或 Base SHA 作为长期事实（与 CURRENT.md「计数/SHA 不作当前事实」一致）。下表只描述**状态性质**；最终候选 SHA、门结果与证据路径在发布条件勾选表中由 Owner 落笔。
+
+| 对象 | 当前事实 |
 |---|---|
-| `preflight` | PASS（Agnes `auth_models` 真实探测 200 passed，两条绑定 `account_verified`） |
-| `story` | PASS（真实 DeepSeek，`actual_model=anthropic/deepseek-v4-flash`） |
-| `media` | PASS（真实 Agnes 关键帧＋视频，逐片过身份/漂移审查与人工批准） |
-| `editing` | PASS（交付准入逐片通过、剪辑建议采用可审计） |
-| `regressions` | PASS（负向边界 fail closed、MANUAL 不依赖导演） |
-| `delivery` | PASS（真实 MP4/SRT 下载、哈希一致、ffprobe 全真、15–30s、改字幕重导出零新增媒体调用） |
-| `review-submit` / `review-collect` | PASS（修复候选已派发并停在人工门；`review_repair` 断言通过） |
+| 发布基线 | `main` 仅通过受保护的 `dev -> main` PR 前进；当前 tip 以远端为准 |
+| 运行实例 | 8080 上的 gateway/API/workers 与迁移头构成「当前运行候选」；健康状态不证明创作链完成。实例身份、迁移头与源码 SHA 必须分别核对 |
+| 开发源码 | 工作台 UI、模型目录、模型系统 expand 与本地 H3 接入已整合到 `dev`；功能分支已清理。源码整合不等于运行实例部署或发布候选验收 |
+| 本地质量门 | 完整 backend/PostgreSQL/migration、frontend（含完整 Playwright）与固定 LiteLLM mock-proxy 容器门可重复执行；命令见 [DEVELOPMENT.md](DEVELOPMENT.md) |
+| 真实制作验收 | 双路径真实验收 driver 可达 `complete=true`（模板与自由创作 MP4/SRT；一次授权 Editing 文本建议显式采用/保存/导出）。历史媒体/恢复证据仅在「候选等价边界」内复用（见条件 3） |
 
-成片证据：`template_auto-final-film.mp4` 6.34 MB、`free_assist-final-film.mp4` 3.77 MB，
-各带 SRT，均在 `tmp/evidence/`。
+当前快速开发模式下，CI 仅监听指向 `main` 的 PR 与手动 dispatch；`dev` push 本身不是
+质量门证明。Owner 授权的开发任务可提交或整合到 `dev`；受保护的 `dev -> main` PR
+只由 Owner 批准和合并。Agent 不自行发布。
 
-## 本轮修复的产品缺陷（全部由真实验收暴露，离线套件此前全绿）
+## 当前继续边界
 
-| 提交 | 缺陷 |
-|---|---|
-| `4e9113f` | Formal 选择门**不可能满足**：冻结图里没有审查节点，且关键帧阶段从不排队审查 → 设为正式关键帧对任何项目都 422，下游视频链随之停死 |
-| `fcd19a2` | 审查 run 未写 `upstream_artifact_id`，而门正是按该键解析审查 → "审查已完成"被读成"没有审查" |
-| `468d4a3` | 审查查找在有界分页里做选择，历史一多即"查无此审查" |
-| `cd6f202` | 重复导出成片撞唯一约束报 `ARTIFACT_NOT_INDEPENDENT`（产品要求重复导出回读原结果） |
-| `cef8402` | 两个 repair 端点在 `commit()` **之后**读状态；repair 表按 `app.current_project_id()` 做 RLS 且该变量是每事务的，新事务没有作用域 → 修复已建、第一步已派发并提交，响应却是 404 `repair request not found` |
+- 代码回归、部署与双路径制作验收分别留证；任一项通过不自动证明最新开发源码已正式发布。
+- Owner 的历史付费授权不延续；没有当前任务的 Owner 明确授权时不得扩大 probe/production/repair。
+- 不重跑已有图像/视频，不重试历史 `unknown_submission`。新的用户重生成意图必须作为新操作独立授权。
+- 后续进入 Owner 候选审阅与发布流程。
 
-**尚未完成**：`dev → main` 合并与版本 tag 属 Owner（Agent 不自批自合）；上表未列
-的 `revise-unknown-free` / `replace-template` / `recover-local-editing` 三个阶段需
-特定前置状态（未对账的提交、并发 Artifact 竞争失败），本轮未构造，记录为未执行。
-本文件记录的是"候选可发布"，不是"已发布"。
+## 已确定的首版产品边界
 
-实施记录（不入 Git）见 `tmp/v1-release-20260915/`：`REL01_RESULT_cd6f202.md`、
-`CANDIDATE_RECORD.md` 及各 DEV-0x_RECORD.md。
+- `quality_gated` 表示质量认证/正式支持证据，不是普通执行与实验的硬准入；绑定、连接、能力不匹配仍失败关闭。
+- 项目 Provider Binding 已有显式绑定与来源回显；Provider Connection 可启用/停用，连接删除延期。多连接与来源隔离的目标改造见 MODEL_PROVIDER。
+- 无生产者旧表面已清退：Shot Change Proposal 面板和前端客户端已删除；服务端 `change-proposals` API 暂保留且无前端消费者。ModelPicker/uiStore/DirectorBoard 前端死代码删除；video-frames 保留；DirectorBoard 后端暂保留；V2 bootstrap stub fail-closed 为类型化 `unsupported_capability`（HTTP 422），不再以 500 暴露。产品运行时无 demo Project ID 特判，测试使用普通 Project fixture。
+- 镜头旧视频提交仍须按 `unknown_submission` 保留证据，禁止技术盲重试。
 
-## 历史 V1 主链验收记录
+## 尚需闭合的发布条件（Owner 勾选表）
 
-V1"统一创作主链"目标（2026-09-03 起）已完成 21 项最终完成审计，全部 PASS。
-运行时候选 `adf1b94`，证据/发布候选 `3677430`，`dev → main` PR #66 待 Owner
-审阅合并。审计覆盖（摘要）：
+每条必须能落到：**最终候选 SHA + 可执行门命令 + 证据路径 + Owner 勾选**。
+未勾选不得宣称 V1 发布完成。
 
-- Legacy 硬删除与 Canonical/directory 门；
-- Idea → proposal/diff/partial apply → Canonical facts；
-- Template Start / Free Start 创建同一 Project；无模板 runtime；
-- AUTO / ASSIST / MANUAL 保持执行身份；MANUAL 无导演回归通过；
-- 主动推荐（performance/action/camera/shot/rhythm/reference）与
-  whole/partial/reject 决策；
-- Manual/locked/dirty/stale 优先级；
-- Candidate/Formal/Experiment/Repair 边界；
-- 统一 NodeRun/ProviderOperation/Artifact 血缘；
-- OpenCut/Editing 为正式尾部，两路径 Final Film（H.264/AAC + SRT）真实交付；
-- 全量质量/安全/迁移/E2E 与 commit-bound 真实 Provider Golden。
+| # | 条件 | 门命令 / 证据 | Owner 确认 |
+|---|---|---|---|
+| 1 | **候选一致性**：确定最终候选 SHA；其运行相关内容通过完整容器门与远端 required checks。后续优化不得夹带进旧候选验收 | 候选 SHA：`________`；`scripts/run_quality_in_docker.ps1`；远端 required checks 截图或 API 结果路径：`________` | ☐ |
+| 2 | **正式入口**：在明确安排现有实例交接后，8080 的 gateway/API/workers 都运行该候选的 production 身份；`alembic heads` 单一且与候选一致 | 实例源码 commit：`________`；`GET /health` 证据路径：`________`；`alembic heads` 输出：`________` | ☐ |
+| 3 | **候选验收证据绑定**：针对**最终候选 SHA** 记录质量门命令、运行结果和证据路径。历史媒体/恢复证据只有在明确列出「候选等价边界」（哪些文件/路径自证据 SHA 起未变化）并确认相关代码未变化时才允许复用；运行相关代码一旦变化须重新评估受影响证据，不能直接挪用 | 最终候选 SHA 的验收 driver / 门日志路径：`________`；候选等价边界清单路径：`________` | ☐ |
+| 4 | **Owner 合并**：Owner 审阅并合并受保护的 `dev -> main` | 合并提交 SHA：`________` | ☐ |
+| 5 | **发布与安装**：生成版本化 Release 制品，并用该版本 online/offline bundle 在干净目录安装验证。源码测试不能替代制品安装验证 | Release tag：`________`；安装验证日志路径：`________` | ☐ |
 
-## 历史 Director Runtime（D0–D8）完成记录
+当前尚无版本化 GitHub Release。安全告警与依赖审计以 GitHub Security 和最终候选的
+锁文件检查为准，不在本文件保留会过期的告警数量或包清单。生产依赖审计通过不证明
+开发依赖告警已关闭。优先兼容升级；无安全兼容版本时记录有期限的例外。
+指向 `main` 的 PR 自动执行 dependency-review 和完整依赖/安全门；`dev` 快速开发模式
+的 CI 边界及 Dependabot 配置见 [RELEASE.md](RELEASE.md)。
 
-独立导演编排 runtime（Owner 2026-09-09 授权）已落地：runtime contracts、
-event boundary、invocation journal、LangGraph 验证、engine 迁移、
-tools/decisions UI、跨 runtime 失败矩阵、候选验收与终态对账。MANUAL 路径
-在导演服务停止时完成空项目 → MP4/SRT 全程。详见
-[DIRECTOR_RUNTIME.md](DIRECTOR_RUNTIME.md)。
+真实 Provider probe/production/repair 每次都需要本任务的 Owner 明确授权（批量须说明允许创建的操作数）。历史授权不延续；可能已计费或 `unknown_submission` 的调用不能盲重试。
 
-## 之后已合入 dev 的工作
+## 权威与历史
 
-- V2 导航 / Project Lobby / 设置返回语义（统一导航与项目大厅）；
-- Resonance UI、Canvas-first UI、Production 渐进披露、移动端 canvas 收敛；
-- 前端骨架对齐（设计 Token 采用、骨架约定落文档）；
-- 上下文导演交互与项目导航修复（当时记录的 HEAD 为 070faa3）。
-
-## 数据库与质量基线
-
-- Alembic 单 head：`20260915_0069`（69 个 revision）；以候选自身 `alembic heads`
-  为准。本轮新增 0067（资产入库请求身份）、0068（人工审查决定）、0069（分阶段修复步骤）。
-- CI：`policy` + `container-gates`（backend / PostgreSQL / 迁移 / OpenAPI /
-  前端 / E2E / LiteLLM 集成），Release workflow 发布版本化镜像。
-
-## 剩余工作方向
-
-- Owner 审阅并合并发布 PR **#88**（候选 `df546f6`，检查已全绿）；Agent 不自批自合。
-- DS＋Agnes 真实场景验收：按仓库规则需要逐次正数预算与 Owner 授权。
-- 发布按 [RELEASE.md](RELEASE.md) 执行；新功能开发以本目录权威文档 + 代码
-  现状为基线，不再有历史 Task Contract 序列。
-
-## 历史证据的获取方式
-
-已删除的 Task Contract、Review、Golden evidence 与执行记录保存在 Git 历史
-（`git log` / `git show`）中；它们不构成当前实现依据。正式验收证据按
-[DEVELOPMENT.md](DEVELOPMENT.md) 写入 `tmp/p0-evidence/<source-commit>/`
-（不入 Git）。
+产品与技术合同见 [CURRENT.md](CURRENT.md)；可重复验证命令见 [DEVELOPMENT.md](DEVELOPMENT.md)、
+[DEPLOYMENT.md](DEPLOYMENT.md) 与 [RELEASE.md](RELEASE.md)。先前工作区快照、旧测试计数、旧候选运行身份和逐轮执行记录
+只通过 Git 历史追溯，不在本文件继续累积互相矛盾的“当前结论”。

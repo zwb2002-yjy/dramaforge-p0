@@ -1,5 +1,6 @@
 /** Product wording for the Final Film delivery admission boundary. */
 
+/** Product wording for the Final Film delivery admission boundary. */
 import { ApiError } from "../../lib/api";
 
 export const DELIVERY_REVIEW_REASON_LABEL: Record<string, string> = {
@@ -22,7 +23,7 @@ export function deliveryGateMessage(error: unknown): string {
     if (details?.code === "DELIVERY_REVIEW_REQUIRED") {
       const reason = typeof details.reason === "string" ? details.reason : null;
       const explain = reason
-        ? (DELIVERY_REVIEW_REASON_LABEL[reason] ?? reason)
+        ? (DELIVERY_REVIEW_REASON_LABEL[reason] ?? "该素材尚未通过交付检查。")
         : "缺少人工审查决定。";
       return `${error.message}：${explain} 请在“待审内容”完成人工判断后再导出成片。`;
     }

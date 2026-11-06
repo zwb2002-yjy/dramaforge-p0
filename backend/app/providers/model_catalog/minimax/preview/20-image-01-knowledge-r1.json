@@ -1,0 +1,450 @@
+{
+  "schema_version": "2",
+  "manifest_version": "2026-10-13",
+  "provider_type": "minimax",
+  "protocol_profile": "minimax_cn_v1",
+  "api_version": "v1",
+  "region": "CN",
+  "model_id": "image-01",
+  "model_revision": "knowledge-2026-10-13-r1",
+  "refines_revision": "v3",
+  "media_kind": "image",
+  "display_name": "MiniMax Image 01",
+  "lifecycle": "preview",
+  "catalog_source": "official_static",
+  "documented_at": "2026-10-13",
+  "operations": {
+    "image.generate": {
+      "operation": "image.generate",
+      "claim_status": "documented_supported",
+      "input_contracts": {
+        "text": {
+          "claim_status": "documented_supported",
+          "input_slots": {},
+          "minimum_total_references": {
+            "kind": "bounded",
+            "value": 0,
+            "claim_status": "documented_supported"
+          },
+          "maximum_total_references": {
+            "kind": "bounded",
+            "value": 0,
+            "claim_status": "documented_supported"
+          }
+        },
+        "character": {
+          "claim_status": "documented_supported",
+          "input_slots": {
+            "reference_image": {
+              "claim_status": "documented_supported",
+              "required": true,
+              "minimum": {
+                "kind": "bounded",
+                "value": 1,
+                "claim_status": "documented_supported"
+              },
+              "maximum": {
+                "kind": "unknown",
+                "claim_status": "unknown"
+              },
+              "media_types": [
+                "image/jpeg",
+                "image/png"
+              ],
+              "ordering": "preserve",
+              "wire_field": "subject_reference[].image_file",
+              "delivery_formats": [
+                "public_https",
+                "data_uri"
+              ],
+              "max_bytes": {
+                "kind": "bounded",
+                "value": 10000000,
+                "claim_status": "documented_supported",
+                "inclusive": false
+              },
+              "wire_attributes": {
+                "type": "character"
+              }
+            }
+          },
+          "minimum_total_references": {
+            "kind": "bounded",
+            "value": 1,
+            "claim_status": "documented_supported"
+          },
+          "maximum_total_references": {
+            "kind": "unknown",
+            "claim_status": "unknown"
+          }
+        }
+      },
+      "output_options": {
+        "aspect_ratio": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "1:1",
+            "3:4",
+            "4:3",
+            "16:9",
+            "9:16",
+            "2:3",
+            "3:2",
+            "21:9"
+          ],
+          "default": "1:1",
+          "default_status": "documented_supported"
+        },
+        "width": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "minimum": {
+            "kind": "bounded",
+            "value": 512,
+            "claim_status": "documented_supported"
+          },
+          "maximum": {
+            "kind": "bounded",
+            "value": 2048,
+            "claim_status": "documented_supported"
+          },
+          "multiple_of": 8
+        },
+        "height": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "minimum": {
+            "kind": "bounded",
+            "value": 512,
+            "claim_status": "documented_supported"
+          },
+          "maximum": {
+            "kind": "bounded",
+            "value": 2048,
+            "claim_status": "documented_supported"
+          },
+          "multiple_of": 8
+        },
+        "n": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "minimum": {
+            "kind": "bounded",
+            "value": 1,
+            "claim_status": "documented_supported"
+          },
+          "maximum": {
+            "kind": "bounded",
+            "value": 9,
+            "claim_status": "documented_supported"
+          },
+          "default": 1,
+          "default_status": "documented_supported"
+        },
+        "response_format": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "url",
+            "base64"
+          ],
+          "default": "url",
+          "default_status": "documented_supported"
+        },
+        "seed": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false
+        },
+        "prompt_optimizer": {
+          "type": "boolean",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "default": false,
+          "default_status": "documented_supported"
+        },
+        "aigc_watermark": {
+          "type": "boolean",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "default": false,
+          "default_status": "documented_supported"
+        }
+      },
+      "protocol_facts": {
+        "dimension_precedence": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "unsupported",
+          "required": false,
+          "default": "aspect_ratio_over_width_height",
+          "default_status": "documented_supported"
+        }
+      },
+      "prompt_spec": {
+        "type": "string",
+        "claim_status": "documented_supported",
+        "control": "native",
+        "required": true,
+        "max_length": {
+          "kind": "bounded",
+          "value": 1500,
+          "claim_status": "documented_supported"
+        }
+      },
+      "constraints": [
+        {
+          "kind": "requires",
+          "claim_status": "documented_supported",
+          "when_present": [
+            "width"
+          ],
+          "require": [
+            "height"
+          ]
+        },
+        {
+          "kind": "requires",
+          "claim_status": "documented_supported",
+          "when_present": [
+            "height"
+          ],
+          "require": [
+            "width"
+          ]
+        }
+      ],
+      "evidence_group_ref": "285e7b8a6a0342cdba33a520c46f3651f947d1afddc986032518f1da212d3810:a48a4b262f90ba669e66165acc81c381ca4bf4dc5c609aeb6c2add24f8cdcf94:knowledge-review-20261013",
+      "evidence_review": {
+        "covers": "/operations/image.generate",
+        "reviewed_subtree_hash": "c62419ece507b748c6c16c5c147c8980205ccb256c5b0e0f80a93be2ef0150a1",
+        "reviewed_by": "Codex authorized task reviewer",
+        "review_kind": "authorized_agent",
+        "locator": "Exact model and request parameters; unknown limits explicitly retained"
+      }
+    },
+    "image.edit": {
+      "operation": "image.edit",
+      "claim_status": "documented_supported",
+      "input_contracts": {
+        "character": {
+          "claim_status": "documented_supported",
+          "input_slots": {
+            "reference_image": {
+              "claim_status": "documented_supported",
+              "required": true,
+              "minimum": {
+                "kind": "bounded",
+                "value": 1,
+                "claim_status": "documented_supported"
+              },
+              "maximum": {
+                "kind": "unknown",
+                "claim_status": "unknown"
+              },
+              "media_types": [
+                "image/jpeg",
+                "image/png"
+              ],
+              "ordering": "preserve",
+              "wire_field": "subject_reference[].image_file",
+              "delivery_formats": [
+                "public_https",
+                "data_uri"
+              ],
+              "max_bytes": {
+                "kind": "bounded",
+                "value": 10000000,
+                "claim_status": "documented_supported",
+                "inclusive": false
+              },
+              "wire_attributes": {
+                "type": "character"
+              }
+            }
+          },
+          "minimum_total_references": {
+            "kind": "bounded",
+            "value": 1,
+            "claim_status": "documented_supported"
+          },
+          "maximum_total_references": {
+            "kind": "unknown",
+            "claim_status": "unknown"
+          }
+        }
+      },
+      "output_options": {
+        "aspect_ratio": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "1:1",
+            "3:4",
+            "4:3",
+            "16:9",
+            "9:16",
+            "2:3",
+            "3:2",
+            "21:9"
+          ],
+          "default": "1:1",
+          "default_status": "documented_supported"
+        },
+        "width": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "minimum": {
+            "kind": "bounded",
+            "value": 512,
+            "claim_status": "documented_supported"
+          },
+          "maximum": {
+            "kind": "bounded",
+            "value": 2048,
+            "claim_status": "documented_supported"
+          },
+          "multiple_of": 8
+        },
+        "height": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "minimum": {
+            "kind": "bounded",
+            "value": 512,
+            "claim_status": "documented_supported"
+          },
+          "maximum": {
+            "kind": "bounded",
+            "value": 2048,
+            "claim_status": "documented_supported"
+          },
+          "multiple_of": 8
+        },
+        "n": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "minimum": {
+            "kind": "bounded",
+            "value": 1,
+            "claim_status": "documented_supported"
+          },
+          "maximum": {
+            "kind": "bounded",
+            "value": 9,
+            "claim_status": "documented_supported"
+          },
+          "default": 1,
+          "default_status": "documented_supported"
+        },
+        "response_format": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "url",
+            "base64"
+          ],
+          "default": "url",
+          "default_status": "documented_supported"
+        },
+        "seed": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false
+        },
+        "prompt_optimizer": {
+          "type": "boolean",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "default": false,
+          "default_status": "documented_supported"
+        },
+        "aigc_watermark": {
+          "type": "boolean",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "default": false,
+          "default_status": "documented_supported"
+        }
+      },
+      "protocol_facts": {
+        "dimension_precedence": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "unsupported",
+          "required": false,
+          "default": "aspect_ratio_over_width_height",
+          "default_status": "documented_supported"
+        }
+      },
+      "prompt_spec": {
+        "type": "string",
+        "claim_status": "documented_supported",
+        "control": "native",
+        "required": true,
+        "max_length": {
+          "kind": "bounded",
+          "value": 1500,
+          "claim_status": "documented_supported"
+        }
+      },
+      "constraints": [
+        {
+          "kind": "requires",
+          "claim_status": "documented_supported",
+          "when_present": [
+            "width"
+          ],
+          "require": [
+            "height"
+          ]
+        },
+        {
+          "kind": "requires",
+          "claim_status": "documented_supported",
+          "when_present": [
+            "height"
+          ],
+          "require": [
+            "width"
+          ]
+        }
+      ],
+      "evidence_group_ref": "285e7b8a6a0342cdba33a520c46f3651f947d1afddc986032518f1da212d3810:a48a4b262f90ba669e66165acc81c381ca4bf4dc5c609aeb6c2add24f8cdcf94:knowledge-review-20261013",
+      "evidence_review": {
+        "covers": "/operations/image.edit",
+        "reviewed_subtree_hash": "c9d98f3544115271d3973707d7c8d75401180a71b1a67d8bc46cc26d4fd03567",
+        "reviewed_by": "Codex authorized task reviewer",
+        "review_kind": "authorized_agent",
+        "locator": "Exact model and request parameters; unknown limits explicitly retained"
+      }
+    }
+  }
+}

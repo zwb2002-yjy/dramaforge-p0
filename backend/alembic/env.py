@@ -6,8 +6,11 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
+from alembic.script import ScriptDirectory
+from alembic.script.revision import RangeNotAncestorError
 from app.config import get_settings
 from app.shared.base import Base
+from app.shared.migration_safety import require_retired_evidence_archived
 from app.shared.model_registry import load_all_models
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -29,6 +32,19 @@ def get_url() -> str:
     return get_settings().database_url
 
 
+def crosses_evidence_cleanup(current: tuple[str, ...] | str | None) -> bool:
+    destination = context.get_context().opts.get("destination_rev")
+    if destination is None:
+        return False
+    script = ScriptDirectory.from_config(config)
+    try:
+        revisions = tuple(script.iterate_revisions(destination, current or "base"))
+    except RangeNotAncestorError:
+        # A downgrade does not traverse the destructive upgrade.
+        return False
+    return any(revision.revision == "20261007_0084" for revision in revisions)
+
+
 def run_migrations_offline() -> None:
     url = get_url()
     context.configure(
@@ -38,12 +54,19 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
     )
     with context.begin_transaction():
+        if crosses_evidence_cleanup(context.get_starting_revision_argument()):
+            raise RuntimeError(
+                "MODEL_MIGRATION_REQUIRES_ONLINE_PREFLIGHT: "
+                "offline SQL cannot establish evidence preservation across 0084"
+            )
         context.run_migrations()
 
 
 def do_run_migrations(connection: Connection) -> None:
     context.configure(connection=connection, target_metadata=target_metadata)
     with context.begin_transaction():
+        if crosses_evidence_cleanup(context.get_context().get_current_heads()):
+            require_retired_evidence_archived(connection)
         context.run_migrations()
 
 

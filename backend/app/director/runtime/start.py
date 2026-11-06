@@ -12,6 +12,7 @@ from app.config import Settings
 from app.contracts.director_runtime import RuntimeInput, RuntimeScope
 from app.director.assistant_models import DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
+from app.director.runtime.capabilities import require_director_runtime_available
 from app.director.runtime.control import DirectorRuntimeControlService
 from app.director.runtime.models import DirectorRuntimeWakeup
 from app.director.runtime.routing import DirectorEngineRouter
@@ -37,11 +38,7 @@ class DirectorRuntimeStartService:
         request_key: str,
         max_steps: int,
     ) -> tuple[DirectorTurn, DirectorRuntimeWakeup]:
-        if self._settings.director_runtime_engine != "langgraph":
-            raise ConflictError(
-                "The durable Director runtime is not enabled for new turns",
-                details={"code": "DIRECTOR_RUNTIME_NOT_ENABLED", "manual_ok": True},
-            )
+        require_director_runtime_available(self._settings)
         result = await self._session.execute(
             select(DirectorProposal, DirectorThread)
             .join(DirectorThread, DirectorThread.id == DirectorProposal.thread_id)
@@ -55,19 +52,27 @@ class DirectorRuntimeStartService:
         if row is None:
             raise NotFoundError("Director proposal not found")
         proposal, thread = row
-        items = list((await self._session.scalars(
-            select(DirectorProposalItem).where(
-                DirectorProposalItem.proposal_id == proposal.id,
-                DirectorProposalItem.project_id == project.id,
-            ).order_by(DirectorProposalItem.id)
-        )).all())
+        items = list(
+            (
+                await self._session.scalars(
+                    select(DirectorProposalItem)
+                    .where(
+                        DirectorProposalItem.proposal_id == proposal.id,
+                        DirectorProposalItem.project_id == project.id,
+                    )
+                    .order_by(DirectorProposalItem.id)
+                )
+            ).all()
+        )
         grant: ProductionCommandAuthorization | None = None
         if authorization_ref is not None:
-            grant = await self._session.scalar(select(ProductionCommandAuthorization).where(
-                ProductionCommandAuthorization.id == authorization_ref,
-                ProductionCommandAuthorization.project_id == project.id,
-                ProductionCommandAuthorization.actor_id == actor.id,
-            ))
+            grant = await self._session.scalar(
+                select(ProductionCommandAuthorization).where(
+                    ProductionCommandAuthorization.id == authorization_ref,
+                    ProductionCommandAuthorization.project_id == project.id,
+                    ProductionCommandAuthorization.actor_id == actor.id,
+                )
+            )
             if grant is None:
                 raise NotFoundError("Production authorization not found")
             if thread.scope_type == "shot" and grant.shot_id != thread.scope_entity_id:
@@ -118,11 +123,6 @@ class DirectorRuntimeStartService:
             settings=self._settings,
             controls=DirectorRuntimeControlService(self._session),
         ).bind_new(turn, created=created)
-        if control is None:
-            raise ConflictError(
-                "An existing legacy turn cannot be migrated to LangGraph",
-                details={"code": "DIRECTOR_ENGINE_BINDING_CONFLICT"},
-            )
         request = RuntimeInput(
             scope=RuntimeScope(
                 workspace_id=project.workspace_id,
@@ -149,18 +149,17 @@ class DirectorRuntimeStartService:
         created: bool,
         authorization_ref: UUID | None = None,
     ) -> DirectorRuntimeWakeup | None:
-        """Bind a Turn created in this request; legacy/replayed Turns stay untouched."""
+        """Bind or replay an exact durable Turn; unbound old Turns are rejected."""
 
-        if self._settings.director_runtime_engine != "langgraph":
-            return None
+        require_director_runtime_available(self._settings)
         if turn.project_id != project.id or turn.actor_id != actor.id:
             raise NotFoundError("Director turn not found")
-        if not created and turn.runtime_execution_id is None:
-            return None
-        proposal = await self._session.scalar(select(DirectorProposal).where(
-            DirectorProposal.id == proposal_id,
-            DirectorProposal.project_id == project.id,
-        ))
+        proposal = await self._session.scalar(
+            select(DirectorProposal).where(
+                DirectorProposal.id == proposal_id,
+                DirectorProposal.project_id == project.id,
+            )
+        )
         if proposal is None:
             raise NotFoundError("Director proposal not found")
         if turn.proposal_id is None:
@@ -171,26 +170,24 @@ class DirectorRuntimeStartService:
                 details={"code": "DIRECTOR_RUNTIME_REQUEST_CONFLICT"},
             )
         intent = dict(turn.intent_snapshot or {})
-        intent.update({
-            "proposal_id": str(proposal.id),
-            "proposal_version": 1,
-            "authorization_ref": (
-                str(authorization_ref) if authorization_ref is not None else None
-            ),
-        })
+        intent.update(
+            {
+                "proposal_id": str(proposal.id),
+                "proposal_version": 1,
+                "authorization_ref": (
+                    str(authorization_ref) if authorization_ref is not None else None
+                ),
+            }
+        )
         turn.intent_snapshot = intent
         await self._session.flush()
         control = await DirectorEngineRouter(
             settings=self._settings,
             controls=DirectorRuntimeControlService(self._session),
         ).bind_new(turn, created=created)
-        if control is None:
-            return None
         max_steps_raw = (turn.request_summary or {}).get("max_steps", 6)
         max_steps = (
-            max_steps_raw
-            if isinstance(max_steps_raw, int) and 1 <= max_steps_raw <= 8
-            else 6
+            max_steps_raw if isinstance(max_steps_raw, int) and 1 <= max_steps_raw <= 8 else 6
         )
         request = RuntimeInput(
             scope=RuntimeScope(
@@ -217,12 +214,9 @@ class DirectorRuntimeStartService:
     ) -> DirectorRuntimeWakeup | None:
         """Bind a newly generated draft-only suggestion without inventing a Proposal row."""
 
-        if self._settings.director_runtime_engine != "langgraph":
-            return None
+        require_director_runtime_available(self._settings)
         if turn.project_id != project.id or turn.actor_id != actor.id:
             raise NotFoundError("Director turn not found")
-        if not created and turn.runtime_execution_id is None:
-            return None
         task = (turn.request_summary or {}).get("task")
         if (
             turn.proposal_id is not None
@@ -238,13 +232,9 @@ class DirectorRuntimeStartService:
             settings=self._settings,
             controls=DirectorRuntimeControlService(self._session),
         ).bind_new(turn, created=created)
-        if control is None:
-            return None
         max_steps_raw = (turn.request_summary or {}).get("max_steps", 4)
         max_steps = (
-            max_steps_raw
-            if isinstance(max_steps_raw, int) and 1 <= max_steps_raw <= 8
-            else 4
+            max_steps_raw if isinstance(max_steps_raw, int) and 1 <= max_steps_raw <= 8 else 4
         )
         request = RuntimeInput(
             scope=RuntimeScope(

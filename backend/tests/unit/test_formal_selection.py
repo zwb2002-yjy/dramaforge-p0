@@ -27,6 +27,7 @@ from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from tests.formal_fixture import approve_candidate
 
 
 @pytest.fixture
@@ -107,9 +108,10 @@ async def _make_keyframe_artifact(
     if version.status == "draft":
         version = await graphs.publish(version_id=version.id, published_by=user.id)
     node = (
-        materialized.nodes["keyframe"]
-        if node_type == "keyframe"
-        else materialized.nodes["video"]
+        materialized.nodes["keyframe"] if node_type == "keyframe" else materialized.nodes["video"]
+    )
+    initial_run_status = (
+        "queued" if run_status in {"completed", "cached", "completed_after_cancel"} else run_status
     )
     run = NodeRun(
         project_id=project.id,
@@ -118,11 +120,10 @@ async def _make_keyframe_artifact(
         idempotency_key=f"keyframe:{uuid4().hex}",
         input_hash="a" * 64,
         attempt_no=attempt_no,
-        status=run_status,
+        status=initial_run_status,
         input_snapshot={
             "shot_id": str(shot_id),
-            "stage": snapshot_stage
-            or ("image_keyframe" if node_type == "keyframe" else "video"),
+            "stage": snapshot_stage or ("image_keyframe" if node_type == "keyframe" else "video"),
         },
         created_by=user.id,
     )
@@ -131,7 +132,7 @@ async def _make_keyframe_artifact(
     artifact = Artifact(
         project_id=project.id,
         artifact_type=artifact_type or ("video" if node_type == "video" else "image"),
-        storage_state="stored",
+        storage_state="available",
         object_key=f"obj/{uuid4().hex}",
         content_hash=uuid4().hex * 2,
         mime_type="image/png",
@@ -141,6 +142,7 @@ async def _make_keyframe_artifact(
     session.add(artifact)
     await session.flush()
     run.result_artifact_id = artifact.id
+    run.status = run_status
     await session.flush()
     return artifact
 
@@ -149,6 +151,7 @@ async def _make_keyframe_artifact(
 async def test_set_formal_keyframe_accepts_keyframe_artifact(session: AsyncSession) -> None:
     project, shot, user = await _seed(session)
     artifact = await _make_keyframe_artifact(session, project=project, shot_id=shot.id, user=user)
+    await approve_candidate(session, shot=shot, artifact=artifact, actor_id=user.id)
     updated = await set_formal_keyframe(
         session,
         project_id=project.id,
@@ -164,6 +167,46 @@ async def test_set_formal_keyframe_accepts_keyframe_artifact(session: AsyncSessi
         shot_id=shot.id,
     )
     assert required.id == artifact.id
+
+
+@pytest.mark.parametrize("video", [False, True])
+@pytest.mark.parametrize(
+    "verdict", [None, "demo_confirmed", "rejected", "stale", "deleted_evidence"]
+)
+async def test_internal_formal_writer_has_no_ungated_default(session, video, verdict):
+    project, shot, user = await _seed(session)
+    artifact = await _make_keyframe_artifact(
+        session,
+        project=project,
+        shot_id=shot.id,
+        user=user,
+        node_type="video" if video else "keyframe",
+    )
+    if verdict is not None:
+        decision = await approve_candidate(
+            session,
+            shot=shot,
+            artifact=artifact,
+            actor_id=user.id,
+            video=video,
+            verdict="approved" if verdict in {"stale", "deleted_evidence"} else verdict,
+        )
+        if verdict == "deleted_evidence":
+            from datetime import UTC, datetime
+
+            evidence = await session.get(Artifact, decision.review_artifact_id)
+            evidence.deleted_at = datetime.now(UTC)
+            await session.flush()
+    if verdict == "stale":
+        artifact.content_hash = "f" * 64
+        await session.flush()
+    writer = set_formal_video if video else set_formal_keyframe
+    with pytest.raises(ValidationAppError) as blocked:
+        await writer(session, project_id=project.id, shot_id=shot.id, artifact_id=artifact.id)
+    assert blocked.value.details["code"] == "REVIEW_APPROVAL_REQUIRED"
+    assert shot.version == 1
+    assert shot.formal_video_artifact_id is None
+    assert shot.formal_keyframe_artifact_id is None
 
 
 @pytest.mark.asyncio
@@ -214,6 +257,7 @@ async def test_set_formal_video_accepts_video_artifact(session: AsyncSession) ->
     artifact = await _make_keyframe_artifact(
         session, project=project, shot_id=shot.id, user=user, node_type="video"
     )
+    await approve_candidate(session, shot=shot, artifact=artifact, actor_id=user.id, video=True)
     updated = await set_formal_video(
         session,
         project_id=project.id,
@@ -291,9 +335,7 @@ async def test_list_formal_candidates_returns_only_successful_real_artifacts(
     session: AsyncSession,
 ) -> None:
     project, shot, user = await _seed(session)
-    accepted = await _make_keyframe_artifact(
-        session, project=project, shot_id=shot.id, user=user
-    )
+    accepted = await _make_keyframe_artifact(session, project=project, shot_id=shot.id, user=user)
     await _make_keyframe_artifact(
         session,
         project=project,

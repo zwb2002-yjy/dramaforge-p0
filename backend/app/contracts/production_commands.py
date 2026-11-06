@@ -10,7 +10,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
-from app.production.reference_intents import ShotReferenceIntent
+from app.contracts.shot_reference import ShotReferenceIntent
 
 
 class ExecutionPlanBody(BaseModel):
@@ -29,6 +29,7 @@ class ExecutionPlanBody(BaseModel):
 
 class ExecutionBody(ExecutionPlanBody):
     plan_fingerprint: str = Field(min_length=64, max_length=64)
+    compiler_wire_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     accepted_approximations: list[str] = Field(default_factory=list)
 
 

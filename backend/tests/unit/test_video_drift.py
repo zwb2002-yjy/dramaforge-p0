@@ -45,6 +45,8 @@ def test_video_samples_include_stable_anchors_and_scene_roles(tmp_path: Path) ->
     video_bytes = _make_sample_mp4(tmp_path / "drift.mp4")
     first = extract_video_samples(video_bytes)
     second = extract_video_samples(video_bytes)
+    streamed = extract_video_samples(tmp_path / "drift.mp4")
+    assert first == streamed
 
     assert {sample.role for sample in first}.issuperset({"start", "mid", "end"})
     assert [(sample.role, sample.timestamp_seconds) for sample in first] == [

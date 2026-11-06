@@ -1,3 +1,4 @@
+import { Disclosure } from "../../components/ui";
 /**
  * AdvancedModelOptions (P4-03/MS8).
  *
@@ -7,7 +8,7 @@
 
 import { Fragment, type ReactElement, useState } from "react";
 
-import type { ParameterSpecRead } from "../../lib/api";
+import type { ParameterSpecRead } from "./api";
 import { OptionField, type OptionFieldProps } from "./DynamicCapabilityForm";
 
 export interface AdvancedModelOptionsProps {
@@ -16,6 +17,7 @@ export interface AdvancedModelOptionsProps {
   onChange: (key: string, value: unknown) => void;
   /** Reuse the same OptionFieldProps to stay consistent with the form. */
   renderField?: (props: OptionFieldProps) => ReactElement;
+  disabled?: boolean;
 }
 
 export function AdvancedModelOptions({
@@ -23,17 +25,18 @@ export function AdvancedModelOptions({
   values,
   onChange,
   renderField = (props) => <OptionField {...props} />,
+  disabled,
 }: AdvancedModelOptionsProps) {
   const [open, setOpen] = useState(false);
   const keys = Object.keys(options);
   if (keys.length === 0) return null;
   return (
-    <details
+    <Disclosure
       data-testid="advanced-model-options"
       open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onOpenChange={(event) => setOpen(event)}
+      title={<>高级参数</>}
     >
-      <summary className="cursor-pointer text-sm font-medium text-gray-700">高级参数</summary>
       <div className="mt-2 space-y-3">
         {keys.map((key) => {
           const parameter = options[key];
@@ -47,11 +50,12 @@ export function AdvancedModelOptions({
                 value: values[key],
                 onChange: (k: string, v: unknown) => onChange(k, v),
                 values,
+                disabled,
               })}
             </Fragment>
           );
         })}
       </div>
-    </details>
+    </Disclosure>
   );
 }

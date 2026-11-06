@@ -291,14 +291,13 @@ def restore_verify(
                 raise ValueError(f"object checksum does not match manifest: {item['archive_name']}")
             target_store.fput_object(target_bucket, item["object_key"], str(data_path))
             restored += 1
-        with connect(_pg_url(target_database_url)) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT count(*) FROM information_schema.tables "
-                    "WHERE table_schema = 'public'"
-                )
-                row = cur.fetchone()
-                table_count = int(row[0]) if row is not None else 0
+        with connect(_pg_url(target_database_url)) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM information_schema.tables "
+                "WHERE table_schema = 'public'"
+            )
+            row = cur.fetchone()
+            table_count = int(row[0]) if row is not None else 0
         return {
             "ok": True,
             "source_commit": manifest.get("source_commit"),
@@ -351,4 +350,4 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except (OSError, S3Error, subprocess.CalledProcessError, ValueError) as exc:
         print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}))
-        raise SystemExit(2)
+        raise SystemExit(2) from exc

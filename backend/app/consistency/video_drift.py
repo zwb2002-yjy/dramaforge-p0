@@ -28,13 +28,14 @@ def _encode_png(frame: Any) -> bytes:
     return bytes(encoded)
 
 
-def extract_video_samples(video_bytes: bytes) -> list[VideoFrameSample]:
+def extract_video_samples(video_bytes: bytes | Path) -> list[VideoFrameSample]:
     """Extract start/mid/end plus up to two strongest repeatable scene changes."""
     if not video_bytes:
         raise ValueError("video Artifact is empty")
     with tempfile.TemporaryDirectory(prefix="dramaforge-drift-") as temp_dir:
-        path = Path(temp_dir) / "source.mp4"
-        path.write_bytes(video_bytes)
+        path = video_bytes if isinstance(video_bytes, Path) else Path(temp_dir) / "source.mp4"
+        if isinstance(video_bytes, bytes):
+            path.write_bytes(video_bytes)
         capture = cv2.VideoCapture(str(path))
         try:
             if not capture.isOpened():

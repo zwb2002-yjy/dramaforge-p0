@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -41,6 +40,11 @@ def main() -> int:
     parser.add_argument("--scratch", type=Path, required=True)
     parser.add_argument("--idea", required=True)
     parser.add_argument("--script-file", type=Path, required=True)
+    parser.add_argument(
+        "--real",
+        action="store_true",
+        help="Acknowledge that this probe dispatches a real paid Provider create",
+    )
     args = parser.parse_args()
     idea = args.idea.strip()
     script_file = args.script_file.resolve()
@@ -122,9 +126,19 @@ def main() -> int:
             execution_input,
         )
         preview.raise_for_status()
+        if not args.real:
+            raise RuntimeError(
+                "This probe dispatches a real paid Provider create. Pass --real after "
+                "confirming the exact instance and per-operation Owner authorization; "
+                "registration/import/preview above are not paid."
+            )
         started = post(
             f"/api/v1/projects/{project_id}/shots/{shot_id}/executions",
-            {**execution_input, "plan_fingerprint": preview.json()["plan_fingerprint"]},
+            {
+                **execution_input,
+                "plan_fingerprint": preview.json()["plan_fingerprint"],
+                "compiler_wire_fingerprint": preview.json()["compiler_contract_preview"]["wire_fingerprint"],
+            },
         )
         started.raise_for_status()
         out["steps"] = [

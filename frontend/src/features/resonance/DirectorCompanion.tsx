@@ -1,3 +1,4 @@
+import { Button } from "../../components/ui";
 import { useIsMutating, useMutationState, useQuery } from "@tanstack/react-query";
 import { CirclePause, Radio, Sparkles } from "lucide-react";
 import { listDirectorTurns } from "../director/api";
@@ -41,7 +42,7 @@ export function DirectorCompanion({
   const turns = useQuery({
     queryKey: queryKeys.director.turns(projectId, "shot", shotId ?? "none"),
     queryFn: () => listDirectorTurns(projectId, "shot", shotId!),
-    enabled: Boolean(shotId) && projectId !== "demo",
+    enabled: Boolean(projectId) && Boolean(shotId),
     retry: false,
     refetchInterval: (query) =>
       Array.isArray(query.state.data) && query.state.data.some((turn) => ACTIVE.has(turn.status))
@@ -60,7 +61,7 @@ export function DirectorCompanion({
   const needsAttention = ["awaiting_user", "failed", "stale", "disconnected"].includes(status);
   const Icon = active ? Radio : needsAttention ? CirclePause : Sparkles;
   return (
-    <button
+    <Button
       type="button"
       className="rs-companion"
       aria-label="与导演一起创作"
@@ -82,6 +83,6 @@ export function DirectorCompanion({
               ? "正在同步"
               : (LABELS[status] ?? "导演")}
       </span>
-    </button>
+    </Button>
   );
 }

@@ -35,6 +35,17 @@ class ProductionModelProfile(Base):
             "workspace_id", "name", "project_id", name="uq_model_profile_workspace_name"
         ),
         UniqueConstraint("project_id", name="uq_model_profile_project"),
+        # PostgreSQL treats NULL project_id values as distinct, so the plain
+        # constraint cannot dedupe workspace-level profiles. This partial index
+        # closes that hole for rows without a project.
+        Index(
+            "uq_model_profile_workspace_name_null_project",
+            "workspace_id",
+            "name",
+            unique=True,
+            postgresql_where=text("project_id IS NULL"),
+            sqlite_where=text("project_id IS NULL"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)

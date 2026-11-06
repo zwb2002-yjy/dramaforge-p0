@@ -31,23 +31,33 @@ router = APIRouter(tags=["auth"])
 
 def _set_session_cookie(response: Response, *, token: str, secure: bool) -> None:
     response.set_cookie(
-        key=SESSION_COOKIE, value=token, httponly=True, samesite="lax", secure=secure,
-        max_age=SESSION_MAX_AGE_SECONDS, path="/",
+        key=SESSION_COOKIE,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        secure=secure,
+        max_age=SESSION_MAX_AGE_SECONDS,
+        path="/",
     )
 
 
 def _set_csrf_cookie(response: Response, *, token: str, secure: bool) -> None:
     response.set_cookie(
-        key=CSRF_COOKIE, value=token, httponly=False, samesite="lax", secure=secure,
-        max_age=SESSION_MAX_AGE_SECONDS, path="/",
+        key=CSRF_COOKIE,
+        value=token,
+        httponly=False,
+        samesite="lax",
+        secure=secure,
+        max_age=SESSION_MAX_AGE_SECONDS,
+        path="/",
     )
 
 
 @router.get("/auth/bootstrap-status", response_model=BootstrapStatusRead)
 async def bootstrap_status(session: SessionDep, settings: SettingsDep) -> BootstrapStatusRead:
-    owner_initialized, registration_available = await AccessService(
-        session
-    ).registration_status(public_registration_enabled=settings.public_registration_enabled)
+    owner_initialized, registration_available = await AccessService(session).registration_status(
+        public_registration_enabled=settings.public_registration_enabled
+    )
     return BootstrapStatusRead(
         owner_initialized=owner_initialized,
         registration_available=registration_available,
@@ -57,8 +67,10 @@ async def bootstrap_status(session: SessionDep, settings: SettingsDep) -> Bootst
 
 @router.post("/auth/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def register(
-    body: RegisterRequest, response: Response,
-    session: SessionDep, settings: SettingsDep,
+    body: RegisterRequest,
+    response: Response,
+    session: SessionDep,
+    settings: SettingsDep,
 ) -> UserRead:
     user = await AccessService(session).register(
         email=str(body.email),
@@ -70,7 +82,8 @@ async def register(
     _set_session_cookie(
         response,
         token=issue_session_token(
-            user_id=user.id, secret=settings.session_secret,
+            user_id=user.id,
+            secret=settings.session_secret,
         ),
         secure=secure,
     )
@@ -84,17 +97,21 @@ async def register(
 
 @router.post("/auth/login", response_model=UserRead)
 async def login(
-    body: LoginRequest, response: Response,
-    session: SessionDep, settings: SettingsDep,
+    body: LoginRequest,
+    response: Response,
+    session: SessionDep,
+    settings: SettingsDep,
 ) -> UserRead:
     user = await AccessService(session).authenticate(
-        email=str(body.email), password=body.password,
+        email=str(body.email),
+        password=body.password,
     )
     secure = settings.session_cookie_secure
     _set_session_cookie(
         response,
         token=issue_session_token(
-            user_id=user.id, secret=settings.session_secret,
+            user_id=user.id,
+            secret=settings.session_secret,
         ),
         secure=secure,
     )
@@ -107,7 +124,7 @@ async def login(
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
-async def logout(response: Response) -> Response:
+async def logout(response: Response, _: CsrfDep) -> Response:
     response.delete_cookie(SESSION_COOKIE, path="/")
     response.delete_cookie(CSRF_COOKIE, path="/")
     response.status_code = status.HTTP_204_NO_CONTENT
@@ -134,8 +151,10 @@ async def list_workspaces(user: CurrentUser, session: SessionDep) -> list[Worksp
 
 @router.post("/workspaces", response_model=WorkspaceRead, status_code=status.HTTP_201_CREATED)
 async def create_workspace(
-    body: WorkspaceCreate, user: CurrentUser,
-    session: SessionDep, _: CsrfDep,
+    body: WorkspaceCreate,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
 ) -> WorkspaceRead:
     workspace = await AccessService(session).create_workspace(name=body.name, owner=user)
     return WorkspaceRead.model_validate(workspace)
@@ -143,21 +162,29 @@ async def create_workspace(
 
 @router.get("/workspaces/{workspace_id}", response_model=WorkspaceRead)
 async def get_workspace(
-    workspace_id: UUID, user: CurrentUser, session: SessionDep,
+    workspace_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
 ) -> WorkspaceRead:
     workspace = await AccessService(session).get_workspace_for_owner(
-        workspace_id=workspace_id, user=user,
+        workspace_id=workspace_id,
+        user=user,
     )
     return WorkspaceRead.model_validate(workspace)
 
 
 @router.patch("/workspaces/{workspace_id}", response_model=WorkspaceRead)
 async def rename_workspace(
-    workspace_id: UUID, body: WorkspaceUpdate,
-    user: CurrentUser, session: SessionDep, _: CsrfDep,
+    workspace_id: UUID,
+    body: WorkspaceUpdate,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
 ) -> WorkspaceRead:
     workspace = await AccessService(session).rename_workspace(
-        workspace_id=workspace_id, name=body.name, actor=user,
+        workspace_id=workspace_id,
+        name=body.name,
+        actor=user,
     )
     return WorkspaceRead.model_validate(workspace)
 
@@ -168,8 +195,10 @@ async def rename_workspace(
     response_class=Response,
 )
 async def delete_workspace(
-    workspace_id: UUID, user: CurrentUser,
-    session: SessionDep, _: CsrfDep,
+    workspace_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
 ) -> Response:
     await AccessService(session).delete_workspace(workspace_id=workspace_id, actor=user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -141,7 +141,7 @@ async def _seed(
         graph_node_id=node.id,
         idempotency_key=f"edit-proposal:{uuid4().hex}",
         input_hash="a" * 64,
-        status="completed",
+        status="queued",
         input_snapshot={"shot_id": str(shot.id), "stage": "video"},
         output_summary={"source": "test"},
         created_by=user.id,
@@ -162,6 +162,7 @@ async def _seed(
     session.add(artifact)
     await session.flush()
     run.result_artifact_id = artifact.id
+    run.status = "completed"
     shot.formal_video_artifact_id = artifact.id
     operation = ProviderOperation(
         node_run_id=run.id,
@@ -287,6 +288,7 @@ async def test_manual_save_bumps_edit_session_version_once(session: AsyncSession
         project_id=project.id,
         session_id=edit_session.id,
         timeline={"clips": list(edit_session.timeline["clips"]), "metadata": {"manual": True}},
+        expected_session_version=1,
     )
     assert saved.version == 2
     assert saved.timeline["metadata"] == {"manual": True}
@@ -303,6 +305,7 @@ async def test_valid_reorder_duration_and_subtitle_plan_bumps_once_and_preserves
         project_id=project.id,
         session_id=edit_session.id,
         timeline=dict(edit_session.timeline),
+        expected_session_version=1,
     )
     await session.refresh(edit_session)
     facts_before = await _snapshot_facts(
@@ -387,6 +390,7 @@ async def test_stale_edit_session_proposal_marks_item_stale_without_mutation(
         project_id=project.id,
         session_id=edit_session.id,
         timeline=dict(edit_session.timeline),
+        expected_session_version=1,
     )
     await session.refresh(edit_session)
     before = (
@@ -620,8 +624,8 @@ async def test_malformed_edit_session_plans_fail_closed_without_mutation(
     assert edit_session.production_lineage == before[2]
 
 
-def test_plan_rejects_forbidden_fields_and_accepts_aliases() -> None:
-    from app.editing.proposal_plan import EditSessionTimelinePlan
+def test_plan_rejects_forbidden_fields_and_retired_aliases() -> None:
+    from app.editing.proposal_plan import EditSessionTimelineCommand, EditSessionTimelinePlan
 
     with pytest.raises(ValueError):
         EditSessionTimelinePlan.model_validate(
@@ -636,7 +640,93 @@ def test_plan_rejects_forbidden_fields_and_accepts_aliases() -> None:
                 ]
             }
         )
-    plan = EditSessionTimelinePlan.model_validate(
-        {"operations": [{"kind": "reorder_clips", "clip_ids": ["clip-a"]}]}
+    with pytest.raises(ValueError):
+        EditSessionTimelinePlan.model_validate(
+            {"operations": [{"kind": "reorder_clips", "clip_ids": ["clip-a"]}]}
+        )
+
+    session_id = str(uuid4())
+    canonical_plan = {
+        "operations": [{"operation": "reorder_clips", "clip_ids": ["clip-a"]}]
+    }
+    retired_payloads = [
+        {"session_id": session_id, "plan": canonical_plan},
+        {"edit_session_id": session_id, "timeline_plan": canonical_plan},
+        {"edit_session_id": session_id, "operations": canonical_plan["operations"]},
+    ]
+    for payload in retired_payloads:
+        with pytest.raises(ValueError):
+            EditSessionTimelineCommand.model_validate(payload)
+
+
+@pytest.mark.asyncio
+async def test_repair_proposal_acceptance_only_acknowledges_scope(session):
+    from copy import deepcopy
+
+    from app.director.editing_repair import EditingRepairRoutingRequest, EditingRepairRoutingService
+    from app.director.proposal_service import PartialApplyInput, ProposalDecision, ProposalService
+    from sqlalchemy import func
+
+    project, edit, user, shot, *_ = await _seed(session)
+    before = deepcopy(edit.timeline), edit.version, shot.version, shot.formal_video_artifact_id
+    execution_counts = [await session.scalar(select(func.count()).select_from(model))
+                        for model in (NodeRun, ProviderOperation, Artifact)]
+    routing = await EditingRepairRoutingService(session).route(
+        project_id=project.id, session_id=edit.id, actor=user,
+        request=EditingRepairRoutingRequest(expected_session_version=edit.version,
+                                            user_instruction="reshoot"),
     )
-    assert plan.operations[0].operation == "reorder_clips"
+    result = await ProposalService(session, actor=user).partial_apply(
+        project=project, proposal_id=routing.proposal_id,
+        apply_input=PartialApplyInput(decisions=[ProposalDecision(item_id=routing.item_id,
+                                                                 decision="accepted")]),
+    )
+    assert result.accepted == [routing.item_id] and not result.failed
+    assert (edit.timeline, edit.version, shot.version, shot.formal_video_artifact_id) == before
+    assert [await session.scalar(select(func.count()).select_from(model))
+            for model in (NodeRun, ProviderOperation, Artifact)] == execution_counts
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", ["stale", "foreign_shot", "auto_execute"])
+async def test_repair_acknowledgement_rechecks_scope_and_gate(session, invalid):
+    project, edit, user, shot, *_ = await _seed(session)
+    payload = {"edit_session_id": str(edit.id), "shot_ids": [str(shot.id)],
+               "no_auto_execute": True}
+    version = edit.version
+    if invalid == "stale":
+        version += 1
+    elif invalid == "foreign_shot":
+        payload["shot_ids"] = [str(uuid4())]
+    else:
+        payload["no_auto_execute"] = False
+    with pytest.raises(ProposalCommandError):
+        await ProposalCommandRegistry(session, actor_id=user.id).apply(
+            project_id=project.id, command="editing.repair_proposal", payload=payload,
+            expected_target_version=version,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", ["missing", "unformal", "foreign"])
+async def test_explicit_timeline_selection_cannot_silently_omit_a_shot(session, invalid):
+    from app.editing.timeline_builder import build_edit_session_from_shots
+    from app.shared.errors import ValidationAppError
+    from sqlalchemy import func
+
+    project, edit, user, shot, *_ = await _seed(session)
+    bad = uuid4()
+    if invalid == "unformal":
+        other = Shot(project_id=project.id, scene_id=shot.scene_id, shot_number=2,
+                     visual_description="Unfinished")
+        session.add(other)
+        await session.flush()
+        bad = other.id
+    elif invalid == "foreign":
+        _, _, _, foreign_shot, *_ = await _seed(session)
+        bad = foreign_shot.id
+    count = await session.scalar(select(func.count(EditSession.id)))
+    with pytest.raises(ValidationAppError):
+        await build_edit_session_from_shots(session, project_id=project.id, user_id=user.id,
+                                            shot_ids=[shot.id, bad])
+    assert await session.scalar(select(func.count(EditSession.id))) == count

@@ -95,6 +95,10 @@ class _FakeSession:
             return self.workspace
         return None
 
+    async def scalar(self, statement: object) -> NodeRun:
+        # Worker admission now locks/reloads the NodeRun before taking its lease.
+        return self.run
+
     async def commit(self) -> None:
         self.commits += 1
 
@@ -302,6 +306,8 @@ async def test_worker_honors_provider_retry_after_and_requeues_same_run(
     assert first.rollbacks == 1
     assert fallback.commits == 1
     assert run.status == "queued"
+    assert run.started_at is None
+    assert (run.next_attempt_at - datetime.now(UTC)).total_seconds() > 15
     assert run.id == first.run.id == fallback.run.id
 
 

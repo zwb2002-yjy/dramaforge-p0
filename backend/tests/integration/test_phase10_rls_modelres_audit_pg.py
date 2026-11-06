@@ -34,17 +34,14 @@ from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun
-from app.production.models import (
-    ProductionExperiment,
-    ShotExperiment,
-    ShotReferenceBinding,
-)
+from app.production.models import ExperimentBranch, ShotReferenceBinding
 from app.production.workbench_execution import (
+    WorkbenchExecutionError,
     WorkbenchExecutionInput,
     WorkbenchExecutionService,
 )
+from app.providers.catalog_loader import hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
-from app.providers.catalog_seed_data import SEED_MANIFESTS, hash_manifest
 from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.models import (
@@ -58,6 +55,7 @@ from app.shared.security import hash_password
 from pg_support import available, database_url
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from tests.unit.model_infra_fixture import unit_video_manifest
 
 
 def _postgres_is_available() -> bool:
@@ -90,8 +88,7 @@ P10_05_TABLES = [
     "asset_tag_links",  # tag
     "shot_reference_bindings",
     "asset_version_references",  # binding
-    "production_experiments",
-    "shot_experiments",  # experiment
+    "experiment_branches",  # experiment
     "review_annotations",  # annotation
     "director_threads",
     "director_messages",  # director assistant
@@ -178,7 +175,7 @@ async def _seed_user_workspace_projects(session: AsyncSession, suffix: str) -> d
             name="Lin Xia",
             description="Lead",
             metadata_json={},
-            status="draft",
+            status="formal",
             created_by=user.id,
         )
     )
@@ -237,21 +234,13 @@ async def _seed_user_workspace_projects(session: AsyncSession, suffix: str) -> d
             proposal_id=proposal.id, project_id=project_b.id, command="shot.update_design"
         )
     )
-    experiment = ProductionExperiment(
-        project_id=project_b.id,
-        name="B exp",
-        idempotency_key=f"exp-{suffix}",
-        status="draft",
-        created_by=user.id,
-    )
-    session.add(experiment)
-    await session.flush()
     session.add(
-        ShotExperiment(
-            production_experiment_id=experiment.id,
+        ExperimentBranch(
             project_id=project_b.id,
-            shot_id=shot.id,
-            prompts={},
+            source_shot_id=shot.id,
+            name="B exp",
+            idempotency_key=f"exp-{suffix}",
+            status="draft",
             created_by=user.id,
         )
     )
@@ -468,12 +457,8 @@ async def test_phase10_rls_cross_project_negative_pg(pg_session: AsyncSession) -
             select(DirectorProposalItem.id).where(DirectorProposalItem.project_id == project_b.id),
         ),
         (
-            "production_experiments",
-            select(ProductionExperiment.id).where(ProductionExperiment.project_id == project_b.id),
-        ),
-        (
-            "shot_experiments",
-            select(ShotExperiment.id).where(ShotExperiment.project_id == project_b.id),
+            "experiment_branches",
+            select(ExperimentBranch.id).where(ExperimentBranch.project_id == project_b.id),
         ),
         (
             "shot_reference_bindings",
@@ -556,7 +541,7 @@ async def _seed_professional_resolution(session: AsyncSession, suffix: str) -> d
     shot.formal_keyframe_artifact_id = keyframe.id
     await session.flush()
 
-    manifest = next(item for item in SEED_MANIFESTS if item["model_id"] == "agnes-video-v2.0")
+    manifest = unit_video_manifest()
     model_id = f"p10-res-{suffix}"
     entry = ModelCatalogEntry(
         provider_type="agnes",
@@ -656,6 +641,7 @@ async def _seed_professional_resolution(session: AsyncSession, suffix: str) -> d
         "keyframe": keyframe,
         "credential_revision": credential_revision,
         "connection_revision": connection_revision,
+        "profile": profile,
     }
 
 
@@ -675,6 +661,32 @@ async def test_phase10_professional_resolution_no_bypass_pg(pg_session: AsyncSes
     )
 
     service = WorkbenchExecutionService(pg_session, user_id=user.id)
+    # A saved Profile option must be consumed, not silently ignored. The
+    # controlled Agnes contract does not declare seed, so reject it before any
+    # run exists; explicitly repair the test Profile before testing dispatch.
+    with pytest.raises(WorkbenchExecutionError) as invalid_profile:
+        await service.build_plan(
+            project=project,
+            execution_input=WorkbenchExecutionInput(
+                project_id=project.id,
+                stage="video",
+                shot_id=shot.id,
+                prompt="Lin Xia turns at the corner",
+                semantic_intent={"action": "turn"},
+                mode_id="explicit_binding",
+            ),
+        )
+    assert invalid_profile.value.details["code"] == "MODEL_OPTION_UNDECLARED"
+    assert invalid_profile.value.details["option"] == "seed"
+    assert (
+        await pg_session.scalar(select(NodeRun.id).where(NodeRun.project_id == project.id)) is None
+    )
+    profile = seed["profile"]
+    profile.bindings = {
+        slot: {**value, "native_options": {}} for slot, value in profile.bindings.items()
+    }
+    profile.version += 1
+    await pg_session.flush()
     plan = await service.build_plan(
         project=project,
         execution_input=WorkbenchExecutionInput(
@@ -786,3 +798,219 @@ async def test_editing_recovery_reads_obey_runtime_role_and_frozen_scope_pg(
     assert history[0].timeline_version == 7
     assert history[0].result is None
     assert not pg_session.new and not pg_session.dirty
+
+
+@pytest.mark.asyncio
+async def test_asset_mutation_responses_keep_tags_across_commit_pg(
+    pg_session: AsyncSession,
+) -> None:
+    from app.api.v1.assets import (
+        AssetFromArtifactBody,
+        _asset_tag_names,
+        create_asset_from_artifact,
+        recycle_asset,
+        restore_asset,
+    )
+    from app.assets.from_artifact_service import asset_creation_request_hash
+    from app.assets.models import AssetTag, AssetTagLink
+
+    user = User(email=f"tag-response-{uuid4().hex}@example.com", display_name="Owner",
+                password_hash=hash_password("password123"))
+    pg_session.add(user)
+    await pg_session.flush()
+    workspace = Workspace(owner_user_id=user.id, name="Tags")
+    pg_session.add(workspace)
+    await pg_session.flush()
+    project = Project(workspace_id=workspace.id, name="Tags", aspect_ratio="9:16", budget_limit=0)
+    pg_session.add(project)
+    await pg_session.flush()
+    asset = Asset(project_id=project.id, kind="character", name="Lead", status="active")
+    body = AssetFromArtifactBody(kind="character", name="Lead", artifact_id=uuid4())
+    asset.creation_request_key = "replay-tagged-card"
+    asset.creation_request_hash = asset_creation_request_hash(
+        artifact_id=body.artifact_id, kind=body.kind, name=body.name,
+        description=body.description, reference_role=body.reference_role, metadata=body.metadata,
+    )
+    tag = AssetTag(project_id=project.id, name="lead", normalized_name="lead")
+    pg_session.add_all([asset, tag])
+    await pg_session.flush()
+    pg_session.add(AssetTagLink(asset_id=asset.id, tag_id=tag.id))
+    await pg_session.commit()
+    # The session-scoped role survives each endpoint commit; LOCAL GUCs do not.
+    await pg_session.execute(text("SET ROLE dramaforge_app"))
+    pg_session.info["selected_workspace_id"] = workspace.id
+    try:
+        for endpoint in (recycle_asset, restore_asset):
+            await set_rls_context(pg_session, user_id=user.id, workspace_id=workspace.id,
+                                  project_id=project.id)
+            response = await endpoint(project_id=project.id, asset_id=asset.id, user=user,
+                                      session=pg_session, _csrf=None)
+            assert response.tags == ["lead"]
+            assert await _asset_tag_names(pg_session, asset.id) == []
+        await set_rls_context(pg_session, user_id=user.id, workspace_id=workspace.id,
+                              project_id=project.id)
+        replay = await create_asset_from_artifact(
+            project_id=project.id, body=body, user=user, session=pg_session,
+            _csrf=None, idempotency_key="replay-tagged-card",
+        )
+        assert replay.id == asset.id and replay.tags == ["lead"]
+    finally:
+        await pg_session.rollback()
+        await pg_session.execute(text("RESET ROLE"))
+        await pg_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_terminal_execution_changed_is_emitted_by_database_pg(
+    pg_session: AsyncSession,
+) -> None:
+    from app.events.models import EventLog, OutboxEvent
+    from app.execution.models import GraphNode
+    from app.production.models import GraphVersion, ProductionGraph
+
+    seeded = await _seed_user_workspace_projects(pg_session, uuid4().hex[:8])
+    project, shot, user = seeded["project_b"], seeded["shot"], seeded["user"]
+    graph = ProductionGraph(project_id=project.id, scope_type="shot", scope_entity_id=shot.id,
+                            template_key="shot-p0-v1", created_by=user.id)
+    pg_session.add(graph)
+    await pg_session.flush()
+    version = GraphVersion(graph_id=graph.id, version_number=1, definition_hash="f" * 64)
+    pg_session.add(version)
+    await pg_session.flush()
+    node = GraphNode(graph_version_id=version.id, node_key="video", node_type="video",
+                     display_name="Video")
+    pg_session.add(node)
+    await pg_session.flush()
+    run = NodeRun(project_id=project.id, graph_version_id=version.id, graph_node_id=node.id,
+                  idempotency_key=f"notice-{uuid4()}", input_hash="a" * 64, status="running",
+                  input_snapshot={"workbench_plan": {}, "shot_id": str(shot.id)},
+                  created_by=user.id)
+    pg_session.add(run)
+    await pg_session.flush()
+    await pg_session.execute(text("SET LOCAL ROLE dramaforge_app"))
+    await set_rls_context(pg_session, user_id=user.id, workspace_id=seeded["workspace"].id,
+                          project_id=project.id)
+    run.status = "failed"
+    await pg_session.flush()
+    notices = list(await pg_session.scalars(select(EventLog).where(
+        EventLog.aggregate_id == shot.id, EventLog.event_type == "execution_changed")))
+    assert len(notices) == 1
+    assert notices[0].payload["notice"]["node_run_id"] == str(run.id)
+    outbox = await pg_session.scalar(select(OutboxEvent).where(
+        OutboxEvent.event_id == notices[0].event_id, OutboxEvent.topic == "production.facts.v1"))
+    assert outbox is not None
+    # Rolled-back facts and notices disappear together.
+    notice_id = notices[0].event_id
+    await pg_session.rollback()
+    assert await pg_session.scalar(select(EventLog).where(EventLog.event_id == notice_id)) is None
+    assert await pg_session.scalar(select(OutboxEvent).where(
+        OutboxEvent.event_id == notice_id,
+    )) is None
+
+
+@pytest.mark.asyncio
+async def test_experiment_replay_keeps_run_states_before_rls_commit_pg(
+    pg_session: AsyncSession,
+) -> None:
+    from app.api.v1.experiments import create_experiment
+    from app.execution.models import GraphNode
+    from app.production.experiment_service import ExperimentCreateBody, create_experiment_branch
+    from app.production.models import GraphVersion, ProductionGraph
+
+    seeded = await _seed_user_workspace_projects(pg_session, uuid4().hex[:8])
+    project, shot, user = seeded["project_b"], seeded["shot"], seeded["user"]
+    body = ExperimentCreateBody(name="Replay", idempotency_key=f"replay-{uuid4()}",
+                                source_shot_id=shot.id)
+    branch = await create_experiment_branch(pg_session, project_id=project.id,
+                                             actor_id=user.id, body=body)
+    graph = ProductionGraph(project_id=project.id, scope_type="shot", scope_entity_id=shot.id,
+                            template_key="shot-p0-v1", created_by=user.id)
+    pg_session.add(graph)
+    await pg_session.flush()
+    version = GraphVersion(graph_id=graph.id, version_number=1, definition_hash="a" * 64)
+    pg_session.add(version)
+    await pg_session.flush()
+    node = GraphNode(graph_version_id=version.id, node_key="video", node_type="video",
+                     display_name="Video")
+    pg_session.add(node)
+    await pg_session.flush()
+    run = NodeRun(project_id=project.id, graph_version_id=version.id, graph_node_id=node.id,
+                  idempotency_key=f"exp-{uuid4()}", input_hash="c" * 64, status="failed",
+                  input_snapshot={"experiment_id": str(branch.id), "node_key": "video"},
+                  created_by=user.id)
+    pg_session.add(run)
+    await pg_session.flush()
+    branch.status = "running"
+    branch.parameters = {**branch.parameters, "run_ids": [str(run.id)]}
+    await pg_session.commit()
+    await pg_session.execute(text("SET ROLE dramaforge_app"))
+    pg_session.info["selected_workspace_id"] = seeded["workspace"].id
+    try:
+        await set_rls_context(pg_session, user_id=user.id, workspace_id=seeded["workspace"].id,
+                              project_id=project.id)
+        replay = await create_experiment(project_id=project.id, body=body, user=user,
+                                          session=pg_session, _csrf=None)
+        assert replay.id == branch.id
+        assert replay.comparison["run_states"][0]["run_id"] == str(run.id)
+        assert replay.comparison["run_states"][0]["status"] == "failed"
+        # An unscoped read after commit would have hidden precisely this run.
+        assert await pg_session.scalar(select(NodeRun).where(NodeRun.id == run.id)) is None
+    finally:
+        await pg_session.rollback()
+        await pg_session.execute(text("RESET ROLE"))
+        await pg_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_synchronous_image_receipt_is_discovered_without_remote_id_pg(
+    pg_session: AsyncSession,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.execution.models import GraphNode, ProviderOperation
+    from app.execution.synchronous_results import SynchronousImageReceipt
+    from app.production.models import GraphVersion, ProductionGraph
+    from app.shared.db import list_resumable_provider_node_run_rls_scopes
+
+    seeded = await _seed_user_workspace_projects(pg_session, uuid4().hex[:8])
+    project, shot, user = seeded["project_b"], seeded["shot"], seeded["user"]
+    graph = ProductionGraph(project_id=project.id, scope_type="shot", scope_entity_id=shot.id,
+                            template_key="shot-p0-v1", created_by=user.id)
+    pg_session.add(graph)
+    await pg_session.flush()
+    version = GraphVersion(graph_id=graph.id, version_number=1, definition_hash="d" * 64)
+    pg_session.add(version)
+    await pg_session.flush()
+    node = GraphNode(graph_version_id=version.id, node_key="keyframe", node_type="keyframe",
+                     display_name="Keyframe")
+    pg_session.add(node)
+    await pg_session.flush()
+    stale = datetime.now(UTC) - timedelta(hours=2)
+    run = NodeRun(project_id=project.id, graph_version_id=version.id, graph_node_id=node.id,
+                  idempotency_key=f"sync-{uuid4()}", input_hash="e" * 64, status="running",
+                  input_snapshot={"shot_id": str(shot.id)}, created_by=user.id,
+                  started_at=stale, created_at=stale)
+    pg_session.add(run)
+    await pg_session.flush()
+    operation = ProviderOperation(node_run_id=run.id, operation_kind="image",
+        actual_provider="openai_compatible_media", actual_model="image",
+        request_fingerprint="f" * 64, execution_path_version="unified-v1",
+        status="submitted", created_at=stale, submitted_at=stale)
+    pg_session.add(operation)
+    await pg_session.flush()
+    operation.response_summary = {"synchronous_result": SynchronousImageReceipt(
+        operation_id=operation.id, node_run_id=run.id,
+        artifact_uri="https://media.example/received.png",
+    ).model_dump(mode="json")}
+    await pg_session.commit()
+    await pg_session.execute(text("SET ROLE dramaforge_app"))
+    try:
+        candidates = await list_resumable_provider_node_run_rls_scopes(pg_session, limit=50)
+        match = next(scope for run_id, scope in candidates if run_id == run.id)
+        assert match.project_id == project.id
+        assert match.workspace_id == seeded["workspace"].id
+        assert match.user_id == user.id
+    finally:
+        await pg_session.rollback()
+        await pg_session.execute(text("RESET ROLE"))
+        await pg_session.commit()

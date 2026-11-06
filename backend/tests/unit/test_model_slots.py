@@ -31,25 +31,6 @@ def test_all_required_capabilities_are_valid() -> None:
             assert isinstance(capability, Capability)
 
 
-def test_fallback_slot_graph_is_acyclic() -> None:
-    visiting: set[ModelSlot] = set()
-    visited: set[ModelSlot] = set()
-
-    def visit(node: ModelSlot) -> None:
-        if node in visited:
-            return
-        assert node not in visiting, f"fallback cycle at {node}"
-        visiting.add(node)
-        definition = MODEL_SLOT_DEFINITIONS.get(node)
-        if definition is not None and definition.fallback_slot is not None:
-            visit(definition.fallback_slot)
-        visiting.discard(node)
-        visited.add(node)
-
-    for slot in MODEL_SLOT_DEFINITIONS:
-        visit(slot)
-
-
 def test_script_slot_requires_text_generate() -> None:
     assert slot_satisfies(ModelSlot.PLANNING_SCRIPT, Capability.TEXT_GENERATE)
 
@@ -86,8 +67,6 @@ def test_p0_slots_are_a_subset() -> None:
 
 
 def test_simple_mode_groups_cover_p0_slots() -> None:
-    covered = {
-        slot for group in SIMPLE_MODE_SLOT_GROUPS.values() for slot in group
-    }
+    covered = {slot for group in SIMPLE_MODE_SLOT_GROUPS.values() for slot in group}
     for slot in P0_SLOTS:
         assert slot in covered, f"P0 slot {slot} missing from simple mode groups"

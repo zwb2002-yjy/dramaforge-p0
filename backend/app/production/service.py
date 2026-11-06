@@ -401,7 +401,14 @@ class GraphService:
         return version
 
     async def publish(self, *, version_id: UUID, published_by: UUID) -> GraphVersion:
-        version = await self.get_version(version_id)
+        # Serialize publish against concurrent callers; a stale DRAFT read
+        # must not overwrite the first published graph version.
+        version = await self._session.scalar(
+            select(GraphVersion).where(GraphVersion.id == version_id)
+            .with_for_update().execution_options(populate_existing=True)
+        )
+        if version is None:
+            raise NotFoundError("graph version not found")
         if version.status != GraphStatus.DRAFT.value:
             raise ValidationAppError("only draft versions can be published")
         materialized = await self.materialize_definition(version_id=version.id)

@@ -49,6 +49,14 @@ def test_gate_1_scene_assembler_deterministic_coordinates() -> None:
     assert door["x"] == 0.5 and door["y"] == 0.15  # north
 
 
+def test_scene_assembler_clamps_large_cast_inside_the_grid() -> None:
+    spec = SceneLayoutSpec(characters=[CharacterSpec(name=f"C{index}") for index in range(9)])
+    elements = SceneAssembler().assemble(spec)["elements"]
+    coordinates = [(item["x"], item["y"]) for item in elements]
+    assert coordinates
+    assert all(0 <= x <= 1 and 0 <= y <= 1 for x, y in coordinates), coordinates
+
+
 async def _seed_scene_shot(session: AsyncSession) -> tuple[Project, Shot, User]:
     user = User(
         email=f"board-{uuid4().hex}@example.com",

@@ -124,12 +124,17 @@ async def test_apply_shot_commands_with_version_check(session: AsyncSession) -> 
 
 @pytest.mark.asyncio
 async def test_apply_reference_add(session: AsyncSession) -> None:
+    from app.assets.models import Asset
+
     project, shot, user = await _seed(session)
+    asset = Asset(project_id=project.id, kind="character", name="Lead")
+    session.add(asset)
+    await session.flush()
     registry = ProposalCommandRegistry(session, actor_id=user.id)
     await registry.apply(
         project_id=project.id,
         command="shot_reference.add",
-        payload={"shot_id": str(shot.id), "purpose": "identity", "asset_id": str(uuid4())},
+        payload={"shot_id": str(shot.id), "purpose": "identity", "asset_id": str(asset.id)},
     )
     rows = (
         await session.execute(
@@ -168,3 +173,82 @@ async def test_proposal_item_persistence(session: AsyncSession) -> None:
     assert len(rows) == 1
     assert rows[0].command == "shot.update_director_state"
     assert rows[0].expected_target_version == 1
+
+
+@pytest.mark.asyncio
+async def test_scene_design_command_rechecks_scope_and_version(session: AsyncSession) -> None:
+    project, shot, user = await _seed(session)
+    other, _, _ = await _seed(session)
+    scene = await session.get(Scene, shot.scene_id)
+    assert scene is not None
+    registry = ProposalCommandRegistry(session, actor_id=user.id)
+    payload = {"scene_id": str(scene.id), "design_state": {"camera": "new"}}
+    with pytest.raises(ProposalCommandError, match="not found"):
+        await registry.apply(project_id=other.id, command="scene.update_design",
+                             payload=payload, expected_target_version=scene.version)
+    for stale in (None, scene.version + 1):
+        with pytest.raises(ProposalCommandError, match="stale"):
+            await registry.apply(project_id=project.id, command="scene.update_design",
+                                 payload=payload, expected_target_version=stale)
+    version = scene.version
+    await registry.apply(project_id=project.id, command="scene.update_design",
+                         payload=payload, expected_target_version=version)
+    assert scene.design_state == {"camera": "new"}
+    assert scene.version == version + 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command,kind", [
+    ("shot.update_image_prompt", "shot"),
+    ("story.upsert_episode", "episode"),
+    ("story.upsert_scene", "scene"),
+    ("story.upsert_shot", "shot"),
+])
+async def test_proposal_target_refreshes_before_version_check(session, command, kind):
+    from app.assets.models import Episode
+    from sqlalchemy import update
+
+    project, shot, user = await _seed(session)
+    scene = await session.get(Scene, shot.scene_id)
+    episode = await session.get(Episode, scene.episode_id)
+    target = {"shot": shot, "scene": scene, "episode": episode}[kind]
+    await session.execute(update(type(target)).where(type(target).id == target.id)
+        .values(version=2).execution_options(synchronize_session=False))
+    assert target.version == 1
+    with pytest.raises(ProposalCommandError, match="stale"):
+        await ProposalCommandRegistry(session, actor_id=user.id).apply(
+            project_id=project.id, command=command, expected_target_version=1,
+            payload={"shot_id": str(shot.id), "episode_number": 1, "scene_number": 1,
+                     "shot_number": 1, "image_prompt": "overwrite", "title": "overwrite"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_reference_command_rejects_foreign_asset(session):
+    from app.assets.models import Asset
+    project, shot, user = await _seed(session)
+    other, _, _ = await _seed(session)
+    foreign = Asset(project_id=other.id, kind="character", name="Foreign")
+    session.add(foreign)
+    await session.flush()
+    with pytest.raises(ProposalCommandError, match="asset not found"):
+        await ProposalCommandRegistry(session, actor_id=user.id).apply(
+            project_id=project.id, command="shot_reference.add",
+            payload={"shot_id": str(shot.id), "asset_id": str(foreign.id)},
+        )
+
+
+@pytest.mark.asyncio
+async def test_reference_remove_rechecks_shot_scope(session):
+    project, shot, user = await _seed(session)
+    other = Shot(project_id=project.id, scene_id=shot.scene_id, shot_number=2,
+                 visual_description="Other")
+    binding = ShotReferenceBinding(project_id=project.id, shot_id=shot.id,
+        purpose="identity", asset_id=uuid4(), created_by=user.id)
+    session.add_all([other, binding])
+    await session.flush()
+    with pytest.raises(ProposalCommandError, match="binding not found"):
+        await ProposalCommandRegistry(session, actor_id=user.id).apply(
+            project_id=project.id, command="shot_reference.remove",
+            payload={"shot_id": str(other.id), "binding_id": str(binding.id)},
+        )

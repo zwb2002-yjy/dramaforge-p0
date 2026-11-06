@@ -1,0 +1,356 @@
+{
+  "version": 1,
+  "source_commit": "ca8f8b7555768b958fd372608aaf34c2ac430f3d",
+  "dependencies": [
+    {
+      "from": "app.access.projects",
+      "to": "app.director.creative_capabilities.creative_compiler",
+      "reason": "ARCHITECTURE_MAPPING §4.6: Project creation validates, compiles and freezes its initial creative profile. Remove after application orchestration injects validated inputs while preserving atomic project/profile creation, ownership and versions."
+    },
+    {
+      "from": "app.access.projects",
+      "to": "app.director.creative_capabilities.creative_templates",
+      "reason": "ARCHITECTURE_MAPPING §4.6: Project creation validates, compiles and freezes its initial creative profile. Remove after application orchestration injects validated inputs while preserving atomic project/profile creation, ownership and versions."
+    },
+    {
+      "from": "app.access.projects",
+      "to": "app.director.creative_capabilities.freeze",
+      "reason": "ARCHITECTURE_MAPPING §4.6: Project creation validates, compiles and freezes its initial creative profile. Remove after application orchestration injects validated inputs while preserving atomic project/profile creation, ownership and versions."
+    },
+    {
+      "from": "app.access.projects",
+      "to": "app.director.creative_capabilities.packs_library",
+      "reason": "ARCHITECTURE_MAPPING §4.6: Project creation validates, compiles and freezes its initial creative profile. Remove after application orchestration injects validated inputs while preserving atomic project/profile creation, ownership and versions."
+    },
+    {
+      "from": "app.assets.from_artifact_service",
+      "to": "app.execution.models",
+      "reason": "ARCHITECTURE_MAPPING §4.13: Asset creation validates an existing Artifact before atomic Asset/Version/Reference creation. Remove through an explicit production-facts boundary preserving ownership, storage/type checks and idempotency."
+    },
+    {
+      "from": "app.assets.scene_service",
+      "to": "app.production.models",
+      "reason": "ARCHITECTURE_MAPPING §4.13: Scene impact reports read ExperimentBranch membership. Remove through a typed impact/facts query preserving project filtering and confirmation."
+    },
+    {
+      "from": "app.director.assistant_context",
+      "to": "app.execution.models",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Director reads canonical production facts for context/reconciliation. Remove through typed fact ports preserving exact project/run/artifact identity and recovery; do not create a second fact store."
+    },
+    {
+      "from": "app.director.assistant_context",
+      "to": "app.production.models",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Director reads canonical production facts for context/reconciliation. Remove through typed fact ports preserving exact project/run/artifact identity and recovery; do not create a second fact store."
+    },
+    {
+      "from": "app.director.assistant_context",
+      "to": "app.providers.model_profiles.service",
+      "reason": "ARCHITECTURE_MAPPING §4.3: Director reads effective project model configuration or task-slot identity. Remove when neutral text/model contracts supply the same exact identities without default substitution."
+    },
+    {
+      "from": "app.director.context_builder",
+      "to": "app.providers.model_profiles.slots",
+      "reason": "ARCHITECTURE_MAPPING §4.3: Director reads effective project model configuration or task-slot identity. Remove when neutral text/model contracts supply the same exact identities without default substitution."
+    },
+    {
+      "from": "app.director.editing_suggestion",
+      "to": "app.providers.model_profiles.slots",
+      "reason": "ARCHITECTURE_MAPPING §4.3: Director reads effective project model configuration or task-slot identity. Remove when neutral text/model contracts supply the same exact identities without default substitution."
+    },
+    {
+      "from": "app.director.proposal_commands",
+      "to": "app.execution.models",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Explicit proposal Apply invokes production mutation/validation or notices. Remove through the canonical application boundary preserving user gates, atomicity, deletion safeguards and unique ExperimentBranch semantics."
+    },
+    {
+      "from": "app.director.proposal_commands",
+      "to": "app.production.experiment_service",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Explicit proposal Apply invokes production mutation/validation or notices. Remove through the canonical application boundary preserving user gates, atomicity, deletion safeguards and unique ExperimentBranch semantics."
+    },
+    {
+      "from": "app.director.proposal_commands",
+      "to": "app.production.models",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Explicit proposal Apply invokes production mutation/validation or notices. Remove through the canonical application boundary preserving user gates, atomicity, deletion safeguards and unique ExperimentBranch semantics."
+    },
+    {
+      "from": "app.director.proposal_service",
+      "to": "app.production.application.events",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Explicit proposal Apply invokes production mutation/validation or notices. Remove through the canonical application boundary preserving user gates, atomicity, deletion safeguards and unique ExperimentBranch semantics."
+    },
+    {
+      "from": "app.director.recommendation",
+      "to": "app.providers.model_profiles.slots",
+      "reason": "ARCHITECTURE_MAPPING §4.3: Director reads effective project model configuration or task-slot identity. Remove when neutral text/model contracts supply the same exact identities without default substitution."
+    },
+    {
+      "from": "app.director.runtime.delegation",
+      "to": "app.production.application.authorization",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Director runtime consumes production authorization, plans and receipts. Remove through injected typed ports preserving one-shot grants, same-lock plan revalidation, compiler consent and unknown-submission protection."
+    },
+    {
+      "from": "app.director.runtime.delegation",
+      "to": "app.production.application.commands",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Director runtime consumes production authorization, plans and receipts. Remove through injected typed ports preserving one-shot grants, same-lock plan revalidation, compiler consent and unknown-submission protection."
+    },
+    {
+      "from": "app.director.runtime.delegation",
+      "to": "app.production.workbench_execution",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Director runtime consumes production authorization, plans and receipts. Remove through injected typed ports preserving one-shot grants, same-lock plan revalidation, compiler consent and unknown-submission protection."
+    },
+    {
+      "from": "app.director.runtime.domain_tools",
+      "to": "app.production.application.authorization",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Director runtime consumes production authorization, plans and receipts. Remove through injected typed ports preserving one-shot grants, same-lock plan revalidation, compiler consent and unknown-submission protection."
+    },
+    {
+      "from": "app.director.runtime.domain_tools",
+      "to": "app.production.application.facts",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Director runtime consumes production authorization, plans and receipts. Remove through injected typed ports preserving one-shot grants, same-lock plan revalidation, compiler consent and unknown-submission protection."
+    },
+    {
+      "from": "app.director.runtime.domain_tools",
+      "to": "app.production.command_models",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Director runtime consumes production authorization, plans and receipts. Remove through injected typed ports preserving one-shot grants, same-lock plan revalidation, compiler consent and unknown-submission protection."
+    },
+    {
+      "from": "app.director.runtime.reconcile",
+      "to": "app.production.application.facts",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Director reads canonical production facts for context/reconciliation. Remove through typed fact ports preserving exact project/run/artifact identity and recovery; do not create a second fact store."
+    },
+    {
+      "from": "app.director.runtime.start",
+      "to": "app.production.command_models",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Director runtime consumes production authorization, plans and receipts. Remove through injected typed ports preserving one-shot grants, same-lock plan revalidation, compiler consent and unknown-submission protection."
+    },
+    {
+      "from": "app.director.story_generation",
+      "to": "app.providers.model_profiles.slots",
+      "reason": "ARCHITECTURE_MAPPING §4.3: Director reads effective project model configuration or task-slot identity. Remove when neutral text/model contracts supply the same exact identities without default substitution."
+    },
+    {
+      "from": "app.director.suggestion",
+      "to": "app.providers.model_profiles.slots",
+      "reason": "ARCHITECTURE_MAPPING §4.3: Director reads effective project model configuration or task-slot identity. Remove when neutral text/model contracts supply the same exact identities without default substitution."
+    },
+    {
+      "from": "app.director.text_model",
+      "to": "app.providers.capabilities",
+      "reason": "ARCHITECTURE_MAPPING §4.3: TextModelPort and its implementation use Provider request/result/context types and routing. Remove after DTO ownership and implementation injection are separated together; moving the Protocol alone is insufficient."
+    },
+    {
+      "from": "app.director.text_model",
+      "to": "app.providers.contracts.common",
+      "reason": "ARCHITECTURE_MAPPING §4.3: TextModelPort and its implementation use Provider request/result/context types and routing. Remove after DTO ownership and implementation injection are separated together; moving the Protocol alone is insufficient."
+    },
+    {
+      "from": "app.director.text_model",
+      "to": "app.providers.contracts.text",
+      "reason": "ARCHITECTURE_MAPPING §4.3: TextModelPort and its implementation use Provider request/result/context types and routing. Remove after DTO ownership and implementation injection are separated together; moving the Protocol alone is insufficient."
+    },
+    {
+      "from": "app.director.text_model",
+      "to": "app.providers.registry",
+      "reason": "ARCHITECTURE_MAPPING §4.3: TextModelPort and its implementation use Provider request/result/context types and routing. Remove after DTO ownership and implementation injection are separated together; moving the Protocol alone is insufficient."
+    },
+    {
+      "from": "app.director.text_model",
+      "to": "app.providers.router",
+      "reason": "ARCHITECTURE_MAPPING §4.3: TextModelPort and its implementation use Provider request/result/context types and routing. Remove after DTO ownership and implementation injection are separated together; moving the Protocol alone is insufficient."
+    },
+    {
+      "from": "app.director.text_transport",
+      "to": "app.providers.capabilities",
+      "reason": "ARCHITECTURE_MAPPING §4.3: Text invocation resolves exact model/connection identity and constructs the adapter. Remove after a contract port preserves invocation evidence, unknown-submission handling, errors and test seams."
+    },
+    {
+      "from": "app.director.text_transport",
+      "to": "app.providers.contracts.common",
+      "reason": "ARCHITECTURE_MAPPING §4.3: Text invocation resolves exact model/connection identity and constructs the adapter. Remove after a contract port preserves invocation evidence, unknown-submission handling, errors and test seams."
+    },
+    {
+      "from": "app.director.text_transport",
+      "to": "app.providers.contracts.text",
+      "reason": "ARCHITECTURE_MAPPING §4.3: Text invocation resolves exact model/connection identity and constructs the adapter. Remove after a contract port preserves invocation evidence, unknown-submission handling, errors and test seams."
+    },
+    {
+      "from": "app.director.text_transport",
+      "to": "app.providers.model_profiles.resolver",
+      "reason": "ARCHITECTURE_MAPPING §4.3: Text invocation resolves exact model/connection identity and constructs the adapter. Remove after a contract port preserves invocation evidence, unknown-submission handling, errors and test seams."
+    },
+    {
+      "from": "app.director.text_transport",
+      "to": "app.providers.model_profiles.service",
+      "reason": "ARCHITECTURE_MAPPING §4.3: Text invocation resolves exact model/connection identity and constructs the adapter. Remove after a contract port preserves invocation evidence, unknown-submission handling, errors and test seams."
+    },
+    {
+      "from": "app.director.text_transport",
+      "to": "app.providers.model_profiles.slots",
+      "reason": "ARCHITECTURE_MAPPING §4.3: Text invocation resolves exact model/connection identity and constructs the adapter. Remove after a contract port preserves invocation evidence, unknown-submission handling, errors and test seams."
+    },
+    {
+      "from": "app.director.text_transport",
+      "to": "app.providers.registry",
+      "reason": "ARCHITECTURE_MAPPING §4.3: Text invocation resolves exact model/connection identity and constructs the adapter. Remove after a contract port preserves invocation evidence, unknown-submission handling, errors and test seams."
+    },
+    {
+      "from": "app.director.wakeup",
+      "to": "app.production.application.facts",
+      "reason": "ARCHITECTURE_MAPPING §4.12: Director reads canonical production facts for context/reconciliation. Remove through typed fact ports preserving exact project/run/artifact identity and recovery; do not create a second fact store."
+    },
+    {
+      "from": "app.director.workflows.contracts",
+      "to": "app.providers.capabilities",
+      "reason": "ARCHITECTURE_MAPPING §4.4: Workflow planning/read models consume capability and manifest types, not media execution. Remove after neutral contracts and explicit input conversion preserve serialization, capacity limits and approximation consent."
+    },
+    {
+      "from": "app.director.workflows.library",
+      "to": "app.production.templates",
+      "reason": "ARCHITECTURE_MAPPING §4.5: Workflow registry reuses the canonical dialogue graph factory and quality policy. Remove after one neutral template-discovery boundary preserves golden graph equivalence; do not copy graph definitions."
+    },
+    {
+      "from": "app.director.workflows.library",
+      "to": "app.providers.capabilities",
+      "reason": "ARCHITECTURE_MAPPING §4.4: Workflow planning/read models consume capability and manifest types, not media execution. Remove after neutral contracts and explicit input conversion preserve serialization, capacity limits and approximation consent."
+    },
+    {
+      "from": "app.director.workflows.reference_capability",
+      "to": "app.providers.capabilities",
+      "reason": "ARCHITECTURE_MAPPING §4.4: Workflow planning/read models consume capability and manifest types, not media execution. Remove after neutral contracts and explicit input conversion preserve serialization, capacity limits and approximation consent."
+    },
+    {
+      "from": "app.director.workflows.reference_capability",
+      "to": "app.providers.manifest",
+      "reason": "ARCHITECTURE_MAPPING §4.4: Workflow planning/read models consume capability and manifest types, not media execution. Remove after neutral contracts and explicit input conversion preserve serialization, capacity limits and approximation consent."
+    },
+    {
+      "from": "app.director.workflows.workflow_read_models",
+      "to": "app.providers.capabilities",
+      "reason": "ARCHITECTURE_MAPPING §4.4: Workflow planning/read models consume capability and manifest types, not media execution. Remove after neutral contracts and explicit input conversion preserve serialization, capacity limits and approximation consent."
+    },
+    {
+      "from": "app.director.workflows.workflow_read_models",
+      "to": "app.providers.manifest",
+      "reason": "ARCHITECTURE_MAPPING §4.4: Workflow planning/read models consume capability and manifest types, not media execution. Remove after neutral contracts and explicit input conversion preserve serialization, capacity limits and approximation consent."
+    },
+    {
+      "from": "app.editing.timeline_builder",
+      "to": "app.execution.models",
+      "reason": "ARCHITECTURE_MAPPING §4.13: Timeline construction validates selected Formal Artifacts without rewriting production truth. Remove through a typed formal-media read boundary preserving availability, project identity and Editing ownership."
+    },
+    {
+      "from": "app.providers.connection_service",
+      "to": "app.execution.models",
+      "reason": "ARCHITECTURE_MAPPING §4.8: Connection/evidence management validates Artifact and exact NodeRun/ProviderOperation producer lineage. Remove when a typed execution-facts boundary preserves project, binding and operation checks."
+    },
+    {
+      "from": "app.providers.reference_delivery",
+      "to": "app.execution.branches",
+      "reason": "ARCHITECTURE_MAPPING §4.8: Reference delivery applies execution branch-priority policy. Remove when Production owns selection and supplies the exact validated Artifact; moving only ORM reads is insufficient."
+    },
+    {
+      "from": "app.providers.reference_delivery",
+      "to": "app.execution.models",
+      "reason": "ARCHITECTURE_MAPPING §4.8: Reference delivery resolves graph/run/artifact lineage before granting access. Remove when Production supplies validated references preserving tenant, availability and token checks."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.access.models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.assets.models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.delivery.models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.director.assistant_models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.director.inbox_models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.director.invocation_models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.director.proposal_models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.director.runtime.models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.director.turn_models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.editing.models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.execution.models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.production.command_models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.production.models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.providers.catalog_models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.providers.model_profiles.orm",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.model_registry",
+      "to": "app.providers.models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Process composition registers this ORM module for metadata and foreign keys. Remove after explicit composition-root relocation/classification preserves Alembic and worker metadata coverage; do not delete active models."
+    },
+    {
+      "from": "app.shared.rls_scopes",
+      "to": "app.access.models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Non-PostgreSQL scope discovery reads persisted ownership; PostgreSQL uses dedicated RLS context queries. Remove after an explicit scope-composition boundary preserves tenant isolation and recovery; never trust queued ownership claims."
+    },
+    {
+      "from": "app.shared.rls_scopes",
+      "to": "app.director.turn_models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Non-PostgreSQL scope discovery reads persisted ownership; PostgreSQL uses dedicated RLS context queries. Remove after an explicit scope-composition boundary preserves tenant isolation and recovery; never trust queued ownership claims."
+    },
+    {
+      "from": "app.shared.rls_scopes",
+      "to": "app.execution.models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Non-PostgreSQL scope discovery reads persisted ownership; PostgreSQL uses dedicated RLS context queries. Remove after an explicit scope-composition boundary preserves tenant isolation and recovery; never trust queued ownership claims."
+    },
+    {
+      "from": "app.workbench.shot_service",
+      "to": "app.director.turn_service",
+      "reason": "ARCHITECTURE_MAPPING §4.2: Shot Save invalidates active Director turns in the same transaction. Remove after an explicit application/port boundary preserves ownership, expected version, stale revision and rollback."
+    }
+  ]
+}

@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 import pytest
 from app.access.models import Project, User, Workspace
 from app.assets.models import Scene, Shot
+from app.contracts.reference_capability import MultiCharacterCapabilityStatus
 from app.director.workflows.character_participation import (
     ScreenRole,
     ShotCharacterParticipation,
@@ -41,13 +42,8 @@ from app.director.workflows.layered_planning import (
     SceneStoryboardPlanPayload,
     ShotPlanPayload,
 )
-from app.director.workflows.layered_production_service import (
-    materialize_episode_plan,
-    materialize_scene_storyboard,
-)
 from app.director.workflows.library import get_default_registry
 from app.director.workflows.reference_capability import (
-    MultiCharacterCapabilityStatus,
     assess_multi_character_capability,
 )
 from app.director.workflows.resolver import WorkflowTemplateResolver
@@ -74,6 +70,10 @@ from app.providers.manifest import (
 from app.shared.base import Base
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from tests.unit.layered_plan_fixtures import (
+    seed_episode_plan,
+    seed_scene_storyboard,
+)
 
 
 @pytest.fixture
@@ -150,7 +150,7 @@ async def test_golden_workflow_expansion_end_to_end(session: AsyncSession) -> No
     project_id = await _seed_project(session)
 
     # 1) Layered planning + real materialization (Episode/Scene/Shot rows).
-    episode = await materialize_episode_plan(
+    episode = await seed_episode_plan(
         session, project_id=project_id, plan=_episode_plan()
     )
     scene1 = (
@@ -164,7 +164,7 @@ async def test_golden_workflow_expansion_end_to_end(session: AsyncSession) -> No
         )
     ).scalar_one()
 
-    shots_scene1 = await materialize_scene_storyboard(
+    shots_scene1 = await seed_scene_storyboard(
         session,
         project_id=project_id,
         scene=scene1,
@@ -176,7 +176,7 @@ async def test_golden_workflow_expansion_end_to_end(session: AsyncSession) -> No
             ]
         ),
     )
-    shots_scene2 = await materialize_scene_storyboard(
+    shots_scene2 = await seed_scene_storyboard(
         session,
         project_id=project_id,
         scene=scene2,

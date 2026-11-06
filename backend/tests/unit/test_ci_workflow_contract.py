@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
 
 _WORKFLOW = Path(__file__).resolve().parents[3] / ".github" / "workflows" / "ci.yml"
-_SECURITY_WORKFLOW = (
-    Path(__file__).resolve().parents[3] / ".github" / "workflows" / "security.yml"
-)
+_SECURITY_WORKFLOW = Path(__file__).resolve().parents[3] / ".github" / "workflows" / "security.yml"
 
 
 def _job(workflow: str, name: str) -> str:
@@ -19,16 +18,20 @@ def _job(workflow: str, name: str) -> str:
     return workflow[start:end]
 
 
+def _step(workflow: str, name: str) -> dict[str, str]:
+    import yaml
+
+    parsed = yaml.safe_load(workflow)
+    return next(step for step in parsed["jobs"]["policy"]["steps"] if step.get("name") == name)
+
+
 def test_container_gate_owns_all_project_toolchains_and_quality_commands() -> None:
     workflow = _WORKFLOW.read_text(encoding="utf-8")
     container_job = _job(workflow, "container-gates")
 
     assert "docker-compose.quality.yml" in container_job
-    assert "docker compose -f docker-compose.quality.yml build" in container_job
-    assert "--exit-code-from backend-quality" in container_job
-    assert "postgres-quality backend-quality" in container_job
-    assert "run --rm --no-deps frontend-quality" in container_job
-    assert "litellm-integration-quality" in container_job
+    assert "run_quality_in_docker.ps1 -Stage Full" in container_job
+    assert "shell: pwsh" in container_job
     assert "--volumes --remove-orphans" in container_job
     assert "if: always()" in container_job
     assert "actions/setup-python" not in container_job
@@ -51,19 +54,23 @@ def test_policy_checks_run_inside_a_python_container() -> None:
     assert "scripts/repo_guardrails.py policy" in policy_job
 
 
-def test_branch_flow_admits_dependency_integration_but_protects_main() -> None:
+def test_pr_ci_only_listens_on_main_while_dev_is_in_fast_development() -> None:
     import yaml
 
-    workflow = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
-    step = next(
-        step for step in workflow["jobs"]["policy"]["steps"]
-        if step.get("name") == "Enforce integration branch flow"
-    )
+    parsed = yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
+    triggers = parsed[True]
+    assert triggers["pull_request"]["branches"] == ["main"]
+    assert "workflow_dispatch" in triggers
+
+
+def test_branch_flow_leaves_dev_open_but_protects_main() -> None:
+    step = _step(_WORKFLOW.read_text(encoding="utf-8"), "Enforce integration branch flow")
     for base, head, allowed in [
-        ("dev", "dependabot/npm_and_yarn/frontend/prettier-3.9.6", True),
-        ("dev", "agent/runtime-policy", True),
-        ("dev", "unreviewed-feature", False),
+        ("dev", "codex/workbench-optimization", True),
+        ("dev", "unreviewed-feature", True),
+        ("main", "codex/workbench-optimization", False),
         ("main", "dependabot/npm_and_yarn/frontend/prettier-3.9.6", False),
+        ("main", "agent/hotfix-provider", True),
         ("main", "dev", True),
     ]:
         result = subprocess.run(
@@ -84,22 +91,206 @@ def test_quality_images_own_browser_and_canonical_surface_gates() -> None:
         Path(__file__).resolve().parents[3] / "frontend" / "Dockerfile.quality"
     ).read_text(encoding="utf-8")
     assert "scripts/check_canonical_surface.py" in backend_dockerfile
-    assert "uv run --directory backend mypy app" in backend_dockerfile
+    assert "uv run --offline --no-sync --directory backend mypy app" in backend_dockerfile
     assert "chromium" in frontend_dockerfile
     assert "npm run --prefix frontend test:e2e" in frontend_dockerfile
 
 
-def test_security_workflow_gates_optional_dependency_review_on_repository_capability() -> None:
-    workflow = _SECURITY_WORKFLOW.read_text(encoding="utf-8")
+def test_quality_images_cache_dependencies_before_copying_source() -> None:
+    backend = (Path(__file__).resolve().parents[3] / "backend" / "Dockerfile.quality").read_text(
+        encoding="utf-8"
+    )
+    frontend = (Path(__file__).resolve().parents[3] / "frontend" / "Dockerfile.quality").read_text(
+        encoding="utf-8"
+    )
+
+    backend_dependencies = "COPY backend/pyproject.toml backend/uv.lock backend/README.md"
+    assert backend.index(backend_dependencies) < backend.index("COPY . .")
+    assert backend.index("COPY . .") < backend.rindex("uv sync --locked")
+    assert "id=dramaforge-quality-uv" in backend
+    assert "UV_OFFLINE=${QUALITY_UV_OFFLINE}" in backend
+    assert frontend.index("COPY frontend/package.json") < frontend.index("COPY . .")
+    assert frontend.index("npm ci --prefix") < frontend.index("COPY . .")
+
+
+def test_quality_runtime_never_resolves_or_reinstalls_dependencies() -> None:
+    import json
+    import shlex
+
+    dockerfile = (Path(__file__).resolve().parents[3] / "backend/Dockerfile.quality").read_text()
+    command = json.loads(dockerfile.split("\nCMD ", 1)[1])[2]
+    uv_commands = [shlex.split(part) for part in command.split(";") if "uv run " in part]
+    assert uv_commands
+    for tokens in uv_commands:
+        assert "--offline" in tokens and "--no-sync" in tokens
+    assert "uv sync" not in command
+
+
+def test_browser_failure_evidence_survives_ephemeral_quality_container() -> None:
+    import yaml
+
+    root = Path(__file__).resolve().parents[3]
+    services = yaml.safe_load((root / "docker-compose.quality.yml").read_text())["services"]
+    assert (
+        "${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}/playwright-results:"
+        "/workspace/frontend/test-results"
+    ) in services["frontend-quality"]["volumes"]
+    for filename, job in (("ci.yml", "container-gates"), ("release.yml", "verify-release-source")):
+        steps = yaml.safe_load((root / ".github/workflows" / filename).read_text())["jobs"][job][
+            "steps"
+        ]
+        evidence = next(
+            step for step in steps if step.get("name") == "Preserve failed browser evidence"
+        )
+        assert evidence["if"] == "failure() && steps.quality.outputs.cleanup_owned == 'true'"
+        assert evidence["with"]["path"] == "tmp/quality-contract/playwright-results"
+
+
+def test_main_pr_preserves_every_required_check_context() -> None:
+    workflow = _WORKFLOW.read_text(encoding="utf-8")
+    required = (
+        "policy",
+        "container-gates",
+        "secret-scan",
+        "python-dependencies",
+        "frontend-dependencies",
+        "filesystem-scan",
+    )
+
+    for name in required:
+        assert f"name: {name}" in _job(workflow, name)
+    for name in required[1:2] + required[3:]:
+        assert "github.base_ref == 'main'" in _job(workflow, name)
+
+
+def test_changed_path_classifier_routes_fast_and_full_gates(tmp_path: Path) -> None:
+    step = _step(_WORKFLOW.read_text(encoding="utf-8"), "Classify changed paths")
+    cases = {
+        "docs": (["docs/guide.md"], {"docs_only": "true", "full_quality": "false"}),
+        "backend": (
+            ["backend/app/shared/json.py"],
+            {"backend": "true", "full_quality": "false"},
+        ),
+        "frontend": (
+            ["frontend/src/lib/api.ts"],
+            {"frontend": "true", "full_quality": "false"},
+        ),
+        "migration": (
+            ["backend/alembic/versions/new.py"],
+            {"migrations": "true", "full_quality": "true"},
+        ),
+        "generated-api": (
+            ["frontend/src/shared/api/generated.ts"],
+            {"api_contract": "true", "full_quality": "true"},
+        ),
+        "script": (
+            ["scripts/prove_new_flow.py"],
+            {"backend": "true", "full_quality": "false"},
+        ),
+        "cross-stack": (
+            ["backend/tests/unit/test_x.py", "frontend/tests/unit/x.test.ts"],
+            {"full_quality": "true"},
+        ),
+        "workflow": (
+            [".github/workflows/ci.yml"],
+            {"infra": "true", "full_quality": "true"},
+        ),
+    }
+
+    for case_name, (paths, expected) in cases.items():
+        repo = tmp_path / case_name
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "CI Test"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "ci@example.invalid"], cwd=repo, check=True)
+        (repo / ".baseline").write_text("baseline\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repo, check=True)
+        base_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+        ).strip()
+
+        for relative in paths:
+            target = repo / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("changed\n", encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", "change"], cwd=repo, check=True)
+        head_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+        ).strip()
+
+        output = repo / "github-output"
+        result = subprocess.run(
+            ["bash", "-c", step["run"]],
+            cwd=repo,
+            env={
+                **os.environ,
+                "EVENT_NAME": "pull_request",
+                "BASE_SHA": base_sha,
+                "HEAD_SHA": head_sha,
+                "GITHUB_OUTPUT": str(output),
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        actual = dict(
+            line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines()
+        )
+        for name, value in expected.items():
+            assert actual[name] == value, case_name
+
+
+def test_ci_runs_dependency_review_without_a_silent_repository_variable_gate() -> None:
+    workflow = _WORKFLOW.read_text(encoding="utf-8")
     dependency_review = _job(workflow, "dependency-review")
 
-    assert (
-        "if: github.event_name == 'pull_request' && "
-        "vars.DEPENDENCY_REVIEW_ENABLED == 'true'"
-    ) in dependency_review
+    assert "DEPENDENCY_REVIEW_ENABLED" not in dependency_review
+    assert "github.base_ref == 'main'" in dependency_review
+    assert "needs.policy.outputs.python_deps == 'true'" in dependency_review
+    assert "needs.policy.outputs.frontend_deps == 'true'" in dependency_review
     assert "fail-on-severity: high" in dependency_review
     assert "continue-on-error:" not in dependency_review
 
     filesystem_scan = _job(workflow, "filesystem-scan")
     assert "security-events: write" in filesystem_scan
     assert "continue-on-error: true" in filesystem_scan
+
+
+def test_scheduled_security_workflow_has_no_pr_or_push_duplication() -> None:
+    workflow = _SECURITY_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "  pull_request:" not in workflow
+    assert "  push:" not in workflow
+    assert "  schedule:" in workflow
+    assert "  workflow_dispatch:" in workflow
+    for job in (
+        "scheduled-secret-scan",
+        "scheduled-python-dependencies",
+        "scheduled-frontend-dependencies",
+        "scheduled-filesystem-scan",
+    ):
+        assert _job(workflow, job)
+
+
+def test_litellm_isolated_integration_reuses_built_environment_without_network_sync() -> None:
+    """Network-isolated integration must never trigger uv/build-isolation downloads."""
+    import yaml
+
+    quality_compose = (
+        Path(__file__).resolve().parents[3] / "docker-compose.quality.yml"
+    )
+    services = yaml.safe_load(quality_compose.read_text(encoding="utf-8"))["services"]
+    integration = services["litellm-integration-quality"]
+    assert integration["image"] == services["backend-quality"]["image"]
+    assert integration["network_mode"] == "service:litellm-policy-network-quality"
+    command = integration["command"]
+    assert command[:2] == ["sh", "-c"]
+    assert "cd /workspace/backend;" in command[2]
+    assert ".venv/bin/pytest tests/integration/test_litellm_real_proxy.py" in command[2]
+    assert "test_litellm_proxy_policy.py" in command[2]
+    assert "--fail-on-skip" in command[2]
+    assert "uv run" not in command[2]
+    assert "uv sync" not in command[2]
