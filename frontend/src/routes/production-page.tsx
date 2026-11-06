@@ -13,7 +13,8 @@ import { listModelCandidates } from "../features/production/modelCandidatesApi";
 import { fetchShotWorkbench } from "../features/shots/api";
 import { stageOutcomeUnknown } from "../features/production/sceneRunState";
 import { fetchScenes } from "../features/scenes/api";
-import { ApiError, getSelectedWorkspaceId } from "../lib/api";
+import { ApiError } from "../lib/api";
+import { getSelectedWorkspaceId } from "../lib/navigationPreferences";
 import {
   createExperiment,
   decideExperiment,

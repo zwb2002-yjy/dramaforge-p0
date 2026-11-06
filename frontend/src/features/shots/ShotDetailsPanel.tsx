@@ -24,6 +24,8 @@ type ShotDetailsBodyProps = {
  */
 export function ShotDetailsBody({ projectId, shot, trace }: ShotDetailsBodyProps) {
   const [selection, setSelection] = useState<{ shotId: string; runId: string } | null>(null);
+  // Scene/Shot trace contract: created_at, attempt_no, id descending. Keep
+  // this server order; finished_at can make an older run look newer.
   const latestFailureRunId =
     trace.flatMap((row) =>
       typeof row === "object" &&
@@ -110,7 +112,10 @@ export function ShotDetailsBody({ projectId, shot, trace }: ShotDetailsBodyProps
                     connection_failed: "连接失败，尚未发送 HTTP 请求",
                     outcome_unknown: "等待响应时中断，发送结果未知",
                     response_received: "已收到 HTTP 响应，未取得远端任务 ID",
-                    accepted: "已取得远端任务 ID",
+                    accepted:
+                      (traceDetail.submission_diagnostics.http_status ?? 200) >= 300
+                        ? "已取得远端任务 ID，但 HTTP 回应异常，需查询原任务确认"
+                        : "已取得远端任务 ID",
                   }[traceDetail.submission_diagnostics.phase]
                 : traceDetail.operation_status
                   ? "该历史记录未保存发送诊断，无法补造"

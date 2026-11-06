@@ -7,11 +7,17 @@ import { queryKeys } from "../../src/lib/queryKeys";
 afterEach(() => vi.restoreAllMocks());
 
 it("releases only media overrides after an explicit click, preserving text options and version checking", async () => {
-  const text = { model_id: "litellm/text", enabled: false, native_options: { temperature: 0.4 } };
+  const text = {
+    model_id: "litellm/text",
+    enabled: false,
+    native_options: { temperature: 0.4, extension: { enabled: false, count: 0, tags: ["keep"] } },
+  };
   let profile = {
     id: "profile",
     workspace_id: "workspace",
     version: 8,
+    name: "Keep project profile name",
+    is_default: false,
     bindings: {
       "planning.script": text,
       "visual.keyframe": { model_id: "binding:old-image", enabled: true, native_options: {} },
@@ -45,6 +51,9 @@ it("releases only media overrides after an explicit click, preserving text optio
   await waitFor(() =>
     expect(writes).toEqual([{ expected_version: 8, bindings: { "planning.script": text } }]),
   );
+  expect(profile.name).toBe("Keep project profile name");
+  expect(profile.is_default).toBe(false);
+  expect(profile.bindings["planning.script"]).toEqual(text);
   await waitFor(() =>
     expect(screen.queryByTestId("project-model-inheritance")).not.toBeInTheDocument(),
   );

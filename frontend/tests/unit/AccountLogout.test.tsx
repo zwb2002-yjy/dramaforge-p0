@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { queryKeys } from "../../src/lib/queryKeys";
 import { AccountSettingsPage } from "../../src/routes/settings-page";
-import { ApiError, fetchHealth, setSelectedWorkspaceId } from "../../src/lib/api";
+import { ApiError, fetchHealth } from "../../src/lib/api";
+import { setSelectedWorkspaceId } from "../../src/lib/navigationPreferences";
 import { fetchCurrentUser, logoutUser } from "../../src/features/access/api";
 
 vi.mock("../../src/lib/api", async (original) => ({
@@ -12,13 +13,17 @@ vi.mock("../../src/lib/api", async (original) => ({
   fetchCurrentUser: vi.fn(),
   fetchHealth: vi.fn(),
   logoutUser: vi.fn(),
-  getSelectedWorkspaceId: vi.fn(() => "workspace-1"),
-  setSelectedWorkspaceId: vi.fn(),
   // The account page also mounts the recovery panel; it hides itself when the
   // owner-only query is not available.
   apiGet: vi.fn(() => Promise.reject(new Error("no recovery access"))),
   apiSend: vi.fn(),
   fetchCsrf: vi.fn(),
+}));
+
+vi.mock("../../src/lib/navigationPreferences", async (original) => ({
+  ...(await original<typeof import("../../src/lib/navigationPreferences")>()),
+  getSelectedWorkspaceId: vi.fn(() => "workspace-1"),
+  setSelectedWorkspaceId: vi.fn(),
 }));
 
 afterEach(() => vi.clearAllMocks());

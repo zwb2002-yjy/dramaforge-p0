@@ -84,10 +84,10 @@ Creative Layer 是普通领域能力与编译能力的集合，**不是 Runtime*
 | **Quality Policy** | 质量维度与失败分类（TECHNICAL_BLOCKER / QUALITY_WARNING / HUMAN_JUDGMENT） | `creative_capabilities/shot_language.py::QualityPolicySpec`、`QualityDimension` |
 | **Skill Resolver** | 按适用条件从 Skill 库解析出应生效的 Skill 组合 | `creative_capabilities/skill_library.py`、`registry.py`、`composer.py` |
 | **Creative Compiler** | 把用户意图 + 项目上下文 + Genre + SkillStack + Style + ShotLanguage + QualityPolicy 确定性编译成一份冻结的 CreativeIntent | `creative_capabilities/creative_compiler.py::CreativeCapabilityCompiler` |
-| **CreativeIntent** | **前段创意系统与后段 Production 之间的唯一中间协议**。代码名为 `CompiledCreativeIntent`，`frozen=True`。字段表与实现差异见宪法第四节 | `creative_capabilities/creative_compiler.py::CompiledCreativeIntent` |
+| **CreativeIntent** | Creative Layer 向生产编译传递的唯一创意语义合同；代码名为 `CompiledCreativeIntent`，`frozen=True`。不替代操作 Command、冻结执行计划或执行回执；适用边界见宪法第四节 | `creative_capabilities/creative_compiler.py::CompiledCreativeIntent` |
 | **CreativeIntent freeze** | 把 CreativeIntent 及其 pack 身份序列化，保证 resume 使用同一组 hash | `creative_capabilities/freeze.py` |
 | **Creative Template** | 项目启动模板（`start_type="TEMPLATE"` 时引用），贡献 Genre/Style/Skill 预设；**只是项目初始化方式** | `creative_capabilities/creative_templates.py`、`access/projects.py` |
-| **Model Adaptation** | 把 CreativeIntent + ModelCapability 编译为 `EffectiveProviderRequest` 的能力 `[未落地：当前由 Provider layer 的 compiler/runtime 承担]` | 参见 `providers/` |
+| **Model Adaptation** | 将已确认的创意和输入约束落实为模型请求的能力；当前由 Production 计划编译与 Provider compiler/runtime 分工实现，不要求另建同名层或重新解释 Style/Skill | `production/workbench_execution.py`、`providers/`；职责差距见 ARCHITECTURE_MAPPING |
 
 **优先级门（Creative 域唯一权威，不得改写）：**
 

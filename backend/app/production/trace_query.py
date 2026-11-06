@@ -20,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.execution.models import NodeRun, ProviderOperation
+from app.providers.transport_errors import public_error_summary
 
 UNKNOWN_SUBMISSION_STATUS = "unknown_submission"
 DEFAULT_PER_SHOT_LIMIT = 20
@@ -163,7 +164,7 @@ async def _load_traces(
                 node_key=_node_key(raw),
                 status=run.status,
                 error_code=run.error_code,
-                error_summary=run.error_summary,
+                error_summary=public_error_summary(run.error_summary),
                 finished_at=run.finished_at,
                 result_artifact_id=run.result_artifact_id,
                 operation_outcome_unknown=run.id in unknown_outcomes,

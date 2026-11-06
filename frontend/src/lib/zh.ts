@@ -84,7 +84,6 @@ export const ZH_ERROR_CODE: Record<string, string> = {
   COMPOSITE_INPUT_MISSING: "合成输入缺失",
   COMPOSITE_RENDER_FAILED: "合成渲染失败",
   ARTIFACT_NOT_INDEPENDENT: "产物不独立",
-  TEXT_LLM_NOT_CONFIGURED: "文本模型未配置",
   NODE_EXECUTION_FAILED: "节点执行失败",
   NODE_RUN_ALREADY_CLAIMED: "节点已被占用",
   VALIDATION_ERROR: "校验失败",

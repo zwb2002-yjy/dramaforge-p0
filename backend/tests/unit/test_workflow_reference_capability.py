@@ -9,6 +9,7 @@ from app.contracts.reference_capability import (
     MultiCharacterCapabilityStatus,
     dispatch_capability_gate,
 )
+from app.contracts.shot_reference import ShotReferenceIntent
 from app.director.workflows.character_participation import (
     ScreenRole,
     ShotCharacterParticipation,
@@ -17,7 +18,7 @@ from app.director.workflows.character_participation import (
 from app.director.workflows.reference_capability import (
     assess_multi_character_capability,
 )
-from app.production.reference_intents import ShotReferenceIntent, compile_references
+from app.production.reference_intents import compile_references
 from app.providers.capabilities import Capability
 from app.providers.manifest import (
     CapabilitySpec,

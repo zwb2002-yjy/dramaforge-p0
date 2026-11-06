@@ -12,11 +12,11 @@ import pytest
 from app.assets.models import Asset, AssetVersion, AssetVersionReference
 from app.config import Settings
 from app.contracts.production_commands import ExecutionBody
+from app.contracts.shot_reference import ShotReferenceIntent
 from app.execution.media_submission import prepare_media_submission
 from app.execution.models import Artifact, NodeRun, ProviderOperation
 from app.production.application.commands import ProductionCommands
 from app.production.models import ShotReferenceBinding
-from app.production.reference_intents import ShotReferenceIntent
 from app.production.workbench_execution import WorkbenchExecutionError, WorkbenchExecutionService
 from app.providers.agnes import AgnesImageCompiler, AgnesRuntime
 from app.providers.availability_models import (

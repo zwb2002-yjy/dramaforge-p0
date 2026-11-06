@@ -31,6 +31,7 @@ from app.access.models import Project, ProjectCreativeProfile
 from app.assets.models import Asset, AssetVersion, AssetVersionReference, Episode, Scene, Shot
 from app.config import get_settings
 from app.consistency.identity_policy import identity_evidence_policy_snapshot
+from app.contracts.shot_reference import ShotReferenceIntent
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun
 from app.execution.shot_pipeline import (
     SHOT_PIPELINE_TEMPLATE_KEY,
@@ -45,7 +46,6 @@ from app.production.formal_selection import require_formal_keyframe
 from app.production.models import GraphVersion, ProductionGraph, ShotReferenceBinding
 from app.production.reference_intents import (
     PURPOSE_TO_ROLE,
-    ShotReferenceIntent,
     compile_references,
 )
 from app.production.service import GraphService

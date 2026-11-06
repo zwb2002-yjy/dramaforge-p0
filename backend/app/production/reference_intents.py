@@ -14,11 +14,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from fnmatch import fnmatch
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from pydantic import BaseModel, Field
 
-from app.contracts.shot_reference import ShotReferenceIntent as ShotReferenceIntent
 from app.production.execution_plan import (
     CapabilityGap,
     PlanDelivery,
@@ -26,6 +25,9 @@ from app.production.execution_plan import (
 )
 from app.providers.capabilities import Capability
 from app.providers.manifest import InputSlotSpec, ModelManifest
+
+if TYPE_CHECKING:
+    from app.contracts.shot_reference import ShotReferenceIntent
 
 # Business purpose -> canonical ModelManifest input-slot role.
 PURPOSE_TO_ROLE: Final[dict[str, str]] = {

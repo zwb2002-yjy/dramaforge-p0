@@ -71,13 +71,6 @@ async def _cleanup_uploads(session: AsyncSession, *, run_id: UUID, store: Object
         logger.warning("final_film_cleanup_deferred run=%s", run_id, exc_info=True)
 
 
-class FinalFilmPrepareBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    edit_session_id: UUID
-    expected_timeline_version: int = Field(ge=1)
-
-
 class FinalFilmPrepareRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1914,7 +1907,6 @@ async def execute_final_film_node_run(
 
 __all__ = [
     "FinalFilmJobRead",
-    "FinalFilmPrepareBody",
     "FinalFilmPrepareRead",
     "FinalFilmRead",
     "execute_final_film_node_run",

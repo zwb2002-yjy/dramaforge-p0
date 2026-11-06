@@ -3,12 +3,11 @@ import { Link, createRoute, useNavigate, useRouterState, redirect } from "@tanst
 import { Plus, Search, Settings2 } from "lucide-react";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
+import { ApiError, fetchHealth } from "../lib/api";
 import {
-  ApiError,
-  fetchHealth,
   getSelectedWorkspaceId,
   setSelectedWorkspaceId as persistSelectedWorkspaceId,
-} from "../lib/api";
+} from "../lib/navigationPreferences";
 import {
   fetchBootstrapStatus,
   fetchCurrentUser,

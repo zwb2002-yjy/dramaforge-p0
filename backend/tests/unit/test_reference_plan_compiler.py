@@ -8,10 +8,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from app.production.reference_intents import (
-    ShotReferenceIntent,
-    compile_references,
-)
+from app.contracts.shot_reference import ShotReferenceIntent
+from app.production.reference_intents import compile_references
 from app.providers.capabilities import Capability
 from app.providers.manifest import (
     CapabilitySpec,

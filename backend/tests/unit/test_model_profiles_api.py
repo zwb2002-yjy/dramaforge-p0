@@ -207,6 +207,59 @@ def test_workspace_profile_path_must_match_selected_workspace(
     assert response.status_code == 404, response.text
 
 
+def test_project_media_inheritance_preserves_non_media_options_and_profile_metadata(api):
+    from app.access.models import Project, User
+    from app.providers.model_profiles.orm import ProductionModelProfile
+    from sqlalchemy import select
+
+    client, factory = api
+    workspace_id = _register(client)
+    text_id = _managed_text(client, workspace_id)
+    project_id = _create_project(client, workspace_id)
+    text_binding = {
+        "model_id": text_id,
+        "enabled": False,
+        "native_options": {"extension": {"enabled": False, "count": 0, "tags": ["keep"]}},
+    }
+
+    async def seed_profile():
+        async with factory() as session:
+            user = (await session.scalars(select(User))).one()
+            project = await session.get(Project, UUID(project_id))
+            profile = ProductionModelProfile(
+                workspace_id=project.workspace_id, project_id=project.id,
+                name="Keep existing project name", version=8, is_default=False,
+                bindings={
+                    "planning.script": text_binding,
+                    "visual.keyframe": {"model_id": "binding:old-image", "enabled": True},
+                    "video.shot": {"model_id": "binding:old-video", "enabled": True},
+                },
+                created_by=user.id, updated_by=user.id,
+            )
+            session.add(profile)
+            await session.commit()
+            return profile.id
+
+    profile_id = _run_create(seed_profile())
+    response = client.put(
+        f"/api/v1/projects/{project_id}/model-profile",
+        json={"expected_version": 8, "bindings": {"planning.script": text_binding}},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert response.status_code == 200, response.text
+
+    async def verify_saved():
+        async with factory() as session:
+            saved = await session.get(ProductionModelProfile, profile_id)
+            assert saved.bindings == {"planning.script": text_binding}
+            assert saved.name == "Keep existing project name"
+            assert saved.is_default is False
+            assert saved.project_id == UUID(project_id)
+            assert saved.version == 9
+
+    _run_create(verify_saved())
+
+
 def test_workspace_profile_validation_rejects_capability_mismatch(
     api: tuple[TestClient, Any],
 ) -> None:

@@ -8,11 +8,8 @@ import { ProjectModelSourceSummary } from "../components/provider/ProjectModelSo
 import { ModelConnectionSettings } from "../components/provider/ModelConnectionSettings";
 import { useSettingsWorkspace } from "../hooks/useSettingsWorkspace";
 import { AdvancedRecoveryPanel } from "../features/maintenance/AdvancedRecoveryPanel";
-import {
-  ApiError,
-  fetchHealth,
-  setSelectedWorkspaceId as persistSelectedWorkspaceId,
-} from "../lib/api";
+import { ApiError, fetchHealth } from "../lib/api";
+import { setSelectedWorkspaceId as persistSelectedWorkspaceId } from "../lib/navigationPreferences";
 import {
   createWorkspace,
   deleteWorkspace,

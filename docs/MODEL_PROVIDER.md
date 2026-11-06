@@ -226,7 +226,11 @@ Agnes 图片与视频编译器保留旧 revision 的冻结请求，同时可按 
   新视频任务在恢复令牌中冻结模型名，用于 `/agnesapi` 查询的 `model_name`；旧令牌不从当前设置补造模型。
   Agnes 视频提交另外在同一 ProviderOperation 的 response_summary 中保存发送边界诊断：
   配置未发送、连接失败、结果未知、收到 HTTP 响应、已取得任务 ID 分别记录；仅保存白名单追踪头、
-  脱敏错误摘要及耗时，不保存 Key、完整提示词或原始响应正文。执行详情返回这些原始事实，
+  本地生成的 HTTP 错误摘要及耗时，不复制供应商 JSON 错误文字、HTML 标题或文本正文；
+  替换已知 Key/完整提示词无法保证部分回显和编码文本安全。追踪头仅保留有界 hex/UUID
+  请求 ID、CF-Ray 格式 ID 与受限服务标识；无法识别的自由文本不保存。
+  新写入与旧诊断读取使用同一投影；历史 Agnes 提交错误摘要中的响应摘录在公开 trace
+  中移除，数据库原件不自动改写或删除。执行详情返回已安全投影的事实，
   历史记录没有诊断时明确缺失，不根据当前配置补造。HTTP 响应不等于模型任务已经受理。
 MiniMax 视频新合同也要求显式产品策略；同一个 V2 编译器按 Manifest 的时长、分辨率、
 比例和可选 `extra` 生成 H3 / H3-Max 请求，旧 H3 revision 保持原首帧请求形状。
@@ -288,6 +292,11 @@ Protocol/DTO，以及无调用方的 `providers/openai.py`、`providers/fake.py`
   冻结引用；历史静态别名及直连目录不再成为新文本模型。
 - Agnes / MiniMax / Ark 视频 Create 返回远端任务 ID 时，即使 HTTP 为 429 或其他错误，
   也保留该身份进入查询路径；不能丢弃任务 ID 后按限流重新提交 Create。
+  这是本项目防重复提交的恢复规则，不是供应商保证错误状态代表受理成功。Agnes 诊断
+  `accepted` 仅表示取得远端 ID；保留原 HTTP 状态，异常响应显示待查询确认。
+  [官方 Video 2.5 合同](https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-video-25) 定义了字符串
+  任务 ID、查询方式及错误码，但未承诺任意错误 HTTP + ID 等同成功受理；只有后续原任务
+  查询的完成状态和产物才证明执行结果，不重发 Create。
   MiniMax / Ark 未返回费用时记录 `not_reported`，不伪造零费用。取消仅在响应明确给出
   `cancelled/canceled` 时记作远端确认；请求已受理、失败或响应丢失继续查询原任务。
   Agnes 当前没有实现取消协议，返回 `unsupported`，不能记作已取消。

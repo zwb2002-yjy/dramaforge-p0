@@ -1,3 +1,8 @@
+
+
+
+
+
 # CURRENT — DramaForge 唯一文档入口
 
 本文件是仓库当前文档入口。代码、迁移、测试和运行结果是“现在实际是什么”的最终事实；
@@ -57,23 +62,33 @@ Director Runtime 负责提案和编排；Production Runtime 负责真实生产�
 | 开发与测试 | [DEVELOPMENT.md](DEVELOPMENT.md) |
 | 部署 | [DEPLOYMENT.md](DEPLOYMENT.md) |
 | 发布 | [RELEASE.md](RELEASE.md) |
-| 已做出的技术决策 | [adr/](adr/) |
+| 已做出的技术决策 | [adr/README.md](adr/README.md) |
 
 文档发生冲突时，以代码、迁移、自动化测试和实际运行结果为当前事实；
 目标架构冲突记录在 `ARCHITECTURE_MAPPING.md`，不要重新引入第二套方案文档。
 
 ## 约束执行索引
 
-约束执行入口：模块依赖由 `MODULE_BOUNDARIES.md` 定义，
-`scripts/arch_import_scan.py --check` 与 `backend/tests/unit/test_architecture_gate.py`
-检查新增依赖债务及过期豁免；通过仅证明扫描覆盖范围内无新增债务，不代表架构完全合规。
-现存债务与收敛顺序归 `ARCHITECTURE_MAPPING.md`，不得自动重建 baseline 消除失败。
-退役面、目录和 Provider 权威分别由 `scripts/check_canonical_surface.py`、
-`scripts/check_directory_compliance.py`、`scripts/check_provider_authority.py` 执行。
-验证时点及产物生命周期归 `DEVELOPMENT.md`；分支策略归 `RELEASE.md`，
-workflow 合同由 `backend/tests/unit/test_ci_workflow_contract.py` 检查。
-静态门不证明业务授权、RLS、并发或恢复；这些由对应行为/集成测试验证。
+本表只导航，不复制规则正文，也不要求为每一行新增测试或记录。
+
+| 约束 | 唯一权威 | 现有执行机制及边界 |
+|---|---|---|
+| 主链、两个 Runtime、创意语义合同与唯一生产事实链 | CANONICAL_ARCHITECTURE | 架构 Review + 对应行为测试；不能靠名称/字符串扫描证明全部符合 |
+| 模块依赖与真实债务 | MODULE_BOUNDARIES（规则）、ARCHITECTURE_MAPPING（差距） | `arch_import_scan.py --check`、`test_architecture_gate.py`、baseline；仅检查已覆盖依赖、新增债务和过期豁免 |
+| 共享领域术语 | DOMAIN_VOCABULARY | 类型/公共合同与 Review；不检查普通变量或逐字文案 |
+| 用户门、执行身份、幂等、恢复、RLS | CURRENT 表中对应领域权威 | 现有 Unit、PG Integration、关键 E2E；静态 import 门不能替代行为验证 |
+| 退役表面、目录与敏感文件、Provider 权威 | ARCHITECTURE 退役边界、目录策略、MODEL_PROVIDER | `check_canonical_surface.py`、`check_directory_compliance.py`、`check_provider_authority.py`；词法命中须诊断，禁止为过门放宽边界 |
+| Agent 范围、授权与报告 | AGENTS.md | 任务审查、`repo_guardrails.py` 覆盖的 Git/归属合同；不声称机器可拦截全部自然语言决策 |
+| 验证选择、测试资产、产物生命周期 | DEVELOPMENT | 共享质量脚本及 `test_run_quality_script.py` / Compose 合同；批次与保留判断由任务审查落实 |
+| CI、集成与发布保护 | RELEASE | workflow、`test_ci_workflow_contract.py`、Rulesets；本地通过不证明远端检查或保护状态 |
+
+规则变更在同一变更中完成：确认权威与适用范围 → 核对受影响调用方、Agent 入口、
+脚本、测试及 CI/Ruleset → 同步实际受影响部分 → 执行对应验证 → 移除过时描述。
+只澄清文字且执行机制已经正确时，不为凑齐文件数修改检查器或新建字符串断言。
+改变机器行为时必须验证接受/拒绝语义；变更远端 CI/Ruleset 才要求对应远端实际证据。
 架构原则、豁免扩展与付费执行权限的变更由 Owner 决定，检查失败不构成放宽规则的授权。
+新增债务不能靠重建 baseline 消除；参考方案、待决设计不自动成为硬门或新任务。
+完成报告区分已实施、已验证、未完成和明确不采用；局部门通过不代表整个治理计划完成。
 
 ## 创作体验改进：开发入口
 

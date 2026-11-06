@@ -4,7 +4,10 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { routeTree } from "../../src/routeTree.gen";
-import { getSelectedWorkspaceId, setSelectedWorkspaceId } from "../../src/lib/api";
+import {
+  getSelectedWorkspaceId,
+  setSelectedWorkspaceId,
+} from "../../src/lib/navigationPreferences";
 
 function renderApp(initialPath = "/") {
   const history = createMemoryHistory({ initialEntries: [initialPath] });

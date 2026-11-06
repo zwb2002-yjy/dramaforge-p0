@@ -57,8 +57,9 @@ shared     → 无内部层依赖     ← 注意：当前 shared/rls_scopes 与 
                                ARCHITECTURE_MAPPING.md §4
 ```
 
-**规则与现状不一致时，以 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) 记录
-的差距为准**；不得为了让现状"合规"而放宽本节，也不得在未修代码的情况下声称已合规。
+规则与现状不一致时，将核实的调用链登记到
+[ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md)。Mapping 描述差距，不覆盖本节规则；
+不得为了让现状"合规"而放宽本节，也不得在未修代码的情况下声称已合规。
 
 ## 三、禁止的依赖方向
 
@@ -128,7 +129,8 @@ Director 需要文本 LLM 才能工作，因此存在受限例外：
 
 - `app/contracts/**` 不得 import `app.production.*` 等实现包。
 - 被契约引用的模型**必须定义在契约层内**，由实现层反向 import。
-- `ShotReferenceIntent` 已归 `app/contracts/shot_reference.py`；生产编译器旧导入路径仅重新导出同一类型，不再由 contract 依赖 production。
+- `ShotReferenceIntent` 已归 `app/contracts/shot_reference.py`；contract 不再依赖 production。
+  生产编译器直接 import 契约类型，不保留旧重新导出，也不存在兼容入口豁免。
 
 ### 4.6 前端只有一个入口族
 
@@ -145,7 +147,7 @@ Director 需要文本 LLM 才能工作，因此存在受限例外：
 
 ---
 
-## 五、目标物理布局（Phase 2+ 参考，本轮未执行）
+## 五、物理布局参考（不构成迁移要求）
 
 ```text
 backend/app/
@@ -186,7 +188,8 @@ api/
 workers/
 ```
 
-**执行纪律：** 先锁定依赖与概念，再逐步迁移。上述是目标布局参考，不授权新增
+**执行纪律：** 依赖与职责规则约束当前实现；上图不要求创建每一个目录或空壳模块。
+只有具体任务证明迁移收益并明确调用方与验证范围时才调整布局，不授权新增
 facade / compatibility import；当前未发布策略要求直接更新调用方并删除被替换实现，
 不保留过渡别名。不要一次移动大量活跃文件。
 

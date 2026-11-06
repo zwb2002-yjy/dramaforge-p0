@@ -16,9 +16,13 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
-import { getSelectedWorkspaceId, setSelectedWorkspaceId } from "../../lib/api";
 import { resolveProjectWorkspace } from "../../features/project/api";
-import { validateSettingsReturnTo, setRememberedProjectId } from "../../lib/navigationPreferences";
+import {
+  getSelectedWorkspaceId,
+  setRememberedProjectId,
+  setSelectedWorkspaceId,
+  validateSettingsReturnTo,
+} from "../../lib/navigationPreferences";
 import { queryKeys } from "../../lib/queryKeys";
 import { ContextNavigation } from "./ContextNavigation";
 import { Button, Card, Alert } from "../ui";

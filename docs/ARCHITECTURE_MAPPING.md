@@ -42,7 +42,7 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 
 当前源码仍使用这些物理目录；目标职责划分不等于已完成目录迁移。
 
-## 3. 本轮已确定的能力处置
+## 3. 已确定的能力处置
 
 | 对象 | 产品判断 | 处置 |
 |---|---|---|
@@ -80,8 +80,12 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 6. **creative_capabilities 与 access → creative 初始化依赖**：职责与 director 路径
    不完全一致；`access/projects` 对 creative_templates 的依赖仍需明确是应用层注入
    还是允许的初始化依赖。
-7. **ShotReferenceIntent 已迁至 contracts/shot_reference**：production 编译器重新导出
-   同一类型，序列化与既有调用语义保持不变，contract → production 的这条依赖已移除。
+7. **（已解决，编号保留）ShotReferenceIntent 旧导入入口已清退**：唯一类型定义与唯一导入
+   入口均为 `contracts/shot_reference.py`；`production/reference_intents.py` 只保留
+   `PURPOSE_TO_ROLE` 与 `compile_references` 实现，不再重新导出该类型；
+   `production/workbench_execution.py` 与全部测试直接引用 contracts，
+   `test_architecture_gate.py` 的旧入口等价性断言已改为中立合同保护（合同归属与序列化往返）。
+   编号保留以维持其他文档的交叉引用，它不再计入未解决债务或 Owner 收敛顺序。
 8. **Provider 对 execution/models 的事实依赖**：与对 production/runtime 业务的
    依赖应分别判断；在修改 MODULE_BOUNDARIES 规则前，不把现状自动宣告合规。
 9. **shared 组合根**：shared/db 的事务上下文、shared/rls_scopes 的持久归属发现与
@@ -109,6 +113,11 @@ development + worker token 限定的同步调试入口，经同一 WorkerRuntime
 组合根分类）→ 问题 6（domain→creative 初始化依赖）→ 再逐步清剩余
 `architecture-baseline.json` 豁免。
 
+**待决设计与清理范围：** CreativeIntent 的历史平铺字段方案、Creative 目录搬迁、
+Model Adaptation 的物理归属不是已批准迁移任务。现有编译、冻结、命令和请求各有职责；
+只有具体用例证明重复事实、越界或缺失行为时，才提出相应迁移及消费者回归方案。
+普通测试、文档、缓存清理不得据此创建新 DTO、空壳应用层、端口或第二份状态。
+
 ### 治理专项任务的执行边界
 
 主 Agent 独占权威文档、baseline、构建与 CI；下表是尚需独立验收的切片，不是完成记录。
@@ -117,7 +126,7 @@ development + worker token 限定的同步调试入口，经同一 WorkerRuntime
 
 | 顺序/任务 | 专项可写范围与目标 | 不可改变的边界 | 最小验证与完成标准 |
 |---|---|---|---|
-| 问题2：Save失效传播 | `workbench/shot_service.py`、明确的应用编排/端口及直接调用测试；移除对 DirectorTurnService 的直接依赖 | 同事务、权限、expected version、stale revision、失败回滚 | `test_director_turn_service.py` 及对应 API/PG 并发回归；原边消失、无新增边，再过 Full |
+| 问题2：Save失效传播 | `workbench/shot_service.py`、明确的应用编排/端口及直接调用测试；移除对 DirectorTurnService 的直接依赖 | 同事务、权限、expected version、stale revision、失败回滚 | `test_director_turn_service.py` 及对应 API/PG 并发回归；原边消失、无新增边；Full 由协调者在整合候选上执行 |
 | 问题3：文本端口 | `director/text_model.py`、`text_transport.py`、中立文本DTO及实现注入；先提出具体所有权方案 | 模型/连接精确身份、未知提交不重放、错误语义、测试 seam | 现有文本调用/网关/Director恢复单测与 PG；Protocol、DTO、构造同时解耦，不保留旧转发别名 |
 | 问题9：组合根分类 | `shared/model_registry.py`、`rls_scopes.py` 及其进程初始化消费者；写前固定所有权方案 | ORM注册完整、RLS、不信任队列声称的归属 | Alembic metadata、Worker recovery、跨租户 PG；不能仅搬目录放行 |
 | 问题6：创意初始化 | `access/projects.py` 与应用层初始化输入及对应测试 | Project/Profile 原子创建、归属、编译/冻结版本 | Project/Creative初始化单测与事务失败回归；不复制模板/编译规则 |
@@ -128,6 +137,9 @@ development + worker token 限定的同步调试入口，经同一 WorkerRuntime
 实际可运行命令取自 DEVELOPMENT、package/pyproject 与当前质量容器，禁止虚构已不存在的
 fast jobs。专项 Agent只执行本切片聚焦回归，主 Agent在最终整合源码上统一执行完整门。
 新增豁免、改变宪法/分支保护、改变付费授权或不可逆数据操作，须按当前 Owner 边界另行决定。
+上述架构切片与细粒度资产清理分开分配。一般清理不要求先消除全部 baseline 债务，
+也不授权专项 Agent 改权威、改门禁或“修成通过”。只读审计、测试增删和结果保留条件
+统一引用 DEVELOPMENT，不为每个专项建立一份重复规范或验收报告模板。
 
 ## 5. Director Agent 目标设计的详细映射
 

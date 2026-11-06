@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   getSelectedWorkspaceId,
   setSelectedWorkspaceId as persistSelectedWorkspaceId,
-} from "../lib/api";
+} from "../lib/navigationPreferences";
 import { listWorkspaceProjects, listWorkspaces } from "../features/access/api";
 import { queryKeys } from "../lib/queryKeys";
 

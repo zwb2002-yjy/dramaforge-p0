@@ -2,7 +2,7 @@
 
 import type { components } from "../shared/api/generated";
 
-import { getSelectedWorkspaceId, setSelectedWorkspaceId } from "./navigationPreferences";
+import { getSelectedWorkspaceId } from "./navigationPreferences";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -17,8 +17,6 @@ function apiUrl(path: string): string {
   }
   return `${API_BASE}${path}`;
 }
-
-export { getSelectedWorkspaceId, setSelectedWorkspaceId };
 
 function workspaceHeaders(workspaceIdOverride?: string | null): Record<string, string> {
   const workspaceId =

@@ -49,7 +49,7 @@ Squash 必须显式传入审阅过的标题和正文，不使用自动拼接的�
 
 `dev` ruleset（删除与 non-fast-forward 保护）当前为 disabled，PR CI 不监听 `dev`。
 
-PR CI 的分层规则见 [DEVELOPMENT.md](DEVELOPMENT.md)。`dev -> main` 不走
+本地验证选择与当前 CI 执行范围见 [DEVELOPMENT.md](DEVELOPMENT.md)。`dev -> main` 不走
 Fast Gate：上述六个 required checks 全部执行，其中 `container-gates`
 包含 backend/frontend、PostgreSQL migration/integration、Playwright 与 LiteLLM
 完整质量门。

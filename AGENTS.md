@@ -41,6 +41,10 @@
 - Use the development feedback and evidence lifecycle in
   [DEVELOPMENT.md](docs/DEVELOPMENT.md). Re-run passed checks only after relevant
   source/dependency/environment changes, failures or unresolved concerns.
+- Batch related edits into a coherent slice before verification. Cleanup does
+  not require a new test, report, snapshot or full gate for every deleted file;
+  retain independent risk coverage and follow DEVELOPMENT for test selection,
+  evidence retention and coordinator-owned final verification.
 - Choose verification proportionate to the change (focused tests plus affected
   regression); formal gates required by CI are not reduced.
 - Command facts come from [`frontend/package.json`](frontend/package.json),

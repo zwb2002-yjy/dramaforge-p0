@@ -112,14 +112,12 @@ def test_baseline_is_a_no_new_debt_gate_not_an_all_compliant_claim():
     assert json.loads(scan.BASELINE.read_text())["dependencies"]
 
 
-def test_reference_contract_is_the_same_class_for_existing_compiler_consumers():
+def test_shot_reference_contract_owns_its_validation_semantics():
     from app.contracts.shot_reference import ShotReferenceIntent
-    from app.production.reference_intents import ShotReferenceIntent as CompilerIntent
 
-    assert CompilerIntent is ShotReferenceIntent
     assert ShotReferenceIntent.__module__ == "app.contracts.shot_reference"
     intent = ShotReferenceIntent(purpose="identity")
-    assert CompilerIntent.model_validate_json(intent.model_dump_json()) == intent
+    assert ShotReferenceIntent.model_validate_json(intent.model_dump_json()) == intent
 
 
 def test_shared_full_container_gate_enforces_dependencies():

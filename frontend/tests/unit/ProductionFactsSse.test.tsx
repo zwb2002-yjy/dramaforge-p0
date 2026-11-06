@@ -3,7 +3,7 @@ import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProductionFactsSse } from "../../src/components/sse/ProductionFactsSse";
-import { setSelectedWorkspaceId } from "../../src/lib/api";
+import { setSelectedWorkspaceId } from "../../src/lib/navigationPreferences";
 
 type Listener = (event: Event) => void;
 

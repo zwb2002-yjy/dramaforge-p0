@@ -30,7 +30,8 @@ describe("API transport origin boundary", () => {
   it("preserves the configured backend origin, workspace and CSRF headers", async () => {
     vi.stubEnv("VITE_API_BASE_URL", "https://backend.example");
     const client = await import("../../src/lib/api");
-    client.setSelectedWorkspaceId("workspace-1");
+    const preferences = await import("../../src/lib/navigationPreferences");
+    preferences.setSelectedWorkspaceId("workspace-1");
     const fetch = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(null, { status: 204 }));
@@ -46,7 +47,7 @@ describe("API transport origin boundary", () => {
         body: JSON.stringify({ name: "project" }),
       }),
     );
-    client.setSelectedWorkspaceId(null);
+    preferences.setSelectedWorkspaceId(null);
   });
 
   it("keeps an unavailable EventSource a no-subscription result", () => {

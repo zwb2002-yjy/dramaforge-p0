@@ -27,40 +27,45 @@ const SHOT = {
 };
 
 describe("ShotDetailsPanel", () => {
-  it("opens the latest failed run and shows the HTTP boundary rather than claiming acceptance", async () => {
-    const client = new QueryClient({
-      defaultOptions: { queries: { staleTime: Infinity, retry: false } },
-    });
-    client.setQueryData(queryKeys.shot.executionTrace("project-1", SHOT.id, "failed-run"), {
-      run_id: "failed-run",
-      status: "failed",
-      node_key: "video",
-      operation_status: "failed",
-      actual_model: "agnes-video-2.5-flash",
-      submission_diagnostics: {
-        phase: "response_received",
-        http_status: 503,
-        endpoint: "https://api.agnes-ai.cn/v1/videos",
-        duration_ms: 145,
-        response_error: "No healthy upstream",
-        response_request_id: "req-503",
-      },
-    });
-    render(
-      <QueryClientProvider client={client}>
-        <ShotDetailsBody
-          projectId="project-1"
-          shot={SHOT}
-          trace={[{ node_run_id: "failed-run", node_key: "video", status: "failed" }]}
-        />
-      </QueryClientProvider>,
-    );
-    const status = await screen.findByTestId("execution-submission-status");
-    expect(status).toHaveTextContent("未取得远端任务 ID");
-    expect(status).toHaveTextContent("HTTP 503");
-    expect(status).toHaveTextContent("No healthy upstream");
-    expect(screen.getByTestId("execution-trace-diagnostics")).toHaveTextContent("req-503");
-  });
+  it.each(["response_received", "accepted"] as const)(
+    "shows the HTTP boundary for %s",
+    async (phase) => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+      });
+      client.setQueryData(queryKeys.shot.executionTrace("project-1", SHOT.id, "failed-run"), {
+        run_id: "failed-run",
+        status: "failed",
+        node_key: "video",
+        operation_status: "failed",
+        actual_model: "agnes-video-2.5-flash",
+        submission_diagnostics: {
+          phase,
+          http_status: 503,
+          endpoint: "https://api.agnes-ai.cn/v1/videos",
+          duration_ms: 145,
+          response_error: "Provider returned HTTP 503",
+          response_request_id: "req-503",
+        },
+      });
+      render(
+        <QueryClientProvider client={client}>
+          <ShotDetailsBody
+            projectId="project-1"
+            shot={SHOT}
+            trace={[{ node_run_id: "failed-run", node_key: "video", status: "failed" }]}
+          />
+        </QueryClientProvider>,
+      );
+      const status = await screen.findByTestId("execution-submission-status");
+      expect(status).toHaveTextContent(
+        phase === "accepted" ? "HTTP 回应异常，需查询原任务确认" : "未取得远端任务 ID",
+      );
+      expect(status).toHaveTextContent("HTTP 503");
+      expect(status).toHaveTextContent("Provider returned HTTP 503");
+      expect(screen.getByTestId("execution-trace-diagnostics")).toHaveTextContent("req-503");
+    },
+  );
 
   it("surfaces shot metadata and production trace on demand", () => {
     render(

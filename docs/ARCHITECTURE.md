@@ -18,7 +18,7 @@ Updated: 2026-10-07；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 | `api` | FastAPI 入站鉴权、业务命令与读取；不在 HTTP 请求中等待长推理 |
 | `dispatcher` | 常驻事务性 Outbox 分发（区分导演工作唤醒与生产任务分发） |
 | `worker-default` | Arq `dramaforge:default`：媒体、review、continuity 作业 |
-| `worker-director` | Arq `dramaforge:director`：有界导演轮次、事件 intake、唤醒重放；禁用 Provider 调用 |
+| `worker-director` | Arq `dramaforge:director`：有界导演轮次、事件 intake、唤醒重放；禁止媒体 Provider 执行，文本推理遵循 MODULE_BOUNDARIES §4.3 |
 | `worker-heavy` | Arq `dramaforge:heavy`：重媒体作业 |
 | `frontend` | Nginx 网关，唯一对外应用入口（宿主端口 8080） |
 | `postgres` / `redis` / `minio` / `litellm` / `litellm-db` | 内部基础设施，不发布宿主端口（dev override 除外） |
@@ -53,15 +53,18 @@ Updated: 2026-10-07；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 | Workers | backend/app/workers | Arq default/director/heavy entry points and recovery ticks | domain rules owned by other packages |
 | Frontend | frontend/src/routes and frontend/src/features | views and explicit user commands | duplicated server truth |
 
-## 依赖方向
+## 入站调用职责
 
 Frontend UI → 统一 API Client（DTO 来自 OpenAPI）→ Backend API → Application → Domain / Runtime。
+该关系表示职责分工，不是源码 import 矩阵或每个请求都必须穿过的全部层；模块依赖只由
+MODULE_BOUNDARIES 定义，不能据此为每个操作增加 Command、接口或转发包装。
 Backend API 负责 HTTP 鉴权、输入校验与命令/查询转发；Backend Worker 负责异步消费并调用
 相应应用服务和 Runtime。Application 承载用例编排、业务操作权限及事务入口；Domain
 维护领域事实和规则。Application 是职责，不是新的 Runtime，也不是允许跨层绕过的理由。
 现有 Python 扫描分别标记 `backend_api` / `backend_worker`；浏览器 UI 不属于这两个标签。
 `production/application` 仍遵守 production 依赖方向；混合包中的应用服务不能靠改名免除债务。
-Provider adapter 只能被 Workbench Worker 执行或其显式配置/探测边界触达。
+媒体 Provider adapter 由生产 Worker 执行；文本推理、连接管理与只读查询按各自合同
+触达对应适配器。生成探测没有独立当前授权合同则不可用，不能由“探测边界”推导付费许可。
 验证按改动影响执行，发布候选必须通过完整容器质量门；API 变更同时检查 generated
 OpenAPI。`dev` 快速开发与 `main` 的强制门边界见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 

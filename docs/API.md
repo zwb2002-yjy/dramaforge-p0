@@ -144,6 +144,11 @@ project count, are the reason a used workspace stays undeletable.
 | Maintenance | maintenance.py | Owner-only recovery: list persisted failures; replay one Director wakeup, Outbox dead letter, or `POST /maintenance/media-node-runs/{node_run_id}/replay` with the expected failure identity. Media replay reuses the frozen operation/result and never creates a new paid generation. |
 | Worker tick | worker.py | token-protected development-only HTTP tick when no separate Arq worker is running; unavailable outside development |
 
+Scene workspace 与 Shot workbench 的每镜头 `trace` 共用查询：按 NodeRun 的
+`created_at DESC, attempt_no DESC, id DESC` 返回，默认每镜头最近 20 条（项目扫描上限
+2000 条）。前端自动打开返回范围内第一条失败执行；“最新”指执行创建顺序，不能按
+`finished_at` 重排，否则旧任务晚结束会覆盖新任务。用户手动选择执行后保留该选择。
+
 ## Read-only Model Capability / Prompt Compiler
 
 - Provider connection create accepts `auth_mode=bearer|none` (default bearer).

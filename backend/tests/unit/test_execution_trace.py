@@ -195,17 +195,22 @@ async def test_trace_exposes_stored_http_evidence_and_does_not_invent_it_for_his
             "endpoint": "https://api.agnes-ai.cn/v1/videos",
             "duration_ms": 145,
             "http_status": 503,
-            "response_request_id": "req-503",
-            "response_error": "No healthy upstream",
+            "response_request_id": "12345678-1234-1234-1234-123456789abc",
+            "response_error": "Old private prompt fragment",
         }
     }
     run.status = "failed"
     run.error_code = "PROVIDER_CREATE_FAILED"
-    run.error_summary = "Video HTTP 503; no task ID"
+    run.error_summary = "Agnes video HTTP 503; no task ID: Old private prompt fragment"
     await session.flush()
     trace = await build_execution_trace(session, project_id=project.id, run_id=run.id)
-    assert trace.submission_diagnostics.response_request_id == "req-503"
+    assert (
+        trace.submission_diagnostics.response_request_id == "12345678-1234-1234-1234-123456789abc"
+    )
     assert trace.submission_diagnostics.http_status == 503
+    assert trace.submission_diagnostics.response_error == "Provider returned HTTP 503"
+    assert "Old private prompt fragment" not in trace.model_dump_json()
+    assert "Old private prompt fragment" in run.error_summary  # No rewrite of stored evidence.
     assert trace.error_code == "PROVIDER_CREATE_FAILED"
     op.response_summary = {"create_http_status": 503}
     await session.flush()

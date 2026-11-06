@@ -11,8 +11,8 @@ from uuid import uuid4
 import pytest
 from app.access.models import Project, User, Workspace
 from app.assets.models import Episode, Scene
+from app.contracts.shot_reference import ShotReferenceIntent
 from app.execution.models import NodeRun, ProviderOperation
-from app.production.reference_intents import ShotReferenceIntent
 from app.production.workbench_execution import (
     WorkbenchExecutionError,
     WorkbenchExecutionInput,
@@ -316,7 +316,7 @@ async def test_build_plan_fails_closed_when_model_unavailable(session: AsyncSess
 
 @pytest.mark.asyncio
 async def test_build_plan_fails_closed_on_fatal_reference_gap(session: AsyncSession) -> None:
-    from app.production.reference_intents import ShotReferenceIntent
+    from app.contracts.shot_reference import ShotReferenceIntent
 
     project, binding, user = await _seed(session)
     shot, artifact = await _seed_video_shot(session, project=project, user=user)
@@ -343,7 +343,7 @@ async def test_build_plan_fails_closed_on_fatal_reference_gap(session: AsyncSess
 async def test_approximate_reference_requires_preview_then_explicit_acceptance(
     session: AsyncSession,
 ) -> None:
-    from app.production.reference_intents import ShotReferenceIntent
+    from app.contracts.shot_reference import ShotReferenceIntent
 
     project, video_binding, user = await _seed(session)
     shot, artifact, binding = await _seed_image_shot(
@@ -401,7 +401,7 @@ async def test_reference_identity_is_hydrated_and_frozen_in_node_run_snapshot(
     from app.assets.models import Asset, AssetVersion, AssetVersionReference, Shot
     from app.execution.models import Artifact
     from app.production.models import ShotReferenceBinding
-    from app.production.reference_intents import ShotReferenceIntent
+    from app.contracts.shot_reference import ShotReferenceIntent
 
     # The shared seed only needs one additional image binding to exercise the
     # keyframe path; no provider call is made by WorkbenchExecutionService.
@@ -585,7 +585,7 @@ async def test_cross_project_reference_fails_before_plan_or_graph_write(
     session.add(foreign)
     await session.flush()
     service = WorkbenchExecutionService(session, user_id=user.id)
-    from app.production.reference_intents import ShotReferenceIntent
+    from app.contracts.shot_reference import ShotReferenceIntent
 
     with pytest.raises(WorkbenchExecutionError, match="current project"):
         await service.build_plan(
@@ -855,7 +855,7 @@ async def test_fl2va_plan_keeps_tail_and_formal_first_roles_distinct(
     session: AsyncSession,
     mode: str,
 ) -> None:
-    from app.production.reference_intents import ShotReferenceIntent
+    from app.contracts.shot_reference import ShotReferenceIntent
 
     project, binding, user = await _seed(session)
     shot, artifact = await _seed_video_shot(session, project=project, user=user)
@@ -898,7 +898,7 @@ async def test_ref2va_plan_validates_saved_media_without_formal_keyframe(
 
     from app.assets.models import Shot
     from app.execution.models import Artifact
-    from app.production.reference_intents import ShotReferenceIntent
+    from app.contracts.shot_reference import ShotReferenceIntent
 
     project, binding, user = await _seed(session)
     entry = await session.get(ModelCatalogEntry, binding.catalog_entry_id)
