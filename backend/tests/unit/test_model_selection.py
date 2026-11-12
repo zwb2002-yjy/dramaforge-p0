@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from datetime import date
 from uuid import uuid4
 
@@ -21,22 +20,10 @@ from app.providers.models import (
     ProviderModelBinding,
 )
 from app.providers.selection import ModelSelectionService
-from app.shared.base import Base
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 from tests.unit.model_infra_fixture import unit_video_manifest
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
 
 
 async def _seed(

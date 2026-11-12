@@ -24,15 +24,27 @@ spec.loader.exec_module(surface)
     ('const path = "/creation/start-project";', '.ts', '/creation/start-project'),
     ('import { CharacterReference } from "./old";', '.tsx', 'CharacterReference'),
     ('Graph: object=ProductionGraph', '.py', 'Graph = ProductionGraph'),
-    (r'const url = /https?:\/\//; const route = "/creation/start-project";', '.ts', '/creation/start-project'),
+    (
+        r'const url = /https?:\/\//; const route = "/creation/start-project";',
+        ".ts",
+        "/creation/start-project",
+    ),
     ('const value = `${(() => { return import("manual_media"); })()}`;', '.ts', 'manual_media'),
     (r'const route = "/creation/\u{73}tart-project";', '.ts', '/creation/start-project'),
     ('const ui = <p>{CharacterReference.name}</p>;', '.tsx', 'CharacterReference'),
     ('const ui = <CharacterReference />;', '.tsx', 'CharacterReference'),
     ('const ui = <p data-kind="manual_media">description</p>;', '.tsx', 'manual_media'),
     ('const value = `${`inner ${CharacterReference.name}`}`;', '.ts', 'CharacterReference'),
-    (r'if (ready) /https?:\/\//; const route = "/creation/start-project";', '.ts', '/creation/start-project'),
-    ('const ui = <Foo<T> href="/creation/start-project"></Foo>;', '.tsx', '/creation/start-project'),
+    (
+        r'if (ready) /https?:\/\//; const route = "/creation/start-project";',
+        ".ts",
+        "/creation/start-project",
+    ),
+    (
+        'const ui = <Foo<T> href="/creation/start-project"></Foo>;',
+        ".tsx",
+        "/creation/start-project",
+    ),
 ])
 def test_rejects_retired_code_and_contract_references(source, suffix, token):
     assert surface.contains_reference(surface.code_references(source, suffix), token)

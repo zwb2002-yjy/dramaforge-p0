@@ -32,7 +32,6 @@ from PIL import Image
 from sqlalchemy import func, select
 from tests.unit.model_infra_fixture import unit_image_manifest
 from tests.unit.test_workbench_execution import _input, _seed, _seed_image_shot
-from tests.unit.test_workbench_execution import session as session
 
 
 async def _setup(session, count=1, *, supported=1):

@@ -23,7 +23,6 @@ from app.providers.workspace_credentials import (
     runtime_text_gateway_settings,
 )
 from test_gateway_model_management import fixture, model
-from test_gateway_model_management import session as session
 
 
 async def test_managed_selection_has_no_discovery_or_external_transport(session, monkeypatch):

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -61,17 +61,6 @@ async def test_text_model_port_runs_without_business_session_and_preserves_unkno
     )
     assert result.status == GenerationStatus.SUBMIT_UNKNOWN
     assert len(calls) == 1
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
 
 
 async def _seed(session: AsyncSession) -> tuple[User, Project, Scene, Shot, Shot]:

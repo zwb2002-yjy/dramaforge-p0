@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -11,20 +10,8 @@ from app.access.models import Project, User, Workspace
 from app.assets.models import Episode, Scene, Shot
 from app.editing.timeline_builder import build_edit_session_for_project
 from app.execution.models import Artifact
-from app.shared.base import Base
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with factory() as s:
-        yield s
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _seed_project(session: AsyncSession) -> UUID:

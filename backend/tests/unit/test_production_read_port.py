@@ -8,7 +8,7 @@ from app.execution.shot_pipeline import SHOT_PIPELINE_TEMPLATE_KEY, shot_pipelin
 from app.production.application.facts import ProductionFacts
 from app.production.service import GraphService
 from app.shared.errors import ValidationAppError
-from tests.unit.test_director_turn_service import _seed, session  # noqa: F401
+from tests.unit.test_director_turn_service import _seed
 
 
 async def _seed_execution(session):  # noqa: F811

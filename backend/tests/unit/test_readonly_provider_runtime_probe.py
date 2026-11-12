@@ -13,7 +13,6 @@ from app.providers.models import ProviderModelBinding
 from cryptography.fernet import Fernet
 from tests.unit.model_infra_fixture import unit_video_manifest
 from tests.unit.test_provider_probe_safety import _seed
-from tests.unit.test_provider_probe_safety import session as session
 
 
 @pytest.mark.parametrize(

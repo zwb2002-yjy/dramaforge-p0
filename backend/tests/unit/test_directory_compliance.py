@@ -16,7 +16,12 @@ def test_disk_scan_prunes_caches_without_hiding_source_secrets(tmp_path, monkeyp
     spec = importlib.util.spec_from_file_location("directory_compliance", SCRIPT)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    for relative in ("tmp/evidence", "frontend/node_modules/package", "backend/app/data", "backend/app/logs"):
+    for relative in (
+        "tmp/evidence",
+        "frontend/node_modules/package",
+        "backend/app/data",
+        "backend/app/logs",
+    ):
         (tmp_path / relative).mkdir(parents=True)
     (tmp_path / ".env").write_text("local synthetic settings")
     (tmp_path / "backend/.env").write_text("synthetic secret")

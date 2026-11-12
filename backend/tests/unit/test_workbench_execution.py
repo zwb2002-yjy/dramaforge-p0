@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import AsyncGenerator
 from copy import deepcopy
 from datetime import date
 from uuid import uuid4
@@ -23,22 +22,10 @@ from app.providers.catalog_loader import CATALOG_MODELS, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.intents import VideoGenerationIntentV1
 from app.providers.models import ProviderConnection, ProviderModelBinding
-from app.shared.base import Base
 from app.shared.security import hash_password
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 from tests.unit.model_infra_fixture import unit_video_manifest
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
 
 
 async def _seed(

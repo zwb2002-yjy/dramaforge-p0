@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Awaitable, Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
@@ -29,11 +29,10 @@ from app.providers.models import (
 from app.providers.registry import get_plugin
 from app.providers.runtime import PollResult, ProviderResumeToken
 from app.security.models import EncryptedProviderCredential
-from app.shared.base import Base
 from app.shared.errors import ValidationAppError
 from cryptography.fernet import Fernet
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.fixture(autouse=True)
@@ -48,17 +47,6 @@ def isolated_provider_io(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     )
     yield
     clear_settings_cache()
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
 
 
 async def _seed(

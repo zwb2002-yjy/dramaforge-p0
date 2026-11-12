@@ -127,7 +127,9 @@ def test_check_fails_closed_when_a_source_cannot_be_parsed(tmp_path, monkeypatch
     ("new_package.py", "# No imports must not hide an unclassified module"),
     ("config.py", "import app.new_package"),
 ])
-def test_unclassified_internal_modules_fail_even_without_cross_layer_edges(tmp_path, monkeypatch, module, source):
+def test_unclassified_internal_modules_fail_even_without_cross_layer_edges(
+    tmp_path, monkeypatch, module, source
+):
     app = tmp_path / "backend/app"
     app.mkdir(parents=True)
     (app / module).write_text(source)

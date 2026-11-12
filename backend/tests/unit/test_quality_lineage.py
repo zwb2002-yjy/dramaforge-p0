@@ -3,7 +3,6 @@ the exact model binding being gated — not by a sibling binding."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from datetime import date
 from uuid import uuid4
 
@@ -18,22 +17,10 @@ from app.providers.catalog_loader import ModelCatalogLoader, hash_manifest
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.connection_service import ProviderConnectionService
 from app.providers.models import ProviderConnection, ProviderModelBinding
-from app.shared.base import Base
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _seed_chain(

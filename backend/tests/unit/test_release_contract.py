@@ -155,11 +155,13 @@ def test_offline_bundle_is_flat_and_carries_one_compressed_image_archive() -> No
 
     # Tagged package inputs have no container references after smoke teardown.
     # Do not remove them before the archive is written.
-    for line in workflow[:workflow.index("- name: Create online and offline release bundles")].splitlines():
+    bundle_step = workflow.index("- name: Create online and offline release bundles")
+    for line in workflow[:bundle_step].splitlines():
         if line.split()[:3] == ["docker", "image", "prune"]:
             command = shlex.split(line.strip(), comments=True)
             assert not any(
-                option == "--all" or (option.startswith("-") and not option.startswith("--") and "a" in option)
+                option == "--all"
+                or (option.startswith("-") and not option.startswith("--") and "a" in option)
                 for option in command[3:]
             ), "image prune --all deletes unused tagged package inputs"
 

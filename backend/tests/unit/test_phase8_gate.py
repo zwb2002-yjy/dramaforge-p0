@@ -2,27 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 import pytest
 from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
 from app.assets.models import Scene, Shot
-from app.shared.base import Base
 from app.shared.security import hash_password
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _seed_scene_shot(session: AsyncSession) -> tuple[Project, Shot, User]:

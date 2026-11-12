@@ -12,10 +12,7 @@ from tests.unit.test_workbench_execution import (
     _input,
     _seed,
     _seed_image_shot,
-    session,
 )
-
-__all__ = ["session"]
 
 
 async def test_explicit_model_query_uses_only_the_projects_workspace_binding_registry(session):

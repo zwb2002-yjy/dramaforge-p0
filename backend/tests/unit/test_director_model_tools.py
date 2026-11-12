@@ -19,7 +19,6 @@ from pydantic import ValidationError
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from tests.unit.test_workbench_execution import _seed, _seed_image_shot
-from tests.unit.test_workbench_execution import session as session
 
 
 async def _fixture(session):

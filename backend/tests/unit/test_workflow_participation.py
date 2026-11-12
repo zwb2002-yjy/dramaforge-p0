@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from uuid import UUID, uuid4
 
 import pytest
@@ -15,19 +14,7 @@ from app.director.workflows.character_participation import (
     ShotParticipationPlan,
     participation_director_state,
 )
-from app.shared.base import Base
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with factory() as s:
-        yield s
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _seed_project(session: AsyncSession) -> tuple[UUID, UUID]:

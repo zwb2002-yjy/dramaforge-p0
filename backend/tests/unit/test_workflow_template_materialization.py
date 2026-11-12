@@ -4,7 +4,6 @@ import pytest
 from app.director.workflows.template_nodes import two_character_dialogue_definition
 from app.production.service import GraphService
 from tests.unit.test_proposal_commands import _seed
-from tests.unit.test_proposal_commands import session as session
 
 
 @pytest.mark.asyncio

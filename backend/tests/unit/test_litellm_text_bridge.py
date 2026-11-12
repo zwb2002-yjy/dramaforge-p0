@@ -7,7 +7,6 @@ the canonical LiteLLM capability and resolver path.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
 from typing import Any
 from uuid import uuid4
 
@@ -26,8 +25,7 @@ from app.providers.model_profiles.resolver import ModelBindingResolver
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.registry import ModelRegistry
 from app.providers.router import CapabilityRouter
-from app.shared.base import Base
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 _GATEWAY = Settings(
     app_env="development",
@@ -54,17 +52,6 @@ def _text_result(payload: dict[str, Any]) -> httpx.Response:
         },
         request=payload and httpx.Request("POST", "https://gateway.example/v1/chat/completions"),
     )
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with factory() as s:
-        yield s
-    await engine.dispose()
 
 
 async def test_litellm_adapter_builds_chat_contract() -> None:

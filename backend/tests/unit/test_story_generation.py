@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
 from decimal import Decimal
 from uuid import uuid4
 
@@ -34,17 +33,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 MODEL_ID = "litellm/controlled-script"
 pytestmark = pytest.mark.usefixtures("configured_director_runtime")
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
 
 
 async def _seed(session: AsyncSession) -> tuple[Project, User]:

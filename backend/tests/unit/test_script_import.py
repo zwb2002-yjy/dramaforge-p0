@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -35,25 +34,13 @@ from app.delivery import models as _dm  # noqa: F401
 from app.events import models as _em  # noqa: F401
 from app.execution import models as _xm  # noqa: F401
 from app.production import models as _pm  # noqa: F401
-from app.shared.base import Base
 from app.shared.errors import ConflictError, ValidationAppError
 from app.shared.security import hash_password
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 REPO = Path(__file__).resolve().parents[3]
 SCRIPT = REPO / "fixtures" / "scripts" / "episode_script.md"
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with factory() as s:
-        yield s
-    await engine.dispose()
 
 
 async def _project(session: AsyncSession):

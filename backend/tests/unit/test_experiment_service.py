@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 import pytest
@@ -16,22 +15,10 @@ from app.director.proposal_commands import (
 from app.execution.models import NodeRun
 from app.production.experiment_service import ExperimentCreateBody, create_experiment_branch
 from app.production.models import ExperimentBranch
-from app.shared.base import Base
 from app.shared.errors import ConflictError, NotFoundError
 from app.shared.security import hash_password
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _seed(session: AsyncSession) -> tuple[Project, Shot, User]:
@@ -207,4 +194,3 @@ async def test_accept_experiment_requires_explicit_adoption_scope(session: Async
 
     await session.refresh(row)
     assert row.status == "draft"
-

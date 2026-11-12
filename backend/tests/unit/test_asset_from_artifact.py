@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from uuid import UUID, uuid4
 
 import pytest
@@ -15,22 +14,10 @@ from app.assets.from_artifact_service import (
 )
 from app.assets.models import Asset, AssetVersion, AssetVersionReference
 from app.execution.models import Artifact
-from app.shared.base import Base
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 from app.shared.security import hash_password
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with factory() as s:
-        yield s
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _project(session: AsyncSession) -> tuple[User, Project]:

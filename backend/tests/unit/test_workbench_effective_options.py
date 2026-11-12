@@ -9,10 +9,7 @@ from tests.unit.test_workbench_execution import (
     _seed,
     _seed_video_shot,
     _video_manifest_with_contract,
-    session,
 )
-
-__all__ = ["session"]
 
 
 async def test_saved_shot_contract_change_requires_explicit_review_before_preflight(session):

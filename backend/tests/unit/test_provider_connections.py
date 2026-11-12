@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 import pytest
@@ -10,13 +9,12 @@ from app.access.models import User, Workspace
 from app.config import clear_settings_cache
 from app.providers.connection_service import ProviderConnectionService
 from app.providers.models import ProviderCapabilityEvidence, ProviderModelBinding
-from app.shared.base import Base
 from app.shared.errors import NotFoundError, ValidationAppError
 from app.shared.security import CSRF_HEADER, hash_password
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _csrf(client: TestClient) -> str:
@@ -159,17 +157,6 @@ def test_same_protocol_connections_are_independent_and_credentials_are_write_onl
     listed = client.get(f"/api/v1/workspaces/{workspace_id}/provider-connections")
     assert len(listed.json()) == 2
     assert "second-secret" not in listed.text
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
 
 
 async def _seed_owner(session: AsyncSession) -> tuple[User, Workspace]:

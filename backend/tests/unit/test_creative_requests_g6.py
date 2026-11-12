@@ -23,7 +23,6 @@ from app.providers.agnes import AgnesImageCompiler, AgnesRuntime
 from app.providers.models import ProviderConnection
 from app.providers.runtime import ProviderRuntimeResolver, ResolvedRuntime
 from test_prompt_mentions_execution import _setup
-from tests.unit.test_workbench_execution import session as session
 
 
 async def test_four_creative_inputs_reach_distinct_frozen_provider_requests(

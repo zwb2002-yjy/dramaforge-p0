@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-from collections.abc import AsyncGenerator
 from datetime import date
 from pathlib import Path
 from shutil import copytree
@@ -32,8 +31,7 @@ from app.providers.manifest import (
     read_catalog_manifest,
     to_v3_model_manifest,
 )
-from app.shared.base import Base
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 BACKEND = Path(__file__).resolve().parents[2]
 CONTRACTS_DIR = BACKEND.parent / "fixtures" / "providers" / "contracts"
@@ -73,17 +71,6 @@ def _assert_fixture_completeness(manifests: list[dict[str, object]], fixtures_di
         # body shape or success envelope. Pin the structural wire identity too.
         assert isinstance(template.get("path"), str) and template["path"].startswith("/")
         assert isinstance(template.get("request_body"), dict) or template["method"] == "GET"
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
 
 
 def _load_frozen() -> object:

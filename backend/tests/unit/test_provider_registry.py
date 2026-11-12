@@ -7,7 +7,6 @@ through the registry without a provider-name branch.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from typing import Any
 from uuid import uuid4
 
@@ -18,12 +17,11 @@ from app.providers import registry as registry_module
 from app.providers.connection_service import ProviderConnectionService
 from app.providers.models import ProviderCapabilityEvidence, ProviderModelBinding
 from app.providers.registry import ProviderPlugin, get_plugin, list_plugins, register_plugin
-from app.shared.base import Base
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from cryptography.fernet import Fernet
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 FAKE_PROVIDER = "fakeprovider"
 FAKE_PROFILE = "fakeprofile"
@@ -142,17 +140,6 @@ def _fake_plugin() -> ProviderPlugin:
         paid_capabilities=frozenset({"image_t2i", "image_i2i", "video_i2v"}),
         model_list_path="/v1/models",
     )
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
 
 
 @pytest.fixture

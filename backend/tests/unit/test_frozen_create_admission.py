@@ -13,7 +13,6 @@ from app.providers.execution_identity import ExecutionIdentitySnapshot
 from app.providers.models import ProviderConnectionRevision
 from app.shared.errors import ValidationAppError
 from tests.unit.runtime_model_fixtures import _seed_two_models
-from tests.unit.runtime_model_fixtures import session as session
 
 
 async def _setup(session):

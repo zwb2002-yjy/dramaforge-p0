@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
 from pathlib import Path
 from shutil import copytree
 from uuid import uuid4
@@ -13,24 +12,10 @@ from app.providers.catalog_loader import ModelCatalogLoader
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.catalog_sync import CatalogRevisionConflict, sync_model_catalog
 from app.providers.models import ProviderModelBinding
-from app.shared.base import Base
-from app.shared.model_registry import load_all_models
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 CATALOG_DIR = Path(__file__).resolve().parents[2] / "app" / "providers" / "model_catalog"
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    load_all_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
 
 
 async def test_sync_is_dry_by_default_idempotent_and_rejects_hash_drift(

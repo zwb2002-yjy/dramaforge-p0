@@ -19,7 +19,6 @@ from app.providers.openai_compatible_media import (
 )
 from PIL import Image
 from test_model_profiles_api import api as api
-from tests.unit.test_workbench_execution import session as session
 
 
 def png(color="red"):

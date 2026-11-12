@@ -101,6 +101,22 @@ def configured_director_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
+async def session() -> AsyncIterator[AsyncSession]:
+    """Empty in-memory SQLite session over the complete current metadata.
+
+    Every model module is imported at conftest import time, so local copies of
+    this fixture only duplicated the same setup.
+    """
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    async with factory() as db_session:
+        yield db_session
+    await engine.dispose()
+
+
+@pytest.fixture
 def client() -> Iterator[TestClient]:
     """App client with in-memory SQLite session (functional path only — not RLS)."""
     clear_settings_cache()

@@ -9,23 +9,7 @@ limitation, not a production issue).
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
-
-import pytest
 from app.providers.bootstrap import transport_profile_id_for
-from app.shared.base import Base
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture()
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
 
 
 class TestTransportProfileId:

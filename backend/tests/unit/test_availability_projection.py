@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 import pytest
@@ -16,24 +15,10 @@ from app.providers.availability_projection import (
     record_model_availability,
 )
 from app.providers.connection_service import ProviderConnectionService
-from app.shared.base import Base
-from app.shared.model_registry import load_all_models
 from app.shared.security import hash_password
 from cryptography.fernet import Fernet
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    load_all_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.mark.asyncio

@@ -17,19 +17,6 @@ from app.director.creative_capabilities.packs_library import (
     STYLE_PACKS,
 )
 from app.director.creative_capabilities.skill_library import BASELINE_SKILLS
-from app.shared.base import Base
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with factory() as s:
-        yield s
-    await engine.dispose()
 
 
 async def _seed(session) -> tuple[Project, Scene, Shot]:

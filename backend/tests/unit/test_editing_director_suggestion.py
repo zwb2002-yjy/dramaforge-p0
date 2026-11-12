@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from copy import deepcopy
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -31,23 +30,11 @@ from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun, ProviderOperation
 from app.production.models import ProductionGraph
 from app.production.service import GraphService
-from app.shared.base import Base
 from app.shared.enums import ProjectStage
 from app.shared.errors import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
 from app.shared.security import hash_password
 from sqlalchemy import func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _seed(
