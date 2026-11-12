@@ -1,8 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { selectSegment } from "./selectSegment";
 import { fileURLToPath } from "node:url";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
 
 import { installProfessionalMock, PROJECT_ID, WORKSPACE_ID } from "./professional-mocks";
 import type { ShotOverviewRead } from "../../src/features/scenes/api";
@@ -375,7 +373,7 @@ test("pending review, generating, failed and unknown filters use server facts an
 
 test("two projects retain independent filters and focused scenes across refresh", async ({
   page,
-}, testInfo) => {
+}) => {
   const first = await installStoryboardFixture(page, { shots: 100, scenes: 20, missingVideoAt: 1 });
   const secondId = "project-second";
   const second = await installStoryboardFixture(page, {
@@ -385,7 +383,6 @@ test("two projects retain independent filters and focused scenes across refresh"
     projectId: secondId,
     installBase: false,
   });
-  const began = Date.now();
   await page.goto(`/projects/${PROJECT_ID}/scenes`);
   await expect(page.getByTestId("scene-card")).toHaveCount(20);
   await expect(page.getByTestId("scene-card").first().getByTestId("scene-shot-card")).toHaveCount(
@@ -415,22 +412,4 @@ test("two projects retain independent filters and focused scenes across refresh"
   expect(nodes).toBeLessThan(1200);
   expect(await page.locator("video").count()).toBe(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  const metadataPath = testInfo.outputPath("overview-scale-metadata.json");
-  await mkdir(dirname(metadataPath), { recursive: true });
-  await writeFile(
-    metadataPath,
-    JSON.stringify({
-      shots: 100,
-      renderedShots: 1,
-      nodes,
-      sequenceMs: Date.now() - began,
-      firstProjectUniqueSceneReads: new Set(first.reads).size,
-      secondProjectUniqueSceneReads: new Set(second.reads).size,
-      productionWrites: 0,
-    }),
-  );
-  await testInfo.attach("overview-scale-metadata", {
-    path: metadataPath,
-    contentType: "application/json",
-  });
 });

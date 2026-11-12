@@ -77,8 +77,8 @@ Director Runtime 负责提案和编排；Production Runtime 负责真实生产�
 | 模块依赖与真实债务 | MODULE_BOUNDARIES（规则）、ARCHITECTURE_MAPPING（差距） | `arch_import_scan.py --check`、`test_architecture_gate.py`、baseline；仅检查已覆盖依赖、新增债务和过期豁免 |
 | 共享领域术语 | DOMAIN_VOCABULARY | 类型/公共合同与 Review；不检查普通变量或逐字文案 |
 | 用户门、执行身份、幂等、恢复、RLS | CURRENT 表中对应领域权威 | 现有 Unit、PG Integration、关键 E2E；静态 import 门不能替代行为验证 |
-| 退役表面、目录与敏感文件、Provider 权威 | ARCHITECTURE 退役边界、目录策略、MODEL_PROVIDER | `check_canonical_surface.py`、`check_directory_compliance.py`、`check_provider_authority.py`；词法命中须诊断，禁止为过门放宽边界 |
-| Agent 范围、授权与报告 | AGENTS.md | 任务审查、`repo_guardrails.py` 覆盖的 Git/归属合同；不声称机器可拦截全部自然语言决策 |
+| 退役表面、目录与敏感文件、Provider 权威 | ARCHITECTURE 退役边界、目录策略、MODEL_PROVIDER | `check_canonical_surface.py` 检查代码标识符及精确合同字符串，忽略普通说明；目录与 Provider 检查分工不变。静态引用检查不替代动态注册与实际行为验证 |
+| Agent 范围、授权与报告 | AGENTS.md | 对话中的任务分工、GitHub 保护与本地 pre-push；`repo_guardrails.py` 只检查现行工作流入口，不维护完成/审批台账 |
 | 验证选择、测试资产、产物生命周期 | DEVELOPMENT | 共享质量脚本及 `test_run_quality_script.py` / Compose 合同；批次与保留判断由任务审查落实 |
 | CI、集成与发布保护 | RELEASE | workflow、`test_ci_workflow_contract.py`、Rulesets；本地通过不证明远端检查或保护状态 |
 
@@ -116,7 +116,8 @@ FRONTEND_WORKBENCH、MODEL_PROVIDER、API、DATA_MODEL，不新增平行权威�
 
 ## Director Agent 参考入口
 
-现状与待实现的工具循环合同统一见 [DIRECTOR_RUNTIME](DIRECTOR_RUNTIME.md#director-agent-target)，
+现有有界工具循环、Skills 快照、只读工具与待采纳提案，以及后续扩展合同，
+统一见 [DIRECTOR_RUNTIME](DIRECTOR_RUNTIME.md#director-agent-target)，
 实施依赖见 [ARCHITECTURE_MAPPING §5](ARCHITECTURE_MAPPING.md#director-agent-sequence)。
 模型支持只维护 [MODEL_PROVIDER](MODEL_PROVIDER.md) 与从源码生成的
 [支持矩阵](generated/MODEL_SUPPORT.md)，不另存逐模型手写矩阵或源码审计快照。

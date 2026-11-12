@@ -65,6 +65,198 @@ def event_count(identifier: str) -> int:
     return sum(row["model"] == identifier for row in response.json())
 
 
+def _managed_payload(contract_profile: object) -> tuple[dict, dict]:
+    identifier, workspace, connection = (str(uuid.uuid4()) for _ in range(3))
+    params = {
+        # Keep the upstream model distinct from the Proxy deployment UUID so
+        # assertions cannot accidentally conflate routing and model identity.
+        "model": f"openai/upstream-tools-{uuid.uuid4().hex}",
+        "api_base": "http://litellm-mock-quality:9000/tools/v1",
+        "api_key": "synthetic-upstream-tools-secret",
+        "max_retries": 0,
+    }
+    config_hash = hashlib.sha256(json.dumps(
+        {"model": params["model"], "api_base": params["api_base"]},
+        sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    frozen = {
+        "deployment_id": identifier, "workspace_id": workspace,
+        "connection_id": connection, "config_hash": config_hash, "key_revision": 1,
+    }
+    body = {
+        "model_name": "df-" + uuid.UUID(identifier).hex,
+        "litellm_params": params,
+        "model_info": {
+            "id": identifier, "df_managed": True,
+            "df_workspace_id": workspace, "df_connection_id": connection,
+            "df_config_hash": config_hash, "df_key_revision": 1,
+            "df_request_id": str(uuid.uuid4()), "df_contract_profile": contract_profile,
+        },
+    }
+    return body, frozen
+
+
+@pytest.mark.parametrize("contract_profile", ["chat_tools_v2", "", None, ["chat_tools_v1"]])
+def test_managed_create_rejects_unknown_protocol_contracts_without_upstream(
+    proxy: httpx.Client, contract_profile: object,
+) -> None:
+    body, _frozen = _managed_payload(contract_profile)
+    response = proxy.post("/model/new", json=body)
+    assert response.status_code == 400, response.text
+    assert event_count(body["litellm_params"]["model"].removeprefix("openai/")) == 0
+
+
+async def test_managed_tools_round_trip_preserves_protocol_through_real_proxy(
+    proxy: httpx.Client,
+) -> None:
+    from app.config import Settings
+    from app.providers.capabilities import Capability
+    from app.providers.contracts.common import ExecutionContext, GenerationStatus
+    from app.providers.contracts.text import TextGenerateRequest, TextMessage
+    from app.providers.litellm_adapter import LiteLLMModelAdapter
+    from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
+
+    body, frozen = _managed_payload("chat_tools_v1")
+    created = proxy.post("/model/new", json=body)
+    assert created.status_code == 200, created.text
+    alias, identifier = body["model_name"], frozen["deployment_id"]
+    deployment_model = body["litellm_params"]["model"]
+    upstream_model = deployment_model.removeprefix("openai/")
+    key = proxy.post("/key/generate", json={"models": [alias], "key_type": "llm_api"})
+    assert key.status_code == 200
+    data_key = key.json()["key"]
+    manifest = litellm_logical_manifest(alias)
+    manifest.metadata.update({"gateway_reference": frozen, "contract_profile": "chat_tools_v1"})
+    adapter = LiteLLMModelAdapter(
+        manifest,
+        settings=Settings(
+            _env_file=None, litellm_gateway_url=str(proxy.base_url), litellm_api_key=data_key,
+        ),
+    )
+    arguments = {
+        "shot_id": "shot-fixture-1", "language": "中文", "options": {"detail": "summary"},
+    }
+    parameters = {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "shot_id": {"type": "string"}, "language": {"type": "string"},
+            "options": {
+                "type": "object", "properties": {"detail": {"type": "string"}},
+                "required": ["detail"], "additionalProperties": False,
+            },
+        },
+        "required": ["shot_id", "language", "options"],
+    }
+    tools = [{"type": "function", "function": {
+        "name": "inspect_shot", "description": "Inspect the synthetic shot.",
+        "parameters": parameters,
+    }}]
+    messages = [
+        TextMessage(role="system", content="synthetic-system-content-canary"),
+        TextMessage(role="user", content="synthetic-user-content-canary"),
+    ]
+    context = ExecutionContext(
+        trace_id="managed-tools", workspace_id=frozen["workspace_id"],
+    )
+    first = await adapter.create(
+        Capability.TEXT_GENERATE,
+        TextGenerateRequest(
+            messages=messages, tools=tools, tool_choice="auto", parallel_tool_calls=False,
+        ),
+        context,
+    )
+    assert first.status == GenerationStatus.SUCCEEDED, first.provider_metadata
+    assert first.provider_metadata["text"] == ""
+    assert first.provider_metadata["stop_reason"] == "tool_calls"
+    assert first.provider_metadata["usage"] == {
+        "prompt_tokens": 13, "completion_tokens": 3, "total_tokens": 16,
+    }
+    assert first.provider_metadata["tool_calls"] == [{
+        "call_id": "call-" + upstream_model, "name": "inspect_shot", "arguments": arguments,
+    }]
+    call = first.provider_metadata["tool_calls"][0]
+    tool_result = json.dumps({"ok": True, "data": {"version": 3, "title": "古桥"}})
+    messages.extend([
+        TextMessage.model_validate({
+            "role": "assistant", "content": None,
+            "tool_calls": [{
+                "id": call["call_id"], "type": "function",
+                "function": {"name": call["name"], "arguments": json.dumps(call["arguments"])},
+            }],
+        }),
+        TextMessage(role="tool", tool_call_id=call["call_id"], content=tool_result),
+    ])
+    second = await adapter.create(
+        Capability.TEXT_GENERATE,
+        TextGenerateRequest(
+            messages=messages, tools=tools, tool_choice="auto", parallel_tool_calls=False,
+        ),
+        context,
+    )
+    assert second.status == GenerationStatus.SUCCEEDED, second.provider_metadata
+    assert second.provider_metadata["text"] == "synthetic tools completed"
+    assert second.provider_metadata["tool_calls"] == []
+    assert second.provider_metadata["stop_reason"] == "stop"
+    assert second.provider_metadata["usage"] == {
+        "prompt_tokens": 19, "completion_tokens": 5, "total_tokens": 24,
+    }
+    response = httpx.get(f"{os.environ['LITELLM_MOCK_URL']}/events", trust_env=False)
+    response.raise_for_status()
+    events = [event for event in response.json() if event["model"] == upstream_model]
+    assert len(events) == 2, "one upstream POST per model turn; no hidden retries"
+    assert all(event["path"] == "/tools/v1/chat/completions" for event in events)
+    assert all(event["port"] == 9000 for event in events)
+
+    def fingerprint(value):
+        return hashlib.sha256(json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode()).hexdigest()
+
+    for event in events:
+        protocol = event["protocol"]
+        assert protocol["tools"] == [{
+            "type": "function", "name": "inspect_shot",
+            "parameters_hash": fingerprint(parameters),
+        }]
+        assert protocol["tool_choice"] == "auto"
+        assert protocol["parallel_tool_calls"] is False
+        assert protocol["messages"][:2] == [{
+            "role": message.role, "content_hash": fingerprint(message.content),
+        } for message in messages[:2]]
+    received = events[1]["protocol"]["messages"]
+    assert [message["role"] for message in received] == ["system", "user", "assistant", "tool"]
+    assert received[2]["tool_calls"] == [{
+        "id": call["call_id"], "type": "function", "name": "inspect_shot",
+        "arguments_hash": fingerprint(arguments),
+    }]
+    assert received[3] == {
+        "role": "tool", "tool_call_id": call["call_id"], "content_hash": fingerprint(tool_result),
+    }
+    # The pinned Proxy's _override_openai_response_model deliberately returns
+    # the requested alias in response.model. Its identity headers retain the
+    # deployment UUID and underlying deployment model; upstream events above
+    # independently prove the model actually received by the synthetic server.
+    assert len({alias, identifier, upstream_model}) == 3
+    for completion in (first, second):
+        assert completion.provider_metadata["model"] == alias
+        assert completion.provider_metadata["litellm_model_id"] == identifier
+        assert completion.provider_metadata["litellm_model_name"] == deployment_model
+    inspected = proxy.get("/model/info", params={"litellm_model_id": identifier})
+    assert inspected.status_code == 200
+    saved = next(row for row in inspected.json()["data"] if row["model_info"]["id"] == identifier)
+    assert saved["model_name"] == alias
+    assert saved["litellm_params"]["model"] == deployment_model
+    assert saved["model_info"]["df_contract_profile"] == "chat_tools_v1"
+    assert saved["model_info"]["df_connection_id"] == frozen["connection_id"]
+    assert saved["model_info"]["df_workspace_id"] == frozen["workspace_id"]
+    safe_evidence = json.dumps(events)
+    for forbidden in (
+        data_key, MASTER, "synthetic-upstream-tools-secret", "synthetic-system-content-canary",
+        "synthetic-user-content-canary", "Authorization", "api_key",
+    ):
+        assert forbidden not in safe_evidence
+
+
 def reject_count() -> int:
     rules = subprocess.run(["iptables-save", "-c"], check=True, capture_output=True, text=True)
     match = re.search(r"\[(\d+):\d+\] -A OUTPUT -j REJECT", rules.stdout)

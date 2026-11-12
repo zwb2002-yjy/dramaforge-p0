@@ -130,6 +130,9 @@ def test_turn_read_list_are_scoped_and_typed(
     assert listed.json()[0]["model_resolution"]["model_id"] == "controlled-model"
     assert listed.json()[0]["node_run_ids"] == turn.node_run_ids
     assert listed.json()[0]["schema_repair_count"] == 1
+    assert listed.json()[0]["thread_id"] is None
+    assert listed.json()[0]["turn_kind"] == "workflow"
+    assert listed.json()[0]["origin_agent_turn_id"] is None
 
     read = client.get(f"/api/v1/projects/{project_id}/director/turns/{turn.id}")
     assert read.status_code == 200
@@ -150,7 +153,10 @@ def test_legacy_turn_mutation_routes_are_not_served(api: tuple[TestClient, Any])
     base = f"/api/v1/projects/{project_id}/director/turns/{turn.id}"
 
     assert (
-        client.post(f"{base}/stop", headers=headers, json={"expected_revision": 1}).status_code
+        client.post(
+            f"{base}/stop", headers=headers,
+            json={"expected_revision": 1, "request_key": "agent-stop-on-workflow"},
+        ).status_code
         == 404
     )
     assert client.post(

@@ -2,7 +2,7 @@
 
 Status: current
 Date: 2026-11-03
-Alembic head: 20261103_0096
+Alembic head: 20261111_0097
 
 当前 Alembic 入口跨越 0084 前强制检查已存在的两张实验表和十张旧模型保障表，锁表后
 非空即阻断升级；事务回滚保留原数据和迁移版本。空库初始化中历史迁移生成的静态目录副本
@@ -163,6 +163,7 @@ Migration 20260902_0051 removes:
 | 20261030_0095 | Add the missing `shot_human_locks.shot_id` and `exports.episode_id` foreign keys (orphan rows are cleaned first), require workspace ownership in the two Provider availability RLS policies, verify both sides of `asset_tag_links`, drop the retired 2-argument recovery resolver, revoke UPDATE/DELETE on the rotation-audit and bootstrap-singleton tables, and add the NULL-project workspace-profile name index. |
 | 20261007_0083 | Merge the model-system and local-media migration histories into one head without rewriting either branch. |
 | 20261103_0096 | Normalize legacy tag keys with Python casefold, merge equivalent vocabulary rows within each project while preserving every asset link, and remove the derived key's display-length cap. Downgrade refuses keys that would be truncated. |
+| 20261111_0097 | Link Agent Turns and messages to scoped threads; add Agent control fields and project-isolated tool-call receipts; exclude Agent Turns from Workflow recovery scans. |
 
 No canonical Project, Shot, Artifact, ProviderOperation, or EditSession is
 deleted by these revisions. Revision 0070 backfills legacy Asset lifecycle and
@@ -170,7 +171,7 @@ tag data before enforcing the canonical constraints.
 
 ## Schema invariants
 
-- Alembic has one head: 20261103_0096 (verify with `alembic heads` on the candidate).
+- Alembic has one head: 20261111_0097 (verify with `alembic heads` on the candidate).
 - Metadata registration is centralized in app/shared/model_registry.py.
 - ProviderOperation is NodeRun-owned only.
 - Identity reference resolution is explicit and version-pinned.
@@ -187,7 +188,8 @@ tag data before enforcing the canonical constraints.
 
 当前实验唯一事实是 ExperimentBranch，HTTP 与 Director 共享创建服务。迁移
 20261007_0084 已删除 production_experiments / shot_experiments，旧 ORM 也已移除；
-该迁移在旧表非空时拒绝升级。历史实例数据与证据独立保留，不能伪造成当前分支。
+该迁移在旧表非空时拒绝升级。需恢复的历史实例数据与证据独立保管，不能伪造成当前分支；
+已明确弃用的环境按 DEVELOPMENT 的生命周期清理，不要求永久保留。
 Golden fixture 使用当前 ExperimentBranch，不再为旧轨制造新样本。
 
 ## 数据库清理准入
@@ -307,13 +309,15 @@ timeline schema 校验，预览/导出消费同一值。不得复用背景音乐
 
 
 <a id="director-agent-data"></a>
-## Director Agent 数据扩展（目标，未实现）
+## Director Agent 数据扩展
 
-依赖 [Agent 工具循环合同](DIRECTOR_RUNTIME.md#director-agent-target)，不代表当前迁移
-已包含以下字段。复用 Thread、Message、Turn、Invocation 和 Proposal；不新增 AgentSession
-或第二套模型调用日志。
+迁移 0097 实现 Thread/Turn/Message 关联、Agent 控制字段和 `director_tool_calls`。
+复用 Thread、Message、Turn、Invocation 和 Proposal，不新增 AgentSession 或模型调用日志。
+工具审计受项目 RLS 和复合 FK 约束；唯一 (turn_id, call_id) 保存回执，
+PROPOSE 的回执与 Proposal 同事务提交。输入版本保持冻结，后续从成功工具回执
+合并 observed_versions，任何已观察对象版本改变均要求重新读取并另起轮次。
 
-- Turn 计划增加 thread_id、turn_kind(agent/workflow)、origin_agent_turn_id；Message 增加
+- Turn 已增加 thread_id、turn_kind(agent/workflow)、origin_agent_turn_id；Message 增加
   nullable turn_id 与 ordinal/idempotency linkage。历史关系不补造，原引擎绑定与
   checkpoint/submission 状态不改义。
 - Agent 自己维护 agent_control_epoch、agent_lease_token、agent_lease_expires_at、
@@ -322,7 +326,7 @@ timeline schema 校验，预览/导出消费同一值。不得复用背景音乐
 - 工具调用明细保存 turn/step/call_id、ToolSpec version/hash、脱敏参数、结果摘要/hash、
   observed_versions、latency、status/error；唯一键支持重放，沿用项目 FK、RLS 和索引。
   它不替代模型 Invocation，Agent/Workflow 不共同拥有同一 Turn 的状态写权。
-- ThreadSummary 仅在摘要阶段加入，保存 source message range/hash、版本和 stale 标记；
+- ThreadSummary 尚未实现，仅在摘要阶段加入，保存 source message range/hash、版本和 stale 标记；
   不复制 Shot、Model、Formal 等实时领域事实。CreativeDecision 优先复用既有提案决议，
   没有独立生命周期前不新增表。
 

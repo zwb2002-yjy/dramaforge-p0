@@ -20,7 +20,7 @@ services:
       retries: 20
 
   backend-quality:
-    image: dramaforge-backend-quality:local
+    image: ${QUALITY_BACKEND_IMAGE:-dramaforge-backend-quality:local}
     build:
       context: .
       dockerfile: backend/Dockerfile.quality
@@ -55,6 +55,7 @@ services:
       - ${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}:/contract
 
   frontend-quality:
+    image: ${QUALITY_FRONTEND_IMAGE:-dramaforge-frontend-quality:local}
     build:
       context: .
       dockerfile: frontend/Dockerfile.quality
@@ -82,7 +83,7 @@ services:
       retries: 20
 
   media-resource-quality:
-    image: dramaforge-backend-quality:local
+    image: ${QUALITY_BACKEND_IMAGE:-dramaforge-backend-quality:local}
     cap_add: [NET_ADMIN]
     cpus: 4
     mem_limit: 8g
@@ -99,7 +100,7 @@ services:
     command: ["sh", "-ec", "uv run --offline --no-sync --directory backend pytest tests/media -q -s -rs --fail-on-skip"]
 
   auth-upstream-quality:
-    image: dramaforge-backend-quality:local
+    image: ${QUALITY_BACKEND_IMAGE:-dramaforge-backend-quality:local}
     command: ["python", "backend/tests/fixtures/mock_auth_gateway_upstream.py"]
     networks:
       default:
@@ -124,7 +125,7 @@ services:
       retries: 20
 
   auth-gateway-integration-quality:
-    image: dramaforge-backend-quality:local
+    image: ${QUALITY_BACKEND_IMAGE:-dramaforge-backend-quality:local}
     environment:
       APP_ENV: test
       AUTH_GATEWAY_URL: http://auth-gateway-quality:8080
@@ -147,7 +148,7 @@ services:
       retries: 20
 
   litellm-integration-quality:
-    image: dramaforge-backend-quality:local
+    image: ${QUALITY_BACKEND_IMAGE:-dramaforge-backend-quality:local}
     network_mode: service:litellm-policy-network-quality
     cap_drop: [ALL]
     cap_add: [NET_ADMIN]
@@ -179,11 +180,11 @@ services:
       retries: 20
 
   litellm-mock-quality:
-    image: dramaforge-backend-quality:local
+    image: ${QUALITY_BACKEND_IMAGE:-dramaforge-backend-quality:local}
     command: ["python", "backend/tests/fixtures/mock_llm_server.py"]
 
   litellm-policy-network-quality:
-    image: dramaforge-backend-quality:local
+    image: ${QUALITY_BACKEND_IMAGE:-dramaforge-backend-quality:local}
     user: "0:0"
     entrypoint: ["python", "-m", "app.providers.litellm_gateway.network_guard"]
     environment:

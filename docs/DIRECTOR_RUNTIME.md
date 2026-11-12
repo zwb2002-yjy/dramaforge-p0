@@ -56,25 +56,53 @@ Director Runtime 是**独立于生产执行的编排 runtime**：它驱动导演
 - 导演 Worker 停止时，MANUAL 生产路径必须仍能完成全流程
   （空项目 → MP4/SRT）。
 
-## 当前有界执行与 Agent Loop 目标
+## 当前有界执行与 Agent Loop
 
-当前实现有文本调用和持久编排两种职责，不能将目标 Agent Loop 当成已实现事实：
+当前实现保留结构化文本与 Workflow，并增加 API 同步承载的有界 Agent：
 
 - 文本任务由 `DirectorTextRuntimeAdapter.generate_structured` 执行固定 schema
   请求，必要时同一模型最多一次 schema 修复；调用身份和结果由 Invocation/Turn 持久化。
 - `LangGraphDirectorRuntime` 执行固定的 propose → await_decision →
   submit_execution → await_execution → confirm_candidate 流程及拒绝/无需执行分支。
   其中 propose 的领域 port 读取已有 Proposal/经验证 suggestion，不调用 LLM 自主选工具。
-- 当前 TextGenerateRequest 虽有 tools 字段，但消息/响应适配尚未构成完整的
-  tool-call → ToolResult → LLM 闭环，因此不宣称已实现自主领域工具 Agent。
+- `agent_harness.py` 使用同一 LangGraph 引擎实现 model → tools → model，
+  `agent_service.py` 复用 Turn/Message/Invocation，独立 Agent lease 与工具审计。
+  目前开放项目、场景、镜头、资产七个 READ 工具、媒体能力检查/纯编译预览
+  两个只读模型工具与 `shot_prompt_propose`；后者
+  只创建一个镜头的一个 image/video prompt 待采纳提案，返回真实 Proposal 后停止。
+  Apply、媒体生成、Formal 和 Export 继续由已有用户入口控制。
+- 文本协议支持 assistant tool_calls / tool result / call_id、usage 与 stop_reason；
+  新 Agent 要求显式选择 `chat_tools_v1` 连接，旧 `chat_text_v1` 不自动升级。
+  合同和 mock 验证不表示真实模型工具选择质量已验收。
 
 图的步数护栏、稳定命令键、租约、stop、resume fencing 和检查点继续保留。
 生产执行只能消费已有用户决定及持久授权；图节点不能长期 sleep 或轮询等视频完成。
 每次恢复通过领域 port 核实最新已提交事实，不能用 checkpoint 中的观察值反写业务真相。
 
-目标是在现有模型调用/审计基础上增量增加 DramaForge-owned Agent Loop；
-其只读工具上限、模型调用上限、可恢复工具错误及压缩策略是待实现合同，不是当前能力。
-目标合同收拢在本文末尾，依赖顺序见
+Agent 默认上限为 6 次模型调用、12 次工具调用、120 秒；可以请求更低上限。
+同工具/参数/观察版本连续三次重复终止。工具参数错误返回模型纠正；版本变化停止为 stale。
+调用前持久化 Invocation，网络期间释放应用事务；同 request_key 只读取原回执，
+过期或重启遗留提交保留 unknown_submission，不重放模型请求。stop 不能撤销在途调用。
+stop 同事务保存未完成工具的取消回执，并把在途文本标为结果未知；迟到文本可以补全
+原 Invocation，迟到工具只补摘要，均不能复活轮次。终态读取也收敛遗留未完成记录。
+Skill 上下文复用 CreativeSkillSpec/Compiler，冻结 profile/version/hash；不赋予执行权限。
+实际模型上下文另读取 ProjectCreativeProfile 的全部已保存选择，以及当前 Scene/Shot
+各自已保存的 creative_capabilities；保留来源对象、版本、compiled_hash 和 value_sources。
+不把多个 Style 偷换成一个，也不把记录中的 pack 默认值提升成已接受提案；pending 推荐
+不作为已采用事实。上下文源版本参与轮次守卫，即使未调用 READ 工具，期间修改已保存
+场景也会使轮次 stale。没有保存快照时明确缺失，不从最新库默认值回填。
+上下文预算覆盖 messages + tools 的 UTF-8 JSON 字节。仅按完整历史轮次从旧到新省略，
+数据库历史窗口也按完整 completed Agent Turn 选择，以 Turn 时间/ID 和 Message ordinal
+稳定排序；窗口省略、旧消息省略及不完整组排除分别可见，不在预算器之前悄悄截消息。
+省略说明本身计入预算；系统约束、当前请求、工具定义和当前轮 call/result 不截断。
+checkpoint 保留完整审计 transcript，Invocation 保存实际发送投影及 hash/字节/省略数量。
+当前所需上下文超限明确停止。每次模型调用重验冻结的文本连接/模型修订，不静默换模型。
+ToolCall 校验 name/version/schema/args 完整身份，重复读取原回执；中断不重放，晚到结果
+只增加摘要，不覆盖已确认取消或失败。参数审计脱敏，公开活动只有 hash、版本、状态、耗时。
+Agent 提案通过专用的读取/Apply HTTP 接线进入现有 ProposalService；Apply 仍为显式用户
+操作，重复采用不二次改写，目标版本已变则拒绝覆盖，不创建 NodeRun 或 ProviderOperation。
+更多类型提案、自动 Workflow 交接、ThreadSummary 与 MCP
+仍按后续合同扩展，不因基础循环接通而宣称全部完成。依赖顺序见
 [ARCHITECTURE_MAPPING §5](ARCHITECTURE_MAPPING.md#director-agent-sequence)。
 
 ## 状态权威
@@ -158,7 +186,7 @@ Assistant 当前事实；旧 Phase 5 服务测试由当前分支回归测试替�
 |---|---|
 | 固定结构化文本任务 | [text_transport.py](../backend/app/director/text_transport.py) 组合 Turn、模型解析、Invocation 与同模型 schema repair；保留原 generate_structured 行为 |
 | 模型调用接口 | [text_model.py](../backend/app/director/text_model.py) 的 session-free TextModelPort；在同一接口增补 generate_turn，不另建 resolver |
-| 上下文 | [assistant_context.py](../backend/app/director/assistant_context.py) 负责授权 DB 聚合，[context_builder.py](../backend/app/director/context_builder.py) 负责纯 JSON 冻结；二者组合而非互相替换 |
+| 上下文 | [text_transport.py](../backend/app/director/text_transport.py) 调用 [context_builder.py](../backend/app/director/context_builder.py) 冻结本轮事实；thread 运行时在 [runtime/start.py](../backend/app/director/runtime/start.py) 组装提案快照 |
 | 持久流程 | [langgraph_adapter.py](../backend/app/director/runtime/langgraph_adapter.py) 与 [domain_tools.py](../backend/app/director/runtime/domain_tools.py)；propose 读取已存提案，不能把含执行命令的 workflow ports 整包暴露给模型 |
 | 事实读取与提案 | ProjectService、Scene/ShotWorkbenchService、AssetCardReadService、ModelInspectionService 和 proposal_creation；工具直接复用授权 service，不调用本机 API 或复制业务 SQL |
 
@@ -168,7 +196,8 @@ checkpoint 中的 proposal、receipt、production fact 仅为观察和重放线�
 
 ### 模型与工具合同
 
-以下类型均为目标合同；先扩展当前 LiteLLM 通道，不增加未经验证的厂商直连。
+以下为完整目标合同；当前已实现消息/响应、只读工具、媒体模型工具与受限提案合同，
+其余扩展不能据本表当作已实现。继续使用 LiteLLM 通道，不增加厂商直连。
 
 | 类型 | 必要内容 |
 |---|---|
@@ -186,8 +215,8 @@ ToolExecutor 统一校验 schema（extra=forbid）、权限、归属、版本、
 上限与已验证证据；未知能力拒绝，不按模型名称猜。精确模型、连接/部署修订与 invocation
 沿用 [MODEL_PROVIDER](MODEL_PROVIDER.md)，不能仅冻结可重新绑定的逻辑别名。
 
-首版仅开放 READ 和无网络、无生产副作用的 ANALYZE；后续 PROPOSE 只能幂等创建
-真实 typed Proposal，不能 Apply 或执行生产。MUTATE、EXECUTE、DESTRUCTIVE 不向模型
+当前开放 READ 和受限的 shot_prompt_propose；后续 ANALYZE 不得有生产副作用，
+PROPOSE 只能幂等创建真实 typed Proposal，不能 Apply 或执行生产。MUTATE、EXECUTE、DESTRUCTIVE 不向模型
 开放。工具描述、返回内容及 MCP annotations 均是不可信数据，不能提升权限或确认级别。
 
 ### 循环、恢复与状态所有权

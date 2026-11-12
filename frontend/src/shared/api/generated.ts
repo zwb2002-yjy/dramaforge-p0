@@ -774,6 +774,142 @@ export interface paths {
         patch: operations["update_project_creative_profile_api_v1_projects__project_id__creative_profile_patch"];
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/director/proposals/{proposal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Director Agent Proposal */
+        get: operations["read_director_agent_proposal_api_v1_projects__project_id__director_proposals__proposal_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/proposals/{proposal_id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Director Agent Proposal */
+        post: operations["apply_director_agent_proposal_api_v1_projects__project_id__director_proposals__proposal_id__apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/threads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Open Director Thread */
+        post: operations["open_director_thread_api_v1_projects__project_id__director_threads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/threads/{thread_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Director Thread */
+        get: operations["read_director_thread_api_v1_projects__project_id__director_threads__thread_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/threads/{thread_id}/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Director Agent Request */
+        get: operations["read_director_agent_request_api_v1_projects__project_id__director_threads__thread_id__requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/threads/{thread_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Director Agent Turn */
+        post: operations["run_director_agent_turn_api_v1_projects__project_id__director_threads__thread_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/agent/turns/{turn_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop Director Agent Turn */
+        post: operations["stop_director_agent_turn_api_v1_projects__project_id__director_agent_turns__turn_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/turns/{turn_id}/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Director Agent Tools */
+        get: operations["read_director_agent_tools_api_v1_projects__project_id__director_turns__turn_id__tools_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/director/shots/{shot_id}/suggestion": {
         parameters: {
             query?: never;
@@ -1265,6 +1401,26 @@ export interface paths {
         get: operations["production_artifact_history_api_v1_projects__project_id__production_history_artifacts_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/node-runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Production Run
+         * @description Request cancellation of one project-owned run; the remote task is kept.
+         */
+        post: operations["cancel_production_run_api_v1_projects__project_id__node_runs__run_id__cancel_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2743,6 +2899,93 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AgentLimits */
+        AgentLimits: {
+            /**
+             * Model Calls
+             * @default 6
+             */
+            model_calls: number;
+            /**
+             * Tool Calls
+             * @default 12
+             */
+            tool_calls: number;
+            /**
+             * Deadline Seconds
+             * @default 120
+             */
+            deadline_seconds: number;
+            /**
+             * Context Bytes
+             * @default 64000
+             */
+            context_bytes: number;
+        };
+        /** AgentRequest */
+        AgentRequest: {
+            /** Content */
+            content: string;
+            /** Request Key */
+            request_key: string;
+            /** Expected Versions */
+            expected_versions?: {
+                [key: string]: number;
+            };
+            /** Skill Ids */
+            skill_ids?: string[] | null;
+            limits?: components["schemas"]["AgentLimits"];
+        };
+        /** AgentThreadCreate */
+        AgentThreadCreate: {
+            /**
+             * Scope Type
+             * @default project
+             * @enum {string}
+             */
+            scope_type: "project" | "scene" | "shot";
+            /** Scope Entity Id */
+            scope_entity_id?: string | null;
+        };
+        /** AgentTurnResult */
+        AgentTurnResult: {
+            /**
+             * Turn Id
+             * Format: uuid
+             */
+            turn_id: string;
+            /**
+             * Thread Id
+             * Format: uuid
+             */
+            thread_id: string;
+            /** Status */
+            status: string;
+            /** Transport Status */
+            transport_status: string;
+            /** Assistant Message Id */
+            assistant_message_id?: string | null;
+            /** Proposal Ids */
+            proposal_ids?: string[];
+            /** Stop Reason */
+            stop_reason?: string | null;
+            /** Usage */
+            usage?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Model Calls
+             * @default 0
+             */
+            model_calls: number;
+            /**
+             * Tool Calls
+             * @default 0
+             */
+            tool_calls: number;
+            /** Version */
+            version: number;
+        };
         /** AnnotationCreateBody */
         AnnotationCreateBody: {
             /** Artifact Id */
@@ -3696,6 +3939,140 @@ export interface components {
             /** Csrf Token */
             csrf_token: string;
         };
+        /** DirectorAgentMessageRead */
+        DirectorAgentMessageRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Turn Id */
+            turn_id: string | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "user" | "assistant";
+            /** Content */
+            content: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** DirectorAgentProposalItemRead */
+        DirectorAgentProposalItemRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Command */
+            command: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /** Expected Target Version */
+            expected_target_version: number | null;
+            /** Status */
+            status: string;
+            /** Rationale */
+            rationale: string;
+            /** Benefit */
+            benefit: string;
+            /** Cost */
+            cost: string;
+            /** Risk */
+            risk: string;
+            /** Impact */
+            impact: string;
+        };
+        /** DirectorAgentProposalRead */
+        DirectorAgentProposalRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Thread Id
+             * Format: uuid
+             */
+            thread_id: string;
+            /** Scope Type */
+            scope_type: string;
+            /**
+             * Scope Entity Id
+             * Format: uuid
+             */
+            scope_entity_id: string;
+            /** Status */
+            status: string;
+            /** Items */
+            items: components["schemas"]["DirectorAgentProposalItemRead"][];
+        };
+        /** DirectorAgentStopBody */
+        DirectorAgentStopBody: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Request Key */
+            request_key: string;
+        };
+        /** DirectorAgentThreadRead */
+        DirectorAgentThreadRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Scope Type
+             * @enum {string}
+             */
+            scope_type: "project" | "scene" | "shot";
+            /**
+             * Scope Entity Id
+             * Format: uuid
+             */
+            scope_entity_id: string;
+            /** Messages */
+            messages: components["schemas"]["DirectorAgentMessageRead"][];
+            /** Offset */
+            offset: number;
+            /** Limit */
+            limit: number;
+            /** Total */
+            total: number;
+            /** Has More */
+            has_more: boolean;
+            /** Has Previous */
+            has_previous: boolean;
+        };
+        /** DirectorAgentThreadRef */
+        DirectorAgentThreadRef: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Scope Type
+             * @enum {string}
+             */
+            scope_type: "project" | "scene" | "shot";
+            /**
+             * Scope Entity Id
+             * Format: uuid
+             */
+            scope_entity_id: string;
+        };
         /** DirectorBoardBody */
         DirectorBoardBody: {
             /** Expected Version */
@@ -3998,6 +4375,15 @@ export interface components {
              * Format: uuid
              */
             actor_id: string;
+            /** Thread Id */
+            thread_id: string | null;
+            /**
+             * Turn Kind
+             * @enum {string}
+             */
+            turn_kind: "agent" | "workflow";
+            /** Origin Agent Turn Id */
+            origin_agent_turn_id: string | null;
             /** Scope Type */
             scope_type: string;
             /**
@@ -5041,9 +5427,9 @@ export interface components {
             key_revision: number;
             /**
              * Contract Profile
-             * @constant
+             * @enum {string}
              */
-            contract_profile: "chat_text_v1";
+            contract_profile: "chat_text_v1" | "chat_tools_v1";
         };
         /** GatewayKeyWrite */
         GatewayKeyWrite: {
@@ -5079,9 +5465,9 @@ export interface components {
             /**
              * Contract Profile
              * @default chat_text_v1
-             * @constant
+             * @enum {string}
              */
-            contract_profile: "chat_text_v1";
+            contract_profile: "chat_text_v1" | "chat_tools_v1";
         };
         /** GatewayReference */
         GatewayReference: {
@@ -5132,9 +5518,9 @@ export interface components {
             /**
              * Contract Profile
              * @default chat_text_v1
-             * @constant
+             * @enum {string}
              */
-            contract_profile: "chat_text_v1";
+            contract_profile: "chat_text_v1" | "chat_tools_v1";
             /** Error Code */
             error_code?: string | null;
         };
@@ -6131,6 +6517,21 @@ export interface components {
             items: components["schemas"]["ArtifactRead"][];
             /** Next Cursor */
             next_cursor: string | null;
+        };
+        /**
+         * ProductionRunCancelRead
+         * @description Qualified cancellation receipt for one project-owned run.
+         */
+        ProductionRunCancelRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Status */
+            status: string;
+            /** Cancellation Requested At */
+            cancellation_requested_at: string | null;
         };
         /** ProductionRunHistoryRead */
         ProductionRunHistoryRead: {
@@ -10965,6 +11366,340 @@ export interface operations {
             };
         };
     };
+    read_director_agent_proposal_api_v1_projects__project_id__director_proposals__proposal_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                proposal_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectorAgentProposalRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_director_agent_proposal_api_v1_projects__project_id__director_proposals__proposal_id__apply_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                proposal_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PartialApplyInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PartialApplyResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_director_thread_api_v1_projects__project_id__director_threads_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentThreadCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectorAgentThreadRef"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_director_thread_api_v1_projects__project_id__director_threads__thread_id__get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number | null;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                thread_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectorAgentThreadRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_director_agent_request_api_v1_projects__project_id__director_threads__thread_id__requests_get: {
+        parameters: {
+            query: {
+                request_key: string;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                thread_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTurnResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_director_agent_turn_api_v1_projects__project_id__director_threads__thread_id__messages_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                thread_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTurnResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_director_agent_turn_api_v1_projects__project_id__director_agent_turns__turn_id__stop_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                turn_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DirectorAgentStopBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentTurnResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_director_agent_tools_api_v1_projects__project_id__director_turns__turn_id__tools_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                turn_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     suggest_shot_design_api_v1_projects__project_id__director_shots__shot_id__suggestion_post: {
         parameters: {
             query?: {
@@ -12145,6 +12880,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductionArtifactPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_production_run_api_v1_projects__project_id__node_runs__run_id__cancel_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                run_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionRunCancelRead"];
                 };
             };
             /** @description Validation Error */

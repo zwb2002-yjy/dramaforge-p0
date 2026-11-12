@@ -2,8 +2,12 @@ import { selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createRef } from "react";
 
-import { ShotDesignPanel } from "../../src/features/shots/ShotDesignPanel";
+import {
+  ShotDesignPanel,
+  type ShotDesignPanelHandle,
+} from "../../src/features/shots/ShotDesignPanel";
 import type { ShotLite } from "../../src/features/shots/api";
 
 const PROJECT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -43,17 +47,19 @@ function renderPanel() {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   const onSaved = vi.fn();
+  const handle = createRef<ShotDesignPanelHandle>();
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <ShotDesignPanel projectId={PROJECT_ID} shot={SHOT} onSaved={onSaved} />
+      <ShotDesignPanel ref={handle} projectId={PROJECT_ID} shot={SHOT} onSaved={onSaved} />
     </QueryClientProvider>,
   );
   return {
     onSaved,
+    handle,
     rerenderShot: (shot: ShotLite) =>
       view.rerender(
         <QueryClientProvider client={queryClient}>
-          <ShotDesignPanel projectId={PROJECT_ID} shot={shot} onSaved={onSaved} />
+          <ShotDesignPanel ref={handle} projectId={PROJECT_ID} shot={shot} onSaved={onSaved} />
         </QueryClientProvider>,
       ),
   };
@@ -83,6 +89,34 @@ describe("ShotDesignPanel save feedback", () => {
     expect(screen.getByTestId("shot-design-dirty")).toBeInTheDocument();
     expect(screen.queryByTestId("shot-design-saved-state")).not.toBeInTheDocument();
   });
+
+  it("adopts an explicitly applied external proposal through the refreshed server fact", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => json({}));
+    const { handle, rerenderShot, onSaved } = renderPanel();
+    expect(handle.current?.acceptExternalSave()).toBe(true);
+    rerenderShot({ ...SHOT, version: 5, image_prompt: "approved agent proposal" });
+    await waitFor(() =>
+      expect(screen.getByLabelText("图片提示词")).toHaveValue("approved agent proposal"),
+    );
+    expect(screen.getByTestId("shot-design-saved-state")).toHaveTextContent("已保存 v5");
+    expect(screen.queryByTestId("shot-design-conflict")).not.toBeInTheDocument();
+    expect(onSaved).not.toHaveBeenCalled();
+  });
+
+  it.each(["图片提示词", "画面描述"])(
+    "preserves a new %s edit made while external adoption waits for refetch",
+    async (label) => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(() => json({}));
+      const { handle, rerenderShot } = renderPanel();
+      expect(handle.current?.acceptExternalSave()).toBe(true);
+      fireEvent.change(screen.getByLabelText(label), { target: { value: "new local input" } });
+      expect(handle.current?.acceptExternalSave()).toBe(false);
+      rerenderShot({ ...SHOT, version: 5, image_prompt: "approved agent proposal" });
+      expect(screen.getByLabelText(label)).toHaveValue("new local input");
+      expect(screen.getByTestId("shot-design-dirty")).toBeInTheDocument();
+      expect(screen.getByTestId("shot-design-conflict")).toHaveTextContent("本地 v4");
+    },
+  );
 
   it("saves model options through the design gate and reloads the saved Shot values", async () => {
     let savedState: Record<string, unknown> | undefined;

@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
+from app.contracts.agent import AgentMessage, AgentModelResponse
 from app.director.context_builder import DirectorContextBuilder
 from app.director.invocation_models import DirectorInvocation
 from app.director.invocations import InvocationService
@@ -28,6 +29,107 @@ from app.providers.model_profiles.slots import ModelSlot
 from app.providers.registry import ModelRegistry
 from app.shared.db import set_rls_context
 from app.shared.errors import ConflictError, ValidationAppError
+
+
+@dataclass(frozen=True)
+class ResolvedAgentTextModel:
+    """A frozen, session-free text binding; no media dispatch surface."""
+
+    model_id: str
+    resolution: dict[str, object]
+    text_model: TextModelPort
+    native_options: dict[str, object]
+
+    async def validate_current(self, session: AsyncSession, *, project: Project) -> None:
+        current = await resolve_agent_text_model(session, project=project)
+        if current.resolution != self.resolution:
+            raise ConflictError(
+                "The selected text model or connection revision changed",
+                details={"code": "DIRECTOR_AGENT_MODEL_STALE"},
+            )
+
+    async def generate(
+        self, *, messages: list[AgentMessage], tools: list[dict[str, object]],
+        project_id: UUID, workspace_id: UUID, actor_id: UUID,
+        turn_id: UUID, invocation_id: UUID,
+    ) -> AgentModelResponse:
+        wire = []
+        for message in messages:
+            value = message.model_dump(exclude={"tool_calls"}, exclude_none=True)
+            if message.tool_calls:
+                value["tool_calls"] = [{
+                    "id": call.call_id, "type": "function",
+                    "function": {"name": call.name, "arguments": canonical_json(call.arguments)},
+                } for call in message.tool_calls]
+            wire.append(TextMessage.model_validate(value))
+        result = await self.text_model.generate(
+            request=TextGenerateRequest(
+                messages=wire, tools=tools, tool_choice="auto", parallel_tool_calls=False,
+                max_tokens=4096, native_options=self.native_options,
+            ),
+            model_id=self.model_id,
+            context=ExecutionContext(
+                trace_id=str(turn_id), operation_id=f"director-invocation:{invocation_id}",
+                project_id=str(project_id), workspace_id=str(workspace_id),
+                user_id=str(actor_id), idempotency_key=f"director-invocation:{invocation_id}",
+            ),
+        )
+        if result.status != GenerationStatus.SUCCEEDED:
+            raise ValidationAppError(
+                "Director Agent text request did not complete",
+                details={"code": (
+                    "DIRECTOR_AGENT_MODEL_UNKNOWN"
+                    if result.status == GenerationStatus.SUBMIT_UNKNOWN
+                    else "DIRECTOR_AGENT_MODEL_FAILED"
+                )},
+            )
+        metadata = result.provider_metadata
+        reported_cost, _ = _reported_cost([
+            {"provider_cost": metadata.get("litellm_response_cost")},
+        ])
+        if reported_cost is not None and (not reported_cost.is_finite() or reported_cost < 0):
+            reported_cost = None
+        return AgentModelResponse.model_validate({
+            "text": metadata.get("text") or "",
+            "tool_calls": metadata.get("tool_calls") or [],
+            "usage": metadata.get("usage") or {},
+            "reported_cost": reported_cost,
+            "stop_reason": metadata.get("stop_reason"),
+        })
+
+
+async def resolve_agent_text_model(
+    session: AsyncSession, *, project: Project,
+) -> ResolvedAgentTextModel:
+    """Require an explicitly selected tools contract, never infer from a model name."""
+    resolved, registry = await ModelBindingResolver(session).resolve_with_registry(
+        workspace_id=project.workspace_id, project_id=project.id,
+        slot=ModelSlot.PLANNING_SCRIPT, capability=Capability.TEXT_GENERATE,
+    )
+    registered = registry.get(resolved.model_id)
+    capabilities = registered.manifest.metadata.get("text_capabilities", {})
+    if (registered.adapter is None or not isinstance(capabilities, dict)
+            or capabilities.get("tool_calling") is not True
+            or capabilities.get("tool_results") is not True):
+        raise ValidationAppError(
+            "Select a text connection with an explicit chat_tools_v1 contract",
+            details={"code": "DIRECTOR_AGENT_TOOLS_UNAVAILABLE"},
+        )
+    resolution: dict[str, object] = {
+        "model_id": resolved.model_id, "slot": str(ModelSlot.PLANNING_SCRIPT),
+        "profile_id": str(resolved.profile_id) if resolved.profile_id else None,
+        "profile_version": resolved.profile_version,
+        "manifest_version": registered.manifest.manifest_version,
+        "gateway_reference": registered.manifest.metadata.get("gateway_reference", {}),
+        "connection_revision_id": registered.manifest.metadata.get("connection_revision_id"),
+        "credential_revision_id": registered.manifest.metadata.get("credential_revision_id"),
+        "text_capabilities": capabilities,
+        "native_options": dict(resolved.native_options),
+    }
+    return ResolvedAgentTextModel(
+        model_id=resolved.model_id, resolution=resolution,
+        text_model=CapabilityTextModel(registry), native_options=dict(resolved.native_options),
+    )
 
 
 class DirectorInvocationEvidence(BaseModel):
@@ -786,7 +888,9 @@ class DirectorTextRuntimeAdapter:
             "purpose": purpose,
             "status": str(result.status),
             "provider_request_id": metadata.get("request_id"),
-            "actual_model": metadata.get("litellm_model_name") or metadata.get("model"),
+            # The pinned Proxy rewrites response.model to the requested alias.
+            # Only its deployment-model header identifies the reported upstream.
+            "actual_model": metadata.get("litellm_model_name"),
             "usage": _safe_json(metadata.get("usage") or {}),
             "provider_cost": _safe_json(provider_cost),
             "output_text_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),

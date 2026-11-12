@@ -1,6 +1,4 @@
-import { writeFile } from "node:fs/promises";
-
-import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { PROJECT_ID, SHOT_ID, installProfessionalMock } from "./professional-mocks";
 
@@ -55,35 +53,6 @@ async function openPortraitReview(page: Page) {
   return { errors, writes };
 }
 
-async function recordLayout(page: Page, testInfo: TestInfo) {
-  const layout = await page.evaluate(() => ({
-    windowScrollY: window.scrollY,
-    viewportHeight: window.innerHeight,
-    regions: [
-      ".df-global-shell",
-      ".df-primary-sidebar",
-      ".df-context-sidebar",
-      ".df-shell-content",
-    ].map((selector) => {
-      const element = document.querySelector(selector);
-      if (!element) return { selector, mounted: false };
-      const rect = element.getBoundingClientRect();
-      return {
-        selector,
-        mounted: true,
-        top: rect.top,
-        height: rect.height,
-        scrollTop: element.scrollTop,
-        clientHeight: element.clientHeight,
-        scrollHeight: element.scrollHeight,
-      };
-    }),
-  }));
-  const path = testInfo.outputPath("scroll-layout.json");
-  await writeFile(path, JSON.stringify(layout, null, 2));
-  await testInfo.attach("scroll-layout", { path, contentType: "application/json" });
-}
-
 async function scrollReview(page: Page) {
   const viewport = page.viewportSize()!;
   await page.mouse.move(viewport.width - 80, viewport.height / 2);
@@ -114,11 +83,11 @@ for (const viewport of [
 ]) {
   test(`portrait review keeps navigation visible at ${viewport.width}x${viewport.height}`, async ({
     page,
-  }, testInfo) => {
+  }) => {
     await page.setViewportSize(viewport);
     const { errors, writes } = await openPortraitReview(page);
     await scrollReview(page);
-    await recordLayout(page, testInfo);
+
     await expectPrimaryVisible(page);
     const secondary = page.locator("#project-navigation");
     for (const name of ["项目总览", "故事剧本", "角色与素材", "分镜制作", "审片确认", "剪辑成片"]) {
@@ -148,13 +117,11 @@ for (const viewport of [
   });
 }
 
-test("narrow-window drawer remains usable after scrolling a long review", async ({
-  page,
-}, testInfo) => {
+test("narrow-window drawer remains usable after scrolling a long review", async ({ page }) => {
   await page.setViewportSize({ width: 600, height: 800 });
   const { errors, writes } = await openPortraitReview(page);
   await scrollReview(page);
-  await recordLayout(page, testInfo);
+
   await expectPrimaryVisible(page);
   const secondary = page.locator("#project-navigation");
   const creation = page.getByRole("button", { name: "项目导航", exact: true });

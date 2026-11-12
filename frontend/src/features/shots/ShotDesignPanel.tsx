@@ -1,5 +1,13 @@
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactNode,
+  type ForwardedRef,
+} from "react";
 
 import { Button, Disclosure, Field, Input, Select, Textarea } from "../../components/ui";
 import { ApiError } from "../../lib/api";
@@ -21,6 +29,11 @@ export type ShotDesignSaveControl = {
   save: () => void;
   videoMode: ShotVideoMode;
   setVideoMode: (mode: ShotVideoMode) => void;
+};
+
+export type ShotDesignPanelHandle = {
+  /** Adopt the next server revision only if the editor is still clean now. */
+  acceptExternalSave: () => boolean;
 };
 
 type ShotDesignPanelProps = {
@@ -139,25 +152,33 @@ function serverDesign(shot: {
  * panel reports the draft as clean. This keeps production actions tied to
  * server truth rather than a browser-only version or prompt.
  */
-export function ShotDesignPanel({
-  projectId,
-  shot,
-  onSaved,
-  onDirtyChange,
-  draft: controlledDraft,
-  onDraftChange,
-  applyDraft,
-  references,
-  production,
-  promptsOpen,
-  onPromptsOpenChange,
-  onOpenModelSettings,
-  lastFrameCount = 0,
-}: ShotDesignPanelProps) {
+function ShotDesignPanelContent(
+  {
+    projectId,
+    shot,
+    onSaved,
+    onDirtyChange,
+    draft: controlledDraft,
+    onDraftChange,
+    applyDraft,
+    references,
+    production,
+    promptsOpen,
+    onPromptsOpenChange,
+    onOpenModelSettings,
+    lastFrameCount = 0,
+  }: ShotDesignPanelProps,
+  ref: ForwardedRef<ShotDesignPanelHandle>,
+) {
   // An unsaved draft keeps the server version it was edited from. A background
   // refresh may reveal a conflict, but cannot silently rebase or erase it.
   const [baseline, setBaseline] = useState(shot);
   const syncAfterExplicitSave = useRef(false);
+  const currentDirty = useRef(false);
+  const markEdited = () => {
+    currentDirty.current = true;
+    syncAfterExplicitSave.current = false;
+  };
   const [imageReferencesReady, setImageReferencesReady] = useState(true);
   const [videoReferencesReady, setVideoReferencesReady] = useState(true);
   const [visual, setVisual] = useState(shot.visual_description);
@@ -174,7 +195,8 @@ export function ShotDesignPanel({
   const dialogue = draft.dialogue ?? shot.dialogue ?? "";
   const directorStateText =
     draft.director_state_text ?? serializeDirectorState(draft.director_state);
-  const updateDraft = (next: ShotDesignDraft) => {
+  const updateDraft = (next: ShotDesignDraft, fromServer = false) => {
+    if (!fromServer) markEdited();
     if (onDraftChange) {
       onDraftChange(next);
       return;
@@ -249,6 +271,18 @@ export function ShotDesignPanel({
     cameraMove !== (baseline.camera_move ?? "") ||
     durationSeconds !== (baseline.duration_seconds ?? "");
   const dirty = designDirty || canvasDirty;
+  currentDirty.current = dirty;
+  useImperativeHandle(
+    ref,
+    () => ({
+      acceptExternalSave: () => {
+        if (currentDirty.current) return false;
+        syncAfterExplicitSave.current = true;
+        return true;
+      },
+    }),
+    [],
+  );
 
   // The panel remains mounted while the shot strip changes selection. Reset
   // editor state to the newly selected shot's server read model. Clean editors
@@ -375,7 +409,7 @@ export function ShotDesignPanel({
       setShotType(freshShot.shot_type);
       setCameraMove(freshShot.camera_move ?? "");
       setDurationSeconds(freshShot.duration_seconds ?? "");
-      updateDraft(serverDesign(freshShot));
+      updateDraft(serverDesign(freshShot), true);
       return freshShot;
     },
     onSuccess: async () => {
@@ -397,7 +431,10 @@ export function ShotDesignPanel({
           rows={4}
           value={visual}
           placeholder="这一镜看到什么：人物、动作、环境、光线"
-          onChange={(event) => setVisual(event.target.value)}
+          onChange={(event) => {
+            markEdited();
+            setVisual(event.target.value);
+          }}
         />
       </Field>
       <Field>
@@ -428,7 +465,14 @@ export function ShotDesignPanel({
         <div className="df-shot-camera" data-testid="shot-design-camera-facts">
           <Field>
             景别
-            <Select aria-label="镜头类型" value={shotType} onChange={(event) => setShotType(event)}>
+            <Select
+              aria-label="镜头类型"
+              value={shotType}
+              onChange={(event) => {
+                markEdited();
+                setShotType(event);
+              }}
+            >
               {shotTypeOptionsFor(shotType).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -441,7 +485,10 @@ export function ShotDesignPanel({
             <Input
               aria-label="机位运动"
               value={cameraMove}
-              onChange={(event) => setCameraMove(event.target.value)}
+              onChange={(event) => {
+                markEdited();
+                setCameraMove(event.target.value);
+              }}
               placeholder="缓慢推近"
             />
           </Field>
@@ -454,7 +501,10 @@ export function ShotDesignPanel({
               max="30"
               step="0.1"
               value={durationSeconds}
-              onChange={(event) => setDurationSeconds(event.target.value)}
+              onChange={(event) => {
+                markEdited();
+                setDurationSeconds(event.target.value);
+              }}
             />
           </Field>
         </div>
@@ -579,3 +629,6 @@ export function ShotDesignPanel({
     </div>
   );
 }
+
+export const ShotDesignPanel = forwardRef(ShotDesignPanelContent);
+ShotDesignPanel.displayName = "ShotDesignPanel";

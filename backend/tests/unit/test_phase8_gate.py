@@ -1,4 +1,4 @@
-"""Canonical deterministic Scene layout and direct Workbench path tests."""
+"""Direct Workbench path without the retired director board."""
 
 from __future__ import annotations
 
@@ -9,12 +9,6 @@ import pytest
 from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
 from app.assets.models import Scene, Shot
-from app.director.scene_assembler import (
-    CharacterSpec,
-    SceneAssembler,
-    SceneLayoutSpec,
-    SceneObjectSpec,
-)
 from app.shared.base import Base
 from app.shared.security import hash_password
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -29,32 +23,6 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
     async with factory() as db_session:
         yield db_session
     await engine.dispose()
-
-
-def test_gate_1_scene_assembler_deterministic_coordinates() -> None:
-    """§79-1/2: 2D layout is plannable and deterministic (never LLM coords)."""
-    spec = SceneLayoutSpec(
-        door=SceneObjectSpec(kind="door", name="门", position="north"),
-        furniture=[SceneObjectSpec(kind="table", name="桌子", position="center")],
-        characters=[CharacterSpec(name="A", enters_from="south"), CharacterSpec(name="B")],
-    )
-    first = SceneAssembler().assemble(spec)
-    second = SceneAssembler().assemble(spec)
-    assert first == second  # deterministic
-    assert first["generator"] == "deterministic_scene_assembler_v1"
-    elements = first["elements"]
-    kinds = {item["kind"] for item in elements}
-    assert "character" in kinds and "table" in kinds and "door" in kinds
-    door = next(item for item in elements if item["kind"] == "door")
-    assert door["x"] == 0.5 and door["y"] == 0.15  # north
-
-
-def test_scene_assembler_clamps_large_cast_inside_the_grid() -> None:
-    spec = SceneLayoutSpec(characters=[CharacterSpec(name=f"C{index}") for index in range(9)])
-    elements = SceneAssembler().assemble(spec)["elements"]
-    coordinates = [(item["x"], item["y"]) for item in elements]
-    assert coordinates
-    assert all(0 <= x <= 1 and 0 <= y <= 1 for x, y in coordinates), coordinates
 
 
 async def _seed_scene_shot(session: AsyncSession) -> tuple[Project, Shot, User]:

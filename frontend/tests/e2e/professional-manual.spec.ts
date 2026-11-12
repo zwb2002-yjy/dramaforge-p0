@@ -101,7 +101,6 @@ for (const viewport of [
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
       .toBe(true);
     expect(errors).toEqual([]);
-    await page.screenshot({ path: test.info().outputPath(`h3-modes-${viewport.width}.png`) });
   });
 }
 

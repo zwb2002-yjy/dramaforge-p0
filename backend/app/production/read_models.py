@@ -93,6 +93,14 @@ class ProductionRunStatusRead(BaseModel):
     error_code: str | None
 
 
+class ProductionRunCancelRead(BaseModel):
+    """Qualified cancellation receipt for one project-owned run."""
+
+    id: UUID
+    status: str
+    cancellation_requested_at: datetime | None
+
+
 class ProductionRunHistoryRead(ProductionRunStatusRead):
     node_key: str
     attempt_no: int

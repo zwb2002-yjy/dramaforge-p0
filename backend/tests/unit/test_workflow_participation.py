@@ -15,11 +15,7 @@ from app.director.workflows.character_participation import (
     ShotParticipationPlan,
     participation_director_state,
 )
-from app.director.workflows.participation_service import (
-    validate_participation_bindings,
-)
 from app.shared.base import Base
-from app.shared.errors import ValidationAppError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
@@ -152,46 +148,3 @@ async def test_participation_plan_requires_identity_binding(session: AsyncSessio
                 )
             ]
         )
-
-
-@pytest.mark.asyncio
-async def test_validate_participation_bindings_ok(session: AsyncSession) -> None:
-    project_id, user_id = await _seed_project(session)
-    char_a, ver_a = await _seed_character(session, project_id, user_id)
-    plan = ShotParticipationPlan(
-        participations=[_participation(char_a, ver_a, ScreenRole.PRIMARY)]
-    )
-    await validate_participation_bindings(session, project_id=project_id, plan=plan)
-
-
-@pytest.mark.asyncio
-async def test_validate_participation_bindings_cross_workspace(session: AsyncSession) -> None:
-    project_id, user_id = await _seed_project(session)
-    char_a, ver_a = await _seed_character(session, project_id, user_id)
-    plan = ShotParticipationPlan(
-        participations=[_participation(char_a, ver_a, ScreenRole.PRIMARY)]
-    )
-    # Change only the project_id to simulate a cross-workspace reference.
-    other_project, _ = await _seed_project(session)
-    with pytest.raises(ValidationAppError) as excinfo:
-        await validate_participation_bindings(
-            session, project_id=other_project, plan=plan
-        )
-    assert excinfo.value.details.get("code") == "PARTICIPATION_ASSET_CROSS_WORKSPACE"
-
-
-@pytest.mark.asyncio
-async def test_validate_participation_bindings_unknown_character(session: AsyncSession) -> None:
-    project_id, _ = await _seed_project(session)
-    plan = ShotParticipationPlan(
-        participations=[
-            ShotCharacterParticipation(
-                asset_id=uuid4(),
-                asset_version_id=None,
-                screen_role=ScreenRole.OFFSCREEN,
-            )
-        ]
-    )
-    with pytest.raises(ValidationAppError) as excinfo:
-        await validate_participation_bindings(session, project_id=project_id, plan=plan)
-    assert excinfo.value.details.get("code") == "PARTICIPATION_ASSET_NOT_FOUND"

@@ -91,8 +91,17 @@ def inspect_manifest(
         "style": "prompt_only",
         "native_audio": "native" if "generate_audio" in options else "unsupported",
         "tool_calling": "unsupported" if media else "unknown",
+        "tool_results": "unsupported" if media else "unknown",
+        "parallel_calls": "unsupported" if media else "unknown",
         "structured_output": "unsupported" if media else "unknown",
     }
+    if not media and manifest.metadata.get("contract_profile") == "chat_tools_v1":
+        controls.update({
+            "tool_calling": "native",
+            "tool_results": "native",
+            "parallel_calls": "unsupported",
+            "structured_output": "native",
+        })
     limitations = ["Contract inspection does not verify account access or generation quality."]
     if catalog is not None:
         limitations.append(
@@ -104,10 +113,18 @@ def inspect_manifest(
                 "legacy/explicit_binding uses declared slots."
             )
     if not media:
-        limitations += [
-            "Logical gateway aliases do not identify an immutable upstream deployment.",
-            "Tool request forwarding is not a complete tool-result conversation contract.",
-        ]
+        if not manifest.metadata.get("gateway_reference"):
+            limitations.append(
+                "Logical gateway aliases do not identify an immutable upstream deployment."
+            )
+        if manifest.metadata.get("contract_profile") == "chat_tools_v1":
+            limitations.append(
+                "Tool support is an explicitly selected protocol contract, not a generation probe."
+            )
+        else:
+            limitations.append(
+                "Tool-result conversation support has not been declared for this text contract."
+            )
     return ModelCapabilityReport(
         model_id=manifest.id,
         model_revision=catalog.model_revision if catalog else None,
@@ -120,6 +137,8 @@ def inspect_manifest(
                 "capability_specs": {
                     str(k): v.model_dump(mode="json") for k, v in manifest.capability_specs.items()
                 },
+                **({"contract_profile": manifest.metadata["contract_profile"]}
+                   if "contract_profile" in manifest.metadata else {}),
             }
         ),
         catalog_lifecycle=effective_publication_lifecycle(

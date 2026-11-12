@@ -126,12 +126,13 @@ def check_root_entries(root: Path) -> list[str]:
 def check_sensitive_on_disk(root: Path) -> list[str]:
     """Fail if credential-like files exist under the tree (excluding venv/node_modules)."""
     errors: list[str] = []
-    skip_parts = FORBIDDEN_TRACKED_PARTS | LOCAL_ONLY_ROOT | {".git"}
+    skip_parts = FORBIDDEN_TRACKED_PARTS | {".git"}
     for directory, subdirs, filenames in os.walk(root, followlinks=False):
         # Prune before traversal: ignored evidence/dependencies can contain
         # hundreds of thousands of files. The separate Git index check still
         # rejects tracked caches and secrets inside these directories.
-        subdirs[:] = [name for name in subdirs if name not in skip_parts]
+        excluded = skip_parts | LOCAL_ONLY_ROOT if Path(directory) == root else skip_parts
+        subdirs[:] = [name for name in subdirs if name not in excluded]
         for name in filenames:
             path = Path(directory) / name
             if not path.is_file():

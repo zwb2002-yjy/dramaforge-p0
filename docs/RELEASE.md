@@ -62,7 +62,7 @@ Dependency Review 对 Python / frontend 依赖文件变更和所有 `dev -> main
 ## 发布步骤
 
 1. Check out the exact candidate SHA.
-2. Run `scripts/run_quality_in_docker.ps1`（或 Linux 等价 Docker Compose 命令）.
+2. Run `scripts/run_quality_in_docker.ps1 -Stage Full -KeepArtifacts` to retain candidate outputs.
 3. Confirm Alembic reports a single head and that `alembic check` is clean
    （当前 head 记录在 [DATA_MODEL.md](DATA_MODEL.md)，以候选本身
    `alembic heads` 为准）.
@@ -94,16 +94,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_git_hooks.
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\task_worktree.ps1 `
   -Operation create `
-  -TaskId example-task `
-  -OwnedPaths "backend/app/example;backend/tests/unit/test_example.py"
+  -TaskId example-task
 ```
 
-GitHub 是权威强制点（本地 hook 可被移除）。本地 `.agent-control` ledger 只是
-审计数据，其 `approved_by` 不构成身份认证，不能替代 GitHub review 或受保护
-分支合并记录。
+该可选助手从 dev 提交创建 `codex/<task-id>`，不要求主工作区干净，不替主工作区提交修改。
+其他合法分支或 worktree 布局也可使用 Git 原生命令；写入范围在现有任务中协调。
+不维护本地 STARTED/COMPLETED/MERGED 台账；完成工作不强制制造提交或 PR。
+GitHub 是审批与受保护分支合并的权威，本地 hook 只阻止直接推送 main。
 
 ## Release evidence
 
 发布或 P0 tag 前，从 exact candidate commit 的干净 checkout 运行 Docker
 Compose 正式证明。任何 FAIL / BLOCKED / dirty source / source mismatch 都
 阻止发布。生成的报告默认写入 `tmp/p0-evidence/<sha>/`（不入 Git）。
+这只适用于正式发布候选，不要求每次修改生成证据包。候选废弃或开发环境重置后，
+没有恢复、交付或明确归档用途的历史材料按 DEVELOPMENT 的生命周期清理；
+被删除的证据不能继续作为当前通过依据。有效发布记录与制品不随普通开发清理删除。

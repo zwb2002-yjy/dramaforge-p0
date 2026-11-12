@@ -51,6 +51,8 @@ Updated: 2026-10-07；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 | Security | backend/app/security | encrypted BYOK credentials and rotation audits | credential readback |
 | Contracts | backend/app/contracts | shared typed runtime/production command and fact contracts | persistence or HTTP surface |
 | Workers | backend/app/workers | Arq default/director/heavy entry points and recovery ticks | domain rules owned by other packages |
+| Maintenance | backend/app/maintenance/recovery_service.py | Owner-scoped recovery of an existing failure through normal scheduling | new paid create, direct Provider calls, a third Runtime |
+| Composition / bootstrap | backend/app/main.py / backend/app/install_env.py | application assembly and installation configuration respectively | business use cases or reverse dependencies from application modules |
 | Frontend | frontend/src/routes and frontend/src/features | views and explicit user commands | duplicated server truth |
 
 ## 入站调用职责

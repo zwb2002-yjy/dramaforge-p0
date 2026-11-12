@@ -174,7 +174,12 @@ CapabilityRouter 的 validate/translate 不是所有 Worker 的逐函数路径�
 URL 或凭据，不调用 submit/poll、下载对象、启动 TTS，也不创建 NodeRun、Operation 或
 reference token。历史缺证据明确标缺失，不能用当前 Formal/Binding 补齐旧快照。
 无命名输入模式的目录接受既有 text_to_image / first_frame 阶段语义，有命名合同只接受
-实际声明的合同 ID；跨媒体阶段和未知模式拒绝。Agent ToolRegistry 接线仍未实现，未来
+实际声明的合同 ID；跨媒体阶段和未知模式拒绝。Agent 现经中立 ModelToolsPort
+接入当前媒体 stage 的 model_capabilities / model_compile_preview，复用本节同一服务。
+检查返回精确 Binding、Manifest、连接修订及身份 hash；预览必须回传匹配身份，
+只预览已保存镜头的 prompt。工具不读取凭据、不调用 Provider、不创建 NodeRun/Operation
+或传输 token；结果仍明确 account_verified/transport_verified=false。任意文本目录读取
+尚未开放，避免把涉及凭据解析的路径误标为纯工具读取。后续
 工具直接复用授权 service，不绕经本机 HTTP 或复制 SQL。
 
 维护新能力时，以官方字段审核 → 限定产品子集 → 新 revision/fixture/hash →
@@ -185,6 +190,9 @@ Manifest、DTO→intent→wire→summary、有序参考、MIME/hash/scope、参�
 `test_reference_plan_compiler.py`；真实账号及作品验证仍须本次 Owner 授权。
 文本模型与语音分别遵守下文的 Proxy 版本化身份及 voice_execution 合同，不从逻辑名称
 推断上游型号、工具能力或音色质量，不增加自动回退。
+Proxy 的 OpenAI 响应体 `model` 会回显请求别名；Director 的 `actual_model` 只采用
+明确的上游模型响应头。缺少该证据时保持未知，不把请求别名冒充实际型号；冻结的
+连接/部署身份仍独立保存，可追溯本次选择，不能用它伪造上游返回证据。
 
 ## 分层
 
@@ -439,6 +447,12 @@ BF16 或量化权重只要由同一 SGLang H3 协议提供相同分区能力，�
 连接、配置哈希及 Key 修订；Proxy 在同一锁中检查并执行，Key 轮换使旧冻结修订显式失败。
 多条可用文本连接必须显式选择；不按列表排序改用其他模型。目录发现仅提供可见性，
 不授予 Chat、工具、流式或结构化输出能力。`chat_text_v1` 是管理员显式选定的保守 Chat 合同。
+
+`chat_tools_v1` 是显式可选的工具消息合同，支持 assistant tool_calls、tool role、
+call_id、JSON 对象参数以及 usage/stop_reason。注册引用、换 Key 和模型解析保留该合同；
+旧 chat_text_v1 不自动升级，工具能力仍为 unknown。工具合同声明不等于真实模型
+工具选择质量或账号验收；Director Agent 在未知工具能力时拒绝启动。
+非法响应明确失败、不自动重发；可能已提交的超时仍保留 unknown_submission。
 
 历史直连和静态 `script-quality` / `script-fast` 不参与新生产注册；已有 Profile 不自动改绑。
 历史结果、凭据与修订继续可读。已 prepared 且未提交的持久文本执行要求人工重建并使用

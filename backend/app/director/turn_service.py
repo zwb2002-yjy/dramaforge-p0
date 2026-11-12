@@ -551,6 +551,8 @@ class DirectorTurnService:
 
         ts = now or datetime.now(UTC)
         turn = await self.get(project_id=project_id, turn_id=turn_id)
+        if turn.turn_kind == "agent":
+            return turn
         if turn.status in TERMINAL_TURN_STATUSES:
             return turn
         if _deadline_passed(turn.deadline, ts):

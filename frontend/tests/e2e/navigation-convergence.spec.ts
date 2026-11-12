@@ -535,7 +535,7 @@ for (const destination of ["settings", "other-project"] as const) {
 }
 
 for (const width of [1440, 1100, 1099, 808, 390]) {
-  test(`A16-A19: navigation, focus and layout at ${width}px`, async ({ page }, testInfo) => {
+  test(`A16-A19: navigation, focus and layout at ${width}px`, async ({ page }) => {
     const { writes, errors } = await setup(page);
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
@@ -564,7 +564,7 @@ for (const width of [1440, 1100, 1099, 808, 390]) {
           a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top,
         ).toBe(true);
       }
-    await page.screenshot({ path: testInfo.outputPath(`home-${width}.png`), fullPage: true });
+
     await page.getByRole("button", { name: /进入工作台/ }).click();
     await expect(page).toHaveURL(`${ROOT}/script`);
     await expect(page.getByRole("heading", { name: "故事剧本", exact: true })).toBeVisible();
@@ -618,10 +618,6 @@ for (const width of [1440, 1100, 1099, 808, 390]) {
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
       .toBe(true);
-    await testInfo.attach("layout", {
-      body: JSON.stringify({ width, bounds, writes, errors }),
-      contentType: "application/json",
-    });
     expect(writes).toEqual([]);
     expect(errors).toEqual([]);
   });

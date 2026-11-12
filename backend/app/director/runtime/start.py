@@ -113,6 +113,13 @@ class DirectorRuntimeStartService:
         )
         if created:
             turn.proposal_id = proposal.id
+            turn.thread_id = thread.id
+            turn.origin_agent_turn_id = await self._session.scalar(select(DirectorTurn.id).where(
+                DirectorTurn.project_id == project.id,
+                DirectorTurn.turn_kind == "agent",
+                DirectorTurn.proposal_id == proposal.id,
+                DirectorTurn.status == "completed",
+            ))
             await self._session.flush()
         elif turn.proposal_id != proposal.id:
             raise ConflictError(

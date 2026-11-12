@@ -22,6 +22,7 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${e2ePort}`,
     trace: "on-first-retry",
+    screenshot: "only-on-failure",
     launchOptions: process.env.DRAMAFORGE_E2E_EXECUTABLE_PATH
       ? {
           executablePath: process.env.DRAMAFORGE_E2E_EXECUTABLE_PATH,

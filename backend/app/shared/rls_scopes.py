@@ -440,6 +440,7 @@ async def list_recoverable_director_turn_rls_scopes(
     rows = await session.execute(
         select(DirectorTurn.id, DirectorTurn.project_id)
         .where(
+            DirectorTurn.turn_kind != "agent",
             DirectorTurn.status.in_({"queued", "thinking", "awaiting_user", "awaiting_execution"}),
             or_(
                 DirectorTurn.deadline <= datetime.now(UTC),
@@ -490,6 +491,7 @@ async def list_reconcilable_director_turn_rls_scopes(
     rows = await session.execute(
         select(DirectorTurn.id, DirectorTurn.project_id)
         .where(
+            DirectorTurn.turn_kind != "agent",
             or_(
                 DirectorTurn.status == "awaiting_execution",
                 (DirectorTurn.status == "awaiting_user")

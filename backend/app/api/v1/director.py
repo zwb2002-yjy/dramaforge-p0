@@ -9,17 +9,28 @@ proposal-only text turns and never mutates Shot design or Formal media.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.api.director_model_tools import ApiDirectorModelTools
 from app.config import get_settings
 from app.contracts.director_runtime import ResumeSignal, RuntimeScope, StopRequest
 from app.contracts.production_commands import ExecutionBody
+from app.director.agent_service import (
+    AgentRequest,
+    AgentThreadCreate,
+    AgentTurnResult,
+    DirectorAgentService,
+)
+from app.director.proposal_models import DirectorProposal, DirectorProposalItem
+from app.director.proposal_service import PartialApplyInput, PartialApplyResult, ProposalService
 from app.director.recommendation import (
     DirectorRecommendation,
     DirectorRecommendationRequest,
@@ -28,7 +39,9 @@ from app.director.recommendation import (
 from app.director.runtime.capabilities import (
     DirectorCapabilitiesRead,
     build_director_capabilities,
+    require_director_runtime_available,
 )
+from app.director.runtime.checkpoint import scoped_checkpointer
 from app.director.runtime.control import DirectorRuntimeControlService
 from app.director.runtime.delegation import DirectorRuntimeDelegationService
 from app.director.runtime.routing import DirectorEngineRouter
@@ -41,7 +54,7 @@ from app.director.suggestion import (
 )
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
-from app.shared.errors import ConflictError, ValidationAppError
+from app.shared.errors import AppError, ConflictError, NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["director"], dependencies=[Depends(require_selected_workspace)])
 
@@ -55,6 +68,9 @@ class DirectorTurnRead(BaseModel):
     project_id: UUID
     workspace_id: UUID
     actor_id: UUID
+    thread_id: UUID | None
+    turn_kind: Literal["agent", "workflow"]
+    origin_agent_turn_id: UUID | None
     scope_type: str
     scope_entity_id: UUID
     request_key: str
@@ -91,18 +107,38 @@ class DirectorTurnRead(BaseModel):
 
     @classmethod
     def from_model(cls, turn: DirectorTurn) -> DirectorTurnRead:
+        intent = dict(turn.intent_snapshot or {})
+        resolution = dict(turn.model_resolution or {})
+        if turn.turn_kind == "agent":
+            raw_skills = intent.get("skills")
+            skills = raw_skills if isinstance(raw_skills, dict) else {}
+            raw_tools = intent.get("tools")
+            tools = raw_tools if isinstance(raw_tools, list) else []
+            intent = {
+                "scope": intent.get("scope"),
+                "skills": {key: skills.get(key) for key in (
+                    "profile_version", "selected_skill_ids", "requested_skill_ids", "context_hash",
+                )},
+                "tools": [{key: spec.get(key) for key in ("name", "version", "schema_hash")}
+                          for spec in tools if isinstance(spec, dict)],
+            }
+            resolution = {key: value for key, value in resolution.items()
+                          if key != "native_options"}
         return cls(
             id=turn.id,
             project_id=turn.project_id,
             workspace_id=turn.workspace_id,
             actor_id=turn.actor_id,
+            thread_id=turn.thread_id,
+            turn_kind=cast(Literal["agent", "workflow"], turn.turn_kind),
+            origin_agent_turn_id=turn.origin_agent_turn_id,
             scope_type=turn.scope_type,
             scope_entity_id=turn.scope_entity_id,
             request_key=turn.request_key,
             context_hash=turn.context_hash,
             input_versions=dict(turn.input_versions or {}),
-            intent_snapshot=dict(turn.intent_snapshot or {}),
-            model_resolution=dict(turn.model_resolution or {}),
+            intent_snapshot=intent,
+            model_resolution=resolution,
             transport_record_id=turn.transport_record_id,
             transport_status=turn.transport_status,
             engine_version=turn.engine_version,
@@ -174,6 +210,244 @@ class DirectorRuntimeDelegationBody(BaseModel):
     execution: ExecutionBody
     authorization_expires_at: datetime
     max_steps: int = Field(default=6, ge=3, le=8)
+
+
+class DirectorAgentThreadRef(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: UUID
+    scope_type: Literal["project", "scene", "shot"]
+    scope_entity_id: UUID
+
+
+class DirectorAgentMessageRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    turn_id: UUID | None
+    role: Literal["user", "assistant"]
+    content: str
+    created_at: datetime
+
+
+class DirectorAgentThreadRead(DirectorAgentThreadRef):
+    messages: list[DirectorAgentMessageRead]
+    offset: int
+    limit: int
+    total: int
+    has_more: bool
+    has_previous: bool
+
+
+class DirectorAgentStopBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+    request_key: str = Field(min_length=1, max_length=160, pattern=r"\S")
+
+
+class DirectorAgentProposalItemRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: UUID
+    command: str
+    payload: dict[str, object]
+    expected_target_version: int | None
+    status: str
+    rationale: str
+    benefit: str
+    cost: str
+    risk: str
+    impact: str
+
+
+class DirectorAgentProposalRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    project_id: UUID
+    thread_id: UUID
+    scope_type: str
+    scope_entity_id: UUID
+    status: str
+    items: list[DirectorAgentProposalItemRead]
+
+
+async def _agent_proposal(
+    session: SessionDep, *, project_id: UUID, proposal_id: UUID,
+) -> DirectorProposal:
+    proposal = await session.scalar(select(DirectorProposal).join(
+        DirectorTurn, DirectorTurn.proposal_id == DirectorProposal.id,
+    ).where(
+        DirectorProposal.id == proposal_id,
+        DirectorProposal.project_id == project_id,
+        DirectorTurn.project_id == project_id,
+        DirectorTurn.thread_id == DirectorProposal.thread_id,
+        DirectorTurn.turn_kind == "agent",
+    ))
+    if proposal is None:
+        raise NotFoundError("Agent proposal not found")
+    return proposal
+
+
+@router.get(
+    "/projects/{project_id}/director/proposals/{proposal_id}",
+    response_model=DirectorAgentProposalRead,
+)
+async def read_director_agent_proposal(
+    project_id: UUID, proposal_id: UUID, user: CurrentUser, session: SessionDep,
+) -> DirectorAgentProposalRead:
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    proposal = await _agent_proposal(session, project_id=project_id, proposal_id=proposal_id)
+    items = list(await session.scalars(select(DirectorProposalItem).where(
+        DirectorProposalItem.proposal_id == proposal.id,
+        DirectorProposalItem.project_id == project_id,
+    ).order_by(DirectorProposalItem.created_at, DirectorProposalItem.id)))
+    return DirectorAgentProposalRead(
+        id=proposal.id, project_id=project_id, thread_id=proposal.thread_id,
+        scope_type=proposal.scope_type, scope_entity_id=proposal.scope_entity_id,
+        status=proposal.status,
+        items=[DirectorAgentProposalItemRead.model_validate(item) for item in items],
+    )
+
+
+@router.post(
+    "/projects/{project_id}/director/proposals/{proposal_id}/apply",
+    response_model=PartialApplyResult,
+)
+async def apply_director_agent_proposal(
+    project_id: UUID, proposal_id: UUID, body: PartialApplyInput,
+    user: CurrentUser, session: SessionDep, _csrf: CsrfDep,
+) -> PartialApplyResult:
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    proposal = await _agent_proposal(session, project_id=project_id, proposal_id=proposal_id)
+    result = await ProposalService(session, actor=user).partial_apply(
+        project=project, proposal_id=proposal.id, apply_input=body,
+    )
+    await session.commit()
+    return result
+
+
+async def _agent_service(
+    project_id: UUID, user: CurrentUser, session: SessionDep,
+) -> DirectorAgentService:
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    factory = async_sessionmaker(bind=session.bind, expire_on_commit=False)
+    service = DirectorAgentService(
+        factory,
+        actor_id=user.id, workspace_id=project.workspace_id, project_id=project.id,
+        model_tools=ApiDirectorModelTools(factory),
+    )
+    # The Agent uses short, scoped transactions from its own factory. Release
+    # the inbound auth/project read transaction before any model network call.
+    await session.commit()
+    return service
+
+
+@router.post(
+    "/projects/{project_id}/director/threads",
+    response_model=DirectorAgentThreadRef,
+    status_code=status.HTTP_201_CREATED,
+)
+async def open_director_thread(
+    project_id: UUID,
+    body: AgentThreadCreate,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> DirectorAgentThreadRef:
+    service = await _agent_service(project_id, user, session)
+    return DirectorAgentThreadRef.model_validate(await service.open_thread(body))
+
+
+@router.get(
+    "/projects/{project_id}/director/threads/{thread_id}",
+    response_model=DirectorAgentThreadRead,
+)
+async def read_director_thread(
+    project_id: UUID,
+    thread_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    limit: int = Query(default=30, ge=1, le=100),
+    offset: int | None = Query(default=None, ge=0),
+) -> DirectorAgentThreadRead:
+    service = await _agent_service(project_id, user, session)
+    return DirectorAgentThreadRead.model_validate(
+        await service.read_thread(thread_id, limit=limit, offset=offset)
+    )
+
+
+@router.get(
+    "/projects/{project_id}/director/threads/{thread_id}/requests",
+    response_model=AgentTurnResult,
+)
+async def read_director_agent_request(
+    project_id: UUID, thread_id: UUID, user: CurrentUser, session: SessionDep,
+    request_key: str = Query(min_length=1, max_length=160),
+) -> AgentTurnResult:
+    service = await _agent_service(project_id, user, session)
+    return await service.read_request(thread_id, request_key)
+
+
+@router.post(
+    "/projects/{project_id}/director/threads/{thread_id}/messages",
+    response_model=AgentTurnResult,
+)
+async def run_director_agent_turn(
+    project_id: UUID,
+    thread_id: UUID,
+    body: AgentRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> AgentTurnResult:
+    service = await _agent_service(project_id, user, session)
+    replay = await service.replay(thread_id, body)
+    if replay is not None:
+        return replay
+    settings = get_settings()
+    try:
+        require_director_runtime_available(settings)
+    except AppError as exc:
+        exc.details = {**exc.details, "request_accepted": False}
+        raise
+    async with scoped_checkpointer(settings, project_id=project_id) as checkpointer:
+        return await service.run(thread_id, body, checkpointer=checkpointer)
+
+
+@router.post(
+    "/projects/{project_id}/director/agent/turns/{turn_id}/stop",
+    response_model=AgentTurnResult,
+)
+async def stop_director_agent_turn(
+    project_id: UUID,
+    turn_id: UUID,
+    body: DirectorAgentStopBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> AgentTurnResult:
+    service = await _agent_service(project_id, user, session)
+    return await service.stop(
+        turn_id, expected_revision=body.expected_revision, request_key=body.request_key,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/director/turns/{turn_id}/tools",
+    response_model=dict[str, object],
+)
+async def read_director_agent_tools(
+    project_id: UUID,
+    turn_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    limit: int = Query(default=30, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
+    service = await _agent_service(project_id, user, session)
+    return await service.read_tools(turn_id, limit=limit, offset=offset)
 
 
 @router.post(
@@ -344,6 +618,9 @@ async def get_director_turn(
 ) -> DirectorTurnRead:
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     turn = await DirectorTurnService(session).get(project_id=project_id, turn_id=turn_id)
+    if turn.turn_kind == "agent":
+        service = await _agent_service(project_id, user, session)
+        turn = await service.read_turn(turn_id)
     return DirectorTurnRead.from_model(turn)
 
 

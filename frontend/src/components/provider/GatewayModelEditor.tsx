@@ -7,10 +7,11 @@ import {
   rotateGatewayCredential,
   saveGatewayModel,
   updateProviderConnection,
+  type GatewayModelWrite,
   type ProviderConnectionRead,
 } from "../../features/model-controls/api";
 import { queryKeys } from "../../lib/queryKeys";
-import { Button, Dialog, Field, Input } from "../ui";
+import { Button, Dialog, Field, Input, Select } from "../ui";
 import { probeErrorText } from "./providerSetup";
 import { useModelActivation } from "./useModelActivation";
 
@@ -38,6 +39,9 @@ export function GatewayModelEditor({
   const [name, setName] = useState<string | null>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [modelId, setModelId] = useState<string | null>(null);
+  const [contractProfile, setContractProfile] = useState<
+    GatewayModelWrite["contract_profile"] | null
+  >(null);
   const [apiKey, setApiKey] = useState("");
   const [requestId, setRequestId] = useState(() => globalThis.crypto.randomUUID());
   const [message, setMessage] = useState<string | null>(null);
@@ -54,6 +58,9 @@ export function GatewayModelEditor({
   const nameValue = name ?? row?.display_name ?? defaultName;
   const urlValue = url ?? config.data?.base_url ?? "";
   const modelValue = modelId ?? row?.gateway_ref?.remote_model_id ?? "";
+  const savedContract =
+    row?.gateway_ref?.contract_profile ?? config.data?.contract_profile ?? "chat_text_v1";
+  const contractValue = contractProfile ?? savedContract;
   const pending = row?.gateway_ref?.state !== "ready" && Boolean(row);
   const uncertain = pending && row?.gateway_ref?.state !== "reserved";
   const refresh = async () => {
@@ -71,6 +78,7 @@ export function GatewayModelEditor({
       setName(null);
       setUrl(null);
       setModelId(null);
+      setContractProfile(null);
       setRequestId(globalThis.crypto.randomUUID());
       setMessage("配置已核验，上游生成尚未验证。");
       onConnectionCreated?.(saved);
@@ -87,10 +95,13 @@ export function GatewayModelEditor({
         !row ||
         pending ||
         urlValue.trim() !== config.data?.base_url ||
-        modelValue.trim() !== row.gateway_ref?.remote_model_id;
+        modelValue.trim() !== row.gateway_ref?.remote_model_id ||
+        contractValue !== savedContract;
       if (targetChanged) {
         if (!urlValue.trim() || !modelValue.trim() || !apiKey.trim())
-          throw new Error("请填写服务地址、真实模型 ID 和 Key；更换目标时需重新填写 Key。");
+          throw new Error(
+            "请填写服务地址、真实模型 ID 和 Key；更换地址、模型或协作方式时需重新填写 Key。",
+          );
         return saveGatewayModel(
           workspaceId,
           {
@@ -99,7 +110,7 @@ export function GatewayModelEditor({
             base_url: urlValue.trim(),
             model_id: modelValue.trim(),
             api_key: apiKey,
-            contract_profile: "chat_text_v1",
+            contract_profile: contractValue,
           },
           row?.id,
         );
@@ -210,6 +221,24 @@ export function GatewayModelEditor({
         />
       </Field>
       <Field>
+        协作方式
+        <Select
+          aria-label="协作方式"
+          value={contractValue}
+          disabled={busy || uncertain}
+          onChange={(value) => {
+            if (value === "chat_text_v1" || value === "chat_tools_v1") setContractProfile(value);
+          }}
+          options={[
+            { value: "chat_text_v1", label: "文本对话" },
+            { value: "chat_tools_v1", label: "工具协作" },
+          ]}
+        />
+      </Field>
+      <p className="muted">
+        工具协作需要兼容文本服务支持工具调用与结果回传。此选择声明服务能力，不代表已通过真实调用验证。
+      </p>
+      <Field>
         API Key
         <Input
           aria-label="API Key"
@@ -222,7 +251,7 @@ export function GatewayModelEditor({
         />
       </Field>
       <p className="muted">
-        保存和核验配置不会生成内容。更换地址或模型会创建新版本，保留旧执行记录。
+        保存和核验配置不会生成内容。更换地址、模型或协作方式会创建新版本，保留旧执行记录。
       </p>
       {row?.gateway_ref && <code>{row.gateway_ref.remote_model_id}</code>}
       {config.isError && <p role="alert">配置读取失败，请核验连接。</p>}

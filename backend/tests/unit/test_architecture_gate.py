@@ -47,6 +47,24 @@ def test_import_spellings_cannot_hide_provider_dependency(statement):
         ("app.shared.helper", "app.access.models", True),
         ("app.access.service", "app.production.service", True),
         ("app.api.v1.test", "app.production.service", False),
+        ("app.api.v1.maintenance", "app.maintenance.recovery_service", False),
+        ("app.shared.errors", "app.maintenance.recovery_service", True),
+        ("app.access.projects", "app.maintenance.recovery_service", True),
+        ("app.workers.jobs", "app.maintenance.recovery_service", True),
+        ("app.maintenance.recovery_service", "app.director.wakeup_replay", False),
+        ("app.maintenance.recovery_service", "app.runtime.scheduler", False),
+        ("app.maintenance.recovery_service", "app.providers.registry", True),
+        ("app.maintenance.recovery_service", "app.director.turn_service", True),
+        ("app.main", "app.api.v1.router", False),
+        ("app.main", "app.providers.litellm_gateway.client", False),
+        ("app.main", "app.production.application.commands", True),
+        ("app.api.v1.test", "app.main", True),
+        ("app.access.projects", "app.install_env", True),
+        ("app.install_env", "app.config", False),
+        ("app.install_env", "app.access.projects", True),
+        ("app.unknown", "app.shared.errors", True),
+        ("app.shared.errors", "app.unknown", True),
+        ("app.unknown", "app.other_unknown", True),
     ],
 )
 def test_documented_permissions_are_not_widened_for_current_code(source, target, blocked):
@@ -103,6 +121,22 @@ def test_check_fails_closed_when_a_source_cannot_be_parsed(tmp_path, monkeypatch
     monkeypatch.setattr(scan, "APP", app)
     path = baseline(tmp_path / "baseline.json", [])
     assert scan.main(["--check", "--baseline", str(path)]) == 1
+
+
+@pytest.mark.parametrize("module,source", [
+    ("new_package.py", "# No imports must not hide an unclassified module"),
+    ("config.py", "import app.new_package"),
+])
+def test_unclassified_internal_modules_fail_even_without_cross_layer_edges(tmp_path, monkeypatch, module, source):
+    app = tmp_path / "backend/app"
+    app.mkdir(parents=True)
+    (app / module).write_text(source)
+    monkeypatch.setattr(scan, "ROOT", tmp_path)
+    monkeypatch.setattr(scan, "APP", app)
+    path = baseline(tmp_path / "baseline.json", [])
+    assert scan.main(["--check", "--baseline", str(path)]) == 1
+    _, problems = scan.build_edges()
+    assert any(problem.startswith("UNCLASSIFIED-") for problem in problems)
 
 
 def test_baseline_is_a_no_new_debt_gate_not_an_all_compliant_claim():

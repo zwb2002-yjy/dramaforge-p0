@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { selectValue } from "./selectValue";
+import { expectSelectValue, selectValue } from "./selectValue";
 import { expectLibraryGeometry } from "./layoutGeometry";
 import {
   installProfessionalMock,
@@ -201,150 +201,158 @@ test("provider rows and explicit protocol mapping stay readable at desktop width
   }
 });
 
-test("text model management uses one explicit reference and preserves workspace slot activation", async ({
-  page,
-}) => {
-  const { connection } = await setupProviders(page);
-  const upstreamUrl = "https://my-text.invalid/v1";
-  const textConnection = {
-    ...connection,
-    id: "text-connection",
-    display_name: "文本服务",
-    provider_type: "litellm",
-    protocol_profile: "openai_chat_v1",
-    base_url: "http://litellm:4000",
-    verification_status: "gateway_registered",
-    gateway_ref: {
-      deployment_id: "00000000-0000-4000-8000-000000000001",
-      workspace_id: WORKSPACE_ID,
-      connection_id: "text-connection",
-      alias: "df-00000000000040008000000000000001",
-      remote_model_id: "my-chat",
-      config_hash: "a".repeat(64),
-      key_revision: 1,
-      request_id: "00000000-0000-4000-8000-000000000002",
-      request_fingerprint: "b".repeat(64),
-      state: "ready",
-      operation: "create",
-      contract_profile: "chat_text_v1",
-      error_code: null,
-    },
-  };
-  const modelId = `litellm/${textConnection.id}/${textConnection.gateway_ref.alias}`;
-  const creates: Record<string, unknown>[] = [];
-  const saves: Record<string, unknown>[] = [];
-  let connected = false;
-  const probes: string[] = [];
-  await page.route("**/api/v1/provider-plugins", (route) =>
-    route.fulfill({
-      json: [
-        {
-          provider_type: "litellm",
-          protocol_profile: "openai_chat_v1",
-          display_name: "LiteLLM",
-          default_base_url: "http://litellm:4000",
-          implemented: true,
-          kind: "text",
-          models: [],
-          paid_capabilities: [],
-          capabilities: ["auth_models"],
+for (const contractProfile of ["chat_text_v1", "chat_tools_v1"] as const) {
+  test(`text model management preserves ${contractProfile} and workspace slot activation`, async ({
+    page,
+  }) => {
+    const { connection } = await setupProviders(page);
+    const upstreamUrl = "https://my-text.invalid/v1";
+    const textConnection = {
+      ...connection,
+      id: "text-connection",
+      display_name: "文本服务",
+      provider_type: "litellm",
+      protocol_profile: "openai_chat_v1",
+      base_url: "http://litellm:4000",
+      verification_status: "gateway_registered",
+      gateway_ref: {
+        deployment_id: "00000000-0000-4000-8000-000000000001",
+        workspace_id: WORKSPACE_ID,
+        connection_id: "text-connection",
+        alias: "df-00000000000040008000000000000001",
+        remote_model_id: "my-chat",
+        config_hash: "a".repeat(64),
+        key_revision: 1,
+        request_id: "00000000-0000-4000-8000-000000000002",
+        request_fingerprint: "b".repeat(64),
+        state: "ready",
+        operation: "create",
+        contract_profile: contractProfile,
+        error_code: null,
+      },
+    };
+    const modelId = `litellm/${textConnection.id}/${textConnection.gateway_ref.alias}`;
+    const creates: Record<string, unknown>[] = [];
+    const saves: Record<string, unknown>[] = [];
+    let connected = false;
+    const probes: string[] = [];
+    await page.route("**/api/v1/provider-plugins", (route) =>
+      route.fulfill({
+        json: [
+          {
+            provider_type: "litellm",
+            protocol_profile: "openai_chat_v1",
+            display_name: "LiteLLM",
+            default_base_url: "http://litellm:4000",
+            implemented: true,
+            kind: "text",
+            models: [],
+            paid_capabilities: [],
+            capabilities: ["auth_models"],
+          },
+        ],
+      }),
+    );
+    await page.route(`**/api/v1/workspaces/${WORKSPACE_ID}/provider-connections`, async (route) => {
+      await route.fulfill({ json: connected ? [connection, textConnection] : [connection] });
+    });
+    await page.route(
+      `**/api/v1/workspaces/${WORKSPACE_ID}/provider-connections/gateway`,
+      async (route) => {
+        const body = route.request().postDataJSON();
+        creates.push(body);
+        connected = true;
+        textConnection.gateway_ref.request_id = body.request_id;
+        await route.fulfill({ status: 201, json: textConnection });
+      },
+    );
+    await page.route(`**/provider-connections/text-connection/gateway/configuration`, (route) =>
+      route.fulfill({
+        json: {
+          base_url: upstreamUrl,
+          model_id: "my-chat",
+          deployment_id: textConnection.gateway_ref.deployment_id,
+          key_revision: 1,
+          contract_profile: contractProfile,
         },
-      ],
-    }),
-  );
-  await page.route(`**/api/v1/workspaces/${WORKSPACE_ID}/provider-connections`, async (route) => {
-    await route.fulfill({ json: connected ? [connection, textConnection] : [connection] });
-  });
-  await page.route(
-    `**/api/v1/workspaces/${WORKSPACE_ID}/provider-connections/gateway`,
-    async (route) => {
-      const body = route.request().postDataJSON();
-      creates.push(body);
-      connected = true;
-      textConnection.gateway_ref.request_id = body.request_id;
-      await route.fulfill({ status: 201, json: textConnection });
-    },
-  );
-  await page.route(`**/provider-connections/text-connection/gateway/configuration`, (route) =>
-    route.fulfill({
-      json: {
+      }),
+    );
+    await page.route(`**/provider-connections/text-connection/probes`, async (route) => {
+      if (route.request().method() === "POST") {
+        probes.push(route.request().url());
+      }
+      await route.fulfill({ json: [] });
+    });
+    await page.route("**/api/v1/models", (route) =>
+      route.fulfill({
+        json: connected
+          ? [
+              {
+                id: modelId,
+                display_name: "my-chat · 文本服务",
+                source: "workspace",
+                capabilities: ["text.generate"],
+                available: true,
+              },
+            ]
+          : [],
+      }),
+    );
+    let profile: Record<string, unknown> | null = null;
+    await page.route(`**/workspaces/${WORKSPACE_ID}/model-profiles`, async (route) => {
+      if (route.request().method() === "POST") {
+        profile = { id: "text-profile", name: "默认", is_default: true, version: 1, bindings: {} };
+        await route.fulfill({ status: 201, json: profile });
+      } else await route.fulfill({ json: profile ? [profile] : [] });
+    });
+    await page.route(`**/model-profiles/text-profile`, (route) => route.fulfill({ json: profile }));
+    await page.route(`**/model-profiles/text-profile/simple-mode`, async (route) => {
+      saves.push(route.request().postDataJSON());
+      profile = {
+        ...profile,
+        version: 2,
+        bindings: Object.fromEntries(
+          ["planning.brief", "planning.script", "planning.storyboard"].map((slot) => [
+            slot,
+            { model_id: modelId },
+          ]),
+        ),
+      };
+      await route.fulfill({ json: profile });
+    });
+    await page.goto("/settings/models");
+    await page.getByRole("button", { name: "选择 文本服务", exact: true }).click();
+    const panel = page.getByRole("region", { name: "LLM 配置", exact: true });
+    await expect(panel.getByLabel("服务地址")).toHaveValue("");
+    await expectSelectValue(panel.getByLabel("协作方式"), "chat_text_v1");
+    if (contractProfile === "chat_tools_v1") {
+      await selectValue(panel.getByLabel("协作方式"), { label: "工具协作" });
+    }
+    await expect(panel.getByText(/不代表已通过真实调用验证/)).toBeVisible();
+    await panel.getByLabel("服务地址").fill(upstreamUrl);
+    await panel.getByLabel("真实模型 ID").fill("my-chat");
+    await panel.getByLabel("API Key", { exact: true }).fill("text-only-fixture-key");
+    await panel.getByRole("button", { name: "保存 LLM 配置" }).click();
+    await expect(panel.getByText("my-chat", { exact: true })).toBeVisible();
+    await expectSelectValue(panel.getByLabel("协作方式"), contractProfile);
+    await panel.getByRole("button", { name: "完成", exact: true }).click();
+    await panel.getByRole("button", { name: "启用 my-chat", exact: true }).click();
+    await expect(panel.getByRole("button", { name: "已启用 my-chat", exact: true })).toBeDisabled();
+    expect(creates).toEqual([
+      expect.objectContaining({
+        display_name: "文本服务",
         base_url: upstreamUrl,
         model_id: "my-chat",
-        deployment_id: textConnection.gateway_ref.deployment_id,
-        key_revision: 1,
-        contract_profile: "chat_text_v1",
-      },
-    }),
-  );
-  await page.route(`**/provider-connections/text-connection/probes`, async (route) => {
-    if (route.request().method() === "POST") {
-      probes.push(route.request().url());
-    }
-    await route.fulfill({ json: [] });
+        api_key: "text-only-fixture-key",
+        contract_profile: contractProfile,
+        request_id: expect.any(String),
+      }),
+    ]);
+    expect(probes).toEqual([]);
+    expect(saves).toEqual([{ llm_model_id: modelId, expected_version: 1 }]);
+    await expect(page.getByLabel("文本模型", { exact: true })).toHaveCount(0);
   });
-  await page.route("**/api/v1/models", (route) =>
-    route.fulfill({
-      json: connected
-        ? [
-            {
-              id: modelId,
-              display_name: "my-chat · 文本服务",
-              source: "workspace",
-              capabilities: ["text.generate"],
-              available: true,
-            },
-          ]
-        : [],
-    }),
-  );
-  let profile: Record<string, unknown> | null = null;
-  await page.route(`**/workspaces/${WORKSPACE_ID}/model-profiles`, async (route) => {
-    if (route.request().method() === "POST") {
-      profile = { id: "text-profile", name: "默认", is_default: true, version: 1, bindings: {} };
-      await route.fulfill({ status: 201, json: profile });
-    } else await route.fulfill({ json: profile ? [profile] : [] });
-  });
-  await page.route(`**/model-profiles/text-profile`, (route) => route.fulfill({ json: profile }));
-  await page.route(`**/model-profiles/text-profile/simple-mode`, async (route) => {
-    saves.push(route.request().postDataJSON());
-    profile = {
-      ...profile,
-      version: 2,
-      bindings: Object.fromEntries(
-        ["planning.brief", "planning.script", "planning.storyboard"].map((slot) => [
-          slot,
-          { model_id: modelId },
-        ]),
-      ),
-    };
-    await route.fulfill({ json: profile });
-  });
-  await page.goto("/settings/models");
-  await page.getByRole("button", { name: "选择 文本服务", exact: true }).click();
-  const panel = page.getByRole("region", { name: "LLM 配置", exact: true });
-  await expect(panel.getByLabel("服务地址")).toHaveValue("");
-  await panel.getByLabel("服务地址").fill(upstreamUrl);
-  await panel.getByLabel("真实模型 ID").fill("my-chat");
-  await panel.getByLabel("API Key", { exact: true }).fill("text-only-fixture-key");
-  await panel.getByRole("button", { name: "保存 LLM 配置" }).click();
-  await expect(panel.getByText("my-chat", { exact: true })).toBeVisible();
-  await panel.getByRole("button", { name: "完成", exact: true }).click();
-  await panel.getByRole("button", { name: "启用 my-chat", exact: true }).click();
-  await expect(panel.getByRole("button", { name: "已启用 my-chat", exact: true })).toBeDisabled();
-  expect(creates).toEqual([
-    expect.objectContaining({
-      display_name: "文本服务",
-      base_url: upstreamUrl,
-      model_id: "my-chat",
-      api_key: "text-only-fixture-key",
-      contract_profile: "chat_text_v1",
-      request_id: expect.any(String),
-    }),
-  ]);
-  expect(probes).toEqual([]);
-  expect(saves).toEqual([{ llm_model_id: modelId, expected_version: 1 }]);
-  await expect(page.getByLabel("文本模型", { exact: true })).toHaveCount(0);
-});
+}
 
 test("supplier settings stay read-only while browsing, show failed evidence, and keep the return context", async ({
   page,

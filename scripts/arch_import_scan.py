@@ -57,7 +57,29 @@ LAYERS: tuple[tuple[str, str], ...] = (
     ("app.events", "shared"),
     ("app.api", "backend_api"),
     ("app.workers", "backend_worker"),
+    ("app.maintenance", "maintenance"),
 )
+
+# Standalone modules have exact roles; this does not classify future app.* packages.
+EXACT_LAYERS = {
+    "app": "shared",
+    "app.config": "shared",
+    "app.install_env": "bootstrap",
+    "app.main": "composition",
+}
+
+MAINTENANCE_IMPORTS = {
+    "app.access.models", "app.access.projects", "app.config",
+    "app.director.inbox_models", "app.director.wakeup_replay",
+    "app.events.models", "app.events.outbox", "app.events.service",
+    "app.execution.models", "app.execution.synchronous_results",
+    "app.runtime.scheduler", "app.shared.enums", "app.shared.errors",
+}
+COMPOSITION_IMPORTS = {
+    "app.api.errors", "app.api.v1.router", "app.config", "app.events.sse",
+    "app.providers.litellm_gateway.client", "app.runtime.resources",
+    "app.shared.db", "app.shared.observability",
+}
 
 # Explicit permissions from MODULE_BOUNDARIES §two/four. Existing violations
 # are individual debts, not a reason to widen these permissions.
@@ -83,7 +105,19 @@ BASELINE = ROOT / "scripts" / "architecture-baseline.json"
 
 def forbidden(source_module: str, target_module: str) -> bool:
     source, target = layer_of(source_module), layer_of(target_module)
-    if source == target or "other" in (source, target):
+    if "other" in (source, target):
+        return True
+    if target in {"composition", "bootstrap"}:
+        return source_module != target_module
+    if target == "maintenance":
+        return source not in {"backend_api", "maintenance"}
+    if source == "composition":
+        return target_module not in COMPOSITION_IMPORTS
+    if source == "maintenance":
+        return target != "maintenance" and target_module not in MAINTENANCE_IMPORTS
+    if source == "bootstrap":
+        return target != "shared"
+    if source == target:
         return False
     if source == "production" and target == "creative":
         return not (target_module == "app.director.creative_capabilities.contracts" or
@@ -92,6 +126,8 @@ def forbidden(source_module: str, target_module: str) -> bool:
 
 
 def layer_of(module: str) -> str:
+    if module in EXACT_LAYERS:
+        return EXACT_LAYERS[module]
     for prefix, name in LAYERS:
         if module == prefix or module.startswith(prefix + "."):
             return name
@@ -150,6 +186,8 @@ def build_edges() -> tuple[dict[tuple[str, str], set[str]], list[str]]:
 
     paths = [path for path in sorted(APP.rglob("*.py")) if "__pycache__" not in path.parts]
     known_modules = {module_name(path) for path in paths}
+    problems.extend(f"UNCLASSIFIED-MODULE {module}" for module in sorted(known_modules)
+                    if layer_of(module) == "other")
     for path in paths:
         module = module_name(path)
         try:
@@ -164,6 +202,8 @@ def build_edges() -> tuple[dict[tuple[str, str], set[str]], list[str]]:
             if not target.startswith("app."):
                 continue
             destination = layer_of(target)
+            if destination == "other":
+                problems.append(f"UNCLASSIFIED-IMPORT {module} -> {target}")
             if source != destination:
                 edges[(source, destination)].add(f"{module} -> {target}")
     return edges, problems

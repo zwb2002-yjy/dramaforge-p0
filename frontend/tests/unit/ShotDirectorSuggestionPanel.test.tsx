@@ -111,6 +111,9 @@ function directorTurn(
     project_id: "project-1",
     workspace_id: "workspace-1",
     actor_id: "actor-1",
+    thread_id: null,
+    turn_kind: "workflow",
+    origin_agent_turn_id: null,
     scope_type: "shot",
     scope_entity_id: "shot-1",
     request_key: `${task}:shot-1:test`,
@@ -225,6 +228,70 @@ describe("ShotDirectorSuggestionPanel", () => {
         expected_runtime_revision: null,
         expected_turn_revision: turn.revision,
       });
+      expect(calls.some((call) => call.url.includes("/director/agent/"))).toBe(false);
+    });
+  });
+
+  it("stops an Agent turn through its own control and then reads the durable turn", async () => {
+    const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
+    let turn = directorTurn(
+      "shot_director_suggestion",
+      {},
+      {
+        turn_kind: "agent",
+        thread_id: "55555555-5555-4555-8555-555555555555",
+        status: "thinking",
+        wait_reason: null,
+        engine_version: "langgraph:1.2.14:director-agent-v1",
+        state_schema_version: "director-agent-v1",
+      },
+    );
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const body = init?.body
+        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+        : undefined;
+      calls.push({ url, method, body });
+      if (url.endsWith("/auth/csrf")) return Promise.resolve(json({ csrf_token: "csrf" }));
+      if (url.includes("/director/turns?")) return Promise.resolve(json([turn]));
+      if (url.endsWith(`/agent/turns/${turn.id}/stop`)) {
+        turn = { ...turn, status: "cancelled", wait_reason: "user_stop", revision: 4 };
+        return Promise.resolve(
+          json({
+            turn_id: turn.id,
+            thread_id: turn.thread_id,
+            status: "cancelled",
+            assistant_message_id: null,
+            proposal_ids: [],
+            stop_reason: "user_stop",
+            usage: {},
+            model_calls: 1,
+            tool_calls: 0,
+            version: 4,
+          }),
+        );
+      }
+      if (url.endsWith(`/director/turns/${turn.id}`)) return Promise.resolve(json(turn));
+      return Promise.resolve(json({}));
+    });
+    renderPanel();
+
+    fireEvent.click(await screen.findByTestId("stop-director-turn"));
+    await waitFor(() => {
+      const index = calls.findIndex((call) => call.url.endsWith(`/agent/turns/${turn.id}/stop`));
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(calls[index]?.method).toBe("POST");
+      expect(calls[index]?.body).toEqual({
+        expected_revision: 3,
+        request_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      });
+      expect(calls.slice(index + 1)).toContainEqual({
+        url: `/api/v1/projects/project-1/director/turns/${turn.id}`,
+        method: "GET",
+        body: undefined,
+      });
+      expect(calls.some((call) => call.url.includes("/director/runtime/"))).toBe(false);
     });
   });
 

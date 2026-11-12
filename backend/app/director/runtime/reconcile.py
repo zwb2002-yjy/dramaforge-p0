@@ -29,7 +29,8 @@ class DirectorRuntimeFactReconciler:
 
     async def reconcile(self, turn: DirectorTurn) -> DirectorRuntimeWakeup | None:
         if (
-            turn.runtime_execution_id is None
+            turn.turn_kind == "agent"
+            or turn.runtime_execution_id is None
             or turn.runtime_revision is None
             or len(turn.node_run_ids or []) != 1
         ):

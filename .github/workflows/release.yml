@@ -57,17 +57,21 @@ jobs:
               python scripts/check_directory_compliance.py
               python scripts/repo_guardrails.py policy --repo-root /workspace
             '
+      - name: Verify quality output lifecycle
+        shell: pwsh
+        run: ./backend/tests/unit/test_quality_output_lifecycle.ps1
       - name: Run the exact source quality gate in containers
         id: quality
         shell: pwsh
-        run: ./scripts/run_quality_in_docker.ps1 -Stage Full
+        run: ./scripts/run_quality_in_docker.ps1 -Stage Full -KeepArtifacts
       - name: Resolve single migration head
         id: migration-head
         shell: bash
         run: |
           set -euo pipefail
+          backend_image="$(cat tmp/quality-contract/backend.iid)"
           mapfile -t heads < <(
-            docker run --rm dramaforge-backend-quality:local \
+            docker run --rm "$backend_image" \
               sh -ec 'uv run --offline --no-sync --directory backend alembic heads' | awk 'NF {print $1}'
           )
           if [[ "${#heads[@]}" -ne 1 ]]; then
@@ -273,10 +277,9 @@ jobs:
           # runner the gate steps before it leave tens of GB of intermediate
           # layers and cache behind, and `docker save` then fails with
           # "no space left on device" after the redownload of the archives is
-          # already committed. Drop only what nothing references: the tagged
-          # release images and every image the bundle needs stay.
+          # already committed. Keep runtime images for the following bundle:
+          # image prune -a also deletes tagged images without container references.
           df -h /
-          docker image prune -af || true
           docker container prune -f || true
           docker builder prune -af || true
           df -h /

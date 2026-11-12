@@ -337,6 +337,36 @@ async def test_same_model_uses_distinct_shot_context_and_persists_exact_evidence
 
 
 @pytest.mark.asyncio
+async def test_proxy_response_alias_is_not_reported_as_actual_model_when_header_is_missing(
+    session: AsyncSession,
+) -> None:
+    user, project, scene, shot, _ = await _seed(session)
+    calls = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={
+            "model": "controlled-storyboard",
+            "choices": [{"message": {"content": json.dumps(_valid_candidate(request))}}],
+            "usage": {"total_tokens": 10},
+        })
+
+    service = ShotDirectorSuggestionService(
+        session, text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
+    )
+    request = _request(scene, shot, key="missing-upstream-header")
+    first = await service.suggest(project_id=project.id, actor=user, request=request)
+    replay = await service.suggest(project_id=project.id, actor=user, request=request)
+    assert len(calls) == 1
+    assert first.director_evidence is not None and replay.director_evidence is not None
+    assert first.director_evidence.actual_model is None
+    assert replay.director_evidence.actual_model is None
+    assert first.director_evidence.model_id == MODEL_ID
+    invocation = await session.scalar(select(DirectorInvocation))
+    assert invocation is not None and invocation.response_summary["litellm_model_name"] is None
+
+
+@pytest.mark.asyncio
 async def test_request_key_replays_stored_result_without_second_model_call(
     session: AsyncSession,
 ) -> None:

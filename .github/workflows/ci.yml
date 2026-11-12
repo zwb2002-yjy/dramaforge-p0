@@ -192,6 +192,9 @@ jobs:
       COMPOSE_PROJECT_NAME: df-quality-ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v7
+      - name: Verify quality output lifecycle
+        shell: pwsh
+        run: ./backend/tests/unit/test_quality_output_lifecycle.ps1
       - name: Run the shared full quality gate
         id: quality
         shell: pwsh

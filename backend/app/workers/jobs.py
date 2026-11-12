@@ -93,7 +93,7 @@ async def recover_interrupted_director_turns(ctx: dict[str, Any]) -> dict[str, i
             try:
                 service = DirectorTurnService(session)
                 before = await service.get(project_id=scope.project_id, turn_id=turn_id)
-                if before.runtime_execution_id is not None:
+                if before.turn_kind == "agent" or before.runtime_execution_id is not None:
                     unchanged += 1
                     await session.rollback()
                     continue
@@ -150,6 +150,10 @@ async def reconcile_waiting_director_turns(ctx: dict[str, Any]) -> dict[str, int
                     project_id=scope.project_id,
                     turn_id=turn_id,
                 )
+                if turn.turn_kind == "agent":
+                    unchanged += 1
+                    await session.rollback()
+                    continue
                 if turn.runtime_execution_id is None:
                     if turn.status in ACTIVE_TURN_STATUSES:
                         await service.compare_and_set(

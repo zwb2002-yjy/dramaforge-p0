@@ -85,7 +85,8 @@ docker compose ps
 
 健康检查只证明网关/API 与数据库就绪。更新源码后保留原 `.env` 与数据卷，
 将 `DRAMAFORGE_SOURCE_COMMIT` 更新为 `git rev-parse HEAD` 的结果再重建；镜像、API、
-Workers 必须对应同一提交。旧实例数据卷单独保管，不自动合并数据或启动旧任务。
+Workers 必须对应同一提交。旧实例数据卷不自动合并或启动旧任务；仍需恢复时单独保管，
+已明确弃用的材料按 [DEVELOPMENT](docs/DEVELOPMENT.md) 的生命周期及授权范围清理。
 公网入口、HTTPS 和备份恢复见 [DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
 ### 版本化安装包
@@ -130,11 +131,12 @@ docs/       当前权威文档与技术决策
 
 ## 开发与验证
 
-运行时、依赖安装、静态检查、测试和 E2E 统一在 Docker 中执行。
+应用运行时、依赖安装、静态检查、测试和 E2E 统一在 Docker 中执行。
 宿主机不创建 Python venv、不安装 Node 依赖，也不直接启动 API 或 Vite。
+Git、PowerShell 和容器编排脚本自身的隔离验证可使用宿主原生工具，不替代产品容器测试。
 
 ```powershell
-# 定向前端单测（不启动外部服务）
+# 前端单测（默认运行 Vitest；可用 TestArgs 筛选，不启动外部服务）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_docker.ps1 -Stage FrontendTests
 
 # 完整容器质量门
@@ -144,7 +146,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_quality_in_doc
 完整质量门覆盖目录与架构规则、后端静态检查和单测、PostgreSQL 迁移及集成测试、
 OpenAPI / 前端 API 合同、format / lint / typecheck / Vitest / 构建 / Playwright，
 以及固定 LiteLLM Proxy 与确定性 mock 的集成测试；不调用真实外部模型。
-脚本会清理其 quality 项目的容器与卷，运行前核对资源归属。
+脚本核对归属后只清理其 quality 项目的容器与卷；普通 Full 成功输出默认收尾，失败诊断
+和显式保留的候选材料按 DEVELOPMENT 管理。日常修改按实际影响选择验证，不默认运行 Full；
 文档改动采用链接与差异等必要检查，发布候选仍须完整验证。
 详细命令和验证边界见 [DEVELOPMENT.md](docs/DEVELOPMENT.md)。
 

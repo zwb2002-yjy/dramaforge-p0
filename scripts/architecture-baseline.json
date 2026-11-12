@@ -33,21 +33,6 @@
       "reason": "ARCHITECTURE_MAPPING §4.13: Scene impact reports read ExperimentBranch membership. Remove through a typed impact/facts query preserving project filtering and confirmation."
     },
     {
-      "from": "app.director.assistant_context",
-      "to": "app.execution.models",
-      "reason": "ARCHITECTURE_MAPPING §4.12: Director reads canonical production facts for context/reconciliation. Remove through typed fact ports preserving exact project/run/artifact identity and recovery; do not create a second fact store."
-    },
-    {
-      "from": "app.director.assistant_context",
-      "to": "app.production.models",
-      "reason": "ARCHITECTURE_MAPPING §4.12: Director reads canonical production facts for context/reconciliation. Remove through typed fact ports preserving exact project/run/artifact identity and recovery; do not create a second fact store."
-    },
-    {
-      "from": "app.director.assistant_context",
-      "to": "app.providers.model_profiles.service",
-      "reason": "ARCHITECTURE_MAPPING §4.3: Director reads effective project model configuration or task-slot identity. Remove when neutral text/model contracts supply the same exact identities without default substitution."
-    },
-    {
       "from": "app.director.context_builder",
       "to": "app.providers.model_profiles.slots",
       "reason": "ARCHITECTURE_MAPPING §4.3: Director reads effective project model configuration or task-slot identity. Remove when neutral text/model contracts supply the same exact identities without default substitution."

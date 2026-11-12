@@ -5,29 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
-from app.director.autonomy_policy import DirectorAutonomyPolicy, policy_for
 from app.shared.security import CSRF_HEADER
 from fastapi.testclient import TestClient
-
-
-def test_policy_matrix_matches_design() -> None:
-    auto = policy_for("AUTO")
-    assist = policy_for("ASSIST")
-    manual = policy_for("MANUAL")
-
-    assert isinstance(auto, DirectorAutonomyPolicy)
-    assert auto.active_analysis is True
-    assert auto.show_recommendations is True
-    assert auto.auto_generate_proposals is True
-    assert auto.advanced_default_visible is False
-
-    assert assist.active_analysis is True
-    assert assist.auto_generate_proposals is True
-
-    assert manual.active_analysis is False
-    assert manual.show_recommendations is False
-    assert manual.auto_generate_proposals is False
-    assert manual.advanced_default_visible is True
 
 
 def test_runtime_and_model_selection_never_read_autonomy_policy() -> None:

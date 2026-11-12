@@ -211,6 +211,7 @@ class GatewayModelService:
             request_id=body.request_id,
             request_fingerprint=fingerprint,
             state="reserved",
+            contract_profile=body.contract_profile,
         )
         if connection is None:
             credential = await store_credential(

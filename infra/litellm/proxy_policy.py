@@ -60,7 +60,7 @@ def _validate_managed_create(body):
         valid = (body.get("model_name") == f"df-{identifier.hex}"
                  and info.get("df_managed") is True
                  and info.get("df_key_revision") == 1
-                 and info.get("df_contract_profile") == "chat_text_v1"
+                 and info.get("df_contract_profile") in {"chat_text_v1", "chat_tools_v1"}
                  and info.get("df_config_hash") == _physical_hash(params)
                  and params["model"].startswith("openai/")
                  and not set(params).difference({"model", "api_base", "api_key", "max_retries"}))

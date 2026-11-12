@@ -32,20 +32,24 @@ Python 扫描范围内，其调用边界另由 API/client 检查、行为测试�
 |---|---|---|
 | **backend_api** | `app/api/` | HTTP 入站适配，转发至应用入口 |
 | **backend_worker** | `app/workers/` | 异步任务消费和 Runtime/领域服务调用入口 |
+| **maintenance** | `app/maintenance/` | Owner 显式触发的恢复用例编排；仅恢复已有失败身份，不创建新的付费生产 |
+| **composition** | 仅 `app/main.py` | FastAPI 路由、生命周期资源与基础设施客户端的装配入口，不承载业务用例 |
+| **bootstrap** | 仅 `app/install_env.py` | 独立安装配置生成入口，不被业务层反向调用 |
 | **contract** | `app/contracts/` | 共享的**类型化契约**：命令、事实、事件、Director Runtime 契约。不含持久化、不含 HTTP |
 | **director** | `app/director/`（不含 `creative_capabilities`） | 提案式编排：理解、推理、建议、等待、恢复、委派 |
 | **creative** | `app/director/creative_capabilities/` | Style / Skill / Pack / VisualBible / ShotLanguage / Resolver / Compiler。**无生命周期** |
 | **production** | `app/production/`、`app/execution/`、`app/runtime/`、`app/workbench/` | 可靠执行已确定的生产意图：Graph、NodeRun、Outbox、重试、恢复 |
 | **provider** | `app/providers/` | 外部模型能力：manifest、compiler、runtime adapter、连接与凭据 |
 | **domain** | `app/access/`、`app/assets/`、`app/consistency/`、`app/delivery/`、`app/editing/` | 产品实体与业务事实 |
-| **shared** | `app/shared/`、`app/events/`、`app/security/`、`app/storage/` | 基础设施原语，被所有层依赖 |
+| **shared** | `app/shared/`、`app/events/`、`app/security/`、`app/storage/`、`app/config.py`、根包 `app/__init__.py` | 基础设施原语与配置；根包只作命名空间，不承载业务逻辑 |
 
 ---
 
 ## 二、允许的依赖方向
 
 ```text
-backend_api / backend_worker → 后端各层及入站适配（import 可见性；业务调用须遵守上述职责）
+backend_api / backend_worker → 原有后端业务层及入站适配（import 可见性；业务调用须遵守上述职责）
+backend_api → maintenance 的 Owner 恢复用例入口
 contract   → 仅 shared
 director   → creative, domain, contract, shared
 creative   → domain, shared
@@ -56,6 +60,26 @@ domain     → shared          ← 初始化的 domain → creative 债务见
 shared     → 无内部层依赖     ← 注意：当前 shared/rls_scopes 与 model_registry 依赖域模型，见
                                ARCHITECTURE_MAPPING.md §4
 ```
+
+### 受限恢复与装配入口
+
+maintenance 是应用编排职责，不是第三个 Runtime 或任意跨层入口。它只允许依赖以下模块，
+以及本包内部模块：`app.access.models`、`app.access.projects`、`app.config`、
+`app.director.inbox_models`、`app.director.wakeup_replay`、`app.events.models`、
+`app.events.outbox`、`app.events.service`、`app.execution.models`、
+`app.execution.synchronous_results`、`app.runtime.scheduler`、`app.shared.enums`、`app.shared.errors`。
+这些依赖用于 Owner 校验、失败身份读取、已有回执核对与正常恢复调度；不允许直接调用 Provider
+或绕过原有 Runtime 的用户门。只有 Backend API 可从包外调用它；领域、共享、Runtime 和 Worker
+不得反向依赖该恢复编排入口。
+
+composition 仅允许 `app.main` 依赖 `app.api.errors`、`app.api.v1.router`、`app.config`、
+`app.events.sse`、`app.providers.litellm_gateway.client`、`app.runtime.resources`、
+`app.shared.db`、`app.shared.observability`，用于装配和资源生命周期；不能在其中增加业务操作。
+bootstrap 仅允许依赖 shared。其他应用模块不得导入 composition/bootstrap；需要共享的逻辑
+应属于其实际责任模块，不能经启动入口转发。
+
+扫描到未分类的内部模块或内部导入时必须报错，包括没有跨层导入的新包；不再将 `other`
+当作自动放行。新增归属与允许方向须先按 Owner 边界决定，不能靠 baseline 豁免未知层。
 
 规则与现状不一致时，将核实的调用链登记到
 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md)。Mapping 描述差距，不覆盖本节规则；

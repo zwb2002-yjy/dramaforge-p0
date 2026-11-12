@@ -730,7 +730,4 @@ test("33 identifiable clips fit the workspace and navigation, ruler and source p
   }
   expect(writes).toEqual([]);
   await expect(page.getByTestId("save-edit-timeline")).toBeDisabled();
-  await page
-    .getByRole("region", { name: "可视时间线", exact: true })
-    .screenshot({ path: test.info().outputPath("timeline.png") });
 });

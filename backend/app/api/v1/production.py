@@ -1,4 +1,4 @@
-"""Read-only production snapshots and Artifact evidence delivery."""
+"""Production snapshots, Artifact evidence delivery, and qualified run cancellation."""
 
 from __future__ import annotations
 
@@ -13,12 +13,13 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import select
 
 from app.access.projects import ProjectService
-from app.api.deps import CurrentUser, SessionDep, require_selected_workspace
+from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.production.read_models import (
     ArtifactRead,
     NodeRunRead,
     ProductionArtifactPage,
+    ProductionRunCancelRead,
     ProductionRunPage,
     ProductionRunStatusRead,
     ProductionSummaryRead,
@@ -27,6 +28,7 @@ from app.production.read_models import (
     UpstreamDependencyRead,
 )
 from app.production.read_service import ProductionReadService
+from app.production.run_control import ProductionRunControl
 from app.shared.errors import NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["production"], dependencies=[Depends(require_selected_workspace)])
@@ -436,4 +438,28 @@ async def production_artifact_history(
         limit=limit,
         cursor=cursor,
         usable_audio=usable_audio,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/node-runs/{run_id}/cancel",
+    response_model=ProductionRunCancelRead,
+)
+async def cancel_production_run(
+    project_id: UUID,
+    run_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> ProductionRunCancelRead:
+    """Request cancellation of one project-owned run; the remote task is kept."""
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=user
+    )
+    run = await ProductionRunControl(session).request_cancel(project=project, run_id=run_id)
+    await session.commit()
+    return ProductionRunCancelRead(
+        id=run.id,
+        status=run.status,
+        cancellation_requested_at=run.cancellation_requested_at,
     )

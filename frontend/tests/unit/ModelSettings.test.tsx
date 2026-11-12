@@ -1,16 +1,21 @@
-import { selectValue } from "./selectValue";
+import { expectSelectValue, selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState, type ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AddProviderDialog } from "../../src/components/provider/AddProviderDialog";
+import { GatewayModelEditor } from "../../src/components/provider/GatewayModelEditor";
 import { useModelActivation } from "../../src/components/provider/useModelActivation";
 import type { WorkspaceModelRole } from "../../src/lib/workspaceModelRoles";
 import { ProviderList } from "../../src/components/provider/ProviderList";
 import { ProviderDetails } from "../../src/components/provider/ProviderDetails";
 import { queryKeys } from "../../src/lib/queryKeys";
-import type { ProviderPluginRead } from "../../src/features/model-controls/api";
+import type {
+  GatewayModelWrite,
+  ProviderConnectionRead,
+  ProviderPluginRead,
+} from "../../src/features/model-controls/api";
 
 const WS = "11111111-1111-4111-8111-111111111111";
 const CONN = "22222222-2222-4222-8222-222222222222";
@@ -97,6 +102,34 @@ function connection(overrides: Record<string, unknown> = {}) {
     verified_at: null,
     connection_revision_id: "revision-1",
     ...overrides,
+  };
+}
+
+function gatewayConnection(
+  contractProfile: GatewayModelWrite["contract_profile"],
+): ProviderConnectionRead {
+  return {
+    ...connection(),
+    provider_type: "litellm",
+    protocol_profile: "openai_chat_v1",
+    display_name: "文本服务",
+    base_url: "http://litellm:4000",
+    verification_status: "gateway_registered",
+    gateway_ref: {
+      deployment_id: "00000000-0000-4000-8000-000000000001",
+      workspace_id: WS,
+      connection_id: CONN,
+      remote_model_id: "physical-chat",
+      alias: "df-00000000000040008000000000000001",
+      config_hash: "a".repeat(64),
+      key_revision: 1,
+      request_id: "00000000-0000-4000-8000-000000000002",
+      request_fingerprint: "b".repeat(64),
+      state: "ready",
+      operation: "create",
+      contract_profile: contractProfile,
+      error_code: null,
+    },
   };
 }
 
@@ -410,60 +443,168 @@ describe("AddProviderDialog", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("已添加 1 个，1 个未添加");
   });
 
-  it("saves an explicit text-model reference without claiming discovery or generation passed", async () => {
-    const saved = connection({
-      provider_type: "litellm",
-      protocol_profile: "openai_chat_v1",
-      base_url: "http://litellm:4000",
-      verification_status: "gateway_registered",
-      gateway_ref: {
-        deployment_id: "00000000-0000-4000-8000-000000000001",
-        remote_model_id: "physical-chat",
-        alias: "df-00000000000040008000000000000001",
-        key_revision: 1,
-        state: "ready",
-      },
-    });
+  it.each(["chat_text_v1", "chat_tools_v1"] as const)(
+    "saves explicit %s without claiming discovery or generation passed",
+    async (contractProfile) => {
+      const saved = connection({
+        provider_type: "litellm",
+        protocol_profile: "openai_chat_v1",
+        base_url: "http://litellm:4000",
+        verification_status: "gateway_registered",
+        gateway_ref: {
+          deployment_id: "00000000-0000-4000-8000-000000000001",
+          remote_model_id: "physical-chat",
+          alias: "df-00000000000040008000000000000001",
+          key_revision: 1,
+          state: "ready",
+          contract_profile: contractProfile,
+        },
+      });
+      const calls = mockApi(({ method, url }) => {
+        if (method === "POST" && url.endsWith("/provider-connections/gateway"))
+          return json(saved, 201);
+        if (url.endsWith("/gateway/configuration"))
+          return json({
+            base_url: "https://my-text.test/v1",
+            model_id: "physical-chat",
+            deployment_id: "00000000-0000-4000-8000-000000000001",
+            key_revision: 1,
+            contract_profile: contractProfile,
+          });
+        return undefined;
+      });
+      wrap(
+        <AddProviderDialog workspaceId={WS} plugins={[TEXT_PLUGIN]} onClose={() => undefined} />,
+      );
+      const dialog = await screen.findByRole("dialog", { name: "添加 LLM 配置" });
+      await waitFor(() => expect(dialog).toBeVisible());
+      await waitFor(() => expect(dialog).toBeVisible());
+      expect(within(dialog).getByLabelText("服务地址")).toHaveValue("");
+      expectSelectValue(within(dialog).getByLabelText("协作方式"), "chat_text_v1");
+      if (contractProfile === "chat_tools_v1") {
+        await selectValue(within(dialog).getByLabelText("协作方式"), contractProfile);
+      }
+      expect(within(dialog).getByText(/不代表已通过真实调用验证/)).toBeVisible();
+      fireEvent.change(within(dialog).getByLabelText("服务地址"), {
+        target: { value: "https://my-text.test/v1" },
+      });
+      fireEvent.change(within(dialog).getByLabelText("API Key"), { target: { value: "sk-gw" } });
+      fireEvent.change(within(dialog).getByLabelText("真实模型 ID"), {
+        target: { value: "physical-chat" },
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "保存 LLM 配置" }));
+      expect(await screen.findByText("配置已核验，上游生成尚未验证。")).toBeVisible();
+      expect(within(dialog).getByLabelText("API Key")).toHaveValue("");
+      expect(calls.some((call) => call.url.endsWith("/model-bindings"))).toBe(false);
+      expect(calls.some((call) => call.url.endsWith("/probes"))).toBe(false);
+      expect(
+        calls.find(
+          (call) => call.method === "POST" && call.url.endsWith("/provider-connections/gateway"),
+        )?.body,
+      ).toMatchObject({
+        base_url: "https://my-text.test/v1",
+        model_id: "physical-chat",
+        contract_profile: contractProfile,
+        api_key: "sk-gw",
+      });
+    },
+  );
+});
+
+describe("GatewayModelEditor", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(["chat_text_v1", "chat_tools_v1"] as const)(
+    "preserves saved %s when renaming a connection",
+    async (contractProfile) => {
+      const saved = gatewayConnection(contractProfile);
+      const calls = mockApi(({ method, url }) => {
+        if (url.endsWith("/gateway/configuration"))
+          return json({ base_url: "https://my-text.test/v1", contract_profile: contractProfile });
+        if (method === "PATCH" && url.endsWith(`/provider-connections/${CONN}`))
+          return json({ ...saved, display_name: "地方文化文本服务" });
+        return undefined;
+      });
+      wrap(<GatewayModelEditor workspaceId={WS} connection={saved} />);
+      const panel = screen.getByRole("region", { name: "LLM 配置" });
+      await waitFor(() =>
+        expect(within(panel).getByLabelText("服务地址")).toHaveValue("https://my-text.test/v1"),
+      );
+      expectSelectValue(within(panel).getByLabelText("协作方式"), contractProfile);
+      expect(calls.every((call) => call.method === "GET")).toBe(true);
+      fireEvent.change(within(panel).getByLabelText("连接名称"), {
+        target: { value: "地方文化文本服务" },
+      });
+      fireEvent.click(within(panel).getByRole("button", { name: "保存 LLM 配置" }));
+      await screen.findByText("配置已核验，上游生成尚未验证。");
+      expect(calls.filter((call) => call.method !== "GET")).toEqual([
+        {
+          method: "PATCH",
+          url: `/api/v1/workspaces/${WS}/provider-connections/${CONN}`,
+          body: { display_name: "地方文化文本服务" },
+        },
+      ]);
+      expectSelectValue(within(panel).getByLabelText("协作方式"), contractProfile);
+    },
+  );
+
+  it("keeps an explicit tools selection and request after a failed configuration change", async () => {
+    const saved = gatewayConnection("chat_text_v1");
+    let attempts = 0;
+    let configured = false;
     const calls = mockApi(({ method, url }) => {
-      if (method === "POST" && url.endsWith("/provider-connections/gateway"))
-        return json(saved, 201);
       if (url.endsWith("/gateway/configuration"))
         return json({
           base_url: "https://my-text.test/v1",
-          model_id: "physical-chat",
-          deployment_id: "00000000-0000-4000-8000-000000000001",
-          key_revision: 1,
-          contract_profile: "chat_text_v1",
+          contract_profile: configured ? "chat_tools_v1" : "chat_text_v1",
         });
+      if (method === "PUT" && url.endsWith(`/provider-connections/${CONN}/gateway`)) {
+        attempts += 1;
+        if (attempts === 1)
+          return json({ code: "VALIDATION_ERROR", detail: "服务配置未保存" }, 422);
+        configured = true;
+        return json({
+          ...gatewayConnection("chat_tools_v1"),
+          connection_revision_id: "revision-2",
+        });
+      }
       return undefined;
     });
-    wrap(<AddProviderDialog workspaceId={WS} plugins={[TEXT_PLUGIN]} onClose={() => undefined} />);
-    const dialog = await screen.findByRole("dialog", { name: "添加 LLM 配置" });
-    await waitFor(() => expect(dialog).toBeVisible());
-    await waitFor(() => expect(dialog).toBeVisible());
-    expect(within(dialog).getByLabelText("服务地址")).toHaveValue("");
-    fireEvent.change(within(dialog).getByLabelText("服务地址"), {
-      target: { value: "https://my-text.test/v1" },
-    });
-    fireEvent.change(within(dialog).getByLabelText("API Key"), { target: { value: "sk-gw" } });
-    fireEvent.change(within(dialog).getByLabelText("真实模型 ID"), {
-      target: { value: "physical-chat" },
-    });
-    fireEvent.click(within(dialog).getByRole("button", { name: "保存 LLM 配置" }));
-    expect(await screen.findByText("配置已核验，上游生成尚未验证。")).toBeVisible();
-    expect(within(dialog).getByLabelText("API Key")).toHaveValue("");
-    expect(calls.some((call) => call.url.endsWith("/model-bindings"))).toBe(false);
-    expect(calls.some((call) => call.url.endsWith("/probes"))).toBe(false);
-    expect(
-      calls.find(
-        (call) => call.method === "POST" && call.url.endsWith("/provider-connections/gateway"),
-      )?.body,
-    ).toMatchObject({
+    wrap(<GatewayModelEditor workspaceId={WS} connection={saved} />);
+    const panel = screen.getByRole("region", { name: "LLM 配置" });
+    await waitFor(() =>
+      expect(within(panel).getByLabelText("服务地址")).toHaveValue("https://my-text.test/v1"),
+    );
+    expectSelectValue(within(panel).getByLabelText("协作方式"), "chat_text_v1");
+    await selectValue(within(panel).getByLabelText("协作方式"), "chat_tools_v1");
+    fireEvent.click(within(panel).getByRole("button", { name: "保存 LLM 配置" }));
+    expect(await within(panel).findByRole("alert")).toHaveTextContent("需重新填写 Key");
+    expect(attempts).toBe(0);
+    fireEvent.change(within(panel).getByLabelText("API Key"), { target: { value: "fixture-key" } });
+    fireEvent.click(within(panel).getByRole("button", { name: "保存 LLM 配置" }));
+    await waitFor(() =>
+      expect(within(panel).getByRole("alert")).toHaveTextContent("服务配置未保存"),
+    );
+    expect(attempts).toBe(1);
+    expectSelectValue(within(panel).getByLabelText("协作方式"), "chat_tools_v1");
+    expect(within(panel).getByLabelText("API Key")).toHaveValue("fixture-key");
+    fireEvent.click(within(panel).getByRole("button", { name: "保存 LLM 配置" }));
+    await screen.findByText("配置已核验，上游生成尚未验证。");
+    const writes = calls.filter((call) => call.method === "PUT" && call.url.endsWith("/gateway"));
+    expect(writes).toHaveLength(2);
+    expect(writes[0].body).toEqual(writes[1].body);
+    expect(writes[1].body).toMatchObject({
+      request_id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      display_name: "文本服务",
       base_url: "https://my-text.test/v1",
       model_id: "physical-chat",
-      contract_profile: "chat_text_v1",
-      api_key: "sk-gw",
+      api_key: "fixture-key",
+      contract_profile: "chat_tools_v1",
     });
+    expectSelectValue(within(panel).getByLabelText("协作方式"), "chat_tools_v1");
+    expect(within(panel).getByLabelText("API Key")).toHaveValue("");
+    expect(calls.some((call) => call.url.endsWith("/gateway/credential"))).toBe(false);
+    expect(calls.some((call) => call.url.endsWith("/probes"))).toBe(false);
   });
 });
 

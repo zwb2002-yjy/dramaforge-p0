@@ -16,12 +16,14 @@ def test_disk_scan_prunes_caches_without_hiding_source_secrets(tmp_path, monkeyp
     spec = importlib.util.spec_from_file_location("directory_compliance", SCRIPT)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    for relative in ("tmp/evidence", "frontend/node_modules/package", "backend/app"):
+    for relative in ("tmp/evidence", "frontend/node_modules/package", "backend/app/data", "backend/app/logs"):
         (tmp_path / relative).mkdir(parents=True)
     (tmp_path / ".env").write_text("local synthetic settings")
     (tmp_path / "backend/.env").write_text("synthetic secret")
     (tmp_path / "backend/app/credentials.json").write_text("{}")
     (tmp_path / "backend/app/test.key").write_text("synthetic key")
+    (tmp_path / "backend/app/data/.env").write_text("synthetic nested secret")
+    (tmp_path / "backend/app/logs/test.key").write_text("synthetic nested key")
     original = os.scandir
 
     def guarded_scan(path):
@@ -31,10 +33,12 @@ def test_disk_scan_prunes_caches_without_hiding_source_secrets(tmp_path, monkeyp
 
     monkeypatch.setattr(os, "scandir", guarded_scan)
     errors = module.check_sensitive_on_disk(tmp_path)
-    assert len(errors) == 3
+    assert len(errors) == 5
     assert any("backend/.env" in error for error in errors)
     assert any("backend/app/credentials.json" in error for error in errors)
     assert any("backend/app/test.key" in error for error in errors)
+    assert any("backend/app/data/.env" in error for error in errors)
+    assert any("backend/app/logs/test.key" in error for error in errors)
 
 
 def test_directory_compliance_passes_on_repo() -> None:

@@ -538,6 +538,18 @@ review 节点在生成证据时将帧作为不可变派生 Artifact 物化，复
 - ShotDirectorState.voice 使用 ShotVoiceSettings：voice_id=null 表示沿用实例默认，rate_percent 范围 -30 到 30；经既有镜头 design PATCH 与 expected_version 保存。未知/不兼容音色在写入变更或生成冻结时拒绝，不自动替换。
 - FinalFilmPrepareRead.preparation_fingerprint 表示本次实际准备的尾部素材身份（包含相关 NodeRun）。客户端将该指纹和剪辑会话/时间线版本一起用于显式 render 的幂等键；缺少此回执时不盲目重试或渲染旧素材。
 
+## 生产运行取消（受控写）
+
+`POST /api/v1/projects/{project_id}/node-runs/{run_id}/cancel` 是运行取消的唯一入口：要求登录、选中的
+workspace、项目所有权与 CSRF；只更新本次运行的可取消状态，不重新提交、不删除远端任务、不创建新的
+ProviderOperation。
+
+- `queued` 且没有已提交的 ProviderOperation：直接记为 `cancelled`，返回 `cancellation_requested_at`。
+- `running` 或已有提交记录：记为 `cancel_requested`，由 Worker / 恢复扫描按冻结的远端身份确认取消；
+  重复调用幂等返回当前状态，不重复请求远端。
+- `completed` / `failed` 等终态：`409 CONFLICT`，不修改既有结果。
+- 跨项目或不可见项目：`404`，项目所有权检查先于运行查询。
+
 ## Resumable repair commands
 
 `step-plan` is read-only: it resolves saved Shot references (excluding experiments),
@@ -572,20 +584,40 @@ repair cannot be abandoned to unlock another submission before reconciliation.
 
 
 <a id="director-agent-api"></a>
-## Director Agent API（目标，未实现）
+## Director Agent API
 
-[工具循环合同](DIRECTOR_RUNTIME.md#director-agent-target) 不改变当前 HTTP 表面。
-未来在现有 project-scoped routes 增补以下合同，不提前生成 DTO 或注册空入口：
+[工具循环合同](DIRECTOR_RUNTIME.md#director-agent-target) 的基础后端接口已接入。
+全部入口要求所选工作空间和项目归属，写入要求 CSRF；不提供媒体执行权限。
 
-| `/api/v1` 下的目标接口 | 合同 |
+| `/api/v1` 下的接口 | 合同 |
 |---|---|
-| `POST /projects/{project_id}/director/threads/{thread_id}/messages` | content、request_key、UI context、观察版本；actor 来自认证。同步返回 AgentTurnResult 及 message/turn ID；同 key 重入只读回执 |
-| `GET /projects/{project_id}/director/threads/{thread_id}` | 分页消息、summary 引用、关联 Turn；不返回凭据或原始大工具结果 |
+| `POST /projects/{project_id}/director/threads` | project/scene/shot scope；同一项目同 scope 复用既有 Thread |
+| `POST /projects/{project_id}/director/threads/{thread_id}/messages` | content、request_key、观察版本和限额；scope 来自 Thread，actor 来自认证。同步返回 AgentTurnResult 及 message/turn ID；同 key 重入只读回执 |
+| `GET /projects/{project_id}/director/threads/{thread_id}` | limit/offset 分页 user/assistant 消息和关联 Turn；ThreadSummary 尚未实现 |
 | `GET /projects/{project_id}/director/turns/{turn_id}` | 扩展既有读取，展示消息、工具活动、提案及等待/完成/失败状态 |
-| `POST /projects/{project_id}/director/turns/{turn_id}/stop` | expected_revision + request_key，按 turn_kind 路由既有 stop 语义 |
+| `POST /projects/{project_id}/director/agent/turns/{turn_id}/stop` | expected_revision + request_key；仅 Agent，Workflow 使用原 runtime stop；已退役通用 stop 路径保持 404 |
+| `GET /projects/{project_id}/director/turns/{turn_id}/tools` | limit/offset 分页工具身份、状态、hash、观察版本和安全错误；不返回参数或完整结果 |
+| `GET /projects/{project_id}/director/proposals/{proposal_id}` | 读取 Agent 轮次实际创建的待采纳提案及其 items；无 Agent 关联的提案不通过此入口访问 |
+| `POST /projects/{project_id}/director/proposals/{proposal_id}/apply` | 复用 PartialApplyInput/Result 与 ProposalService；用户逐项 accepted/rejected，重验版本；不触发媒体生成 |
+
+messages 当前输入为 content/request_key/expected_versions/skill_ids/limits；scope 由
+Thread 决定，skill_ids 只能选择项目已选技能的子集。同键异输入返回冲突。
+相同请求先读取回执，恢复不依赖模型或 checkpoint 可用性；读取过期 Agent Turn
+仅收敛状态，不继续生成。新请求要求 checkpoint 与显式 chat_tools_v1 合同。
+工具结果、Skill 方法和请求快照不通过 TurnRead 原样公开。
+工具活动提供服务端来源、latency_ms 和可选晚到结果摘要；取消/失败状态不会被晚到成功覆盖。
+response_summary.context 提供实际消息与工具定义的字节数、hash 与历史组省略数量，
+不包含原始上下文。model_calls 计实际模型提交，tool_calls 计唯一工具回执，
+内部 tool_requests 单独消耗循环调用上限。
+历史选择按完整已完成 Agent Turn 分组，组内采用 ordinal 排序；
+response_summary.history_selection 区分查询窗口省略、未关联旧消息省略与不完整组排除，
+包含选中来源范围 hash。它与 context 中按字节预算省略的组数分开记录，不能把截断窗口
+宣称为完整历史。停止操作与未完成工具的终止回执、在途文本的 unknown_submission
+在同一事务提交；后续读取可收敛历史终态的未完成记录，不依赖原 handler 仍存活。
 
 首版由 API-owned handler 有界同步执行，GET/stop 可并发；断线后读取持久结果/未知提交
 状态，不能重放可能计费调用。worker-director 仍无 Provider 权限。202 后台受理须另行
 设计 text-only 宿主和可靠 Outbox，不能用内存 background task 冒充持久执行。
-事件复用现有 SSE，携带 event_id/turn_id/sequence/type/version；重连后 GET 为权威，
+当前 Agent 通过 GET 读取进度与工具审计。后续事件接线复用现有 SSE，
+携带 event_id/turn_id/sequence/type/version；重连后 GET 为权威，
 不新增 WebSocket 状态源，token streaming 非首版阻塞项，前端不从事件推导执行权限。

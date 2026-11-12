@@ -147,6 +147,8 @@ def backup(destination: Path, *, key_env: str) -> dict[str, Any]:
     settings = get_settings()
     context = begin_evidence_context(REPO)
     destination = require_ignored_evidence_path(REPO, destination)
+    if destination.exists():
+        raise FileExistsError(f"Backup already exists; choose a new output path: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     fernet = _fernet_from_env(key_env)
     with tempfile.TemporaryDirectory(prefix="dramaforge-backup-") as temp_name:
@@ -164,7 +166,10 @@ def backup(destination: Path, *, key_env: str) -> dict[str, Any]:
             archive.add(payload / "manifest.json", arcname="manifest.json")
             for item in manifest["objects"]:
                 archive.add(payload / item["archive_name"], arcname=item["archive_name"])
-        destination.write_bytes(fernet.encrypt(plain_tar.read_bytes()))
+        # Exclusive creation also protects a backup created after the preflight.
+        encrypted = fernet.encrypt(plain_tar.read_bytes())
+        with destination.open("xb") as output:
+            output.write(encrypted)
     return {
         "ok": True,
         "source_commit": context["source_commit"],

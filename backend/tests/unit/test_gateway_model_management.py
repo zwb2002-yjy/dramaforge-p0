@@ -319,8 +319,9 @@ async def test_global_proxy_or_data_key_change_cannot_rebind_existing_connection
         await manager.reconcile(workspace_id=workspace.id, actor=user, connection_id=connection.id)
 
 
+@pytest.mark.parametrize("contract_profile", ["chat_text_v1", "chat_tools_v1"])
 def test_api_routes_require_owner_context_and_keep_upstream_key_write_only(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, contract_profile: str,
 ) -> None:
     settings = Settings(
         _env_file=None,
@@ -352,6 +353,7 @@ def test_api_routes_require_owner_context_and_keep_upstream_key_write_only(
     client.headers["X-Workspace-Id"] = workspace_id
     csrf = client.get("/api/v1/auth/csrf").json()["csrf_token"]
     body = model().model_dump(mode="json")
+    body["contract_profile"] = contract_profile
     body["api_key"] = "upstream-secret-only-for-proxy"
     path = f"/api/v1/workspaces/{workspace_id}/provider-connections/gateway"
     blocked = client.post(path, json=body)
@@ -373,6 +375,8 @@ def test_api_routes_require_owner_context_and_keep_upstream_key_write_only(
     assert created.status_code == 201, created.text
     saved = created.json()
     assert saved["gateway_ref"]["state"] == "ready"
+    assert saved["gateway_ref"]["contract_profile"] == contract_profile
+    assert next(iter(proxy.rows.values()))["model_info"]["df_contract_profile"] == contract_profile
     assert saved["base_url"] == settings.litellm_gateway_url
     assert body["api_key"] not in created.text
     replay = client.post(path, json=body, headers={CSRF_HEADER: csrf})
@@ -381,6 +385,7 @@ def test_api_routes_require_owner_context_and_keep_upstream_key_write_only(
         f"/api/v1/workspaces/{workspace_id}/provider-connections/{saved['id']}/gateway/configuration"
     )
     assert config.status_code == 200 and config.json()["base_url"] == body["base_url"]
+    assert config.json()["contract_profile"] == contract_profile
     assert body["api_key"] not in config.text
     canary = "sensitive-validation-canary-" * 200
     invalid = client.post(path, json={**body, "api_key": canary}, headers={CSRF_HEADER: csrf})

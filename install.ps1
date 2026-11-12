@@ -68,7 +68,13 @@ if (-not (Test-Path -LiteralPath $envFile)) {
         }
         if (-not $found) { $lines.Add("$name=$($identity[$name])") }
     }
-    [IO.File]::WriteAllText($envFile, ($lines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+    $pendingEnv = Join-Path $root ('.env.updating.' + [guid]::NewGuid().ToString('N'))
+    try {
+        [IO.File]::WriteAllText($pendingEnv, ($lines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+        [IO.File]::Replace($pendingEnv, $envFile, [NullString]::Value)
+    } finally {
+        if ([IO.File]::Exists($pendingEnv)) { [IO.File]::Delete($pendingEnv) }
+    }
     Write-Host 'Updated release identity; existing secrets and Provider settings were preserved.'
 }
 

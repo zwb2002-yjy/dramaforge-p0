@@ -30,7 +30,7 @@ class GatewayModelWrite(BaseModel):
     base_url: str = Field(min_length=1, max_length=240)
     model_id: str = Field(min_length=1, max_length=160)
     api_key: SecretStr = Field(min_length=1, max_length=4096)
-    contract_profile: Literal["chat_text_v1"] = "chat_text_v1"
+    contract_profile: Literal["chat_text_v1", "chat_tools_v1"] = "chat_text_v1"
 
 
 class GatewayKeyWrite(BaseModel):
@@ -44,7 +44,7 @@ class GatewayConfigurationRead(BaseModel):
     model_id: str
     deployment_id: UUID
     key_revision: int
-    contract_profile: Literal["chat_text_v1"]
+    contract_profile: Literal["chat_text_v1", "chat_tools_v1"]
 
 
 class GatewayReference(BaseModel):
@@ -61,7 +61,7 @@ class GatewayReference(BaseModel):
     request_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     state: Literal["reserved", "submission_started", "ready", "unknown", "rejected"]
     operation: Literal["create", "rotate_key"] = "create"
-    contract_profile: Literal["chat_text_v1"] = "chat_text_v1"
+    contract_profile: Literal["chat_text_v1", "chat_tools_v1"] = "chat_text_v1"
     error_code: str | None = None
 
     def execution_reference(self) -> dict[str, object]:

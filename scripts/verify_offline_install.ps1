@@ -10,23 +10,30 @@ param(
     [int]$Port = 8091,
     [string]$Version = "0.1.0",
     [string]$WorkDir = "",
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$KeepArtifacts
 )
 
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'quality_output.ps1')
+$PreviousProject = $env:COMPOSE_PROJECT_NAME
 $sha = (git -C $repo rev-parse HEAD).Trim()
-git -C $repo diff --quiet HEAD --
-if ($LASTEXITCODE -ne 0) { throw "Commit tracked changes before verifying an exact candidate" }
-$untrackedBuildInputs = @(git -C $repo ls-files --others --exclude-standard -- backend frontend infra scripts)
+git -C $repo diff --quiet HEAD -- backend frontend infra docker-compose.yml docker-compose.offline.yml .env.example install.ps1 install.sh scripts/release_contract.py
+if ($LASTEXITCODE -ne 0) { throw "Commit runtime/build inputs before verifying an exact candidate" }
+$untrackedBuildInputs = @(git -C $repo ls-files --others --exclude-standard -- backend frontend infra scripts/release_contract.py)
 if ($LASTEXITCODE -ne 0 -or $untrackedBuildInputs.Count -gt 0) {
     throw "Commit untracked build inputs before verifying an exact candidate"
 }
 $tag = "sha-$($sha.Substring(0, 8))"
 
 $work = if ($WorkDir) { $WorkDir } else { Join-Path $repo "tmp\stage15-install-$tag" }
+$work = if ([IO.Path]::IsPathRooted($work)) { [IO.Path]::GetFullPath($work) }
+    else { [IO.Path]::GetFullPath((Join-Path $repo $work)) }
+if (-not (Test-QualityOutputBoundary $repo $work)) { throw 'Offline verification output must be inside repository tmp without links.' }
 $bundle = Join-Path $work "bundle"
-$project = "dramaforge-install-$tag"
+$invocation = [guid]::NewGuid().ToString("N").Substring(0, 12)
+$project = "dramaforge-install-$tag-$invocation"
 
 Write-Host "candidate : $sha"
 Write-Host "tag       : $tag"
@@ -34,13 +41,21 @@ Write-Host "work dir  : $work"
 Write-Host "project   : $project on port $Port"
 
 if (Test-Path -LiteralPath $work) { throw "Verification directory already exists; preserve it and choose a new -WorkDir: $work" }
-New-Item -ItemType Directory -Force -Path $bundle, (Join-Path $bundle "infra\litellm") | Out-Null
 
 # A fresh install must not delete a previous verification's data or evidence.
 $existingContainers = @(docker ps -aq --filter "label=com.docker.compose.project=$project")
 if ($LASTEXITCODE -ne 0 -or $existingContainers.Count -gt 0) { throw "Verification project already exists or could not be inspected: $project" }
 $existingVolumes = @(docker volume ls -q --filter "label=com.docker.compose.project=$project")
 if ($LASTEXITCODE -ne 0 -or $existingVolumes.Count -gt 0) { throw "Verification volumes already exist or could not be inspected: $project" }
+
+$existingNetworks = @(docker network ls -q --filter "label=com.docker.compose.project=$project")
+if ($LASTEXITCODE -ne 0 -or $existingNetworks.Count -gt 0) { throw "Verification network already exists: $project" }
+$outputOwner = New-QualityOutput $work
+$OwnStack = $false
+$OwnProbe = $false
+$Verified = $false
+try {
+New-Item -ItemType Directory -Force -Path $bundle, (Join-Path $bundle "infra\litellm") | Out-Null
 
 $backendImage = "dramaforge-backend:$tag"
 $frontendImage = "dramaforge-frontend:$tag"
@@ -123,18 +138,25 @@ $envLines = @(
     [System.Text.UTF8Encoding]::new($false)
 )
 
-Write-Host "`n== saving runtime images to images.tar.gz (single pass) =="
+Write-Host "`n== saving and compressing runtime images =="
 $tarPath = Join-Path $work "images.tar"
+try {
 docker save -o $tarPath $runtimeImages
 if ($LASTEXITCODE -ne 0) { throw "docker save failed" }
 $tarBytes = (Get-Item $tarPath).Length
 Write-Host "images.tar: $tarBytes bytes"
 $source = [System.IO.File]::OpenRead($tarPath)
+try {
 $target = [System.IO.File]::Create((Join-Path $bundle "images.tar.gz"))
+try {
 $gzip = New-Object System.IO.Compression.GZipStream($target, [System.IO.Compression.CompressionLevel]::Optimal)
-$source.CopyTo($gzip)
-$gzip.Dispose(); $target.Dispose(); $source.Dispose()
-Remove-Item $tarPath -Force
+try { $source.CopyTo($gzip) } finally { $gzip.Dispose() }
+} finally { $target.Dispose() }
+} finally { $source.Dispose() }
+} finally {
+    # This invocation owns the fresh work directory; raw tar is disposable even on failure.
+    if (Test-Path -LiteralPath $tarPath -PathType Leaf) { Remove-Item -LiteralPath $tarPath -Force }
+}
 $gzPath = Join-Path $bundle "images.tar.gz"
 $gzBytes = (Get-Item $gzPath).Length
 Write-Host "images.tar.gz: $gzBytes bytes"
@@ -167,16 +189,18 @@ Write-Host "`n== installing the bundle into a clean directory =="
 # Render .env with the bundle's own generator. The template is copied into the
 # container and redirected by file: piping it through the PowerShell pipeline
 # rewrites bytes, and a container created without stdin never sees the template.
-$probe = "df-env-probe-$($sha.Substring(0,8))"
+$probe = "df-env-probe-$invocation"
 $existingProbe = @(docker ps -aq --filter "name=^/$probe`$")
 if ($LASTEXITCODE -ne 0 -or $existingProbe.Count -gt 0) { throw "Environment rendering container already exists or could not be inspected: $probe" }
 docker create --name $probe $backendImage sh -c `
     "python -m app.install_env --version $Version --source-commit $sha --backend-image $backendImage --frontend-image $frontendImage < /tmp/template.env" | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "could not create the env rendering container" }
+$OwnProbe = $true
 docker cp (Join-Path $bundle ".env.example") "${probe}:/tmp/template.env"
 $rendered = @(docker start -a $probe 2>&1)
 $renderExit = $LASTEXITCODE
 docker rm $probe | Out-Null
+if ($LASTEXITCODE -eq 0) { $OwnProbe = $false }
 if ($renderExit -ne 0 -or $rendered.Count -eq 0) { throw "failed to render the bundle .env: $rendered" }
 $envLines = @($rendered -split "`n")
 for ($i = 0; $i -lt $envLines.Count; $i++) {
@@ -198,6 +222,7 @@ try {
     # Pin the compose project so the install cannot land in a project an inherited
     # environment variable names, and so the assertion below addresses it.
     $env:COMPOSE_PROJECT_NAME = $project
+    $OwnStack = $true
     # Run the installer in a child host so a failure cannot take this script down.
     if (Get-Command pwsh -ErrorAction SilentlyContinue) {
         pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $bundle "install.ps1") -Offline
@@ -206,7 +231,7 @@ try {
     }
     if ($LASTEXITCODE -ne 0) { throw "install.ps1 -Offline failed with exit $LASTEXITCODE" }
 } finally {
-    Remove-Item Env:\COMPOSE_PROJECT_NAME -ErrorAction SilentlyContinue
+    $env:COMPOSE_PROJECT_NAME = $PreviousProject
     Pop-Location
 }
 
@@ -277,4 +302,17 @@ $evidence | ConvertTo-Json -Depth 5 | Set-Content -Path $evidencePath -Encoding 
 Write-Host "`nevidence: $evidencePath"
 if (-not $healthy) { throw "installed stack did not reach a healthy state" }
 if ($gateway -ne 200 -or -not $runtimeIdentityMatches) { throw "installed gateway/API identity did not match the candidate" }
-Write-Host "STAGE15 INSTALL SMOKE: PASS (local reproduction only)"
+$Verified = $true
+} finally {
+    $env:COMPOSE_PROJECT_NAME = $PreviousProject
+    if ($OwnProbe) {
+        docker rm -f $probe | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Verification probe cleanup failed; output retained.' }
+    }
+    if ($OwnStack) {
+        docker compose --env-file (Join-Path $bundle ".env") -f (Join-Path $bundle "docker-compose.yml") -p $project down --volumes --remove-orphans
+        if ($LASTEXITCODE -ne 0) { throw 'Verification stack cleanup failed; output retained.' }
+    }
+    if ($Verified -and -not $KeepArtifacts) { Clear-QualityOutput $repo $work $outputOwner }
+}
+Write-Host "OFFLINE INSTALL CHECK: PASS (local candidate only)"

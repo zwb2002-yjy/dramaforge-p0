@@ -135,16 +135,21 @@ Model Adaptation 的物理归属不是已批准迁移任务。现有编译、冻
 | 配置/脚本审计 | 只读 Compose 角色环境及指定脚本的调用者/副作用；修改提案交主Agent | 不合并数据库/队列、不放宽ACL、不删除卷、不绕过真实调用授权 | Compose解析后语义对照、`test_compose_contract.py`、网络guard和必要集成；孤立名称不是删除证据 |
 
 实际可运行命令取自 DEVELOPMENT、package/pyproject 与当前质量容器，禁止虚构已不存在的
-fast jobs。专项 Agent只执行本切片聚焦回归，主 Agent在最终整合源码上统一执行完整门。
+fast jobs。专项 Agent只执行本切片聚焦回归，主 Agent按 DEVELOPMENT 的实际影响选择整合验证；
+仅在系统性风险或正式 CI/发布合同要求时执行完整门。
 新增豁免、改变宪法/分支保护、改变付费授权或不可逆数据操作，须按当前 Owner 边界另行决定。
 上述架构切片与细粒度资产清理分开分配。一般清理不要求先消除全部 baseline 债务，
 也不授权专项 Agent 改权威、改门禁或“修成通过”。只读审计、测试增删和结果保留条件
 统一引用 DEVELOPMENT，不为每个专项建立一份重复规范或验收报告模板。
 
 <a id="director-agent-sequence"></a>
-## 5. Director Agent 的依赖顺序（未启动）
+## 5. Director Agent 的依赖顺序与当前范围
 
-当前是结构化文本任务加确定性持久编排。现状与目标合同统一见
+当前已在 LangGraph 上增加 API 同步 Agent 工具循环：消息工具协议、七个领域读取、
+单镜头提示词待采纳提案、Skills 冻结上下文、独立控制与调用审计已接入。
+P2b 当前媒体能力检查和纯编译预览通过中立端口接线；上下文完整组压缩及工具中断审计已接入。
+任意文本模型目录工具、其余提案类型、P4 自动交接、ThreadSummary 与 MCP 尚未实现；
+下表是完整扩展合同，不能整体标记完成。现状与目标合同统一见
 [DIRECTOR_RUNTIME](DIRECTOR_RUNTIME.md#director-agent-target)；模型能力查询、无副作用
 编译预览与生成快照已有授权 service/API，可复用，不重建同名能力。
 
@@ -347,11 +352,12 @@ PostgreSQL/RLS、恢复幂等、前端provider-settings、professional-edit、ed
 
 动态分镜、UI到wire同源验证、资源基准等缺失的可重复驱动必须随实现补入现有tests/scripts；
 它们不是当前已存在命令。命令来源仍为 DEVELOPMENT、package.json、pyproject、CI及quality compose。
-涉及本合同的Provider/API/Worker/迁移及前后端联合改动按现有CI运行完整容器门，局部通过不能代替。
+涉及本合同的修改按 DEVELOPMENT 的实际影响选择回归，数据库行为补对应 PG 验证；只有系统性风险、影响无法可靠界定或适用的正式 CI/发布要求才执行完整容器门。需要完整门时，局部通过不能代替。
 
-每条证据最少含 requirement/acceptance ID、候选来源、fixture/模型合同版本、操作者、执行时间、
-观察值、结果、费用属性和证据路径。媒体另存大小、尺寸/时长、SHA-256及自动断言；不得写入Key、
-签名URL或媒体base64。临时记录与媒体留在gitignored tmp，正式可重复逻辑进入tests/scripts。
+正式候选综合验收的证据关联 requirement/acceptance ID、候选来源和实际 fixture/模型合同，
+按验收需要保留执行时间、观察值、结果及必要路径；媒体核对大小、尺寸/时长、SHA-256及自动断言。
+日常切片按 DEVELOPMENT 在现有对话报告实际命令与结果，不补逐用例元数据台账。
+不得写入Key、签名URL或媒体base64。临时材料的保留与清理遵循 DEVELOPMENT，正式可重复逻辑进入tests/scripts。
 当前合同不保存某个候选的测试计数、SHA或已完成勾选表，历史结果按项目规则追溯。
 
 ### 6.9 完成与交接

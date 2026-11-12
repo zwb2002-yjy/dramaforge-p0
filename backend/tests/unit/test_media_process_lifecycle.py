@@ -15,7 +15,8 @@ def _process_identity(pid: int) -> tuple[str, str] | None:
     try:
         fields = Path(f"/proc/{pid}/stat").read_text().split()
         return fields[2], fields[21]
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
+        # A process can disappear after /proc/stat opens but before it is read.
         return None
 
 

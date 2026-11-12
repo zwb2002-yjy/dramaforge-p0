@@ -9,6 +9,7 @@ import httpx
 import pytest
 from app.providers.bootstrap import default_v3_registry
 from app.providers.capabilities import Capability
+from app.providers.capability_inspection import inspect_manifest
 from app.providers.contracts.common import ExecutionContext
 from app.providers.contracts.text import TextGenerateRequest, TextMessage
 from app.providers.errors import ProviderError, SubmissionOutcomeUnknownError
@@ -77,6 +78,43 @@ async def test_managed_selection_has_no_discovery_or_external_transport(session,
     connection.base_url = "https://external.example/v1"
     with pytest.raises(WorkspaceCredentialConfigurationError):
         await runtime_text_gateway_settings(session, connection=connection, settings=cfg)
+
+
+async def test_tools_require_explicit_versioned_contract_without_upgrading_existing_models(
+    session, monkeypatch,
+):
+    actor, workspace, cfg, remote, manager = await fixture(session)
+    connection = await manager.register(workspace_id=workspace.id, actor=actor, body=model())
+    before = GatewayReference.model_validate(connection.gateway_ref)
+    monkeypatch.setattr("app.providers.workspace_credentials.get_settings", lambda: cfg)
+    original_registry = await workspace_model_registry(
+        session, workspace_id=workspace.id, base_registry=ModelRegistry(),
+    )
+    original = original_registry.find_by_capability(Capability.TEXT_GENERATE)[0]
+    assert "text_capabilities" not in original.manifest.metadata
+    assert inspect_manifest(original.manifest).controls["tool_calling"] == "unknown"
+    changed = model().model_copy(update={"contract_profile": "chat_tools_v1"})
+    updated = await manager.register(
+        workspace_id=workspace.id, actor=actor, body=changed, connection_id=connection.id,
+    )
+    after = GatewayReference.model_validate(updated.gateway_ref)
+    assert after.deployment_id != before.deployment_id
+    assert after.contract_profile == "chat_tools_v1" and before.contract_profile == "chat_text_v1"
+    registry = await workspace_model_registry(
+        session, workspace_id=workspace.id, base_registry=ModelRegistry(),
+    )
+    selected = registry.find_by_capability(Capability.TEXT_GENERATE)[0]
+    assert selected.manifest.metadata["text_capabilities"] == {
+        "structured_json": True, "tool_calling": True,
+        "tool_results": True, "parallel_calls": False,
+    }
+    report = inspect_manifest(selected.manifest)
+    assert report.controls["tool_calling"] == report.controls["tool_results"] == "native"
+    assert report.controls["parallel_calls"] == "unsupported"
+    assert report.account_status == "not_checked"
+    assert "text_capabilities" not in original.manifest.metadata
+    # Only mocked model-management writes occur; no generation probe was submitted.
+    assert remote.creates == 2
 
 
 @pytest.mark.parametrize("kind", [httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout])

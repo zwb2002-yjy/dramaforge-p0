@@ -18,6 +18,7 @@ talks to it over HTTP.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.config import Settings, get_settings
@@ -30,7 +31,7 @@ from app.providers.contracts.common import (
     ProviderCreateResult,
     ProviderPollResult,
 )
-from app.providers.contracts.text import TextGenerateRequest
+from app.providers.contracts.text import TextGenerateRequest, TextToolCall
 from app.providers.errors import ProviderError
 from app.providers.litellm_gateway.client import LiteLLMGatewayClient
 from app.providers.manifest import ModelManifest
@@ -204,15 +205,27 @@ class LiteLLMModelAdapter:
                     "error": f"litellm {type(exc).__name__}: {exc}",
                 },
             )
-        text_out = _extract_completion_text(response.data)
         metadata: dict[str, Any] = {
-            "text": text_out,
-            "usage": (response.data.get("usage") if isinstance(response.data, dict) else {}),
+            "usage": _normalize_usage(response.data.get("usage")),
             "model": (
                 str(response.data.get("model") or "") if isinstance(response.data, dict) else ""
             ),
             **response.metadata,
         }
+        try:
+            metadata.update(_normalize_completion(response.data))
+        except ValueError:
+            # A received but malformed response must not become text by repr(),
+            # or trigger another potentially billed request in this adapter.
+            return ProviderCreateResult(
+                status=GenerationStatus.FAILED,
+                provider_metadata={
+                    **metadata,
+                    "error_code": "unknown",
+                    "error": "LiteLLM returned a malformed model response",
+                    "stop_reason": "malformed_response",
+                },
+            )
         return ProviderCreateResult(
             status=GenerationStatus.SUCCEEDED,
             provider_metadata=metadata,
@@ -255,9 +268,16 @@ class LiteLLMModelAdapter:
             from app.providers.errors import InvalidOptionCombinationError
 
             raise InvalidOptionCombinationError("text.generate requires a TextGenerateRequest")
-        messages = [
-            {"role": message.role, "content": message.content} for message in request.messages
-        ]
+        messages: list[dict[str, Any]] = []
+        for message in request.messages:
+            item: dict[str, Any] = {"role": message.role, "content": message.content}
+            if message.tool_calls:
+                item["tool_calls"] = [call.model_dump(mode="json") for call in message.tool_calls]
+            if message.tool_call_id is not None:
+                item["tool_call_id"] = message.tool_call_id
+            if message.name is not None:
+                item["name"] = message.name
+            messages.append(item)
         payload: dict[str, Any] = {
             "messages": messages,
         }
@@ -267,6 +287,10 @@ class LiteLLMModelAdapter:
             payload["temperature"] = request.temperature
         if request.tools:
             payload["tools"] = request.tools
+        if request.tool_choice is not None:
+            payload["tool_choice"] = request.tool_choice
+        if request.parallel_tool_calls is not None:
+            payload["parallel_tool_calls"] = request.parallel_tool_calls
         if request.response_format:
             payload["response_format"] = request.response_format
         payload.update(request.native_options)
@@ -285,6 +309,11 @@ class LiteLLMModelAdapter:
             "max_retries",
             "fallbacks",
             "mock_response",
+            "messages",
+            "tools",
+            "tool_choice",
+            "parallel_tool_calls",
+            "response_format",
         }
         if forbidden.intersection(request.native_options):
             from app.providers.errors import InvalidOptionCombinationError
@@ -301,18 +330,81 @@ class LiteLLMModelAdapter:
         return payload, "chat"
 
 
-def _extract_completion_text(data: Any) -> str:
+def _normalize_completion(data: Any) -> dict[str, Any]:
+    """Normalize only the chat response fields consumed by text callers."""
     if not isinstance(data, dict):
-        return str(data)[:2000]
+        raise ValueError("completion must be an object")
     choices = data.get("choices")
-    if isinstance(choices, list) and choices:
-        first = choices[0]
-        if isinstance(first, dict):
-            message = first.get("message")
-            if isinstance(message, dict) and message.get("content"):
-                return str(message["content"])
-            if first.get("text"):
-                return str(first["text"])
-    if isinstance(data.get("content"), str):
-        return str(data["content"])
-    return str(data)[:2000]
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise ValueError("completion requires a choice")
+    first = choices[0]
+    message = first.get("message")
+    if not isinstance(message, dict):
+        raise ValueError("completion requires an assistant message")
+    if message.get("role", "assistant") != "assistant":
+        raise ValueError("completion must be an assistant message")
+    content = message.get("content")
+    if content is None:
+        text = ""
+    elif isinstance(content, str):
+        text = content
+    elif isinstance(content, list) and all(
+        isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str)
+        for part in content
+    ):
+        text = "".join(part["text"] for part in content)
+    else:
+        raise ValueError("unsupported completion content")
+    raw_calls = message.get("tool_calls")
+    if raw_calls is None:
+        raw_calls = []
+    if not isinstance(raw_calls, list):
+        raise ValueError("tool_calls must be an array")
+    if len(raw_calls) > 12:
+        raise ValueError("too many tool calls")
+    calls: list[dict[str, Any]] = []
+    call_ids: set[str] = set()
+    for raw_call in raw_calls:
+        if not isinstance(raw_call, dict) or raw_call.get("type") != "function":
+            raise ValueError("unsupported tool call")
+        call = TextToolCall.model_validate(raw_call)
+        if call.id in call_ids:
+            raise ValueError("duplicate tool call ID")
+        call_ids.add(call.id)
+        calls.append({
+            "call_id": call.id,
+            "name": call.function.name,
+            "arguments": json.loads(call.function.arguments),
+        })
+    if not text.strip() and not calls:
+        raise ValueError("completion has neither text nor tool calls")
+    reason = first.get("finish_reason")
+    if reason is not None and not isinstance(reason, str):
+        raise ValueError("finish_reason must be a string")
+    return {"text": text, "tool_calls": calls, "stop_reason": reason}
+
+
+def _normalize_usage(usage: Any) -> dict[str, Any]:
+    """Keep token counts, including known token details, without raw metadata."""
+    if not isinstance(usage, dict):
+        return {}
+    result: dict[str, Any] = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = usage.get(key)
+        if type(value) is int and value >= 0:
+            result[key] = value
+    detail_keys = {
+        "prompt_tokens_details": ("cached_tokens", "audio_tokens"),
+        "completion_tokens_details": (
+            "reasoning_tokens", "audio_tokens",
+            "accepted_prediction_tokens", "rejected_prediction_tokens",
+        ),
+    }
+    for key, fields in detail_keys.items():
+        details = usage.get(key)
+        if isinstance(details, dict):
+            result[key] = {
+                name: details[name] for name in fields
+                if type(details.get(name)) is int and details[name] >= 0
+            }
+    return result

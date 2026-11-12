@@ -684,6 +684,7 @@ export function SceneWorkspace({
           suggestionDraft={suggestionDraft}
           onApplySuggestionDraft={setSuggestionDraft}
           onDesignSaved={handleDesignSaved}
+          onFactsChanged={() => workspace.refetch().then(() => undefined)}
           intentSeed={intentSeed?.shotId === selectedShotKey ? intentSeed : null}
           focusRequest={focusRequest}
           onOpenModelSettings={() => setModelSettingsOpen(true)}

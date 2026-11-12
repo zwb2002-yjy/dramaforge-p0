@@ -14,6 +14,24 @@ BUILD_COMPOSE = REPO_ROOT / "docker-compose.build.yml"
 OFFLINE_COMPOSE = REPO_ROOT / "docker-compose.offline.yml"
 
 
+def test_quality_builds_reuse_image_names_across_compose_projects() -> None:
+    services = yaml.safe_load(
+        (REPO_ROOT / "docker-compose.quality.yml").read_text(encoding="utf-8")
+    )["services"]
+    built_images = {
+        name: service.get("image")
+        for name, service in services.items()
+        if "build" in service
+    }
+    assert built_images == {
+        "backend-quality": "${QUALITY_BACKEND_IMAGE:-dramaforge-backend-quality:local}",
+        "frontend-quality": "${QUALITY_FRONTEND_IMAGE:-dramaforge-frontend-quality:local}",
+    }
+    for service in services.values():
+        if "backend-quality:local" in service.get("image", ""):
+            assert service["image"] == built_images["backend-quality"]
+
+
 def test_quality_minio_copy_is_immutable_without_changing_runtime_distribution() -> None:
     quality = yaml.safe_load(
         (REPO_ROOT / "docker-compose.quality.yml").read_text(encoding="utf-8")

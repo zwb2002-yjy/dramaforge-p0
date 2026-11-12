@@ -111,35 +111,6 @@ async def test_director_creates_only_canonical_draft(session: AsyncSession, comm
 
 
 @pytest.mark.asyncio
-async def test_canonical_director_payload_is_visible_in_context(session: AsyncSession) -> None:
-    from app.director.assistant_context import AssistantContextBuilder
-    from app.director.assistant_models import DirectorThread
-
-    project, shot, user = await _seed(session)
-    payload = {
-        "source_shot_id": str(shot.id),
-        "name": "Keyframe B",
-        "idempotency_key": "keyframe-b",
-        "selected_model": "agnes/image-b",
-        "parameters": {"target_node_key": "keyframe"},
-    }
-    await ProposalCommandRegistry(session, actor_id=user.id).apply(
-        project_id=project.id, command="experiment.create", payload=payload
-    )
-    branch = (await session.scalars(select(ExperimentBranch))).one()
-    thread = DirectorThread(
-        project_id=project.id, scope_type="shot", scope_entity_id=shot.id, created_by=user.id
-    )
-    session.add(thread)
-    await session.flush()
-    context = await AssistantContextBuilder(session).build(
-        project=project, thread=thread, current_user_message="compare"
-    )
-    assert [row["experiment_id"] for row in context.experiments] == [str(branch.id)]
-    assert context.experiments[0]["selected_model"] == "agnes/image-b"
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "change",
     [

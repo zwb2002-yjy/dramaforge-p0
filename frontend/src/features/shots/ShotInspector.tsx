@@ -4,10 +4,15 @@ import {
   AssetReferencePicker,
   type ReferenceResolutionState,
 } from "../../components/assets/AssetReferencePicker";
-import { Button, Disclosure } from "../../components/ui";
+import { Button, Disclosure, SegmentedControl } from "../../components/ui";
 import { CreativeCapabilitiesPanel } from "../production/CreativeCapabilitiesPanel";
 import { ShotDirectorSuggestionPanel } from "../director/ShotDirectorSuggestionPanel";
-import { ShotDesignPanel, type ShotDesignDraft } from "./ShotDesignPanel";
+import { DirectorAgentPanel } from "../director/DirectorAgentPanel";
+import {
+  ShotDesignPanel,
+  type ShotDesignDraft,
+  type ShotDesignPanelHandle,
+} from "./ShotDesignPanel";
 import { ShotDetailsBody } from "./ShotDetailsPanel";
 import { ShotProductionActions } from "./ShotProductionActions";
 import type { ShotExecutionReference, ShotLite } from "./api";
@@ -36,6 +41,7 @@ type ShotInspectorProps = {
   suggestionDraft: ShotDesignDraft | null;
   onApplySuggestionDraft: (draft: ShotDesignDraft | null) => void;
   onDesignSaved: () => void | Promise<void>;
+  onFactsChanged: () => void | Promise<void>;
   intentSeed?: { text: string; revision: number } | null;
   /** Bumps whenever something asks for a section; the latest request wins. */
   focusRequest?: { focus: InspectorFocus; revision: number } | null;
@@ -71,13 +77,17 @@ export function ShotInspector({
   suggestionDraft,
   onApplySuggestionDraft,
   onDesignSaved,
+  onFactsChanged,
   intentSeed,
   focusRequest,
   onOpenModelSettings,
   onBackToPreview,
 }: ShotInspectorProps) {
   const root = useRef<HTMLElement>(null);
+  const design = useRef<ShotDesignPanelHandle>(null);
   const [directorOpen, setDirectorOpen] = useState(false);
+  const [directorMode, setDirectorMode] = useState<"suggestion" | "agent">("suggestion");
+  const [agentVisited, setAgentVisited] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [promptsOpen, setPromptsOpen] = useState(focusRequest?.focus === "prompts");
   const handledFocus = useRef<number | null>(null);
@@ -158,6 +168,7 @@ export function ShotInspector({
 
       <ShotDesignPanel
         key={`design:${shot.id}`}
+        ref={design}
         projectId={projectId}
         shot={shot}
         draft={designDraft}
@@ -211,25 +222,63 @@ export function ShotInspector({
         open={directorOpen}
         onOpenChange={setDirectorOpen}
       >
-        {directorOpen && (
-          <>
-            <ShotDirectorSuggestionPanel
-              key={`suggestion:${shot.id}`}
-              projectId={projectId}
-              shot={shot}
-              dirty={designDirty}
-              onApplyDraft={onApplySuggestionDraft}
-              intentSeed={intentSeed}
-            />
-            <Disclosure compact className="df-inspector-subsection" title={<>创作手法</>}>
-              <CreativeCapabilitiesPanel
-                key={`methods:${shot.id}`}
-                projectId={projectId}
-                shotId={shot.id}
+        <>
+          {directorOpen && (
+            <>
+              <SegmentedControl
+                label="协作方式"
+                value={directorMode}
+                options={[
+                  { value: "suggestion", label: "镜头设计" },
+                  { value: "agent", label: "对话协作" },
+                ]}
+                onChange={(mode) => {
+                  setDirectorMode(mode);
+                  if (mode === "agent") setAgentVisited(true);
+                }}
               />
-            </Disclosure>
-          </>
-        )}
+              {directorMode === "suggestion" && (
+                <ShotDirectorSuggestionPanel
+                  key={`suggestion:${shot.id}`}
+                  projectId={projectId}
+                  shot={shot}
+                  dirty={designDirty}
+                  onApplyDraft={onApplySuggestionDraft}
+                  intentSeed={intentSeed}
+                />
+              )}
+            </>
+          )}
+          {agentVisited && (
+            <div hidden={!directorOpen || directorMode !== "agent"}>
+              <DirectorAgentPanel
+                key={`agent:${projectId}:${shot.id}`}
+                projectId={projectId}
+                shot={shot}
+                dirty={designDirty}
+                visible={directorOpen && directorMode === "agent"}
+                onApplied={() => {
+                  if (design.current?.acceptExternalSave()) {
+                    void handleSaved();
+                  } else {
+                    void onFactsChanged();
+                  }
+                }}
+              />
+            </div>
+          )}
+          {directorOpen && (
+            <>
+              <Disclosure compact className="df-inspector-subsection" title={<>创作手法</>}>
+                <CreativeCapabilitiesPanel
+                  key={`methods:${shot.id}`}
+                  projectId={projectId}
+                  shotId={shot.id}
+                />
+              </Disclosure>
+            </>
+          )}
+        </>
       </Disclosure>
 
       <Disclosure

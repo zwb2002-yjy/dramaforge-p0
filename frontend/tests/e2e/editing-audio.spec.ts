@@ -23,7 +23,7 @@ function sampleWav() {
 
 test("editing audio is auditioned, selected by Artifact identity and saved without production writes", async ({
   page,
-}, testInfo) => {
+}) => {
   const state = await installProfessionalMock(page);
   state.editing.created = true;
   const productionVersion = state.shotVersion;
@@ -101,7 +101,7 @@ test("editing audio is auditioned, selected by Artifact identity and saved witho
   await page.getByRole("button", { name: "选择背景音乐", exact: true }).click();
   await expect(page.getByRole("region", { name: "背景音乐音频库", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: testInfo.outputPath("audio-picker-ready.png"), fullPage: true });
+
   await page.getByRole("button", { name: "使用音频 1", exact: true }).click();
   await expectSelectValue(page.getByTestId("timeline-music-artifact"), AUDIO_ID);
   expect(saves).toBe(0);

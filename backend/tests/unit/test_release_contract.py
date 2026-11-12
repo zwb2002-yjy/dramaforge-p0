@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shlex
 from pathlib import Path
 
 import pytest
@@ -151,6 +152,16 @@ def test_offline_bundle_is_flat_and_carries_one_compressed_image_archive() -> No
     assert 'tar -czf "${offline_dir}.tar.gz" "$offline_dir"' not in pack
     assert 'images.tar"' not in pack
     assert 'rm -rf "$online_dir" "$offline_dir"' in pack
+
+    # Tagged package inputs have no container references after smoke teardown.
+    # Do not remove them before the archive is written.
+    for line in workflow[:workflow.index("- name: Create online and offline release bundles")].splitlines():
+        if line.split()[:3] == ["docker", "image", "prune"]:
+            command = shlex.split(line.strip(), comments=True)
+            assert not any(
+                option == "--all" or (option.startswith("-") and not option.startswith("--") and "a" in option)
+                for option in command[3:]
+            ), "image prune --all deletes unused tagged package inputs"
 
     for installer in (REPO_ROOT / "install.sh", REPO_ROOT / "install.ps1"):
         installer_text = installer.read_text(encoding="utf-8")
