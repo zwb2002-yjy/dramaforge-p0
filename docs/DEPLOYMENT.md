@@ -15,9 +15,9 @@ Python, Node.js, or a compiler. The source-development setup below invokes
 
 This topology is intended to behave the same with Docker Compose v2 on Linux,
 Windows Docker Desktop and macOS Docker Desktop. The authoritative CI quality
-gate builds and tests the same containers used for the release path; a release
-claim still requires the release candidate's Docker smoke test and evidence on
-each claimed host.
+gate builds dedicated quality images from the candidate source and locked dependencies.
+The release path builds production images from that same candidate; a release claim still
+requires the candidate's Docker smoke test and evidence on each claimed host.
 
 ## Current development start
 
@@ -28,8 +28,10 @@ python scripts/init_env.py
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
-The project is unreleased. Retain old instance volumes separately; current startup does not
-reuse another worktree, old image tags or queued provider tasks.
+The project is unreleased. Retain old instance volumes separately only while recovery or
+delivery still needs them; once that purpose ends, follow DEVELOPMENT's lifecycle and
+authorized cleanup scope. Current startup does not reuse another worktree, old image tags
+or queued provider tasks.
 
 ### Frontend hot reload and backend identity
 
@@ -39,10 +41,12 @@ requires a new API, build the current images, apply the current migration chain,
 the application services together, using the same source identity. Preserve credentials,
 volumes and existing execution records; never resubmit old Provider operations during rollout.
 
-Before reporting a local workflow fixed, check `/health` through the actual browser gateway
-and compare `source_commit` with the deployed image identity. Check the dispatcher and each
-worker image too, then exercise the affected API from that browser page. Source tests or
-a working frontend hot reload alone do not establish that the running backend has the change.
+When a task claims that an affected workflow is fixed in a deployed local instance, check
+`/health` through its actual browser gateway and compare `source_commit` with the deployed
+image identity. Check the dispatcher/workers involved in that workflow and exercise the
+affected API from that page; a full-stack rollout must verify all application service identities.
+Source tests or frontend hot reload alone do not establish that the running backend has the
+change. A source-only fix follows DEVELOPMENT's risk-based checks and makes no deployment claim.
 
 ## Future packaged release start
 
@@ -239,6 +243,10 @@ docker compose ps
 docker compose logs --tail 200 api dispatcher worker-default worker-director worker-heavy
 docker compose down
 ```
+
+运行中的 Compose 服务统一使用 `json-file` 日志驱动并配置轮转（每容器 `max-size: 10m`、
+`max-file: 3`），不会无限增长；需要长期保留的内容应显式导出，不能依赖容器日志充当
+业务事实或审计记录。
 
 `/gateway-health` checks the gateway process. `/health` is proxied to the API
 and includes its database readiness. Queue processing should additionally be

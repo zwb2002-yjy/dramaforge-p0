@@ -214,7 +214,8 @@ Playwright 结果写入该目录的 `playwright-results/`。普通 Full 在全�
 失败、中断和容器回收失败保留输出与镜像。已有非空目录仍拒绝覆盖；外部路径不自动删除，
 目录归属变化或内部链接使清理失败并保留材料。正式候选需要保留成功输出时显式传
 `-Stage Full -KeepArtifacts`；Release workflow 使用此开关。
-CI/Release 仅在失败时上传已有结果，远端保留期服从仓库 artifact 设置。
+CI/Release 仅在失败时上传已有结果，普通失败证据在远端保留 7 天（workflow `retention-days: 7`）；
+正式发布制品按发布流程另行管理。
 本地失败原件及显式保留的候选输出按上述生命周期收尾，不自动回收其他任务目录。
 普通 docs-only 改动不因新增验收文字就运行完整门。
 

@@ -172,11 +172,12 @@ Assistant 当前事实；旧 Phase 5 服务测试由当前分支回归测试替�
 
 
 <a id="director-agent-target"></a>
-## Director Agent 工具循环合同（目标，未实现）
+## Director Agent 工具循环扩展合同（部分已实现，完整目标未完成）
 
-本节保留待实施设计，不授权启动新功能或付费验证。当前固定文本任务与 LangGraph
-编排仍按上文运行。选择是在现有 Python / TextModelPort / Invocation 基础上增加自有
-小型工具循环；LangGraph 继续拥有跨用户、跨 Worker 等待的流程位置，Production
+本节说明现有工具循环及待实施扩展，不授权启动新功能或付费验证；当前实现范围以上文
+及本节的明确标注为准，不代表完整目标已验收。固定文本任务与 LangGraph 编排继续运行；
+自有小型工具循环基于现有 Python / TextModelPort / Invocation。LangGraph 继续拥有
+跨用户、跨 Worker 等待的流程位置，Production
 继续拥有全部生产事实。不引入第二套模型注册表、调用日志、通用 Agent 平台或领域服务。
 引擎选型决策及启用备选的条件仍由 [ADR 0007](adr/0007-director-runtime-langgraph.md) 管理。
 

@@ -1,8 +1,9 @@
 # infra/litellm — DramaForge 文本 Proxy 配置
 
 当前模型与凭证权威见 [MODEL_PROVIDER.md](../../docs/MODEL_PROVIDER.md)，部署边界见
-[DEPLOYMENT.md](../../docs/DEPLOYMENT.md)。本目录维护可选的官方 LiteLLM Proxy 配置，
-不是第三个产品 Runtime。DramaForge 不安装 `litellm` SDK，通过 OpenAI-compatible
+[DEPLOYMENT.md](../../docs/DEPLOYMENT.md)。本目录维护官方 LiteLLM Proxy 配置；当前默认
+Compose 启动内部 Proxy，新文本生产必须经过它，关闭后文本不可用，不直连回退。
+Proxy 不是第三个产品 Runtime。DramaForge 不安装 `litellm` SDK，通过 OpenAI-compatible
 Chat HTTP 合同访问部署指定的内部 Proxy。新文本执行只接受工作区拥有的版本化受管引用；
 用户填写的上游地址仅由管理接口登记到 Proxy，不成为应用的直连目标。
 
@@ -10,7 +11,7 @@ Chat HTTP 合同访问部署指定的内部 Proxy。新文本执行只接受工�
 
 | 文件 | 作用 |
 |---|---|
-| `config.yaml` | 待迁移的 `script-quality` / `script-fast` 别名、DB 与禁止自动重放的策略 |
+| `config.yaml` | 历史引用/受控恢复使用的 `script-quality` / `script-fast` 别名、DB 与禁止自动重放的策略；旧别名不参与新文本生产 |
 | `proxy_policy.py` | 在锁定 Proxy 内执行的单部署、零自动重试及 HTTPX 禁止重定向策略 |
 | `quality-config.yaml` | 隔离集成测试的确定性 `mock_response`，不调用外部 Provider |
 | [compatibility.md](compatibility.md) | 当前项目采用的 HTTP 合同、验证入口与限制 |
@@ -85,12 +86,14 @@ docker compose exec litellm python -c "import urllib.request; print(urllib.reque
 [DEVELOPMENT.md](../../docs/DEVELOPMENT.md) 和
 [test_litellm_real_proxy.py](../../backend/tests/integration/test_litellm_real_proxy.py)。
 此处的 “real proxy” 表示实际 Proxy 进程，模型响应仍为 mock；不证明真实上游可用。
-本目录不提供可绕过测试隔离的真实 Chat 试调用步骤，实际模型调用遵守逐操作预算与授权。
+本目录不提供可绕过测试隔离的真实 Chat 试调用步骤；新的付费模型调用遵守当前任务的
+Owner 显式授权，批量执行绑定预览与操作数上限，不引入应用金额预算。
 
 ## 产品边界
 
 图像/视频由 `backend/app/providers/` 的统一 Compiler 与 Provider Runtime 执行，
 不是 LiteLLM 媒体 Fork 的待接入路径。静态文本别名与历史直连记录仅保留读取、身份解码
 和受控恢复所需的原配置，不参与新文本生产；缺少原身份的旧任务明确受阻，不能自动
-换成受管模型。删除旧别名或凭据前，须证明历史引用及回滚所需数据已获得明确处理。
+换成受管模型。删除旧别名或凭据前核对实际历史引用及恢复需求，并按 DEVELOPMENT 的
+生命周期和授权范围处理；无当前用途不要求迁移或永久保留，也不另建逐项证明台账。
 媒体 Binding 的来源/修订独立冻结，不以兼容协议或相同名称推断同一模型。

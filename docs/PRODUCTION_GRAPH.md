@@ -93,8 +93,10 @@ Artifact A / Artifact B / Artifact C   ← 都是 Candidate
 实现事实：**没有 Candidate 表**。候选直接从 NodeRun + Artifact 派生；正式选择记录在
 `Shot.formal_keyframe_artifact_id` / `Shot.formal_video_artifact_id`。
 
-Video 执行默认使用正式关键帧，且在不存在正式关键帧时**必须 fail closed**，绝不退化为
-"用最新一张图"（`production/formal_selection.py::require_formal_keyframe`）。
+Video 执行按冻结输入模式决定引用：`first_frame` / `first_last_frame` 缺少所需正式关键帧时
+**必须 fail closed**，绝不退化为"用最新一张图"（`production/formal_selection.py::require_formal_keyframe`）。
+`text_to_video` / `last_frame` / `omni_reference` 不因缺少正式首帧而拒绝；各自输入仍须满足
+[PRODUCTION_RUNTIME](PRODUCTION_RUNTIME.md) 和模型合同，不能静默切换模式。
 
 ---
 
@@ -117,7 +119,7 @@ Graph 的 `definition` 是一个 JSON 文档（`GraphVersion.definition`），�
 `publish`。节点结构变化会被 `materialize_definition` 与 `create_graph` 校验
 （`production/service.py`）。
 
-### 3.1 三个 Graph 定义来源（当前事实）
+### 3.1 三处模板来源及 FinalFilm 内部图（当前事实）
 
 | 来源 | template_key | 是否被真实生产执行 |
 |---|---|---|
@@ -266,7 +268,8 @@ Review 节点产出证据 Artifact，作为分支判定依据。
 **尚未成形：** 一个独立的 **Production Planner**，即"由 CreativeIntent + 现有 Artifact
 + Formal 状态 + ModelCapability + 修改范围自动推导出**最小** ProductionGraph"的角色。
 当前最小重算由调用方（Workbench 阶段选择 / 修复计划 / 可复用产物声明）驱动，而不是由
-规划器自动推导。这是 Phase 4 的收敛目标。
+规划器自动推导。这是待实施的收敛目标，范围与优先级见
+[ARCHITECTURE_MAPPING](ARCHITECTURE_MAPPING.md)；不按历史 Phase 编号自动启动。
 
 ---
 

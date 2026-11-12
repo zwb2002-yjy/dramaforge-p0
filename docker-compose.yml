@@ -3,8 +3,15 @@ name: dramaforge-dev
 x-dramaforge-release:
   version: ${DRAMAFORGE_VERSION:-0.1.0}
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
+    logging: *default-logging
     image: postgres:15-alpine
     # Six DramaForge processes plus the director checkpoint pools share this
     # instance; per-role pool ceilings (DB_POOL_SIZE/DB_MAX_OVERFLOW below)
@@ -25,6 +32,7 @@ services:
     restart: unless-stopped
 
   redis:
+    logging: *default-logging
     image: redis:7-alpine
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -35,6 +43,7 @@ services:
     restart: unless-stopped
 
   minio:
+    logging: *default-logging
     # MinIO publishes only to quay.io; the Docker Hub `minio/minio` repository was
     # removed upstream, so the pinned tag resolves here.
     image: quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z
@@ -57,6 +66,7 @@ services:
   # DramaForge uses HTTP, never the LiteLLM SDK. Proxy failure does not gate
   # API/media startup; only Proxy shares the isolated egress namespace.
   litellm-db:
+    logging: *default-logging
     image: postgres:15-alpine
     environment:
       POSTGRES_USER: litellm
@@ -73,6 +83,7 @@ services:
     restart: unless-stopped
 
   litellm-network:
+    logging: *default-logging
     image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     user: "0:0"
     entrypoint: ["python", "-m", "app.providers.litellm_gateway.network_guard"]
@@ -96,6 +107,7 @@ services:
     restart: unless-stopped
 
   litellm:
+    logging: *default-logging
     image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.96.0@sha256:90d8de0ea6fbb3cad145d1019d00a0149ae400b1e18e2011a60f1988f143f672}
     network_mode: service:litellm-network
     cap_drop: [ALL]
@@ -137,6 +149,7 @@ services:
     restart: unless-stopped
 
   litellm-bootstrap:
+    logging: *default-logging
     image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:v1.96.0@sha256:90d8de0ea6fbb3cad145d1019d00a0149ae400b1e18e2011a60f1988f143f672}
     network_mode: service:litellm-network
     entrypoint: ["python", "/etc/dramaforge-litellm/bootstrap_keys.py"]
@@ -153,6 +166,7 @@ services:
         condition: service_healthy
 
   migrate:
+    logging: *default-logging
     image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
@@ -173,6 +187,7 @@ services:
       - ALL
 
   api:
+    logging: *default-logging
     image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
@@ -250,6 +265,7 @@ services:
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--no-proxy-headers"]
 
   frontend:
+    logging: *default-logging
     image: ${DRAMAFORGE_FRONTEND_IMAGE:-dramaforge-frontend:dev}
     ports:
       - "${DRAMAFORGE_BIND_ADDRESS:-127.0.0.1}:${DRAMAFORGE_PORT:-8080}:8080"
@@ -273,6 +289,7 @@ services:
     restart: unless-stopped
 
   database-bootstrap:
+    logging: *default-logging
     image: postgres:15-alpine
     environment:
       PGHOST: postgres
@@ -301,6 +318,7 @@ services:
       - ALL
 
   maintenance:
+    logging: *default-logging
     profiles: ["maintenance"]
     image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     working_dir: /workspace
@@ -331,6 +349,7 @@ services:
     entrypoint: ["python", "/workspace/scripts/p0_backup_restore.py"]
 
   dispatcher:
+    logging: *default-logging
     image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
@@ -372,6 +391,7 @@ services:
     command: ["python", "-m", "app.workers.dispatcher"]
 
   worker-default:
+    logging: *default-logging
     image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
@@ -445,6 +465,7 @@ services:
     restart: unless-stopped
 
   worker-director:
+    logging: *default-logging
     image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
@@ -486,6 +507,7 @@ services:
     restart: unless-stopped
 
   worker-heavy:
+    logging: *default-logging
     image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}

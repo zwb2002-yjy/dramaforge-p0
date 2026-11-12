@@ -209,6 +209,7 @@ jobs:
           name: browser-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: tmp/quality-contract/playwright-results
           if-no-files-found: ignore
+          retention-days: 7
 
   dependency-review:
     name: dependency-review

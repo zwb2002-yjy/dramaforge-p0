@@ -302,20 +302,16 @@ Retries must not create a second operation:
 | `POST …/repairs`, `POST …/repairs/{id}/steps` | request key and per-step command key; a retry resumes the same step |
 | `POST …/final-film/render` | `Idempotency-Key` plus a request fingerprint; reuse with a different body is rejected |
 
-## Required checks
+## API 验证范围
 
-这些检查在下述质量容器内执行，片段不是宿主安装指令。
-
-npm run api:check
-frontend: npm run format:check
-backend: alembic check
-backend: pytest tests/unit
-backend: pytest tests/integration
+完整质量门包含 OpenAPI 客户端同步、前端格式、迁移一致性以及后端单元和集成测试。
+单个 API 切片按 [DEVELOPMENT](DEVELOPMENT.md) 的实际影响选择检查，公开 schema 变化
+补生成客户端检查，数据库行为变化补对应 PG 回归；不因修改 API 文件默认执行全部测试。
 
 The authoritative dependency installation and command execution are defined by
 docker-compose.quality.yml (backend/Dockerfile.quality and
-frontend/Dockerfile.quality). The repository does not require a host Python or
-Node installation for development or release evidence.
+frontend/Dockerfile.quality). Application dependencies and tests run in containers;
+source initialization and native orchestration checks follow DEVELOPMENT's host-tool boundary.
 
 ## 创作体验改进：目标 API 扩展
 

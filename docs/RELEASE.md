@@ -4,8 +4,8 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 
 ## Branch flow
 
-- `main` 是受保护的稳定发布分支，禁止直接 push（本地 pre-push hook 与
-  GitHub ruleset 双重拦截）。
+- `main` 必须作为受保护的稳定发布分支，禁止直接 push；本地 pre-push hook
+  与远端分支保护共同落实该政策，本地 hook 不能替代远端强制配置。
 - `dev` 是常规集成分支，当前处于快速开发模式：不运行 PR CI，不启用 ruleset，
   允许直接 push 或直接合并分支；完整质量与安全验证集中在 `dev -> main`。
   恢复 dev 门禁时，在 `ci.yml` 的 `pull_request.branches` 加回 `dev`
@@ -15,8 +15,8 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
   required checks；合并后本地 `main` fast-forward，并在历史分叉时把
   `main` 合回 `dev`。
 - 短生命周期分支 + `.worktrees/<task-id>` 可用于并行隔离
-  工作：从 `dev` 出发、合回 `dev`。生产 hotfix 可从 `main` 出发、
-  目标 `main`，事后同步回 `dev`。
+  工作：从 `dev` 出发、合回 `dev`。当前未发布阶段的修复也遵循此流程，
+  不以 hotfix 名义绕过 `dev -> main` 和 Owner 合并边界。
 - Dependabot 常规版本更新按月运行，只允许直接依赖并忽略 major 更新；PR 目标为
   `dev`。并发限额为 backend pip 3、frontend npm 3、GitHub Actions 2、backend/frontend
   Docker 各 1。Python Docker 基线继续停留在 3.14.x，Node Docker 基线继续停留在
@@ -35,7 +35,7 @@ Squash 必须显式传入审阅过的标题和正文，不使用自动拼接的�
 
 ## Required GitHub ruleset（main）
 
-当前 `main` ruleset 要求：
+`main` 的远端保护必须满足以下要求（由适用的 ruleset / branch protection 落实）：
 
 1. 禁止 force push 与分支删除；
 2. required status checks 使用 strict 模式；
@@ -46,6 +46,9 @@ Squash 必须显式传入审阅过的标题和正文，不使用自动拼接的�
    - `python-dependencies`
    - `frontend-dependencies`
    - `filesystem-scan`
+
+发布前核对实际仓库的保护和审批配置符合本页政策；本文、本地 hook 或本地测试通过不证明
+远端已强制执行。无法查询的保护项不能记作已验证，也不构成绕过 PR 或 Owner 审批的理由。
 
 `dev` ruleset（删除与 non-fast-forward 保护）当前为 disabled，PR CI 不监听 `dev`。
 

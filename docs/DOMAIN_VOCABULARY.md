@@ -111,7 +111,7 @@ explicit user value > accepted proposal > project override > pack default
 | **DirectorTurn** | 一次有界的导演轮次（有状态、可恢复、可 fencing） | `director/turn_models.py::DirectorTurn`、`turn_service.py` |
 | **DirectorInvocation** | 一次具体的 LLM 调用事实及其证据 | `director/invocation_models.py::DirectorInvocation`、`invocations.py` |
 | **DirectorProposal** | 结构化提案（含 ProposalItem）；用户 Apply 后才成为事实 | `director/proposal_models.py::DirectorProposal`、`DirectorProposalItem`、`proposal_service.py` |
-| **DirectorDecision** | 用户对提案的显式决定（Apply / Save / Formal / Export 用户门） | `director/proposal_commands.py` |
+| **DirectorDecision** | 用户对导演提案的显式接受、部分接受或拒绝；不合并 Save / Formal / Export 等其他领域操作 | `director/proposal_commands.py` |
 | **DirectorInbox** | 传给导演的事件收件箱 | `director/inbox_models.py::DirectorInbox`、`inbox.py` |
 | **DirectorWakeup** | 唤醒导演的信号（含重放） | `director/inbox_models.py::DirectorWakeup`、`wakeup.py`、`wakeup_replay.py` |
 | **Director autonomy** | AUTO / ASSIST / MANUAL：**只是 Director 参与模式**，不创建第二条生产链 | `ProjectCreativeProfile.director_autonomy`（`backend/app/access/models.py`）；消费点见 `DIRECTOR_RUNTIME.md` |
@@ -188,7 +188,7 @@ explicit user value > accepted proposal > project override > pack default
 | `Character`、`CharacterReference`（兼容层） | **AssetVersionReference** |
 | `Quick Creation`、`V1 Workbench`、`Professional`（作为并列产品） | 只有一个产品主链 |
 
-**已存在的同义风险（历史遗留，需在后续 Phase 消除，见
+**已存在的同义风险（当前处置见映射，不按历史 Phase 编号启动新任务，见
 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md)）：**
 
 | 词 | 现状 | 处置 |

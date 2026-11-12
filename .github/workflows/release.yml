@@ -89,6 +89,8 @@ jobs:
           name: browser-failure-${{ github.run_id }}-${{ github.run_attempt }}
           path: tmp/quality-contract/playwright-results
           if-no-files-found: ignore
+          # Ordinary failure evidence is disposable; formal release material is handled separately.
+          retention-days: 7
 
   containers-and-sbom:
     name: Build, smoke, and publish containers
