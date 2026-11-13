@@ -444,39 +444,49 @@ test("settings activation reveals navigation without resetting the page, and ret
   await expect(page).toHaveURL(scenePath);
 });
 
-for (const width of [910, 1440]) {
-  test(`production stays focused and preserves drafts at ${width}px`, async ({ page }) => {
-    const state = await installProfessionalMock(page);
-    await page.setViewportSize({ width, height: 900 });
-    await page.goto(`/projects/${PROJECT_ID}/production`);
-    await expect(page.getByTestId("production-monitor")).toBeVisible();
-    await expect(page.getByTestId("monitor-stats").locator(":scope > div")).toHaveCount(4);
-    await expect(page.getByTestId("professional-workbench")).not.toBeVisible();
-    await expect(page.getByTestId("stat-completed")).not.toBeVisible();
-    await page.getByRole("tab", { name: "版本尝试", exact: true }).click();
-    await expect(page.getByTestId("professional-workbench")).toBeVisible();
-    await page.getByLabel("实验名称", { exact: true }).fill("还没有提交的版本尝试");
-    await page.getByRole("tab", { name: "作品进度", exact: true }).click();
-    await page.setViewportSize({ width: 700, height: 900 });
-    await page.setViewportSize({ width, height: 900 });
-    await page.getByRole("tab", { name: "版本尝试", exact: true }).click();
-    await expect(page.getByLabel("实验名称", { exact: true })).toHaveValue("还没有提交的版本尝试");
-    await page.getByRole("tab", { name: "作品进度", exact: true }).click();
-    await page.getByRole("radio", { name: "仅看风险" }).locator("..").click();
-    await expect(page.getByRole("radio", { name: "仅看风险" })).toBeChecked();
-    // Route restoration persists UI navigation, never production facts.
-    expect(state.editing.requests.filter((request) => request.method !== "GET")).toEqual([
-      {
-        method: "PATCH",
-        path: `/api/v1/projects/${PROJECT_ID}/workspace-state`,
-        body: { state: { last_view: "production" } },
-      },
-    ]);
-    await expect
-      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
-      .toBe(true);
-  });
-}
+test("production stays focused and preserves drafts across desktop widths", async ({
+  browser,
+  baseURL,
+}) => {
+  for (const width of [910, 1440]) {
+    const context = await browser.newContext({ baseURL, viewport: { width, height: 900 } });
+    const page = await context.newPage();
+    try {
+      const state = await installProfessionalMock(page);
+      await page.goto(`/projects/${PROJECT_ID}/production`);
+      await expect(page.getByTestId("production-monitor")).toBeVisible();
+      await expect(page.getByTestId("monitor-stats").locator(":scope > div")).toHaveCount(4);
+      await expect(page.getByTestId("professional-workbench")).not.toBeVisible();
+      await expect(page.getByTestId("stat-completed")).not.toBeVisible();
+      await page.getByRole("tab", { name: "版本尝试", exact: true }).click();
+      await expect(page.getByTestId("professional-workbench")).toBeVisible();
+      await page.getByLabel("实验名称", { exact: true }).fill("还没有提交的版本尝试");
+      await page.getByRole("tab", { name: "作品进度", exact: true }).click();
+      await page.setViewportSize({ width: 700, height: 900 });
+      await page.setViewportSize({ width, height: 900 });
+      await page.getByRole("tab", { name: "版本尝试", exact: true }).click();
+      await expect(page.getByLabel("实验名称", { exact: true })).toHaveValue(
+        "还没有提交的版本尝试",
+      );
+      await page.getByRole("tab", { name: "作品进度", exact: true }).click();
+      await page.getByRole("radio", { name: "仅看风险" }).locator("..").click();
+      await expect(page.getByRole("radio", { name: "仅看风险" })).toBeChecked();
+      // Route restoration persists UI navigation, never production facts.
+      expect(state.editing.requests.filter((request) => request.method !== "GET")).toEqual([
+        {
+          method: "PATCH",
+          path: `/api/v1/projects/${PROJECT_ID}/workspace-state`,
+          body: { state: { last_view: "production" } },
+        },
+      ]);
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+        .toBe(true);
+    } finally {
+      await context.close();
+    }
+  }
+});
 
 test("new project keeps essentials visible and retains collapsed options without writes", async ({
   page,

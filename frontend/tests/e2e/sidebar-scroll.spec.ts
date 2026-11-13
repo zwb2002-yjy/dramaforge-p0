@@ -77,45 +77,60 @@ async function expectPrimaryVisible(page: Page) {
     .toBe(true);
 }
 
-for (const viewport of [
-  { width: 1440, height: 900 },
-  { width: 1280, height: 720 },
-]) {
-  test(`portrait review keeps navigation visible at ${viewport.width}x${viewport.height}`, async ({
-    page,
-  }) => {
-    await page.setViewportSize(viewport);
-    const { errors, writes } = await openPortraitReview(page);
-    await scrollReview(page);
+test("portrait review keeps navigation visible across desktop viewports", async ({
+  browser,
+  baseURL,
+}) => {
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 1280, height: 720 },
+  ]) {
+    const context = await browser.newContext({ baseURL, viewport });
+    const page = await context.newPage();
+    try {
+      const { errors, writes } = await openPortraitReview(page);
+      await scrollReview(page);
 
-    await expectPrimaryVisible(page);
-    const secondary = page.locator("#project-navigation");
-    for (const name of ["项目总览", "故事剧本", "角色与素材", "分镜制作", "审片确认", "剪辑成片"]) {
-      await expect(secondary.getByRole("link", { name, exact: true })).toBeInViewport({ ratio: 1 });
+      await expectPrimaryVisible(page);
+      const secondary = page.locator("#project-navigation");
+      for (const name of [
+        "项目总览",
+        "故事剧本",
+        "角色与素材",
+        "分镜制作",
+        "审片确认",
+        "剪辑成片",
+      ]) {
+        await expect(secondary.getByRole("link", { name, exact: true })).toBeInViewport({
+          ratio: 1,
+        });
+      }
+      await expect.poll(async () => (await secondary.boundingBox())?.y).toBe(0);
+
+      // Folding the navigation must not take the user back to the top or hide L1.
+      const primary = page.getByRole("navigation", { name: "一级导航" });
+      const creation = page.getByRole("button", { name: "项目导航", exact: true });
+      await creation.click();
+      await expect(secondary).not.toBeVisible();
+      await expectPrimaryVisible(page);
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+      await creation.click();
+      await expect(secondary.getByRole("link", { name: "剪辑成片", exact: true })).toBeInViewport();
+
+      // Keep normal router scroll reset and remembered-project reentry intact.
+      await primary.getByRole("link", { name: "设置", exact: true }).click();
+      await expect(page).toHaveURL(/\/settings\/models(?:\?|$)/);
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+      await page.getByRole("link", { name: "返回工作台" }).click();
+      await expect(page).toHaveURL(`/projects/${PROJECT_ID}/review`);
+      await expect(page.getByRole("heading", { name: "审片确认" })).toBeInViewport();
+      expect(writes).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally {
+      await context.close();
     }
-    await expect.poll(async () => (await secondary.boundingBox())?.y).toBe(0);
-
-    // Folding the navigation must not take the user back to the top or hide L1.
-    const primary = page.getByRole("navigation", { name: "一级导航" });
-    const creation = page.getByRole("button", { name: "项目导航", exact: true });
-    await creation.click();
-    await expect(secondary).not.toBeVisible();
-    await expectPrimaryVisible(page);
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
-    await creation.click();
-    await expect(secondary.getByRole("link", { name: "剪辑成片", exact: true })).toBeInViewport();
-
-    // Keep normal router scroll reset and remembered-project reentry intact.
-    await primary.getByRole("link", { name: "设置", exact: true }).click();
-    await expect(page).toHaveURL(/\/settings\/models(?:\?|$)/);
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
-    await page.getByRole("link", { name: "返回工作台" }).click();
-    await expect(page).toHaveURL(`/projects/${PROJECT_ID}/review`);
-    await expect(page.getByRole("heading", { name: "审片确认" })).toBeInViewport();
-    expect(writes).toEqual([]);
-    expect(errors).toEqual([]);
-  });
-}
+  }
+});
 
 test("narrow-window drawer remains usable after scrolling a long review", async ({ page }) => {
   await page.setViewportSize({ width: 600, height: 800 });

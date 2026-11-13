@@ -534,91 +534,96 @@ for (const destination of ["settings", "other-project"] as const) {
   });
 }
 
-for (const width of [1440, 1100, 1099, 808, 390]) {
-  test(`A16-A19: navigation, focus and layout at ${width}px`, async ({ page }) => {
-    const { writes, errors } = await setup(page);
-    await page.setViewportSize({ width, height: 900 });
-    await page.goto("/");
-    await expect(page.getByRole("article", { name: "项目一 1" })).toBeVisible();
-    await expect
-      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
-      .toBe(true);
-    const controls = page.locator(
-      ".df-project-filters select, .df-project-filters input, .df-project-filters a",
-    );
-    const bounds = await controls.evaluateAll((elements) =>
-      elements.map((element) => {
-        const b = element.getBoundingClientRect();
-        return { left: b.left, right: b.right, top: b.top, bottom: b.bottom };
-      }),
-    );
-    for (const b of bounds) {
-      expect(b.left).toBeGreaterThanOrEqual(0);
-      expect(b.right).toBeLessThanOrEqual(width);
-    }
-    for (let i = 0; i < bounds.length; i++)
-      for (let j = i + 1; j < bounds.length; j++) {
-        const a = bounds[i],
-          b = bounds[j];
-        expect(
-          a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top,
-        ).toBe(true);
+test("A16-A19: navigation, focus and layout across breakpoints", async ({ browser, baseURL }) => {
+  for (const width of [1440, 1100, 1099, 808, 390]) {
+    const context = await browser.newContext({ baseURL, viewport: { width, height: 900 } });
+    const page = await context.newPage();
+    try {
+      const { writes, errors } = await setup(page);
+      await page.goto("/");
+      await expect(page.getByRole("article", { name: "项目一 1" })).toBeVisible();
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+        .toBe(true);
+      const controls = page.locator(
+        ".df-project-filters select, .df-project-filters input, .df-project-filters a",
+      );
+      const bounds = await controls.evaluateAll((elements) =>
+        elements.map((element) => {
+          const b = element.getBoundingClientRect();
+          return { left: b.left, right: b.right, top: b.top, bottom: b.bottom };
+        }),
+      );
+      for (const b of bounds) {
+        expect(b.left).toBeGreaterThanOrEqual(0);
+        expect(b.right).toBeLessThanOrEqual(width);
       }
+      for (let i = 0; i < bounds.length; i++)
+        for (let j = i + 1; j < bounds.length; j++) {
+          const a = bounds[i],
+            b = bounds[j];
+          expect(
+            a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top,
+          ).toBe(true);
+        }
 
-    await page.getByRole("button", { name: /进入工作台/ }).click();
-    await expect(page).toHaveURL(`${ROOT}/script`);
-    await expect(page.getByRole("heading", { name: "故事剧本", exact: true })).toBeVisible();
-    const toggle = page.getByTestId("project-navigation-toggle");
-    const drawer = page.locator("#project-navigation");
-    await expect(toggle).toHaveAttribute("aria-controls", "project-navigation");
-    await expect(toggle).toHaveAttribute("aria-expanded", width >= 1100 ? "true" : "false");
-    if (width >= 1100) {
-      await expect(drawer).toBeVisible();
-      await toggle.click();
-      await expect(drawer).not.toBeVisible();
-      await toggle.click();
-    } else {
-      await expect(drawer).not.toBeVisible();
-      await toggle.focus();
-      await page.keyboard.press("Enter");
-      const navigationDialog = page.getByRole("dialog", { name: "二级导航", exact: true });
-      await expect(navigationDialog).toHaveAttribute("aria-modal", "true");
-      await expect(page.getByRole("link", { name: "切换项目" })).toBeFocused();
-      await page.keyboard.press("Shift+Tab");
-      await expect(
-        navigationDialog.getByRole("button", { name: "关闭二级导航", exact: true }),
-      ).toBeFocused();
-      await page.keyboard.press("Shift+Tab");
-      await expect(
-        drawer.getByRole("link", { name: "剪辑成片" }),
-        await page.evaluate(() => document.activeElement?.outerHTML),
-      ).toBeFocused();
-      await page.keyboard.press("Tab");
-      await expect(
-        navigationDialog.getByRole("button", { name: "关闭二级导航", exact: true }),
-      ).toBeFocused();
-      await page.keyboard.press("Tab");
-      await expect(page.getByRole("link", { name: "切换项目" })).toBeFocused();
-      await page.keyboard.press("Escape");
-      await expect(drawer).not.toBeVisible();
-      await expect(toggle).toBeFocused();
-      await toggle.click();
-      await page.getByRole("button", { name: "关闭二级导航" }).click();
-      await expect(drawer).not.toBeVisible();
-      await expect(toggle).toBeFocused();
-      await toggle.click();
+      await page.getByRole("button", { name: /进入工作台/ }).click();
+      await expect(page).toHaveURL(`${ROOT}/script`);
+      await expect(page.getByRole("heading", { name: "故事剧本", exact: true })).toBeVisible();
+      const toggle = page.getByTestId("project-navigation-toggle");
+      const drawer = page.locator("#project-navigation");
+      await expect(toggle).toHaveAttribute("aria-controls", "project-navigation");
+      await expect(toggle).toHaveAttribute("aria-expanded", width >= 1100 ? "true" : "false");
+      if (width >= 1100) {
+        await expect(drawer).toBeVisible();
+        await toggle.click();
+        await expect(drawer).not.toBeVisible();
+        await toggle.click();
+      } else {
+        await expect(drawer).not.toBeVisible();
+        await toggle.focus();
+        await page.keyboard.press("Enter");
+        const navigationDialog = page.getByRole("dialog", { name: "二级导航", exact: true });
+        await expect(navigationDialog).toHaveAttribute("aria-modal", "true");
+        await expect(page.getByRole("link", { name: "切换项目" })).toBeFocused();
+        await page.keyboard.press("Shift+Tab");
+        await expect(
+          navigationDialog.getByRole("button", { name: "关闭二级导航", exact: true }),
+        ).toBeFocused();
+        await page.keyboard.press("Shift+Tab");
+        await expect(
+          drawer.getByRole("link", { name: "剪辑成片" }),
+          await page.evaluate(() => document.activeElement?.outerHTML),
+        ).toBeFocused();
+        await page.keyboard.press("Tab");
+        await expect(
+          navigationDialog.getByRole("button", { name: "关闭二级导航", exact: true }),
+        ).toBeFocused();
+        await page.keyboard.press("Tab");
+        await expect(page.getByRole("link", { name: "切换项目" })).toBeFocused();
+        await page.keyboard.press("Escape");
+        await expect(drawer).not.toBeVisible();
+        await expect(toggle).toBeFocused();
+        await toggle.click();
+        await page.getByRole("button", { name: "关闭二级导航" }).click();
+        await expect(drawer).not.toBeVisible();
+        await expect(toggle).toBeFocused();
+        await toggle.click();
+      }
+      await expect(drawer.locator('nav [aria-current="page"]')).toHaveCount(1);
+      await drawer.getByRole("link", { name: "角色与素材" }).click();
+      await expect(page).toHaveURL(`${ROOT}/assets`);
+      if (width < 1100) {
+        await expect(drawer).not.toBeVisible();
+        await expect(toggle).toBeFocused();
+      }
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+        .toBe(true);
+      expect(writes).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally {
+      await context.close();
     }
-    await expect(drawer.locator('nav [aria-current="page"]')).toHaveCount(1);
-    await drawer.getByRole("link", { name: "角色与素材" }).click();
-    await expect(page).toHaveURL(`${ROOT}/assets`);
-    if (width < 1100) {
-      await expect(drawer).not.toBeVisible();
-      await expect(toggle).toBeFocused();
-    }
-    await expect
-      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
-      .toBe(true);
-    expect(writes).toEqual([]);
-    expect(errors).toEqual([]);
-  });
-}
+  }
+});
