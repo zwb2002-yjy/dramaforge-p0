@@ -216,6 +216,47 @@ async def test_prompt_proposal_is_real_pending_and_never_applies(agent_world: Ag
         assert await session.scalar(select(func.count(ProviderOperation.id))) == 0
 
 
+@pytest.mark.parametrize("tool_name", ["shot_get", "shot_prompt_propose"])
+async def test_scope_denial_stops_batch_and_replay_reads_failed_receipt(
+    agent_world: AgentWorld, tool_name: str,
+) -> None:
+    world = agent_world
+    async with world.factory() as session:
+        original = await session.get(Shot, world.shot_id)
+        sibling = Shot(
+            project_id=original.project_id, scene_id=original.scene_id, shot_number=2,
+            visual_description="A different shot outside the active scope.",
+        )
+        session.add(sibling)
+        await session.commit()
+        sibling_id = sibling.id
+    thread = await world.service.open_thread(
+        AgentThreadCreate(scope_type="shot", scope_entity_id=world.shot_id)
+    )
+    arguments = {"shot_id": str(sibling_id)}
+    if tool_name == "shot_prompt_propose":
+        arguments.update(expected_version=1, image_prompt="Outside scope", rationale="Test")
+    model = ScriptedModel(AgentModelResponse(tool_calls=[
+        AgentToolCall(call_id="denied", name=tool_name, arguments=arguments),
+        AgentToolCall(call_id="must-not-run", name="project_get", arguments={}),
+    ]))
+    request = AgentRequest(content="Inspect another shot", request_key="denied-once")
+    result = await world.service.run(thread.id, request, model=model, checkpointer=MemorySaver())
+    assert result.status == "failed" and result.stop_reason == "permission_denied"
+    assert result.proposal_ids == [] and result.assistant_message_id is None
+    assert len(model.calls) == 1 and result.tool_calls == 1
+    replay = await world.service.run(thread.id, request, model=model, checkpointer=MemorySaver())
+    assert replay == result and len(model.calls) == 1
+    async with world.factory() as session:
+        audits = list(await session.scalars(select(DirectorToolCall)))
+        assert len(audits) == 1
+        assert audits[0].result["error"]["code"] == "ToolPermissionDenied"
+        assert audits[0].result["error"]["retry_class"] == "none"
+        assert await session.scalar(select(func.count(DirectorProposal.id))) == 0
+        assert await session.scalar(select(func.count(NodeRun.id))) == 0
+        assert await session.scalar(select(func.count(ProviderOperation.id))) == 0
+
+
 async def test_unknown_submission_is_journaled_and_never_replayed(agent_world: AgentWorld) -> None:
     world = agent_world
     thread = await world.service.open_thread(AgentThreadCreate())

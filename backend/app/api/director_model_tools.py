@@ -51,7 +51,9 @@ class ApiDirectorModelTools:
         observed = {f"project:{project.id}": project.version}
         if scope.scope_type in {"project", "story"}:
             if scope.scope_entity_id != scope.project_id:
-                raise NotFoundError("project scope not found")
+                raise ValidationAppError(
+                    "Project scope mismatch", details={"code": "ToolPermissionDenied"}
+                )
         elif scope.scope_type == "scene":
             scene = await reader.scene(scope.scope_entity_id)
             observed[f"scene:{scene.id}"] = scene.version
@@ -66,7 +68,9 @@ class ApiDirectorModelTools:
                 or scope.scope_type == "shot"
                 and shot.id != scope.scope_entity_id
             ):
-                raise NotFoundError("shot outside Director scope")
+                raise ValidationAppError(
+                    "Shot outside Director scope", details={"code": "ToolPermissionDenied"}
+                )
             if shot.version != request.expected_shot_version:
                 raise _stale()
             observed[f"shot:{shot.id}"] = shot.version

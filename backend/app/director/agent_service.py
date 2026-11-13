@@ -855,14 +855,28 @@ class DirectorAgentService:
                     ).model_dump(mode="json")
                 except (ValidationError, ValidationAppError, ConflictError, NotFoundError) as exc:
                     stale = isinstance(exc, ConflictError)
+                    denied = (
+                        isinstance(exc, AppError)
+                        and exc.details.get("code") == "ToolPermissionDenied"
+                    )
                     result = {
                         "call_id": call.call_id,
                         "ok": False,
                         "data": None,
                         "error": {
-                            "code": "ContextStale" if stale else "PROPOSAL_INPUT_INVALID",
-                            "recoverable": not stale,
-                            "message": "Read the target and correct the proposal input.",
+                            "code": (
+                                "ToolPermissionDenied" if denied
+                                else "ContextStale" if stale else "PROPOSAL_INPUT_INVALID"
+                            ),
+                            "recoverable": not (stale or denied),
+                            "retry_class": (
+                                "none" if denied else "refresh_context" if stale
+                                else "correct_input"
+                            ),
+                            "message": (
+                                "The requested resource is unavailable in this scope."
+                                if denied else "Read the target and correct the proposal input."
+                            ),
                         },
                     }
                 receipt = await audit.complete(

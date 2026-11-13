@@ -228,7 +228,8 @@ PROPOSE 只能幂等创建真实 typed Proposal，不能 Apply 或执行生产�
    和 expected versions。工具参数、响应和错误保留 call_id，成对追加 assistant/tool 消息。
 3. 模型选择下一工具，runtime 仅校验与调度，不按用户关键词硬编码业务路径。
    ToolNotFound、ToolInputInvalid、ModelToolCallInvalid、ToolExecutionFailed/SHOT_NOT_FOUND
-   作为安全且可恢复的 ToolResult 返回模型；权限拒绝不扩大 scope。ModelUnavailable 或
+   作为安全且可恢复的 ToolResult 返回模型；ToolPermissionDenied 保留拒绝回执并立即以
+   permission_denied 终止，不再请求模型或执行同批后续工具，不能通过改参扩大 scope。ModelUnavailable 或
    malformed 响应不换模型，仅执行已允许的同模型修复；未知模型提交阻塞并查 journal。
 4. 初始工程上限仍待校准：每 Turn 6 次模型请求、12 次工具调用、120 秒总时限；单工具
    默认 5 秒且受总 deadline 约束；schema repair 最多一次并计入模型请求数。同工具、

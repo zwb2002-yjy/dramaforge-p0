@@ -33,7 +33,7 @@ _HASH = re.compile(r"[0-9a-f]{64}\Z")
 _ERRORS: dict[str, tuple[str, bool, str]] = {
     "ToolNotFound": ("Tool is not available in this scope.", True, "correct_input"),
     "ToolInputInvalid": ("Arguments do not match the tool schema.", True, "correct_input"),
-    "ToolPermissionDenied": ("Resource is unavailable in this scope.", True, "correct_input"),
+    "ToolPermissionDenied": ("Resource is unavailable in this scope.", False, "none"),
     "ToolExecutionFailed": ("The tool could not be completed.", True, "transient"),
     "ToolTimeout": ("The read timed out.", True, "transient"),
     "ContextStale": ("A referenced object changed; refresh context.", False, "refresh_context"),

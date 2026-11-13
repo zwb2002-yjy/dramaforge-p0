@@ -185,6 +185,8 @@ class DirectorAgentHarness:
                 )
                 answered.add(call.call_id)
                 error = result.get("error")
+                if isinstance(error, dict) and error.get("code") == "ToolPermissionDenied":
+                    raise AgentHalt("permission_denied")
                 if isinstance(error, dict) and error.get("retry_class") == "refresh_context":
                     raise AgentHalt("context_stale")
                 data = result.get("data")

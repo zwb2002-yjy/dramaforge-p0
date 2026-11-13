@@ -17,7 +17,7 @@ from app.director.agent_tools import ToolContext, ToolExecutor, ToolRegistry
 from app.director.assistant_models import DirectorThread
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.shared.base import Base
-from app.shared.errors import ConflictError, ValidationAppError
+from app.shared.errors import ConflictError, ForbiddenError, UnauthorizedError, ValidationAppError
 from pydantic import ValidationError
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -211,7 +211,23 @@ async def test_foreign_project_and_narrow_shot_scope_do_not_disclose(world: Worl
         context=scope,
     )
     assert result.error and result.error.code == "ToolPermissionDenied"
+    assert not result.error.recoverable and result.error.retry_class == "none"
     assert "shots_list" not in {spec.name for spec in ToolRegistry().specs(scope)}
+
+
+@pytest.mark.parametrize("error_type", [ForbiddenError, UnauthorizedError])
+async def test_permission_errors_are_not_parameter_corrections(world, monkeypatch, error_type):
+    async def denied(self):
+        raise error_type("private policy detail")
+
+    monkeypatch.setattr(AgentReadService, "project", denied)
+    result = await world.executor.execute(
+        name="project_get", arguments={}, call_id="denied", context=world.context
+    )
+    assert not result.ok and result.data is None
+    assert result.error.code == "ToolPermissionDenied"
+    assert not result.error.recoverable and result.error.retry_class == "none"
+    assert "private policy detail" not in result.model_dump_json()
 
 
 async def test_changed_observed_version_requires_refresh(world: World) -> None:

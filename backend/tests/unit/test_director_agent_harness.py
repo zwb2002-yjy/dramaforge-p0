@@ -498,7 +498,17 @@ async def test_model_submission_halt_counts_attempt_and_never_retries() -> None:
     assert tools.calls == []
 
 
-async def test_stale_tool_result_is_preserved_before_stopping_remaining_calls() -> None:
+@pytest.mark.parametrize(
+    "code,retry_class,stop_reason",
+    [
+        ("ContextStale", "refresh_context", "context_stale"),
+        ("ToolPermissionDenied", "none", "permission_denied"),
+        ("ToolPermissionDenied", "correct_input", "permission_denied"),
+    ],
+)
+async def test_terminal_tool_result_is_preserved_before_stopping_remaining_calls(
+    code, retry_class, stop_reason,
+) -> None:
     model = FakeModel(
         [
             AgentModelResponse(
@@ -518,8 +528,8 @@ async def test_stale_tool_result_is_preserved_before_stopping_remaining_calls() 
             "ok": False,
             "observed_versions": {"shot:shot-1": 2},
             "error": {
-                "code": "ContextStale",
-                "retry_class": "refresh_context",
+                "code": code,
+                "retry_class": retry_class,
                 "recoverable": False,
             },
         }
@@ -529,11 +539,13 @@ async def test_stale_tool_result_is_preserved_before_stopping_remaining_calls() 
     ).run(messages=_inputs(), checkpoint_key="stale-result")
     assert executed == ["stale"]
     assert len(model.inputs) == 1
-    assert state["stop_reason"] == "context_stale"
+    assert state["stop_reason"] == stop_reason
     _paired(state["messages"])
     stale = next(row for row in state["messages"] if row.get("tool_call_id") == "stale")
     assert json.loads(stale["content"])["observed_versions"] == {"shot:shot-1": 2}
-    assert json.loads(stale["content"])["error"]["code"] == "ContextStale"
+    assert json.loads(stale["content"])["error"]["code"] == code
+    skipped = next(row for row in state["messages"] if row.get("tool_call_id") == "not-run")
+    assert json.loads(skipped["content"])["execution_status"] == "not_executed"
 
 
 @pytest.mark.parametrize(

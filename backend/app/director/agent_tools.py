@@ -310,6 +310,9 @@ def _failure(
     recoverable: bool = True,
     retry_class: Literal["none", "correct_input", "transient", "refresh_context"] = "correct_input",
 ) -> _ToolFailure:
+    if code == "ToolPermissionDenied":
+        recoverable = False
+        retry_class = "none"
     return _ToolFailure(
         ToolError(
             code=code,
@@ -427,11 +430,15 @@ class ToolExecutor:
             )
         except AppError as exc:
             stale = exc.details.get("code") in {"CONTEXT_STALE", "ContextStale"}
+            denied = (
+                exc.status_code in {401, 403}
+                or exc.details.get("code") == "ToolPermissionDenied"
+            )
             code = (
-                "ContextStale"
+                "ToolPermissionDenied"
+                if denied
+                else "ContextStale"
                 if stale
-                else "ToolPermissionDenied"
-                if exc.status_code in {401, 403}
                 else "ToolExecutionFailed"
             )
             result = ToolResult(
@@ -441,8 +448,10 @@ class ToolExecutor:
                 error=ToolError(
                     code=code,
                     message="The requested resource is unavailable in this scope.",
-                    recoverable=not stale,
-                    retry_class="refresh_context" if stale else "correct_input",
+                    recoverable=not (stale or denied),
+                    retry_class=(
+                        "none" if denied else "refresh_context" if stale else "correct_input"
+                    ),
                 ),
             )
         except Exception:

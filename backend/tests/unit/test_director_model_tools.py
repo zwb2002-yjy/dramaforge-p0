@@ -14,7 +14,7 @@ from app.contracts.director_model_tools import (
 )
 from app.director.agent_tools import ToolContext, ToolExecutor
 from app.providers.models import ProjectProviderBinding, ProviderConnectionRevision
-from app.shared.errors import ConflictError, NotFoundError
+from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 from pydantic import ValidationError
 from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -270,10 +270,27 @@ async def test_tools_enforce_narrow_scope_and_observed_versions(session):
     for narrow_scope in (
         scope.model_copy(update={"scope_type": "scene", "scope_entity_id": other_scene.id}),
         scope.model_copy(update={"scope_type": "shot", "scope_entity_id": other_shot.id}),
-        scope.model_copy(update={"actor_id": uuid4()}),
     ):
-        with pytest.raises(NotFoundError):
+        with pytest.raises(ValidationAppError) as denied:
             await port.preview(scope=narrow_scope, request=_preview(shot, report))
+        assert denied.value.details["code"] == "ToolPermissionDenied"
+        factory = async_sessionmaker(bind=session.bind, expire_on_commit=False)
+        executor = ToolExecutor(factory, model_tools=ApiDirectorModelTools(factory))
+        result = await executor.execute(
+            name="model_compile_preview",
+            arguments=_preview(shot, report).model_dump(mode="json"),
+            call_id="denied-preview",
+            context=ToolContext(
+                **narrow_scope.model_dump(), turn_id=uuid4(), thread_id=uuid4(),
+            ),
+        )
+        assert not result.ok and result.data is None
+        assert result.error.code == "ToolPermissionDenied"
+        assert not result.error.recoverable and result.error.retry_class == "none"
+    with pytest.raises(NotFoundError):
+        await port.preview(
+            scope=scope.model_copy(update={"actor_id": uuid4()}), request=_preview(shot, report),
+        )
     with pytest.raises(ConflictError):
         await port.inspect(
             scope=scope.model_copy(update={"expected_versions": {f"project:{project.id}": 99}}),
