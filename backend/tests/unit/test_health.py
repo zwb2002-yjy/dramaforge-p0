@@ -14,6 +14,11 @@ def test_health_returns_200_with_expected_shape(client: TestClient) -> None:
     assert "version" in body and body["version"]
     assert "env" in body and body["env"]
     assert body["source_commit"] == "test-source-commit"
+    # A reachable but unmigrated database must be distinguishable from the
+    # exact schema the candidate expects; the in-memory fixture has no
+    # alembic_version table, so the value is explicitly null.
+    assert "migration_head" in body
+    assert body["migration_head"] is None
 
 
 def test_health_is_stable_across_calls(client: TestClient) -> None:

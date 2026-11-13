@@ -1,0 +1,85 @@
+{
+  "manifest_version": "2026-09-30-ref2va-v2",
+  "provider_type": "openai_compatible_media",
+  "protocol_profile": "openai_media_v1",
+  "model_id": "@contract/sglang-h3-ref2va-v1",
+  "model_revision": "v3",
+  "media_kind": "video",
+  "display_name": "SGLang H3 多素材参考 (Ref2VA)",
+  "lifecycle": "active",
+  "catalog_source": "protocol_contract",
+  "documented_at": "2026-09-30",
+  "operations": {
+    "video.generate": {
+      "operation": "video.generate",
+      "capabilities": [
+        "video.reference.image",
+        "video.reference.video",
+        "video.reference.audio"
+      ],
+      "output_constraints": {
+        "duration_seconds": 5,
+        "aspect_ratio": {
+          "allowed": [
+            "9:16",
+            "16:9"
+          ]
+        },
+        "native_audio": true
+      },
+      "reference_constraints": {
+        "reference_image": {
+          "min": 0,
+          "max": 9
+        },
+        "reference_video": {
+          "min": 0,
+          "max": 3
+        },
+        "reference_audio": {
+          "min": 0,
+          "max": 3
+        }
+      },
+      "exclusive_groups": [
+        {
+          "name": "ref2va",
+          "members": [
+            [
+              "reference_image",
+              "reference_video",
+              "reference_audio"
+            ]
+          ]
+        }
+      ],
+      "reference_media_limits": {
+        "maximum_files": 12,
+        "durations": {
+          "reference_video": {
+            "minimum_seconds": 2,
+            "maximum_seconds": 15,
+            "total_maximum_seconds": 15
+          },
+          "reference_audio": {
+            "minimum_seconds": 2,
+            "maximum_seconds": 15,
+            "total_maximum_seconds": 15
+          }
+        }
+      }
+    }
+  },
+  "option_schema": {
+    "namespace": "",
+    "options": {}
+  },
+  "implementation_status": "contract_tested",
+  "evidence": {
+    "current_contract": {
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit",
+      "checked_at": "2026-10-07"
+    }
+  }
+}

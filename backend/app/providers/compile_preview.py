@@ -1,0 +1,429 @@
+"""Pure provider-contract preview; no Runtime, credentials, tokens or storage I/O.
+
+Reference transports are placeholders. Success proves compiler acceptance, not
+media validity, transport reachability, account access or executable readiness.
+"""
+
+import base64
+import hashlib
+import json
+import re
+from collections import Counter
+from typing import Literal, TypedDict
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
+
+from app.providers.catalog_loader import hash_manifest
+from app.providers.compiled_options import (
+    compiled_generation_evidence,
+    uncompiled_requested_options,
+)
+from app.providers.intents import ImageGenerationIntent, VideoGenerationIntentV1
+from app.providers.manifest import ModelCapabilityManifest
+from app.providers.normalizer import normalize_image, normalize_video
+from app.providers.reference_roles import ReferenceRoleValue
+from app.providers.registry import get_plugin
+from app.providers.runtime import (
+    CompiledImageRequest,
+    CompiledVideoRequest,
+    ResolvedReference,
+)
+from app.providers.workbench_contract import select_workbench_contract
+
+LEGACY_WORKBENCH_MODES: dict[str, frozenset[str]] = {
+    "image": frozenset({"text_to_image"}),
+    "video": frozenset(
+        {"text_to_video", "first_frame", "last_frame", "first_last_frame", "omni_reference"}
+    ),
+}
+
+
+def _preview_placeholder_bytes(index: int) -> bytes:
+    """Deterministic, ordinal-distinct placeholder for bytes-transport compilers.
+
+    It only needs to make the compiler take its reference branch (data URI /
+    base64 embedding); compiled_wire_evidence replaces the encoded value with
+    the frozen identity slot, so the placeholder never influences the wire
+    fingerprint. Distinctness per ordinal keeps the slot replacement from
+    collapsing two distinct references onto one marker.
+    """
+
+    return f"preview-reference-{index}".encode("ascii")
+
+
+class _PreviewIdentity(TypedDict):
+    prompt_hash: str
+    semantic_hash: str
+    manifest_hash: str
+    reference_ids: list[UUID]
+    requested_options: dict[str, JsonValue]
+
+
+class PreviewReference(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    role: ReferenceRoleValue
+    artifact_id: UUID
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    mime_type: str = Field(pattern=r"^(image|video|audio)/[a-zA-Z0-9.+-]+$", max_length=100)
+
+
+class CompilePreview(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    compile_level: Literal["provider_contract"] = "provider_contract"
+    readiness: Literal["contract_validated", "blocked"]
+    transport_verified: Literal[False] = False
+    account_verified: Literal[False] = False
+    prompt_hash: str
+    semantic_hash: str
+    manifest_hash: str
+    reference_ids: list[UUID]
+    requested_options: dict[str, JsonValue] = Field(default_factory=dict)
+    effective_options: dict[str, JsonValue] = Field(default_factory=dict)
+    wire_fingerprint: str | None = None
+    redacted_wire: dict[str, JsonValue] = Field(default_factory=dict)
+    transformations: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(
+        default_factory=lambda: [
+            "PLACEHOLDER_TRANSPORT_NOT_VERIFIED",
+            "MEDIA_BYTES_NOT_VERIFIED",
+            "ACCOUNT_NOT_CHECKED",
+        ]
+    )
+
+
+def _reference_errors(
+    intent: ImageGenerationIntent | VideoGenerationIntentV1,
+    manifest: ModelCapabilityManifest,
+    references: list[PreviewReference],
+    contract_id: str | None = None,
+) -> list[str]:
+    expected = (
+        [("reference_image", reference_id) for reference_id in intent.selected_reference_ids()]
+        if isinstance(intent, ImageGenerationIntent)
+        else [(r.role, r.artifact_id) for r in intent.references]
+    )
+    if expected != [(r.role, r.artifact_id) for r in references]:
+        return ["REFERENCE_IDENTITY_MISMATCH"]
+    operation = manifest.operations.get(intent.operation)
+    if operation is None:
+        return ["OPERATION_UNSUPPORTED"]
+    from app.providers.capabilities import Capability
+    from app.providers.manifest import to_v3_model_manifest
+
+    capability = (
+        Capability.IMAGE_GENERATE
+        if isinstance(intent, ImageGenerationIntent)
+        else Capability.VIDEO_IMAGE_TO_VIDEO
+    )
+    spec = to_v3_model_manifest(manifest, transport_profile_id="preview").capability_specs.get(
+        capability
+    )
+    counts: Counter[str] = Counter(ref.role for ref in references)
+    if spec is not None and spec.modes:
+        try:
+            mode = spec.mode_spec(contract_id or intent.mode_id)
+        except ValueError:
+            return ["MODE_UNSUPPORTED"]
+        if any(role not in mode.input_slots for role in counts):
+            return ["MODE_REFERENCE_UNSUPPORTED"]
+        for role, slot in mode.input_slots.items():
+            count = counts.get(role, 0)
+            if count < (slot.minimum or (1 if slot.required else 0)) or (
+                slot.maximum is not None and count > slot.maximum
+            ):
+                return ["MODE_REFERENCE_UNSUPPORTED"]
+    else:
+        for role, count in counts.items():
+            constraint = operation.reference_constraints.get(role)
+            if constraint is None or count > constraint.max:
+                return ["REFERENCE_SLOT_UNSUPPORTED"]
+        if any(
+            counts.get(role, 0) < constraint.min
+            for role, constraint in operation.reference_constraints.items()
+        ):
+            return ["REFERENCE_REQUIRED"]
+    if isinstance(intent, ImageGenerationIntent) and references:
+        ref = references[0]
+        if (intent.reference_fingerprint and intent.reference_fingerprint != ref.fingerprint) or (
+            intent.reference_mime and intent.reference_mime != ref.mime_type
+        ):
+            return ["REFERENCE_IDENTITY_MISMATCH"]
+    if any(
+        not ref.mime_type.startswith(
+            "audio/"
+            if ref.role == "reference_audio"
+            else "video/"
+            if ref.role == "reference_video"
+            else "image/"
+        )
+        for ref in references
+    ):
+        return ["REFERENCE_MEDIA_UNSUPPORTED"]
+    return []
+
+
+def compiled_wire_evidence(
+    compiled: CompiledImageRequest | CompiledVideoRequest,
+    references: list[ResolvedReference],
+) -> tuple[str, dict[str, JsonValue]]:
+    """Exact non-media wire fields + ordered frozen reference identities.
+
+    Random reference grants and raw media bytes are replaced with typed slot
+    markers, so preflight and Worker can compare the actual Compiler output
+    without disclosing the URL token, image bytes or credentials.
+    """
+    replacements: list[tuple[str, str]] = []
+    for index, ref in enumerate(references):
+        marker = f"<reference:{index}:{ref.fingerprint or ref.artifact_id}>"
+        if ref.content_url:
+            replacements.append((ref.content_url, marker))
+        if ref.content_bytes:
+            replacements.append((base64.b64encode(ref.content_bytes).decode("ascii"), marker))
+    replacements.sort(key=lambda pair: len(pair[0]), reverse=True)
+
+    def scrub(value: JsonValue, key: str = "") -> JsonValue:
+        # Free-text prompt values are user content, not transport slots: slot
+        # replacement still applies (a reference URL pasted into the prompt is
+        # normalized like any other occurrence), but a plain https:// link in
+        # prose must not fail the whole projection as an unbound transport
+        # value (N-08). Transport-bearing keys keep the fail-closed check.
+        free_text = key.lower() in {"prompt", "prompt_value", "text"}
+        if isinstance(value, dict):
+            result: dict[str, JsonValue] = {}
+            for field, child in value.items():
+                normalized = field.lower().replace("-", "_")
+                if any(
+                    fragment in normalized
+                    for fragment in (
+                        "authorization",
+                        "api_key",
+                        "apikey",
+                        "password",
+                        "secret",
+                        "ciphertext",
+                        "bearer",
+                    )
+                ):
+                    raise ValueError("credential key in Provider wire")
+                result[field] = scrub(child, field)
+            return result
+        if isinstance(value, list):
+            return [scrub(child, key) for child in value]
+        if isinstance(value, str):
+            redacted: str = value
+            for raw, marker in replacements:
+                if raw in redacted:
+                    redacted = redacted.replace(raw, marker)
+            # Normalize tokenized transport and binary data without leaking it.
+            data_uri = re.fullmatch(
+                r"data:[a-zA-Z0-9.+/-]+;base64,(<reference:[^>]+>)",
+                redacted,
+            )
+            if data_uri is not None:
+                redacted = data_uri.group(1)
+            if not free_text and (
+                "https://" in redacted or "http://" in redacted or ";base64," in redacted
+            ):
+                raise ValueError("unbound URL or media value in Provider wire")
+            if (
+                not free_text
+                and ("base64" in key.lower() or "b64" in key.lower())
+                and "<reference:" not in redacted
+            ):
+                raise ValueError("unbound binary field in Provider wire")
+            return redacted
+        return value
+
+    projection: dict[str, JsonValue] = {
+        "provider_type": compiled.provider_type,
+        "protocol_profile": compiled.protocol_profile,
+        "model_id": compiled.model_id,
+        "operation": compiled.operation,
+        "request_schema_version": compiled.request_schema_version,
+        "wire_request": scrub(compiled.wire_request),
+        "reference_artifact_ids": [str(value) for value in compiled.reference_artifact_ids],
+        # Binary preview fixtures do not contain the media bytes. The actual
+        # Worker validates storage SHA-256 before compiling. The proof always
+        # binds the frozen reference hashes, never fixture-byte digests.
+        "reference_fingerprints": [ref.fingerprint for ref in references],
+    }
+    encoded = json.dumps(projection, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest(), projection
+
+
+async def preview_compile(
+    *,
+    manifest: ModelCapabilityManifest,
+    invoke_model_value: str,
+    intent: ImageGenerationIntent | VideoGenerationIntentV1,
+    references: list[PreviewReference],
+    expected_mode_id: str | None = None,
+    include_redacted_wire: bool = False,
+) -> CompilePreview:
+    import hashlib
+
+    requested: dict[str, JsonValue] = (
+        {"size": intent.size, "aspect_ratio": intent.aspect_ratio, "seed": intent.seed}
+        if isinstance(intent, ImageGenerationIntent)
+        else intent.output.model_dump(mode="json")
+    )
+    common: _PreviewIdentity = {
+        "prompt_hash": hashlib.sha256(intent.prompt.encode()).hexdigest(),
+        "semantic_hash": hash_manifest(
+            {
+                "intent": intent.model_dump(mode="json"),
+                "model": invoke_model_value,
+                "manifest": manifest.model_dump(mode="json"),
+                "references": [ref.model_dump(mode="json") for ref in references],
+            }
+        ),
+        "manifest_hash": hash_manifest(manifest.model_dump(mode="json")),
+        "reference_ids": [ref.artifact_id for ref in references],
+        "requested_options": requested,
+    }
+    errors = _reference_errors(intent, manifest, references, expected_mode_id)
+    from app.providers.capabilities import Capability
+    from app.providers.manifest import to_v3_model_manifest
+
+    capability = (
+        Capability.IMAGE_GENERATE
+        if isinstance(intent, ImageGenerationIntent)
+        else Capability.VIDEO_IMAGE_TO_VIDEO
+    )
+    spec = to_v3_model_manifest(manifest, transport_profile_id="preview").capability_specs.get(
+        capability
+    )
+    if spec is not None:
+        if spec.modes:
+            try:
+                spec.mode_spec(expected_mode_id or intent.mode_id)
+            except ValueError:
+                errors.append("MODE_UNSUPPORTED")
+        else:
+            # Legacy catalogs expose slots without named modes. Workbench
+            # still freezes its stage mode names; validate those names here
+            # while the reference and compiler checks retain the actual
+            # contract. The video vocabulary covers every mode build_plan
+            # accepts (text_to_video/first_frame/last_frame/
+            # first_last_frame/omni_reference) — a text_to_video preview was
+            # previously misrejected as MODE_UNSUPPORTED.
+            workbench_modes = LEGACY_WORKBENCH_MODES[manifest.media_kind]
+            if intent.mode_id not in {None, "default", "explicit_binding"} | workbench_modes:
+                errors.append("MODE_UNSUPPORTED")
+    if not invoke_model_value.strip():
+        errors.append("MODEL_IDENTITY_MISSING")
+    normalized = (
+        normalize_image(intent)
+        if isinstance(intent, ImageGenerationIntent)
+        else normalize_video(intent)
+    )
+    operation = manifest.operations.get(intent.operation)
+    if normalized.errors:
+        errors.append("INTENT_UNSUPPORTED")
+    if operation and not normalized.required_capabilities.issubset(set(operation.capabilities)):
+        errors.append("CAPABILITY_UNSUPPORTED")
+    if errors:
+        return CompilePreview(readiness="blocked", errors=sorted(set(errors)), **common)
+    try:
+        plugin = get_plugin(manifest.provider_type, manifest.protocol_profile)
+        if not plugin.implemented or plugin.compiler_factory is None:
+            return CompilePreview(readiness="blocked", errors=["COMPILER_UNAVAILABLE"], **common)
+        image_compiler, video_compiler = plugin.compiler_factory()
+        compiler = image_compiler if isinstance(intent, ImageGenerationIntent) else video_compiler
+        # Use the selected compiler contract, never the probe transport or
+        # provider-name heuristics. No reference bytes are loaded here.
+        from app.providers.reference_delivery import runtime_reference_transport
+
+        transport = runtime_reference_transport(compiler, manifest)
+        if transport not in {"bytes", "public_url"}:
+            return CompilePreview(
+                readiness="blocked", errors=["REFERENCE_TRANSPORT_UNDECLARED"], **common
+            )
+        # An invented byte buffer cannot satisfy a real SHA-256 media hash.
+        # Build the preview reference in the transport the selected compiler
+        # actually consumes, so the preview projection matches the Worker
+        # projection field-for-field (including presence of reference fields
+        # and any operation derived from them). compiled_wire_evidence
+        # normalizes both placeholder and real media to the same identity
+        # slot, so only shape differences could change the fingerprint.
+        # Placeholder bytes are distinct per reference ordinal: two equal
+        # placeholders would collide in the slot replacement and collapse
+        # distinct references onto one marker. No real media bytes are
+        # loaded here; the Worker re-verifies the stored SHA-256 before the
+        # paid request.
+        resolved = [
+            ResolvedReference(
+                role=ref.role,
+                artifact_id=ref.artifact_id,
+                mime_type=ref.mime_type,
+                fingerprint=ref.fingerprint,
+                content_bytes=(_preview_placeholder_bytes(index) if transport == "bytes" else None),
+                content_url=(
+                    f"https://preview.invalid/{ref.artifact_id}"
+                    if transport == "public_url"
+                    else None
+                ),
+            )
+            for index, ref in enumerate(references)
+        ]
+        if operation is not None and operation.input_contracts:
+            selected = select_workbench_contract(
+                operation=operation,
+                media_kind="image" if isinstance(intent, ImageGenerationIntent) else "video",
+                references=[(ref.role, ref.mime_type) for ref in resolved],
+                ui_mode_id=intent.mode_id,
+            )
+            if expected_mode_id is not None and selected.contract_id != expected_mode_id:
+                return CompilePreview(
+                    readiness="blocked", errors=["CONTRACT_MODE_MISMATCH"], **common
+                )
+            from typing import Any, cast
+
+            compiled = await cast(Any, compiler).compile(
+                intent,
+                manifest,
+                resolved,
+                invoke_model_value=invoke_model_value,
+                policy=selected.policy,
+            )
+        else:
+            compiled = await compiler.compile(
+                intent,
+                manifest,
+                resolved,
+                invoke_model_value=invoke_model_value,
+            )
+        if compiled.reference_artifact_ids != [ref.artifact_id for ref in references]:
+            return CompilePreview(
+                readiness="blocked", errors=["REFERENCE_IDENTITY_MISMATCH"], **common
+            )
+        fingerprint, redacted_wire = compiled_wire_evidence(compiled, resolved)
+        effective, option_changes = compiled_generation_evidence(compiled)
+        uncompiled = uncompiled_requested_options(requested, effective, option_changes)
+        if uncompiled:
+            return CompilePreview(
+                readiness="blocked",
+                errors=["MODEL_OPTION_NOT_COMPILED"],
+                warnings=[f"UNCOMPILED_OPTION:{name}" for name in uncompiled],
+                **common,
+            )
+        transformations = [
+            f"{item.field}:{item.from_value}->{item.to_value}:{item.reason}"
+            for item in option_changes
+        ]
+        return CompilePreview(
+            readiness="contract_validated",
+            effective_options=effective,
+            transformations=transformations,
+            wire_fingerprint=fingerprint,
+            redacted_wire=redacted_wire if include_redacted_wire else {},
+            **common,
+        )
+    except (ValueError, LookupError, TypeError):
+        # Compiler exceptions may include caller-controlled text; only a stable
+        # code leaves this boundary. The original prompt/wire never leaves it.
+        return CompilePreview(
+            readiness="blocked", errors=["PROVIDER_CONTRACT_UNSUPPORTED"], **common
+        )

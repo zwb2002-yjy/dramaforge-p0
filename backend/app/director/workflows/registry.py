@@ -17,6 +17,18 @@ from app.director.workflows.contracts import (
 )
 
 
+def version_sort_key(version: str) -> tuple[int, ...]:
+    """Order dotted numeric versions numerically (``2.10`` after ``2.9``).
+
+    Non-numeric segments sort before numeric ones so an unparsable label can
+    never silently win over a real release.
+    """
+    parts: list[int] = []
+    for segment in version.split("."):
+        parts.append(int(segment) if segment.isdigit() else -1)
+    return tuple(parts)
+
+
 class WorkflowTemplateRegistry:
     """In-memory registration and eligibility lookup for production templates."""
 
@@ -43,7 +55,7 @@ class WorkflowTemplateRegistry:
         versions[spec.template_version] = spec
         # Keep ``_keys`` pointing at the highest registered version.
         self._keys[spec.template_key] = max(
-            versions.values(), key=lambda s: s.template_version
+            versions.values(), key=lambda s: version_sort_key(s.template_version)
         )
         return spec
 

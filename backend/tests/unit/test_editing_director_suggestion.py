@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from copy import deepcopy
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -31,23 +30,11 @@ from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun, ProviderOperation
 from app.production.models import ProductionGraph
 from app.production.service import GraphService
-from app.shared.base import Base
 from app.shared.enums import ProjectStage
 from app.shared.errors import ConflictError, ForbiddenError, NotFoundError, ValidationAppError
 from app.shared.security import hash_password
 from sqlalchemy import func, select, update
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _seed(
@@ -135,7 +122,7 @@ async def _seed(
         graph_node_id=node.id,
         idempotency_key=f"suggestion:{uuid4().hex}",
         input_hash="a" * 64,
-        status="completed",
+        status="queued",
         input_snapshot={"shot_id": str(shot.id), "stage": "video"},
         output_summary={"source": "test"},
         created_by=user.id,
@@ -156,6 +143,7 @@ async def _seed(
     session.add(artifact)
     await session.flush()
     run.result_artifact_id = artifact.id
+    run.status = "completed"
     shot.formal_video_artifact_id = artifact.id
     operation = ProviderOperation(
         node_run_id=run.id,

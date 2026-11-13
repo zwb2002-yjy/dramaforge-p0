@@ -18,21 +18,22 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User
-from app.assets.models import Episode, Scene, ScriptDocument, Shot
+from app.assets.models import Asset, Episode, Scene, ScriptDocument, Shot
 from app.assets.version_service import AssetVersionService
 from app.editing.models import EditSession
 from app.editing.proposal_plan import (
+    EditingRepairProposalCommand,
     EditSessionTimelineCommand,
     ReorderClipsOperation,
     SetClipDurationOperation,
     SetClipSubtitleOperation,
 )
 from app.production.experiment_service import (
-    ExperimentCreateInput,
-    ExperimentService,
+    ExperimentCreateBody,
+    create_experiment_branch,
 )
 from app.production.models import ShotReferenceBinding
-from app.shared.errors import ValidationAppError
+from app.shared.errors import AppError, ValidationAppError
 
 COMMAND_WHITELIST = frozenset(
     {
@@ -53,6 +54,7 @@ COMMAND_WHITELIST = frozenset(
         "scene.update_design",
         "experiment.create",
         "edit_session.apply_timeline_plan",
+        "editing.repair_proposal",
     }
 )
 
@@ -115,7 +117,7 @@ async def _episode_number_row(
         select(Episode).where(
             Episode.project_id == project_id,
             Episode.episode_number == raw_number,
-        )
+        ).with_for_update().execution_options(populate_existing=True)
     )
     if episode is None:
         if required:
@@ -147,7 +149,7 @@ async def _scene_number_row(
         select(Scene).where(
             Scene.episode_id == episode.id,
             Scene.scene_number == raw_number,
-        )
+        ).with_for_update().execution_options(populate_existing=True)
     )
     if scene is None:
         if required:
@@ -182,7 +184,7 @@ async def _shot_row(
             Shot.project_id == project_id,
             Shot.scene_id == scene.id,
             Shot.shot_number == raw_number,
-        )
+        ).with_for_update().execution_options(populate_existing=True)
     )
     if shot is None:
         if required:
@@ -538,7 +540,10 @@ async def _require_shot(
     shot_id = payload.get("shot_id")
     if shot_id is None:
         raise ProposalCommandError("payload requires shot_id")
-    shot = await session.get(Shot, UUID(str(shot_id)))
+    shot = await session.scalar(
+        select(Shot).where(Shot.id == UUID(str(shot_id)), Shot.project_id == project_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
     if shot is None or shot.project_id != project_id:
         raise ProposalCommandError("shot not found")
     if expected_target_version is not None and shot.version != expected_target_version:
@@ -603,7 +608,7 @@ async def _apply_edit_session_timeline_plan(
         select(EditSession).where(
             EditSession.id == command_payload.edit_session_id,
             EditSession.project_id == project_id,
-        )
+        ).with_for_update().execution_options(populate_existing=True)
     )
     if edit_session is None:
         raise ProposalCommandError("edit session not found")
@@ -683,6 +688,42 @@ async def _apply_edit_session_timeline_plan(
     await session.flush()
 
 
+async def _acknowledge_editing_repair(
+    session: AsyncSession, *, project_id: UUID, payload: dict[str, Any],
+    expected_target_version: int | None,
+) -> None:
+    try:
+        command = EditingRepairProposalCommand.model_validate(payload)
+    except ValidationError as exc:
+        raise ProposalCommandError("invalid editing repair proposal") from exc
+    edit = await session.scalar(
+        select(EditSession).where(EditSession.id == command.edit_session_id,
+                                   EditSession.project_id == project_id)
+        .with_for_update().execution_options(populate_existing=True)
+    )
+    if edit is None:
+        raise ProposalCommandError("edit session not found")
+    if expected_target_version is None or edit.version != expected_target_version:
+        raise ProposalCommandError("edit session version mismatch: proposal is stale",
+                                   details={"code": "PROPOSAL_STALE"})
+    clips = (edit.timeline or {}).get("clips")
+    if not isinstance(clips, list) or any(not isinstance(clip, dict) for clip in clips):
+        raise ProposalCommandError("invalid editing repair timeline")
+    timeline_shots = {str(clip.get("shot_id")) for clip in clips if clip.get("shot_id")}
+    requested = set(command.shot_ids)
+    if len(requested) != len(command.shot_ids) or not {
+        str(shot_id) for shot_id in requested
+    }.issubset(timeline_shots):
+        raise ProposalCommandError("repair shots must belong to the current timeline")
+    owned = set(await session.scalars(select(Shot.id).where(
+        Shot.project_id == project_id, Shot.id.in_(requested),
+    )))
+    if owned != requested:
+        raise ProposalCommandError("repair shot not found")
+    # The caller only records the proposal decision. Repair planning/execution
+    # keeps its independent explicit user gate; no timeline/production writes.
+
+
 async def _apply_reference(
     session: AsyncSession,
     *,
@@ -694,14 +735,18 @@ async def _apply_reference(
     shot_id = payload.get("shot_id")
     if shot_id is None:
         raise ProposalCommandError("payload requires shot_id")
-    shot = await session.get(Shot, UUID(str(shot_id)))
-    if shot is None or shot.project_id != project_id:
-        raise ProposalCommandError("shot not found")
+    shot = await _require_shot(session, project_id=project_id, payload=payload,
+                               expected_target_version=None)
     purpose = str(payload.get("purpose", "generic_reference"))
     if command == "shot_reference.add":
         asset_id = payload.get("asset_id")
         if asset_id is None:
             raise ProposalCommandError("payload requires asset_id")
+        asset = await session.scalar(select(Asset).where(
+            Asset.id == UUID(str(asset_id)), Asset.project_id == project_id,
+        ))
+        if asset is None:
+            raise ProposalCommandError("asset not found")
         binding = ShotReferenceBinding(
             project_id=project_id,
             shot_id=shot.id,
@@ -717,7 +762,8 @@ async def _apply_reference(
         if binding_id is None:
             raise ProposalCommandError("payload requires binding_id")
         existing_binding = await session.get(ShotReferenceBinding, UUID(str(binding_id)))
-        if existing_binding is None or existing_binding.project_id != project_id:
+        if (existing_binding is None or existing_binding.project_id != project_id
+                or existing_binding.shot_id != shot.id):
             raise ProposalCommandError("binding not found")
         await session.delete(existing_binding)
     await session.flush()
@@ -733,9 +779,19 @@ async def _apply_scene_update(
     scene_id = payload.get("scene_id")
     if scene_id is None:
         raise ProposalCommandError("payload requires scene_id")
-    scene = await session.get(Scene, UUID(str(scene_id)))
+    scene = await session.scalar(
+        select(Scene).join(Episode, Episode.id == Scene.episode_id).where(
+            Scene.id == UUID(str(scene_id)), Episode.project_id == project_id,
+        ).with_for_update().execution_options(populate_existing=True)
+    )
     if scene is None:
         raise ProposalCommandError("scene not found")
+    if expected_target_version is None or scene.version != expected_target_version:
+        raise ProposalCommandError(
+            "scene version mismatch: proposal is stale",
+            details={"code": "PROPOSAL_STALE", "expected_version": expected_target_version,
+                     "actual_version": scene.version},
+        )
     scene.design_state = dict(payload.get("design_state") or {})
     scene.version = (scene.version or 1) + 1
     await session.flush()
@@ -769,6 +825,7 @@ async def _apply_experiment_create(
     project_id: UUID,
     payload: dict[str, Any],
     actor_id: UUID,
+    command_key: str | None = None,
 ) -> None:
     from app.access.models import Project
 
@@ -778,17 +835,56 @@ async def _apply_experiment_create(
     actor = await session.get(User, actor_id)
     if actor is None:
         raise ProposalCommandError("actor not found")
-    await ExperimentService(session).create_experiment(
-        project=project,
-        actor=actor,
-        experiment_input=ExperimentCreateInput(
-            name=str(payload.get("name", "assistant experiment")),
-            shot_ids=[UUID(str(shot_id)) for shot_id in (payload.get("shot_ids") or [])],
-            model_overrides=dict(payload.get("model_overrides") or {}),
-            idempotency_key=str(payload.get("idempotency_key") or f"assistant-{UUID(int=0)}"),
-        ),
-    )
-    await session.flush()
+    # One command creates one isolated Shot branch, never a production run.
+    data = dict(payload)
+    shot_id = data.pop("shot_id", None)
+    shot_ids = data.pop("shot_ids", None)
+    if shot_ids is not None:
+        if not isinstance(shot_ids, list) or len(shot_ids) != 1:
+            raise ProposalCommandError("experiment requires exactly one source shot")
+        if shot_id is not None and str(shot_id) != str(shot_ids[0]):
+            raise ProposalCommandError("conflicting source shots")
+        shot_id = shot_ids[0]
+    if shot_id is not None:
+        if data.get("source_shot_id") is not None and str(data["source_shot_id"]) != str(shot_id):
+            raise ProposalCommandError("conflicting source shots")
+        data["source_shot_id"] = shot_id
+    if not data.get("source_shot_id"):
+        raise ProposalCommandError("experiment requires source_shot_id")
+    overrides = data.pop("model_overrides", {})
+    if not isinstance(overrides, dict):
+        raise ProposalCommandError("model_overrides must be an object")
+    if overrides:
+        if len(overrides) != 1:
+            raise ProposalCommandError("experiment requires one model override")
+        slot, model = next(iter(overrides.items()))
+        targets = {"video.shot": "video", "visual.keyframe": "keyframe"}
+        if slot not in targets:
+            raise ProposalCommandError("unsupported experiment model slot")
+        raw_parameters = data.get("parameters", {})
+        if not isinstance(raw_parameters, dict):
+            raise ProposalCommandError("experiment parameters must be an object")
+        parameters = dict(raw_parameters)
+        if parameters.get("target_node_key", targets[slot]) != targets[slot]:
+            raise ProposalCommandError("conflicting experiment target")
+        if data.get("selected_model", model) != model:
+            raise ProposalCommandError("conflicting experiment model")
+        data["selected_model"] = model
+        data["parameters"] = {**parameters, "target_node_key": targets[slot]}
+    data.setdefault("name", "assistant experiment")
+    # Item identity separates a replay from a new, identical user intention.
+    if command_key is not None:
+        data["idempotency_key"] = command_key
+    elif not data.get("idempotency_key"):
+        raise ProposalCommandError("experiment requires a stable command key")
+    try:
+        body = ExperimentCreateBody.model_validate(data)
+    except ValidationError as exc:
+        raise ProposalCommandError("invalid experiment branch payload") from exc
+    try:
+        await create_experiment_branch(session, project_id=project_id, actor_id=actor_id, body=body)
+    except AppError as exc:
+        raise ProposalCommandError(str(exc), details={"code": exc.code}) from exc
 
 
 class ProposalCommandRegistry:
@@ -808,6 +904,7 @@ class ProposalCommandRegistry:
         command: str,
         payload: dict[str, Any],
         expected_target_version: int | None = None,
+        command_key: str | None = None,
     ) -> None:
         if not self.is_known(command):
             raise ProposalCommandError(
@@ -871,6 +968,11 @@ class ProposalCommandRegistry:
                 payload=payload,
                 expected_target_version=expected_target_version,
             )
+        elif command == "editing.repair_proposal":
+            await _acknowledge_editing_repair(
+                self._session, project_id=project_id, payload=payload,
+                expected_target_version=expected_target_version,
+            )
         elif command in ("shot_reference.add", "shot_reference.remove"):
             await _apply_reference(
                 self._session,
@@ -894,23 +996,25 @@ class ProposalCommandRegistry:
                 actor_id=self._actor_id,
             )
         elif command == "shot.set_model_override":
-            # A model override is a model-swap experiment (P5 semantics).
+            # Model changes remain isolated until the branch decision gate.
             await _apply_experiment_create(
                 self._session,
                 project_id=project_id,
                 payload={
                     **payload,
-                    "model_overrides": payload.get("model_overrides") or {},
+                    "model_overrides": payload.get("model_overrides", {}),
                     "name": "assistant model override",
-                    "idempotency_key": str(
-                        payload.get("idempotency_key") or f"assistant-override-{UUID(int=0)}"
-                    ),
                 },
                 actor_id=self._actor_id,
+                command_key=command_key,
             )
         elif command == "experiment.create":
             await _apply_experiment_create(
-                self._session, project_id=project_id, payload=payload, actor_id=self._actor_id
+                self._session,
+                project_id=project_id,
+                payload=payload,
+                actor_id=self._actor_id,
+                command_key=command_key,
             )
         elif command in _EDIT_SESSION_VERSIONED:
             await _apply_edit_session_timeline_plan(

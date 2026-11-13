@@ -7,7 +7,6 @@ Provider/Runtime/SQL/Artifact fields.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, Protocol
@@ -21,8 +20,10 @@ from app.access.models import User
 from app.access.projects import ProjectService
 from app.assets.models import Episode, Scene, Shot
 from app.config import get_settings
+from app.director.forbidden_fields import reject_forbidden_fields
+from app.director.runtime.capabilities import require_director_runtime_available
 from app.director.runtime.start import DirectorRuntimeStartService
-from app.director.text_transport import DirectorInvocationEvidence, DirectorTextTransport
+from app.director.text_transport import DirectorInvocationEvidence, DirectorTextRuntimeAdapter
 from app.director.turn_service import DirectorTurnService
 from app.providers.model_profiles.slots import ModelSlot
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
@@ -32,65 +33,8 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-_FORBIDDEN_KEYS = frozenset(
-    {
-        "artifact",
-        "artifact_id",
-        "artifact_ids",
-        "artifact_url",
-        "column",
-        "execution",
-        "execution_id",
-        "execution_plan",
-        "node_run",
-        "node_run_id",
-        "node_run_ids",
-        "patch",
-        "production_lineage",
-        "provider",
-        "provider_model_id",
-        "provider_operation",
-        "provider_request",
-        "raw_sql",
-        "runtime",
-        "runtime_id",
-        "sql",
-        "sql_query",
-        "table",
-        "worker",
-        "worker_queue",
-    }
-)
-_FORBIDDEN_PREFIXES = (
-    "artifact_",
-    "execution_",
-    "node_run_",
-    "provider_",
-    "raw_sql_",
-    "runtime_",
-    "sql_",
-    "worker_",
-)
-
-
-def _normalize(key: object) -> str:
-    text = str(key).strip().replace("-", "_").replace(" ", "_")
-    text = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", text)
-    text = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", text)
-    return re.sub(r"_+", "_", text).lower()
-
-
 def _reject_forbidden(value: object, *, path: str = "recommendation") -> None:
-    if isinstance(value, Mapping):
-        for key, nested in value.items():
-            if _normalize(key) in _FORBIDDEN_KEYS or _normalize(key).startswith(
-                _FORBIDDEN_PREFIXES
-            ):
-                raise ValueError(f"{path} contains forbidden field: {key}")
-            _reject_forbidden(nested, path=f"{path}.{key}")
-    elif isinstance(value, list | tuple):
-        for index, nested in enumerate(value):
-            _reject_forbidden(nested, path=f"{path}[{index}]")
+    reject_forbidden_fields(value, path=path, message="contains forbidden field")
 
 
 class DirectorRecommendationOperation(_StrictModel):
@@ -203,11 +147,11 @@ class DirectorRecommendationService:
         session: AsyncSession,
         *,
         transport: DirectorRecommendationTransport | None = None,
-        text_transport: DirectorTextTransport | None = None,
+        text_transport: DirectorTextRuntimeAdapter | None = None,
     ) -> None:
         self._session = session
         self._transport = transport
-        self._text_transport = text_transport or DirectorTextTransport(session)
+        self._text_transport = text_transport or DirectorTextRuntimeAdapter(session)
 
     async def recommend(
         self,
@@ -266,6 +210,7 @@ class DirectorRecommendationService:
                     await self._transport.generate(context)
                 )
             else:
+                require_director_runtime_available(get_settings())
                 text_result = await self._text_transport.generate_structured(
                     project=project,
                     actor=actor,
@@ -361,7 +306,8 @@ class DirectorRecommendationService:
                 )
             await self._text_transport.mark_awaiting_user(text_result.turn)
             await DirectorRuntimeStartService(
-                self._session, settings=get_settings(),
+                self._session,
+                settings=get_settings(),
             ).accept_existing_detached_turn(
                 project=project,
                 actor=actor,

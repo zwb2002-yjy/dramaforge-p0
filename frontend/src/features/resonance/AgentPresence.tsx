@@ -1,3 +1,4 @@
+import { Button } from "../../components/ui";
 import { CircleCheck, CirclePause, Radio, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import "./resonance.css";
@@ -44,7 +45,7 @@ export function AgentPresence({ status, label }: { status: string; label: string
         <Icon size={23} />
       </span>
       <span role="status">{label}</span>
-      <button
+      <Button
         type="button"
         aria-label={sound ? "关闭状态声音" : "开启状态声音"}
         aria-pressed={sound}
@@ -63,7 +64,7 @@ export function AgentPresence({ status, label }: { status: string; label: string
         }}
       >
         {sound ? <Volume2 size={17} /> : <VolumeX size={17} />}
-      </button>
+      </Button>
     </div>
   );
 }

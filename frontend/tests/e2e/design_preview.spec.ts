@@ -37,6 +37,6 @@ test.describe("Visual System 2.0 preview", () => {
     }));
     expect(viewport.scrollWidth).toBeLessThanOrEqual(viewport.clientWidth);
     await expect(page.getByTestId("design-preview")).toBeVisible();
-    await expect(page.getByRole("link", { name: "返回项目大厅" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "返回我的项目" })).toBeVisible();
   });
 });

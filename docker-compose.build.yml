@@ -1,6 +1,6 @@
 services:
   migrate: &backend-build
-    image: dramaforge-backend:local
+    image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -9,6 +9,9 @@ services:
         DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
 
   api:
+    <<: *backend-build
+
+  litellm-network:
     <<: *backend-build
 
   dispatcher:
@@ -27,10 +30,11 @@ services:
     <<: *backend-build
 
   frontend:
-    image: dramaforge-frontend:local
+    image: ${DRAMAFORGE_FRONTEND_IMAGE:-dramaforge-frontend:dev}
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
         DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
         DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}

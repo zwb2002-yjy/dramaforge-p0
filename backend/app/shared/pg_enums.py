@@ -10,16 +10,6 @@ from sqlalchemy.types import TypeEngine
 from app.shared.enums import GraphStatus, OutboxStatus, ProjectStage
 
 
-def pg_str_enum(name: str, *values: str) -> Enum:
-    return Enum(
-        *values,
-        name=name,
-        create_constraint=False,
-        native_enum=True,
-        validate_strings=True,
-    )
-
-
 def pg_py_enum(enum_cls: type, name: str) -> Enum:
     return Enum(
         enum_cls,

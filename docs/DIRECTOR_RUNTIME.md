@@ -18,19 +18,27 @@ Director Runtime 是**独立于生产执行的编排 runtime**：它驱动导演
 | Proposal | 类型化 diff 提案（story / shot / editing 等），只能通过 typed command registry 应用；Assistant 永远 proposal-only。 |
 | NextAction | 导演给出的下一步建议；不是自动执行。 |
 | 用户决策 | 用户对 Proposal 的接受 / 部分接受 / 拒绝，持久化记录。 |
-| BusinessCheckpoints | 业务检查点（授权、确认）持久化，供恢复使用。 |
+| Runtime signals | 用户决定与生产事实作为持久事件/Runtime wakeup 恢复；不再维护第二套 BusinessCheckpoints 协调器。 |
 
 三种身份不得混淆：DirectorThread（对话容器）、DirectorTurn（轮次业务身份）、
 `runtime_execution_id`（实现层检查点执行身份，与 Turn 及 engine_version 绑定）。
 
+接受提案时先按 Project → Proposal → 目标行顺序加锁；目标行刷新后检查版本，
+两个提案不能同时覆盖同一版本。引用命令校验 Asset 的项目以及待删除 Binding 的 Shot 归属。
+`editing.repair_proposal` 是有界的需求确认：重验 EditSession 版本、时间线镜头及项目归属后，
+只登记提案决议，不修改时间线或生产事实，不创建 NodeRun；实际 Repair 仍需独立用户确认。
+
 ## 引擎与检查点
 
-- `DIRECTOR_RUNTIME_ENGINE` 选择**新启动**轮次的引擎，默认 `legacy`；
-  `langgraph` 只在硬门满足时分配给新轮次。选择一个引擎绝不静默运行另一个。
-- `langgraph` 需要 `DIRECTOR_CHECKPOINT_DATABASE_URL`（只给 worker-director），
+- `DIRECTOR_RUNTIME_ENGINE` 只接受 `langgraph`；执行、重放和恢复没有第二种引擎。
+- `langgraph` 需要 `DIRECTOR_CHECKPOINT_DATABASE_URL`（API 与 worker-director
+  均接收，用于能力报告与实际执行），
   使用私有 `director_runtime_checkpoints` schema（迁移 `20260910_0066`，
   角色 `dramaforge_director_checkpoint`，对 `PUBLIC` / `dramaforge_app` REVOKE，
   不进应用 model registry）。
+- checkpoint 未配置时，Story / Shot / Editing 的结构化文本入口与 Runtime start
+  共用可用性门；在创建 Turn / Invocation 或调用文本模型之前拒绝，避免返回文本后才失败。
+  MANUAL 媒体生产继续可用；配置存在不代表真实 checkpoint 连接已通过验收。
 - 引擎身份按 Turn 全有或全无（`ck_director_turn_engine_binding`），
   `runtime_execution_id` 唯一。
 - 代码位置：`backend/app/director/runtime`（engine ports、路由、投影、唤醒、
@@ -48,23 +56,54 @@ Director Runtime 是**独立于生产执行的编排 runtime**：它驱动导演
 - 导演 Worker 停止时，MANUAL 生产路径必须仍能完成全流程
   （空项目 → MP4/SRT）。
 
-## 有界 Agent loop
+## 当前有界执行与 Agent Loop
 
-每次唤醒先读取最新已提交事实，再执行有限步骤：
+当前实现保留结构化文本与 Workflow，并增加 API 同步承载的有界 Agent：
 
-```text
-读取事实与上下文 → 模型提出动作 → 结构与业务校验
-  ├─ 读取类 → 只读工具 → 继续
-  ├─ 建议/写入类 → 提案与授权 Gate
-  │    ├─ 等待用户 → 持久暂停（保存检查点，释放 Worker）
-  │    └─ 条件满足 → 提交业务命令（异步生产 → 持久暂停）
-  └─ 结束/受阻 → 完成或解释阻塞
-有效唤醒 → 回到读取事实
-```
+- 文本任务由 `DirectorTextRuntimeAdapter.generate_structured` 执行固定 schema
+  请求，必要时同一模型最多一次 schema 修复；调用身份和结果由 Invocation/Turn 持久化。
+- `LangGraphDirectorRuntime` 执行固定的 propose → await_decision →
+  submit_execution → await_execution → confirm_candidate 流程及拒绝/无需执行分支。
+  其中 propose 的领域 port 读取已有 Proposal/经验证 suggestion，不调用 LLM 自主选工具。
+- `agent_harness.py` 使用同一 LangGraph 引擎实现 model → tools → model，
+  `agent_service.py` 复用 Turn/Message/Invocation，独立 Agent lease 与工具审计。
+  目前开放项目、场景、镜头、资产七个 READ 工具、媒体能力检查/纯编译预览
+  两个只读模型工具与 `shot_prompt_propose`；后者
+  只创建一个镜头的一个 image/video prompt 待采纳提案，返回真实 Proposal 后停止。
+  Apply、媒体生成、Formal 和 Export 继续由已有用户入口控制。
+- 文本协议支持 assistant tool_calls / tool result / call_id、usage 与 stop_reason；
+  新 Agent 要求显式选择 `chat_tools_v1` 连接，旧 `chat_text_v1` 不自动升级。
+  合同和 mock 验证不表示真实模型工具选择质量已验收。
 
-运行护栏（可调，不是产品镜头数量限制）：每轮模型调用上限、只读工具上限、
-Schema 修复上限、总时限、无进展阈值、每次唤醒最多提交 1 个生产命令。
-禁止在图节点里长期 sleep、无限轮询 NodeRun 或让模型进程等待视频完成。
+图的步数护栏、稳定命令键、租约、stop、resume fencing 和检查点继续保留。
+生产执行只能消费已有用户决定及持久授权；图节点不能长期 sleep 或轮询等视频完成。
+每次恢复通过领域 port 核实最新已提交事实，不能用 checkpoint 中的观察值反写业务真相。
+
+Agent 默认上限为 6 次模型调用、12 次工具调用、120 秒；可以请求更低上限。
+同工具/参数/观察版本连续三次重复终止。工具参数错误返回模型纠正；版本变化停止为 stale。
+调用前持久化 Invocation，网络期间释放应用事务；同 request_key 只读取原回执，
+过期或重启遗留提交保留 unknown_submission，不重放模型请求。stop 不能撤销在途调用。
+stop 同事务保存未完成工具的取消回执，并把在途文本标为结果未知；迟到文本可以补全
+原 Invocation，迟到工具只补摘要，均不能复活轮次。终态读取也收敛遗留未完成记录。
+Skill 上下文复用 CreativeSkillSpec/Compiler，冻结 profile/version/hash；不赋予执行权限。
+实际模型上下文另读取 ProjectCreativeProfile 的全部已保存选择，以及当前 Scene/Shot
+各自已保存的 creative_capabilities；保留来源对象、版本、compiled_hash 和 value_sources。
+不把多个 Style 偷换成一个，也不把记录中的 pack 默认值提升成已接受提案；pending 推荐
+不作为已采用事实。上下文源版本参与轮次守卫，即使未调用 READ 工具，期间修改已保存
+场景也会使轮次 stale。没有保存快照时明确缺失，不从最新库默认值回填。
+上下文预算覆盖 messages + tools 的 UTF-8 JSON 字节。仅按完整历史轮次从旧到新省略，
+数据库历史窗口也按完整 completed Agent Turn 选择，以 Turn 时间/ID 和 Message ordinal
+稳定排序；窗口省略、旧消息省略及不完整组排除分别可见，不在预算器之前悄悄截消息。
+省略说明本身计入预算；系统约束、当前请求、工具定义和当前轮 call/result 不截断。
+checkpoint 保留完整审计 transcript，Invocation 保存实际发送投影及 hash/字节/省略数量。
+当前所需上下文超限明确停止。每次模型调用重验冻结的文本连接/模型修订，不静默换模型。
+ToolCall 校验 name/version/schema/args 完整身份，重复读取原回执；中断不重放，晚到结果
+只增加摘要，不覆盖已确认取消或失败。参数审计脱敏，公开活动只有 hash、版本、状态、耗时。
+Agent 提案通过专用的读取/Apply HTTP 接线进入现有 ProposalService；Apply 仍为显式用户
+操作，重复采用不二次改写，目标版本已变则拒绝覆盖，不创建 NodeRun 或 ProviderOperation。
+更多类型提案、自动 Workflow 交接、ThreadSummary 与 MCP
+仍按后续合同扩展，不因基础循环接通而宣称全部完成。依赖顺序见
+[ARCHITECTURE_MAPPING §5](ARCHITECTURE_MAPPING.md#director-agent-sequence)。
 
 ## 状态权威
 
@@ -93,6 +132,149 @@ Schema 修复上限、总时限、无进展阈值、每次唤醒最多提交 1 �
 
 - 可恢复轮次通过数据库函数/授权（迁移 20260908_0057–0060）跨进程重启恢复，
   复用经校验的 invocation 结果，不重复付费调用。
+  文本模型解析冻结版本化 Proxy 部署引用；已 prepared 但尚无 Invocation 的旧请求
+  要求显式重建和新请求键，不能重启后重新绑定模型。传输尝试次数与失败阶段持久化于
+  Invocation 摘要，独立于业务 schema repair 次数。
+    每次显式文本操作最多一个 primary Invocation 和一个同模型 schema-repair Invocation；
+    第二次结构校验失败即终止，无第三次修复或规则回退。修复输入截断为 20,000 字符原输出
+    和 4,000 字符错误说明。每个 Invocation 的 Proxy HTTP 默认各阶段超时为 120 秒，
+    仅已证明发送前的连接失败最多重试一次；这不是总墙钟截止或额外上游调用授权。
+    已可能发送的超时保留 `unknown_submission`，同请求键重入只读取原事实，不重发 primary
+    或 repair。界面模型证据显示格式修复次数，详细尝试与失败阶段留在原 Invocation。
 - 唤醒重放由 `wakeup_replay.py` 与 worker 启动恢复承担。
 - Assistant 边界：Shot 建议为非持久响应；editing 建议持久化
   DirectorProposal/DirectorProposalItem 并只能经 typed command registry 应用。
+
+## Proposal 创建与应用分工
+
+`director/proposal_creation.py` 只统一 DirectorProposal 父子行的持久创建：
+thread/project 归属、先父后子的 flush、输入项顺序、默认状态及 expected version。
+Story、Editing suggestion / repair、已授权 delegation 共用此处；领域 payload 和
+Story 的 `sort_order` 仍由 feature 构造，创建层不 commit、不执行 command。
+delegation 的 applied/accepted 记录必须在原有显式授权校验之后创建。
+
+这不是统一所有叫 Proposal 的实体：资产域 `ShotChangeProposal` 保留独立语义。
+Apply 的部分成功、幂等持久 item identity、Save/Formal/Export 用户门均未迁入创建层。
+
+## 实验提案与唯一分支
+
+Director 的 experiment.create / shot.set_model_override 在用户 Apply
+后调用与 HTTP 相同的 ExperimentBranch 创建服务，只创建 draft，不排队执行、
+不改写 Shot 的 Formal 或模型绑定。每条命令明确一个 source_shot_id；旧单 Shot
+payload 可规范化，含糊的多 Shot / 多模型覆盖拒绝，不静默选择一个。
+Director 幂等键由持久 proposal-item 身份提供，不信任模型自选键；同一项重试复用
+分支，不同项即使内容相同也可新建。HTTP 仍要求显式 idempotency_key。
+相同键不同创建输入冲突，已开始/已决定的分支重放不重置状态。
+Assistant context 只读取当前 Shot 的 ExperimentBranch，返回 experiment_id、
+selected_model 与参数；后续 start / decision 仍通过现有显式用户 Gate。
+ProductionExperiment / ShotExperiment 只保留历史存储，不再创建、采用或作为
+Assistant 当前事实；旧 Phase 5 服务测试由当前分支回归测试替代。
+
+
+<a id="director-agent-target"></a>
+## Director Agent 工具循环扩展合同（部分已实现，完整目标未完成）
+
+本节说明现有工具循环及待实施扩展，不授权启动新功能或付费验证；当前实现范围以上文
+及本节的明确标注为准，不代表完整目标已验收。固定文本任务与 LangGraph 编排继续运行；
+自有小型工具循环基于现有 Python / TextModelPort / Invocation。LangGraph 继续拥有
+跨用户、跨 Worker 等待的流程位置，Production
+继续拥有全部生产事实。不引入第二套模型注册表、调用日志、通用 Agent 平台或领域服务。
+引擎选型决策及启用备选的条件仍由 [ADR 0007](adr/0007-director-runtime-langgraph.md) 管理。
+
+### 现有实现定位
+
+| 职责 | 现有入口及边界 |
+|---|---|
+| 固定结构化文本任务 | [text_transport.py](../backend/app/director/text_transport.py) 组合 Turn、模型解析、Invocation 与同模型 schema repair；保留原 generate_structured 行为 |
+| 模型调用接口 | [text_model.py](../backend/app/director/text_model.py) 的 session-free TextModelPort；在同一接口增补 generate_turn，不另建 resolver |
+| 上下文 | [text_transport.py](../backend/app/director/text_transport.py) 调用 [context_builder.py](../backend/app/director/context_builder.py) 冻结本轮事实；thread 运行时在 [runtime/start.py](../backend/app/director/runtime/start.py) 组装提案快照 |
+| 持久流程 | [langgraph_adapter.py](../backend/app/director/runtime/langgraph_adapter.py) 与 [domain_tools.py](../backend/app/director/runtime/domain_tools.py)；propose 读取已存提案，不能把含执行命令的 workflow ports 整包暴露给模型 |
+| 事实读取与提案 | ProjectService、Scene/ShotWorkbenchService、AssetCardReadService、ModelInspectionService 和 proposal_creation；工具直接复用授权 service，不调用本机 API 或复制业务 SQL |
+
+DirectorTurn.revision 是业务 CAS，runtime_revision 是引擎投影水位，不能合并比较。
+checkpoint 中的 proposal、receipt、production fact 仅为观察和重放线索；恢复时重读领域
+事实。Assistant 的 Shot suggestion 与持久 Proposal 不是同一对象。
+
+### 模型与工具合同
+
+以下为完整目标合同；当前已实现消息/响应、只读工具、媒体模型工具与受限提案合同，
+其余扩展不能据本表当作已实现。继续使用 LiteLLM 通道，不增加厂商直连。
+
+| 类型 | 必要内容 |
+|---|---|
+| AgentMessage / AgentToolCall | system/user/assistant/tool；assistant 的调用列表；tool 的 call_id、name、结构化结果；arguments 必须为 JSON object，不接受可执行代码 |
+| AgentModelRequest | 有序消息、获准 ToolSpec、tool_choice、输出 schema、冻结模型解析、limits |
+| AgentModelResponse | text、tool_calls、usage、stop_reason、白名单 metadata；文本和工具皆空判 malformed |
+| AgentTurnResult | turn/thread、status、assistant_message_id、实际 proposal_ids、stop_reason、usage、version |
+| ToolSpec | name/version、description、输入/输出 schema、risk/side_effect、requires_confirmation、timeout_ms、source、schema_hash、结果大小上限 |
+| ToolContext | 服务端认证的 actor/workspace/project、turn/thread/UI scope、expected_versions、trace、cancel/deadline、只读 service factory；不交付 session 或凭据给模型 |
+| ToolResult / ToolError | call_id、ok、data 或安全错误 code/message/recoverable/retry_class/details、observed_versions、provenance、truncated、result_hash |
+
+ToolRegistry 返回按 scope 过滤的不可变 ToolSpec 集，并按 name/version 解析 handler。
+ToolExecutor 统一校验 schema（extra=forbid）、权限、归属、版本、超时、幂等及审计。
+模型能力元数据须区分 structured_json、tool_calling、tool_results、parallel_calls、上下文
+上限与已验证证据；未知能力拒绝，不按模型名称猜。精确模型、连接/部署修订与 invocation
+沿用 [MODEL_PROVIDER](MODEL_PROVIDER.md)，不能仅冻结可重新绑定的逻辑别名。
+
+当前开放 READ 和受限的 shot_prompt_propose；后续 ANALYZE 不得有生产副作用，
+PROPOSE 只能幂等创建真实 typed Proposal，不能 Apply 或执行生产。MUTATE、EXECUTE、DESTRUCTIVE 不向模型
+开放。工具描述、返回内容及 MCP annotations 均是不可信数据，不能提升权限或确认级别。
+
+### 循环、恢复与状态所有权
+
+1. 验证 thread/scope、request_key、UI context 和观察版本；同 key 同 payload 读取原
+   Turn/回执，异 payload 冲突。冻结模型、工具集合版本与 context_hash，领取单 Turn lease。
+2. 每次模型网络调用前持久记录 Invocation submission；工具先串行执行，每次重验权限
+   和 expected versions。工具参数、响应和错误保留 call_id，成对追加 assistant/tool 消息。
+3. 模型选择下一工具，runtime 仅校验与调度，不按用户关键词硬编码业务路径。
+   ToolNotFound、ToolInputInvalid、ModelToolCallInvalid、ToolExecutionFailed/SHOT_NOT_FOUND
+   作为安全且可恢复的 ToolResult 返回模型；ToolPermissionDenied 保留拒绝回执并立即以
+   permission_denied 终止，不再请求模型或执行同批后续工具，不能通过改参扩大 scope。ModelUnavailable 或
+   malformed 响应不换模型，仅执行已允许的同模型修复；未知模型提交阻塞并查 journal。
+4. 初始工程上限仍待校准：每 Turn 6 次模型请求、12 次工具调用、120 秒总时限；单工具
+   默认 5 秒且受总 deadline 约束；schema repair 最多一次并计入模型请求数。同工具、
+   规范化参数及观察版本连续重复 3 次即停止；参数纠正后的调用仍允许。
+5. 工具去重绑定 turn_id + step + call_id + args_hash + tool_version；同 call_id 异参数冲突。
+   READ 明确未执行或瞬时失败可有界重试；PROPOSE 超时先查 receipt。可能计费或
+   unknown_submission 的模型请求不盲重发。网络期间不持有 DB 事务，工具用短事务。
+6. stop 持久更新 epoch 后阻止新调用，不能撤销已提交网络操作，也不隐式取消既有授权
+   Production/Workflow。ContextStale/RevisionConflict 要求重读并重新提案，不改批准计划。
+7. 输出必须引用实际存在的 Proposal；达到 step/call/deadline 限制时返回已完成部分和原因。
+   Agent 输出提案后结束推理；用户接受后，独立授权才交给新的 Workflow Turn，关联
+   origin_agent_turn_id。Agent CAS 与 graph projector 不同时写同一 Turn。
+
+数据演进归 [DATA_MODEL](DATA_MODEL.md#director-agent-data)，API/宿主选择归
+[API](API.md#director-agent-api)。完成回答/提案用 completed；限额或不可恢复错误用
+failed + stop_reason，用户 stop 用 cancelled，版本冲突用 stale；blocked 是结果/UI 分类，
+不另增数据库状态。旧引擎身份、checkpoint、submission 与历史记录不补造、不改义。
+
+### 上下文、Skill/Style 与可选外部工具
+
+上下文分为版本化安全/工具合同、服务端验证的 UI scope、有来源及覆盖范围的历史摘要、
+带 observed_versions 的实时领域读取。压缩保留当前请求、安全规则、scope/versions 与
+未闭合 call/result 对；先确定性裁剪，LLM 摘要计入调用上限。未知提交不重算历史。
+只保留业务所需 transcript、动作和结果摘要，不保存隐藏思维链；公开事件不含 Key、
+Authorization、签名 URL、完整敏感 payload 或原始素材。
+
+复用 Thread/Message、ProjectCreativeProfile 和可失效的 ThreadSummary，不引入向量库。
+Formal、模型 Binding、生产状态实时读取，不由 Memory 认定。Skill 是方法，Style 是表达；
+复用 CreativeSkillSpec/Stack、StylePack、ShotLanguageCompiler 与已有编译快照。
+优先级仍为显式用户 > 已接受提案 > project override > pack default；未采纳推荐保持 pending。
+人物一致性仍依赖参考素材、模型、冻结参数和审核，不能承诺开启 Skill 就能保证一致。
+
+MCP 延后且不是首版阻塞项：受控 connect → tools/list → schema/大小/风险校验 →
+带 server 身份的 namespace registry → tools/call → ToolResult。schema 变化生成新版本/hash，
+不改变运行中 Turn 的工具定义。凭据在服务端，文件与网络均受限；外部工具不管理循环或
+领域事实。不强制把内部服务 MCP 化，不开放 unrestricted shell/filesystem/browser control，
+也不因厂商 hosted tool 或 readOnly 标注而继承执行权限。
+
+### 验收边界
+
+依赖顺序见 [ARCHITECTURE_MAPPING](ARCHITECTURE_MAPPING.md#director-agent-sequence)。
+只读组合验收仍须分别证明：模型能按上下文选择不同工具顺序、实际调用授权 service、
+错误带 call_id 回到模型、模型能改参/list 后纠正、step/call/deadline 均能终止、重启/stop/
+租约/幂等成立、压缩不拆工具对、数据库前后无 Shot/Asset/Formal/NodeRun/ProviderOperation
+写入（会话与审计允许）。每步模型身份、上下文 hash、工具版本、参数 hash、观察版本、
+延迟、错误及 usage/cost_status 可追溯；未知费用不猜值。
+Mock 只证明程序机制；真实模型工具选择质量须单独授权与验收，不继承历史付费许可。
+各阶段退出时停止新受理、保留既有提案/审计/冻结 Workflow 的恢复，不删除历史数据。

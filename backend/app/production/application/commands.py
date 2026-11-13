@@ -25,15 +25,22 @@ from app.shared.errors import NotFoundError, ValidationAppError
 
 
 def execution_input(
-    project_id: UUID, shot_id: UUID, body: ExecutionPlanBody,
+    project_id: UUID,
+    shot_id: UUID,
+    body: ExecutionPlanBody,
 ) -> WorkbenchExecutionInput:
     return WorkbenchExecutionInput(
-        project_id=project_id, shot_id=shot_id, stage=body.stage,
-        prompt=body.prompt, semantic_intent=body.semantic_intent, mode_id=body.mode_id,
+        project_id=project_id,
+        shot_id=shot_id,
+        stage=body.stage,
+        prompt=body.prompt,
+        semantic_intent=body.semantic_intent,
+        mode_id=body.mode_id,
         requested_model_id=body.requested_model_id,
         requested_binding_id=body.requested_binding_id,
         accept_approximations=body.accept_approximations,
-        references=body.references, expected_shot_version=body.expected_shot_version,
+        references=body.references,
+        expected_shot_version=body.expected_shot_version,
     )
 
 
@@ -48,8 +55,11 @@ async def execution_receipt(session: AsyncSession, run: NodeRun) -> ExecutionRec
             details={"code": "EXECUTION_RECEIPT_INVALID"},
         )
     return ExecutionReceipt(
-        node_run_id=run.id, graph_id=version.graph_id, graph_version_id=run.graph_version_id,
-        status=run.status, plan_fingerprint=fingerprint,
+        node_run_id=run.id,
+        graph_id=version.graph_id,
+        graph_version_id=run.graph_version_id,
+        status=run.status,
+        plan_fingerprint=fingerprint,
     )
 
 
@@ -58,8 +68,13 @@ class ProductionCommands:
         self._session = session
 
     async def submit_user_execution(
-        self, *, actor: User, project_id: UUID, shot_id: UUID,
-        body: ExecutionBody, command_key: str | None,
+        self,
+        *,
+        actor: User,
+        project_id: UUID,
+        shot_id: UUID,
+        body: ExecutionBody,
+        command_key: str | None,
     ) -> ExecutionReceipt:
         """Accept an explicit user command; actor comes from trusted auth context.
 
@@ -67,26 +82,34 @@ class ProductionCommands:
         grant. Its separate authorization gate is mandatory before submission.
         """
         project = await ProjectService(self._session).get_project_for_owner(
-            project_id=project_id, actor=actor,
+            project_id=project_id,
+            actor=actor,
         )
         service = WorkbenchExecutionService(self._session, user_id=actor.id)
         identity = workbench_request_hash(body.model_dump(mode="json"))
         await service.lock_command_scope(project_id=project_id)
         existing = await service.find_command_receipt(
-            project_id=project_id, shot_id=shot_id, stage=body.stage,
-            command_key=command_key, plan_fingerprint=body.plan_fingerprint,
+            project_id=project_id,
+            shot_id=shot_id,
+            stage=body.stage,
+            command_key=command_key,
+            plan_fingerprint=body.plan_fingerprint,
             expected_request_hash=identity,
         )
         if existing is not None:
             return await execution_receipt(self._session, existing)
         shot = await self._session.get(
-            Shot, shot_id, with_for_update=True, populate_existing=True,
+            Shot,
+            shot_id,
+            with_for_update=True,
+            populate_existing=True,
         )
         if shot is None or shot.project_id != project_id:
             raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
         if shot.version != body.expected_shot_version:
             raise ValidationAppError(
-                "shot changed since plan preview", details={"code": "SHOT_VERSION_MISMATCH"},
+                "shot changed since plan preview",
+                details={"code": "SHOT_VERSION_MISMATCH"},
             )
         command_input = execution_input(project_id, shot_id, body)
         plan = await service.build_plan(project=project, execution_input=command_input)
@@ -100,12 +123,29 @@ class ProductionCommands:
                 "accepted approximation set does not match the rebuilt plan",
                 details={"code": "ACCEPTED_APPROXIMATIONS_MISMATCH"},
             )
+        preview = await service.preview_compiler_contract(project=project, plan=plan)
+        if (
+            preview is None
+            or preview.readiness != "contract_validated"
+            or preview.wire_fingerprint is None
+            or body.compiler_wire_fingerprint != preview.wire_fingerprint
+        ):
+            raise ValidationAppError(
+                "This generation request has no matching acknowledged Compiler proof",
+                details={"code": "COMPILER_WIRE_CONFIRMATION_REQUIRED"},
+            )
         run = await service.create_and_dispatch(
-            project=project, execution_input=command_input,
-            idempotency_key_override=command_key, prepared_plan=plan, request_hash=identity,
+            project=project,
+            execution_input=command_input,
+            idempotency_key_override=command_key,
+            prepared_plan=plan,
+            request_hash=identity,
+            confirmed_compiler_wire_fingerprint=preview.wire_fingerprint,
         )
         await append_production_notice(
-            self._session, project_id=project_id, actor_id=actor.id,
+            self._session,
+            project_id=project_id,
+            actor_id=actor.id,
             notice=ExecutionAccepted(shot_id=shot_id, node_run_id=run.id),
         )
         return await execution_receipt(self._session, run)

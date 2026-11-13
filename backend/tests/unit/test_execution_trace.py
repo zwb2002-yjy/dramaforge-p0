@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 import pytest
@@ -10,21 +9,9 @@ from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
 from app.execution.models import Artifact, NodeRun, ProviderOperation
 from app.production.trace import build_execution_trace
-from app.shared.base import Base
 from app.shared.errors import NotFoundError
 from app.shared.security import hash_password
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _seed_run_with_trace(
@@ -67,7 +54,7 @@ async def _seed_run_with_trace(
         graph_node_id=node.id,
         idempotency_key=f"trace:{uuid4().hex}",
         input_hash="a" * 64,
-        status="completed",
+        status="queued",
         input_snapshot={
             "node_key": "video",
             "workbench_plan": {
@@ -122,6 +109,9 @@ async def _seed_run_with_trace(
     )
     session.add(artifact)
     await session.flush()
+    run.result_artifact_id = artifact.id
+    run.status = "completed"
+    await session.flush()
     return project, run, user
 
 
@@ -174,6 +164,49 @@ async def test_trace_raises_for_unknown_run(session: AsyncSession) -> None:
             project_id=project.id,
             run_id=uuid4(),
         )
+
+
+@pytest.mark.asyncio
+async def test_trace_exposes_stored_http_evidence_and_does_not_invent_it_for_history(session):
+    from sqlalchemy import select
+
+    project, run, _ = await _seed_run_with_trace(session)
+    op = (
+        await session.scalars(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+    ).one()
+    op.response_summary = {
+        "submission_diagnostics": {
+            "phase": "response_received",
+            "endpoint": "https://api.agnes-ai.cn/v1/videos",
+            "duration_ms": 145,
+            "http_status": 503,
+            "response_request_id": "12345678-1234-1234-1234-123456789abc",
+            "response_error": "Old private prompt fragment",
+        }
+    }
+    run.status = "failed"
+    run.error_code = "PROVIDER_CREATE_FAILED"
+    run.error_summary = "Agnes video HTTP 503; no task ID: Old private prompt fragment"
+    await session.flush()
+    trace = await build_execution_trace(session, project_id=project.id, run_id=run.id)
+    assert (
+        trace.submission_diagnostics.response_request_id == "12345678-1234-1234-1234-123456789abc"
+    )
+    assert trace.submission_diagnostics.http_status == 503
+    assert trace.submission_diagnostics.response_error == "Provider returned HTTP 503"
+    assert "Old private prompt fragment" not in trace.model_dump_json()
+    assert "Old private prompt fragment" in run.error_summary  # No rewrite of stored evidence.
+    assert (
+        op.response_summary["submission_diagnostics"]["response_error"]
+        == "Old private prompt fragment"
+    )
+    assert trace.error_code == "PROVIDER_CREATE_FAILED"
+    op.response_summary = {"create_http_status": 503}
+    await session.flush()
+    historical = await build_execution_trace(session, project_id=project.id, run_id=run.id)
+    assert historical.submission_diagnostics is None
 
 
 @pytest.mark.asyncio

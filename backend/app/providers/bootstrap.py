@@ -17,36 +17,22 @@ from collections.abc import Callable
 from typing import Any
 
 from app.providers.adapter import ModelAdapter
-from app.providers.capabilities import Capability
-from app.providers.contracts.common import (
-    ExecutionContext,
-    ProviderCancelResult,
-    ProviderCostResult,
-    ProviderCreateResult,
-    ProviderPollResult,
-    ResolvedArtifact,
-)
 from app.providers.manifest import (
-    CapabilitySpec,
     ModelCapabilityManifest,
     ModelManifest,
-    ParameterSpec,
-    SubmissionSemantics,
     to_v3_model_manifest,
 )
 from app.providers.registry import ModelRegistry
-from app.providers.translation import TranslationResult
 from app.providers.transport import AuthSpec, PollSpec, TransportProfile
 from app.providers.transport_registry import TransportRegistry
 
 # The LiteLLM text model registered in the default V3 registry (M7/M8). The
 # manifest carries a ``ModelBackendBinding`` so the generic adapter knows which
 # gateway model to send. P0 exposes ``text.generate`` through the gateway.
-# The text-llm model is a *bootstrap bridge* (fix spec §34/§103): it maps to the
-# configurable ``compatibility-text`` logical alias so the gateway can serve the compatibility
-# BYOK text path while logical aliases (script-quality / script-fast) are
-# registered separately by :func:`register_litellm_logical_models`.
-LITELLM_TEXT_MODEL_ID = "litellm/text-llm"
+# The text model is the bootstrap identity for the configured LiteLLM logical
+# alias. The canonical aliases (script-quality / script-fast) are registered by
+# :func:`register_litellm_logical_models` and route through the same gateway.
+DEFAULT_TEXT_MODEL_ID = "litellm/script-quality"
 
 # Transport profiles. One profile per wire endpoint family; a model's
 # CapabilitySpec picks its profile via ``transport_profile_id``.
@@ -146,59 +132,6 @@ def transport_profile_id_for(
     return _TRANSPORT_BY_KEY.get((provider_type, protocol_profile, media_kind))
 
 
-class UnavailableAdapter:
-    """LEGACY_COMPAT: Phase 2 placeholder. Real ModelAdapter V2 bridges are
-    registered by Phase 3 (:mod:`app.providers.adapters_v2`). This stub keeps
-    the registry complete for capability/manifest queries while never sending a
-    wire request."""
-
-    def __init__(self, manifest: ModelManifest) -> None:
-        self._manifest = manifest
-        self.provider_id = manifest.provider_id
-        self.model_id = manifest.id
-
-    @property
-    def manifest(self) -> ModelManifest:
-        return self._manifest
-
-    async def translate(
-        self,
-        capability: Capability,
-        request: Any,
-        resolved_artifacts: dict[str, ResolvedArtifact],
-    ) -> TranslationResult:
-        raise NotImplementedError("V2 adapter is not wired yet (Phase 3); registry is query-only")
-
-    async def create(
-        self,
-        capability: Capability,
-        request: Any,
-        context: ExecutionContext,
-    ) -> ProviderCreateResult:
-        raise NotImplementedError("V2 adapter is not wired yet (Phase 3); registry is query-only")
-
-    async def poll(
-        self,
-        remote_task_id: str,
-        context: ExecutionContext,
-    ) -> ProviderPollResult:
-        raise NotImplementedError("V2 adapter is not wired yet (Phase 3)")
-
-    async def cancel(
-        self,
-        remote_task_id: str,
-        context: ExecutionContext,
-    ) -> ProviderCancelResult:
-        raise NotImplementedError("V2 adapter is not wired yet (Phase 3)")
-
-    async def fetch_cost(
-        self,
-        remote_task_id: str,
-        context: ExecutionContext,
-    ) -> ProviderCostResult:
-        raise NotImplementedError("V2 adapter is not wired yet (Phase 3)")
-
-
 LITELLM_CHAT_TRANSPORT = TransportProfile(
     id="litellm-chat-v1",
     method="POST",
@@ -233,16 +166,11 @@ def _register_model(
     key = (manifest.provider_type, manifest.protocol_profile, manifest.media_kind)
     transport_profile_id = _TRANSPORT_BY_KEY.get(key)
     if transport_profile_id is None:
-        return
+        raise ValueError(f"model catalog has no registered transport profile for {key}")
     transport_profile = transport_registry.get(transport_profile_id)
     v3_manifest = to_v3_model_manifest(manifest, transport_profile_id=transport_profile.id)
-    # Phase 3 replaces the placeholder with a real bridge; both share the same
-    # signature so bootstrap does not change.
-    adapter = (
-        adapter_factory(v3_manifest)
-        if adapter_factory is not None
-        else UnavailableAdapter(v3_manifest)
-    )
+    v3_manifest.metadata["inspection_only"] = True
+    adapter = adapter_factory(v3_manifest) if adapter_factory is not None else None
     model_registry.register(v3_manifest, adapter)
 
 
@@ -256,20 +184,24 @@ def build_v3_registry(
     ``adapter_factories`` maps a V3 model id to a callable building its V2
     adapter (Phase 3). When absent, query-only placeholder adapters are used.
     """
-    from app.providers.catalog_seed_data import seed_manifests_for
+    from app.providers.catalog_loader import active_manifests_for
 
     model_registry = ModelRegistry()
     transport_registry = TransportRegistry()
     _register_transports(transport_registry)
 
-    manifests = seed_manifests or [
-        ModelCapabilityManifest.model_validate(item)
-        for item in (
-            list(seed_manifests_for(provider_type="agnes"))
-            + list(seed_manifests_for(provider_type="volcengine"))
-            + list(seed_manifests_for(provider_type="minimax"))
-        )
-    ]
+    if seed_manifests is None:
+        manifests = [
+            ModelCapabilityManifest.model_validate(item)
+            for item in (
+                list(active_manifests_for(provider_type="agnes"))
+                + list(active_manifests_for(provider_type="volcengine"))
+                + list(active_manifests_for(provider_type="minimax"))
+            )
+            if item.get("catalog_source") != "protocol_contract"
+        ]
+    else:
+        manifests = seed_manifests
     for manifest in manifests:
         v3_id = f"{manifest.provider_type}/{manifest.model_id}"
         factory = (adapter_factories or {}).get(v3_id)
@@ -277,58 +209,15 @@ def build_v3_registry(
     return model_registry, transport_registry
 
 
-def litellm_text_manifest() -> ModelManifest:
-    """V3 manifest for the generic LiteLLM text model (spec §113/§114).
-
-    Bootstrap bridge (fix spec §34/§103): the ``gateway_model`` is the configurable
-    logical alias, NOT an upstream provider
-    model (fix spec §32/§33 — DramaForge requests a logical group; LiteLLM's
-    Router picks the deployment). Prefer ``litellm/<logical-alias>`` models
-    registered by :func:`register_litellm_logical_models` in new profiles.
-    """
+def default_text_manifest() -> ModelManifest:
+    """Use the same logical-model contract as every explicit text profile."""
     from app.config import get_settings
-    from app.providers.model_profiles.models import ModelBackendBinding
+    from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
 
-    settings = get_settings()
-    backend = ModelBackendBinding(
-        kind="litellm",
-        gateway_model=settings.litellm_text_gateway_model or "legacy-text",
-        api_mode="chat",
-        provider_id="litellm",
-        model_family="litellm",
-    )
-    return ModelManifest(
-        schema_version="1",
-        manifest_version="1",
-        id=LITELLM_TEXT_MODEL_ID,
-        provider_id="litellm",
-        model_name="text-llm",
-        display_name="LiteLLM 文本模型（provider adapter bridge）",
-        model_family="litellm",
-        capability_specs={
-            Capability.TEXT_GENERATE: CapabilitySpec(
-                capability=Capability.TEXT_GENERATE,
-                common_options={
-                    "max_tokens": ParameterSpec(type="integer", ui_component="number"),
-                    "system": ParameterSpec(type="string", ui_component="textarea"),
-                    "temperature": ParameterSpec(type="number", ui_component="number"),
-                },
-                native_options={},
-                transport_profile_id="litellm-chat-v1",
-            )
-        },
-        execution_mode="sync",
-        supports_cancel=False,
-        submission_semantics=SubmissionSemantics(),
-        metadata={
-            "backend": backend.model_dump(mode="json"),
-            "legacy_compat": True,
-            "bootstrap_bridge": True,
-        },
-    )
+    return litellm_logical_manifest(get_settings().litellm_text_gateway_model)
 
 
-def register_litellm_text_models(
+def register_default_text_model(
     model_registry: ModelRegistry,
     *,
     adapter_factory: Callable[[ModelManifest], ModelAdapter] | None = None,
@@ -336,7 +225,7 @@ def register_litellm_text_models(
     """Register the LiteLLM text model(s) in a V3 registry (M7)."""
     from app.providers.litellm_adapter import LiteLLMModelAdapter
 
-    manifest = litellm_text_manifest()
+    manifest = default_text_manifest()
     if model_registry.get_or_none(manifest.id) is not None:
         return
     adapter = (
@@ -351,9 +240,8 @@ def default_v3_registry() -> tuple[ModelRegistry, TransportRegistry]:
     built from the provider plugin's compiler + runtime factories. A bridge
     submits only when the underlying provider is configured (settings key);
     otherwise it fails closed exactly like the runtime does."""
-    from app.config import get_settings
     from app.providers.adapters_v2 import BridgeComponents, ProviderAdapterBridge
-    from app.providers.catalog_seed_data import seed_manifests_for
+    from app.providers.catalog_loader import active_manifests_for
     from app.providers.registry import get_plugin
 
     factories: dict[str, Callable[[ModelManifest], ModelAdapter]] = {}
@@ -365,10 +253,9 @@ def default_v3_registry() -> tuple[ModelRegistry, TransportRegistry]:
         if plugin.runtime_factory is None or plugin.compiler_factory is None:
             return
         image_compiler, video_compiler = plugin.compiler_factory()
-        runtime = plugin.runtime_factory(
-            settings=get_settings(),
-            host=plugin.default_base_url,
-        )
+        # Catalog adapters only inspect and compile. Media submission belongs
+        # exclusively to the frozen DB-bound Production execution path.
+        runtime = None
 
         def factory(v3_manifest: ModelManifest) -> ModelAdapter:
             return ProviderAdapterBridge(
@@ -384,14 +271,14 @@ def default_v3_registry() -> tuple[ModelRegistry, TransportRegistry]:
 
         factories[v3_id] = factory
 
-    for manifest_dict in seed_manifests_for(provider_type="agnes"):
+    for manifest_dict in active_manifests_for(provider_type="agnes"):
         build(manifest_dict["media_kind"], manifest_dict)
-    for manifest_dict in seed_manifests_for(provider_type="volcengine"):
+    for manifest_dict in active_manifests_for(provider_type="volcengine"):
         build(manifest_dict["media_kind"], manifest_dict)
-    for manifest_dict in seed_manifests_for(provider_type="minimax"):
+    for manifest_dict in active_manifests_for(provider_type="minimax"):
         build(manifest_dict["media_kind"], manifest_dict)
     registry, transport_registry = build_v3_registry(adapter_factories=factories)
-    register_litellm_text_models(registry)
+    register_default_text_model(registry)
     # Static logical aliases (script-quality / script-fast, fix spec §34/§104).
     # Discovery sync (F8) can add more aliases from GET /v1/models later.
     from app.providers.litellm_gateway.model_catalog import (

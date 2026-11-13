@@ -1,19 +1,20 @@
 """Unified Provider runtime/compiler contracts and resolver (stage B).
 
 Single wire owner: a Compiler produces ``CompiledVideoRequest.wire_request`` and
-the Runtime ``submit_*`` sends it verbatim. Existing HubClient methods become
-compatible wrappers over the same low-level transport. Resume is driven by a
+the Runtime ``submit_*`` sends it verbatim. Read-only account task probes use
+the same Runtime polling surface. Resume is driven by a
 sanitized :class:`ProviderResumeToken` persisted on ``ProviderOperation`` —
 never by current Feature Flags or the current Project binding.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol, cast
 from uuid import UUID
 
-from pydantic import BaseModel, Field, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from sqlalchemy import select
 
 from app.providers.catalog_models import ModelCatalogEntry
@@ -31,12 +32,14 @@ from app.providers.models import (
     ProviderConnectionRevision,
     ProviderModelBinding,
 )
-from app.providers.registry import ProviderPlugin
 from app.security.models import EncryptedProviderCredential
-from app.shared.errors import NotFoundError, ValidationAppError
+from app.shared.errors import ValidationAppError
 
 if TYPE_CHECKING:
     from app.providers.model_resolution import ExecutionModelResolution
+    from app.providers.registry import ProviderPlugin
+
+PROVIDER_CONTENT_URI = "provider-content"
 
 
 class ProviderResumeToken(BaseModel):
@@ -49,6 +52,47 @@ class ProviderResumeToken(BaseModel):
     remote_secondary_id: str | None = None
     query_kind: str | None = None
     opaque_state: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+def require_resume_token_identity(
+    token: ProviderResumeToken,
+    *,
+    remote_task_id: str | None,
+    provider_type: str,
+    protocol_profile: str | None,
+    remote_secondary_id: str | None,
+) -> None:
+    """Validate persisted remote identity before constructing or calling a Runtime."""
+    if (
+        not remote_task_id
+        or token.remote_task_id != remote_task_id
+        or token.provider_type != provider_type
+        or token.protocol_profile != protocol_profile
+        or token.remote_secondary_id != remote_secondary_id
+    ):
+        raise ValidationAppError(
+            "恢复令牌与已提交任务身份不一致，必须人工核对",
+            details={"code": "RESUME_TOKEN_IDENTITY_MISMATCH"},
+        )
+
+
+def require_operation_identity(identity: ExecutionIdentitySnapshot, operation: Any) -> None:
+    """Audit and recovery share the exact persisted input/model identity check."""
+    for actual, expected in (
+        (operation.connection_id, identity.connection_id),
+        (operation.provider_connection_revision_id, identity.connection_revision_id),
+        (operation.credential_revision_id, identity.credential_revision_id),
+        (operation.model_binding_id, identity.provider_model_binding_id),
+        (operation.catalog_entry_id, identity.catalog_entry_id),
+        (operation.capability_manifest_hash, identity.manifest_hash),
+        (operation.actual_model, identity.invoke_model_value),
+        (operation.request_fingerprint, identity.request_fingerprint),
+    ):
+        if actual != expected:
+            raise ValidationAppError(
+                "已提交任务与冻结执行身份不一致，必须人工核对",
+                details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+            )
 
 
 class CompiledVideoRequest(BaseModel):
@@ -75,6 +119,85 @@ class CompiledImageRequest(BaseModel):
     reference_fingerprints: list[str] = Field(default_factory=list)
 
 
+def validate_compiled_submission(
+    request: CompiledImageRequest | CompiledVideoRequest,
+    *,
+    provider_type: str,
+    protocol_profile: str,
+    operation: Literal["image.generate", "video.generate"],
+) -> None:
+    """Check the existing JSON media seam before credentials reach the network.
+
+    This is not payload compilation or model selection. The compiler's chosen
+    wire model must match its envelope, and the envelope must target this runtime.
+    Never repair a mismatch by substituting a configured default or rebuilding
+    the body. Errors intentionally omit payloads and credential values.
+    """
+    if (request.provider_type, request.protocol_profile, request.operation) != (
+        provider_type,
+        protocol_profile,
+        operation,
+    ):
+        raise ValueError("compiled request does not match runtime provider/profile/operation")
+    if not request.model_id.strip() or request.wire_request.get("model") != request.model_id:
+        raise ValueError("compiled wire model does not match request model_id")
+
+
+class SubmissionDiagnostics(BaseModel):
+    """Observed submission boundary, never a claim of billing or inference."""
+
+    # accepted means a remote ID was obtained for reconciliation, including on
+    # an error HTTP response; it does not certify successful task acceptance.
+    # Free response text is unsafe even after token replacement. The same
+    # projection applies when reading older stored diagnostics.
+
+    model_config = ConfigDict(extra="forbid")
+
+    phase: Literal[
+        "not_sent", "connection_failed", "outcome_unknown", "response_received", "accepted"
+    ]
+    endpoint: str = Field(max_length=500)
+    method: Literal["POST"] = "POST"
+    duration_ms: float = Field(ge=0)
+    http_status: int | None = None
+    response_request_id: str | None = Field(default=None, max_length=200)
+    edge_request_id: str | None = Field(default=None, max_length=200)
+    response_server: str | None = Field(default=None, max_length=100)
+    response_type: Literal["json", "html", "text", "empty", "other"] | None = None
+    response_error: str | None = Field(default=None, max_length=500)
+    network_error: str | None = Field(default=None, max_length=100)
+
+    @model_validator(mode="after")
+    def restrict_response_metadata(self) -> SubmissionDiagnostics:
+        self.response_error = (
+            f"Provider returned HTTP {self.http_status}"
+            if self.http_status is not None and 400 <= self.http_status <= 599
+            else None
+        )
+        if self.response_request_id and not re.fullmatch(
+            r"(?:req[-_])?(?:[0-9a-fA-F]{16,64}|"
+            r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})",
+            self.response_request_id,
+        ):
+            self.response_request_id = None
+        if self.edge_request_id and not re.fullmatch(
+            r"[0-9a-fA-F]{16,32}(?:-[A-Z]{3})?", self.edge_request_id
+        ):
+            self.edge_request_id = None
+        if self.response_server and not re.fullmatch(
+            r"(?:nginx|cloudflare|envoy|Apache)(?:/[0-9.]+)?", self.response_server
+        ):
+            self.response_server = None
+        if self.network_error not in {
+            None, "ConnectError", "ConnectTimeout", "ReadError", "ReadTimeout",
+            "WriteError", "WriteTimeout", "CloseError", "PoolTimeout", "ProxyError",
+            "LocalProtocolError", "RemoteProtocolError", "UnsupportedProtocol",
+            "TransportError",
+        }:
+            self.network_error = "TransportError"
+        return self
+
+
 class SubmissionResult(BaseModel):
     """One create attempt outcome. ``status`` mirrors the provider_operation
     status vocabulary so the caller can persist it directly. Synchronous image
@@ -89,10 +212,12 @@ class SubmissionResult(BaseModel):
     request_summary: dict[str, JsonValue] = Field(default_factory=dict)
     resume_token: ProviderResumeToken | None = None
     artifact_uri: str | None = None
+    artifact_bytes: bytes | None = Field(default=None, exclude=True, repr=False)
     error_code: str | None = None
     error: str | None = None
     retry_after_seconds: float | None = None
     http_status: int | None = None
+    submission_diagnostics: SubmissionDiagnostics | None = None
 
 
 class PollResult(BaseModel):
@@ -112,9 +237,9 @@ class CostResult(BaseModel):
     amount: float | None = None
     currency: str = "USD"
     units: float = 1.0
-    cost_status: Literal[
-        "reported", "estimated_only", "not_reported", "reconciled"
-    ] = "not_reported"
+    cost_status: Literal["reported", "estimated_only", "not_reported", "reconciled"] = (
+        "not_reported"
+    )
 
     @model_validator(mode="after")
     def infer_reported_amount(self) -> CostResult:
@@ -135,6 +260,10 @@ class ResolvedReference:
     content_url: str | None = None
     mime_type: str = "image/png"
     fingerprint: str | None = None
+    byte_size: int | None = None
+    duration_seconds: float | None = None
+    width: int | None = None
+    height: int | None = None
 
 
 class VideoCompiler(Protocol):
@@ -168,11 +297,6 @@ class ProviderRuntime(Protocol):
     async def cancel_video(self, resume: ProviderResumeToken) -> CancelResult: ...
     async def fetch_cost(self, resume: ProviderResumeToken) -> CostResult: ...
 
-
-@dataclass(frozen=True)
-class ConnectionContext:
-    connection: ProviderConnection
-    plugin: ProviderPlugin
 
 
 @dataclass(frozen=True)
@@ -209,10 +333,19 @@ class ProviderRuntimeResolver:
                 f"provider plugin {plugin.provider_type}/{plugin.protocol_profile} "
                 "has no unified runtime/compiler"
             )
+        from app.config import Settings as _Settings
+        from app.providers.egress import guarded_provider_transport
+
+        # Connection-time SSRF closure (joint-review P1): every runtime
+        # socket resolves and validates its destination before credentials
+        # leave the process; the factory's transport parameter keeps test
+        # doubles working when they are injected directly.
+        egress_settings = settings if isinstance(settings, _Settings) else None
         runtime = plugin.runtime_factory(
             connection=connection,
             settings=settings,
             host=connection.base_url,
+            transport=guarded_provider_transport(settings=egress_settings),
         )
         image_compiler, video_compiler = plugin.compiler_factory()
         if binding is not None and not binding.invoke_model_value:
@@ -233,85 +366,10 @@ class ProviderRuntimeResolver:
             binding=binding,
             catalog_entry=entry,
             model_id=(
-                f"{connection.provider_type}/{binding.model_id}"
-                if binding is not None
-                else None
+                f"{connection.provider_type}/{binding.model_id}" if binding is not None else None
             ),
             invoke_model_value=binding.invoke_model_value if binding is not None else None,
             manifest_hash=entry.contract_manifest_hash if entry is not None else None,
-        )
-
-    async def resolve_runtime_for_model_binding(
-        self,
-        *,
-        model_binding_id: UUID,
-        settings: Any = None,
-    ) -> ResolvedRuntime:
-        """Resolve the existing runtime from one concrete binding identity.
-
-        This is the Professional entry point. It deliberately starts with the
-        selected ``ProviderModelBinding`` and its catalog revision; it never
-        searches seed manifests by provider/media and never chooses a sibling
-        model when the selected identity is invalid.
-        """
-        binding = await self._session.get(ProviderModelBinding, model_binding_id)
-        if binding is None:
-            raise NotFoundError("provider model binding not found")
-        connection = await self._session.get(ProviderConnection, binding.connection_id)
-        if connection is None:
-            raise NotFoundError("provider connection not found")
-        entry = (
-            await self._session.get(ModelCatalogEntry, binding.catalog_entry_id)
-            if binding.catalog_entry_id is not None
-            else None
-        )
-        if entry is None:
-            raise ValidationAppError(
-                "provider model binding has no catalog revision",
-                details={"code": "MODEL_RUNTIME_IDENTITY_INVALID"},
-            )
-        reasons: list[str] = []
-        if not binding.enabled:
-            reasons.append("BINDING_DISABLED")
-        if not connection.enabled:
-            reasons.append("CONNECTION_DISABLED")
-        if binding.workspace_id != connection.workspace_id:
-            reasons.append("BINDING_CONNECTION_WORKSPACE_MISMATCH")
-        if binding.catalog_entry_id != entry.id:
-            reasons.append("BINDING_CATALOG_MISMATCH")
-        if entry.model_id != binding.model_id:
-            reasons.append("CATALOG_MODEL_MISMATCH")
-        if entry.provider_type != connection.provider_type:
-            reasons.append("CATALOG_PROVIDER_MISMATCH")
-        if entry.protocol_profile != connection.protocol_profile:
-            reasons.append("CATALOG_PROTOCOL_MISMATCH")
-        if entry.media_kind != binding.media_type:
-            reasons.append("CATALOG_MEDIA_MISMATCH")
-        if entry.lifecycle != "active":
-            reasons.append("CATALOG_LIFECYCLE_UNACCEPTABLE")
-        if binding.capability_manifest_hash != entry.contract_manifest_hash:
-            reasons.append("MANIFEST_HASH_MISMATCH")
-        if not binding.invoke_model_value:
-            reasons.append("INVOKE_MODEL_VALUE_MISSING")
-        if reasons:
-            raise ValidationAppError(
-                "concrete provider model runtime identity is invalid",
-                details={
-                    "code": "MODEL_RUNTIME_IDENTITY_INVALID",
-                    "reasons": reasons,
-                    "model_binding_id": str(binding.id),
-                    "catalog_entry_id": str(entry.id),
-                },
-            )
-        from app.providers.registry import get_plugin
-
-        plugin = get_plugin(connection.provider_type, connection.protocol_profile)
-        return await self.resolve(
-            plugin=plugin,
-            connection=connection,
-            binding=binding,
-            entry=entry,
-            settings=settings,
         )
 
     async def resolve_runtime_for_resolution(
@@ -350,7 +408,7 @@ class ProviderRuntimeResolver:
             )
         revision_id = connection_revision_id or resolution.provider_connection_revision_id
         credential_id = credential_revision_id or resolution.credential_revision_id
-        if revision_id is None or credential_id is None:
+        if revision_id is None:
             raise ValidationAppError(
                 "frozen execution model has no connection revision",
                 details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
@@ -369,9 +427,7 @@ class ProviderRuntimeResolver:
             credential_revision_id=credential_id,
             capability=resolution.capability.value,
             mode_id=resolution.mode_id or "resolved",
-            effective_options=cast(
-                dict[str, JsonValue], resolution.native_options
-            ),
+            effective_options=cast(dict[str, JsonValue], resolution.native_options),
             request_fingerprint="0" * 64,
         )
         return await self.resolve_runtime_for_identity(
@@ -395,21 +451,7 @@ class ProviderRuntimeResolver:
         and credential pointer are never used to build the runtime.
         """
         if operation is not None:
-            if operation.connection_id != identity.connection_id:
-                raise ValidationAppError(
-                    "operation and execution identity connection mismatch",
-                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
-                )
-            if operation.provider_connection_revision_id != identity.connection_revision_id:
-                raise ValidationAppError(
-                    "operation and execution identity revision mismatch",
-                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
-                )
-            if operation.actual_model != identity.invoke_model_value:
-                raise ValidationAppError(
-                    "operation and execution identity model mismatch",
-                    details={"code": "EXECUTION_IDENTITY_MISMATCH"},
-                )
+            require_operation_identity(identity, operation)
 
         revision = await self._session.scalar(
             select(ProviderConnectionRevision)
@@ -428,7 +470,9 @@ class ProviderRuntimeResolver:
                 "frozen provider connection revision is unavailable",
                 details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
             )
-        if revision.credential_revision_id != identity.credential_revision_id:
+        if revision.credential_revision_id != identity.credential_revision_id or (
+            revision.auth_mode != ("none" if identity.credential_revision_id is None else "bearer")
+        ):
             raise ValidationAppError(
                 "frozen connection and credential revisions do not match",
                 details={"code": "EXECUTION_IDENTITY_MISMATCH"},
@@ -450,11 +494,15 @@ class ProviderRuntimeResolver:
             binding is None
             or entry is None
             or binding.catalog_entry_id != identity.catalog_entry_id
-            or binding.model_id != identity.resolved_model.rsplit("/", 1)[-1]
+            or identity.resolved_model != f"{entry.provider_type}/{binding.model_id}"
             or binding.invoke_model_value != identity.invoke_model_value
             or entry.provider_type != revision.provider_type
             or entry.protocol_profile != revision.protocol_profile
-            or entry.model_id != binding.model_id
+            or (entry.catalog_source != "protocol_contract" and entry.model_id != binding.model_id)
+            or (
+                entry.catalog_source == "protocol_contract"
+                and binding.invoke_model_value != binding.model_id
+            )
             or entry.model_revision != identity.model_revision
             or entry.contract_manifest_hash != identity.manifest_hash
         ):
@@ -468,7 +516,7 @@ class ProviderRuntimeResolver:
                 EncryptedProviderCredential.workspace_id == workspace_id,
             )
         )
-        if credential is None:
+        if credential is None and revision.auth_mode != "none":
             raise ValidationAppError(
                 "frozen credential revision is unavailable",
                 details={"code": "EXECUTION_IDENTITY_CREDENTIAL_UNAVAILABLE"},
@@ -483,7 +531,9 @@ class ProviderRuntimeResolver:
                 "frozen provider plugin is unavailable",
                 details={"code": "PROVIDER_PLUGIN_UNKNOWN"},
             ) from exc
-        if credential.provider != plugin.credential_key:
+        if revision.auth_mode not in plugin.auth_modes or (
+            credential is not None and credential.provider != plugin.credential_key
+        ):
             raise ValidationAppError(
                 "frozen credential provider does not match connection protocol",
                 details={"code": "EXECUTION_IDENTITY_CREDENTIAL_MISMATCH"},
@@ -507,7 +557,8 @@ class ProviderRuntimeResolver:
             protocol_profile=revision.protocol_profile,
             base_url=revision.base_url,
             credential_id=revision.credential_revision_id,
-            credential_revision=credential.revision_no,
+            credential_revision=credential.revision_no if credential else 0,
+            auth_mode=revision.auth_mode,
             enabled=True,
         )
         frozen_settings = await runtime_connection_settings(
@@ -532,6 +583,26 @@ class ProviderRuntimeResolver:
         settings: Any = None,
     ) -> ProviderRuntime:
         """Rebuild only the runtime for an existing frozen operation."""
+        from app.providers.execution_contract import execution_contract_gaps
+
+        gaps = execution_contract_gaps(identity.execution_contract)
+        if gaps:
+            raise ValidationAppError(
+                "历史任务的执行合同无法精确核验，请人工核对后恢复",
+                details={"code": gaps[0], "gaps": list(gaps)},
+            )
+        if (
+            operation is not None
+            and identity.execution_contract is not None
+            and (
+                identity.execution_contract.provider_type != operation.actual_provider
+                or identity.execution_contract.protocol_profile != operation.protocol_profile
+            )
+        ):
+            raise ValidationAppError(
+                "frozen execution contract does not match operation protocol",
+                details={"code": "EXECUTION_IDENTITY_MISMATCH"},
+            )
         resolved = await self.resolve_runtime_for_identity(
             identity=identity,
             workspace_id=workspace_id,
@@ -539,24 +610,3 @@ class ProviderRuntimeResolver:
             settings=settings,
         )
         return resolved.runtime
-
-    async def resume_runtime(
-        self,
-        *,
-        plugin: ProviderPlugin,
-        connection: ProviderConnection,
-        settings: Any = None,
-    ) -> ProviderRuntime:
-        """Rebuild a runtime for polling/cancel/download from persisted state.
-        Never submits."""
-        if plugin.runtime_factory is None:
-            raise RuntimeError(
-                f"provider plugin {plugin.provider_type}/{plugin.protocol_profile} "
-                "has no unified runtime"
-            )
-        runtime = plugin.runtime_factory(
-            connection=connection,
-            settings=settings,
-            host=connection.base_url,
-        )
-        return cast(ProviderRuntime, runtime)

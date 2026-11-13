@@ -1,3 +1,4 @@
+import { selectValue } from "./selectValue";
 import {
   createRootRoute,
   createRouter,
@@ -75,7 +76,7 @@ describe("Video review interaction", () => {
     player.currentTime = 1.25;
     fireEvent.timeUpdate(player);
     fireEvent.click(screen.getByRole("button", { name: "使用当前时间作为开始" }));
-    fireEvent.change(screen.getByLabelText("视频批注类型"), { target: { value: "range" } });
+    await selectValue(screen.getByLabelText("视频批注类型"), "range");
     fireEvent.change(screen.getByLabelText("批注结束时间"), { target: { value: "2.5" } });
     fireEvent.change(screen.getByLabelText("批注说明"), { target: { value: "检查人物漂移" } });
     expect(writes).toHaveLength(0);
@@ -90,7 +91,7 @@ describe("Video review interaction", () => {
     });
     expect(await screen.findByText(/1.25s–2.50s/)).toBeInTheDocument();
     expect(screen.getByLabelText("批注说明")).toHaveValue("");
-    fireEvent.change(screen.getByLabelText("当前镜头"), { target: { value: "s2" } });
+    await selectValue(screen.getByLabelText("当前镜头"), "s2");
     await waitFor(() =>
       expect(screen.getByLabelText("正式视频审片播放器")).toHaveAttribute(
         "src",
@@ -100,7 +101,7 @@ describe("Video review interaction", () => {
     expect(screen.getByLabelText("批注开始时间")).toHaveValue(0);
     expect(screen.queryByText(/1.25s–2.50s/)).not.toBeInTheDocument();
   });
-  it("rejects out-of-duration and reversed ranges and disables saving broken media", () => {
+  it("rejects out-of-duration and reversed ranges and disables saving broken media", async () => {
     const save = vi.fn().mockResolvedValue(undefined);
     render(
       <VideoReviewTimeline
@@ -112,7 +113,7 @@ describe("Video review interaction", () => {
       />,
     );
     const player = loadedVideo();
-    fireEvent.change(screen.getByLabelText("视频批注类型"), { target: { value: "range" } });
+    await selectValue(screen.getByLabelText("视频批注类型"), "range");
     fireEvent.change(screen.getByLabelText("批注开始时间"), { target: { value: "3" } });
     fireEvent.change(screen.getByLabelText("批注结束时间"), { target: { value: "2" } });
     expect(screen.getByRole("button", { name: "保存视频批注" })).toBeDisabled();

@@ -5,6 +5,8 @@
 .env.*
 !.env.example
 **/.venv
+backend/.venv/
+backend/.venv/**
 **/node_modules
 **/__pycache__
 **/.pytest_cache
@@ -15,10 +17,15 @@
 **/dist
 **/build
 tmp
+# Local git worktrees and offline mypy audit caches are not application source.
+.worktrees
+**/.worktrees
+**/.mypy_audit_cache
 docs
 *.sqlite
 *.db
 *.mp4
+!fixtures/playback/*.mp4
 *.zip
 *.onnx
 *.bin

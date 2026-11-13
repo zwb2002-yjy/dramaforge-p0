@@ -15,10 +15,6 @@ from app.director.workflows.layered_planning import (
     SceneStoryboardPlanPayload,
     ShotPlanPayload,
 )
-from app.director.workflows.layered_production_service import (
-    materialize_episode_plan,
-    materialize_scene_storyboard,
-)
 from app.director.workflows.library import get_default_registry
 from app.director.workflows.resolver import WorkflowTemplateResolver
 from app.director.workflows.workflow_read_models import (
@@ -34,6 +30,10 @@ from app.providers.manifest import (
     SubmissionSemantics,
 )
 from sqlalchemy import select
+from tests.unit.layered_plan_fixtures import (
+    seed_episode_plan,
+    seed_scene_storyboard,
+)
 
 
 @pytest.fixture
@@ -140,11 +140,11 @@ def _storyboard(specs: list[dict[str, object]]) -> SceneStoryboardPlanPayload:
 @pytest.mark.asyncio
 async def test_shot_workflow_state_reports_frozen_template(session) -> None:
     project = await _seed_project(session)
-    episode = await materialize_episode_plan(
+    episode = await seed_episode_plan(
         session, project_id=project.id, plan=_episode_plan_payload()
     )
     scene1 = (await session.execute(_scene_query(episode.id, 1))).scalar_one()
-    shots = await materialize_scene_storyboard(
+    shots = await seed_scene_storyboard(
         session,
         project_id=project.id,
         scene=scene1,
@@ -179,11 +179,11 @@ async def test_shot_workflow_state_reports_frozen_template(session) -> None:
 async def test_frozen_unknown_template_reads_unavailable(session) -> None:
     """A frozen key that later disappears from the registry must not lie."""
     project = await _seed_project(session)
-    episode = await materialize_episode_plan(
+    episode = await seed_episode_plan(
         session, project_id=project.id, plan=_episode_plan_payload()
     )
     scene1 = (await session.execute(_scene_query(episode.id, 1))).scalar_one()
-    shots = await materialize_scene_storyboard(
+    shots = await seed_scene_storyboard(
         session,
         project_id=project.id,
         scene=scene1,
@@ -230,7 +230,7 @@ async def test_project_overview_counts_and_unsupported(session) -> None:
     )
 
     project = await _seed_project(session)
-    episode = await materialize_episode_plan(
+    episode = await seed_episode_plan(
         session, project_id=project.id, plan=_episode_plan_payload()
     )
     scenes = (
@@ -241,13 +241,13 @@ async def test_project_overview_counts_and_unsupported(session) -> None:
         .all()
     )
     by_number = {s.scene_number: s for s in scenes}
-    shots_s1 = await materialize_scene_storyboard(
+    shots_s1 = await seed_scene_storyboard(
         session,
         project_id=project.id,
         scene=by_number[1],
         storyboard=_storyboard([{"shot_number": 1, "visual_description": "a"}]),
     )
-    shots_s2 = await materialize_scene_storyboard(
+    shots_s2 = await seed_scene_storyboard(
         session,
         project_id=project.id,
         scene=by_number[2],

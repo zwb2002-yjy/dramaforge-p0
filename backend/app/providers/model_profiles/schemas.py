@@ -95,12 +95,3 @@ class ProfileValidationIssue(BaseModel):
     slot: str
     model_id: str
     message: str
-
-
-class ProfileValidateRequest(BaseModel):
-    bindings: dict[str, BindingInput] = Field(default_factory=dict)
-
-
-class ProfileValidateResponse(BaseModel):
-    valid: bool
-    issues: list[ProfileValidationIssue] = Field(default_factory=list)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
 from copy import deepcopy
 from decimal import Decimal
 from uuid import uuid4
@@ -17,7 +16,7 @@ from app.director.editing_suggestion import (
     EditingDirectorSuggestionService,
 )
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
-from app.director.text_transport import DirectorTextTransport
+from app.director.text_transport import DirectorTextRuntimeAdapter
 from app.director.turn_models import DirectorTurn
 from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun
@@ -32,17 +31,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 MODEL_ID = "litellm/controlled-editing"
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
+pytestmark = pytest.mark.usefixtures("configured_director_runtime")
 
 
 async def _seed(session: AsyncSession) -> tuple[Project, User, EditSession]:
@@ -71,8 +60,9 @@ async def _seed(session: AsyncSession) -> tuple[Project, User, EditSession]:
     await session.flush()
     from app.access.models import ProjectCreativeProfile
 
-    session.add(ProjectCreativeProfile(project_id=project.id, start_type="FREE",
-                                       director_autonomy="ASSIST"))
+    session.add(
+        ProjectCreativeProfile(project_id=project.id, start_type="FREE", director_autonomy="ASSIST")
+    )
     await session.flush()
     edit_session = EditSession(
         project_id=project.id,
@@ -216,7 +206,7 @@ async def test_real_editing_model_receives_sanitized_timeline_and_links_one_turn
 
     service = EditingDirectorSuggestionService(
         session,
-        text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+        text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
     )
     request = _request("editing-turn:one")
     first = await service.suggest(
@@ -281,7 +271,7 @@ async def test_real_editing_plan_with_unknown_clip_fails_and_creates_no_proposal
     with pytest.raises(ValidationAppError) as raised:
         await EditingDirectorSuggestionService(
             session,
-            text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+            text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
         ).suggest(
             project_id=project.id,
             session_id=edit_session.id,
@@ -310,7 +300,7 @@ async def test_unconfigured_editing_model_is_manual_safe_without_rule_fallback(
     with pytest.raises(ValidationAppError) as raised:
         await EditingDirectorSuggestionService(
             session,
-            text_transport=DirectorTextTransport(
+            text_transport=DirectorTextRuntimeAdapter(
                 session,
                 registry=_registry(must_not_call, configured=False),
             ),
@@ -349,7 +339,7 @@ async def test_edit_session_changed_during_real_call_marks_turn_stale(tmp_path) 
         with pytest.raises(ConflictError) as raised:
             await EditingDirectorSuggestionService(
                 session,
-                text_transport=DirectorTextTransport(session, registry=_registry(handler)),
+                text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
             ).suggest(
                 project_id=project.id,
                 session_id=edit_session.id,

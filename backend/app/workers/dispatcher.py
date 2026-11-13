@@ -7,12 +7,15 @@ import logging
 import os
 import socket
 
+from app.runtime.provider_recovery import recover_interrupted_provider_jobs
 from app.runtime.scheduler import NodeRunScheduler, RedisStreamPublisher
 from app.shared.db import get_session_factory
 from app.shared.model_registry import load_all_models
 
 logger = logging.getLogger(__name__)
 POLL_SECONDS = float(os.getenv("OUTBOX_DISPATCH_INTERVAL_SECONDS", "1"))
+PROVIDER_RECOVERY_POLL_SECONDS = 60.0
+FINAL_FILM_CLEANUP_TIMEOUT_SECONDS = 20.0
 
 # This resident process writes OutboxEvent rows directly. Register every ORM
 # model before SQLAlchemy compiles the cross-domain foreign keys during flush.
@@ -34,9 +37,8 @@ async def dispatch_once(*, worker_id: str) -> int:
             await publisher.close()
 
 
-async def run_forever() -> None:
+async def _dispatch_forever(*, worker_id: str) -> None:
     """Keep dispatching after temporary infrastructure failures."""
-    worker_id = f"outbox-dispatcher:{socket.gethostname()}"
     while True:
         try:
             dispatched = await dispatch_once(worker_id=worker_id)
@@ -47,6 +49,58 @@ async def run_forever() -> None:
         except Exception:  # noqa: BLE001
             logger.exception("outbox_dispatcher iteration failed")
         await asyncio.sleep(POLL_SECONDS)
+
+
+async def _recover_providers_forever() -> None:
+    """Scan independently of both media capacity and a blocked Outbox iteration."""
+    state: dict[str, object] = {}
+    loop = asyncio.get_running_loop()
+    while True:
+        tick_started = loop.time()
+        try:
+            counts = await recover_interrupted_provider_jobs(state)
+            from app.production.final_film_uploads import sweep_final_film_uploads
+
+            async with asyncio.timeout(FINAL_FILM_CLEANUP_TIMEOUT_SECONDS):
+                await sweep_final_film_uploads()
+            if any(counts.values()):
+                logger.info("provider_recovery %s", counts)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - infrastructure failure must not stop later ticks
+            logger.exception("provider_recovery iteration failed")
+        await asyncio.sleep(max(0, PROVIDER_RECOVERY_POLL_SECONDS - (loop.time() - tick_started)))
+
+
+async def run_forever() -> None:
+    """Own production scheduling, recovery and independent local source processing."""
+    worker_id = f"outbox-dispatcher:{socket.gethostname()}"
+    from app.runtime.resources import close_runtime_resources
+
+    try:
+        async with asyncio.TaskGroup() as tasks:
+            tasks.create_task(_dispatch_forever(worker_id=worker_id), name="outbox-dispatch")
+            tasks.create_task(_recover_providers_forever(), name="provider-recovery")
+            tasks.create_task(_process_sources_forever(), name="project-source-processing")
+    finally:
+        await close_runtime_resources()
+
+
+async def _process_sources_forever() -> None:
+    from app.storage.minio_store import get_object_store
+    from app.workers.project_files import SourceScanCursor, process_project_files
+
+    cursor = SourceScanCursor()
+    while True:
+        try:
+            await process_project_files(
+                get_session_factory(), store=get_object_store(), cursor=cursor,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Source processing scan unavailable (%s)", type(exc).__name__)
+        await asyncio.sleep(5)
 
 
 def main() -> int:

@@ -5,7 +5,6 @@ from __future__ import annotations
 from app.config import Settings
 from app.director.runtime.capabilities import (
     DIRECTOR_BLOCKER_CHECKPOINT_NOT_CONFIGURED,
-    DIRECTOR_BLOCKER_ENGINE_NOT_ENABLED,
     build_director_capabilities,
 )
 
@@ -20,18 +19,12 @@ def _settings(**overrides: object) -> Settings:
     return Settings(**base)  # type: ignore[arg-type]
 
 
-def test_legacy_engine_reports_the_configuration_blocker() -> None:
-    capabilities = build_director_capabilities(
-        _settings(director_runtime_engine="legacy")
-    )
+def test_old_engine_configuration_is_rejected() -> None:
+    import pytest
+    from pydantic import ValidationError
 
-    assert capabilities.effective_engine == "legacy"
-    assert capabilities.runtime_turns_available is False
-    assert capabilities.blocker_code == DIRECTOR_BLOCKER_ENGINE_NOT_ENABLED
-    assert capabilities.blocker_message is not None
-    assert "langgraph" in capabilities.blocker_message
-    # MANUAL remains usable without the Director worker.
-    assert capabilities.manual_production_available is True
+    with pytest.raises(ValidationError):
+        _settings(director_runtime_engine="legacy")
 
 
 def test_langgraph_without_a_checkpoint_store_is_still_blocked() -> None:

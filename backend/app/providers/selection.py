@@ -97,6 +97,8 @@ def _resolution_capability(*, purpose: str, reference_roles: frozenset[str]) -> 
         return Capability.VIDEO_FIRST_LAST_FRAME
     if "first_frame" in reference_roles:
         return Capability.VIDEO_IMAGE_TO_VIDEO
+    if "last_frame" in reference_roles:
+        return Capability.VIDEO_LAST_FRAME_TO_VIDEO
     if reference_roles:
         return Capability.VIDEO_REFERENCE_TO_VIDEO
     return Capability.VIDEO_TEXT_TO_VIDEO
@@ -112,13 +114,15 @@ def _video_mode_id(intent: VideoGenerationIntentV1) -> str:
         return "omni_reference"
     if "first_frame" in roles:
         return "first_frame"
+    if "last_frame" in roles:
+        return "last_frame"
     return "text_to_video"
 
 
 def _image_mode_id(intent: ImageGenerationIntent) -> str:
     if intent.mode_id:
         return intent.mode_id
-    return "reference_image" if intent.reference_artifact_id is not None else "text_to_image"
+    return "reference_image" if intent.reference_artifact_ids else "text_to_image"
 
 
 class ModelSelectionService:
@@ -241,9 +245,11 @@ class ModelSelectionService:
                     "issues": [issue.code for issue in remaining_issues],
                 },
             )
-        manifest = ModelCapabilityManifest.model_validate(
-            entry.capability_manifest_json
-        ) if entry is not None else None
+        manifest = (
+            ModelCapabilityManifest.model_validate(entry.capability_manifest_json)
+            if entry is not None
+            else None
+        )
         supported = set(evaluation.supported_capabilities)
         return SelectionPlan(
             intent_hash=intent_hash,

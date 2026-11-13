@@ -67,7 +67,8 @@ class GeneratedStoryProposalRead(BaseModel):
 
 
 def _operation_read(item: DirectorProposalItem) -> StoryOperationRead:
-    payload = dict(item.payload or {})
+    payload = {key: value for key, value in (item.payload or {}).items()
+               if key != "_story_request_fingerprint"}
     return StoryOperationRead(
         id=item.id,
         command=item.command,
@@ -162,6 +163,14 @@ async def generate_project_story_proposal(
         actor=user,
         request=body,
     )
+    # Generation commits the turn and proposal. Restore transaction-local RLS
+    # before reading items; otherwise PostgreSQL hides the persisted operations.
+    await set_rls_context(
+        session,
+        user_id=user.id,
+        workspace_id=project.workspace_id,
+        project_id=project.id,
+    )
     proposal = await _proposal_read(
         session,
         project_id=project.id,
@@ -244,6 +253,7 @@ async def apply_project_story_proposal(
         select(DirectorProposal).where(
             DirectorProposal.id == proposal_id,
             DirectorProposal.project_id == project.id,
+            DirectorProposal.scope_type == "project",
         )
     )
     if proposal is None:

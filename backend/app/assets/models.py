@@ -7,8 +7,10 @@ from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -16,6 +18,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -153,6 +156,9 @@ class CanvasRevision(Base):
     __tablename__ = "canvas_revisions"
     __table_args__ = (
         UniqueConstraint("shot_id", "revision_number", name="uq_canvas_revision_number"),
+        CheckConstraint("revision_number > 0", name="ck_canvas_revision_number_positive"),
+        CheckConstraint("base_shot_version > 0", name="ck_canvas_revision_base_version_positive"),
+        CheckConstraint("duration_seconds > 0", name="ck_canvas_revision_duration_positive"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -187,6 +193,9 @@ class ShotChangeProposal(Base):
     __table_args__ = (
         UniqueConstraint(
             "project_id", "idempotency_key", name="uq_shot_change_proposal_idempotency"
+        ),
+        CheckConstraint(
+            "base_shot_version > 0", name="ck_shot_change_proposal_base_version_positive"
         ),
     )
 
@@ -224,7 +233,13 @@ class ShotChangeProposal(Base):
 
 class Asset(Base):
     __tablename__ = "assets"
-    __table_args__ = (UniqueConstraint("project_id", "kind", "name", name="uq_asset_name"),)
+    __table_args__ = (
+        UniqueConstraint("project_id", "kind", "name", name="uq_asset_name"),
+        CheckConstraint(
+            "status IN ('draft','active','recycled')",
+            name="ck_assets_status",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(
@@ -266,6 +281,11 @@ class AssetVersion(Base):
     __tablename__ = "asset_versions"
     __table_args__ = (
         UniqueConstraint("asset_id", "version_number", name="uq_asset_version_number"),
+        CheckConstraint("version_number > 0", name="ck_asset_version_number_positive"),
+        CheckConstraint(
+            "status IN ('candidate','formal','historical','rejected')",
+            name="ck_asset_versions_status",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -282,7 +302,7 @@ class AssetVersion(Base):
     metadata_json: Mapped[dict[str, object]] = mapped_column(
         "metadata", JSON_DOCUMENT, nullable=False, default=dict
     )
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="candidate")
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
@@ -341,7 +361,7 @@ class AssetTag(Base):
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(80), nullable=False)
-    normalized_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -414,3 +434,71 @@ Index(
     "ix_asset_version_references_version",
     AssetVersionReference.__table__.c.asset_version_id,
 )
+
+
+class ProjectFile(Base):
+    """Project-private source association; unlinking preserves every revision."""
+
+    __tablename__ = "project_files"
+    __table_args__ = (
+        UniqueConstraint("id", "project_id", name="uq_project_file_scope"),
+        CheckConstraint("version > 0", name="ck_project_files_version"),
+        CheckConstraint("content_version > 0", name="ck_project_files_content_version"),
+        Index("ix_project_files_project", "project_id", "created_at"),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False,
+    )
+    filename: Mapped[str] = mapped_column(String(260), nullable=False)
+    content_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    detached_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+
+
+class ProjectFileRevision(Base):
+    """Original bytes are immutable; extraction is a separately retryable local step."""
+
+    __tablename__ = "project_file_revisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["file_id", "project_id"], ["project_files.id", "project_files.project_id"],
+            name="fk_project_file_revision_scope", ondelete="RESTRICT",
+        ),
+        UniqueConstraint("file_id", "number", name="uq_project_file_revision_number"),
+        UniqueConstraint("project_id", "request_key", name="uq_project_file_request"),
+        CheckConstraint("number > 0", name="ck_project_file_revision_number"),
+        CheckConstraint("byte_size >= 0", name="ck_project_file_revision_size"),
+        CheckConstraint("attempt > 0", name="ck_project_file_revision_attempt"),
+        CheckConstraint(
+            "status IN ('pending','parsed','failed')", name="ck_project_file_revision_status",
+        ),
+        Index("ix_project_file_revision_hash", "project_id", "content_hash"),
+        Index("ix_project_file_revision_pending", "id",
+              postgresql_where=text("status = 'pending'"),
+              sqlite_where=text("status = 'pending'")),
+    )
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(nullable=False)
+    file_id: Mapped[UUID] = mapped_column(nullable=False)
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    filename: Mapped[str] = mapped_column(String(260), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    content_hash: Mapped[str] = mapped_column(HASH_64, nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    request_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_hash: Mapped[str] = mapped_column(HASH_64, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    parser_version: Mapped[str | None] = mapped_column(String(80))
+    excerpts: Mapped[list[dict[str, object]]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=list,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )

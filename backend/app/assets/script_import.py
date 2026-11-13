@@ -223,6 +223,15 @@ async def import_script(
     if actor is not None:
         await ProjectService(session).get_project_for_owner(project_id=project_id, actor=actor)
     parsed = parse_script_markdown(text)
+    scene_numbers: set[int] = set()
+    for scene_input in parsed.scenes:
+        numbers = [shot.shot_number for shot in scene_input.shots]
+        if scene_input.scene_number in scene_numbers or len(numbers) != len(set(numbers)):
+            raise ValidationAppError(
+                "scene numbers and shot numbers within each scene must be unique",
+                details={"code": "SCRIPT_DUPLICATE_NUMBER"},
+            )
+        scene_numbers.add(scene_input.scene_number)
     content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
     existing_doc = (
         await session.execute(

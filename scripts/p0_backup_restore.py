@@ -147,6 +147,8 @@ def backup(destination: Path, *, key_env: str) -> dict[str, Any]:
     settings = get_settings()
     context = begin_evidence_context(REPO)
     destination = require_ignored_evidence_path(REPO, destination)
+    if destination.exists():
+        raise FileExistsError(f"Backup already exists; choose a new output path: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     fernet = _fernet_from_env(key_env)
     with tempfile.TemporaryDirectory(prefix="dramaforge-backup-") as temp_name:
@@ -164,7 +166,10 @@ def backup(destination: Path, *, key_env: str) -> dict[str, Any]:
             archive.add(payload / "manifest.json", arcname="manifest.json")
             for item in manifest["objects"]:
                 archive.add(payload / item["archive_name"], arcname=item["archive_name"])
-        destination.write_bytes(fernet.encrypt(plain_tar.read_bytes()))
+        # Exclusive creation also protects a backup created after the preflight.
+        encrypted = fernet.encrypt(plain_tar.read_bytes())
+        with destination.open("xb") as output:
+            output.write(encrypted)
     return {
         "ok": True,
         "source_commit": context["source_commit"],
@@ -291,14 +296,13 @@ def restore_verify(
                 raise ValueError(f"object checksum does not match manifest: {item['archive_name']}")
             target_store.fput_object(target_bucket, item["object_key"], str(data_path))
             restored += 1
-        with connect(_pg_url(target_database_url)) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT count(*) FROM information_schema.tables "
-                    "WHERE table_schema = 'public'"
-                )
-                row = cur.fetchone()
-                table_count = int(row[0]) if row is not None else 0
+        with connect(_pg_url(target_database_url)) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM information_schema.tables "
+                "WHERE table_schema = 'public'"
+            )
+            row = cur.fetchone()
+            table_count = int(row[0]) if row is not None else 0
         return {
             "ok": True,
             "source_commit": manifest.get("source_commit"),
@@ -351,4 +355,4 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except (OSError, S3Error, subprocess.CalledProcessError, ValueError) as exc:
         print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}))
-        raise SystemExit(2)
+        raise SystemExit(2) from exc

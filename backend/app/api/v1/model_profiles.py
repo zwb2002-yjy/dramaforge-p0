@@ -10,6 +10,7 @@ providers layer free of HTTP imports (boundary test §68).
 
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
@@ -18,8 +19,13 @@ from app.access.projects import ProjectService
 from app.api.deps import (
     CsrfDep,
     CurrentUser,
+    SelectedWorkspace,
     SessionDep,
     require_selected_workspace,
+)
+from app.providers.execution_preflight import (
+    ExecutionModelPreflightRead,
+    resolve_execution_model_preflight,
 )
 from app.providers.model_profiles.models import (
     ModelSlotBinding,
@@ -35,9 +41,6 @@ from app.providers.model_profiles.schemas import (
     ProfileRead,
     ProfileSummaryRead,
     ProfileUpdate,
-    ProfileValidateRequest,
-    ProfileValidateResponse,
-    ProfileValidationIssue,
     SimpleModeApply,
 )
 from app.providers.model_profiles.service import ProductionModelProfileService
@@ -79,7 +82,6 @@ def _slot_display_name(slot: ModelSlot) -> str:
         ModelSlot.VISUAL_KEYFRAME: "镜头关键帧",
         ModelSlot.VISUAL_IMAGE_EDIT: "图片编辑",
         ModelSlot.VIDEO_SHOT: "镜头视频",
-        ModelSlot.AUDIO_TTS: "语音合成",
     }.get(slot, str(slot))
 
 
@@ -110,6 +112,13 @@ def _assert_workspace_profile(profile: ProductionModelProfile, workspace_id: UUI
         raise NotFoundError("model profile not found")
 
 
+def _assert_selected_workspace(workspace_id: UUID, workspace: SelectedWorkspace) -> None:
+    if workspace.id != workspace_id:
+        from app.shared.errors import NotFoundError
+
+        raise NotFoundError("workspace not found")
+
+
 @router.get(
     "/workspaces/{workspace_id}/model-profiles",
     response_model=list[ProfileSummaryRead],
@@ -117,8 +126,10 @@ def _assert_workspace_profile(profile: ProductionModelProfile, workspace_id: UUI
 )
 async def list_workspace_profiles(
     workspace_id: UUID,
+    workspace: SelectedWorkspace,
     session: SessionDep,
 ) -> list[ProfileSummaryRead]:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profiles = await service.list_workspace_profiles(workspace_id=workspace_id)
     return [
@@ -145,10 +156,12 @@ async def list_workspace_profiles(
 async def create_workspace_profile(
     workspace_id: UUID,
     body: ProfileCreate,
+    workspace: SelectedWorkspace,
     user: CurrentUser,
     session: SessionDep,
     _: CsrfDep,
 ) -> ProfileRead:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.create(
         workspace_id=workspace_id,
@@ -170,8 +183,10 @@ async def create_workspace_profile(
 async def get_workspace_profile(
     workspace_id: UUID,
     profile_id: UUID,
+    workspace: SelectedWorkspace,
     session: SessionDep,
 ) -> ProfileRead:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.get(profile_id=profile_id)
     _assert_workspace_profile(profile, workspace_id)
@@ -187,16 +202,16 @@ async def update_workspace_profile(
     workspace_id: UUID,
     profile_id: UUID,
     body: ProfileUpdate,
+    workspace: SelectedWorkspace,
     user: CurrentUser,
     session: SessionDep,
     _: CsrfDep,
 ) -> ProfileRead:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.get(profile_id=profile_id)
     _assert_workspace_profile(profile, workspace_id)
-    bindings = (
-        _to_domain_bindings(body.bindings) if body.bindings is not None else None
-    )
+    bindings = _to_domain_bindings(body.bindings) if body.bindings is not None else None
     profile = await service.update(
         profile_id=profile_id,
         actor_id=user.id,
@@ -218,10 +233,12 @@ async def apply_simple_mode(
     workspace_id: UUID,
     profile_id: UUID,
     body: SimpleModeApply,
+    workspace: SelectedWorkspace,
     user: CurrentUser,
     session: SessionDep,
     _: CsrfDep,
 ) -> ProfileRead:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.get(profile_id=profile_id)
     _assert_workspace_profile(profile, workspace_id)
@@ -248,10 +265,12 @@ async def apply_simple_mode(
 async def delete_workspace_profile(
     workspace_id: UUID,
     profile_id: UUID,
+    workspace: SelectedWorkspace,
     user: CurrentUser,
     session: SessionDep,
     _: CsrfDep,
 ) -> Response:
+    _assert_selected_workspace(workspace_id, workspace)
     service = ProductionModelProfileService(session)
     profile = await service.get(profile_id=profile_id)
     _assert_workspace_profile(profile, workspace_id)
@@ -270,9 +289,7 @@ async def get_project_profile(
     user: CurrentUser,
     session: SessionDep,
 ) -> ProfileRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     service = ProductionModelProfileService(session)
     profile = await service.get_project_profile(project_id=project.id)
     if profile is None:
@@ -294,17 +311,13 @@ async def put_project_profile(
     session: SessionDep,
     _: CsrfDep,
 ) -> ProfileRead:
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     service = ProductionModelProfileService(session)
     profile = await service.get_project_profile(project_id=project.id)
     if profile is None:
         # Snapshot the workspace default into a project profile on first write
         # (spec §54 Snapshot semantics — the project stops live-inheriting).
-        workspace_default = await service.get_workspace_default(
-            workspace_id=project.workspace_id
-        )
+        workspace_default = await service.get_workspace_default(workspace_id=project.workspace_id)
         profile = await service.create(
             workspace_id=project.workspace_id,
             actor_id=user.id,
@@ -313,9 +326,7 @@ async def put_project_profile(
             project_id=project.id,
             copy_from=workspace_default.id if workspace_default is not None else None,
         )
-    bindings = (
-        _to_domain_bindings(body.bindings) if body.bindings is not None else None
-    )
+    bindings = _to_domain_bindings(body.bindings) if body.bindings is not None else None
     profile = await service.update(
         profile_id=profile.id,
         actor_id=user.id,
@@ -326,32 +337,6 @@ async def put_project_profile(
     )
     await session.commit()
     return await service.profile_read(profile)
-
-
-@router.post(
-    "/model-profiles/validate",
-    response_model=ProfileValidateResponse,
-    dependencies=[Depends(require_selected_workspace)],
-)
-async def validate_profile(
-    body: ProfileValidateRequest,
-    session: SessionDep,
-    _: CsrfDep,
-) -> ProfileValidateResponse:
-    service = ProductionModelProfileService(session)
-    report = service.validate_bindings(_to_domain_bindings(body.bindings))
-    return ProfileValidateResponse(
-        valid=report.valid,
-        issues=[
-            ProfileValidationIssue(
-                code=issue.code,
-                slot=issue.slot,
-                model_id=issue.model_id,
-                message=issue.message,
-            )
-            for issue in report.issues
-        ],
-    )
 
 
 @router.get(
@@ -366,16 +351,14 @@ async def get_effective_bindings(
 ) -> list[EffectiveBindingRead]:
     """Preview the effective slot→model map for a project (spec §37). This is
     resolution preview only — it never calls a Provider."""
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     service = ProductionModelProfileService(session)
     profile = await service.get_effective_for_project(project=project)
     if profile is None:
         return []
     from app.providers.model_profiles.service import parse_bindings
 
-    resolver = ModelBindingResolver(session, registry=service._registry)
+    resolver = ModelBindingResolver(session)
     result: list[EffectiveBindingRead] = []
     for slot, binding in parse_bindings(profile.bindings).items():
         if not binding.enabled:
@@ -387,9 +370,9 @@ async def get_effective_bindings(
             planned_capability_for_slot,
         )
 
-        preview_capability = planned_capability_for_slot(slot) or slot_definition(
-            slot
-        ).required_capabilities[0]
+        preview_capability = (
+            planned_capability_for_slot(slot) or slot_definition(slot).required_capabilities[0]
+        )
         try:
             resolved = await resolver.resolve(
                 workspace_id=project.workspace_id,
@@ -413,3 +396,29 @@ async def get_effective_bindings(
             )
         )
     return result
+
+
+@router.get(
+    "/projects/{project_id}/execution-models/preflight",
+    response_model=ExecutionModelPreflightRead,
+    dependencies=[Depends(require_selected_workspace)],
+)
+async def get_execution_model_preflight(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    video_mode: Literal[
+        "first_frame", "last_frame", "first_last_frame", "text_to_video", "omni_reference"
+    ] = "first_frame",
+) -> ExecutionModelPreflightRead:
+    """Resolve the exact provider bindings production will freeze.
+
+    The profile preview above answers which logical model a profile names.  A
+    production run additionally needs an enabled, credentialed workspace
+    ``ProviderModelBinding`` for the relevant purpose.  Returning that second
+    answer explicitly prevents a UI from saying "use default" while the first
+    paid action will fail with ``MODEL_BINDING_MISSING``.
+    """
+
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return await resolve_execution_model_preflight(session, project=project, video_mode=video_mode)

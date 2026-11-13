@@ -15,6 +15,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -47,6 +48,17 @@ class DirectorTurn(Base):
     __table_args__ = (
         UniqueConstraint("id", "project_id", name="uq_director_turn_scope"),
         UniqueConstraint("project_id", "request_key", name="uq_director_turn_request"),
+        ForeignKeyConstraint(
+            ["thread_id", "project_id"], ["director_threads.id", "director_threads.project_id"],
+            ondelete="CASCADE", name="fk_director_turn_thread_scope",
+        ),
+        ForeignKeyConstraint(
+            ["origin_agent_turn_id", "project_id"],
+            ["director_turns.id", "director_turns.project_id"],
+            ondelete="CASCADE", name="fk_director_turn_origin_scope",
+        ),
+        CheckConstraint("turn_kind IN ('agent','workflow')", name="ck_director_turn_kind"),
+        CheckConstraint("agent_control_epoch >= 0", name="ck_director_turn_control_epoch"),
         CheckConstraint("revision > 0", name="ck_director_turn_revision_positive"),
         CheckConstraint("step_count >= 0", name="ck_director_turn_step_count_nonnegative"),
         CheckConstraint(
@@ -83,6 +95,21 @@ class DirectorTurn(Base):
     )
     actor_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    thread_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    turn_kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="workflow", server_default="workflow"
+    )
+    origin_agent_turn_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    agent_control_epoch: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    agent_lease_token: Mapped[UUID | None] = mapped_column(nullable=True)
+    agent_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    stop_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     scope_type: Mapped[str] = mapped_column(String(24), nullable=False)
     scope_entity_id: Mapped[UUID] = mapped_column(nullable=False)
@@ -139,6 +166,15 @@ class DirectorTurn(Base):
     )
 
 
+Index(
+    "ix_director_turns_thread",
+    DirectorTurn.__table__.c.thread_id,
+    DirectorTurn.__table__.c.created_at,
+)
+Index(
+    "ix_director_turns_origin",
+    DirectorTurn.__table__.c.origin_agent_turn_id,
+)
 Index(
     "ix_director_turns_scope",
     DirectorTurn.__table__.c.project_id,

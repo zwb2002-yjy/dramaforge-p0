@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 import pytest
@@ -12,23 +11,9 @@ from app.assets.models import Shot
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.proposal_service import PartialApplyInput, ProposalDecision, ProposalService
 from app.events.models import OutboxEvent
-from app.shared.base import Base
-from app.shared.model_registry import load_all_models
 from app.shared.security import hash_password
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    load_all_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _seed(session: AsyncSession) -> tuple[Project, Shot, User]:
@@ -59,13 +44,7 @@ async def _seed(session: AsyncSession) -> tuple[Project, Shot, User]:
 
 
 @pytest.mark.asyncio
-async def test_partial_apply_only_executes_accepted(session: AsyncSession, monkeypatch) -> None:
-    from app.director.business_checkpoints import DirectorBusinessCheckpoints
-
-    def unavailable(*args, **kwargs):
-        raise RuntimeError("Director is stopped")
-
-    monkeypatch.setattr(DirectorBusinessCheckpoints, "__init__", unavailable)
+async def test_partial_apply_only_executes_accepted(session: AsyncSession) -> None:
     project, shot, user = await _seed(session)
     proposal = DirectorProposal(
         project_id=project.id, thread_id=uuid4(), scope_type="shot",
@@ -136,7 +115,7 @@ async def test_partial_apply_only_executes_accepted(session: AsyncSession, monke
 
 
 @pytest.mark.asyncio
-async def test_proposal_rejection_blocks_immediately_and_notifies_turn_independently(session):
+async def test_proposal_rejection_blocks_immediately_without_resuming_an_unbound_turn(session):
     from app.director.inbox import receive_production_event
     from app.director.turn_models import DirectorTurn
     from app.director.turn_service import DirectorTurnService
@@ -182,7 +161,12 @@ async def test_proposal_rejection_blocks_immediately_and_notifies_turn_independe
     assert await apply_director_wakeup(session, inbox_id=inbox_id)
     await session.commit()
     await session.refresh(turn)
-    assert turn.status == "completed" and turn.wait_reason == "proposal_rejected"
+    assert turn.status == "awaiting_user"
+    recovered = await DirectorTurnService(session).recover_interrupted(
+        project_id=project.id, turn_id=turn.id,
+    )
+    assert recovered.status == "stale"
+    assert recovered.wait_reason == "runtime_binding_missing"
     with pytest.raises(ValidationAppError) as duplicate:
         await service.partial_apply(project=project, proposal_id=proposal.id,
             apply_input=PartialApplyInput(decisions=[

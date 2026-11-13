@@ -11,8 +11,9 @@ from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.assets.models import Shot
 from app.production.models import DirectorBoardState
-from app.shared.errors import ConflictError
+from app.shared.errors import ConflictError, NotFoundError
 
 router = APIRouter(tags=["director-board"], dependencies=[Depends(require_selected_workspace)])
 
@@ -84,6 +85,12 @@ async def save_director_board(
     _csrf: CsrfDep,
 ) -> DirectorBoardRead:
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    # The board row may not exist yet. Lock its stable parent before looking
+    # for it so concurrent first saves cannot both insert version 1.
+    if await session.scalar(select(Shot.id).where(
+        Shot.id == shot_id, Shot.project_id == project_id,
+    ).with_for_update()) is None:
+        raise NotFoundError("shot not found")
     row = (
         await session.execute(
             select(DirectorBoardState)
@@ -92,6 +99,7 @@ async def save_director_board(
                 DirectorBoardState.shot_id == shot_id,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
     ).scalar_one_or_none()
     now = datetime.now(UTC)
@@ -125,65 +133,3 @@ async def save_director_board(
         row.updated_at = now
     await session.commit()
     return _read(row)
-
-
-# --- Phase 8 (P8-01): persist 2D blocking to Scene.design_state.blocking_2d ---
-
-
-class P8BoardElementWrite(BaseModel):
-    kind: str
-    name: str
-    x: float = Field(ge=0, le=1)
-    y: float = Field(ge=0, le=1)
-    orientation: float | None = None
-
-
-class P8DirectorBoardWrite(BaseModel):
-    blocking_2d: list[P8BoardElementWrite] = Field(default_factory=list)
-    composition_bounds: dict[str, float] = Field(default_factory=dict)
-    director_state: dict[str, object] = Field(default_factory=dict)
-
-
-class P8DirectorBoardRead(BaseModel):
-    blocking_2d: list[dict[str, object]] = Field(default_factory=list)
-    composition_bounds: dict[str, float] = Field(default_factory=dict)
-    director_state: dict[str, object] = Field(default_factory=dict)
-
-
-@router.patch(
-    "/projects/{project_id}/scenes/{scene_id}/shots/{shot_id}/director-board",
-    response_model=P8DirectorBoardRead,
-)
-async def update_director_board_p8(
-    project_id: UUID,
-    scene_id: UUID,
-    shot_id: UUID,
-    body: P8DirectorBoardWrite,
-    user: CurrentUser,
-    session: SessionDep,
-    _csrf: CsrfDep,
-) -> P8DirectorBoardRead:
-    """Phase 8: write 2D blocking to Scene.design_state.blocking_2d and
-    Shot.director_state (03 §72)."""
-    from app.assets.models import Scene, Shot
-    from app.shared.errors import ValidationAppError
-
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    scene = await session.get(Scene, scene_id)
-    if scene is None:
-        raise ValidationAppError("scene not found", details={"code": "SCENE_NOT_FOUND"})
-    shot = await session.get(Shot, shot_id)
-    if shot is None or shot.project_id != project_id:
-        raise ValidationAppError("shot not found", details={"code": "SHOT_NOT_FOUND"})
-    design = dict(scene.design_state or {})
-    design["blocking_2d"] = [element.model_dump() for element in body.blocking_2d]
-    design["composition_bounds"] = body.composition_bounds
-    scene.design_state = design
-    shot.director_state = dict(body.director_state or {})
-    shot.version = (shot.version or 1) + 1
-    await session.commit()
-    return P8DirectorBoardRead(
-        blocking_2d=[element.model_dump() for element in body.blocking_2d],
-        composition_bounds=body.composition_bounds,
-        director_state=shot.director_state,
-    )

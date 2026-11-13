@@ -273,7 +273,8 @@ class DirectorRuntimeExecutor:
             project_id=scope.project_id, turn_id=turn_id,
         )
         if (
-            turn.workspace_id != scope.workspace_id
+            turn.turn_kind == "agent"
+            or turn.workspace_id != scope.workspace_id
             or turn.actor_id != scope.actor_id
             or turn.runtime_execution_id != runtime_execution_id
         ):

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 import pytest
@@ -13,22 +12,10 @@ from app.director.proposal_models import DirectorProposalItem
 from app.director.proposal_service import PartialApplyInput, ProposalDecision, ProposalService
 from app.director.story_proposal import create_story_proposal
 from app.execution.models import NodeRun, ProviderOperation
-from app.shared.base import Base
 from app.shared.security import CSRF_HEADER, hash_password
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _seed(session: AsyncSession) -> tuple[Project, User]:
@@ -73,9 +60,7 @@ async def _counts(session: AsyncSession, project_id: object) -> dict[str, int]:
     return {
         "documents": (
             await session.scalar(
-                select(func.count(ScriptDocument.id)).where(
-                    ScriptDocument.project_id == project_id
-                )
+                select(func.count(ScriptDocument.id)).where(ScriptDocument.project_id == project_id)
             )
         )
         or 0,
@@ -95,9 +80,7 @@ async def _counts(session: AsyncSession, project_id: object) -> dict[str, int]:
         )
         or 0,
         "shots": (
-            await session.scalar(
-                select(func.count(Shot.id)).where(Shot.project_id == project_id)
-            )
+            await session.scalar(select(func.count(Shot.id)).where(Shot.project_id == project_id))
         )
         or 0,
     }
@@ -157,18 +140,14 @@ async def test_whole_apply_writes_canonical_without_provider_or_execution(
     assert counts["shots"] == 3
 
     assert (
-        await session.scalar(
-            select(func.count(NodeRun.id)).where(NodeRun.project_id == project.id)
-        )
+        await session.scalar(select(func.count(NodeRun.id)).where(NodeRun.project_id == project.id))
     ) == 0
     assert (
         await session.scalar(
             select(func.count(ProviderOperation.id))
             .select_from(ProviderOperation)
             .join(NodeRun, NodeRun.id == ProviderOperation.node_run_id)
-            .where(
-                NodeRun.project_id == project.id
-            )
+            .where(NodeRun.project_id == project.id)
         )
     ) == 0
 
@@ -190,7 +169,8 @@ async def test_partial_apply_only_accepts_chosen_scene(session: AsyncSession) ->
     chosen = [
         item
         for item in result.items
-        if item.command in {
+        if item.command
+        in {
             "story.set_script_document",
             "story.upsert_episode",
         }
@@ -213,6 +193,36 @@ async def test_partial_apply_only_accepts_chosen_scene(session: AsyncSession) ->
     assert counts["scenes"] == 1
     assert counts["shots"] == 2
 
+    # Proposal remains pending while pending items exist
+    await session.refresh(result.proposal)
+    assert result.proposal.status == "pending"
+
+    # Now adopt Scene 2 on the same proposal
+    chosen_scene_2 = [
+        item
+        for item in result.items
+        if item.command in {"story.upsert_scene", "story.upsert_shot"}
+        and (item.payload or {}).get("scene_number") == 2
+    ]
+    assert len(chosen_scene_2) > 0
+    outcome_2 = await ProposalService(session, actor=user).partial_apply(
+        project=project,
+        proposal_id=result.proposal.id,
+        apply_input=PartialApplyInput(
+            decisions=[
+                ProposalDecision(item_id=item.id, decision="accepted") for item in chosen_scene_2
+            ]
+        ),
+    )
+    assert outcome_2.failed == []
+    counts_2 = await _counts(session, project.id)
+    assert counts_2["scenes"] == 2
+    assert counts_2["shots"] == 3
+
+    # Now all items are decided, proposal transitions to applied
+    await session.refresh(result.proposal)
+    assert result.proposal.status == "applied"
+
 
 @pytest.mark.asyncio
 async def test_stale_episode_apply_fails_closed(session: AsyncSession) -> None:
@@ -231,9 +241,7 @@ async def test_stale_episode_apply_fails_closed(session: AsyncSession) -> None:
     )
     assert episode is not None
     second = await _proposal(session, project, user, f"story-{uuid4().hex}")
-    episode_item = next(
-        item for item in second.items if item.command == "story.upsert_episode"
-    )
+    episode_item = next(item for item in second.items if item.command == "story.upsert_episode")
     episode.version += 1  # competing canonical write after proposal creation
     await session.flush()
 
@@ -305,8 +313,7 @@ def test_story_proposal_api_create_preview_and_apply(client: TestClient) -> None
         f"/api/v1/projects/{project_id}/story/proposals/{proposal['id']}/apply",
         json={
             "decisions": [
-                {"item_id": operation["id"], "decision": "accepted"}
-                for operation in operations
+                {"item_id": operation["id"], "decision": "accepted"} for operation in operations
             ]
         },
         headers={CSRF_HEADER: csrf},
@@ -321,3 +328,36 @@ def test_story_proposal_api_create_preview_and_apply(client: TestClient) -> None
     assert workspace_after.json()["document"] is not None
     assert len(workspace_after.json()["episodes"]) == 1
     assert len(workspace_after.json()["episodes"][0]["scenes"]) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", ["draft", "brief", "filename"])
+async def test_story_key_cannot_be_reused_for_a_different_request(
+    session: AsyncSession, changed: str,
+) -> None:
+    from app.shared.errors import ConflictError
+    project, user = await _seed(session)
+    request = dict(project_id=project.id, actor=user, brief="first", filename="first.md",
+                   draft_text=DRAFT, idempotency_key="same-request")
+    first = await create_story_proposal(session, **request)
+    replay = await create_story_proposal(session, **request)
+    assert replay.proposal.id == first.proposal.id
+    field = {"draft": "draft_text", "brief": "brief", "filename": "filename"}[changed]
+    request[field] += " changed"
+    with pytest.raises(ConflictError):
+        await create_story_proposal(session, **request)
+
+
+@pytest.mark.asyncio
+async def test_story_apply_rejects_edit_session_scope(session: AsyncSession) -> None:
+    from app.api.v1.story import apply_project_story_proposal
+    from app.shared.errors import NotFoundError
+    project, user = await _seed(session)
+    result = await create_story_proposal(session, project_id=project.id, actor=user,
+        brief="test", filename="draft.md", draft_text=DRAFT, idempotency_key="scope")
+    result.proposal.scope_type = "edit_session"
+    await session.flush()
+    with pytest.raises(NotFoundError):
+        await apply_project_story_proposal(project_id=project.id, proposal_id=result.proposal.id,
+            body=PartialApplyInput(decisions=[ProposalDecision(item_id=result.items[0].id,
+                decision="accepted")]), user=user, session=session, _csrf=None)

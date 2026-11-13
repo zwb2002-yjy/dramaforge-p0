@@ -1,0 +1,17 @@
+export const projectCopy = {
+  title: "我的项目",
+  newProject: "新建项目",
+  workspace: "工作空间",
+  workspaceFilter: "工作空间筛选",
+  manageWorkspace: "管理工作空间",
+  search: "搜索项目",
+  all: "全部项目",
+  recent: "最近打开",
+  count: (count: number) => `${count} 个项目`,
+  enter: "进入工作台",
+  enterProject: (name: string) => `进入工作台 ${name}`,
+  landscape: "横屏",
+  portrait: "竖屏",
+  square: "方形",
+  otherFormat: "自定义画幅",
+};

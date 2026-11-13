@@ -17,19 +17,6 @@ from app.director.creative_capabilities.packs_library import (
     STYLE_PACKS,
 )
 from app.director.creative_capabilities.skill_library import BASELINE_SKILLS
-from app.shared.base import Base
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with factory() as s:
-        yield s
-    await engine.dispose()
 
 
 async def _seed(session) -> tuple[Project, Scene, Shot]:
@@ -130,3 +117,26 @@ async def test_freeze_scene_rejects_cross_project(session) -> None:
             session, project_id=other_project.id, scene_id=scene.id,
             intent=_intent(), actor_id=uuid4(),
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["shot", "scene"])
+async def test_freeze_refreshes_stale_identity_map(session, kind: str) -> None:
+    from sqlalchemy import update
+
+    project, scene, shot = await _seed(session)
+    target = shot if kind == "shot" else scene
+    model = Shot if kind == "shot" else Scene
+    field = "director_state" if kind == "shot" else "design_state"
+    await session.execute(update(model).where(model.id == target.id)
+        .values(**{"version": 3, field: {"other_save": "preserve"}})
+        .execution_options(synchronize_session=False))
+    assert target.version == 1
+    if kind == "shot":
+        await freeze_shot_capabilities(session, project_id=project.id, shot_id=target.id,
+                                       intent=_intent(), actor_id=uuid4())
+    else:
+        await freeze_scene_capabilities(session, project_id=project.id, scene_id=target.id,
+                                        intent=_intent(), actor_id=uuid4())
+    assert target.version == 4
+    assert getattr(target, field)["other_save"] == "preserve"

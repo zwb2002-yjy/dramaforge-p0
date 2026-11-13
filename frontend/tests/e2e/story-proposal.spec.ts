@@ -79,6 +79,7 @@ async function installStoryMock(page: Page) {
   }, "workspace-story");
   let acceptedEpisodeOnly = false;
   let generationBody: Record<string, unknown> | null = null;
+  const unmatched: string[] = [];
   await page.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -88,6 +89,18 @@ async function installStoryMock(page: Page) {
     if (path === "/api/v1/auth/csrf") return json(route, { csrf_token: "csrf-e2e" });
     if (path === `/api/v1/projects/${PROJECT_ID}/script`) {
       return json(route, scriptWorkspace(acceptedEpisodeOnly));
+    }
+    // Explicit background surfaces the Script workspace reads. They stay
+    // explicit so the catch-all below really means "unexpected request".
+    if (path === `/api/v1/projects/${PROJECT_ID}`) return json(route, { id: PROJECT_ID });
+    if (path === "/api/v1/events/stream") {
+      return route.fulfill({ status: 200, contentType: "text/event-stream", body: "" });
+    }
+    if (path === `/api/v1/projects/${PROJECT_ID}/workspace-state`) {
+      return json(route, method === "PATCH" ? {} : { selected_shot_id: null });
+    }
+    if (path === `/api/v1/projects/${PROJECT_ID}/story/proposals` && method === "GET") {
+      return json(route, []);
     }
     if (path === `/api/v1/projects/${PROJECT_ID}/story/proposals/generate` && method === "POST") {
       generationBody = request.postDataJSON();
@@ -165,15 +178,19 @@ async function installStoryMock(page: Page) {
         failed: [],
       });
     }
-    return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
+    // Unknown API calls are recorded and asserted empty by each test: a silent
+    // 200 {} would let a missing mock look like a healthy response.
+    unmatched.push(`${method} ${path}`);
+    return json(route, {});
   });
   return {
     generationBody: () => generationBody,
+    unmatched,
   };
 }
 
 test("Story proposal: create typed diff, partial accept only the episode", async ({ page }) => {
-  await installStoryMock(page);
+  const state = await installStoryMock(page);
   await page.goto(`/projects/${PROJECT_ID}/script`);
   await expect(page.getByTestId("story-proposal-composer")).toBeVisible();
 
@@ -182,18 +199,20 @@ test("Story proposal: create typed diff, partial accept only the episode", async
   await page.getByTestId("story-proposal-create").click();
 
   await expect(page.getByTestId("story-proposal-preview")).toBeVisible();
+  await expect(page.getByTestId("story-proposal-create")).toHaveCount(0);
   await expect(page.getByTestId(/story-operation-create/)).toHaveCount(3);
 
   // Partial accept: only keep the Episode operation checked.
-  const sceneCheckbox = page.getByLabel("采用 Scene 1.1");
-  const shotCheckbox = page.getByLabel("采用 Shot 1.1.1");
+  const sceneCheckbox = page.getByLabel("采用 场景 1.1");
+  const shotCheckbox = page.getByLabel("采用 镜头 1.1.1");
   await sceneCheckbox.uncheck();
   await shotCheckbox.uncheck();
   await page.getByTestId("story-proposal-apply-selected").click();
 
-  await expect(page.getByRole("status")).toContainText("Story 更新完成");
+  await expect(page.getByRole("status")).toContainText("故事更新完成");
   await expect(page.getByTestId("script-episodes")).toContainText("双人冲突");
   await expect(page.getByTestId("script-episodes")).not.toContainText("咖啡厅");
+  expect(state.unmatched).toEqual([]);
 });
 
 test("Story proposal: a brief generates an audited draft and reject-all keeps Story empty", async ({
@@ -207,6 +226,8 @@ test("Story proposal: a brief generates an audited draft and reject-all keeps St
 
   await expect(page.getByTestId("story-proposal-preview")).toBeVisible();
   await expect(page.getByLabel("剧本文本")).toHaveValue(DRAFT);
+  await expect(page.getByTestId("story-proposal-create")).toHaveCount(0);
+  await expect(page.getByTestId("story-draft-preview").locator(".qc-script-raw")).toHaveText(DRAFT);
   await expect(page.getByTestId("story-generation-evidence")).toContainText("upstream/story-e2e");
   await expect(page.getByTestId("story-generation-evidence")).toContainText("0.005 USD");
   expect(state.generationBody()).toEqual({
@@ -219,4 +240,9 @@ test("Story proposal: a brief generates an audited draft and reject-all keeps St
   await expect(page.getByRole("status")).toContainText("拒绝 3");
   await expect(page.getByTestId("script-empty")).toBeVisible();
   await expect(page.getByTestId("script-episodes")).toHaveCount(0);
+
+  await page.getByTestId("story-proposal-generate").click();
+  await expect(page.getByTestId("story-proposal-preview")).toBeVisible();
+  await expect(page.getByLabel("剧本文本")).toHaveValue(DRAFT);
+  expect(state.unmatched).toEqual([]);
 });

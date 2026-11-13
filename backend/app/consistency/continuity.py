@@ -54,6 +54,7 @@ def continuity_four_layers(
 ) -> ContinuityReport:
     """Run four continuity layers; block rules cannot be soft-passed."""
     viols: list[ContinuityViolation] = []
+    lead_name = lead_name.strip() if lead_name else None
 
     # Layer 1: character presence in deliverable shot
     if (

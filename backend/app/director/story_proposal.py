@@ -10,6 +10,7 @@ shared ProposalCommandRegistry so only explicitly accepted operations apply.
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import cast
@@ -18,12 +19,13 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.models import User
+from app.access.models import Project, User
 from app.assets.models import Episode, Scene, ScriptDocument, Shot
 from app.assets.script_import import ParsedScript, parse_script_markdown
 from app.director.assistant_models import DirectorMessage, DirectorThread
+from app.director.proposal_creation import ProposalItemDraft, create_proposal
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
-from app.shared.errors import ValidationAppError
+from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 
 @dataclass(frozen=True)
@@ -418,7 +420,8 @@ def _operation_dict(item: ProposalItemInput) -> dict[str, object]:
         "command": item.command,
         "action": item.action,
         "expected_target_version": item.expected_target_version,
-        "proposed": item.payload,
+        "proposed": {key: value for key, value in item.payload.items()
+                     if key != "_story_request_fingerprint"},
         "rationale": item.rationale,
     }
 
@@ -441,6 +444,17 @@ async def create_story_proposal(
             details={"code": "STORY_DRAFT_REQUIRED"},
         )
 
+    # Serialize key lookup and insertion, including concurrent different keys
+    # that would otherwise race the shared project proposal thread.
+    project = await session.scalar(
+        select(Project).where(Project.id == project_id).with_for_update()
+    )
+    if project is None:
+        raise NotFoundError("project not found")
+    request_hash = hashlib.sha256(json.dumps(
+        {"brief": brief, "filename": filename, "draft_text": draft_text},
+        sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
     existing = await _find_by_idempotency_key(
         session,
         project_id=project_id,
@@ -448,6 +462,12 @@ async def create_story_proposal(
     )
     if existing is not None:
         existing_proposal, existing_items = existing
+        if any((item.payload or {}).get("_story_request_fingerprint") != request_hash
+               for item in existing_items):
+            raise ConflictError(
+                "Story request key is already bound to a different or unverifiable request",
+                details={"code": "STORY_PROPOSAL_REQUEST_REUSED"},
+            )
         operations = [
             _operation_dict(
                 ProposalItemInput(
@@ -502,41 +522,30 @@ async def create_story_proposal(
                 created_by=actor.id,
             )
         )
-    proposal = DirectorProposal(
-        project_id=project_id,
-        thread_id=thread.id,
+    proposal, items = await create_proposal(
+        session,
+        thread=thread,
         scope_type="project",
         scope_entity_id=project_id,
-        status="pending",
         created_by=actor.id,
+        items=[
+            ProposalItemDraft(
+                command=op.command,
+                payload={**op.payload, "key": op.key, "sort_order": sort_order,
+                         "_story_request_fingerprint": request_hash},
+                expected_target_version=op.expected_target_version,
+                rationale=op.rationale or "",
+                benefit="按脚本草稿结构更新 Canonical Story",
+                cost="仅修改被用户接受的 Scene/Shot/Episode 结构",
+                risk=(
+                    "结构变化可能影响已绑定的镜头与制作事实；"
+                    "删除带正式媒体/执行记录的 Shot 会 fail closed"
+                ),
+                impact=op.key,
+            )
+            for sort_order, op in enumerate(operation_inputs)
+        ],
     )
-    session.add(proposal)
-    await session.flush()
-
-    items: list[DirectorProposalItem] = []
-    for sort_order, op in enumerate(operation_inputs):
-        payload = dict(op.payload)
-        payload["key"] = op.key
-        payload["sort_order"] = sort_order
-        item = DirectorProposalItem(
-            proposal_id=proposal.id,
-            project_id=project_id,
-            command=op.command,
-            payload=payload,
-            expected_target_version=op.expected_target_version,
-            rationale=op.rationale or "",
-            benefit="按脚本草稿结构更新 Canonical Story",
-            cost="仅修改被用户接受的 Scene/Shot/Episode 结构",
-    risk=(
-        "结构变化可能影响已绑定的镜头与制作事实；"
-        "删除带正式媒体/执行记录的 Shot 会 fail closed"
-    ),
-            impact=op.key,
-            status="pending",
-        )
-        session.add(item)
-        items.append(item)
-    await session.flush()
     operations = [_operation_dict(op) for op in operation_inputs]
     return StoryProposalResult(
         proposal=proposal,

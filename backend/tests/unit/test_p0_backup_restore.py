@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import tarfile
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from cryptography.fernet import Fernet
@@ -15,6 +16,30 @@ spec = importlib.util.spec_from_file_location("p0_backup_restore", SCRIPT)
 assert spec is not None and spec.loader is not None
 backup = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(backup)
+
+
+@pytest.mark.parametrize("created_during_backup", [False, True])
+def test_backup_never_replaces_an_existing_archive(tmp_path, monkeypatch, created_during_backup):
+    destination = tmp_path / "backup.enc"
+    original = b"existing encrypted backup"
+    if not created_during_backup:
+        destination.write_bytes(original)
+    monkeypatch.setattr(backup, "get_settings", lambda: object())
+    monkeypatch.setattr(backup, "begin_evidence_context", lambda _: {"source_commit": "test"})
+    monkeypatch.setattr(backup, "require_ignored_evidence_path", lambda _, path: path)
+    monkeypatch.setenv("TEST_BACKUP_KEY", Fernet.generate_key().decode("ascii"))
+
+    def payload(_settings, directory):
+        destination.write_bytes(original)
+        (directory / "database.dump").write_bytes(b"synthetic database")
+        return {"objects": [], "database": {"sha256": "synthetic"}}
+
+    create = Mock(side_effect=payload)
+    monkeypatch.setattr(backup, "_create_payload", create)
+    with pytest.raises(FileExistsError):
+        backup.backup(destination, key_env="TEST_BACKUP_KEY")
+    assert destination.read_bytes() == original
+    assert create.call_count == int(created_during_backup)
 
 
 def test_restore_must_use_distinct_database_and_bucket() -> None:

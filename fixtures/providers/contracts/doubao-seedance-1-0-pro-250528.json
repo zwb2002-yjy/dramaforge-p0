@@ -39,36 +39,44 @@
     }
   },
   "manifest": {
-    "catalog_source": "official_static",
-    "display_name": "Seedance 1.0 Pro",
-    "documented_at": "2026-08-10",
-    "lifecycle": "active",
     "manifest_version": "2026-08-10",
-    "media_kind": "video",
+    "provider_type": "volcengine",
+    "protocol_profile": "ark_cn_v1",
     "model_id": "doubao-seedance-1-0-pro-250528",
-    "model_revision": "v1",
+    "model_revision": "v2",
+    "media_kind": "video",
+    "display_name": "Seedance 1.0 Pro",
+    "lifecycle": "active",
+    "catalog_source": "official_static",
+    "documented_at": "2026-08-10",
     "operations": {
       "video.generate": {
+        "operation": "video.generate",
         "capabilities": [
           "video.i2v.first_frame"
         ],
-        "exclusive_groups": [],
-        "operation": "video.generate",
         "output_constraints": {},
         "reference_constraints": {
           "first_frame": {
-            "max": 1,
-            "min": 1
+            "min": 1,
+            "max": 1
           }
-        }
+        },
+        "exclusive_groups": []
       }
     },
     "option_schema": {
       "namespace": "",
       "options": {}
     },
-    "protocol_profile": "ark_cn_v1",
-    "provider_type": "volcengine"
+    "implementation_status": "contract_tested",
+    "evidence": {
+      "current_contract": {
+        "source_type": "contract_fixture",
+        "source_url": "repository:backend/tests/unit",
+        "checked_at": "2026-10-07"
+      }
+    }
   },
-  "manifest_hash": "2fdf987947919fd4d797b9c0a2cbbae165571d91054c1c1e87bd87b77dde6add"
+  "manifest_hash": "a2dd844b76fb0288b1f85d82935f42c0435421e35c6d4c576ad8ea7ab99f6b40"
 }

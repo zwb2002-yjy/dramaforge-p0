@@ -1,0 +1,45 @@
+{
+  "manifest_version": "2026-08-10",
+  "provider_type": "volcengine",
+  "protocol_profile": "ark_cn_v1",
+  "model_id": "doubao-seedream-4-0-250828",
+  "model_revision": "v3",
+  "media_kind": "image",
+  "display_name": "Seedream 4.0",
+  "lifecycle": "active",
+  "catalog_source": "official_static",
+  "documented_at": "2026-08-10",
+  "operations": {
+    "image.generate": {
+      "operation": "image.generate",
+      "capabilities": [
+        "image.t2i",
+        "image.i2i"
+      ],
+      "output_constraints": {
+        "size": "2048x2048",
+        "response_format": "url",
+        "watermark": false
+      },
+      "reference_constraints": {
+        "reference_image": {
+          "min": 0,
+          "max": 1
+        }
+      },
+      "exclusive_groups": []
+    }
+  },
+  "option_schema": {
+    "namespace": "",
+    "options": {}
+  },
+  "implementation_status": "contract_tested",
+  "evidence": {
+    "current_contract": {
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit",
+      "checked_at": "2026-10-07"
+    }
+  }
+}

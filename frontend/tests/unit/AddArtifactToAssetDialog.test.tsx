@@ -1,3 +1,4 @@
+import { expectSelectValue, selectValue, selectOptions } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -58,6 +59,43 @@ function renderDialog(props: Partial<React.ComponentProps<typeof AddArtifactToAs
 describe("AddArtifactToAssetDialog", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("focuses the library modal and closes on Escape", async () => {
+    const { onClose } = renderDialog();
+    const dialog = screen.getByRole("dialog", { name: "将生成结果加入资产" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    await waitFor(() => expect(dialog).toContainElement(document.activeElement as HTMLElement));
+    fireEvent.keyDown(dialog, { key: "Escape", code: "Escape" });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("offers only the asset kinds a video Artifact may become", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      return json(ASSET, 201);
+    });
+
+    renderDialog({ artifactType: "video", defaultKind: "character" });
+    const kindSelect = screen.getByLabelText("资产类型");
+    const options = selectOptions(kindSelect).map((option) => option.label);
+    // 角色 / 场景 are image-only server side; offering them here would turn the
+    // explicit confirmation into a late refusal.
+    expect(options).toEqual(["视频"]);
+    expectSelectValue(kindSelect, "video");
+  });
+
+  it("keeps 角色 / 场景 available for an image Artifact", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      return json(ASSET, 201);
+    });
+
+    renderDialog({ artifactType: "image", defaultKind: "character" });
+    const options = selectOptions(screen.getByLabelText("资产类型")).map((option) => option.label);
+    expect(options).toEqual(["角色", "场景", "视频"]);
+  });
+
   it("shows the provenance and sends one explicit creation request with a stable key", async () => {
     const calls: Array<{ url: string; key: string | undefined; body: Record<string, unknown> }> =
       [];
@@ -75,8 +113,8 @@ describe("AddArtifactToAssetDialog", () => {
     const { onCreated } = renderDialog();
 
     expect(screen.getByTestId("add-asset-source")).toHaveTextContent("关键帧候选");
-    expect(screen.getByLabelText("资产类型")).toHaveValue("character");
-    expect(screen.getByLabelText("参考角色")).toHaveValue("front_face");
+    expectSelectValue(screen.getByLabelText("资产类型"), "character");
+    expectSelectValue(screen.getByLabelText("参考角色"), "front_face");
 
     fireEvent.click(screen.getByTestId("add-asset-confirm"));
 
@@ -121,8 +159,32 @@ describe("AddArtifactToAssetDialog", () => {
     expect(binding?.body).toMatchObject({
       asset_id: ASSET.id,
       artifact_id: ARTIFACT_ID,
+      purpose: "identity",
       resolution_mode: "direct_artifact",
     });
+  });
+
+  it.each([
+    ["video", "action"],
+    ["audio", "audio_rhythm"],
+  ])("binds a %s asset with a supported shot purpose", async (kind, purpose) => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      calls.push({
+        url,
+        body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {},
+      });
+      if (url.endsWith("/assets/from-artifact")) return json({ ...ASSET, kind }, 201);
+      return json({ id: "binding-1" }, 201);
+    });
+    renderDialog({ artifactType: kind, defaultKind: kind });
+    fireEvent.click(screen.getByTestId("add-asset-confirm"));
+    await screen.findByTestId("add-asset-result");
+    fireEvent.click(screen.getByTestId("add-asset-bind-shot"));
+    await waitFor(() => expect(screen.getByTestId("add-asset-bind-shot")).toBeDisabled());
+    expect(calls.find((call) => call.url.includes("/references"))?.body.purpose).toBe(purpose);
   });
 
   it("keeps the dialog open and explains a server rejection", async () => {
@@ -167,12 +229,12 @@ describe("AddArtifactToAssetDialog", () => {
     expect(keys[1]).toBe(keys[0]);
   });
 
-  it("switches reference roles with the asset kind and never sends an impossible pair", () => {
+  it("switches reference roles with the asset kind and never sends an impossible pair", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(() => json({}));
     renderDialog();
 
-    fireEvent.change(screen.getByLabelText("资产类型"), { target: { value: "scene" } });
-    expect(screen.getByLabelText("参考角色")).toHaveValue("layout_reference");
+    await selectValue(screen.getByLabelText("资产类型"), "scene");
+    expectSelectValue(screen.getByLabelText("参考角色"), "layout_reference");
     expect(roleLabel("layout_reference")).toBe("空间布局");
     expect(roleLabel("front_face")).toBe("正面");
   });

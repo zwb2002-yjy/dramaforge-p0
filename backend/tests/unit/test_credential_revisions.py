@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 import pytest
@@ -18,23 +17,9 @@ from app.security.credentials import (
     store_credential,
 )
 from app.security.models import KeyRotationAudit
-from app.shared.base import Base
-from app.shared.model_registry import load_all_models
 from cryptography.fernet import Fernet
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    load_all_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _key() -> str:
@@ -273,4 +258,3 @@ async def test_missing_named_connection_credential_fails_closed_without_environm
     with pytest.raises(WorkspaceCredentialConfigurationError):
         await runtime_connection_settings(session, connection=connection, settings=settings)
     assert "environment-secret-must-not-be-used" not in str(connection.__dict__)
-

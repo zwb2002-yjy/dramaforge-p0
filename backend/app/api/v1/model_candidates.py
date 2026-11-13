@@ -46,6 +46,9 @@ class ModelCandidateRead(BaseModel):
     display_name: str
     purpose: str
     eligible: bool
+    #: Quality certification (human-accepted representative artifact). Reported
+    #: for the model pickers; it never blocks normal execution or experiments.
+    certified: bool
     supported_capabilities: list[str]
     unmet_preferences: list[str]
     evidence: dict[str, bool]
@@ -67,6 +70,7 @@ def _candidate_read(
         display_name=entry.display_name if entry is not None else binding.model_id,
         purpose=binding.purpose,
         eligible=evaluation.eligible,
+        certified=evaluation.certified,
         supported_capabilities=evaluation.supported_capabilities,
         unmet_preferences=evaluation.unmet_preferences,
         evidence=evaluation.evidence,

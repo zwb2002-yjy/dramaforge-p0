@@ -1,0 +1,30 @@
+/* The single "下一步" hint in the project bar. Navigation lives in the shell. */
+.project-stage-next {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--df-space-2);
+  padding: var(--df-space-1) var(--df-space-3);
+  border-radius: var(--df-radius-chip);
+  color: var(--df-text-secondary);
+  font-size: var(--df-font-size-caption);
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    background var(--df-duration-fast) var(--df-ease),
+    color var(--df-duration-fast) var(--df-ease);
+}
+.project-stage-next:hover {
+  background: var(--df-control-background);
+  color: var(--df-verdigris);
+}
+.project-stage-next-kicker {
+  color: var(--df-text-muted);
+  font-size: var(--df-font-size-meta);
+}
+
+/* Phones keep the project bar to one line; the shell nav still reaches every step. */
+@media (max-width: 640px) {
+  .project-stage-next {
+    display: none;
+  }
+}

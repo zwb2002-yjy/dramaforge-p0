@@ -9,6 +9,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.providers.model_profiles.slots import ModelSlot
+from app.shared.errors import ValidationAppError
+
+MAX_CONTEXT_BYTES = 512 * 1024
 
 
 class DirectorContextSnapshot(BaseModel):
@@ -46,7 +49,7 @@ class DirectorContextBuilder:
         intent_snapshot: dict[str, object],
         context_payload: dict[str, object],
     ) -> DirectorContextSnapshot:
-        return DirectorContextSnapshot(
+        snapshot = DirectorContextSnapshot(
             workspace_id=str(workspace_id),
             project_id=str(project_id),
             scope_type=scope_type,
@@ -56,6 +59,12 @@ class DirectorContextBuilder:
             intent=json.loads(json.dumps(intent_snapshot, ensure_ascii=False)),
             context=json.loads(json.dumps(context_payload, ensure_ascii=False)),
         )
+        if len(snapshot.model_dump_json().encode("utf-8")) > MAX_CONTEXT_BYTES:
+            raise ValidationAppError(
+                "Director context exceeds the 512 KiB input limit; narrow the requested scope",
+                details={"code": "DIRECTOR_CONTEXT_TOO_LARGE", "max_bytes": MAX_CONTEXT_BYTES},
+            )
+        return snapshot
 
 
 __all__ = ["DirectorContextBuilder", "DirectorContextSnapshot"]

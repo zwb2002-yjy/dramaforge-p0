@@ -1,52 +1,15 @@
-"""Canonical deterministic Scene layout and direct Workbench path tests."""
+"""Direct Workbench path without the retired director board."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 import pytest
 from app.access.models import Project, User, Workspace
 from app.access.projects import ProjectService
 from app.assets.models import Scene, Shot
-from app.director.scene_assembler import (
-    CharacterSpec,
-    SceneAssembler,
-    SceneLayoutSpec,
-    SceneObjectSpec,
-)
-from app.shared.base import Base
 from app.shared.security import hash_password
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
-
-
-def test_gate_1_scene_assembler_deterministic_coordinates() -> None:
-    """§79-1/2: 2D layout is plannable and deterministic (never LLM coords)."""
-    spec = SceneLayoutSpec(
-        door=SceneObjectSpec(kind="door", name="门", position="north"),
-        furniture=[SceneObjectSpec(kind="table", name="桌子", position="center")],
-        characters=[CharacterSpec(name="A", enters_from="south"), CharacterSpec(name="B")],
-    )
-    first = SceneAssembler().assemble(spec)
-    second = SceneAssembler().assemble(spec)
-    assert first == second  # deterministic
-    assert first["generator"] == "deterministic_scene_assembler_v1"
-    elements = first["elements"]
-    kinds = {item["kind"] for item in elements}
-    assert "character" in kinds and "table" in kinds and "door" in kinds
-    door = next(item for item in elements if item["kind"] == "door")
-    assert door["x"] == 0.5 and door["y"] == 0.15  # north
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _seed_scene_shot(session: AsyncSession) -> tuple[Project, Shot, User]:

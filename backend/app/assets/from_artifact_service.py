@@ -15,7 +15,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.models import User
+from app.access.models import Project, User
 from app.access.projects import ProjectService
 from app.assets.models import Asset, AssetVersion, AssetVersionReference
 from app.execution.models import Artifact
@@ -119,6 +119,9 @@ class AssetFromArtifactService:
         await ProjectService(self._session).get_project_for_owner(
             project_id=project_id, actor=actor
         )
+        # Serialize same-key/name creation before the read-and-insert window.
+        await self._session.scalar(select(Project.id).where(Project.id == project_id)
+                                    .with_for_update())
         request_hash = asset_creation_request_hash(
             artifact_id=request.artifact_id,
             kind=request.kind,

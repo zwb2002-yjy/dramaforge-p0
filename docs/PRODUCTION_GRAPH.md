@@ -1,7 +1,7 @@
 # PRODUCTION_GRAPH — Graph / Node / NodeRun 定义权威
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Date: 2026-09-15 / Base: dev 5ea45d6 / Alembic head: 20260910_0066
+Updated: 2026-10-07；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 
 本文件只回答一件事：**ProductionGraph 怎么组织执行计划。**
 
@@ -93,8 +93,10 @@ Artifact A / Artifact B / Artifact C   ← 都是 Candidate
 实现事实：**没有 Candidate 表**。候选直接从 NodeRun + Artifact 派生；正式选择记录在
 `Shot.formal_keyframe_artifact_id` / `Shot.formal_video_artifact_id`。
 
-Video 执行默认使用正式关键帧，且在不存在正式关键帧时**必须 fail closed**，绝不退化为
-"用最新一张图"（`production/formal_selection.py::require_formal_keyframe`）。
+Video 执行按冻结输入模式决定引用：`first_frame` / `first_last_frame` 缺少所需正式关键帧时
+**必须 fail closed**，绝不退化为"用最新一张图"（`production/formal_selection.py::require_formal_keyframe`）。
+`text_to_video` / `last_frame` / `omni_reference` 不因缺少正式首帧而拒绝；各自输入仍须满足
+[PRODUCTION_RUNTIME](PRODUCTION_RUNTIME.md) 和模型合同，不能静默切换模式。
 
 ---
 
@@ -117,7 +119,7 @@ Graph 的 `definition` 是一个 JSON 文档（`GraphVersion.definition`），�
 `publish`。节点结构变化会被 `materialize_definition` 与 `create_graph` 校验
 （`production/service.py`）。
 
-### 3.1 三个 Graph 定义来源（当前事实）
+### 3.1 三处模板来源及 FinalFilm 内部图（当前事实）
 
 | 来源 | template_key | 是否被真实生产执行 |
 |---|---|---|
@@ -133,7 +135,7 @@ Graph 的 `definition` 是一个 JSON 文档（`GraphVersion.definition`），�
 不是并行执行引擎：真实的 Shot 生产固定使用 `shot-p0-v1`。
 
 因此这是**发现性问题（模板目录分散在三个模块）**，不是**概念性问题（两套 Graph）**。
-详见 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) 问题 5。
+详见 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) §4 问题 5。
 
 ---
 
@@ -146,9 +148,9 @@ Graph 的 `definition` 是一个 JSON 文档（`GraphVersion.definition`），�
 | `prompt_compose` | 把创作意图与 prompt 契约编译为该镜头可执行的 prompt 文档 | 纯上游（零成本本地） |
 | `keyframe` | 生成关键帧图像 | 真实生产 / Provider |
 | `identity_review` | 角色一致性证据与判定 | 零成本本地 review |
-| `video` | 由正式关键帧生成视频 | 真实生产 / Provider |
+| `video` | 按冻结合同由文本、正式首帧、尾帧、首尾帧或参考素材生成视频 | 真实生产 / Provider |
 | `video_review` | 视频漂移证据与判定（node_key 常为 `video_drift_review`） | 零成本本地 review |
-| `voice` | 对白语音合成 | 本地 `local-voice-v1` |
+| `voice` | 对白语音合成 | 冻结 VoiceExecutionSpec；Edge/eSpeak/静音身份见 PRODUCTION_RUNTIME |
 | `subtitle` | 字幕生成 | 零成本本地 |
 | `composite` | 合成该镜头成片片段 | 零成本本地 |
 | `continuity_review` | 连续性证据与判定 | 零成本本地 review |
@@ -266,7 +268,8 @@ Review 节点产出证据 Artifact，作为分支判定依据。
 **尚未成形：** 一个独立的 **Production Planner**，即"由 CreativeIntent + 现有 Artifact
 + Formal 状态 + ModelCapability + 修改范围自动推导出**最小** ProductionGraph"的角色。
 当前最小重算由调用方（Workbench 阶段选择 / 修复计划 / 可复用产物声明）驱动，而不是由
-规划器自动推导。这是 Phase 4 的收敛目标。
+规划器自动推导。这是待实施的收敛目标，范围与优先级见
+[ARCHITECTURE_MAPPING](ARCHITECTURE_MAPPING.md)；不按历史 Phase 编号自动启动。
 
 ---
 

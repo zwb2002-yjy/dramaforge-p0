@@ -5,8 +5,8 @@ from fastapi import APIRouter
 from app.api.v1 import (
     assets,
     auth,
+    batch_production,
     creative_capabilities,
-    credentials,
     director,
     director_board,
     editing,
@@ -14,10 +14,13 @@ from app.api.v1 import (
     experiments,
     final_film,
     generations,
+    maintenance,
     model_candidates,
+    model_inspection,
     model_profiles,
     opencut,
     production,
+    project_files,
     projects,
     provider_connections,
     provider_references,
@@ -35,7 +38,9 @@ api_router = APIRouter()
 
 api_router.include_router(assets.router)
 api_router.include_router(auth.router)
+api_router.include_router(batch_production.router)
 api_router.include_router(projects.router)
+api_router.include_router(project_files.router)
 api_router.include_router(director.router)
 api_router.include_router(director_board.router)
 api_router.include_router(editing.router)
@@ -44,11 +49,11 @@ api_router.include_router(review.router)
 api_router.include_router(scenes.router)
 api_router.include_router(scripts.router)
 api_router.include_router(story.router)
-api_router.include_router(credentials.router)
 api_router.include_router(provider_connections.router)
 api_router.include_router(provider_references.router)
 api_router.include_router(references.router)
 api_router.include_router(model_candidates.router)
+api_router.include_router(model_inspection.router)
 api_router.include_router(generations.router)
 api_router.include_router(model_profiles.router)
 api_router.include_router(opencut.router)
@@ -56,6 +61,7 @@ api_router.include_router(worker.router)
 api_router.include_router(events.router)
 api_router.include_router(experiments.router)
 api_router.include_router(final_film.router)
+api_router.include_router(maintenance.router)
 api_router.include_router(workflow_planning.router)
 api_router.include_router(workflow_overview.router)
 api_router.include_router(creative_capabilities.router)

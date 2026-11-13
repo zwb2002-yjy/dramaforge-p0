@@ -9,7 +9,9 @@ coverage.xml
 **/__pycache__
 **/.pytest_cache
 **/.mypy_cache
+**/.mypy_audit_cache
 **/.ruff_cache
+tmp
 *.pyc
 *.pyo
 *.sqlite

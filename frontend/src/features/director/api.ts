@@ -1,6 +1,6 @@
-import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
+import { ApiError, apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
+import type { components, paths } from "../../shared/api/generated";
 import type {
-  DirectorNextActionRead,
   DirectorRecommendation,
   DirectorTurnRead,
   ShotDirectorSuggestion,
@@ -18,13 +18,18 @@ export const DIRECTOR_ROUTE_TEMPLATES = {
   recommendation: "/api/v1/projects/{project_id}/director/shots/{shot_id}/recommendation",
   turns: "/api/v1/projects/{project_id}/director/turns",
   turn: "/api/v1/projects/{project_id}/director/turns/{turn_id}",
-  turnDecision: "/api/v1/projects/{project_id}/director/turns/{turn_id}/decision",
-  turnStop: "/api/v1/projects/{project_id}/director/turns/{turn_id}/stop",
-  turnResume: "/api/v1/projects/{project_id}/director/turns/{turn_id}/resume",
   runtimeTurnDecision: "/api/v1/projects/{project_id}/director/runtime/turns/{turn_id}/decision",
   runtimeTurnStop: "/api/v1/projects/{project_id}/director/runtime/turns/{turn_id}/stop",
+  agentTurnStop: "/api/v1/projects/{project_id}/director/agent/turns/{turn_id}/stop",
   runtimeTurnResume: "/api/v1/projects/{project_id}/director/runtime/turns/{turn_id}/resume",
   capabilities: "/api/v1/projects/{project_id}/director/capabilities",
+  agentThreads: "/api/v1/projects/{project_id}/director/threads",
+  agentThread: "/api/v1/projects/{project_id}/director/threads/{thread_id}",
+  agentMessages: "/api/v1/projects/{project_id}/director/threads/{thread_id}/messages",
+  agentRequest: "/api/v1/projects/{project_id}/director/threads/{thread_id}/requests",
+  agentActivity: "/api/v1/projects/{project_id}/director/turns/{turn_id}/tools",
+  agentProposal: "/api/v1/projects/{project_id}/director/proposals/{proposal_id}",
+  agentApply: "/api/v1/projects/{project_id}/director/proposals/{proposal_id}/apply",
 } as const;
 
 export type DirectorRouteKey = keyof typeof DIRECTOR_ROUTE_TEMPLATES;
@@ -51,15 +56,7 @@ export function directorPath(
 }
 
 /** Report the effective Director engine and why a new runtime turn may be blocked. */
-export type DirectorCapabilitiesRead = {
-  effective_engine: string;
-  runtime_turns_available: boolean;
-  blocker_code: string | null;
-  blocker_message: string | null;
-  manual_production_available: boolean;
-  checkpoint_configured: boolean;
-};
-
+export type DirectorCapabilitiesRead = components["schemas"]["DirectorCapabilitiesRead"];
 export function fetchDirectorCapabilities(projectId: string): Promise<DirectorCapabilitiesRead> {
   return apiGet<DirectorCapabilitiesRead>(directorPath(projectId, "capabilities"));
 }
@@ -79,8 +76,6 @@ export async function suggestShotDesign(
   const csrf = await fetchCsrf();
   return apiSend("POST", directorPath(projectId, "suggestion", { shot_id: shotId }), input, csrf);
 }
-
-export const requestShotDirectorSuggestion = suggestShotDesign;
 
 /** Request one proactive server-fact recommendation without a user instruction. */
 export async function recommendShotDesign(
@@ -107,6 +102,7 @@ export async function listDirectorTurns(
   scopeType: string,
   scopeEntityId: string,
   limit = 10,
+  signal?: AbortSignal,
 ): Promise<DirectorTurnRead[]> {
   const search = new URLSearchParams({
     scope_type: scopeType,
@@ -115,6 +111,8 @@ export async function listDirectorTurns(
   });
   const rows = await apiGetList<DirectorTurnRead>(
     `${directorPath(projectId, "turns")}?${search.toString()}`,
+    undefined,
+    signal,
   );
   if (!Array.isArray(rows)) throw new Error("导演轮次列表响应无效");
   return rows;
@@ -122,19 +120,6 @@ export async function listDirectorTurns(
 
 export function getDirectorTurn(projectId: string, turnId: string): Promise<DirectorTurnRead> {
   return apiGet(directorPath(projectId, "turn", { turn_id: turnId }));
-}
-
-export async function decideDirectorTurn(
-  projectId: string,
-  turnId: string,
-  input: {
-    expected_revision: number;
-    decision: "accept" | "reject";
-    accepted_operation_indices: number[];
-  },
-): Promise<DirectorTurnRead> {
-  const csrf = await fetchCsrf();
-  return apiSend("POST", directorPath(projectId, "turnDecision", { turn_id: turnId }), input, csrf);
 }
 
 export async function decideDirectorRuntimeTurn(
@@ -160,25 +145,23 @@ export async function decideDirectorRuntimeTurn(
   );
 }
 
-export async function stopDirectorTurn(
-  projectId: string,
-  turnId: string,
-  expectedRevision: number,
-): Promise<DirectorTurnRead> {
-  const csrf = await fetchCsrf();
-  return apiSend(
-    "POST",
-    directorPath(projectId, "turnStop", { turn_id: turnId }),
-    { expected_revision: expectedRevision },
-    csrf,
-  );
-}
-
 export async function stopDirectorRuntimeTurn(
   projectId: string,
   turn: DirectorTurnRead,
 ): Promise<DirectorTurnRead> {
   const csrf = await fetchCsrf();
+  if (turn.turn_kind === "agent") {
+    await apiSend<components["schemas"]["AgentTurnResult"]>(
+      "POST",
+      directorPath(projectId, "agentTurnStop", { turn_id: turn.id }),
+      {
+        expected_revision: turn.revision,
+        request_key: globalThis.crypto.randomUUID(),
+      },
+      csrf,
+    );
+    return getDirectorTurn(projectId, turn.id);
+  }
   return apiSend(
     "POST",
     directorPath(projectId, "runtimeTurnStop", { turn_id: turn.id }),
@@ -191,24 +174,146 @@ export async function stopDirectorRuntimeTurn(
   );
 }
 
-export async function refreshDirectorRuntimeTurn(
+export async function refreshDirectorTurn(
   projectId: string,
   turn: DirectorTurnRead,
 ): Promise<DirectorTurnRead> {
   return getDirectorTurn(projectId, turn.id);
 }
 
-export async function resumeDirectorTurn(
+export type AgentTurnResult = components["schemas"]["AgentTurnResult"];
+export type AgentThreadRead = components["schemas"]["DirectorAgentThreadRead"];
+export type AgentProposalRead = components["schemas"]["DirectorAgentProposalRead"];
+export type AgentActivityRead =
+  paths["/api/v1/projects/{project_id}/director/turns/{turn_id}/tools"]["get"]["responses"][200]["content"]["application/json"];
+
+export async function openDirectorAgentThread(projectId: string, shotId: string) {
+  const csrf = await fetchCsrf();
+  return apiSend<components["schemas"]["DirectorAgentThreadRef"]>(
+    "POST",
+    directorPath(projectId, "agentThreads"),
+    { scope_type: "shot", scope_entity_id: shotId },
+    csrf,
+  );
+}
+
+export function readDirectorAgentThread(
+  projectId: string,
+  threadId: string,
+  offset?: number,
+  signal?: AbortSignal,
+): Promise<AgentThreadRead> {
+  const query = new URLSearchParams({ limit: "20" });
+  if (offset !== undefined) query.set("offset", String(offset));
+  return apiGet(
+    `${directorPath(projectId, "agentThread", { thread_id: threadId })}?${query}`,
+    undefined,
+    signal,
+  );
+}
+
+export async function sendDirectorAgentMessage(
+  projectId: string,
+  threadId: string,
+  input: components["schemas"]["AgentRequest"],
+): Promise<AgentTurnResult> {
+  let csrf: string;
+  try {
+    csrf = await fetchCsrf();
+  } catch (error) {
+    if (error instanceof ApiError)
+      throw new ApiError(error.message, error.status, error.code, {
+        ...error.details,
+        request_accepted: false,
+      });
+    throw new ApiError(
+      error instanceof Error ? error.message : "无法确认请求身份，尚未发送。",
+      0,
+      "DIRECTOR_AGENT_CSRF_UNAVAILABLE",
+      { request_accepted: false },
+    );
+  }
+  return apiSend(
+    "POST",
+    directorPath(projectId, "agentMessages", { thread_id: threadId }),
+    input,
+    csrf,
+  );
+}
+
+export async function getDirectorAgentRequest(
+  projectId: string,
+  threadId: string,
+  requestKey: string,
+  signal?: AbortSignal,
+): Promise<AgentTurnResult | null> {
+  try {
+    const query = new URLSearchParams({ request_key: requestKey });
+    return await apiGet<AgentTurnResult>(
+      `${directorPath(projectId, "agentRequest", { thread_id: threadId })}?${query}`,
+      undefined,
+      signal,
+    );
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      error.status === 404 &&
+      (error.code === "AGENT_REQUEST_NOT_FOUND" || error.details.code === "AGENT_REQUEST_NOT_FOUND")
+    )
+      return null;
+    throw error;
+  }
+}
+
+export function listDirectorAgentActivity(
   projectId: string,
   turnId: string,
-  expectedRevision: number,
-  eventKey: string,
-): Promise<DirectorNextActionRead> {
+  offset = 0,
+  signal?: AbortSignal,
+): Promise<AgentActivityRead> {
+  return apiGet(
+    `${directorPath(projectId, "agentActivity", { turn_id: turnId })}?limit=20&offset=${offset}`,
+    undefined,
+    signal,
+  );
+}
+
+export function getDirectorAgentProposal(
+  projectId: string,
+  proposalId: string,
+  signal?: AbortSignal,
+): Promise<AgentProposalRead> {
+  return apiGet(
+    directorPath(projectId, "agentProposal", { proposal_id: proposalId }),
+    undefined,
+    signal,
+  );
+}
+
+export async function applyDirectorAgentProposal(
+  projectId: string,
+  proposalId: string,
+  input: components["schemas"]["PartialApplyInput"],
+): Promise<components["schemas"]["PartialApplyResult"]> {
   const csrf = await fetchCsrf();
   return apiSend(
     "POST",
-    directorPath(projectId, "turnResume", { turn_id: turnId }),
-    { expected_revision: expectedRevision, event_key: eventKey },
+    directorPath(projectId, "agentApply", { proposal_id: proposalId }),
+    input,
+    csrf,
+  );
+}
+
+export async function stopDirectorAgentTurn(
+  projectId: string,
+  turnId: string,
+  input: components["schemas"]["DirectorAgentStopBody"],
+): Promise<AgentTurnResult> {
+  const csrf = await fetchCsrf();
+  return apiSend(
+    "POST",
+    directorPath(projectId, "agentTurnStop", { turn_id: turnId }),
+    input,
     csrf,
   );
 }

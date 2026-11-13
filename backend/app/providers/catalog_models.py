@@ -15,10 +15,10 @@ from app.shared.base import Base
 class ModelCatalogEntry(Base):
     """One immutable capability manifest revision for one concrete model.
 
-    Global data (no ``workspace_id``), written only by migrations. Runtime access
-    is read-only; the application role has SELECT granted and write revoked.
-    A contract change adds a new row (new ``model_revision``); the old row is
-    marked ``lifecycle='deprecated'``. Bindings point at a specific revision.
+    Global data (no ``workspace_id``), written by historical migrations or the
+    maintenance-only catalog sync. Runtime access is read-only; the application
+    role has SELECT granted and write revoked. A contract change adds a new row
+    (new ``model_revision``); old rows retain their manifest and Binding identity.
     """
 
     __tablename__ = "provider_model_catalog_entries"
