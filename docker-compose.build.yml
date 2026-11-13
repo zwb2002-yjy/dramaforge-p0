@@ -37,3 +37,4 @@ services:
       args:
         DRAMAFORGE_VERSION: ${DRAMAFORGE_VERSION:-0.1.0}
         DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}

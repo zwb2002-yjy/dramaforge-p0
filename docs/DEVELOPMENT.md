@@ -191,6 +191,8 @@ moderate 项来自 minimatch/eslint/openapi 工具链，不进入生产 bundle�
 
 质量 Dockerfile 先安装 lockfile 对应依赖，再复制完整源码，使本地/self-hosted
 以及具有可复用构建缓存的环境不会因普通源码或文档变化无意义重新安装全部依赖。
+受限网络下构建前端镜像可传 `NPM_REGISTRY` 构建参数指向内网/区域镜像；默认仍是公共
+`registry.npmjs.org`，因此提交的 lockfile 保持可移植。
 
 运行时基线为 Node 24.x、Python 3.14.x；Docker 标签允许系列内维护更新，
 不是不可变的补丁版本 / digest 锁定。Dependabot 的常规版本更新先进入 `dev`，

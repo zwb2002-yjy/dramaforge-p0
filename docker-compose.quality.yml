@@ -59,6 +59,8 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile.quality
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     depends_on:
       backend-quality:
         condition: service_completed_successfully
