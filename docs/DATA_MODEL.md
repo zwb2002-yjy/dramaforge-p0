@@ -2,7 +2,7 @@
 
 Status: current
 Date: 2026-11-03
-Alembic head: 20261111_0097
+Alembic head: 20261113_0098
 
 当前 Alembic 入口跨越 0084 前强制检查已存在的两张实验表和十张旧模型保障表，锁表后
 非空即阻断升级；事务回滚保留原数据和迁移版本。空库初始化中历史迁移生成的静态目录副本
@@ -10,8 +10,26 @@ Alembic head: 20261111_0097
 也可在维护权限下运行 `scripts/audit_model_migration.py`：以 PostgreSQL READ ONLY
 事务核对 0084 涉及的两张实验表和十张旧模型保障表，非空时退出码 1，要求先归档并核验
 恢复。该命令不执行迁移、不删除数据、不把备份存在当作恢复通过；不改写已冻结的 0084。
-Revisions: 96
+Revisions: 97
 （入口见 [CURRENT.md](CURRENT.md)）
+
+### 项目资料原件与提取
+
+`project_files` 是项目私有资料关联，`content_version` 指向当前内容序号，`version`
+用于并发更新/解除关联。`project_file_revisions` 保存不可变原件位置、hash、大小、文件名、
+类型和上传幂等身份；提取状态及带位置的原文片段归属于确切修订，不是 AI 研究结论。
+复合外键阻止修订串项目，两个表均强制项目 RLS。原件对象键按项目与内容 hash 分区，
+相同字节可共享项目内对象，但关联、提取结果与授权不合并；不对外暴露跨项目去重结果。
+
+更新追加修订并保留历史；解除关联只设置 detached_at，历史来源标记不可用，不能继续
+作为当前有效依据。提取旧修订不修改当前版本。用户研究修正、研究历史及模型分析尚未
+接入本表，不得用原文提取冒充分析。上传与提取请求 Outbox 同事务；重试身份保存在
+对应修订的 extraction_requested 事件中，处理再次失败后的网络重发也不新增任务。
+当前服务层能力尚待 HTTP、后台消费者和界面接入，不代表上传后的自动处理已可用。
+
+0098 降级在存在资料关联时明确阻断，须先另行确定归档/恢复方案；空表可降级。回滚代码
+不删除对象存储原件。事务回滚留下的内容寻址对象不得即时补偿删除，因为可能被其它
+已提交关联引用；后续回收须核对引用与当前用途。
 
 ### 调度索引与历史保留
 
@@ -164,6 +182,7 @@ Migration 20260902_0051 removes:
 | 20261007_0083 | Merge the model-system and local-media migration histories into one head without rewriting either branch. |
 | 20261103_0096 | Normalize legacy tag keys with Python casefold, merge equivalent vocabulary rows within each project while preserving every asset link, and remove the derived key's display-length cap. Downgrade refuses keys that would be truncated. |
 | 20261111_0097 | Link Agent Turns and messages to scoped threads; add Agent control fields and project-isolated tool-call receipts; exclude Agent Turns from Workflow recovery scans. |
+| 20261113_0098 | Project-private source associations, immutable original revision identity, scoped extraction receipts and RLS; populated-source downgrade is blocked. |
 
 No canonical Project, Shot, Artifact, ProviderOperation, or EditSession is
 deleted by these revisions. Revision 0070 backfills legacy Asset lifecycle and
@@ -171,7 +190,7 @@ tag data before enforcing the canonical constraints.
 
 ## Schema invariants
 
-- Alembic has one head: 20261111_0097 (verify with `alembic heads` on the candidate).
+- Alembic has one head: 20261113_0098 (verify with `alembic heads` on the candidate).
 - Metadata registration is centralized in app/shared/model_registry.py.
 - ProviderOperation is NodeRun-owned only.
 - Identity reference resolution is explicit and version-pinned.
