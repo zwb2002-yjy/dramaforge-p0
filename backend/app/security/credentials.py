@@ -119,22 +119,6 @@ async def read_credential_by_id(
     return keyring.decrypt(ciphertext=record.ciphertext, key_version=record.key_version)
 
 
-async def has_credential(
-    session: AsyncSession,
-    *,
-    workspace_id: UUID,
-    provider: str,
-) -> bool:
-    """Return whether an workspace has a stored credential without decrypting it."""
-    return (
-        await session.scalar(
-            select(EncryptedProviderCredential.id).where(
-                EncryptedProviderCredential.workspace_id == workspace_id,
-                EncryptedProviderCredential.provider == provider,
-            )
-        )
-    ) is not None
-
 
 async def rotate_credentials(
     session: AsyncSession,

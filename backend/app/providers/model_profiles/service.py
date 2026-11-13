@@ -629,16 +629,3 @@ def _now() -> datetime:
     from datetime import UTC
 
     return datetime.now(UTC)
-
-
-def build_snapshot_json(snapshot: ModelProfileSnapshot) -> dict[str, object]:
-    """Serialize a :class:`ModelProfileSnapshot` for ``GraphVersion.definition``
-    / ``NodeRun.input_snapshot``."""
-    return {
-        "profile_id": str(snapshot.profile_id) if snapshot.profile_id is not None else None,
-        "profile_version": snapshot.profile_version,
-        "bindings": {
-            str(slot): binding.model_dump(mode="json")
-            for slot, binding in snapshot.bindings.items()
-        },
-    }

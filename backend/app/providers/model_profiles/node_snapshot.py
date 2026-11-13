@@ -11,7 +11,6 @@ records an explicit ``model_id: None`` marker instead of blocking materializatio
 from __future__ import annotations
 
 from typing import Any
-from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -111,8 +110,3 @@ async def planned_node_model_profile(
         "profile_version": resolved.profile_version,
         "native_options": resolved.native_options,
     }
-
-
-async def workspace_id_for_project(session: AsyncSession, *, project_id: UUID) -> UUID | None:
-    project = await session.get(Project, project_id)
-    return project.workspace_id if project is not None else None

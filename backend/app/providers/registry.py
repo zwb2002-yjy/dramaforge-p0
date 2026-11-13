@@ -87,12 +87,6 @@ def list_plugins() -> list[ProviderPlugin]:
     )
 
 
-def implemented_plugins() -> list[ProviderPlugin]:
-    return sorted(
-        (p for p in _registry.values() if p.implemented),
-        key=lambda p: (p.provider_type, p.protocol_profile),
-    )
-
 
 def _register_defaults() -> None:
     from app.providers.agnes import (

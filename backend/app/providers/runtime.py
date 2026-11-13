@@ -298,11 +298,6 @@ class ProviderRuntime(Protocol):
     async def fetch_cost(self, resume: ProviderResumeToken) -> CostResult: ...
 
 
-@dataclass(frozen=True)
-class ConnectionContext:
-    connection: ProviderConnection
-    plugin: ProviderPlugin
-
 
 @dataclass(frozen=True)
 class ResolvedRuntime:

@@ -141,23 +141,6 @@ class SubmissionOutcomeUnknownError(ProviderError):
         )
 
 
-class CancelNotSupportedError(ProviderError):
-    def __init__(self, message: str = "provider does not support cancel") -> None:
-        super().__init__(
-            ProviderErrorCode.CANCEL_NOT_SUPPORTED,
-            message,
-            status_code=409,
-        )
-
-
-class ResumeNotSupportedError(ProviderError):
-    def __init__(self, message: str = "provider does not support resume") -> None:
-        super().__init__(
-            ProviderErrorCode.RESUME_NOT_SUPPORTED,
-            message,
-            status_code=422,
-        )
-
 
 class ProviderStateMappingError(ProviderError):
     """A provider returned a status the adapter has no explicit mapping for.
