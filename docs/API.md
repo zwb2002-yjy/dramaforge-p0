@@ -617,3 +617,30 @@ response_summary.history_selection 区分查询窗口省略、未关联旧消息
 当前 Agent 通过 GET 读取进度与工具审计。后续事件接线复用现有 SSE，
 携带 event_id/turn_id/sequence/type/version；重连后 GET 为权威，
 不新增 WebSocket 状态源，token streaming 非首版阻塞项，前端不从事件推导执行权限。
+
+<a id="project-source-api"></a>
+## 项目资料原件与本地提取 API
+
+所有入口要求当前登录身份、选定工作空间和项目归属；写入还要求 CSRF。资料属于项目，
+不进入公共资产库。原文提取不代表研究结论，也不会写故事、剧本、正式资产或生产任务。
+
+| 请求 | 语义 |
+|---|---|
+| POST /projects/{project_id}/files | 二进制原件 body；query 的 filename、request_key 必填。更新已有文件还需 file_id、expected_version；新上传返回独立文件关联 |
+| GET /projects/{project_id}/files | 有效关联列表，limit 1–100、offset；每项含当前修订身份和提取状态 |
+| GET /projects/{project_id}/files/{file_id} | 当前修订；解除关联后仍可读取 unavailable 元数据 |
+| GET /projects/{project_id}/file-revisions/{revision_id} | 确切历史修订与原文位置，excerpts 按 limit/offset 分页；total/next_offset 明示剩余内容 |
+| GET /projects/{project_id}/file-revisions/{revision_id}/original | 登录态附件下载，不生成云端 URL；校验原件 hash/大小，解除关联后拒绝下载 |
+| POST /projects/{project_id}/file-revisions/{revision_id}/retry | JSON request_key 必填；只为当前有效失败修订发起新的本地提取尝试，相同 key 重放不新增尝试 |
+| DELETE /projects/{project_id}/files/{file_id}?expected_version=… | 乐观并发解除关联，保留修订和历史，不删除存储原件 |
+
+当前单次原件限 16 MiB，流式累计越界返回 413。元数据/参数错误返回 422，归属不可见
+返回 404，版本冲突或不可重试状态返回 409。上传回执不暴露内部 object_key；同请求 key
+与不同内容冲突。revision_number 与 content_version 分开显示，避免历史修订冒充当前版本。
+source_available=false 的历史片段只供追溯，不作为当前有效原始依据。
+
+pending/parsed/failed 是**原文提取**状态。TXT、CSV/TSV 和受支持的 DOCX 结构使用本地
+解析；其它格式或复杂 DOCX 返回明确 error_code，原件仍保留，不静默外发或截断。
+后台复用 dispatcher，按持久 pending 修订恢复；每次处理和失败记录均有超时，失败不会
+阻塞其它文件。attempt 随显式重试递增，旧尝试的迟到结果不能覆盖新尝试。
+机构研究摘要、人物、事件等语义结果及用户修正尚未接入这些接口。

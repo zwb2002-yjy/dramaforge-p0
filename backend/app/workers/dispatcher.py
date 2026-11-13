@@ -73,7 +73,7 @@ async def _recover_providers_forever() -> None:
 
 
 async def run_forever() -> None:
-    """Own both bounded scheduling loops in the existing resident dispatcher."""
+    """Own production scheduling, recovery and independent local source processing."""
     worker_id = f"outbox-dispatcher:{socket.gethostname()}"
     from app.runtime.resources import close_runtime_resources
 
@@ -81,8 +81,26 @@ async def run_forever() -> None:
         async with asyncio.TaskGroup() as tasks:
             tasks.create_task(_dispatch_forever(worker_id=worker_id), name="outbox-dispatch")
             tasks.create_task(_recover_providers_forever(), name="provider-recovery")
+            tasks.create_task(_process_sources_forever(), name="project-source-processing")
     finally:
         await close_runtime_resources()
+
+
+async def _process_sources_forever() -> None:
+    from app.storage.minio_store import get_object_store
+    from app.workers.project_files import SourceScanCursor, process_project_files
+
+    cursor = SourceScanCursor()
+    while True:
+        try:
+            await process_project_files(
+                get_session_factory(), store=get_object_store(), cursor=cursor,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Source processing scan unavailable (%s)", type(exc).__name__)
+        await asyncio.sleep(5)
 
 
 def main() -> int:

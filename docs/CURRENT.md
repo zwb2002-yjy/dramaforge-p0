@@ -29,7 +29,10 @@ Compiler / Runtime 与冻结 Binding。通用 Images 合同支持配置不同服
 
 ## 当前产品
 
-DramaForge 是面向专业个人创作者的 AI 短剧 / 漫剧导演工作台。首版主链为
+DramaForge 已启动机构版转型，目标用户是地方文化研究机构工作人员；专业版与主动
+开源生态建设暂缓，既有授权不变。机构版目标、实现边界与交付顺序见
+[PRODUCT](PRODUCT.md#institution-product)。现有实现仍以专业创作工作台为基础，
+不能把目标用户定位等同于机构能力已验收。既有主链为
 （**摘要**；canonical 定义见 [CREATION_FLOW.md](CREATION_FLOW.md)）：
 
 ```text

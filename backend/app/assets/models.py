@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -471,10 +472,14 @@ class ProjectFileRevision(Base):
         UniqueConstraint("project_id", "request_key", name="uq_project_file_request"),
         CheckConstraint("number > 0", name="ck_project_file_revision_number"),
         CheckConstraint("byte_size >= 0", name="ck_project_file_revision_size"),
+        CheckConstraint("attempt > 0", name="ck_project_file_revision_attempt"),
         CheckConstraint(
             "status IN ('pending','parsed','failed')", name="ck_project_file_revision_status",
         ),
         Index("ix_project_file_revision_hash", "project_id", "content_hash"),
+        Index("ix_project_file_revision_pending", "id",
+              postgresql_where=text("status = 'pending'"),
+              sqlite_where=text("status = 'pending'")),
     )
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(nullable=False)
@@ -488,6 +493,7 @@ class ProjectFileRevision(Base):
     request_key: Mapped[str] = mapped_column(String(160), nullable=False)
     request_hash: Mapped[str] = mapped_column(HASH_64, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     error_code: Mapped[str | None] = mapped_column(String(80))
     parser_version: Mapped[str | None] = mapped_column(String(80))
     excerpts: Mapped[list[dict[str, object]]] = mapped_column(

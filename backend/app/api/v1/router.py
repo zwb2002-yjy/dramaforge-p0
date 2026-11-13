@@ -20,6 +20,7 @@ from app.api.v1 import (
     model_profiles,
     opencut,
     production,
+    project_files,
     projects,
     provider_connections,
     provider_references,
@@ -39,6 +40,7 @@ api_router.include_router(assets.router)
 api_router.include_router(auth.router)
 api_router.include_router(batch_production.router)
 api_router.include_router(projects.router)
+api_router.include_router(project_files.router)
 api_router.include_router(director.router)
 api_router.include_router(director_board.router)
 api_router.include_router(editing.router)

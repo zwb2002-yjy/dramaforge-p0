@@ -478,3 +478,34 @@ Compiler/normalizer 与现有执行消费处；剧本使用既有 `director/stor
 证据沿用 §6.8：TC/AC、候选身份、fixture/合同/Compiler 版本、断言观察值、结果及路径；
 媒体保留原文件、尺寸/时长/hash，截图只作证据。生成/恢复重复 create、泄漏秘密、请求与
 确认不一致、丢稿、错误目标批注/修复或 Formal/生产血缘被剪辑改写，任一项均阻断交付。
+
+<a id="institution-transition"></a>
+## 7. 机构版转型目标与现有边界
+
+目标由 [PRODUCT 机构版目标](PRODUCT.md#institution-product) 定义。此节记录长期差距与
+实施依赖，不是验收报告。外部总方案中的 Node.js 后端和 LangGraph 待选假设不适用于
+当前仓库：后端使用 Python/FastAPI，Director 使用 LangGraph；保留这两个边界，不为
+重做选型增加第二套 Runtime。代码位置是审计入口，存在代码不等于通过机构场景验收。
+
+| 能力 | 处置 | 当前代码证据与差距 | 必要验证 |
+|---|---|---|---|
+| 多轮 Agent 工具调用 | EXTEND | `director/agent_harness.py` 已有有界 LangGraph loop，`agent_service.py` 有 Turn/调用回执；当前工具主要为读取和镜头提示词提案，缺机构研究工具及长期主 Run 监督 | 错误反馈、限额、取消、拒绝后停止、重复请求回执 |
+| 工具策略 | EXTEND | `agent_tools.py`、`agent_audit.py`、`api/director_model_tools.py` 管理 schema/scope/版本及安全回执；尚无项目资料云端外发许可模型 | scope 拒绝不可纠正绕过；所有实际出口覆盖与撤销竞态 |
+| 用户门与生产委托 | REUSE / EXTEND | `proposal_commands.py` 验证对象版本，`runtime/delegation.py` 绑定用户授权和冻结计划；自然语言 Turn 与委托 Turn 尚需统一监督关联 | 过期、版本改变、未知提交、重复委托和恢复不新增生产 |
+| 持久 Workflow | NEW / EXTEND | `director/workflows/contracts.py` 是 Shot/Scene 规划模板，不能当成跨 Run 的 WorkflowInstance/Step；扩展现有 Director 持久状态，生产仍交唯一 Runtime | 依赖、局部失败保留、受控并行、中途变更和恢复 |
+| 项目资料与研究 | EXTEND / NEW | `assets/source_parser.py` 提供本地原文定位提取，`assets/project_files.py` 与 ProjectFile/ProjectFileRevision 保存项目私有原件版本、提取回执及 Outbox；HTTP/Worker 消费者、研究修正和 Director 读取尚未接入，不能将原文提取视为研究分析 | 文件版本、解除关联、跨项目隔离、用户修正优先、旧任务拒绝；真实格式样本及未支持结构反馈 |
+| 专业 Skills | EXTEND | `creative_capabilities/agent_skills.py` 冻结现有方法上下文，不授予权限；补研究方法、输入输出验证与允许工具交集，不能把静态 prompt 当执行引擎 | 未选 Skill 不激活、不能扩权、来源约束 |
+| 公共生成资产 | EXTEND | `AssetVersion` 是项目内不可变版本；不能将其直接去掉 project 限制作为公共库。需要实例内共享引用、来源限制与项目变体 | 采用后入库、固定版本、私有原件不可读、限制传播 |
+| 机构创作界面 | EXTEND | 复用当前项目与 Director/提案入口，新增资料与研究反馈；专业工作台不能冒充自然语言主导的机构闭环 | 上传—分析—修正—建议—确认—交付，失败/恢复/可访问性 |
+| 三类作品与设备部署 | VERIFY | 复用现有生产链、Editing/FinalFilm 和 Compose；动画宣传片、单集、多集及 WSL2 实机均需独立场景证据 | 自动化回归、重启恢复、真实样本和人工作品评审 |
+
+先交付资料与研究纵向切片：原件存储与项目关联 → 本地文本解析/来源定位 → 逐文件后台
+分析及可恢复失败 → 用户修正/版本并发 → Director 受控读取 → 浏览器闭环。多模态解析
+逐种启用，不支持的格式明确返回不可分析状态；未经许可不静默转云端。新增持久对象
+必须同时有 RLS、迁移、真实 PostgreSQL 验证和 API 合同，不建立只有表名的平行事实库。
+
+后续统一主 Run 时复用 DirectorTurn、ToolCall、RuntimeControl、唤醒与生产回执的已有
+身份；先证明不能表达的关系再新增最小对象。Checkpoint 仅保存执行快照和业务引用。
+新付费 Create 仍要求当前明确授权；模型切换不能重写已提交任务身份。回滚代码与数据库
+迁移须分开验证，不以重新提交旧生产操作作为回滚。整体完成以三类作品、资料格式、
+权限/并发/恢复及目标部署验收为准；本节的 REUSE 分类不代表该能力已完成最终验收。
