@@ -114,6 +114,12 @@ explicit user value > accepted proposal > project override > pack default
 | **DirectorDecision** | 用户对导演提案的显式接受、部分接受或拒绝；不合并 Save / Formal / Export 等其他领域操作 | `director/proposal_commands.py` |
 | **DirectorInbox** | 传给导演的事件收件箱 | `director/inbox_models.py::DirectorInbox`、`inbox.py` |
 | **DirectorWakeup** | 唤醒导演的信号（含重放） | `director/inbox_models.py::DirectorWakeup`、`wakeup.py`、`wakeup_replay.py` |
+| **MasterRun** | 用户明确建立的持续创作目标及其监督身份；跨多个Turn/BusinessFlow，不是单次请求或Runtime | 目标架构；P1 Schema设计，尚未实施 |
+| **MasterRunPlanRevision** | MasterRun 的不可变计划版本；数据库表为 `director_master_run_plans`，API资源为 `/plans` | P1 Schema设计，尚未实施 |
+| **BusinessFlowDefinition** | 版本化业务流程定义；由代码 allowlist 注册 Python LangGraph Graph，不是可任意编辑的DAG数据 | P4 Schema设计，尚未实施 |
+| **BusinessFlowInstance** | 某项目/目标下的一次持续业务流程实例，可跨多个DirectorTurn | P4 Schema设计，尚未实施 |
+| **BusinessFlowStep / StepAttempt** | 流程中的逻辑步骤及一次冻结输入的业务执行尝试；不拥有NodeRun/ProviderOperation事实 | P4 Schema设计，尚未实施 |
+| **MasterRun Supervisor** | Director侧对持续目标、计划、BusinessFlow和事件的监督逻辑；不是第三个Runtime或常驻超级Agent | 目标架构，尚未实施 |
 | **Director autonomy** | AUTO / ASSIST / MANUAL：**只是 Director 参与模式**，不创建第二条生产链 | `ProjectCreativeProfile.director_autonomy`（`backend/app/access/models.py`）；消费点见 `DIRECTOR_RUNTIME.md` |
 | **Checkpoint** | Director 轮次的可恢复检查点 | `director/runtime/checkpoint.py`；旧 BusinessCheckpoints 已退役 |
 
@@ -195,4 +201,8 @@ explicit user value > accepted proposal > project override > pack default
 |---|---|---|
 | `Experiment`（`ExperimentBranch`） | 唯一当前实验分支；旧 `ProductionExperiment` / `ShotExperiment` 已删除 | 旧 ORM/表不在当前 schema；历史实例数据与证据按 DEVELOPMENT 生命周期处置 |
 | `Node` 与 `GraphNode` | `Node` 是概念，`GraphNode` 是持久化实例 | KEEP，成对使用 |
-| `Workflow` | 仅存在于 `director/workflows/`，指"镜头生产模板目录" | RENAME/MERGE，见映射文档 |
+| `Workflow`（旧目录用法） | `director/workflows/` 是混合职责目录，不能整体等同模板：包含生产模板合同、生产状态读模型及创意规划/连续性/质量能力 | 按事实分类精确改名；不整体迁入 Production，见 ARCHITECTURE_MAPPING |
+| **ProductionTemplate** | 镜头生产意图模板、注册、库和解析/资格合同；不是生产状态读模型 | `director/workflows/contracts.py`、`registry.py`、`library.py`、`resolver.py`（目标命名，物理路径暂不变） |
+| **ProductionWorkflow Read Model** | Episode/Scene/Shot 生产状态的只读聚合，不持有调度权或生产生命周期 | `workflow_read_models.py`、`scene_orchestration.py`（目标命名/分类） |
+| **Creative Planning / Continuity / Quality** | 分层叙事规划、连续性、质量、镜头复杂度、角色参与和参考能力规划合同；不是Template或BusinessFlow实例 | `layered_planning.py`、`continuity.py`、`quality_report.py`、`shot_complexity.py`、`character_participation.py`、`reference_capability.py` |
+| **BusinessFlow** | 新的跨Turn业务流程事实，由版本化Graph代码执行，持久化实例/步骤按P4门槛建设 | P4设计，尚未实施 |

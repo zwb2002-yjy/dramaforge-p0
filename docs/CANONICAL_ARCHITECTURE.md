@@ -126,6 +126,30 @@ Director Runtime **不允许**：
 当前实现见 [DIRECTOR_RUNTIME.md](DIRECTOR_RUNTIME.md)。
 当前代码的越界点见 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md)。
 
+### 2.1.1 持续目标与业务流程监督（目标架构，尚未实施）
+
+机构版目标架构在 Director Runtime 之上增加 MasterRun 监督记录，并以 BusinessFlow
+表达可跨多个 DirectorTurn 推进的业务流程。它们是业务事实和控制合同，不构成第三个 Runtime。
+
+- **MasterRun**：用户明确建立的持续创作目标及其监督身份，可跨多个有界 DirectorTurn、
+  BusinessFlow、用户等待和外部生产任务。普通问答/进度查询不自动创建 MasterRun。
+- **MasterRunPlanRevision**：MasterRun 的不可变计划版本。计划确认只确认目标范围和流程安排，
+  不自动创建 NodeRun、授权付费生产、Formal 或 Export。
+- **DirectorTurn**：仍是一次有界推理/推进；不升级为长期目标，不改变现有 Turn 状态机、
+  request_key、scope 或引擎身份。
+- **BusinessFlow**：业务流程定义/实例/步骤。首期由版本化 Python LangGraph Graph 代码注册；
+  LangGraph 仍是现有唯一 Director 执行引擎，不为 MasterRun 创建根图、第二套 Agent Loop
+  或通用数据驱动 DAG 解释器。
+- **LangGraph Thread / Checkpoint**：只保存图执行位置和恢复快照，不替代 DirectorThread、
+  MasterRun、BusinessFlow 或正式业务数据。
+- **Production Runtime**：继续独占 NodeRun、ProviderOperation、Artifact 等生产事实；
+  BusinessFlow 通过现有生产命令/回执合同提交和观察生产任务。
+
+MasterRun Supervisor 是 Director 逻辑控制能力，不是常驻的第三 Runtime。它通过短事务管理
+目标、计划版本、监督关系和事件唤醒；需要模型判断时启动有界 DirectorTurn。不得持有跨网络
+长事务，不直接调用媒体 Provider，不复制 Production 状态。
+
+
 ### 2.2 Production Runtime
 
 ```text
@@ -343,7 +367,8 @@ User → Director → Creative Layer → CreativeIntent → ProductionGraph
 - 新建 Skill / Style / Editing Runtime；
 - 引入 Temporal 或新的 Agent 框架；
 - 把 ProductionGraph 暴露成用户节点编辑器，或模仿 ComfyUI；
-- 为同一业务事实新造 Workflow / Task / Job / Run 同义概念。
+- 为同一业务事实新造同义的 Workflow / Task / Job / Run、重复状态机或竞争性事实源。
+- 把 MasterRun、DirectorTurn、BusinessFlow、ProductionGraph、NodeRun 等不同生命周期的事实强行合并为一个泛化 Run/Workflow；不同事实可以使用不同名称，但必须明确唯一含义和权威归属。
 
 Runtime 重写、物理目录迁移和产品范围扩展不是日常清理的隐含任务；确有需要时，
 由 Owner 依据具体方案决定。保留核心原则不禁止消除歧义或修正文档；改变原则、

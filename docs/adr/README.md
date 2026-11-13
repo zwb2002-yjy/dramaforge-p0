@@ -8,5 +8,6 @@
 | [0006](0006-professional-workbench-reframe.md) | 专业工作台取代四阶段向导 | Superseded（兼容入口条款） |
 | [0007](0007-director-runtime-langgraph.md) | Director Runtime 采用 LangGraph | Accepted（唯一持久编排引擎） |
 | [0008](0008-single-workbench-quick-hard-remove.md) | 单一专业工作台，Quick 硬删除 | Accepted |
+| [0009](0009-master-run-business-flow-supervision.md) | MasterRun 持续目标与 BusinessFlow 监督模型 | Accepted（实现分阶段待验收） |
 
 编号自 0005 起；0001–0004 从未进入当前树，不补写历史正文。追溯用 `git log`。

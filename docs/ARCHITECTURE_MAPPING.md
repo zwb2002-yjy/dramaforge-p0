@@ -72,11 +72,16 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 3. **Director 文本推理直连 Provider adapter**：`director/text_transport.py` 仍直接接触
    Provider adapter；若收敛为 contract 端口，必须保留精确模型身份、冻结上下文、
    错误语义和测试 seam，不能用空壳转发掩盖依赖。
-4. **workflows 跨 creative/production 职责**：执行模板、参与计划与引用能力跨域；
-   是否拆分物理路径需结合实际调用，不先大搬文件。
-5. **模板目录分散**：`execution/shot_pipeline.py`、`production/templates.py` 与
-   `director/workflows/template_nodes.py` 三处 Graph/Workflow 模板来源需要统一发现
-   路径（概念上仍是单一 ProductionGraph 世界观）。
+4. **`director/workflows/` 是混合职责物理目录**：逐文件事实分类见 O2 命名分类决策。
+   `contracts.py`、`registry.py`、`library.py`、`resolver.py` 属于 ProductionTemplate；
+   `workflow_read_models.py`、`scene_orchestration.py` 属于 ProductionWorkflow Read Model；
+   `layered_planning.py`、`continuity.py`、`quality_report.py`、`shot_complexity.py`、
+   `character_participation.py`、`reference_capability.py` 属于 Creative Planning /
+   Continuity / Quality。O2 只批准按事实精确改名，不批准整个目录迁入 Production；
+   当前物理路径保持，跨域物理拆分另需 Owner 对具体调用图和迁移计划批准。
+5. **模板来源分散**：`execution/shot_pipeline.py`、`production/templates.py` 与
+   Director 侧模板合同存在发现/注册路径债务。保持单一 ProductionGraph 生产世界观；
+   不以把混合目录整体搬迁作为解决方式。
 6. **creative_capabilities 与 access → creative 初始化依赖**：职责与 director 路径
    不完全一致；`access/projects` 对 creative_templates 的依赖仍需明确是应用层注入
    还是允许的初始化依赖。
@@ -489,6 +494,10 @@ Compiler/normalizer 与现有执行消费处；剧本使用既有 `director/stor
 
 | 能力 | 处置 | 当前代码证据与差距 | 必要验证 |
 |---|---|---|---|
+| 持续创作目标监督 | EXTEND / NEW | 现有DirectorThread/Turn/Invocation/LangGraph执行基础可复用；MasterRun与不可变MasterRunPlanRevision尚未实施，目标是跨Turn监督而非新增Runtime | P1 PostgreSQL/RLS/幂等/verify/跨Turn验收 |
+| BusinessFlow持久化 | NEW（P4门控） | 现有Director Runtime Flow和旧ProductionTemplate不是BusinessFlowInstance；P4拟采用版本化Python LangGraph Graph注册及实例/步骤/尝试合同 | 计划retain/supersede/cancel、局部失败、跨Turn恢复、复合FK与生产回执 |
+| 项目级外发策略 | EXTEND / NEW | 当前既有调用策略继续；新自主执行路径和严格模式需要实际目的地识别、项目策略和原操作准入证据 | 文本/媒体/OCR/Vision/ASR/TTS/参考交付/存储出口与撤销竞态 |
+| RuntimeControl统一 | EXTEND | 现有Agent Turn与固定流程控制/租约并存；先统一控制端口和单写者适配器，异步迁移及回归后才评估删除旧Turn租约字段 | stop/late result/restart/heartbeat/lease takeover；不得双写或提前删列 |
 | 多轮 Agent 工具调用 | EXTEND | `director/agent_harness.py` 已有有界 LangGraph loop，`agent_service.py` 有 Turn/调用回执；当前工具主要为读取和镜头提示词提案，缺机构研究工具及长期主 Run 监督 | 错误反馈、限额、取消、拒绝后停止、重复请求回执 |
 | 工具策略 | EXTEND | `agent_tools.py`、`agent_audit.py`、`api/director_model_tools.py` 管理 schema/scope/版本及安全回执；尚无项目资料云端外发许可模型 | scope 拒绝不可纠正绕过；所有实际出口覆盖与撤销竞态 |
 | 用户门与生产委托 | REUSE / EXTEND | `proposal_commands.py` 验证对象版本，`runtime/delegation.py` 绑定用户授权和冻结计划；自然语言 Turn 与委托 Turn 尚需统一监督关联 | 过期、版本改变、未知提交、重复委托和恢复不新增生产 |

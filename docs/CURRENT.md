@@ -41,6 +41,8 @@ DramaForge 已启动机构版转型，目标用户是地方文化研究机构工
 ```
 
 Director Runtime 负责提案和编排；Production Runtime 负责真实生产执行。
+机构版统一执行架构目标决策见 [ADR 0009](adr/0009-master-run-business-flow-supervision.md)；
+MasterRun、MasterRunPlanRevision 与 BusinessFlow 当前仍是目标设计，未因文档收敛而视为已实现。
 用户通过显式 Apply / Save / Formal / Export 门决定哪些内容进入正式生产事实。
 
 ## 当前权威文档
