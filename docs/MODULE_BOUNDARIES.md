@@ -36,7 +36,7 @@ Python 扫描范围内，其调用边界另由 API/client 检查、行为测试�
 | **composition** | 仅 `app/main.py` | FastAPI 路由、生命周期资源与基础设施客户端的装配入口，不承载业务用例 |
 | **bootstrap** | 仅 `app/install_env.py` | 独立安装配置生成入口，不被业务层反向调用 |
 | **contract** | `app/contracts/` | 共享的**类型化契约**：命令、事实、事件、Director Runtime 契约。不含持久化、不含 HTTP |
-| **director** | `app/director/`（不含 `creative_capabilities`） | 提案式编排：理解、推理、建议、等待、恢复、委派 |
+| **director** | `app/director/`（不含 `creative_capabilities`） | 提案式编排：理解、推理、建议、等待、恢复、委派；MasterRun Supervisor / BusinessFlow 是该边界内的目标逻辑能力，不独立部署 |
 | **creative** | `app/director/creative_capabilities/` | Style / Skill / Pack / VisualBible / ShotLanguage / Resolver / Compiler。**无生命周期** |
 | **production** | `app/production/`、`app/execution/`、`app/runtime/`、`app/workbench/` | 可靠执行已确定的生产意图：Graph、NodeRun、Outbox、重试、恢复 |
 | **provider** | `app/providers/` | 外部模型能力：manifest、compiler、runtime adapter、连接与凭据 |
@@ -239,3 +239,14 @@ facade / compatibility import；当前未发布策略要求直接更新调用方
   不表示所有依赖已经符合目标架构。新增豁免必须作为显式架构决策审阅，不能自动重建基线来过门。
 - 检查覆盖 backend 的绝对/相对 import、package re-export 与字符串字面量动态导入；
   不证明反射/计算式导入、前端 HTTP 路径或业务调用语义合规，这些仍由专门测试和 Review 验证。
+
+
+## 机构版 MasterRun / BusinessFlow 逻辑边界（目标，尚未实施）
+
+MasterRun Supervisor 与 BusinessFlow 属于 Director 侧应用编排，不新增第三个 Runtime 或顶层
+import 层。BusinessFlow 使用版本化 Python LangGraph Graph 注册，依赖 Domain Services 与
+Production Runtime 的正式端口；Production Runtime 不反向依赖 Director/MasterRun。
+
+O2 对旧 `director/workflows/` 只批准按事实分类和精确改名，不批准整包跨域物理迁移。
+ProductionTemplate、ProductionWorkflow Read Model、Creative Planning/Continuity/Quality
+分别保持其事实归属；跨域物理搬迁须另有 Owner 批准的调用图、迁移步骤和回滚方案。

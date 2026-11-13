@@ -13,6 +13,11 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 Artifact。没有第二套 Generation 真相；批量与逐操作授权只编排同一命令入口，
 不进入 Worker 形成第二套预算 / 批次 Runtime，也没有历史路径分支。
 编排侧见 [DIRECTOR_RUNTIME.md](DIRECTOR_RUNTIME.md)。
+业务目标与流程侧的目标关系见该文档：MasterRun/BusinessFlow 可以监督和关联生产任务，
+但不得复制 NodeRun、ProviderOperation、ExecutionReceipt 或 Artifact 的状态权威。
+BusinessFlow 通过现有 ProductionCommand/授权/回执端口提交单个生产命令；一个生产 attempt
+对应一个 NodeRun 回执，多项生产工作拆分为多个业务步骤。Production Runtime 不负责解释
+MasterRun 目标、BusinessFlow 计划或用户创作意图。
 ProductPolicyRevision、ProductPolicyState/Event 的不可变存储已建立；当前 Dispatch
 尚未选取并冻结该 Revision，不能以新表存在推断新策略准入已经生效。
 

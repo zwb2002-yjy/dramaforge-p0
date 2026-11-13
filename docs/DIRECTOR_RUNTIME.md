@@ -278,3 +278,51 @@ MCP 延后且不是首版阻塞项：受控 connect → tools/list → schema/�
 延迟、错误及 usage/cost_status 可追溯；未知费用不猜值。
 Mock 只证明程序机制；真实模型工具选择质量须单独授权与验收，不继承历史付费许可。
 各阶段退出时停止新受理、保留既有提案/审计/冻结 Workflow 的恢复，不删除历史数据。
+
+
+---
+
+## 机构版持续目标监督（目标架构，尚未实施）
+
+本节定义 MasterRun/BusinessFlow 与现有 Director Runtime 的目标关系；不表示相应表、API、
+Worker 能力或异步流程已经实现。
+
+### 身份与生命周期
+
+- DirectorThread：长期对话容器。
+- DirectorTurn：一次有界推理或推进，保留现有状态机和执行身份。
+- MasterRun：用户明确建立的持续创作目标，可跨多个 DirectorTurn、BusinessFlow 和等待周期。
+- MasterRunPlanRevision：不可变计划版本；历史 Turn 绑定其执行时使用的版本。
+- BusinessFlowInstance：跨多个 Turn 的业务流程实例；由版本化 Python LangGraph Graph 注册。
+- LangGraph Thread/Checkpoint：仅保存某个有界图执行的状态快照，不替代上述业务身份。
+
+MasterRun Supervisor 是 Director 侧的控制逻辑，不是第三个 Runtime、永久运行的 Agent Loop
+或 MasterRun 根图。它通过短事务管理目标/计划/监督关系，必要时启动有界 DirectorTurn。
+普通问答和进度查询不自动创建 MasterRun；不能只靠聊天相似度自动绑定持续目标。
+
+### 执行与权限
+
+现有 LangGraph 继续作为唯一可执行 Director 引擎。Agent Loop、工具调用和现有 Turn/Invocation
+审计优先复用；不另建平行 Agent Runtime 平台或第二套 Loop。BusinessFlow 首期由版本化代码
+Graph 实现，不建设通用数据驱动 DAG 解释器。
+
+Director 只能经 Harness 授权工具访问业务能力。服务端检查身份、Project Scope、工具能力、
+对象版本、审批和外发策略；Prompt 或模型输出不是授权边界。正式业务修改继续 Proposal →
+Approval/Decision → Apply；计划确认不自动授权生产 Create、Formal 或 Export。
+
+### RuntimeControl 与 Worker 阶段门
+
+按 O6 分阶段统一 RuntimeControl：先统一 bind/claim/check/heartbeat/settle/request_stop/
+claim_signal 等控制合同，并由各适配器单写者负责；再完成异步 Worker 接纳、stop/late result/
+restart recovery 回归；只有旧路径排空且调用闭包清零后，才单独评估删除旧 Turn 租约字段。
+
+按 O5，Director Worker 文本推理可受控开放，但必须在 P3 项目策略和实际目的地检查通过后
+启用真实自主文本出口。先用 Mock/隔离环境验证；不得因本节文字而提前改变 Compose、
+环境变量或生产运行配置。
+
+### 与 Production Runtime 的边界
+
+Director/Harness 决定“下一步做什么”并通过受控命令委托；Production Runtime 唯一负责
+NodeRun、Outbox、Worker、ProviderOperation、Artifact 的创建、状态、技术级重试和恢复。
+恢复时先查询原生产回执；unknown_submission 不得自动重发。取消 MasterRun 只封锁新动作并
+向原生产任务发出取消意图，不伪造远端已取消，不删除已完成 Artifact。

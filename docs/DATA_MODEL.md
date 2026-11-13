@@ -357,3 +357,63 @@ PROPOSE 的回执与 Proposal 同事务提交。输入版本保持冻结，后�
 实现时按当前迁移 head 直接演进未发布合同并更新全部调用方；保留历史数据，不生成
 空迁移、平行兼容写路径或无消费者的预备表。完成/失败/取消/stale 沿用现有 Turn 状态；
 blocked 只作结果/UI 分类，不扩展数据库 CHECK。
+
+
+---
+
+<a id="institution-master-run-target"></a>
+## 机构版统一执行架构目标数据模型（设计基线，尚未实施）
+
+本节记录已批准的目标设计，不是当前数据库 Schema 声明。当前实际迁移头和已实施模型仍以
+本文件前文、SQLAlchemy Model 与 Alembic 为准。P1 实施前必须再次对照最新 dev、迁移、
+角色和 PostgreSQL 实测。
+
+### P1：MasterRun 最小模型
+
+P1 目标新增两张业务表及一张窄控制回执表，并扩展现有 DirectorTurn 两列：
+
+| 目标对象 | 目标表/扩展 | 唯一事实 |
+|---|---|---|
+| MasterRun | `director_master_runs` | 用户明确建立的持续创作目标及监督身份 |
+| MasterRunPlanRevision | `director_master_run_plans` | 不可变计划版本；领域名统一为 MasterRunPlanRevision |
+| MasterRunControlReceipt | `director_master_run_control_receipts` | pause/resume/cancel/verify 控制命令的不可变原结果，不是任务表或事件总线 |
+| DirectorTurn 关联 | `master_run_id`、`plan_revision` nullable | 现有有界Turn与持续目标/计划版本的关联 |
+
+P1 不改变现有 DirectorTurn 状态转换、`turn_kind` 值/default/CHECK、`request_key`、
+`scope`、`runtime_execution_id` 或旧租约字段。origin Turn 必须是有 Thread 的 Agent Turn；
+创建 MasterRun 时原子绑定 origin，后续 Turn 通过独立关联路径加入。普通问答不自动创建
+MasterRun。MasterRun 可先存在于 planning 状态，计划确认前不得自动启动 BusinessFlow。
+
+PlanRevision 不可原地修改。计划确认复用类型化 Proposal/Apply 机制并有明确决定记录；
+确认计划不等于生产授权、NodeRun 创建、Formal 或 Export。控制回执用于同键同载荷重读原结果、
+同键异载荷冲突和响应丢失恢复；EventLog 仍承担事件事实，不替代命令回执。
+
+### P4：BusinessFlow 持久化模型（后续阶段，未批准提前实施）
+
+P4 只有在 P1/P2/P3 阶段门通过并获得单独实施批准后，才评估/创建：
+
+- `director_business_flow_instances`
+- `director_business_flow_steps`
+- `director_business_flow_step_attempts`
+
+BusinessFlowDefinition 是版本化 Python LangGraph Graph 的代码注册合同，不是数据库表。
+`graph_entrypoint` 只允许代码 allowlist 注册，不接受用户函数名或任意动态 import。
+数据库 dependencies/completion_spec 是实例启动时冻结的合同快照，不能解释任意 JSON DAG。
+
+BusinessFlowStep/StepAttempt 只记录业务步骤和执行尝试，不复制 NodeRun、ProviderOperation、
+ExecutionReceipt、Proposal item 或 HumanReviewDecision 的权威事实。一个生产 attempt 对应
+一个生产命令和一个 NodeRun 回执；多项生产工作拆为多个 Step。P4 不新增 Run–Flow 关联表、
+Action 表或集合回执表；跨 Run 接管不在本设计范围。
+
+### 事实归属与迁移边界
+
+- Project/Research/Script/Asset 等正式业务事实归 Domain Services。
+- MasterRun/PlanRevision/控制回执归 Director/Harness 控制域。
+- DirectorTurn 仍是有界执行身份。
+- LangGraph Thread/Checkpoint 仅保存图执行快照。
+- BusinessFlow Instance/Step 是业务流程进度，不是媒体生产事实。
+- NodeRun/ProviderOperation/Artifact 仍由 Production Runtime 独占。
+
+上述目标表的字段、复合外键、RLS、CHECK、索引、角色 GRANT/REVOKE、迁移顺序和测试合同
+以 P0 独立设计包第三轮 Schema 文件为设计输入；该设计包不替代实施时重新审计和 PostgreSQL
+集成验证。没有真实 PG 迁移、RLS/角色、并发和故障恢复测试，不得标记为已实施或通过。
