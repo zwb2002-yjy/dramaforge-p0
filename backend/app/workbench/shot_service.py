@@ -13,7 +13,6 @@ from app.access.projects import ProjectService
 from app.assets.models import Shot
 from app.assets.voice import ShotVoiceSettings
 from app.director.turn_service import DirectorTurnService
-from app.providers.voice_config import freeze_voice_execution
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 
@@ -68,9 +67,9 @@ class ShotDesignService:
             )
             new_voice = ShotVoiceSettings.model_validate(director_state.get("voice") or {})
             if old_voice != new_voice:
-                freeze_voice_execution(
-                    director_state
-                )  # Validate locally; saving never synthesizes.
+                # Shape is validated above; the voice binding is enforced at
+                # generation time so saving never requires a configured model.
+                pass
             shot.director_state = dict(director_state)
         if image_prompt is not None:
             shot.image_prompt = image_prompt

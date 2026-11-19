@@ -48,6 +48,93 @@ async def _seed_project(session: AsyncSession) -> tuple[Project, User]:
     return project, user
 
 
+
+
+async def _seed_voice_binding(session: AsyncSession, project: Project, user: User) -> None:
+    """Give the fixture project one enabled voice binding (I8a-02 runtime path)."""
+    from datetime import date
+
+    from app.providers.catalog_models import ModelCatalogEntry
+    from app.providers.model_profiles.orm import ProductionModelProfile
+    from app.providers.models import ProviderConnection, ProviderModelBinding
+    from app.security.models import EncryptedProviderCredential
+
+    credential = EncryptedProviderCredential(
+        workspace_id=project.workspace_id,
+        provider="agnes",
+        revision_no=1,
+        ciphertext="fixture-not-a-real-ciphertext",
+        key_version="fixture",
+    )
+    session.add(credential)
+    await session.flush()
+    connection = ProviderConnection(
+        workspace_id=project.workspace_id,
+        provider_type="agnes",
+        display_name="Voice",
+        base_url="https://speech.example",
+        protocol_profile="openai_speech_v1",
+        credential_id=credential.id,
+        credential_revision=credential.revision_no,
+        enabled=True,
+        verification_status="verified",
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(connection)
+    await session.flush()
+    entry = ModelCatalogEntry(
+        provider_type="agnes",
+        protocol_profile="openai_speech_v1",
+        model_id="unit-voice",
+        model_revision="v1",
+        display_name="Unit Voice",
+        media_kind="voice",
+        lifecycle="active",
+        catalog_source="official_static",
+        capability_manifest_json={"manifest_version": "1", "media_kind": "voice"},
+        option_schema_json={
+            "voices": [
+                {"id": "v1", "label": "Voice", "locale": "zh-CN"},
+                {"id": "v2", "label": "Voice 2", "locale": "zh-CN"},
+            ],
+            "properties": {"voice_id": {}},
+        },
+        documented_at=date(2026, 11, 19),
+        contract_manifest_hash="a" * 64,
+    )
+    session.add(entry)
+    await session.flush()
+    binding = ProviderModelBinding(
+        workspace_id=project.workspace_id,
+        connection_id=connection.id,
+        media_type="voice",
+        model_id="unit-voice",
+        purpose="voice",
+        enabled=True,
+        catalog_entry_id=entry.id,
+        capability_manifest_hash=entry.contract_manifest_hash,
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(binding)
+    await session.flush()
+    session.add(
+        ProductionModelProfile(
+            workspace_id=project.workspace_id,
+            project_id=project.id,
+            name="default",
+            version=1,
+            bindings={},
+            voice_model_binding_id=binding.id,
+            voice_options={"voice_id": "v1"},
+            created_by=user.id,
+            updated_by=user.id,
+        )
+    )
+    await session.flush()
+
+
 async def _seed_renderable_final_film(
     session: AsyncSession,
     *,
@@ -56,6 +143,7 @@ async def _seed_renderable_final_film(
     object_store: ObjectStore | None = None,
 ) -> tuple[Project, User, EditSession, list[Shot], list[Artifact]]:
     project, user = await _seed_project(session)
+    await _seed_voice_binding(session, project, user)
     episode = Episode(project_id=project.id, episode_number=1, title="Episode 1", synopsis="")
     session.add(episode)
     await session.flush()

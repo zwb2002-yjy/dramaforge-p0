@@ -2,6 +2,7 @@
 
 更新：2026-11-19。此文件是本长期任务唯一执行状态，产品/架构规则仍由 [CURRENT](../CURRENT.md) 导航；本目录是合同12明确要求的执行管理材料，不是第二套架构宪法。
 
+
 ## 当前阶段与批次
 
 - **当前任务**：I8a-02 语音生产接线。I5 已完成 Production 公共引用编译并退出（EV93）。I8a 已有媒体配置、语音协议、Binding 与项目音色选项的定向证据（EV94–EV98），最近证据 EV99 验证了冻结的语音身份和运行时适配器。
@@ -10,6 +11,7 @@
 - **交接方式**：当前任务、下一步、阻塞或最近证据变化时覆盖本节，详细历史按 EV 编号查阅。D8 冻结基线为 D8-20261117-r1。
 
 主合同：[桌面12](<C:/Users/RXZY/Desktop/新建 文本文档 (12).txt>)；次合同：[桌面11](<C:/Users/RXZY/Desktop/新建 文本文档 (11).txt>)。Owner明确12优先11。N11已澄清全部改动后续统一执行，先完整设计再工程；不重复请求普通阶段授权。真实费用、扩大真实资料外发、不可逆迁移、正式发布等仍停在硬门槛。
+
 
 ## D0续接审查
 
@@ -23,6 +25,7 @@
 
 这属于续接准入判定，不将原D0严格运行基线判定改为通过。后续风险和关闭责任统一见 [RISK_REGISTER](RISK_REGISTER.md)。
 
+
 ## 尚待交付的跨阶段事项
 
 | 承接批次 | 交付与验收动作 |
@@ -34,6 +37,7 @@
 
 D0–D8 设计结论、各阶段已运行的证据和当时尚待处理的事项按下文留存。当前续跑位置见首页。
 
+
 ## D1阶段报告
 
 依据：主合同12产品十九项、D0 R01–R38、O1–O7、Owner N02–N04，已读真实项目/资料模型与现有产品主链。
@@ -43,6 +47,7 @@ D0–D8 设计结论、各阶段已运行的证据和当时尚待处理的事项
 Schema/API/Event/状态影响：研究/知识/公共引用与作品类型需D2新增/扩展；目标/流程第三轮候选继续复核；D7冻结精确接口，不把语义状态当现有enum。安全影响：显式发布内容快照、不开放私有来源、O4/O5新旧路径区分。依赖：D2–D7细化，D8完整冻结。
 验收：9份本批文档链接无缺失，diff --check退出0；1358 tracked路径比较仅PRODUCT/CREATION_FLOW/CURRENT改变，原17项dirty内容/删除状态不变。未跑产品测试、未连接DB、未改业务/Schema/Compose。
 剩余：C10运行身份、C12资源与真实作品质量待工程验收；不阻断纯设计。D1结论是产品设计检查通过，非整体设计冻结或产品运行通过，按合同自动进入D2。
+
 
 ## 当前证据与Review
 
@@ -66,6 +71,7 @@ D2-03新增证据与修订：读取实际EditSession、Export、FinalFilm dirty�
 已补27新表清单、3幅ER、现有表扩展、角色/不可变权限、迁移依赖/回退和DB01–12数据用例设计。
 上述是设计，未执行迁移/PG/产品门。D2-04已继续闭合公共令牌六列同空规则/精确FK、变体父源链接、
 跨项目来源basis的typed/约束触发器、在途完成与新发送不同检查时间、重复分析排他与空指针可见性。
+
 
 ## D2阶段报告与D3开始
 
@@ -137,6 +143,7 @@ D6整体尚未通过，首版交互可供后续细节迭代；不把本地模拟
 当时继续仅设计；N11现已澄清全部改动后续统一执行，保留N10首版交互，D8完成后按主合同进入I阶段。
 阶段退出条件见 [PHASE_GATES](PHASE_GATES.md)，计划见 [MASTER_EXECUTION_PLAN](MASTER_EXECUTION_PLAN.md)。
 
+
 ## D6首版设计审查与D7准入
 
 依据：Owner N08明确三栏/三级模型/自然语言创作，N10给出首版参考图并允许后续细节迭代，N09限定设计原型。
@@ -154,6 +161,7 @@ Schema/API/Event影响：扩展原Profile三Binding/语音选项/迁移核对版
 配置迁移待核对和精确部署/运行Schema问题登记RSK24/C10，由D7/D8设计、未来实施实测关闭。
 D6结论：按Owner指定首版范围，设计与原型审查通过，进入D7设计；不宣称最终产品或D8通过，不进入代码实施。
 
+
 ## D7阶段审查
 
 交付：API各领域目标请求/返回/权限/版本/幂等/错误/事件；DATA_MODEL新增回执/配置/范围字段、M01–08依赖与历史保护；
@@ -170,6 +178,7 @@ Schema/API/Event影响已回填各权威，权限/副作用风险由T组与API/D
 这些阻断后续对应实施/验收，不以设计文档关闭。真实费用/外发/发布硬门保持；N11已澄清设计后统一工程。
 结论：D7设计交付与一致性审查通过，进入D8全量审计；D8尚未冻结，产品与工程实施没有通过声明。
 
+
 ## D8审计修订进展（尚未冻结）
 
 第一轮已逐实际文件修正：N09后续授权的过强解释由Owner N11澄清；旧专业布局/ADR术语与三栏目标分清；
@@ -185,6 +194,7 @@ NodeRun→Operation当前0..1及本地FFmpeg同链事实回填；默认Compose�
 参考图已原样入frontend/design/prototypes，原型仅格式化；source/model元数据只读，未装工具/权重或调用模型。
 当前检查：38项追踪、38项测试映射、16测试组、14阶段/26批次无环、28文档文件链接存在。
 剩余：完成主合同19项最终交付的逐项审计/当前冲突分类和设计冻结指纹；完成后按N11统一进入I0。
+
 
 ## D7分批过程记录
 
@@ -213,6 +223,7 @@ DEPLOYMENT补现有Windows/WSL2/容器方式、Parser/网络隔离、维护/恢�
 备份脚本当前只核对URL字符串与桶名、容器分支只用目标database名，且全归档装内存；未运行restore，风险登记RSK26。
 真实命令来源已读quality脚本、Dockerfiles/Compose/package/CI，但尚未运行任何产品门。
 剩余：收敛备份容量方案、完整需求→具体测试文件/命令矩阵、故障/重启/恢复用例、可执行实施批次与全设计一致性；D7未通过。
+
 
 ## D8最终设计审计（2026-11-17）
 
@@ -258,6 +269,7 @@ DEPLOYMENT补现有Windows/WSL2/容器方式、Parser/网络隔离、维护/恢�
 结论：D8设计冻结通过，进入I0只读工程基线及隔离验证准备。完整目标仍为I0–I10产品实装/测试/恢复/三作品验收，
 任何费用、扩大真实资料外发、不可逆数据动作和发布都不因本结论获批。
 
+
 ## 工作区身份与运行证据
 
 分支dev；HEAD及远端dev：eff39bf0c940da4dc5dcaa42388d432a2a77111f。
@@ -267,6 +279,7 @@ DEPLOYMENT补现有Windows/WSL2/容器方式、Parser/网络隔离、维护/恢�
 续接前已有14M/3D，清单见D0/02。涉及CI、Workflow模板、FinalFilm、相关测试、ARCHITECTURE_MAPPING、PRODUCTION_GRAPH、architecture-baseline；不将这些改动计入本次成果。已保存本轮开始1358个tracked路径的内容hash/删除状态用于保护校验，不创建长期源码副本。
 
 D8冻结时Docker不可用；N12之后已取得实际运行身份并重建。当前12常驻服务healthy，3初始化任务exit0，users/projects/provider_operations/node_runs均0；访问http://127.0.0.1:8080显示首次Owner初始化。没有真实Provider调用。
+
 
 ## 人工审批与下一步
 
@@ -289,6 +302,7 @@ D8冻结时Docker不可用；N12之后已取得实际运行身份并重建。当
 依据：https://learn.microsoft.com/en-us/windows/wsl/use-custom-distro 、
 https://docs.docker.com/reference/cli/docker/desktop/start/ 、
 https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/SHA256SUMS 。
+
 
 ## I0首批工程进展
 
@@ -347,6 +361,7 @@ I0-02在现有quality Compose和Full脚本加入8个内部网络服务，复用�
 质量接线批次不改业务Model/Migration/生产Compose；N12另外已授权修改本地.env和执行新空库迁移/旧容器数据清理。两者均无Provider调用。
 保护复核：1358原跟踪路径仅20设计文档及5个本批质量/测试文件变化，新增第5项为test_provider_recovery的上述隔离修复；意外变化0，原非设计dirty保持。新fixture/Playwright文件仍未提交。
 
+
 ## I1-01实施与验证（2026-11-17）
 
 上轮上下文在批次中途结束时，I1-01竖向切片已实际写入工作区；本轮逐文件核对确认API/服务/两处分集写入口/
@@ -383,6 +398,7 @@ I1-01退出判定：批次合同证据齐全（三类型/约束持久读回、�
 两用户三项目切换、真实API+UI旅程），受影响回归通过，代码Review完成，无未决失败。按主合同进入
 I1-02（资料原件/版本/基础提取：M04基础Extraction与纯本地提取、T02；此时只合成资料，不启动语义研究）。
 本地运行库dramaforge-dev仍0099：0100仅在隔离质量库验证，不自动升级运行实例。
+
 
 ## I1-02实施与验证（2026-11-17）
 
@@ -427,6 +443,7 @@ fail-closed阻断、真实PG RLS与授权），进入I2a-01。未完成且不冒
 OCR/ASR、source-capabilities、analysis_mode/processing摘要、reparse与事件schema v2（按计划属I4）；
 本地运行库仍0099。
 
+
 ## I2a-01实施与验证（2026-11-17）
 
 交付：M02第一批——持续目标、不可变计划与控制回执；未新增Runtime或第二任务状态机。
@@ -463,6 +480,7 @@ OCR/ASR、source-capabilities、analysis_mode/processing摘要、reparse与事�
 I2a-01退出判定：T06/DB07/12证据齐全，进入I2a-02。未完成且不冒称：202受理侧create_goal自动建Run
 （I2b）、Flow/步骤/attempt读投影与完成谓词（I6a）、cancel对远端任务的实际核对；本地运行库仍0099。
 
+
 ## I2a-02实施与验证（2026-11-17）
 
 交付：运行控制由“跨步持锁”改为短事务准入+发布，旧lease/epoch语义保留，未新增Runtime。
@@ -483,6 +501,7 @@ I2a-01退出判定：T06/DB07/12证据齐全，进入I2a-02。未完成且不冒
 I2a-02退出判定：T08短事务/锁序/迟到写证据齐全，进入I3-01。未完成且不冒称：Worker真实文本仍须
 I3安全门通过后才启用（本批未启用）；checkpoint级epoch围栏（checkpoint_ref/应用指针）按D3设计在
 I2b随异步执行接线，本批只保证控制行与投影写入的围栏。
+
 
 ## I3-01实施与验证（2026-11-17）
 
@@ -518,6 +537,7 @@ I3-01退出判定：管理面（API-S01–04）证据齐全，进入I3-02。未�
 撤销屏障、SourceUse交集、预览egress摘要、Worker真实文本启用；本地运行库仍0099。
 Gate后仅清理`pg_support.py`文件末尾空行（`git diff --check` 2→0），未改代码逻辑或断言。
 
+
 ## I3-02部分实施（准入与来源用途，2026-11-17）
 
 交付：M03第二批的数据与准入核心；**该批次未完成**，不得标阶段通过。
@@ -542,6 +562,7 @@ exit0，清理无残留（EV63）：2595单测、194 PG集成、迁移check（01
 I3-02未完成项（下一轮继续）：`providers/reference_delivery.py`与Production发送入口接入同一准入并做
 撤销前后屏障；执行/研究预览返回egress摘要与required_purposes推导；来源用途HTTP入口（随I4）。
 本地运行库仍0099。
+
 
 ## I3-02完成轮（引用签发与生产提交，2026-11-17/18）
 
@@ -599,6 +620,7 @@ rounds 10/11/13/14 四次尝试均因同一原因失败：该批次要求"202受
 
 审计结论：当前代码等于EV64的Full验证状态（I1/I2a/I3各批），不含intent/202/worker队列改动。下一轮应从零实施该批次，或由用户决定更换执行方式。
 
+
 ## I2b-01完整闭环（2026-11-18，EV68）
 
 本轮在EV66（intent/create_goal切片）之上一次性完成受理、执行与全部测试迁移，未回滚、未删除既有成果。
@@ -638,6 +660,7 @@ I2b-01退出判定：受理/重放/冲突/领取/fencing/checkpoint边界/断线
 均有PG或单元证据，旧同步套件已整片迁移，故标记I2b-01完成。**未改变**：本地运行库仍0099、
 未部署、未调用真实付费Provider、O1–O7与D8冻结基线不变；真实作品与目标机验收仍属I10。
 
+
 ## I6a-01实施（2026-11-18，EV69）
 
 交付：
@@ -671,6 +694,7 @@ I6a-01本切片退出判定：Flow/Step/Attempt持久化、定义注册、受控
 `runtime/inbox/wakeup` Worker驱动与生产执行适配（I6a-02）、Flow读投影HTTP、真实研究/知识/媒体
 端口接线（I4/I6b）。本地运行库仍0099。
 
+
 ## I6a-02实施（2026-11-18，EV70）：Worker 驱动与受控工具执行
 
 交付：
@@ -698,6 +722,7 @@ I6a-01批次退出判定：Flow/Step/Attempt持久化、定义注册、受控工
 授权受理端口与真实研究/知识/媒体接线（I6b/I4）。本地运行库仍0099、未发布。
 
 
+
 ## I4前置切片：来源用途HTTP（2026-11-18，EV71）
 
 按DATA_MODEL/API冻结值校正USE_PURPOSES（research/creation/library_reference/external_processing/export，修正此前实现自造的四值），SourceUseService增加find_subject、state=与expected_version CAS；新增pi/v1/source_use.py提供每原件修订与每Artifact的GET/PUT：artifact须属当前项目，GET无subject返回version0/unreviewed且零写入，PUT先按request_key回执再比较expected_version，declared要求非空声明与用途、revoked用途必须为空。generated.ts重生。
@@ -707,6 +732,7 @@ I6a-01批次退出判定：Flow/Step/Attempt持久化、定义注册、受控工
 未实施且不冒称：source-use-subjects/{s}/impact影响读取与跨项目授权计数；I4全格式处理器/研究工作流仍是下一批。本地运行库仍0099。
 
 
+
 ## I4前置切片：影响读取（2026-11-18，EV72）
 
 GET /projects/{p}/source-use-subjects/{s}/impact：仅当前项目、按id游标分页，返回artifact/usage/status；status由API层读取Artifact，服务层不跨层import（修正架构门报出的ssets→execution新依赖）。未知subject 404。
@@ -714,6 +740,7 @@ GET /projects/{p}/source-use-subjects/{s}/impact：仅当前项目、按id游标
 验证：无过滤Full df-quality-975afff10b2c407a88031ddb313b4edb，exit0，清理无残留（EV72）：2626单测、201 PG集成、迁移check（0108）无漂移、304 schema、754 Vitest、211 mock E2E、媒体/网关/LiteLLM、机构5浏览器用例。镜像backend sha256:787275573515…。
 
 未实施且不冒称：跨项目owner授权计数（other_project_uses_count）与跨项目只读资格；I4全格式处理器/研究工作流为下一批。本地运行库仍0099。
+
 
 
 ## I4-01 全格式处理器实施（2026-11-18，进行中）
@@ -765,6 +792,7 @@ GET /projects/{p}/source-use-subjects/{s}/impact：仅当前项目、按id游标
 流式上传放大处理档、真实中文 ASR 质量（espeak 合成音不可辨，仅用英文 TTS 证明链路；真实资料质量属 I10）。
 本地运行库仍 0099，未部署，未调用真实付费 Provider。
 
+
 ## I4-01 续：受理冻结处理器合同与 retry/reparse（2026-11-18，EV75）
 
 本切片把“解析合同漂移”和“用户显式重新处理”做成同一份持久受理事实，避免后台悄悄换处理器或重复解析。
@@ -801,6 +829,7 @@ GET /projects/{p}/source-use-subjects/{s}/impact：仅当前项目、按id游标
 
 未完成且不冒称：`source_extract_v1` BusinessFlow（动态块步骤）、媒体块级ASR回执、I4-02/03；
 本地运行库仍0099，未部署，未调用真实付费Provider。
+
 
 ## I4-02a 研究结果、用户决定与引文（2026-11-18，EV76）
 
@@ -845,6 +874,7 @@ GET /projects/{p}/source-use-subjects/{s}/impact：仅当前项目、按id游标
 未完成且不冒称：analysis-preview/analyses受理与模型执行、六类覆盖清单、research search_text生成列与
 GIN索引（随I4-03检索切片）、I4-03知识库；完整Full待容量恢复后重跑；本地运行库仍0099。
 
+
 ## I4-02b-1 分析预览（2026-11-19，EV77）
 
 先落“用户可预览、零模型调用、零写入”的输入冻结与阻断原因；分析受理/执行（固定Flow+Invocation+覆盖清单）
@@ -873,6 +903,7 @@ GIN索引（随I4-03检索切片）、I4-03知识库；完整Full待容量恢复
 
 未完成且不冒称：analysis受理（202 ResearchAcceptance）/执行、六类覆盖清单与analysis读投影、
 search_text生成列与I4-03知识库；完整Full待容量恢复重跑；本地运行库仍0099。
+
 
 ## I4-02b-2 分析清单、发布与读投影（2026-11-19，EV78）
 
@@ -912,6 +943,7 @@ search_text生成列与I4-03知识库；完整Full待容量恢复重跑；本地
 未完成且不冒称：analysis受理（202）与真实模型执行（固定Flow/Invocation、六类输出提示与解析）、
 search_text与I4-03知识库；本地运行库仍0099。
 
+
 ## I4-02c 分析受理（202，冻结Turn）（2026-11-19，EV79）
 
 把“用户接受这份预览”变成唯一持久事实：一个`scope_type=research_analysis`的queued Director Turn，
@@ -938,6 +970,7 @@ search_text与I4-03知识库；本地运行库仍0099。
 
 未完成且不冒称：真实模型执行（固定`research_import_v1`、Invocation、六类输出提示/解析与coverage发布接线）、
 search_text与I4-03知识库；本地运行库仍0099。
+
 
 ## I4-02d 分析执行引擎与Worker（2026-11-19，EV80）
 
@@ -974,6 +1007,7 @@ search_text与I4-03知识库；本地运行库仍0099。
 
 未完成且不冒称：真实Provider调用的端到端证据（本批只以fake transport验证引擎与发布接线）、
 search_text与I4-03知识库；本地运行库仍0099。
+
 
 ## I4-03a 独立知识库、发布/撤回与检索投影（2026-11-19，EV81）
 
@@ -1012,6 +1046,7 @@ search_text与I4-03知识库；本地运行库仍0099。
 未完成且不冒称：项目固定引用`/projects/{p}/knowledge-references`（GET/POST/PATCH）、真实Provider分析端到端、
 I4阶段完整验收；本地运行库仍0099。
 
+
 ## I4-03b 项目固定知识引用（2026-11-19，EV82）
 
 把“项目引用已发布知识”做成固定revision+用途的显式决定，并给出读取投影而非第二状态。
@@ -1040,6 +1075,7 @@ I4阶段完整验收；本地运行库仍0099。
 
 未完成且不冒称：真实Provider分析端到端（需当前Owner授权，属外部边界）、研究/知识前端页面（计划归I4-03前端切片）、
 I4阶段完整验收；本地运行库仍0099。
+
 
 ## I4-03c 研究/知识前端首版（2026-11-19，EV83）
 
@@ -1072,6 +1108,7 @@ I4阶段完整验收；本地运行库仍0099。
 未完成且不冒称：右侧Director解释/补充、恢复候选的完整对照、知识发布共享范围预览、真实Provider
 分析端到端；I4阶段完整验收待Full回填。
 
+
 ## I4-03d 研究/知识领域事件与Outbox（2026-11-19，EV84）
 
 补齐I4-03计划中的events/outbox/SSE接线：每次研究/知识决定与业务写入同事务产生一条安全事件。
@@ -1098,6 +1135,7 @@ I4阶段完整验收；本地运行库仍0099。
   `sha256:ec55e3bf5ab3a0d1102ba15ab3223f45a386771ee523c323b23ad0e6c00d86c8`、frontend
   `sha256:fafe627c74a66dac56facb4e304d693c4729e178bfcd9a17989df355abd50086`。
 
+
 ## I4 阶段退出结论（2026-11-19，EV80–EV84）
 
 已交付并各有Full证据：七格式解析/块回执/来源接受（I4-01）、研究结果/修订/引文与候选/恢复/归档、
@@ -1110,6 +1148,7 @@ I4阶段完整验收；本地运行库仍0099。
 本轮以fake transport + 真实PostgreSQL/Worker/HTTP链路证明机制。**未完成UI细节**：右侧Director对研究的
 解释/补充、恢复候选的完整对照视图、知识发布共享范围预览；这些不改变已验收的数据/服务/HTTP合同，
 记入后续切片。I4按机制验收退出，允许进入I5。
+
 
 ## I5-01a 公共资产库与项目固定链接（2026-11-19，EV85）
 
@@ -1140,6 +1179,7 @@ I4阶段完整验收；本地运行库仍0099。
 未完成且不冒称：from-artifact/promote/version-create的采用回执与公共发布同事务、owner_preview/project_use
 内容流、参考绑定判别联合、Provider下载token（I5-01b/I5-02）；I5阶段Full待阶段终点。
 
+
 ## I5-01b 公共内容窄读（owner_preview）（2026-11-19，EV86）
 
 让公共资产可被owner预览真实内容，同时不开放私有源表或存储URL。
@@ -1159,6 +1199,7 @@ I4阶段完整验收；本地运行库仍0099。
 
 未完成且不冒称：采用回执同事务、project_use内容流、参考绑定判别联合、Provider下载token（I5-02）；
 I5阶段Full待阶段终点。
+
 
 ## I5-01c from-artifact采用回执与公共发布同事务（2026-11-19，EV87）
 
@@ -1183,6 +1224,7 @@ I5阶段Full待阶段终点。
 未完成且不冒称：promote/version-create/asset-create回执与目标CAS、project_use内容流、参考绑定判别联合、
 Provider下载token（I5-02）；I5阶段Full待阶段终点。
 
+
 ## I5-02a 公共链接镜头引用（2026-11-19，EV88）
 
 让公共资产成为可被镜头显式引用的生产输入，同时保持私有分支与源隔离。
@@ -1205,6 +1247,7 @@ Provider下载token（I5-02）；I5阶段Full待阶段终点。
 
 未完成且不冒称：project_use内容流、Provider下载token六列身份、promote/version-create回执与目标CAS
 （I5-02剩余）；I5阶段Full待阶段终点。
+
 
 ## I5-02b promote采用回执与目标CAS（2026-11-19，EV89）
 
@@ -1229,6 +1272,7 @@ Provider下载token（I5-02）；I5阶段Full待阶段终点。
 未完成且不冒称：version-create候选回执与`base_public_asset_link_id`、project_use内容流、Provider下载
 token六列身份（I5-02剩余）；I5阶段Full待阶段终点。
 
+
 ## I5-02c 候选版本回执与公共base链接（2026-11-19，EV90）
 
 把“新建候选版本”也变成可重放的CAS决定，并允许元数据变体固定公共来源链接。
@@ -1250,6 +1294,7 @@ token六列身份（I5-02剩余）；I5阶段Full待阶段终点。
 
 未完成且不冒称：project_use内容流、Provider下载token六列身份（I5-02剩余）；I5阶段Full待阶段终点。
 
+
 ## I5-02d project_use内容流（2026-11-19，EV91）
 
 补齐公共内容读取的第二受限输入：消费项目通过自己的固定链接读取同一媒体。
@@ -1266,6 +1311,7 @@ token六列身份（I5-02剩余）；I5阶段Full待阶段终点。
 - 全量unit **2689 passed**（602.46s）；前端757 Vitest、typecheck/prettier/api:authority（366 schema）通过。
 
 未完成且不冒称：Provider下载token六列身份与候选下载（I5-02最后一片）；I5阶段Full待阶段终点。
+
 
 ## I5-02e Provider下载token公共身份（2026-11-19，EV92）
 
@@ -1304,6 +1350,7 @@ I5阶段Full待阶段终点。
 未完成且不冒称：公共引用的Production编译接线（`source:"public"`已进绑定/解析/token，但Production计划编译
 仍只消费私有Artifact解析结果）；I5按此边界暂不宣布阶段退出，下一片完成编译接线后复跑Full再判定。
 
+
 ## I5-02f Production公共引用编译接线（2026-11-19，EV93）
 
 把公共引用真正送进生产计划：编译阶段冻结源项目真实Artifact与公共身份，runtime签发带公共身份的token。
@@ -1341,6 +1388,7 @@ I5阶段Full待阶段终点。
   `sha256:864e25f4a385efedd8dd0b60d2ea5603fbcecb9fff2a748882d85f16da982218`、frontend
   `sha256:58b26c816aef6767113c515ce1297850e6edbd00546353b07bf6e49b779d948c`。
 
+
 ## I5 阶段退出结论（2026-11-19，EV85–EV93）
 
 已交付并各有定向/Full证据：公共资产发布/成员/项目固定链接与availability投影（I5-01a）、owner_preview
@@ -1354,6 +1402,7 @@ I5阶段Full待阶段终点。
 本轮以mock/固定媒体与真实PostgreSQL/HTTP链路证明机制。**未完成UI细节**：公共资产库独立浏览页面
 （当前提供资产API与项目引用/预览链路，未建独立页面）；记入后续切片，不改变已验收的数据/服务/HTTP合同。
 I5按机制验收退出，允许进入I8a。
+
 
 ## I8a-01a D6项目媒体配置（2026-11-19，EV94）
 
@@ -1386,6 +1435,7 @@ I5按机制验收退出，允许进入I8a。
 
 未完成且不冒称：媒体配置API的独立HTTP测试、I8a-02（语音Binding/Edge退出）、I8a-03（媒体安全/逐命令授权）。
 
+
 ## I8a-02a 语音模型HTTP协议适配（2026-11-19，EV96）
 
 先落I8a-02的传输层：三种语音模型的请求构造与字节解码，纯适配、不选模型、不兜底、不重试。
@@ -1404,6 +1454,7 @@ I5按机制验收退出，允许进入I8a。
 
 未完成且不冒称：`voice-options`API投影、生产语音路径切换与Edge/espeak删除、FinalFilm prepare与
 逐命令授权（I8a-02剩余）。
+
 
 ## I8a-02b 语音能力枚举与Binding解析（2026-11-19，EV97）
 
@@ -1424,28 +1475,6 @@ I5按机制验收退出，允许进入I8a。
 未完成且不冒称：生产调用方切换到binding（shot_service/experiment/final_film）、Edge/espeak删除、
 FinalFilm prepare与逐命令授权。
 
-## I8a-02d 语音模型运行时与冻结身份（2026-11-19，EV99）
-
-让冻结的语音身份可以是项目语音Binding，并由HTTP适配器完成一次合成调用。
-
-已实施：
-- `VoiceExecutionSpec`新增`engine="voice_model"`与`binding_id/provider_type/model_id/protocol_profile/
-  manifest_hash`（旧engine值保留用于历史Spec只读）；`voice_identity`返回
-  `(provider_type, model_id, voice-model:<hash12>)`。
-- `freeze_voice_execution(..., binding=...)`：configured→冻结binding身份与音色；missing/unavailable→
-  `ProviderNotConfiguredError`；无音色→422 `VOICE_SELECTION_REQUIRED`。
-- 新增`app/providers/speech_runtime.py`：`SpeechHttpAdapter`按协议构造并POST一次，解码WAV存入blobs；
-  非2xx→`ProviderError`，非法载荷→`SpeechProtocolError`；无重试、无fallback。
-- `get_voice_adapter(spec, session=..., transport=...)`改为async：`voice_model`加载binding/连接/凭据
-  （`read_credential_by_id`）并构建适配器；`execute_voice_node_run`传入session；旧引擎路径保留至下一片删除。
-
-已测（定向）：
-- 新增`test_speech_runtime.py` 4 passed：binding冻结与身份、missing/unavailable拒绝、MockTransport一次
-  POST+WAV/JSON解码、400与坏载荷拒绝。
-- 定向组50 passed（voice_config/speech_runtime/speech_http/voice_binding/final_film/shot_design）；
-  ruff/mypy 398文件通过。
-
-未完成且不冒称：生产调用方切换与Edge/espeak删除、FinalFilm prepare与逐命令授权。
 
 ## I8a-02c voice-options Binding能力投影（2026-11-19，EV98）
 
@@ -1467,6 +1496,7 @@ FinalFilm prepare与逐命令授权。
 未完成且不冒称：生产调用方切换到binding（shot_service/experiment/final_film）、Edge/espeak删除、
 FinalFilm prepare与逐命令授权。
 
+
 ## I8a-02d 语音模型运行时与冻结身份（2026-11-19，EV99）
 
 让冻结的语音身份可以是项目语音Binding，并由HTTP适配器完成一次合成调用。
@@ -1488,4 +1518,26 @@ FinalFilm prepare与逐命令授权。
 - 定向组50 passed（voice_config/speech_runtime/speech_http/voice_binding/final_film/shot_design）；
   ruff/mypy 398文件通过。
 
-未完成且不冒称：生产调用方切换与Edge/espeak删除、FinalFilm prepare与逐命令授权。
+未完成且不冒称：FinalFilm prepare的逐命令授权与预览零调用验证（I8a-03同批）、I8a-02收口Full。
+
+未完成且不冒称：FinalFilm prepare逐命令授权/预览零调用（I8a-03）、I8a-02收口Full。
+
+## I8a-02e 生产语音切换到Binding并删除Edge/espeak（2026-11-19，EV100）
+
+让生产语音只走项目语音Binding，删除实例引擎与全部兜底。
+
+已实施：
+- `freeze_project_voice(session, project_id, ...)`：解析项目语音Binding后冻结；`experiment_nodes`与
+  `final_film.prepare_formal_tail`改用该入口；`shot_service`只校验形状（生成时再验Binding，保存不要求已配置）。
+- 语音选项校验：binding目录列出音色时，所选音色必须在其中（422 `VOICE_UNKNOWN_FOR_BINDING`）。
+- 删除`edge_tts.py`/`local_tts.py`、`Settings.tts_enabled/tts_engine/tts_voice/tts_proxy`、compose/`.env.example`
+  的TTS_*透传与`edge-tts`依赖（uv.lock已更新）；`get_voice_adapter`只接受silence/voice_model，
+  历史engine执行即`ProviderNotConfiguredError`；`voice_path`指纹与`local`标志按新语义修正。
+- `speech_runtime`改用共享`provider_http_client`守卫入口（绝对URL+注入transport）。
+
+已测（定向）：
+- 定向组（voice/speech/final_film/shot_design/compose/formal_path/architecture）全部通过；
+  `test_voice_config.py`重写为Binding冻结与历史engine只读；`test_edge_tts.py`删除。
+- 全量unit **2665 passed**（644.47s，`test_edge_tts.py`随引擎删除）；ruff/mypy 396文件通过。
+
+未完成且不冒称：FinalFilm prepare逐命令授权/预览零调用（I8a-03）、I8a-02收口Full。

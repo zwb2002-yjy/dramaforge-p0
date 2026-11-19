@@ -1,46 +1,55 @@
 """Speech choices are read-only, explicit, and immutable at dispatch."""
 
+from __future__ import annotations
+
 import io
 import wave
+from uuid import uuid4
 
 import pytest
 from app.assets.voice import ShotVoiceSettings
-from app.config import Settings
 from app.providers.errors import ProviderNotConfiguredError
+from app.providers.voice_binding import VoiceBindingStatus
 from app.providers.voice_config import freeze_voice_execution, voice_identity
 from app.providers.voice_runtime import get_voice_adapter
-from app.shared.errors import ValidationAppError
 from pydantic import ValidationError
 
-
-def _settings(**overrides: object) -> Settings:
-    return Settings.model_validate({"app_env": "test", "tts_enabled": True, **overrides})
+BINDING_ID = uuid4()
 
 
-def test_edge_default_and_user_voice_have_distinct_frozen_identity() -> None:
-    female = freeze_voice_execution({}, settings=_settings())
-    male = freeze_voice_execution(
-        {"voice": {"voice_id": "zh-CN-YunxiNeural", "rate_percent": -10}}, settings=_settings()
+def _binding(**overrides: object) -> VoiceBindingStatus:
+    values = {
+        "status": "configured",
+        "binding_id": BINDING_ID,
+        "model_id": "voice-model",
+        "provider_type": "agnes",
+        "voice_options": {"voice_id": "v1"},
+        "reason_code": None,
+        "protocol_profile": "openai_speech_v1",
+        "manifest_hash": "a" * 64,
+    }
+    values.update(overrides)
+    return VoiceBindingStatus(**values)
+
+
+def test_binding_default_and_user_voice_have_distinct_frozen_identity() -> None:
+    default = freeze_voice_execution({}, binding=_binding())
+    custom = freeze_voice_execution(
+        {"voice": {"voice_id": "v2", "rate_percent": -10}}, binding=_binding()
     )
-    assert female.engine == "edge-tts"
-    assert female.voice == "zh-CN-XiaoxiaoNeural"
-    assert male.voice == "zh-CN-YunxiNeural"
-    assert male.rate_percent == -10
-    assert male != female
-    assert voice_identity(male) == ("edge_tts", "zh-CN-YunxiNeural", "edge-voice-v1")
+    assert default.engine == "voice_model"
+    assert default.voice == "v1"
+    assert custom.voice == "v2"
+    assert custom.rate_percent == -10
+    assert custom != default
+    assert voice_identity(custom) == ("agnes", "voice-model", "voice-model:aaaaaaaaaaaa")
 
 
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        {"tts_engine": "unknown"},
-        {"tts_voice": "cmn"},
-        {"tts_engine": "espeak-ng", "tts_voice": "zh-CN-XiaoxiaoNeural"},
-    ],
-)
-def test_mismatched_engine_voice_never_silently_falls_back(overrides: dict[str, object]) -> None:
-    with pytest.raises(ValidationAppError):
-        freeze_voice_execution({}, settings=_settings(**overrides))
+def test_missing_binding_never_silently_falls_back() -> None:
+    with pytest.raises(ProviderNotConfiguredError):
+        freeze_voice_execution({}, binding=_binding(status="missing"))
+    with pytest.raises(ProviderNotConfiguredError):
+        freeze_voice_execution({}, binding=_binding(status="unavailable"))
 
 
 @pytest.mark.parametrize("rate", [-31, 31])
@@ -50,40 +59,18 @@ def test_voice_rate_is_bounded(rate: int) -> None:
 
 
 @pytest.mark.asyncio
-async def test_disabled_service_cannot_fall_back(monkeypatch: pytest.MonkeyPatch) -> None:
-    spec = freeze_voice_execution({}, settings=_settings())
-    monkeypatch.setattr(
-        "app.providers.voice_runtime.get_settings", lambda: _settings(tts_enabled=False)
-    )
+async def test_legacy_engines_are_read_only_and_never_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.assets.voice import VoiceExecutionSpec
+
+    legacy = VoiceExecutionSpec(engine="edge-tts", voice="v", engine_version="7.2.8")
     with pytest.raises(ProviderNotConfiguredError):
-        await get_voice_adapter(spec)
-
-
-@pytest.mark.asyncio
-async def test_worker_keeps_frozen_voice_when_instance_default_changes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    spec = freeze_voice_execution({}, settings=_settings())
-    monkeypatch.setattr(
-        "app.providers.voice_runtime.get_settings", lambda: _settings(tts_voice="zh-CN-YunxiNeural")
-    )
-    adapter = await get_voice_adapter(spec)
-    assert adapter.model == "zh-CN-XiaoxiaoNeural"  # type: ignore[attr-defined]
-
-
-@pytest.mark.asyncio
-async def test_empty_dialogue_is_real_silence_without_network_or_enabled_tts(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    spec = freeze_voice_execution({}, settings=_settings(), silent=True)
-    monkeypatch.setattr(
-        "app.providers.voice_runtime.get_settings", lambda: _settings(tts_enabled=False)
-    )
-    adapter = await get_voice_adapter(spec)
+        await get_voice_adapter(legacy)
+    silence = VoiceExecutionSpec(engine="pcm-silence", voice="none", engine_version="1")
+    adapter = await get_voice_adapter(silence)
     result = await adapter.create({"prompt": ""})
     data = adapter.blobs[result["remote_task_id"]]
     with wave.open(io.BytesIO(data), "rb") as wav:
         assert wav.getframerate() == 24000
         assert wav.getnframes() == 6000
         assert not any(wav.readframes(wav.getnframes()))
-    assert voice_identity(spec) == ("local_audio", "pcm-silence", "silent-voice-v1")
+    assert voice_identity(silence) == ("local_audio", "pcm-silence", "silent-voice-v1")

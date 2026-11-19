@@ -56,6 +56,7 @@ CAPABILITY_FINE_GRAINED: dict[Capability, tuple[tuple[str, ...], ...]] = {
         ("video.reference.video",),
         ("video.reference.audio",),
     ),
+    Capability.VOICE_GENERATE: (("voice.generate",),),
 }
 
 

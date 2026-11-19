@@ -8,7 +8,7 @@ kind, catalog entry present), ``unavailable`` (a saved choice that cannot run no
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 from uuid import UUID
 
@@ -30,6 +30,7 @@ class VoiceBindingStatus:
     reason_code: str | None
     protocol_profile: str | None = None
     manifest_hash: str | None = None
+    voices: list[str] = field(default_factory=list)
 
 
 def _missing() -> VoiceBindingStatus:
@@ -54,6 +55,19 @@ def _unavailable(
         voice_options={},
         reason_code=reason,
     )
+
+
+def _voice_ids(schema: object) -> list[str]:
+    if not isinstance(schema, dict):
+        return []
+    raw = schema.get("voices")
+    if not isinstance(raw, list):
+        return []
+    ids: list[str] = []
+    for item in raw:
+        if isinstance(item, dict) and isinstance(item.get("id"), str):
+            ids.append(item["id"])
+    return ids
 
 
 async def resolve_voice_binding(
@@ -94,6 +108,7 @@ async def resolve_voice_binding(
         reason_code=None,
         protocol_profile=entry.protocol_profile,
         manifest_hash=entry.contract_manifest_hash,
+        voices=_voice_ids(entry.option_schema_json),
     )
 
 

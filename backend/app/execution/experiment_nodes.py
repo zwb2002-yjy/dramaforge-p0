@@ -27,7 +27,7 @@ from app.execution.shot_pipeline import (
     SHOT_PIPELINE_TEMPLATE_KEY,
     shot_pipeline_definition,
 )
-from app.providers.voice_config import freeze_voice_execution
+from app.providers.voice_config import freeze_project_voice
 from app.shared.errors import NotFoundError, ValidationAppError
 
 DONE_STATUSES: frozenset[str] = frozenset({"completed", "cached", "completed_after_cancel"})
@@ -429,8 +429,13 @@ async def queue_branch_nodes(
                 requested_binding_id=(model_binding_id if key == model_binding_node_key else None),
             )
         if key == "voice":
-            execution_freeze["voice_execution"] = freeze_voice_execution(
-                dict(shot.director_state or {}), silent=voice_silent or not dialogue
+            execution_freeze["voice_execution"] = (
+                await freeze_project_voice(
+                    session,
+                    project_id=project_id,
+                    director_state=dict(shot.director_state or {}),
+                    silent=voice_silent or not dialogue,
+                )
             ).model_dump(mode="json")
         voice_prompt = ("" if voice_silent else dialogue) if key == "voice" else prompt
         snapshot: dict[str, object] = {

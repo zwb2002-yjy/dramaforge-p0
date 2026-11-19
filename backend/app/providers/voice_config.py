@@ -1,6 +1,7 @@
 """Explicit speech configuration and immutable execution identity; no network calls."""
 
 from collections.abc import Mapping
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,21 +12,10 @@ from app.assets.voice import (
     VoiceOptionRead,
     VoiceOptionsRead,
 )
-from app.config import Settings, get_settings
+from app.config import Settings
 from app.providers.errors import ProviderNotConfiguredError
 from app.providers.voice_binding import VoiceBindingStatus
 from app.shared.errors import ValidationAppError
-
-EDGE_TTS_VERSION = "7.2.8"
-EDGE_VOICES = (
-    VoiceOptionRead(id="zh-CN-XiaoxiaoNeural", label="晓晓 · 普通话女声", locale="zh-CN"),
-    VoiceOptionRead(id="zh-CN-YunxiNeural", label="云希 · 普通话男声", locale="zh-CN"),
-)
-LEGACY_VOICES = (
-    VoiceOptionRead(id="cmn", label="普通话 · 本地机械音（旧版）", locale="zh-CN"),
-    VoiceOptionRead(id="zh", label="普通话 · 旧版 zh 标识", locale="zh-CN"),
-    VoiceOptionRead(id="en", label="英语 · 本地机械音（旧版）", locale="en"),
-)
 
 
 def freeze_voice_execution(
@@ -35,7 +25,6 @@ def freeze_voice_execution(
     silent: bool = False,
     binding: "VoiceBindingStatus | None" = None,
 ) -> VoiceExecutionSpec:
-    config = settings or get_settings()
     raw = director_state.get("voice") or {}
     voice = ShotVoiceSettings.model_validate(raw)
     if silent:
@@ -51,6 +40,11 @@ def freeze_voice_execution(
                 "请选择该语音模型支持的音色后再生成配音。",
                 details={"code": "VOICE_SELECTION_REQUIRED"},
             )
+        if binding.voices and selected not in binding.voices:
+            raise ValidationAppError(
+                "所选音色不属于该语音模型；请显式重新选择并保存。",
+                details={"code": "VOICE_UNKNOWN_FOR_BINDING"},
+            )
         return VoiceExecutionSpec(
             engine="voice_model",
             voice=selected,
@@ -62,24 +56,26 @@ def freeze_voice_execution(
             protocol_profile=binding.protocol_profile,
             manifest_hash=binding.manifest_hash,
         )
-    selected = voice.voice_id or config.tts_voice
-    if config.tts_engine == "edge-tts":
-        allowed = {entry.id for entry in EDGE_VOICES}
-        version = EDGE_TTS_VERSION
-    elif config.tts_engine == "espeak-ng":
-        allowed = {entry.id for entry in LEGACY_VOICES}
-        version = "system-espeak-ng"
-    else:
-        raise ValidationAppError("配音引擎未正确配置；不会自动切换其他引擎。")
-    if selected not in allowed:
-        raise ValidationAppError("所选音色不属于当前配音引擎；请显式重新选择并保存。")
-    return VoiceExecutionSpec(
-        engine="edge-tts" if config.tts_engine == "edge-tts" else "espeak-ng",
-        voice=selected,
-        rate_percent=voice.rate_percent,
-        engine_version=version,
+    raise ProviderNotConfiguredError(
+        "语音必须使用项目语音模型；不会自动切换到其他引擎。"
     )
 
+
+async def freeze_project_voice(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    director_state: Mapping[str, object],
+    silent: bool = False,
+) -> VoiceExecutionSpec:
+    """Freeze the project's voice binding into one immutable execution identity."""
+    from app.providers.voice_binding import resolve_voice_binding
+
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise ProviderNotConfiguredError("项目不存在，无法冻结配音身份。")
+    binding = await resolve_voice_binding(session, project=project)
+    return freeze_voice_execution(director_state, silent=silent, binding=binding)
 
 async def voice_options_for_project(
     session: AsyncSession, *, project: Project

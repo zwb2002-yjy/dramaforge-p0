@@ -23,7 +23,6 @@ x-institution-runtime: &institution-runtime
     AGNES_ENABLED: "false"
     MINIMAX_ENABLED: "false"
     VOLCENGINE_ENABLED: "false"
-    TTS_ENABLED: "false"
     LITELLM_GATEWAY_URL: ""
     LITELLM_API_KEY: ""
     HTTP_PROXY: ""

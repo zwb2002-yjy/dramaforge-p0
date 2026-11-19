@@ -239,10 +239,6 @@ services:
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_MODEL_ADMIN_KEY: ${LITELLM_MODEL_ADMIN_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
-      TTS_ENABLED: ${TTS_ENABLED:-false}
-      TTS_ENGINE: ${TTS_ENGINE:-edge-tts}
-      TTS_VOICE: ${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
-      TTS_PROXY: ${TTS_PROXY:-}
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
@@ -436,10 +432,6 @@ services:
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
-      TTS_ENABLED: ${TTS_ENABLED:-false}
-      TTS_ENGINE: ${TTS_ENGINE:-edge-tts}
-      TTS_VOICE: ${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
-      TTS_PROXY: ${TTS_PROXY:-}
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully
@@ -553,10 +545,6 @@ services:
       LITELLM_GATEWAY_URL: ${LITELLM_GATEWAY_URL:-http://litellm:4000}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
       LITELLM_LOGICAL_MODELS: ${LITELLM_LOGICAL_MODELS:-script-quality,script-fast}
-      TTS_ENABLED: ${TTS_ENABLED:-false}
-      TTS_ENGINE: ${TTS_ENGINE:-edge-tts}
-      TTS_VOICE: ${TTS_VOICE:-zh-CN-XiaoxiaoNeural}
-      TTS_PROXY: ${TTS_PROXY:-}
     depends_on:
       database-bootstrap:
         condition: service_completed_successfully

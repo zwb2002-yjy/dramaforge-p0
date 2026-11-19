@@ -14,6 +14,7 @@ import httpx
 
 from app.assets.voice import VoiceExecutionSpec
 from app.providers.errors import ProviderError, ProviderErrorCode, ProviderNotConfiguredError
+from app.providers.http_client import provider_http_client
 from app.providers.speech_http import SpeechProtocol, SpeechRequest, speech_protocol
 from app.shared.errors import ValidationAppError
 
@@ -59,12 +60,13 @@ class SpeechHttpAdapter:
         wire = self._protocol.build(self._request(text))
         headers = {**wire.headers, "Authorization": f"Bearer {self._api_key}"}
         try:
-            async with httpx.AsyncClient(
-                base_url=self._base_url,
-                transport=self._transport,
+            async with provider_http_client(
                 timeout=self._timeout,
+                transport=self._transport,
             ) as client:
-                response = await client.post(wire.path, headers=headers, json=wire.body)
+                response = await client.post(
+                    f"{self._base_url}{wire.path}", headers=headers, json=wire.body
+                )
         except httpx.HTTPError as exc:
             raise ProviderError(
                 ProviderErrorCode.PROVIDER_UNAVAILABLE,

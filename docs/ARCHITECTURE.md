@@ -83,7 +83,7 @@ OpenAPI。`dev` 快速开发与 `main` 的强制门边界见 [DEVELOPMENT.md](DE
 | MinIO/ObjectStore | `storage/minio_store.py` 的对象、Range、presign、流读取 | 持久化、租户隔离、授权引用、备份恢复与多进程一致性；内存实现只作测试/显式模式 |
 | FFmpeg/ffprobe | `execution/composite_media.py` 复合镜头；`production/timeline_renderer.py` 消费时间线 | 输入语义、取消、临时资源与媒体等价性；不同产品职责不强行合并 |
 | Pillow/OpenCV/NumPy | 图像解析；`consistency/video_drift.py` 采样和评估；OpenCV 依赖 NumPy | 解码、采样、评分与资源行为等价；没有直接 NumPy import 不等于可删除运行依赖 |
-| edge-tts/espeak-ng/silence | `voice_runtime.py` 根据冻结 engine/version 显式选择 | 历史计划身份和恢复、无对白语义；不能静默 fallback |
+| 语音模型HTTP协议（OpenAI/MiniMax/Volcengine） | `providers/speech_http.py` 构造请求并解码WAV；`providers/speech_runtime.py` 按冻结binding一次调用；`voice_runtime.py` 只选silence或voice_model | 历史冻结engine只读、缺模型不兜底、一次调用不重试、未知提交不重发 |
 | React/TanStack Query/Router/Ant Design | 视图、服务端缓存、导航和组件分别有活跃消费者 | 草稿、缓存失效、导航、表单行为；不为依赖精简重写工作台 |
 | TypeScript/native TypeScript | native 用于 typecheck；当前 ESLint/codegen 工具链仍消费 TS 5.9 | peer 范围与工具链 API 兼容后再移除；并列工具职责不等于两套产品实现 |
 

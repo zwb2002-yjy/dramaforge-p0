@@ -69,6 +69,12 @@ def test_freeze_refuses_missing_or_unavailable_binding():
             freeze_voice_execution({}, binding=_configured(status=status))
     with pytest.raises(ValidationAppError):
         freeze_voice_execution({}, binding=_configured(voice_options={}))
+    with pytest.raises(ValidationAppError) as unknown:
+        freeze_voice_execution(
+            {"voice": {"voice_id": "not-listed"}},
+            binding=_configured(voices=["v1"]),
+        )
+    assert unknown.value.details["code"] == "VOICE_UNKNOWN_FOR_BINDING"
 
 
 @pytest.mark.asyncio

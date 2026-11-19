@@ -258,11 +258,6 @@ class Settings(BaseSettings):
         default_factory=lambda: ["script-quality", "script-fast"],
         description="Comma-separated LiteLLM logical aliases registered at bootstrap",
     )
-    # Speech is explicit and opt-in; network speech never falls back to local speech.
-    tts_enabled: bool = False
-    tts_engine: str = "edge-tts"
-    tts_voice: str = "zh-CN-XiaoxiaoNeural"
-    tts_proxy: str | None = Field(default=None, repr=False, exclude=True)
 
     @field_validator(
         "cors_origins", "litellm_logical_models", "provider_trusted_http_networks", mode="before"

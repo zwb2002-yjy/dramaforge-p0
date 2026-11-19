@@ -1,20 +1,16 @@
-"""One speech runtime seam: frozen engine selection, never automatic fallback."""
+"""One speech runtime seam: a frozen voice-model binding, never a fallback engine."""
 
 from __future__ import annotations
 
 import io
 import wave
-from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Protocol
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assets.voice import VoiceExecutionSpec
-from app.config import get_settings
 from app.providers.errors import ProviderNotConfiguredError
-from app.providers.local_tts import get_local_tts_adapter
-from app.providers.voice_config import EDGE_TTS_VERSION, freeze_voice_execution
 
 
 class VoiceAdapter(Protocol):
@@ -46,35 +42,18 @@ class SilentVoiceAdapter:
 
 
 async def get_voice_adapter(
-    spec: VoiceExecutionSpec | None = None,
+    spec: VoiceExecutionSpec,
     *,
     session: AsyncSession | None = None,
     transport: Any = None,
 ) -> VoiceAdapter:
-    settings = get_settings()
-    frozen = spec or freeze_voice_execution({}, settings=settings)
-    if frozen.engine == "pcm-silence":
+    if spec.engine == "pcm-silence":
         return SilentVoiceAdapter()
-    if frozen.engine == "voice_model":
-        return await _voice_model_adapter(frozen, session=session, transport=transport)
-    if not settings.tts_enabled:
-        raise ProviderNotConfiguredError("配音服务未启用；不会使用其他引擎代替。")
-    if frozen.engine == "espeak-ng":
-        if frozen.engine_version != "system-espeak-ng":
-            raise ProviderNotConfiguredError("本地配音版本与冻结的执行身份不一致。")
-        return get_local_tts_adapter(
-            settings.model_copy(update={"tts_engine": "espeak-ng", "tts_voice": frozen.voice}),
-            rate_percent=frozen.rate_percent,
-        )
-    try:
-        installed = version("edge-tts")
-    except PackageNotFoundError as exc:
-        raise ProviderNotConfiguredError("Edge 配音依赖未安装；不会退回机械音。") from exc
-    if installed != frozen.engine_version or installed != EDGE_TTS_VERSION:
-        raise ProviderNotConfiguredError("Edge 配音版本与冻结的执行身份不一致。")
-    from app.providers.edge_tts import EdgeNeuralAdapter
-
-    return EdgeNeuralAdapter(settings, voice=frozen.voice, rate_percent=frozen.rate_percent)
+    if spec.engine == "voice_model":
+        return await _voice_model_adapter(spec, session=session, transport=transport)
+    raise ProviderNotConfiguredError(
+        "历史配音引擎已停用；不会自动切换到其他引擎。"
+    )
 
 
 async def _voice_model_adapter(

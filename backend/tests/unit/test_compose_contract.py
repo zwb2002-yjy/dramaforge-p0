@@ -107,9 +107,6 @@ def test_compose_defines_required_boot0_services() -> None:
         "LITELLM_GATEWAY_URL",
         "LITELLM_API_KEY",
         "LITELLM_LOGICAL_MODELS",
-        "TTS_ENABLED",
-        "TTS_ENGINE",
-        "TTS_VOICE",
     }
     for name in ("api", "worker-default", "worker-heavy"):
         env = services[name]["environment"]

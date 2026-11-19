@@ -843,7 +843,7 @@ async def test_prepare_voice_change_refreshes_tail_not_video_and_changes_export_
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from app.production.final_film import prepare_formal_tail
-    from app.providers.voice_config import freeze_voice_execution
+    from app.providers.voice_config import freeze_project_voice
 
     project, user, edit, shots, videos = await _seed_renderable_final_film(
         session, canonical_graph=True
@@ -867,9 +867,15 @@ async def test_prepare_voice_change_refreshes_tail_not_video_and_changes_export_
     composite = next(run for run in first_runs if run.input_snapshot["node_key"] == "composite")
     assert composite.input_snapshot["formal_video_artifact_id"] == str(videos[0].id)
     voice = next(run for run in first_runs if run.input_snapshot["node_key"] == "voice")
-    assert voice.input_snapshot["voice_execution"] == freeze_voice_execution(
-        {}, silent=not shot.dialogue.strip()
+    expected_voice = (
+        await freeze_project_voice(
+            session,
+            project_id=project.id,
+            director_state={},
+            silent=not shot.dialogue.strip(),
+        )
     ).model_dump(mode="json")
+    assert voice.input_snapshot["voice_execution"] == expected_voice
     repeated = await prepare_formal_tail(
         session,
         project_id=project.id,
@@ -879,7 +885,7 @@ async def test_prepare_voice_change_refreshes_tail_not_video_and_changes_export_
     )
     assert not repeated.node_run_ids
     assert repeated.preparation_fingerprint == first.preparation_fingerprint
-    shot.director_state = {"voice": {"voice_id": "zh-CN-YunxiNeural", "rate_percent": -10}}
+    shot.director_state = {"voice": {"voice_id": "v2", "rate_percent": -10}}
     await session.flush()
     changed = await prepare_formal_tail(
         session,
@@ -897,7 +903,7 @@ async def test_prepare_voice_change_refreshes_tail_not_video_and_changes_export_
     assert changed.node_run_ids
     assert not any(run.input_snapshot.get("node_key") == "video" for run in changed_runs)
     new_voice = next(run for run in changed_runs if run.input_snapshot["node_key"] == "voice")
-    assert new_voice.input_snapshot["voice_execution"]["voice"] == "zh-CN-YunxiNeural"
+    assert new_voice.input_snapshot["voice_execution"]["voice"] == "v2"
     assert shot.formal_video_artifact_id == videos[0].id
 
 
@@ -982,7 +988,7 @@ async def test_voice_worker_records_frozen_identity_and_rejects_invalid_audio(
 ) -> None:
     from app.execution.voice_path import execute_voice_node_run
     from app.production.final_film import prepare_formal_tail
-    from app.providers.voice_config import freeze_voice_execution
+    from app.providers.voice_config import freeze_project_voice
     from app.providers.voice_runtime import SilentVoiceAdapter
 
     project, user, edit, shots, _videos = await _seed_renderable_final_film(
@@ -1049,15 +1055,15 @@ async def test_voice_worker_records_frozen_identity_and_rejects_invalid_audio(
             )
         assert run.status == "failed"
         assert run.result_artifact_id is None
-    assert received == [freeze_voice_execution({})]
+    assert received == [await freeze_project_voice(session, project_id=project.id, director_state={})]
     operation = (
         await session.execute(
             select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
         )
     ).scalar_one()
-    assert operation.actual_provider == "edge_tts"
-    assert operation.actual_model == "zh-CN-XiaoxiaoNeural"
-    assert operation.execution_path_version == "edge-voice-v1"
+    assert operation.actual_provider == "agnes"
+    assert operation.actual_model == "unit-voice"
+    assert operation.execution_path_version == "voice-model:aaaaaaaaaaaa"
     assert operation.status == ("succeeded" if valid_wav else "failed")
     if valid_wav:
         assert operation.response_summary["local"] is False

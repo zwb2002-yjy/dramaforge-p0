@@ -33,7 +33,7 @@ from app.execution.experiment_nodes import queue_branch_nodes
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.production.models import GraphVersion, ProductionGraph
 from app.production.service import GraphService
-from app.providers.voice_config import freeze_voice_execution
+from app.providers.voice_config import freeze_project_voice
 from app.runtime.scheduler import NodeRunScheduler
 from app.shared.errors import NotFoundError, ProviderTaskPendingError, ValidationAppError
 from app.storage.materialized import MaterializedFile, MediaTransferError, materialize_stream
@@ -470,8 +470,13 @@ async def prepare_formal_tail(
             ref.shot_id == shot.id and not bool(ref.raw_clip.get("muted")) and not ref.audio_id
             for ref in refs
         )
-        desired_voice = freeze_voice_execution(
-            dict(shot.director_state or {}), silent=not speech_required or not shot.dialogue.strip()
+        desired_voice = (
+            await freeze_project_voice(
+                session,
+                project_id=project_id,
+                director_state=dict(shot.director_state or {}),
+                silent=not speech_required or not shot.dialogue.strip(),
+            )
         ).model_dump(mode="json")
         prior_tail = await _current_formal_tail_runs(
             session, project_id=project_id, shot_id=shot.id

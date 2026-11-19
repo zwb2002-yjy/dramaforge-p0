@@ -721,7 +721,9 @@ I8a-02c已实施：`GET /projects/{p}/voice-options`改为项目语音Binding的
 `{status:configured|unavailable|missing,binding_id,model_id,provider_type,reason_code,default_voice,
 voices[{id,label,locale}],supported_controls,notice}`；音色/控件来自binding对应catalog entry的
 `option_schema`，无binding为missing、停用/错配为unavailable并带原因；不再读取实例TTS_ENGINE、不探测Provider。
-旧响应字段`engine/enabled/network/service_notice`已移除，前端语音组件按新状态显示。
+旧响应字段`engine/enabled/network/service_notice`已移除，前端语音组件按新状态显示。生产语音路径
+（experiment/formal tail/FinalFilm）按项目语音Binding冻结`voice_model`身份并由`speech_runtime`一次调用；
+历史`edge-tts/espeak-ng`冻结Spec只读，执行即`ProviderNotConfiguredError`，不再有实例引擎或兜底。
 
 `GET …/voice-options`目标改为项目/本次所选语音Binding的只读能力投影，返回binding身份、可用音色/参数、
 configured/unavailable/missing与原因；不再把实例TTS_ENGINE视作配置。仅列合同中确有依据的音色，不调用合成探测。

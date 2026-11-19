@@ -59,7 +59,7 @@ async def execute_voice_node_run(
     )
     request_fingerprint = hashlib.sha256(
         json.dumps(
-            {"text": prompt, "input_hash": run.input_hash, "voice": spec.model_dump()},
+            {"text": prompt, "input_hash": run.input_hash, "voice": spec.model_dump(mode="json")},
             sort_keys=True,
             ensure_ascii=False,
             separators=(",", ":"),
@@ -200,7 +200,7 @@ async def execute_voice_node_run(
     operation.provider_cost = Decimal("0")
     operation.response_summary = {
         "status": "succeeded",
-        "local": spec.engine != "edge-tts",
+        "local": spec.engine in {"pcm-silence", "espeak-ng"},
         "voice_execution": spec.model_dump(mode="json"),
     }
     operation.completed_at = datetime.now(UTC)

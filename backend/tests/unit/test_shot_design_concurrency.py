@@ -169,7 +169,9 @@ def test_saved_voice_is_validated_and_retained_without_generating(
         "voice_id": "zh-CN-YunxiNeural",
         "rate_percent": -10,
     }
-    invalid = client.patch(
+    # The shot stores a draft voice id; the project voice binding validates it
+    # at generation time (unknown voices fail there, never silently substituted).
+    draft = client.patch(
         path,
         json={
             "expected_version": response.json()["version"],
@@ -177,7 +179,8 @@ def test_saved_voice_is_validated_and_retained_without_generating(
         },
         headers={CSRF_HEADER: _csrf(client)},
     )
-    assert invalid.status_code == 422, invalid.text
+    assert draft.status_code == 200, draft.text
+    assert draft.json()["director_state"]["voice"]["voice_id"] == "cmn"
     excessive = client.patch(
         path,
         json={

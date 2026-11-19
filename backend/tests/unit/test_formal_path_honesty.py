@@ -8,8 +8,6 @@ from uuid import uuid4
 import pytest
 from app.events.models import OutboxEvent
 from app.events.outbox import OutboxDispatcher, StreamPublisher
-from app.providers.errors import ProviderNotConfiguredError
-from app.providers.local_tts import get_local_tts_adapter
 from app.shared.enums import OutboxStatus
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -59,21 +57,6 @@ def test_formal_dispatch_uses_its_bound_source_commit(monkeypatch: pytest.Monkey
     clear_settings_cache()
     try:
         assert dispatch_source_commit() == "source-for-runtime"
-    finally:
-        monkeypatch.setenv("APP_ENV", "test")
-        clear_settings_cache()
-
-
-def test_local_tts_adapter_fail_closed_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("APP_ENV", "development")
-    monkeypatch.setenv("TTS_ENABLED", "false")
-    from app.config import clear_settings_cache
-
-    clear_settings_cache()
-    try:
-        with pytest.raises(ProviderNotConfiguredError) as ei:
-            get_local_tts_adapter()
-        assert ei.value.code == "PROVIDER_NOT_CONFIGURED"
     finally:
         monkeypatch.setenv("APP_ENV", "test")
         clear_settings_cache()
