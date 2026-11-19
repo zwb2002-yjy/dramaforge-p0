@@ -91,6 +91,7 @@ class EditSessionRead(BaseModel):
 
     id: UUID
     project_id: UUID
+    episode_id: UUID | None = None
     name: str
     status: str
     version: int
@@ -149,6 +150,7 @@ def _edit_session_read(row: EditSession) -> EditSessionRead:
     return EditSessionRead(
         id=row.id,
         project_id=row.project_id,
+        episode_id=row.episode_id,
         name=row.name,
         status=row.status,
         version=row.version,
@@ -306,6 +308,42 @@ async def save_edit_timeline(
     )
     await session.commit()
     return _edit_session_read(saved)
+
+
+class EditSessionScopeUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    episode_id: UUID | None = None
+    expected_session_version: int = Field(ge=1)
+
+
+@router.patch(
+    "/projects/{project_id}/edit-sessions/{session_id}/episode",
+    response_model=EditSessionRead,
+)
+async def switch_edit_session_episode(
+    project_id: UUID,
+    session_id: UUID,
+    body: EditSessionScopeUpdateRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> EditSessionRead:
+    """Move the episode scope; clips from another episode reject the switch."""
+    row = await _owned_session(
+        project_id=project_id,
+        session_id=session_id,
+        user=user,
+        session=session,
+    )
+    updated = await EditingAdapter(session).switch_episode(
+        project_id=project_id,
+        session_id=row.id,
+        episode_id=body.episode_id,
+        expected_session_version=body.expected_session_version,
+    )
+    await session.commit()
+    return _edit_session_read(updated)
 
 
 @router.post(

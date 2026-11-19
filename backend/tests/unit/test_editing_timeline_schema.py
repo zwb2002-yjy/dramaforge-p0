@@ -618,6 +618,77 @@ async def test_detached_public_link_or_withdrawn_publication_is_rejected(
 
 
 @pytest.mark.asyncio
+async def test_scope_switch_narrows_only_when_every_clip_belongs(
+    session: AsyncSession,
+) -> None:
+    """Switching episode must refuse, not silently drop, a foreign clip."""
+    from app.assets.models import Episode
+
+    project, user, shot, artifact = await _shot(session)
+    assert artifact is not None
+    episode = await session.scalar(select(Episode).where(Episode.project_id == project.id))
+    other = Episode(project_id=project.id, episode_number=2, title="E2", synopsis="")
+    session.add(other)
+    await session.flush()
+    adapter = EditingAdapter(session)
+    row = await adapter.create_session(project_id=project.id, user_id=user.id, name="Edit")
+    saved = await adapter.save_timeline(
+        project_id=project.id,
+        session_id=row.id,
+        timeline={"schema_version": 2, "clips": [_clip(shot, artifact)], "metadata": {}},
+        expected_session_version=1,
+    )
+    assert saved.version == 2
+
+    # The clip's shot lives in episode 1, so episode 2 must reject the switch.
+    with pytest.raises(ValidationAppError) as rejected:
+        await adapter.switch_episode(
+            project_id=project.id,
+            session_id=row.id,
+            episode_id=other.id,
+            expected_session_version=2,
+        )
+    assert rejected.value.details["code"] == "EDIT_SCOPE_SWITCH_REJECTED"
+    assert rejected.value.details["clip_ids"] == ["clip-1"]
+
+    # Narrowing to its own episode is accepted and bumps the version.
+    narrowed = await adapter.switch_episode(
+        project_id=project.id,
+        session_id=row.id,
+        episode_id=episode.id,
+        expected_session_version=2,
+    )
+    assert narrowed.episode_id == episode.id
+    assert narrowed.version == 3
+
+    # Widening back to project scope is always allowed.
+    widened = await adapter.switch_episode(
+        project_id=project.id,
+        session_id=row.id,
+        episode_id=None,
+        expected_session_version=3,
+    )
+    assert widened.episode_id is None
+    assert widened.version == 4
+
+
+@pytest.mark.asyncio
+async def test_scope_switch_keeps_the_version_conflict_contract(
+    session: AsyncSession,
+) -> None:
+    project, user, _shot_row, _artifact = await _shot(session)
+    adapter = EditingAdapter(session)
+    row = await adapter.create_session(project_id=project.id, user_id=user.id, name="Edit")
+    with pytest.raises(ConflictError):
+        await adapter.switch_episode(
+            project_id=project.id,
+            session_id=row.id,
+            episode_id=None,
+            expected_session_version=9,
+        )
+
+
+@pytest.mark.asyncio
 async def test_save_keeps_the_version_conflict_contract(session: AsyncSession) -> None:
     project, user, shot, artifact = await _shot(session)
     assert artifact is not None

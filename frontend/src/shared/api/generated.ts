@@ -1527,6 +1527,26 @@ export interface paths {
         patch: operations["save_edit_timeline_api_v1_projects__project_id__edit_sessions__session_id__timeline_patch"];
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/edit-sessions/{session_id}/episode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Switch Edit Session Episode
+         * @description Move the episode scope; clips from another episode reject the switch.
+         */
+        patch: operations["switch_edit_session_episode_api_v1_projects__project_id__edit_sessions__session_id__episode_patch"];
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion": {
         parameters: {
             query?: never;
@@ -6513,6 +6533,8 @@ export interface components {
              * Format: uuid
              */
             project_id: string;
+            /** Episode Id */
+            episode_id?: string | null;
             /** Name */
             name: string;
             /** Status */
@@ -6537,6 +6559,13 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** EditSessionScopeUpdateRequest */
+        EditSessionScopeUpdateRequest: {
+            /** Episode Id */
+            episode_id?: string | null;
+            /** Expected Session Version */
+            expected_session_version: number;
         };
         /** EditSessionSummaryRead */
         EditSessionSummaryRead: {
@@ -16806,6 +16835,50 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["EditTimelineUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EditSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    switch_edit_session_episode_api_v1_projects__project_id__edit_sessions__session_id__episode_patch: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                session_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditSessionScopeUpdateRequest"];
             };
         };
         responses: {

@@ -2467,3 +2467,17 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - 至此 schema 2 的三类来源（镜头正式产物 / 已采用资产版本 / 公共素材）**全部可验证**。
 - **下一步**：切换集版本化 Save（显式检查全部 Clip、不静默删）、`episode_id` 读模型、
   渲染快照与导出绑定（I9-02）。
+
+### I9-01e 已实施：切换集作用域（版本化，拒绝而非静默删除）（2026-11-19，EV157）
+
+- 新增 `PATCH /projects/{p}/edit-sessions/{id}/episode`（`{episode_id, expected_session_version}`）
+  → `EditingAdapter.switch_episode`：沿用版本 CAS（`ConflictError`）；目标集须属本项目（否则 404）。
+- **收窄**到某集时逐个检查已保存 clip（schema 1 的 `shot_id`、schema 2 的
+  `shot_formal.source.shot_id`）：凡属其他集（含 id 缺失/不可解析）即 `EDIT_SCOPE_SWITCH_REJECTED`
+  并返回 `clip_ids`，**不删除任何 clip**——由用户显式版本化 Save 决定去留。
+- `asset_version` / `public_material` 不是分集绑定，切换后保持可用；同集为无操作（不增版本）；
+  放宽回项目级始终允许。
+- `EditSessionRead` 新增 `episode_id`，UI 可显示当前作用域。
+- 证据：`test_editing_timeline_schema.py` **17 passed**、编辑组 **28 passed**；ruff 通过、
+  `mypy app` 404 文件通过；`generated.ts` 重生（**410 schema**，`api:check`/`api:authority` 通过）。
+- **下一步**：渲染快照与导出绑定（I9-02：固定版本/hash、原回执优先、MP4/SRT 可解码、逐集交付）。
