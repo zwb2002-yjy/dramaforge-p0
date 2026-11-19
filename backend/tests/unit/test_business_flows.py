@@ -695,3 +695,35 @@ async def test_completion_requires_every_registered_rule(session: AsyncSession) 
     assert checks["all_required_steps_succeeded"]["completed_steps"] == 3
     assert checks["no_unresolved_external"]["unresolved_external_count"] == 0
     assert checks["business_flow_completed_v1"]["completed_flows"] == 1
+
+
+def test_default_registry_carries_the_domain_flows() -> None:
+    from app.director.business_flows import (
+        DEFAULT_DEFINITIONS,
+        PROJECT_ASSET_AUDIT_V1,
+        SCENE_PROMPT_REVIEW_V1,
+        SHOT_MODEL_CONTRACT_REVIEW_V1,
+        SHOT_PROMPT_REVIEW_V1,
+    )
+
+    assert set(DEFAULT_DEFINITIONS.keys()) == {
+        SHOT_PROMPT_REVIEW_V1.flow_key,
+        SCENE_PROMPT_REVIEW_V1.flow_key,
+        SHOT_MODEL_CONTRACT_REVIEW_V1.flow_key,
+        PROJECT_ASSET_AUDIT_V1.flow_key,
+    }
+    for definition in (
+        SHOT_PROMPT_REVIEW_V1,
+        SCENE_PROMPT_REVIEW_V1,
+        SHOT_MODEL_CONTRACT_REVIEW_V1,
+        PROJECT_ASSET_AUDIT_V1,
+    ):
+        registered = DEFAULT_DEFINITIONS.require(
+            definition.definition_key, definition.definition_version
+        )
+        assert registered.contract_hash == definition.contract_hash
+        assert registered.steps
+        assert registered.completion_rule_ids
+    assert SCENE_PROMPT_REVIEW_V1.scope_type == "scene"
+    assert SHOT_MODEL_CONTRACT_REVIEW_V1.scope_type == "shot"
+    assert PROJECT_ASSET_AUDIT_V1.scope_type == "project"

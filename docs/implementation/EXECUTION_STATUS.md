@@ -1897,3 +1897,21 @@ prepare独立授权记录。
 
 I8a收口：EV118审计中列出的三项缺口（prepare授权记录、voice_concat、视频run端到端）均已闭合；
 I8a整体Full按门分级留待正式CI/I10同一候选。
+
+## I6b-01 领域BusinessFlow定义（2026-11-19，EV123）
+
+I6b开工：把默认BusinessFlow注册表从单一shot流程扩为覆盖project/scene/shot的领域流程，
+全部使用既有受控工具（无新工具、无新Runtime）。
+
+- `scene_prompt_review`（scene）：`scene_get`→`shots_list`→`shot_prompt_propose`。
+- `shot_model_contract_review`（shot）：`shot_get`→`model_capabilities`→`model_compile_preview`
+  （纯合同/编译预览，不触Provider）。
+- `project_asset_audit`（project）：`assets_list`→`asset_get`（只读审计）。
+- 三者与既有`shot_prompt_review`一起注册进`DEFAULT_DEFINITIONS`；契约哈希冻结、依赖无环、
+  完成/恢复规则沿用现有集合。
+
+已测（定向）：
+- `test_business_flows.py` 14 passed（新增默认注册表含四个领域流程、scope与contract_hash断言）；
+  定向组72 passed（flows/flows_api/architecture）；ruff/mypy 401文件通过。
+
+未完成且不冒称：I6b其余项（各BusinessFlow的实际端口接线、并行/部分失败/换计划的端到端验收）。

@@ -251,7 +251,107 @@ SHOT_PROMPT_REVIEW_V1 = BusinessFlowDefinition(
     graph_entrypoint="shot_prompt_review_v1",
 )
 
-DEFAULT_DEFINITIONS = BusinessFlowDefinitionRegistry((SHOT_PROMPT_REVIEW_V1,))
+
+SCENE_PROMPT_REVIEW_V1 = BusinessFlowDefinition(
+    flow_key="scene_prompt_review",
+    definition_key="scene_prompt_review",
+    definition_version="1",
+    state_schema_version="business-flow-state-v1",
+    scope_type="scene",
+    steps=(
+        FlowStepSpec(
+            step_key="read_scene",
+            tool_name="scene_get",
+            action_kind="read",
+            input_keys=("scene_id",),
+        ),
+        FlowStepSpec(
+            step_key="list_shots",
+            tool_name="shots_list",
+            action_kind="read",
+            dependencies=("read_scene",),
+            input_keys=("scene_id", "limit"),
+        ),
+        FlowStepSpec(
+            step_key="propose_prompt",
+            tool_name="shot_prompt_propose",
+            action_kind="proposal",
+            dependencies=("list_shots",),
+            input_keys=("shot_id", "expected_version", "image_prompt", "rationale"),
+        ),
+    ),
+    completion_rule_ids=("all_required_steps_succeeded", "no_unresolved_external"),
+    resume_rule_id="retain_completed_steps",
+    graph_entrypoint="scene_prompt_review_v1",
+)
+
+SHOT_MODEL_CONTRACT_REVIEW_V1 = BusinessFlowDefinition(
+    flow_key="shot_model_contract_review",
+    definition_key="shot_model_contract_review",
+    definition_version="1",
+    state_schema_version="business-flow-state-v1",
+    scope_type="shot",
+    steps=(
+        FlowStepSpec(
+            step_key="read_shot",
+            tool_name="shot_get",
+            action_kind="read",
+            input_keys=("shot_id",),
+        ),
+        FlowStepSpec(
+            step_key="read_capabilities",
+            tool_name="model_capabilities",
+            action_kind="read",
+            dependencies=("read_shot",),
+            input_keys=("shot_id", "stage"),
+        ),
+        FlowStepSpec(
+            step_key="compile_preview",
+            tool_name="model_compile_preview",
+            action_kind="read",
+            dependencies=("read_capabilities",),
+            input_keys=("shot_id", "stage", "binding_id", "manifest_hash"),
+        ),
+    ),
+    completion_rule_ids=("all_required_steps_succeeded", "no_unresolved_external"),
+    resume_rule_id="retain_completed_steps",
+    graph_entrypoint="shot_model_contract_review_v1",
+)
+
+PROJECT_ASSET_AUDIT_V1 = BusinessFlowDefinition(
+    flow_key="project_asset_audit",
+    definition_key="project_asset_audit",
+    definition_version="1",
+    state_schema_version="business-flow-state-v1",
+    scope_type="project",
+    steps=(
+        FlowStepSpec(
+            step_key="list_assets",
+            tool_name="assets_list",
+            action_kind="read",
+            input_keys=("limit",),
+        ),
+        FlowStepSpec(
+            step_key="read_asset",
+            tool_name="asset_get",
+            action_kind="read",
+            dependencies=("list_assets",),
+            input_keys=("asset_id",),
+        ),
+    ),
+    completion_rule_ids=("all_required_steps_succeeded", "no_unresolved_external"),
+    resume_rule_id="retain_completed_steps",
+    graph_entrypoint="project_asset_audit_v1",
+)
+
+DEFAULT_DEFINITIONS = BusinessFlowDefinitionRegistry(
+    (
+        SHOT_PROMPT_REVIEW_V1,
+        SCENE_PROMPT_REVIEW_V1,
+        SHOT_MODEL_CONTRACT_REVIEW_V1,
+        PROJECT_ASSET_AUDIT_V1,
+    )
+)
 
 _registry = DEFAULT_DEFINITIONS
 
