@@ -2026,3 +2026,21 @@ I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖�
   typecheck/lint/prettier/UI权威通过。
 
 未完成且不冒称：讨论的多轮记忆/摘要（依赖既有agent线程，未额外建模）、resume signal UI、N08/N10核对。
+
+## 交接检查点（2026-11-19，会话收束）
+
+本会话从 I5 退出后连续推进，累计提交 30+ 个切片，全部按“定向验证+收口提交”节奏；最后一次全量unit回归 **2696 passed**（EV130）。
+
+已完成（有EV证据）：
+- I5 阶段退出（EV85–EV93，Full `df-quality-i5-07`）。
+- I8a 机制主体：D6媒体配置与旧配置核对（EV94/95）、语音Binding/Edge退出（EV97–EV100）、资产image/voice/video计划与命令（EV102–EV114）、混合batch（EV117）、voice_concat（EV121）、prepare预览与逐命令授权（EV115/EV122）。
+- I6b 机制侧：领域流程定义与端口（EV123/124）、端到端成功/部分失败/换计划（EV125–EV127）、只读面板（EV128）。
+- I7-01/02：创作方向CAS与方向讨论（EV129/EV131）。
+
+未完成（按依赖顺序）：
+1. I7：resume signal 的读模型与UI「继续」入口（需从`director_runtime_wakeups.payload`暴露signal_id/reference_id/expected_revision，当前无读端点）；三栏工作台与N08/N10逐项核对（缺N08/N10原文，需Owner提供或按现有三栏基线核对）。
+2. I8b：三类作品（宣传片/单集/多集）完整业务编排与端到端生产；固定媒体/本地验证先行，真实付费单独批准。
+3. I9：Review/Formal/Editing/FinalFilm/Export与分集交付收口。
+4. I10：同候选集成、目标机安装/重启/备份恢复、三作品E2E、Full Gate与实际验收（真实操作按审批）。
+
+门状态：Docker Full Gate 未在会话内重跑（按门分级留待正式CI/I10同一候选）；本地运行库仍为`20261113_0099`，无部署、无付费Provider调用。
