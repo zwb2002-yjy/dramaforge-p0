@@ -185,6 +185,61 @@ async def world(session: AsyncSession):
         updated_by=user.id,
     )
     session.add(profile)
+    from app.providers.catalog_loader import hash_manifest
+    from model_infra_fixture import unit_video_manifest
+
+    video_manifest = unit_video_manifest()
+    video_manifest["operations"]["video.generate"].setdefault("output_options", {})[
+        "duration_seconds"
+    ] = {"type": "integer", "minimum": 1, "maximum": 10}
+    video_entry = ModelCatalogEntry(
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="unit-agnes-video",
+        model_revision="v1",
+        display_name="Unit Video",
+        media_kind="video",
+        capability_manifest_json=video_manifest,
+        option_schema_json={},
+        documented_at=date(2026, 8, 10),
+        contract_manifest_hash=hash_manifest(video_manifest),
+    )
+    session.add(video_entry)
+    await session.flush()
+    video_binding = ProviderModelBinding(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        media_type="video",
+        model_id="unit-agnes-video",
+        purpose="video",
+        enabled=True,
+        catalog_entry_id=video_entry.id,
+        capability_manifest_hash=video_entry.contract_manifest_hash,
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(video_binding)
+    await session.flush()
+    profile.video_model_binding_id = video_binding.id
+    await session.flush()
+    video_asset = Asset(project_id=project.id, kind="video", name="Clip", version=1)
+    session.add(video_asset)
+    await session.flush()
+    video_version = AssetVersion(
+        project_id=project.id,
+        asset_id=video_asset.id,
+        version_number=1,
+        kind="video",
+        name="Clip",
+        description="",
+        metadata_json={},
+        status="candidate",
+        created_by=user.id,
+    )
+    session.add(video_version)
+    await session.flush()
+    video_asset.current_version_id = video_version.id
+    await session.flush()
     voice_entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="openai_speech_v1",
@@ -260,6 +315,8 @@ async def world(session: AsyncSession):
         "project": project,
         "asset": asset,
         "audio": audio,
+        "video": video_asset,
+        "video_binding": video_binding,
         "binding": binding,
         "voice_binding": voice_binding,
     }
@@ -631,3 +688,39 @@ async def test_asset_voice_command_queues_and_completes(session, world, monkeypa
     await session.refresh(run)
     assert run.status == "completed", (run.status, run.error_code, run.error_summary)
     assert run.result_artifact_id is not None
+
+
+async def test_asset_video_command_queues_one_run(session, world):
+    from app.execution.models import NodeRun
+    from app.production.asset_commands import (
+        AssetVideoExecutionBody,
+        submit_asset_video_execution,
+    )
+    from app.production.asset_plan import AssetVideoPlanBody, build_asset_video_plan
+
+    plan_body = AssetVideoPlanBody(
+        expected_asset_version=1,
+        requirements=AssetCreativeRequirements(summary="古桥在晨雾中显现"),
+        mode_id="text_to_video",
+        parameters={"duration_seconds": 5},
+    )
+    plan = await build_asset_video_plan(
+        session, project=world["project"], asset_id=world["video"].id, body=plan_body
+    )
+    body = AssetVideoExecutionBody(
+        **plan_body.model_dump(), plan_fingerprint=plan.plan_fingerprint
+    )
+    receipt = await submit_asset_video_execution(
+        session,
+        actor=world["user"],
+        project_id=world["project"].id,
+        asset_id=world["video"].id,
+        body=body,
+        idempotency_key="video:one",
+    )
+    run = await session.get(NodeRun, receipt.node_run_id)
+    assert run is not None
+    assert run.status == "queued"
+    assert run.input_snapshot["asset_id"] == str(world["video"].id)
+    assert run.input_snapshot["duration_seconds"] == 5.0
+    assert run.input_snapshot["execution_model_resolution"]["status"] == "RESOLVED"

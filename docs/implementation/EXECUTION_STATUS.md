@@ -1758,3 +1758,18 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
 
 未完成且不冒称：资产视频命令提交（video run）、首帧来源确认（采用图像版本/私有原图）、长文本分段拼接、
 媒体安全合同复核、I8a收口。
+
+## I8a-03n 资产视频命令（2026-11-19，EV114）
+
+- `submit_asset_video_execution`：owner/外发准入(`video_generation`)/项目锁/幂等回执；校验video版本与计划
+  fingerprint；要求明确时长（否则422 `ASSET_VIDEO_DURATION_REQUIRED`）；资产Graph同时声明image/voice/video
+  节点，只入队一个`video` NodeRun；快照含`duration_seconds`、`execution_model_resolution`、参考与参数；
+  同key重放原回执；`ExecutionAccepted`同事务通知。
+- `POST /assets/{a}/executions`判别联合增加`asset_video`分支。
+
+已测（定向）：
+- `test_asset_commands.py` 7 passed（新增视频命令入队：duration=5.0、resolution RESOLVED）；
+  定向组72 passed；generated.ts 398 schema、api:authority通过。
+
+未完成且不冒称：视频run的Worker端到端（fake video compiler/runtime）、首帧来源确认、长文本分段拼接、
+媒体安全合同复核、I8a收口。

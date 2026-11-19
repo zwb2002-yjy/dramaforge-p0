@@ -29,9 +29,11 @@ from app.assets.version_service import AssetVersionService
 from app.contracts.production_commands import ExecutionReceipt
 from app.production.asset_commands import (
     AssetExecutionRead,
+    AssetVideoExecutionBody,
     AssetVoiceExecutionBody,
     list_asset_executions,
     submit_asset_execution,
+    submit_asset_video_execution,
     submit_asset_voice_execution,
 )
 from app.production.asset_plan import (
@@ -82,8 +84,13 @@ class AssetVoiceExecutionInput(BaseModel):
     request: AssetVoiceExecutionBody
 
 
+class AssetVideoExecutionInput(BaseModel):
+    stage: Literal["asset_video"]
+    request: AssetVideoExecutionBody
+
+
 AssetExecutionInput = Annotated[
-    AssetImageExecutionInput | AssetVoiceExecutionInput,
+    AssetImageExecutionInput | AssetVoiceExecutionInput | AssetVideoExecutionInput,
     Field(discriminator="stage"),
 ]
 
@@ -291,6 +298,15 @@ async def submit_asset_execution_route(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> ExecutionReceipt:
     """One explicit asset command; the original receipt is returned on replay."""
+    if isinstance(body, AssetVideoExecutionInput):
+        return await submit_asset_video_execution(
+            session,
+            actor=user,
+            project_id=project_id,
+            asset_id=asset_id,
+            body=body.request,
+            idempotency_key=idempotency_key,
+        )
     if isinstance(body, AssetVoiceExecutionInput):
         return await submit_asset_voice_execution(
             session,

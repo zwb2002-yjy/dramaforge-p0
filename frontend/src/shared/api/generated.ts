@@ -4769,6 +4769,42 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * AssetVideoExecutionBody
+         * @description One explicit asset video command: the previewed plan plus its fingerprint.
+         */
+        AssetVideoExecutionBody: {
+            /** Expected Asset Version */
+            expected_asset_version: number;
+            requirements: components["schemas"]["AssetCreativeRequirements"];
+            /** Mode Id */
+            mode_id: string;
+            /** Prompt Override */
+            prompt_override?: string | null;
+            /** Requested Binding Id */
+            requested_binding_id?: string | null;
+            /** References */
+            references?: components["schemas"]["AssetImageReference"][];
+            /** Source Context Refs */
+            source_context_refs?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Parameters */
+            parameters?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Plan Fingerprint */
+            plan_fingerprint: string;
+        };
+        /** AssetVideoExecutionInput */
+        AssetVideoExecutionInput: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            stage: "asset_video";
+            request: components["schemas"]["AssetVideoExecutionBody"];
+        };
         /** AssetVideoPlanBody */
         AssetVideoPlanBody: {
             /** Expected Asset Version */
@@ -12580,7 +12616,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AssetImageExecutionInput"] | components["schemas"]["AssetVoiceExecutionInput"];
+                "application/json": components["schemas"]["AssetImageExecutionInput"] | components["schemas"]["AssetVoiceExecutionInput"] | components["schemas"]["AssetVideoExecutionInput"];
             };
         };
         responses: {
