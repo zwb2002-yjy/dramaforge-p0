@@ -1814,3 +1814,26 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
   两个run的node_key分别为image/voice）；定向组75 passed；generated.ts 402 schema、api:authority通过。
 
 未完成且不冒称：voice_concat执行计划（分段→本地拼接）、视频run端到端、prepare逐命令授权、I8a收口。
+
+## I8a 阶段收口核对（2026-11-19，EV118）
+
+按API.md“独立资产媒体生产”T10/T15条目与主计划I8a范围逐条核对当前实现：
+
+| 条目 | 状态 | 证据 |
+|---|---|---|
+| 三级模型默认（image/video/voice） | 已实施 | EV94/EV95（D6 media-config、review/reconcile、前端组件） |
+| 单次选择`requested_binding_id` | 已实施 | 资产image/video计划；shot既有路径 |
+| 语音Binding与Edge/espeak退出 | 已实施 | EV100（生产调用方切换、依赖/配置删除、历史engine只读） |
+| 媒体安全合同 | 已实施 | capability resolver的`_check_slot`（bytes/duration/width/height）+ workbench视频时长 + Agnes适配器元数据 |
+| 准备预览/逐命令授权 | 部分 | EV115预览零调用；prepare以显式用户请求+幂等fingerprint为授权边界，**未**写独立授权记录 |
+| 无Scene/Shot生成角色/场景候选 | 已实施 | EV102/EV105（asset计划/命令不建Scene/Shot；0伪镜头） |
+| 一次明确Create/同key原回执 | 已实施 | EV105/EV110/EV112/EV114/EV117 |
+| 跨项目asset/grant拒绝 | 已实施 | EV101/EV102/EV106 |
+| Artifact单一身份/候选不自动正式 | 已实施 | EV109（run产出Artifact，不改asset.current_version_id） |
+| 资产image/voice/video计划与命令 | 已实施 | EV102/EV111/EV113/EV112/EV114 |
+| 资产batch（image/voice混合） | 已实施 | EV110/EV117 |
+| 长文本分段/voice_concat | 部分 | EV116分段预览+单命令拒绝；**未**实现concat执行计划 |
+| 视频run Worker端到端 | 未验证 | 仅有入队测试（EV114），缺fake video compiler/runtime完成断言 |
+| I8a整体Full | 未跑 | 按门分级留到正式CI/I10同一候选；本轮无系统性风险触发 |
+
+结论：I8a机制主体已完成；剩余三项（prepare独立授权记录、voice_concat执行计划、视频run端到端验证）列入下一批，完成后按门分级决定是否需要一次阶段Full。
