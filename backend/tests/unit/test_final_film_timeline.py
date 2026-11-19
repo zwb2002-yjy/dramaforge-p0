@@ -1055,7 +1055,9 @@ async def test_voice_worker_records_frozen_identity_and_rejects_invalid_audio(
             )
         assert run.status == "failed"
         assert run.result_artifact_id is None
-    assert received == [await freeze_project_voice(session, project_id=project.id, director_state={})]
+    assert received == [
+        await freeze_project_voice(session, project_id=project.id, director_state={})
+    ]
     operation = (
         await session.execute(
             select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
@@ -1116,10 +1118,9 @@ async def test_prepare_replaces_unpinned_composite_without_repeating_voice_or_vi
 
 
 async def test_prepare_preview_is_read_only_and_stable(session: AsyncSession) -> None:
-    from sqlalchemy import func
-
     from app.execution.models import NodeRun
     from app.production.final_film import preview_formal_tail
+    from sqlalchemy import func
 
     project, user, edit, shots, _videos = await _seed_renderable_final_film(
         session, canonical_graph=True
@@ -1149,3 +1150,55 @@ async def test_prepare_preview_is_read_only_and_stable(session: AsyncSession) ->
         expected_timeline_version=edit.version,
     )
     assert second.preview_fingerprint == first.preview_fingerprint
+
+
+async def test_prepare_authorizes_each_command_and_preview_does_not(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.production.command_models import ProductionCommandAuthorization
+    from app.production.final_film import prepare_formal_tail, preview_formal_tail
+    from sqlalchemy import func
+
+    project, user, edit, _shots, _videos = await _seed_renderable_final_film(
+        session, canonical_graph=True
+    )
+    await _canonicalize_tail_fixture(session, project, user)
+    await session.flush()
+    monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", _fake_enqueue)
+
+    async def _grants() -> list[ProductionCommandAuthorization]:
+        return list(
+            (
+                await session.execute(
+                    select(ProductionCommandAuthorization).where(
+                        ProductionCommandAuthorization.command_key.like(
+                            "final-film-prepare:%"
+                        )
+                    )
+                )
+            ).scalars()
+        )
+
+    assert await _grants() == []
+    await preview_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+    )
+    assert await _grants() == []
+
+    prepared = await prepare_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    grants = await _grants()
+    assert {grant.node_run_id for grant in grants} == set(prepared.node_run_ids)
+    assert all(grant.status == "accepted" for grant in grants)
+    assert all(grant.actor_id == user.id for grant in grants)
+    assert await session.scalar(
+        select(func.count()).select_from(ProductionCommandAuthorization)
+    ) == len(prepared.node_run_ids)

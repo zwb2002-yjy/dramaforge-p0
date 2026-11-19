@@ -1882,3 +1882,18 @@ prepare独立授权记录。
   定向组144 passed；ruff/mypy 401文件通过。
 
 未完成且不冒称：prepare独立授权记录、I8a整体Full（按门分级留待正式CI/I10候选）。
+
+## I8a-03u prepare逐命令授权记录（2026-11-19，EV122）
+
+- `prepare_formal_tail`对每个新建命令写入一条`ProductionCommandAuthorization`：
+  `command_key=final-film-prepare:{node_run_id}`、`status=accepted`、`node_run_id`绑定、
+  body含`preparation_fingerprint`、actor与ProjectCreativeProfile版本；同事务提交。
+- `preview_formal_tail`保持零写入（不产生授权记录）。
+- 最终合成fixture补齐`ProjectCreativeProfile`（真实项目创建路径本就创建该行）。
+
+已测（定向）：
+- `test_final_film_timeline.py` 24 passed（新增：preview零授权、prepare每命令一条accepted且actor正确）；
+  定向组92 passed；ruff/mypy 401文件通过。
+
+I8a收口：EV118审计中列出的三项缺口（prepare授权记录、voice_concat、视频run端到端）均已闭合；
+I8a整体Full按门分级留待正式CI/I10同一候选。

@@ -11,7 +11,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -560,6 +560,18 @@ async def prepare_formal_tail(
                 "tail_runs": {key: str(run.id) for key, run in sorted(current_tail.items())},
             }
         )
+        await _authorize_prepared_runs(
+            session,
+            project_id=project_id,
+            actor_id=actor_id,
+            shot_id=shot.id,
+            run_ids=run_ids,
+            preparation_fingerprint=hashlib.sha256(
+                json.dumps(
+                    prepared_sources[-1], sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest(),
+        )
     await session.commit()
     return FinalFilmPrepareRead(
         project_id=project_id,
@@ -621,6 +633,61 @@ async def preview_formal_tail(
         items=items,
         preview_fingerprint=fingerprint,
     )
+
+async def _authorize_prepared_runs(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    actor_id: UUID,
+    shot_id: UUID,
+    run_ids: list[UUID],
+    preparation_fingerprint: str,
+) -> None:
+    """Persist one accepted grant per command created by prepare (I8a-03u)."""
+    from app.access.models import ProjectCreativeProfile
+    from app.production.command_models import ProductionCommandAuthorization
+
+    profile = await session.scalar(
+        select(ProjectCreativeProfile).where(
+            ProjectCreativeProfile.project_id == project_id
+        )
+    )
+    if profile is None:
+        raise ValidationAppError(
+            "Project has no creative profile", details={"code": "PROFILE_MISSING"}
+        )
+    expires_at = datetime.now(UTC) + timedelta(hours=1)
+    for run_id in run_ids:
+        request_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "kind": "final_film_prepare",
+                    "preparation_fingerprint": preparation_fingerprint,
+                    "node_run_id": str(run_id),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        session.add(
+            ProductionCommandAuthorization(
+                project_id=project_id,
+                actor_id=actor_id,
+                shot_id=shot_id,
+                command_key=f"final-film-prepare:{run_id}",
+                request_hash=request_hash,
+                body={
+                    "kind": "final_film_prepare",
+                    "preparation_fingerprint": preparation_fingerprint,
+                    "node_run_id": str(run_id),
+                },
+                profile_version=profile.version,
+                expires_at=expires_at,
+                status="accepted",
+                node_run_id=run_id,
+            )
+        )
+    await session.flush()
 
 async def _ensure_final_graph(
     session: AsyncSession,

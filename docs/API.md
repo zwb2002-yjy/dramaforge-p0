@@ -1607,7 +1607,8 @@ provider_type,capability,prompt,parameters,output_count,references,max_provider_
 `plan_fingerprint`、`resolution`与参考；同key重放返回原回执，不同载荷409 `ASSET_COMMAND_REUSED`。
 最终合成准备预览（I8a-03o）：`POST /projects/{p}/final-film/prepare-preview`接收同一
 `{edit_session_id,expected_timeline_version}`，纯读返回逐镜头`{speech_required,refresh_tail,
-voice_execution,planned_nodes}`与`preview_fingerprint`，零NodeRun/零Provider调用；`prepare`仍负责实际入队。
+voice_execution,planned_nodes}`与`preview_fingerprint`，零NodeRun/零Provider调用；`prepare`仍负责实际入队，并为每个新建命令写入一条accepted的
+`ProductionCommandAuthorization`（`final-film-prepare:{node_run_id}`，含preparation指纹、actor、profile版本）。
 
 资产语音/视频命令（I8a-03l/m）：`POST /assets/{a}/executions`接受判别联合
 `{stage:"asset_image"|"asset_voice"|"asset_video",request}`；语音分支按句界分段（每段≤500字）并在预览返回`segments/requires_concat/max_provider_operations`；

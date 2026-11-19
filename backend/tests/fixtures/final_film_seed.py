@@ -45,6 +45,14 @@ async def _seed_project(session: AsyncSession) -> tuple[Project, User]:
     )
     session.add(project)
     await session.flush()
+    from app.access.models import ProjectCreativeProfile
+
+    session.add(
+        ProjectCreativeProfile(
+            project_id=project.id, start_type="FREE", director_autonomy="MANUAL"
+        )
+    )
+    await session.flush()
     return project, user
 
 
