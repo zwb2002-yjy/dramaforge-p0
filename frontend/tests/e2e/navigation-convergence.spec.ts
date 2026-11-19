@@ -537,6 +537,8 @@ for (const destination of ["settings", "other-project"] as const) {
 }
 
 test("A16-A19: navigation, focus and layout across breakpoints", async ({ browser, baseURL }) => {
+  // Five breakpoints in one journey need more than the global 30s budget.
+  test.setTimeout(90_000);
   for (const width of [1440, 1100, 1099, 808, 390]) {
     const context = await browser.newContext({ baseURL, viewport: { width, height: 900 } });
     const page = await context.newPage();

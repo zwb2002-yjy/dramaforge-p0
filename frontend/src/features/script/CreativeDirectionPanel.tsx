@@ -22,6 +22,7 @@ type CreativeDirectionPanelProps = {
  */
 export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProps) {
   const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,12 +33,13 @@ export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProp
   const direction = useQuery({
     queryKey: ["creative-direction", projectId],
     queryFn: () => fetchCreativeDirection(projectId),
+    enabled: open,
     retry: false,
   });
   const thread = useQuery({
     queryKey: ["direction-thread", projectId, threadId],
     queryFn: () => readDirectorAgentThread(projectId, threadId!),
-    enabled: threadId !== null,
+    enabled: open && threadId !== null,
     retry: false,
     refetchInterval: awaitingReply ? 2000 : false,
   });
@@ -109,72 +111,83 @@ export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProp
         <h3>创作方向</h3>
       </div>
       <p className="muted">写清题材、时代、语气与禁区；生成故事时作为 brief 的上下文。</p>
-      {direction.isError && <p role="alert">创作方向读取失败，请稍后重试。</p>}
-      <Field>
-        <span>方向说明</span>
-        <Textarea
-          aria-label="创作方向"
-          rows={3}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-        />
-      </Field>
-      {message && <p role="status">{message}</p>}
-      {error && <p role="alert">{error}</p>}
-      <div className="toolbar">
-        <Button
-          type="button"
-          tone="primary"
-          disabled={save.isPending || draft.trim().length === 0}
-          onClick={() => save.mutate()}
-        >
-          保存创作方向
+      {!open && (
+        <Button type="button" tone="ghost" onClick={() => setOpen(true)}>
+          展开创作方向
         </Button>
-        {threadId === null && (
-          <Button
-            type="button"
-            tone="ghost"
-            disabled={openThread.isPending}
-            onClick={() => openThread.mutate()}
-          >
-            开始方向讨论
-          </Button>
-        )}
-      </div>
-      {threadId !== null && (
-        <div className="direction-discussion" aria-label="方向讨论">
-          <ul className="direction-messages">
-            {messages.slice(-6).map((item) => (
-              <li key={item.id}>
-                <span className="status-label">{item.role === "assistant" ? "导演" : "你"}</span>
-                <p>{item.content}</p>
-                {item.role === "assistant" && (
-                  <Button type="button" tone="ghost" onClick={() => setDraft(item.content)}>
-                    采用为方向
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
-          {awaitingReply && <p role="status">导演正在思考…</p>}
+      )}
+      {open && (
+        <>
+          {direction.isError && <p role="alert">创作方向读取失败，请稍后重试。</p>}
           <Field>
-            <span>讨论问题</span>
+            <span>方向说明</span>
             <Textarea
-              aria-label="讨论问题"
-              rows={2}
-              value={question}
-              onChange={(event) => setQuestion(event.target.value)}
+              aria-label="创作方向"
+              rows={3}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
             />
           </Field>
-          <Button
-            type="button"
-            tone="primary"
-            disabled={send.isPending || question.trim().length === 0}
-            onClick={() => send.mutate()}
-          >
-            发送讨论
-          </Button>
-        </div>
+          {message && <p role="status">{message}</p>}
+          {error && <p role="alert">{error}</p>}
+          <div className="toolbar">
+            <Button
+              type="button"
+              tone="primary"
+              disabled={save.isPending || draft.trim().length === 0}
+              onClick={() => save.mutate()}
+            >
+              保存创作方向
+            </Button>
+            {threadId === null && (
+              <Button
+                type="button"
+                tone="ghost"
+                disabled={openThread.isPending}
+                onClick={() => openThread.mutate()}
+              >
+                开始方向讨论
+              </Button>
+            )}
+          </div>
+          {threadId !== null && (
+            <div className="direction-discussion" aria-label="方向讨论">
+              <ul className="direction-messages">
+                {messages.slice(-6).map((item) => (
+                  <li key={item.id}>
+                    <span className="status-label">
+                      {item.role === "assistant" ? "导演" : "你"}
+                    </span>
+                    <p>{item.content}</p>
+                    {item.role === "assistant" && (
+                      <Button type="button" tone="ghost" onClick={() => setDraft(item.content)}>
+                        采用为方向
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {awaitingReply && <p role="status">导演正在思考…</p>}
+              <Field>
+                <span>讨论问题</span>
+                <Textarea
+                  aria-label="讨论问题"
+                  rows={2}
+                  value={question}
+                  onChange={(event) => setQuestion(event.target.value)}
+                />
+              </Field>
+              <Button
+                type="button"
+                tone="primary"
+                disabled={send.isPending || question.trim().length === 0}
+                onClick={() => send.mutate()}
+              >
+                发送讨论
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </section>
   );

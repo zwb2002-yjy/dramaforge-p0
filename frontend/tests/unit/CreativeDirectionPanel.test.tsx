@@ -45,6 +45,7 @@ describe("CreativeDirectionPanel", () => {
       }),
     );
     renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "展开创作方向" }));
     const textarea = await screen.findByLabelText("创作方向");
     await waitFor(() => expect(textarea).toHaveValue("旧方向"));
     fireEvent.change(textarea, { target: { value: "明代江南，克制含蓄。" } });
@@ -108,6 +109,7 @@ describe("CreativeDirectionPanel", () => {
       }),
     );
     renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "展开创作方向" }));
     fireEvent.click(await screen.findByRole("button", { name: "开始方向讨论" }));
     const adopt = await screen.findByRole("button", { name: "采用为方向" });
     expect(screen.getByText(ASSISTANT)).toBeInTheDocument();
@@ -121,6 +123,7 @@ describe("CreativeDirectionPanel", () => {
       vi.fn(() => json({ profile_version: 1, direction: "" })),
     );
     renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "展开创作方向" }));
     const button = await screen.findByRole("button", { name: "保存创作方向" });
     expect(button).toBeDisabled();
   });
