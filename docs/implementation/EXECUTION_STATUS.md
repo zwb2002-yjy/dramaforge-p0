@@ -2706,6 +2706,22 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - **下一步（I10-01 剩余）**：真实 `pg_dump`/`restic` 适配与 staging 峰值内存实测；在隔离资源上做一次
   真实恢复演练（含恢复后业务演练）。
 
+### I10-01f 已实施：真实恢复演练（2026-11-19，EV174）
+
+在隔离 PostgreSQL 上真实跑通 `pg_dump -Fc --no-owner` → `pg_restore --no-owner`，并用本仓库的
+`verify_restore` 判定两个不同角色下的恢复结果：
+
+- 源库 `src_i10` 迁移到 head `20261119_0123` 并插入 1 个用户；dump 577409 字节。
+- **以 owner 角色连接**（`dramaforge`，superuser + BYPASSRLS + 表所有者）→ `passed=false`，
+  报 `RESTORE_ROLE_UNSAFE` 与 `RESTORE_ROLE_OWNS_TABLES`。这正是 DEPLOYMENT 警告的
+  “`pg_restore --no-owner` 不能把应用角色顺手变为全表 owner” 的反面案例。
+- **以 app 角色连接**（`df_app` NOSUPERUSER/NOBYPASSRLS、仅 GRANT SELECT）→ `passed=true`，
+  四类检查齐全，`head` 与 `pending` 均与 manifest 一致。
+- 演练后删除 3 个库与角色、`compose down --volumes`、删除临时卷，无残留容器/卷。
+- 结论：**“恢复成功”不等于“可安全运行”**，且该判断由真实数据而非合成 fixture 验证。
+- **下一步（I10-01 剩余）**：restic 对象快照接线与 staging 峰值内存实测；恢复后业务演练
+  （队列、失去通知、Worker 重启、未知提交计数不增）。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
