@@ -1701,6 +1701,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/production-readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Production Readiness
+         * @description Work-type readiness read model; no Graph, NodeRun or Provider call.
+         */
+        get: operations["production_readiness_api_v1_projects__project_id__production_readiness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/node-runs/status": {
         parameters: {
             query?: never;
@@ -8895,6 +8915,42 @@ export interface components {
             /** Next Cursor */
             next_cursor: string | null;
         };
+        /** ProductionReadinessRead */
+        ProductionReadinessRead: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Work Type */
+            work_type: string | null;
+            /** Planned Episode Count */
+            planned_episode_count: number | null;
+            /** Episode Count */
+            episode_count: number;
+            /** Scene Count */
+            scene_count: number;
+            /** Shot Count */
+            shot_count: number;
+            /** Formal Keyframe Count */
+            formal_keyframe_count: number;
+            /** Formal Video Count */
+            formal_video_count: number;
+            /** Formal Composite Count */
+            formal_composite_count: number;
+            /** Image Binding Configured */
+            image_binding_configured: boolean;
+            /** Video Binding Configured */
+            video_binding_configured: boolean;
+            /** Voice Binding Configured */
+            voice_binding_configured: boolean;
+            /** Items */
+            items: components["schemas"]["ReadinessItem"][];
+            /** Blockers */
+            blockers: string[];
+            /** Ready */
+            ready: boolean;
+        };
         /**
          * ProductionRunCancelRead
          * @description Qualified cancellation receipt for one project-owned run.
@@ -9786,6 +9842,20 @@ export interface components {
              * Format: uuid
              */
             artifact_id: string;
+        };
+        /** ReadinessItem */
+        ReadinessItem: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "partial" | "missing";
+            /** Detail */
+            detail: string;
         };
         /**
          * RecoveryItemRead
@@ -17028,6 +17098,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductionSummaryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    production_readiness_api_v1_projects__project_id__production_readiness_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionReadinessRead"];
                 };
             };
             /** @description Validation Error */

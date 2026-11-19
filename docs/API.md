@@ -696,6 +696,13 @@ Binding存在但已停用不能作为新选择保存；已保存选择后来失�
 错误响应带稳定code与安全的field_path/current_version，可见字段可用于差异合并；不回显凭据或私有Provider响应。
 每次保存不调用Provider；配置保存成功与连接检查/生成成功不可混为一种toast。
 
+### 生产就绪（I8b）
+
+`GET /projects/{p}/production-readiness`：按作品类型返回只读就绪模型——`work_type/planned_episode_count`、
+episode/scene/shot计数、正式首帧/视频/合成计数、图片/视频/语音默认是否配置，以及`items`（story_structure/
+scenes/shots/media_defaults/formal_media）与`blockers`；纯读，不建Graph/NodeRun、不调Provider。
+单集要求恰1集，多集要求≥2集（未填计划时按已有集数判定）。
+
 ### 恢复信号（I7）
 
 `GET /projects/{p}/director/runtime/turns/{turn_id}/resume`：只读返回该turn待处理的resume wakeup

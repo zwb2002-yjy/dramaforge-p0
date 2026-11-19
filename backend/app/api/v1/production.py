@@ -28,6 +28,10 @@ from app.production.read_models import (
     UpstreamDependencyRead,
 )
 from app.production.read_service import ProductionReadService
+from app.production.readiness import (
+    ProductionReadinessRead,
+    read_production_readiness,
+)
 from app.production.run_control import ProductionRunControl
 from app.shared.errors import NotFoundError, ValidationAppError
 
@@ -393,6 +397,19 @@ async def production_summary(
     return await ProductionReadService(session).summary(project_id=project_id)
 
 
+
+@router.get(
+    "/projects/{project_id}/production-readiness",
+    response_model=ProductionReadinessRead,
+)
+async def production_readiness(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> ProductionReadinessRead:
+    """Work-type readiness read model; no Graph, NodeRun or Provider call."""
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return await read_production_readiness(session, project_id=project_id)
 @router.get("/projects/{project_id}/node-runs/status", response_model=list[ProductionRunStatusRead])
 async def production_run_statuses(
     project_id: UUID,

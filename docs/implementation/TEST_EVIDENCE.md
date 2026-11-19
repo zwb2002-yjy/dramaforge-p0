@@ -142,6 +142,7 @@
 | EV134 | 前端稳定性修复与Full复跑：`docker compose run frontend-quality`（单测/单测过滤） | ①`CreativeDirectionPanel`默认折叠（展开才fetch），脚本页首屏零额外请求；面板测试改为先展开，3 passed。②`navigation-convergence A16`显式90s超时后单独通过（45.4s，5断点）。③`workbench-resource`三例仍p95≈396ms>200ms（单worker顺序、宿主16核43%负载），未改阈值，记为未解决。④全量Vitest **764 passed**（583.87s）。 | 前端功能E2E与全量单测通过；**未取得**resource性能阈值通过，不声称Full |
 | EV135 | workbench-resource性能项定位：`docker compose run frontend-quality`（单测过滤、chromium-resource） | ①`1 Shots` p95=84.4ms通过（firstScreenMs=9075ms，Vite依赖重优化）；②`30 Shots` p95=324.5ms失败（滚动p95 22ms正常）；③`100 Shots`此前396ms。同一代码在i8a-03 Full中通过，判定阈值对宿主/冷启动敏感；30/100例每次点击~300ms仍需空闲机对比I5基线排除列表渲染回退。 | 未通过性能阈值；Full仍FAIL，不声称阶段Full |
 | EV136 | I7-03恢复信号只读端点定向证据：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径）+前端Vitest | ①`test_runtime_resume_read.py` 2 passed：待处理resume wakeup返回signal_id/reference_id/expected_revision/attempt_count；已完成wakeup→404 DIRECTOR_RESUME_NOT_PENDING。②前端`fetchPendingRuntimeResume`+`directorApiContract` 8 passed（路由与生成契约一致）。③后端定向59 passed；generated.ts 405 schema、typecheck/api:authority通过。 | 证明待恢复信号可只读暴露；**未实施**恢复按钮的工作台挂载、N08/N10核对 |
+| EV137 | I8b-01a生产就绪只读模型定向证据：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径） | ①新增`test_production_readiness.py` 2 passed：single_comic（1集+场景+镜头+图片/视频默认）→ready、blockers为空、voice未配但不阻断；无故事/无媒体→blockers含story_structure/scenes/media_defaults；serial_comic仅1集→story_structure partial并阻断。②`GET /projects/{p}/production-readiness`注册；定向组59 passed；generated.ts 407 schema。 | 证明三类作品可按类型核对生产就绪；**未实施**I8b端到端生产与两集共享/连续性验收 |
 
 ## 需求与测试分层（设计映射，不是执行结果）
 

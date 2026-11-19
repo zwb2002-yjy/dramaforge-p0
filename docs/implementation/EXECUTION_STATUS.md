@@ -2096,3 +2096,16 @@ I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖�
   定向组59 passed；前端`directorApiContract` 8 passed；generated.ts 405 schema。
 
 未完成且不冒称：恢复按钮的工作台挂载、N08/N10三栏核对。
+
+## I8b-01a 生产就绪只读模型（2026-11-19，EV137）
+
+- 新增`app/production/readiness.py`与`GET /projects/{p}/production-readiness`：按作品类型返回
+  episode/scene/shot与正式媒体计数、三类媒体默认配置状态、逐项`items`与`blockers`；
+  单集要求恰1集、多集要求≥2集（未填计划按已有集数），`formal_media`为非阻断提示。
+- 纯读：不建Graph/NodeRun、不调Provider、不补造缺失事实。
+
+已测（定向）：
+- `test_production_readiness.py` 2 passed（单集完整→ready且blockers为空；缺故事/媒体→blocked；
+  多集仅1集→story_structure partial并阻断）；定向组59 passed；generated.ts 407 schema。
+
+未完成且不冒称：I8b其余（三类作品端到端生产与两集共享/连续性验收）。
