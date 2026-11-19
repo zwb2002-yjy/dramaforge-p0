@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -15,6 +15,7 @@ from sqlalchemy import select
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
+from app.production.batch_plan import ProductionBatchPlanRead, ProductionBatchPlanService
 from app.production.read_models import (
     ArtifactRead,
     NodeRunRead,
@@ -33,6 +34,7 @@ from app.production.readiness import (
     read_production_readiness,
 )
 from app.production.run_control import ProductionRunControl
+from app.production.workbench_execution import PlanStage
 from app.shared.errors import NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["production"], dependencies=[Depends(require_selected_workspace)])
@@ -397,7 +399,6 @@ async def production_summary(
     return await ProductionReadService(session).summary(project_id=project_id)
 
 
-
 @router.get(
     "/projects/{project_id}/production-readiness",
     response_model=ProductionReadinessRead,
@@ -410,6 +411,28 @@ async def production_readiness(
     """Work-type readiness read model; no Graph, NodeRun or Provider call."""
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     return await read_production_readiness(session, project_id=project_id)
+
+
+@router.get(
+    "/projects/{project_id}/production-batches/preview",
+    response_model=ProductionBatchPlanRead,
+)
+async def production_batch_preview(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    stage: Annotated[str, Query(max_length=40)] = "image_keyframe",
+    shot_id: Annotated[list[UUID] | None, Query(max_length=200)] = None,
+) -> ProductionBatchPlanRead:
+    """Preview a project production batch; writes nothing and calls no Provider."""
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return await ProductionBatchPlanService(session, user_id=user.id).preview(
+        project=project,
+        stage=cast(PlanStage, stage),
+        shot_ids=shot_id or None,
+    )
+
+
 @router.get("/projects/{project_id}/node-runs/status", response_model=list[ProductionRunStatusRead])
 async def production_run_statuses(
     project_id: UUID,
@@ -470,9 +493,7 @@ async def cancel_production_run(
     _csrf: CsrfDep,
 ) -> ProductionRunCancelRead:
     """Request cancellation of one project-owned run; the remote task is kept."""
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     run = await ProductionRunControl(session).request_cancel(project=project, run_id=run_id)
     await session.commit()
     return ProductionRunCancelRead(

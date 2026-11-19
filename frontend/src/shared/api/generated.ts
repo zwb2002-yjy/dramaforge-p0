@@ -1721,6 +1721,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/production-batches/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Production Batch Preview
+         * @description Preview a project production batch; writes nothing and calls no Provider.
+         */
+        get: operations["production_batch_preview_api_v1_projects__project_id__production_batches_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/node-runs/status": {
         parameters: {
             query?: never;
@@ -8914,6 +8934,63 @@ export interface components {
             items: components["schemas"]["ArtifactRead"][];
             /** Next Cursor */
             next_cursor: string | null;
+        };
+        /** ProductionBatchItem */
+        ProductionBatchItem: {
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /**
+             * Episode Id
+             * Format: uuid
+             */
+            episode_id: string;
+            /** Episode Number */
+            episode_number: number;
+            /**
+             * Scene Id
+             * Format: uuid
+             */
+            scene_id: string;
+            /** Scene Number */
+            scene_number: number;
+            /** Shot Number */
+            shot_number: number;
+            /** Stage */
+            stage: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "planned" | "blocked" | "formal";
+            /** Plan Fingerprint */
+            plan_fingerprint: string | null;
+            /** Blockers */
+            blockers: string[];
+        };
+        /** ProductionBatchPlanRead */
+        ProductionBatchPlanRead: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Stage */
+            stage: string;
+            /** Items */
+            items: components["schemas"]["ProductionBatchItem"][];
+            /** Planned Count */
+            planned_count: number;
+            /** Blocked Count */
+            blocked_count: number;
+            /** Formal Count */
+            formal_count: number;
+            /** Max Operations */
+            max_operations: number;
+            /** Batch Fingerprint */
+            batch_fingerprint: string;
         };
         /** ProductionReadinessRead */
         ProductionReadinessRead: {
@@ -17137,6 +17214,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductionReadinessRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    production_batch_preview_api_v1_projects__project_id__production_batches_preview_get: {
+        parameters: {
+            query?: {
+                stage?: string;
+                shot_id?: string[] | null;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionBatchPlanRead"];
                 };
             };
             /** @description Validation Error */

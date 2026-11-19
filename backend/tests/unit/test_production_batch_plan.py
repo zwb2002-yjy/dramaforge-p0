@@ -1,14 +1,15 @@
-"""A project-level production batch preview reports plans and blockers only (I8b)."""
+﻿"""A project-level production batch preview reports plans and blockers only (I8b)."""
 
 from __future__ import annotations
 
 from uuid import uuid4
 
 import pytest
+from app.access.models import User
 from app.config import clear_settings_cache
 from app.execution.models import Artifact
 from app.production.batch_plan import ProductionBatchPlanService
-from app.shared.errors import ValidationAppError
+from app.shared.errors import ForbiddenError, ValidationAppError
 from app.storage.minio_store import reset_object_store_for_tests
 from cryptography.fernet import Fernet
 from production_harness import agnes_image_binding, configure_image_default, seed_project
@@ -144,3 +145,37 @@ async def test_batch_preview_can_be_scoped_to_given_shots(
     )
     assert [item.shot_id for item in preview.items] == [shots[1].id]
     assert preview.max_operations == 1
+
+
+@pytest.mark.asyncio
+async def test_batch_preview_route_reads_the_owned_project_only(
+    session: AsyncSession, monkeypatch
+) -> None:
+    """The route resolves ownership first and returns the same preview."""
+    from app.access.projects import ProjectService
+    from app.api.v1.production import production_batch_preview
+
+    _install_keys(monkeypatch)
+    project, owner, shots = await seed_project(session, work_type="single_comic")
+    binding = await agnes_image_binding(session, project=project, owner=owner)
+    await configure_image_default(session, project=project, owner=owner, binding=binding)
+    await session.commit()
+
+    # The route's owner lookup rejects every other user before any plan work.
+    with pytest.raises(ForbiddenError):
+        await ProjectService(session).get_project_for_owner(
+            project_id=project.id,
+            actor=User(email="intruder@example.com", display_name="I", password_hash="x"),
+        )
+
+    preview = await production_batch_preview(
+        project_id=project.id,
+        user=owner,
+        session=session,
+        stage="image_keyframe",
+        shot_id=None,
+    )
+    assert preview.project_id == project.id
+    assert preview.planned_count == len(shots)
+    assert preview.stage == "image_keyframe"
+

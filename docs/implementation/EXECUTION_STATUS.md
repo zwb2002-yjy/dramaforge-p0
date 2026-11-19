@@ -2259,3 +2259,24 @@ Full Gate 仍待空闲宿主重跑`workbench-resource`。
 
 未完成且不冒称：本能力目前**没有 HTTP 入口**（未加路由、未重生`generated.ts`），也没有“获授权后
 按批 create”的写路径——批量付费创建仍必须走既有单命令授权与`max_operations`上界，属后续切片。
+
+## I8b-03b 生产批预览HTTP入口与生成类型（2026-11-19，EV146）
+
+把 I8b-03a 的只读编排接到用户可用入口，并保持 OpenAPI/生成类型权威不变。
+
+已实施：
+- `GET /projects/{project_id}/production-batches/preview?stage=&shot_id=…`（`app/api/v1/production.py`）：
+  先 `ProjectService.get_project_for_owner`（外人 `ForbiddenError`、不存在 `NotFoundError`，不泄露存在性），
+  再交给 `ProductionBatchPlanService.preview`；只读、零 Graph/NodeRun/Provider 写入或调用；
+  `stage` 由查询串给出、非法阶段仍由服务返回 `BATCH_STAGE_UNSUPPORTED`。
+- 路由级测试：owner 校验先于任何计划计算、通过路由函数得到与 service 相同的预览。
+- 生成类型：backend 镜像内导出 OpenAPI → frontend 镜像内 `openapi-typescript` 重生
+  `frontend/src/shared/api/generated.ts`（**409 schema**，原 407），`api:check` 报
+  `generated.ts is up to date`，`api:authority` 409 schema 通过。
+
+已测（定向）：
+- `test_production_batch_plan.py` **8 passed**（含新路由用例）；受影响后端组 **18 passed**；
+  `ruff check app tests` 通过；`mypy app` 403 文件 Success；前端 `npm run typecheck` 通过。
+
+未完成且不冒称：获授权后的批量 create（写路径）、视频/合成生产段、I9 交付段；
+Full Gate 仍待空闲宿主重跑 `workbench-resource`。
