@@ -269,9 +269,7 @@ async def test_shared_asset_is_frozen_into_both_dispatches(
             wire_fingerprint="d" * 64,
         )
 
-    monkeypatch.setattr(
-        "app.production.workbench_execution.preview_compile", fake_contract_preview
-    )
+    monkeypatch.setattr("app.production.workbench_execution.preview_compile", fake_contract_preview)
     service = WorkbenchExecutionService(session, user_id=user.id)
     runs = []
     for shot, binding in zip(shots, bindings, strict=True):

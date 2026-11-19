@@ -2171,3 +2171,32 @@ I7-03（resume只读端点）与 I8b-01a–01e（就绪模型/两集/共享资�
 
 未完成且不冒称：Full Gate 仍卡在 `frontend-quality` 的 `workbench-resource` p95（需空闲宿主重跑）；
 共享资产 Provider 提交端到端、三类作品完整生产编排、I9 交付段仍未实施。
+
+## I8b-01f 共享资产到达两集Provider提交（2026-11-19，EV143）
+
+把“两集共享同一角色资产”从快照/计划边界推到**付费提交边界**：同一冻结引用在真实 Worker 媒体路径上
+被两集各自提交，Provider 收到的参考图字节完全相同，而两集各自拿到自己的关键帧。
+
+已实施：
+- 新增`test_cross_episode_shared_asset_submit.py`：两集各1场景1镜头，同一个`Asset`/`AssetVersion`
+  （formal，唯一版本）+ 同一个参考`Artifact`（真实PNG字节在对象存储里，`content_hash`按字节校验），
+  两镜头各一条`ShotReferenceBinding`（`purpose=identity`→`reference_image`）。
+- 每集`build_plan`→`preview_compiler_contract`（真实编译器wire指纹）→`create_and_dispatch`→
+  `execute_media_node_run`（真实Worker媒体路径，`store`同时提供参考字节与接收产物）。
+- 断言：两集Provider POST体`extra_body.image[0]`都是同一份`data:image/png;base64,...`，解码后与
+  共享`Artifact`字节逐字节相等；两集产出不同`Artifact`且哈希互不相同（相同字节会被
+  `ARTIFACT_NOT_INDEPENDENT`拒绝，说明“每集自己的成片”不是靠复制共享资产）；`Asset`仍只有1个
+  formal版本、`version`不变；两个`ProviderOperation`均`succeeded`。
+- 选型按产品规则而非绕行：`agnes-image-2.1-flash` v3 有`MODEL_OFFICIAL_EVIDENCE_GAP`（阻断新create）、
+  通用`@contract/openai-image-v1`是`protocol_contract`且该插件不允许手填模型ID
+  （`DYNAMIC_MODEL_CAPABILITY_UNVERIFIED`）；因此用官方证据完整的`agnes-image-2.5-flash`
+  （`image.i2i` + `reference`输入合同，9:16 项目比例天然匹配）。
+- 顺带修掉`test_runtime_resume_read.py`的E501超长行——Full 后端静态门（`ruff check app tests`）会因此失败。
+
+已测（定向）：
+- `test_cross_episode_shared_asset_submit.py` 1 passed；受影响定向组 **98 passed**（shared asset×2、
+  workbench execution、generic images protocol、agnes flash release、readiness、asset plan、resume read）。
+- `ruff check app tests` 全通过；本会话自写的两个测试文件按 ruff 格式化。
+
+未完成且不冒称：三类作品（`animation_promo`/`single_comic`/`serial_comic`）完整生产编排端到端、
+真实付费Provider调用（需当前Owner授权，属I10硬门）、I9剪辑交付段。

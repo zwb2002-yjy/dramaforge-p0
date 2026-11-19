@@ -24,9 +24,7 @@ async def _seed_turn(session: AsyncSession) -> tuple[User, Project, DirectorTurn
     workspace = Workspace(owner_user_id=user.id, name="W")
     session.add(workspace)
     await session.flush()
-    project = Project(
-        workspace_id=workspace.id, name="P", aspect_ratio="9:16", budget_limit=0
-    )
+    project = Project(workspace_id=workspace.id, name="P", aspect_ratio="9:16", budget_limit=0)
     session.add(project)
     await session.flush()
     execution_id = uuid4()
@@ -115,7 +113,11 @@ async def test_resume_read_ignores_completed_wakeups(session: AsyncSession) -> N
             runtime_execution_id=turn.runtime_execution_id,
             kind="resume",
             dedupe_key=f"resume:{execution_id}:{uuid4()}",
-            payload={"signal_id": str(uuid4()), "reference_id": str(uuid4()), "expected_revision": 3},
+            payload={
+                "signal_id": str(uuid4()),
+                "reference_id": str(uuid4()),
+                "expected_revision": 3,
+            },
             attempt_count=1,
             completed_at=datetime.now(UTC),
         )
