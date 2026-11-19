@@ -10,7 +10,8 @@ from app.assets.models import Episode, Scene, Shot
 from app.editing.adapter import EditingAdapter
 from app.execution.models import Artifact
 from app.production.models import ShotReferenceBinding  # noqa: F401 - document intent
-from app.shared.errors import ConflictError, ValidationAppError
+from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -228,6 +229,73 @@ async def test_schema2_rejects_malformed_documents(session: AsyncSession) -> Non
             )
         assert rejected.value.details["code"] == "EDIT_TIMELINE_INVALID"
         await session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_episode_scoped_session_rejects_a_clip_from_another_episode(
+    session: AsyncSession,
+) -> None:
+    """Episode scope is enforced at Save, not by trusting the timeline JSON."""
+    from app.assets.models import Episode
+
+    project, user, shot, artifact = await _shot(session)
+    assert artifact is not None
+    other_episode = Episode(project_id=project.id, episode_number=2, title="E2", synopsis="")
+    session.add(other_episode)
+    await session.flush()
+    adapter = EditingAdapter(session)
+    scoped = await adapter.create_session(
+        project_id=project.id,
+        user_id=user.id,
+        name="Episode 2",
+        episode_id=other_episode.id,
+    )
+    with pytest.raises(ValidationAppError) as rejected:
+        await adapter.save_timeline(
+            project_id=project.id,
+            session_id=scoped.id,
+            timeline={"schema_version": 2, "clips": [_clip(shot, artifact)], "metadata": {}},
+            expected_session_version=1,
+        )
+    assert rejected.value.details["code"] == "EDIT_CLIP_OUT_OF_EPISODE"
+    await session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_episode_scoped_session_accepts_its_own_clip_and_rejects_foreign_episode(
+    session: AsyncSession,
+) -> None:
+    from app.assets.models import Episode
+
+    project, user, shot, artifact = await _shot(session)
+    assert artifact is not None
+    episode = await session.scalar(select(Episode).where(Episode.project_id == project.id))
+    assert episode is not None
+    adapter = EditingAdapter(session)
+    scoped = await adapter.create_session(
+        project_id=project.id,
+        user_id=user.id,
+        name="Episode 1",
+        episode_id=episode.id,
+    )
+    saved = await adapter.save_timeline(
+        project_id=project.id,
+        session_id=scoped.id,
+        timeline={"schema_version": 2, "clips": [_clip(shot, artifact)], "metadata": {}},
+        expected_session_version=1,
+    )
+    assert saved.episode_id == episode.id
+    assert saved.timeline["schema_version"] == 2
+
+    # An episode from a different project is not a valid scope at creation.
+    _other_project, _other_user, _other_shot, _other_artifact = await _shot(session)
+    with pytest.raises(NotFoundError):
+        await adapter.create_session(
+            project_id=project.id,
+            user_id=user.id,
+            name="Foreign",
+            episode_id=uuid4(),
+        )
 
 
 @pytest.mark.asyncio

@@ -2421,3 +2421,17 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
   `generated.ts` 重生（409 schema，`api:check`/`api:authority` 通过）。
 - **下一步（I9 剩余）**：`selection_snapshot` 服务端观测、asset/public 素材资质接线、
   分集作用域（`edit_sessions.episode_id` + 候选键/索引/延迟 FK，I9-01b）、渲染快照与导出绑定（I9-02）。
+
+### I9-01b 已实施：分集作用域（2026-11-19，EV154）
+
+- **迁移 `20261119_0121`**：`edit_sessions.episode_id`（可空 FK→`episodes`，`ON DELETE RESTRICT`）、
+  候选键 `uq_edit_sessions_id_project`、索引 `(project_id, episode_id, id)`；历史会话保持 NULL，
+  不从镜头数量或名称猜分集。
+- `EditingAdapter.create_session(episode_id=…)` 校验该集属于本项目（否则 404）。
+- `save_timeline` 对分集会话校验每个 `shot_formal` 来源的镜头经 Scene 属于该集，否则
+  `EDIT_CLIP_OUT_OF_EPISODE`；该校验先于“是否当前正式视频/artifact 可用”，保证错误码指向真正的问题。
+- 证据：`test_editing_timeline_schema.py` **8 passed**、编辑组 **72 passed**；ruff 通过、
+  `mypy app` 404 文件通过；隔离 PG `editor_0121`：upgrade head → `alembic check` 无漂移 →
+  `downgrade 0120` → `upgrade head` 全部成功；随后删库并 `compose down`，无残留容器。
+- **下一步**：`episode_id` 暴露到读模型、`selection_snapshot`、切换集需版本化 Save 且显式检查全部
+  Clip（不静默删 Clip）、渲染快照与导出绑定（I9-02）。

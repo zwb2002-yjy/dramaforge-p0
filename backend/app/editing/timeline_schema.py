@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.assets.models import Shot
+from app.assets.models import Scene, Shot
 from app.execution.models import Artifact
 from app.shared.errors import ValidationAppError
 
@@ -166,6 +166,7 @@ async def _verify_shot_formal(
     project_id: UUID,
     source: ClipSource,
     index: int,
+    episode_id: UUID | None = None,
 ) -> None:
     assert source.shot_id is not None and source.artifact_id is not None
     shot = await session.scalar(
@@ -173,6 +174,17 @@ async def _verify_shot_formal(
     )
     if shot is None:
         raise _invalid("clip shot is not in this project", clip_index=index)
+    if episode_id is not None:
+        belongs = await session.scalar(
+            select(Scene.id)
+            .join(Shot, Shot.scene_id == Scene.id)
+            .where(Shot.id == shot.id, Scene.episode_id == episode_id)
+        )
+        if belongs is None:
+            raise ValidationAppError(
+                "episode-scoped session cannot hold a clip from another episode",
+                details={"code": "EDIT_CLIP_OUT_OF_EPISODE", "clip_index": index},
+            )
     if shot.formal_video_artifact_id != source.artifact_id:
         raise ValidationAppError(
             "clip source is not the shot's current formal video",
@@ -191,6 +203,7 @@ async def normalize_timeline_for_save(
     *,
     project_id: UUID,
     timeline: dict[str, object],
+    episode_id: UUID | None = None,
 ) -> dict[str, object]:
     """Return the exact document to persist, or fail closed.
 
@@ -216,7 +229,13 @@ async def normalize_timeline_for_save(
                         "kind": source.kind,
                     },
                 )
-            await _verify_shot_formal(session, project_id=project_id, source=source, index=index)
+            await _verify_shot_formal(
+                session,
+                project_id=project_id,
+                source=source,
+                index=index,
+                episode_id=episode_id,
+            )
     return document.model_dump(mode="json")
 
 

@@ -30,11 +30,15 @@ async def build_edit_session_from_shots(
     for order, shot_id in enumerate(shot_ids, start=1):
         shot = await session.get(Shot, shot_id)
         if shot is None or shot.project_id != project_id:
-            raise ValidationAppError("selected shot is unavailable",
-                details={"code": "EDIT_SHOT_NOT_READY", "shot_id": str(shot_id)})
+            raise ValidationAppError(
+                "selected shot is unavailable",
+                details={"code": "EDIT_SHOT_NOT_READY", "shot_id": str(shot_id)},
+            )
         if shot.formal_video_artifact_id is None:
-            raise ValidationAppError("selected shot has no formal video",
-                details={"code": "EDIT_SHOT_NOT_READY", "shot_id": str(shot_id)})
+            raise ValidationAppError(
+                "selected shot has no formal video",
+                details={"code": "EDIT_SHOT_NOT_READY", "shot_id": str(shot_id)},
+            )
         artifact = await session.get(Artifact, shot.formal_video_artifact_id)
         if (
             artifact is None
@@ -42,13 +46,11 @@ async def build_edit_session_from_shots(
             or artifact.artifact_type != "video"
             or artifact.deleted_at is not None
         ):
-            raise ValidationAppError("selected shot's formal video is unavailable",
-                details={"code": "EDIT_SHOT_NOT_READY", "shot_id": str(shot_id)})
-        duration = (
-            float(artifact.duration_seconds)
-            if artifact.duration_seconds
-            else 0.0
-        )
+            raise ValidationAppError(
+                "selected shot's formal video is unavailable",
+                details={"code": "EDIT_SHOT_NOT_READY", "shot_id": str(shot_id)},
+            )
+        duration = float(artifact.duration_seconds) if artifact.duration_seconds else 0.0
         clips.append(
             {
                 "id": str(uuid4()),
@@ -103,7 +105,9 @@ async def build_edit_session_for_project(
                 .where(Episode.project_id == project_id)
                 .order_by(Episode.episode_number)
             )
-        ).scalars().all()
+        )
+        .scalars()
+        .all()
     )
 
     clips: list[dict[str, object]] = []
@@ -112,11 +116,11 @@ async def build_edit_session_for_project(
         scenes = list(
             (
                 await session.execute(
-                    select(Scene)
-                    .where(Scene.episode_id == episode.id)
-                    .order_by(Scene.scene_number)
+                    select(Scene).where(Scene.episode_id == episode.id).order_by(Scene.scene_number)
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
         for scene in scenes:
             shots = list(
@@ -126,7 +130,9 @@ async def build_edit_session_for_project(
                         .where(Shot.scene_id == scene.id)
                         .order_by(Shot.sort_order, Shot.shot_number)
                     )
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
             for shot in shots:
                 if shot.project_id != project_id or shot.formal_video_artifact_id is None:
@@ -139,11 +145,7 @@ async def build_edit_session_for_project(
                     or artifact.deleted_at is not None
                 ):
                     continue
-                duration = (
-                    float(artifact.duration_seconds)
-                    if artifact.duration_seconds
-                    else 0.0
-                )
+                duration = float(artifact.duration_seconds) if artifact.duration_seconds else 0.0
                 clips.append(
                     {
                         "id": str(uuid4()),

@@ -47,9 +47,17 @@ class EditingAdapter:
         name: str,
         timeline: dict[str, object] | None = None,
         production_lineage: dict[str, object] | None = None,
+        episode_id: UUID | None = None,
     ) -> EditSession:
+        if episode_id is not None:
+            from app.assets.models import Episode
+
+            episode = await self._session.get(Episode, episode_id)
+            if episode is None or episode.project_id != project_id:
+                raise NotFoundError("episode not found")
         session_row = EditSession(
             project_id=project_id,
+            episode_id=episode_id,
             name=name,
             status="draft",
             version=1,
@@ -113,7 +121,10 @@ class EditingAdapter:
         # Schema 1 keeps its historical meaning; schema 2 sources are verified
         # against production truth before anything is persisted.
         document = await normalize_timeline_for_save(
-            self._session, project_id=project_id, timeline=timeline
+            self._session,
+            project_id=project_id,
+            timeline=timeline,
+            episode_id=row.episode_id,
         )
         row.timeline = dict(document)
         row.version += 1
