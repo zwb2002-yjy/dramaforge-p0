@@ -107,3 +107,115 @@ async def test_domain_flow_keeps_partial_success_when_a_step_fails() -> None:
     )
     assert result.get("status") == "failed", result
     assert dict(steps) == {"list_assets": "succeeded", "read_asset": "failed"}
+
+
+@pytest.mark.asyncio
+async def test_domain_flow_replans_after_a_failed_instance() -> None:
+    load_all_models()
+    tmp_dir = tempfile.mkdtemp(prefix="flow-replan-")
+    db_path = Path(tmp_dir) / "flow.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with factory() as session:
+            project, user, thread = await _seed(session)
+            session.info["selected_workspace_id"] = project.workspace_id
+            asset = Asset(project_id=project.id, kind="character", name="Hero", version=1)
+            session.add(asset)
+            await session.flush()
+            bad_input = {"limit": 5, "asset_id": "00000000-0000-4000-8000-000000000000"}
+            good_input = {"limit": 5, "asset_id": str(asset.id)}
+            flows = _specs(
+                project,
+                [
+                    _flow(
+                        flow_key="project_asset_audit",
+                        definition_key="project_asset_audit",
+                        input_data=bad_input,
+                    )
+                ],
+            )
+            service = MasterRunService(
+                session, actor=user, project=project, flow_registry=DEFAULT_DEFINITIONS
+            )
+            turn = await _turn(session, project, user, thread)
+            run = await service.create_for_origin_turn(turn_id=turn.id, goal="audit")
+            item = await _decision(session, project, user, thread)
+            first_plan = await service.append_plan(
+                run_id=run.id,
+                decision_ref=item.id,
+                plan_data=_plan(run, flows=flows),
+                created_by_turn_id=turn.id,
+            )
+            await session.refresh(run)
+            await service.apply_plan(
+                run_id=run.id,
+                plan_id=first_plan.id,
+                expected_revision=run.revision,
+                expected_control_epoch=run.control_epoch,
+            )
+            await session.commit()
+            failed_instance = await session.scalar(select(DirectorBusinessFlowInstance))
+            assert failed_instance is not None
+            failed_id = failed_instance.id
+
+        for _ in range(6):
+            result = await execute_business_flow(
+                factory, instance_id=failed_id, registry=DEFAULT_DEFINITIONS
+            )
+            if result.get("status") in {"succeeded", "failed", "cancelled"}:
+                break
+        assert result.get("status") == "failed", result
+
+        async with factory() as session:
+            project = await session.get(type(project), project.id)
+            user = await session.get(type(user), user.id)
+            run = await session.get(type(run), run.id)
+            item = await _decision(session, project, user, thread)
+            service = MasterRunService(
+                session, actor=user, project=project, flow_registry=DEFAULT_DEFINITIONS
+            )
+            replanned = await service.append_plan(
+                run_id=run.id,
+                decision_ref=item.id,
+                plan_data=_plan(
+                    run,
+                    flows=_specs(
+                        project,
+                        [
+                            _flow(
+                                flow_key="project_asset_audit",
+                                definition_key="project_asset_audit",
+                                input_data=good_input,
+                            )
+                        ],
+                    ),
+                    current_plan=await service.current_plan(run),
+                ),
+                created_by_turn_id=turn.id,
+            )
+            await session.refresh(run)
+            await service.apply_plan(
+                run_id=run.id,
+                plan_id=replanned.id,
+                expected_revision=run.revision,
+                expected_control_epoch=run.control_epoch,
+            )
+            await session.commit()
+            instances = (
+                await session.execute(select(DirectorBusinessFlowInstance))
+            ).scalars().all()
+            new_instance = next(item for item in instances if item.id != failed_id)
+            new_id = new_instance.id
+
+        for _ in range(6):
+            result = await execute_business_flow(
+                factory, instance_id=new_id, registry=DEFAULT_DEFINITIONS
+            )
+            if result.get("status") in {"succeeded", "failed", "cancelled"}:
+                break
+        assert result.get("status") == "succeeded", result
+    finally:
+        await engine.dispose()

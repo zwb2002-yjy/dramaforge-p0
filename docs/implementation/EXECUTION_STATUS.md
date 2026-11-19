@@ -1952,3 +1952,14 @@ I6b开工：把默认BusinessFlow注册表从单一shot流程扩为覆盖project
   ruff/mypy通过。
 
 未完成且不冒称：领域级换计划（replan disposition）用例、流程UI入口。
+
+## I6b-05 领域流程换计划（2026-11-19，EV127）
+
+- e2e夹具新增换计划场景：首个`project_asset_audit`实例因无效asset失败（终态），随后为同一MasterRun追加
+  新计划（同一流程、修正输入）并apply；终态实例不需要disposition，新计划创建新实例，worker推进后
+  succeeded。
+
+已测（定向）：
+- `test_business_flow_worker_e2e.py` 3 passed（成功/部分失败/换计划）；定向组75 passed；ruff/mypy通过。
+
+I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖；剩余为流程UI入口，随后进入I7。

@@ -132,6 +132,7 @@
 | EV124 | I6b-02领域流程端口接线定向证据：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径） | ①`ToolFlowActionExecutor`注册表启用只读模型合同工具（capabilities/compile preview），不提交Provider操作。②新增断言：四个领域流程的每个step.tool_name都在worker注册表中（防定义/端口漂移）。③`test_business_flows.py` 15 passed；定向组73 passed；ruff/mypy 401文件通过。 | 证明领域流程声明的工具均可由worker执行；**未实施**并行/部分失败/换计划端到端验收、流程UI入口 |
 | EV125 | I6b-03领域流程端到端（worker自有session）定向证据：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径） | ①新增`test_business_flow_worker_e2e.py`：文件型SQLite+独立session factory，`execute_business_flow`驱动`project_asset_audit`实例至succeeded，两个step（list_assets/read_asset）均succeeded。②此前`flow_progress_pending`定位为内存SQLite共享连接导致的测试夹具问题（非产品缺陷），已用文件型DB证实。③定向组74 passed（worker_e2e/business_flows/api/architecture）；ruff/mypy通过。 | 证明领域BusinessFlow可经真实worker端到端完成；**未实施**并行/部分失败/换计划的领域用例扩展、流程UI入口 |
 | EV126 | I6b-04领域流程部分失败保留定向证据：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径） | ①`test_business_flow_worker_e2e.py` 2 passed：成功路径两步均succeeded；`read_asset`指向不存在asset时实例failed，而`list_assets`保持succeeded（部分成功不被回滚）。②定向组74 passed（worker_e2e/business_flows/architecture）；ruff/mypy通过。 | 证明领域流程部分失败如实保留已完成步骤；**未实施**领域级换计划用例、流程UI入口 |
+| EV127 | I6b-05领域流程换计划定向证据：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径） | ①`test_business_flow_worker_e2e.py` 3 passed：成功路径、部分失败（list_assets保留succeeded）、换计划（失败实例终态后追加新计划，新实例经worker推进至succeeded）。②定向组75 passed（worker_e2e/business_flows/architecture）；ruff/mypy通过。 | 证明领域流程失败后可经新计划重建并完成；**未实施**流程UI入口 |
 
 ## 需求与测试分层（设计映射，不是执行结果）
 
