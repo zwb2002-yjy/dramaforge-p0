@@ -62,12 +62,9 @@ class ExportService:
         format: str = "timeline_json",
         idempotency_key: str | None = None,
     ) -> tuple[Export, bool]:
-        if format in RENDER_FORMATS:
-            raise ValidationAppError(
-                "this export needs a bound render run before it can be created",
-                details={"code": "EXPORT_RENDER_REQUIRED", "format": format},
-            )
-        if format not in SNAPSHOT_FORMATS:
+        # A media format is a delivery intent: it still only freezes the version,
+        # and it stays undeliverable until a render binds its artifact.
+        if format not in SNAPSHOT_FORMATS | RENDER_FORMATS:
             raise ValidationAppError(
                 "unsupported export format",
                 details={"code": "EXPORT_FORMAT_UNSUPPORTED", "format": format},

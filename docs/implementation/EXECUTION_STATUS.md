@@ -2575,6 +2575,17 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
   `bytes=999999-`→416 的 `Content-Range` 断言）；`test_public_assets.py` 既有 Range/HEAD 用例全绿；
   内容/交付组 **24 passed**；`ruff check app tests` 通过、`mypy app` 408 文件通过。
 - **下一步**：逐集批量渲染编排；随后 I9 阶段终点跑 Full（需空闲宿主）。
+
+### I9-02g 已实施：媒体格式导出意图（EV165）
+
+- `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
+  同样只冻结会话版本与 hash（`format` 按请求记录），`result_artifact_id` 保持为空；
+  `delivery_artifact` 继续以 `EXPORT_NOT_DELIVERABLE` 拒绝“未渲染就下载”。未知格式仍
+  `EXPORT_FORMAT_UNSUPPORTED`。渲染完成后同一导出被置 `completed` 并绑定渲染产物（EV163）。
+- 这样“导出意图”与“交付事实”分离：可以要求一个 MP4，但在渲染绑定前不会被当成已交付。
+- 证据：`test_export_snapshot.py` **7 passed**（`format=mp4` 创建成功、下载前被拒、`pdf` 仍拒绝；
+  原“mp4 一律拒绝”用例改为只覆盖未知格式与未绑定 clip），导出/渲染/编辑 API **20 passed**；
+  `ruff check app tests` 通过、`mypy app` 408 文件通过。
 - **已修（I9-02b，EV160）**：`exports.episode_id` 外键由 `ON DELETE SET NULL` 改为
   `ON DELETE RESTRICT`（迁移 `20261119_0123`，downgrade 回 SET NULL）。隔离 PG `editor_0123` 实测：
   有导出的集执行 `DELETE FROM episodes` 被 `fk_exports_episode` 拒绝、导出行仍在；`alembic check`

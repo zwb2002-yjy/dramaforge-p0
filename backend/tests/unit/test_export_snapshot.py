@@ -286,18 +286,51 @@ async def test_delivery_download_rejects_another_projects_export(
 
 
 @pytest.mark.asyncio
-async def test_render_formats_and_unbound_clips_are_refused(session: AsyncSession) -> None:
+async def test_media_format_export_stays_undeliverable_until_rendered(
+    session: AsyncSession,
+) -> None:
+    from app.api.v1.editing import download_export_content
+
     project, user, _shot_row, _artifact, saved = await _saved_session(session)
     service = ExportService(session)
+    export, created = await service.create_session_export(
+        project_id=project.id,
+        session_id=saved.id,
+        requested_by=user.id,
+        format="mp4",
+        idempotency_key=f"export-{uuid4().hex}",
+    )
+    await session.commit()
+    assert created is True
+    # The receipt is created, but it is a request for media, not media yet.
+    assert export.format == "mp4"
+    assert export.result_artifact_id is None
+    with pytest.raises(ValidationAppError) as pending:
+        await download_export_content(
+            project_id=project.id,
+            export_id=export.id,
+            request=_request(),
+            user=user,
+            session=session,
+        )
+    assert pending.value.details["code"] == "EXPORT_NOT_DELIVERABLE"
 
-    with pytest.raises(ValidationAppError) as render:
+    with pytest.raises(ValidationAppError) as unsupported:
         await service.create_session_export(
             project_id=project.id,
             session_id=saved.id,
             requested_by=user.id,
-            format="mp4",
+            format="pdf",
         )
-    assert render.value.details["code"] == "EXPORT_RENDER_REQUIRED"
+    assert unsupported.value.details["code"] == "EXPORT_FORMAT_UNSUPPORTED"
+
+
+@pytest.mark.asyncio
+async def test_unsupported_formats_and_unbound_clips_are_refused(
+    session: AsyncSession,
+) -> None:
+    project, user, _shot_row, _artifact, saved = await _saved_session(session)
+    service = ExportService(session)
 
     with pytest.raises(ValidationAppError) as unsupported:
         await service.create_session_export(
