@@ -136,6 +136,7 @@ test("Prompt @Assets persist, rename and delete through the existing binding and
   expect(plans[0].references).toEqual([
     {
       binding_id: bindingId,
+      source: "private",
       purpose: "identity",
       asset_version_id: "version-1",
       artifact_id: artifactId,

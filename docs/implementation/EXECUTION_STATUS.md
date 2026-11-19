@@ -1322,4 +1322,7 @@ I5阶段Full待阶段终点。
   在负载下第二次`process_director_wakeup`返回False——根因是子进程被杀后其PG后端仍短暂持有行锁，
   `FOR UPDATE SKIP LOCKED`跳过；单文件复跑3 passed。已把该断言改为在生产扫描窗口内有限重试（不改变
   产品逻辑，仍要求最终True），定向通过。
+- Full `df-quality-i5-06`**FAIL**：后端全绿；前端E2E `asset-mentions-g3`的
+  `plans[0].references`深比较未含新增`source`字段（契约变更未同步E2E期望）；重建镜像后单文件复跑1 passed，
+  已补`source:"private"`。
 - 复跑无过滤Full见下条；通过后才宣布I5退出。
