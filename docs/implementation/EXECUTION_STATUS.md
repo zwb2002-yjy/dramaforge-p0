@@ -2049,3 +2049,15 @@ I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖�
 
 全量`npx vitest run`首轮763 passed/1 failed：`SceneWorkspace.test.tsx`的`/voice-options` mock仍是EV98之前的旧响应形状，`fetchVoiceOptions`按新契约判为非法、音色选择被禁用。把该mock更新为`{status,binding_id,model_id,provider_type,default_voice,notice,voices}`后全量**764 passed**（162.46s）。
 结论：定向选择会漏掉跨切片的陈旧夹具，阶段内应周期性跑一次全量前端套件（本轮已做）；Docker Full Gate仍留待正式CI/I10候选。
+
+## Full候选验证（2026-11-19，EV133，未通过）
+
+- i8a-03：backend✅；frontend❌——`story-proposal`未mock新增的`/creative-direction`读、`navigation-simplification`
+  仍按3个combobox断言（新媒体配置区使之为6）。已修两个E2E夹具。
+- i8a-04：backend✅（PG integration 201 passed；修复final-film fixture全局catalog行重复插入）、
+  media-resource✅、auth-gateway✅；frontend❌——`navigation-convergence A16`点击30s超时、
+  `workbench-resource` p95 396ms>200ms；同代码在i8a-03通过，判定为宿主CPU争用导致的E2E不稳定。
+- 单独复跑：litellm-integration **35 passed**（`aiohttp`缺失修复：edge-tts移除后需显式声明dev依赖）、
+  institution browser **5 passed**。
+- 结论：未取得完整Full PASS，不声称I8a阶段Full；后端/媒体/网关/litellm/机构栈已验证。前端E2E需在
+  空闲宿主上重跑该阶段（或降低并行度）后再收口。
