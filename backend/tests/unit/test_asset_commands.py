@@ -174,18 +174,69 @@ async def world(session: AsyncSession):
     )
     session.add(binding)
     await session.flush()
-    session.add(
-        ProductionModelProfile(
-            workspace_id=workspace.id,
-            project_id=project.id,
-            name="default",
-            version=1,
-            bindings={},
-            image_model_binding_id=binding.id,
-            created_by=user.id,
-            updated_by=user.id,
-        )
+    profile = ProductionModelProfile(
+        workspace_id=workspace.id,
+        project_id=project.id,
+        name="default",
+        version=1,
+        bindings={},
+        image_model_binding_id=binding.id,
+        created_by=user.id,
+        updated_by=user.id,
     )
+    session.add(profile)
+    voice_entry = ModelCatalogEntry(
+        provider_type="agnes",
+        protocol_profile="openai_speech_v1",
+        model_id="asset-voice",
+        model_revision="v1",
+        display_name="Asset Voice",
+        media_kind="voice",
+        capability_manifest_json={"manifest_version": "1", "media_kind": "voice"},
+        option_schema_json={
+            "voices": [{"id": "v1", "label": "Voice", "locale": "zh-CN"}],
+            "properties": {"voice_id": {}},
+        },
+        documented_at=date(2026, 8, 10),
+        contract_manifest_hash="e" * 64,
+    )
+    session.add(voice_entry)
+    await session.flush()
+    voice_binding = ProviderModelBinding(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        media_type="voice",
+        model_id="asset-voice",
+        purpose="voice",
+        enabled=True,
+        catalog_entry_id=voice_entry.id,
+        capability_manifest_hash=voice_entry.contract_manifest_hash,
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(voice_binding)
+    await session.flush()
+    profile.voice_model_binding_id = voice_binding.id
+    profile.voice_options = {"voice_id": "v1"}
+    await session.flush()
+    audio = Asset(project_id=project.id, kind="audio", name="Narration", version=1)
+    session.add(audio)
+    await session.flush()
+    audio_version = AssetVersion(
+        project_id=project.id,
+        asset_id=audio.id,
+        version_number=1,
+        kind="audio",
+        name="Narration",
+        description="",
+        metadata_json={},
+        status="candidate",
+        created_by=user.id,
+    )
+    session.add(audio_version)
+    await session.flush()
+    audio.current_version_id = audio_version.id
+    await session.flush()
     asset = Asset(project_id=project.id, kind="character", name="Hero", version=1)
     session.add(asset)
     await session.flush()
@@ -204,7 +255,14 @@ async def world(session: AsyncSession):
     await session.flush()
     asset.current_version_id = version.id
     await session.flush()
-    return {"user": user, "project": project, "asset": asset, "binding": binding}
+    return {
+        "user": user,
+        "project": project,
+        "asset": asset,
+        "audio": audio,
+        "binding": binding,
+        "voice_binding": voice_binding,
+    }
 
 
 def _plan_body() -> AssetImagePlanBody:
@@ -491,3 +549,85 @@ async def test_asset_batch_previews_and_dispatches_each_item(session, world):
     assert blocked.blocked_count == 2
     assert {item.reason_code for item in blocked.items} == {"ASSET_VERSION_CONFLICT"}
     assert stale.batch_fingerprint != blocked.batch_fingerprint
+
+
+def _silence_wav() -> bytes:
+    import io
+    import wave
+
+    target = io.BytesIO()
+    with wave.open(target, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes(bytes(2400))
+    return target.getvalue()
+
+
+async def test_asset_voice_command_queues_and_completes(session, world, monkeypatch):
+    from app.execution.models import NodeRun
+    from app.execution.product_path import execute_media_node_run
+    from app.production.asset_commands import (
+        AssetVoiceExecutionBody,
+        submit_asset_voice_execution,
+    )
+    from app.production.asset_plan import AssetVoicePlanBody, build_asset_voice_plan
+    from app.storage.minio_store import reset_object_store_for_tests
+
+    plan_body = AssetVoicePlanBody(expected_asset_version=1, text="古桥始建于明代。")
+    plan = await build_asset_voice_plan(
+        session, project=world["project"], asset_id=world["audio"].id, body=plan_body
+    )
+    body = AssetVoiceExecutionBody(
+        **plan_body.model_dump(), plan_fingerprint=plan.plan_fingerprint
+    )
+    receipt = await submit_asset_voice_execution(
+        session,
+        actor=world["user"],
+        project_id=world["project"].id,
+        asset_id=world["audio"].id,
+        body=body,
+        idempotency_key="voice:one",
+    )
+    run = await session.get(NodeRun, receipt.node_run_id)
+    assert run is not None
+    assert run.input_snapshot["voice_execution"]["engine"] == "voice_model"
+    assert run.input_snapshot["voice_execution"]["binding_id"] == str(
+        world["voice_binding"].id
+    )
+    assert run.input_snapshot["asset_id"] == str(world["audio"].id)
+
+    replay = await submit_asset_voice_execution(
+        session,
+        actor=world["user"],
+        project_id=world["project"].id,
+        asset_id=world["audio"].id,
+        body=body,
+        idempotency_key="voice:one",
+    )
+    assert replay.node_run_id == receipt.node_run_id
+
+    class FakeVoiceAdapter:
+        def __init__(self) -> None:
+            self.blobs: dict[str, bytes] = {}
+
+        async def create(self, request):
+            self.blobs["voice-1"] = _silence_wav()
+            return {"remote_task_id": "voice-1", "status": "succeeded"}
+
+        async def poll(self, remote_task_id):
+            return {"status": "succeeded" if remote_task_id in self.blobs else "failed"}
+
+    adapter = FakeVoiceAdapter()
+
+    async def fake_adapter(*args, **kwargs):
+        return adapter
+
+    monkeypatch.setattr("app.execution.voice_path.get_voice_adapter", fake_adapter)
+    await execute_media_node_run(
+        session, node_run_id=receipt.node_run_id, store=reset_object_store_for_tests()
+    )
+    await session.commit()
+    await session.refresh(run)
+    assert run.status == "completed", (run.status, run.error_code, run.error_summary)
+    assert run.result_artifact_id is not None

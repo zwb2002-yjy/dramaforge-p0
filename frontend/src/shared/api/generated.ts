@@ -56,10 +56,10 @@ export interface paths {
         get: operations["read_asset_executions_api_v1_projects__project_id__assets__asset_id__executions_get"];
         put?: never;
         /**
-         * Submit Asset Image Execution
+         * Submit Asset Execution Route
          * @description One explicit asset command; the original receipt is returned on replay.
          */
-        post: operations["submit_asset_image_execution_api_v1_projects__project_id__assets__asset_id__executions_post"];
+        post: operations["submit_asset_execution_route_api_v1_projects__project_id__assets__asset_id__executions_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4536,6 +4536,15 @@ export interface components {
             reference_role: string;
             public_display?: components["schemas"]["PublicDisplayBody"] | null;
         };
+        /** AssetImageExecutionInput */
+        AssetImageExecutionInput: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            stage: "asset_image";
+            request: components["schemas"]["AssetExecutionBody"];
+        };
         /** AssetImagePlanBody */
         AssetImagePlanBody: {
             /** Expected Asset Version */
@@ -4759,6 +4768,39 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * AssetVoiceExecutionBody
+         * @description One explicit asset voice command: the previewed plan plus its fingerprint.
+         */
+        AssetVoiceExecutionBody: {
+            /** Expected Asset Version */
+            expected_asset_version: number;
+            /** Text */
+            text: string;
+            /** Requested Binding Id */
+            requested_binding_id?: string | null;
+            /** Voice Options */
+            voice_options?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Voice Options For Binding Id */
+            voice_options_for_binding_id?: string | null;
+            /** Source Context Refs */
+            source_context_refs?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Plan Fingerprint */
+            plan_fingerprint: string;
+        };
+        /** AssetVoiceExecutionInput */
+        AssetVoiceExecutionInput: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            stage: "asset_voice";
+            request: components["schemas"]["AssetVoiceExecutionBody"];
         };
         /** AssetVoicePlanBody */
         AssetVoicePlanBody: {
@@ -12442,7 +12484,7 @@ export interface operations {
             };
         };
     };
-    submit_asset_image_execution_api_v1_projects__project_id__assets__asset_id__executions_post: {
+    submit_asset_execution_route_api_v1_projects__project_id__assets__asset_id__executions_post: {
         parameters: {
             query?: {
                 workspace_id?: string | null;
@@ -12463,7 +12505,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AssetExecutionBody"];
+                "application/json": components["schemas"]["AssetImageExecutionInput"] | components["schemas"]["AssetVoiceExecutionInput"];
             };
         };
         responses: {

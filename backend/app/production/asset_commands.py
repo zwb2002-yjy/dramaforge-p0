@@ -14,7 +14,7 @@ import json
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +23,12 @@ from app.access.projects import ProjectService
 from app.assets.models import Asset
 from app.contracts.production_commands import ExecutionReceipt
 from app.execution.models import NodeRun
-from app.production.asset_plan import AssetExecutionBody, build_asset_image_plan
+from app.production.asset_plan import (
+    AssetExecutionBody,
+    AssetVoicePlanBody,
+    build_asset_image_plan,
+    build_asset_voice_plan,
+)
 from app.production.execution_plan import fingerprint_plan
 from app.production.models import GraphVersion, ProductionGraph
 from app.production.service import GraphService
@@ -167,7 +172,10 @@ async def submit_asset_execution(
             template_key=ASSET_IMAGE_TEMPLATE_KEY,
             created_by=actor.id,
             definition={
-                "nodes": [{"key": _ASSET_NODE_KEY, "type": "keyframe"}],
+                "nodes": [
+                    {"key": _ASSET_NODE_KEY, "type": "keyframe"},
+                    {"key": "voice", "type": "voice"},
+                ],
                 "edges": [],
             },
         )
@@ -253,6 +261,8 @@ async def _graph_id(session: AsyncSession, run: NodeRun) -> UUID:
 
 __all__ = [
     "ASSET_IMAGE_TEMPLATE_KEY",
+    "AssetVoiceExecutionBody",
+    "submit_asset_voice_execution",
     "AssetExecutionRead",
     "list_asset_executions",
     "submit_asset_execution",
@@ -307,3 +317,156 @@ async def list_asset_executions(
         )
         for run, graph_id in rows
     ]
+
+class AssetVoiceExecutionBody(AssetVoicePlanBody):
+    """One explicit asset voice command: the previewed plan plus its fingerprint."""
+
+    plan_fingerprint: str = Field(min_length=64, max_length=64)
+
+
+async def submit_asset_voice_execution(
+    session: AsyncSession,
+    *,
+    actor: User,
+    project_id: UUID,
+    asset_id: UUID,
+    body: AssetVoiceExecutionBody,
+    idempotency_key: str | None = None,
+) -> ExecutionReceipt:
+    from app.access.egress_admission import EgressAdmission
+    from app.providers.voice_binding import resolve_voice_binding
+    from app.providers.voice_config import freeze_voice_execution
+
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=actor
+    )
+    decision = await EgressAdmission(session).decide(
+        project, purpose="voice_generation", processing_location="external"
+    )
+    if not decision.allowed:
+        raise ValidationAppError(
+            "项目外发策略不允许本次生成",
+            details={"code": decision.reason_code},
+        )
+    service = WorkbenchExecutionService(session, user_id=actor.id)
+    await service.lock_command_scope(project_id=project.id)
+    key = _asset_idempotency_key(
+        asset_id=asset_id, override=idempotency_key, plan_fingerprint=body.plan_fingerprint
+    ).replace("asset-command:", "asset-voice:", 1)
+    existing = await _find_receipt(
+        session,
+        project_id=project.id,
+        asset_id=asset_id,
+        key=key,
+        plan_fingerprint=body.plan_fingerprint,
+    )
+    if existing is not None:
+        return ExecutionReceipt(
+            node_run_id=existing.id,
+            graph_id=await _graph_id(session, existing),
+            graph_version_id=existing.graph_version_id,
+            status=existing.status,
+            plan_fingerprint=body.plan_fingerprint,
+        )
+    asset = await session.get(
+        Asset, asset_id, with_for_update=True, populate_existing=True
+    )
+    if asset is None or asset.project_id != project.id:
+        raise NotFoundError("Asset not found")
+    if asset.version != body.expected_asset_version:
+        raise ConflictError(
+            "asset changed since plan preview",
+            details={"code": "ASSET_VERSION_CONFLICT", "current": asset.version},
+        )
+    plan = await build_asset_voice_plan(
+        session, project=project, asset_id=asset.id, body=body
+    )
+    if plan.plan_fingerprint != body.plan_fingerprint:
+        raise ValidationAppError(
+            "plan fingerprint mismatch: inputs changed since preview",
+            details={"code": "PLAN_FINGERPRINT_MISMATCH"},
+        )
+    status = await resolve_voice_binding(session, project=project)
+    spec = freeze_voice_execution(
+        {"voice": {"voice_id": plan.voice_options.get("voice_id")}},
+        binding=status,
+    )
+    graphs = GraphService(session)
+    graph = await session.scalar(
+        select(ProductionGraph).where(
+            ProductionGraph.project_id == project.id,
+            ProductionGraph.scope_type == "asset",
+            ProductionGraph.scope_entity_id == asset.id,
+        )
+    )
+    if graph is None:
+        graph = await graphs.create_graph(
+            project_id=project.id,
+            scope_type="asset",
+            scope_entity_id=asset.id,
+            template_key=ASSET_IMAGE_TEMPLATE_KEY,
+            created_by=actor.id,
+            definition={
+                "nodes": [
+                    {"key": _ASSET_NODE_KEY, "type": "keyframe"},
+                    {"key": "voice", "type": "voice"},
+                ],
+                "edges": [],
+            },
+        )
+    assert graph.current_version_id is not None
+    materialized = await graphs.materialize_definition(version_id=graph.current_version_id)
+    version = materialized.version
+    if version.status == GraphStatus.DRAFT.value:
+        version = await graphs.publish(version_id=version.id, published_by=actor.id)
+    node = materialized.nodes["voice"]
+    previous_run = await session.scalar(
+        select(NodeRun)
+        .where(NodeRun.graph_node_id == node.id)
+        .order_by(NodeRun.attempt_no.desc())
+        .limit(1)
+    )
+    attempt_no = (previous_run.attempt_no if previous_run is not None else 0) + 1
+    snapshot: dict[str, object] = {
+        "voice_execution": spec.model_dump(mode="json"),
+        "workbench_request_hash": fingerprint_plan(body.model_dump(mode="json")),
+        "plan_fingerprint": plan.plan_fingerprint,
+        "stage": "voice",
+        "prompt": plan.text,
+        "project_id": str(project.id),
+        "asset_id": str(asset.id),
+        "target": {"kind": "asset", "id": str(asset.id)},
+        "node_key": "voice",
+        "professional_unified": True,
+        "execution_path": "unified-v1",
+        "model_binding_id": str(plan.binding_id),
+    }
+    run = NodeRun(
+        project_id=project.id,
+        graph_version_id=version.id,
+        graph_node_id=node.id,
+        attempt_no=attempt_no,
+        idempotency_key=key,
+        input_hash=_input_hash(snapshot),
+        status="queued",
+        input_snapshot=snapshot,
+        created_by=actor.id,
+    )
+    session.add(run)
+    await session.flush()
+    from app.contracts.domain_events import ExecutionAccepted
+    from app.production.application.events import append_production_notice
+
+    await append_production_notice(
+        session,
+        project_id=project.id,
+        actor_id=actor.id,
+        notice=ExecutionAccepted(asset_id=asset.id, node_run_id=run.id),
+    )
+    return ExecutionReceipt(
+        node_run_id=run.id,
+        graph_id=graph.id,
+        graph_version_id=version.id,
+        status=run.status,
+        plan_fingerprint=plan.plan_fingerprint,
+    )

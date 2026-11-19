@@ -1728,3 +1728,18 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
   定向组68 passed；generated.ts 390 schema、api:authority/typecheck通过。
 
 未完成且不冒称：资产语音命令提交（voice run）、资产视频计划、媒体安全合同扩展、I8a收口。
+
+## I8a-03l 资产语音命令与语音Worker（2026-11-19，EV112）
+
+- `submit_asset_voice_execution`：owner/外发准入(`voice_generation`)/项目锁/幂等回执；校验audio版本与计划
+  fingerprint；解析项目语音binding并冻结`voice_execution`；资产Graph同时声明`image`与`voice`节点，
+  只入队一个`voice` NodeRun；同key重放原回执；`ExecutionAccepted`同事务通知。
+- `POST /assets/{a}/executions`改为`{stage:"asset_image"|"asset_voice",request}`判别联合。
+- `SpeechHttpAdapter.create`兼容voice路径的`prompt`键。
+
+已测（定向）：
+- `test_asset_commands.py` 6 passed：语音命令入队（快照voice_execution=voice_model+binding身份）、
+  同key重放、`execute_media_node_run`经fake voice adapter完成并写audio Artifact。
+- 定向组74 passed；generated.ts 393 schema、api:authority通过。
+
+未完成且不冒称：资产视频计划/命令、长文本分段与拼接、媒体安全合同复核、I8a收口。

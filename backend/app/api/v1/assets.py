@@ -29,8 +29,10 @@ from app.assets.version_service import AssetVersionService
 from app.contracts.production_commands import ExecutionReceipt
 from app.production.asset_commands import (
     AssetExecutionRead,
+    AssetVoiceExecutionBody,
     list_asset_executions,
     submit_asset_execution,
+    submit_asset_voice_execution,
 )
 from app.production.asset_plan import (
     AssetExecutionBody,
@@ -58,6 +60,22 @@ class AssetVoicePlanInput(BaseModel):
 
 AssetPlanInput = Annotated[
     AssetImagePlanInput | AssetVoicePlanInput,
+    Field(discriminator="stage"),
+]
+
+
+class AssetImageExecutionInput(BaseModel):
+    stage: Literal["asset_image"]
+    request: AssetExecutionBody
+
+
+class AssetVoiceExecutionInput(BaseModel):
+    stage: Literal["asset_voice"]
+    request: AssetVoiceExecutionBody
+
+
+AssetExecutionInput = Annotated[
+    AssetImageExecutionInput | AssetVoiceExecutionInput,
     Field(discriminator="stage"),
 ]
 
@@ -251,22 +269,31 @@ async def plan_asset_media(
     "/projects/{project_id}/assets/{asset_id}/executions",
     response_model=ExecutionReceipt,
 )
-async def submit_asset_image_execution(
+async def submit_asset_execution_route(
     project_id: UUID,
     asset_id: UUID,
-    body: AssetExecutionBody,
+    body: AssetExecutionInput,
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> ExecutionReceipt:
     """One explicit asset command; the original receipt is returned on replay."""
+    if isinstance(body, AssetVoiceExecutionInput):
+        return await submit_asset_voice_execution(
+            session,
+            actor=user,
+            project_id=project_id,
+            asset_id=asset_id,
+            body=body.request,
+            idempotency_key=idempotency_key,
+        )
     return await submit_asset_execution(
         session,
         actor=user,
         project_id=project_id,
         asset_id=asset_id,
-        body=body,
+        body=body.request,
         idempotency_key=idempotency_key,
     )
 

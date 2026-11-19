@@ -51,7 +51,7 @@ class SpeechHttpAdapter:
         )
 
     async def create(self, request: dict[str, Any]) -> dict[str, Any]:
-        text = request.get("text")
+        text = request.get("text") or request.get("prompt")
         if not isinstance(text, str) or not text.strip():
             raise ValidationAppError(
                 "speech request needs non-empty text",
