@@ -2345,6 +2345,19 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 （backend 单测+PG+迁移、frontend vitest+typecheck+E2E、媒体/网关/LiteLLM/机构真实栈）；结果未出前
 不宣布任何阶段 Full。
 
+### `df-quality-i8b-01` 结果：FAIL（2026-11-19，EV150）
+
+- 镜像：backend `sha256:847a0d4f77188886e785317d1797cb13aa3e98878db577437e27af867e2adec4`、
+  frontend `sha256:9958a9d328989ced22763cae39c6c41789192774061a735a168ac030a107e95e`。
+- 已通过：build-backend/build-frontend/dependencies-up、静态门、架构门、Provider权威、ruff（`All checks passed`）。
+- 失败：`backend-quality` 在 **2719 passed / 1 failed** 后退出——
+  `test_provider_recovery.py::test_dispatcher_recovery_bypasses_fifty_jobs_and_a_busy_single_heavy_slot`。
+  根因是负载下等待“120 次 admission 全部完成”的 `asyncio.wait_for(..., timeout=5)` 超时（traceback 为
+  `Event.wait` 被取消），属**测试时限**过紧，不是产品缺陷。已把该等待放宽到 60s 并注明理由，
+  **未放宽任何断言**；该文件复跑 14 passed。
+- 因此本次 **frontend-quality 未执行**；为判断前端真实状态，另用同一镜像单跑了该阶段（见下条）。
+- 结论：仍**不宣布** Full 通过；修好时限后需要重跑完整 Full 才能收口。
+
 ## I9 计划（下一阶段，未开工）
 
 依据 [DATA_MODEL](../DATA_MODEL.md) 的 timeline schema2 合同与 [MASTER_EXECUTION_PLAN](MASTER_EXECUTION_PLAN.md) 的 I9-01/02：

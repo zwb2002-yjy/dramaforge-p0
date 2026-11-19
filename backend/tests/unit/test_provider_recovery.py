@@ -544,7 +544,11 @@ async def test_dispatcher_recovery_bypasses_fifty_jobs_and_a_busy_single_heavy_s
         assert not media.done()
         resident = asyncio.create_task(dispatcher.run_forever())
         await asyncio.wait_for(dispatch_started.wait(), timeout=2)
-        await asyncio.wait_for(tail_admitted.wait(), timeout=5)
+        # Observing 120 admissions in bounded batches is asynchronous progress,
+        # not provider latency: on a loaded host the event loop can need far more
+        # than five seconds, and a short deadline fails the whole gate for a
+        # reason the assertion below does not care about.
+        await asyncio.wait_for(tail_admitted.wait(), timeout=60)
         assert not media.done()
         assert worker.job_counter == worker.max_jobs == 1
         assert all(recovery.queue.admitted[key] == value for key, value in prefix.items())
