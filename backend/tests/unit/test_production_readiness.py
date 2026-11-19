@@ -133,3 +133,51 @@ async def test_missing_story_or_media_blocks_readiness(session: AsyncSession) ->
     structure = next(item for item in partial.items if item.key == "story_structure")
     assert structure.status == "partial"
     assert "story_structure" in partial.blockers
+
+
+@pytest.mark.asyncio
+async def test_serial_comic_with_two_episodes_is_ready(session: AsyncSession) -> None:
+    project, user = await _project(session, work_type="serial_comic", planned=2)
+    await _configure_media(session, project, user)
+    for episode_number in (1, 2):
+        episode = Episode(
+            project_id=project.id,
+            episode_number=episode_number,
+            title=f"E{episode_number}",
+            synopsis="",
+        )
+        session.add(episode)
+        await session.flush()
+        scene = Scene(
+            episode_id=episode.id,
+            scene_number=1,
+            location_name="Studio",
+            time_of_day="day",
+            synopsis="",
+        )
+        session.add(scene)
+        await session.flush()
+        session.add(
+            Shot(
+                project_id=project.id,
+                scene_id=scene.id,
+                shot_number=1,
+                sort_order=1,
+                shot_type="wide",
+                camera_move="static",
+                status="draft",
+                visual_description="",
+                dialogue="",
+                duration_seconds=5,
+                image_prompt="",
+                video_prompt="",
+            )
+        )
+    await session.flush()
+    readiness = await read_production_readiness(session, project_id=project.id)
+    assert readiness.episode_count == 2
+    assert readiness.scene_count == 2
+    assert readiness.shot_count == 2
+    structure = next(item for item in readiness.items if item.key == "story_structure")
+    assert structure.status == "ready"
+    assert readiness.ready is True

@@ -2109,3 +2109,15 @@ I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖�
   多集仅1集→story_structure partial并阻断）；定向组59 passed；generated.ts 407 schema。
 
 未完成且不冒称：I8b其余（三类作品端到端生产与两集共享/连续性验收）。
+
+## I8b-01b 两集就绪验证（2026-11-19，EV138）
+
+- 就绪模型新增多集用例：`serial_comic`计划2集、实际2集（各1场景1镜头）→ `episode_count=2`、
+  `scene_count=2`、`shot_count=2`，`story_structure`为ready且`ready=true`。
+- 资产为项目作用域，跨集共享由同一`asset_version_references`行体现；本轮只验证就绪计数与结构规则，
+  跨集参考解析的端到端仍待I8b后续切片。
+
+已测（定向）：
+- `test_production_readiness.py` 3 passed（单集、两集、缺失阻断）；ruff通过。
+
+未完成且不冒称：跨集共享资产在镜头计划/生成中的端到端验收、三类作品完整生产编排。
