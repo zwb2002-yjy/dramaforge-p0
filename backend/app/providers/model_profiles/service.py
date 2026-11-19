@@ -26,6 +26,7 @@ from app.providers.model_profiles.errors import (
     profile_version_conflict,
 )
 from app.providers.model_profiles.models import (
+    MediaConfig,
     ModelProfileSnapshot,
     ModelSlotBinding,
     ResolvedModelBinding,
@@ -43,6 +44,7 @@ from app.providers.model_profiles.slots import (
     ModelSlot,
     slot_definition,
 )
+from app.providers.models import ProviderModelBinding
 from app.providers.registry import ModelRegistry, RegisteredModel
 from app.providers.validator import validate_parameter
 from app.shared.errors import ValidationAppError
@@ -231,6 +233,109 @@ class ProductionModelProfileService:
         profile = await self.get_project_profile(project_id=project.id)
         if profile is None:
             profile = await self.get_workspace_default(workspace_id=project.workspace_id)
+        return profile
+
+    async def media_config(self, *, profile_id: UUID) -> MediaConfig:
+        profile = await self.get(profile_id=profile_id)
+        return self._media_config(profile)
+
+    def _media_config(self, profile: ProductionModelProfile) -> MediaConfig:
+        return MediaConfig(
+            media_config_version=profile.media_config_version,
+            image_model_binding_id=profile.image_model_binding_id,
+            video_model_binding_id=profile.video_model_binding_id,
+            voice_model_binding_id=profile.voice_model_binding_id,
+            voice_options=dict(profile.voice_options),
+        )
+
+    async def _media_binding(
+        self,
+        workspace_id: UUID,
+        binding_id: UUID,
+        *,
+        media_type: str,
+        purpose: str,
+    ) -> ProviderModelBinding:
+        binding = await self._session.get(ProviderModelBinding, binding_id)
+        if binding is None or binding.workspace_id != workspace_id:
+            raise ValidationAppError(
+                "media binding does not belong to this workspace",
+                details={"code": "MODEL_MEDIA_BINDING_SCOPE"},
+            )
+        if binding.media_type != media_type or binding.purpose != purpose:
+            raise ValidationAppError(
+                "media binding does not match its media type and purpose",
+                details={
+                    "code": "MODEL_MEDIA_BINDING_KIND",
+                    "expected_media_type": media_type,
+                    "expected_purpose": purpose,
+                },
+            )
+        return binding
+
+    async def update_media_config(
+        self,
+        *,
+        profile_id: UUID,
+        actor_id: UUID,
+        expected_version: int,
+        image_model_binding_id: UUID | None = None,
+        video_model_binding_id: UUID | None = None,
+        voice_model_binding_id: UUID | None = None,
+        voice_options: dict[str, object] | None = None,
+    ) -> ProductionModelProfile:
+        """One CAS decision covering the three media defaults and voice options."""
+        profile = await self._get_for_update(profile_id=profile_id)
+        if profile.version != expected_version:
+            raise profile_version_conflict(expected_version, profile.version)
+        options = dict(voice_options or {})
+        if profile.project_id is None:
+            if (
+                image_model_binding_id is not None
+                or video_model_binding_id is not None
+                or voice_model_binding_id is not None
+                or options
+            ):
+                raise ValidationAppError(
+                    "workspace-level profiles cannot carry media defaults",
+                    details={"code": "MODEL_MEDIA_WORKSPACE_SCOPE"},
+                )
+        else:
+            if image_model_binding_id is not None:
+                await self._media_binding(
+                    profile.workspace_id,
+                    image_model_binding_id,
+                    media_type="image",
+                    purpose="keyframe",
+                )
+            if video_model_binding_id is not None:
+                await self._media_binding(
+                    profile.workspace_id,
+                    video_model_binding_id,
+                    media_type="video",
+                    purpose="video",
+                )
+            if voice_model_binding_id is not None:
+                await self._media_binding(
+                    profile.workspace_id,
+                    voice_model_binding_id,
+                    media_type="voice",
+                    purpose="voice",
+                )
+            if voice_model_binding_id is None and options:
+                raise ValidationAppError(
+                    "voice options require a voice model binding",
+                    details={"code": "MODEL_VOICE_OPTIONS_WITHOUT_BINDING"},
+                )
+        profile.image_model_binding_id = image_model_binding_id
+        profile.video_model_binding_id = video_model_binding_id
+        profile.voice_model_binding_id = voice_model_binding_id
+        profile.voice_options = options
+        profile.media_config_version = 2
+        profile.updated_by = actor_id
+        profile.version += 1
+        profile.updated_at = _now()
+        await self._session.flush()
         return profile
 
     # ------------------------------------------------------------------

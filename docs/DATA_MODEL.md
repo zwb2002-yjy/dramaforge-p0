@@ -2,7 +2,7 @@
 
 Status: current
 Date: 2026-11-18
-Alembic head: 20261118_0118（0118给artifact_reference_tokens新增publication_id/publication_item_id/public_asset_link_id/owner_user_id与四列同空/同非空CHECK、三个组合FK，并替换`app.artifact_reference_for_token`为含公共身份与实时资格检查的版本；0117给asset_versions新增creation_request_key/hash与CHECK/部分唯一索引；0116新增adoption_request_key/hash/adopted_asset_revision与CHECK/部分唯一索引；0115给shot_reference_bindings新增public_asset_link_id/publication_item_id与单源CHECK、公共链接组合FK、resolution_mode新增public_link；0114新增公共资产三表、AssetVersion两个公共base列与组合FK、asset_versions/asset_version_references候选键；0113新增独立知识四表、knowledge_entry_guard指针守卫、research/knowledge的search_text投影列与pg_trgm GIN索引；0112只新增queued research-analysis Turn的窄作用域扫描函数`app.pending_research_analysis_turns`；0111新增研究分析清单/调用证据/结果链接三表与ProjectFileRevision.current_analysis_id；0110新增研究结果/不可变修订/引用三表与current指针守卫，并给director_invocations补(id,project_id)候选键；0109为解析受理冻结处理器profile并加事件schema2部分唯一表达式索引，无新表；0108只新增BusinessFlow Worker扫描函数`app.pending_business_flow_contexts`；0107新增BusinessFlow实例/步骤/尝试三表、Turn→Attempt链接与NodeRun/批准命令候选键；0106新增/替换导演Worker的窄作用域SECURITY DEFINER扫描；此前0100–0105为项目意图、解析快照、MasterRun、外发策略/目的地、来源用途与引用准入；隔离质量库已验证升级/约束与0109升降级，当前本地运行库仍为20261113_0099）
+Alembic head: 20261118_0119（0119给production_model_profiles新增media_config_version/image/video/voice三个binding与voice_options、项目行三binding组合FK与workspace-level空媒体CHECK，旧行回填version=1；0118给artifact_reference_tokens新增公共身份四列与三个组合FK并替换token解析函数；0117给asset_versions新增creation_request_key/hash与CHECK/部分唯一索引；0116新增adoption_request_key/hash/adopted_asset_revision与CHECK/部分唯一索引；0115给shot_reference_bindings新增public_asset_link_id/publication_item_id与单源CHECK、公共链接组合FK、resolution_mode新增public_link；0114新增公共资产三表、AssetVersion两个公共base列与组合FK、asset_versions/asset_version_references候选键；0113新增独立知识四表、knowledge_entry_guard指针守卫、research/knowledge的search_text投影列与pg_trgm GIN索引；0112只新增queued research-analysis Turn的窄作用域扫描函数`app.pending_research_analysis_turns`；0111新增研究分析清单/调用证据/结果链接三表与ProjectFileRevision.current_analysis_id；0110新增研究结果/不可变修订/引用三表与current指针守卫，并给director_invocations补(id,project_id)候选键；0109为解析受理冻结处理器profile并加事件schema2部分唯一表达式索引，无新表；0108只新增BusinessFlow Worker扫描函数`app.pending_business_flow_contexts`；0107新增BusinessFlow实例/步骤/尝试三表、Turn→Attempt链接与NodeRun/批准命令候选键；0106新增/替换导演Worker的窄作用域SECURITY DEFINER扫描；此前0100–0105为项目意图、解析快照、MasterRun、外发策略/目的地、来源用途与引用准入；隔离质量库已验证升级/约束与0109升降级，当前本地运行库仍为20261113_0099）
 
 当前 Alembic 入口跨越 0084 前强制检查已存在的两张实验表和十张旧模型保障表，锁表后
 非空即阻断升级；事务回滚保留原数据和迁移版本。空库初始化中历史迁移生成的静态目录副本
@@ -10,7 +10,7 @@ Alembic head: 20261118_0118（0118给artifact_reference_tokens新增publication_
 也可在维护权限下运行 `scripts/audit_model_migration.py`：以 PostgreSQL READ ONLY
 事务核对 0084 涉及的两张实验表和十张旧模型保障表，非空时退出码 1，要求先归档并核验
 恢复。该命令不执行迁移、不删除数据、不把备份存在当作恢复通过；不改写已冻结的 0084。
-Revisions: 122（Git HEAD基线含103项；工作区新增0100–0118，容器内alembic heads确认唯一源码头；隔离质量库已验证升降级边界与无模型漂移，本地实例未升级）
+Revisions: 123（Git HEAD基线含103项；工作区新增0100–0119，容器内alembic heads确认唯一源码头；隔离质量库已验证升降级边界与无模型漂移，本地实例未升级）
 （入口见 [CURRENT.md](CURRENT.md)）
 
 ### 项目资料原件与提取
@@ -201,7 +201,7 @@ tag data before enforcing the canonical constraints.
 
 ## Schema invariants
 
-- Alembic has one worktree head: 20261118_0118 (verify with `alembic heads`; current local runtime remains 0099 until an explicit rollout).
+- Alembic has one worktree head: 20261118_0119 (verify with `alembic heads`; current local runtime remains 0099 until an explicit rollout).
 - Metadata registration is centralized in app/shared/model_registry.py.
 - ProviderOperation is NodeRun-owned only.
 - Identity reference resolution is explicit and version-pinned.

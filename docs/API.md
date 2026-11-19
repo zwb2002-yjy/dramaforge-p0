@@ -1204,6 +1204,15 @@ API-D06：legacy/new控制路由按冻结state版本、所有旧入口消费者�
 当前reference token仍是既有同项目生产链，egress.py只管SSRF/连接地址，不等于项目内容授权。
 目标须完整更新服务、RLS窄端口和所有引用消费者，不能仅加公共库页面或放宽project_id过滤。
 
+I8a-01a已实施D6项目媒体配置：`GET/PUT /workspaces/{w}/model-profiles/{p}/media-config`，
+`{expected_version,image_model_binding_id,video_model_binding_id,voice_model_binding_id,voice_options}`→
+`MediaConfigRead{media_config_version,三binding,voice_options}`；一行CAS覆盖三默认与语音选项，陈旧409
+`MODEL_PROFILE_VERSION_CONFLICT`；binding须同workspace且media_type/purpose匹配（image/keyframe、
+video/video、voice/voice），否则422 `MODEL_MEDIA_BINDING_KIND|MODEL_MEDIA_BINDING_SCOPE`；
+workspace-level profile不得携带媒体默认（422 `MODEL_MEDIA_WORKSPACE_SCOPE`）；无voice binding时voice_options
+必须为空（422 `MODEL_VOICE_OPTIONS_WITHOUT_BINDING`）；version=1旧配置经同一命令显式核对后置2。
+**未实施**：前端媒体配置组件与旧配置review_fingerprint核对入口（后续切片）。
+
 ### 采用与项目变体的唯一写入口
 
 继续复用以下原资产路径，不另建`public-assets/create-from-url`或“公共生成”运行链。

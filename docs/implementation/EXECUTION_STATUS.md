@@ -1347,3 +1347,25 @@ I5阶段Full待阶段终点。
 本轮以mock/固定媒体与真实PostgreSQL/HTTP链路证明机制。**未完成UI细节**：公共资产库独立浏览页面
 （当前提供资产API与项目引用/预览链路，未建独立页面）；记入后续切片，不改变已验收的数据/服务/HTTP合同。
 I5按机制验收退出，允许进入I8a。
+
+## I8a-01a D6项目媒体配置（2026-11-19，EV94）
+
+进入I8a：把项目媒体默认收敛到既有项目唯一profile行，旧配置先标记待核对。
+
+已实施：
+- **迁移0119**：`production_model_profiles`新增`media_config_version`（1/2，旧行回填1）、
+  `image/video/voice_model_binding_id`、`voice_options`；项目行三binding组合FK到
+  `provider_model_bindings(workspace_id,id)`（补候选键）、部分索引；workspace-level行必须三空且
+  voice_options={}。
+- 服务：`media_config`读取、`update_media_config`一行CAS覆盖三默认+语音选项（陈旧409），binding须同
+  workspace且media_type/purpose匹配，workspace-level拒绝媒体默认，无voice binding拒绝voice_options；
+  version=1经同一命令显式核对后置2。
+- HTTP：`GET/PUT /workspaces/{w}/model-profiles/{p}/media-config`；generated.ts待重生（下一片随前端）。
+
+已测（定向）：
+- 新增`test_model_profile_media_config.py` 3 passed：CAS+读回、陈旧409、错配kind 422、
+  workspace-level拒绝、voice_options无binding拒绝、旧version=1核对后置2。
+- 隔离库0119升级+`alembic check`无漂移、0118↔0119升降级往返；ruff/mypy 395文件通过。
+
+未完成且不冒称：前端媒体配置组件与旧配置review_fingerprint核对入口、API HTTP测试与generated.ts重生；
+I8a其余切片（语音Binding/Edge退出、媒体安全与逐命令授权）待续。

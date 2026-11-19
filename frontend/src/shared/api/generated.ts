@@ -3214,6 +3214,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/model-profiles/{profile_id}/media-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Media Config */
+        get: operations["get_media_config_api_v1_workspaces__workspace_id__model_profiles__profile_id__media_config_get"];
+        /** Update Media Config */
+        put: operations["update_media_config_api_v1_workspaces__workspace_id__model_profiles__profile_id__media_config_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/opencut-manifest": {
         parameters: {
             query?: never;
@@ -7264,6 +7282,36 @@ export interface components {
             /** Capability Specs */
             capability_specs: {
                 [key: string]: components["schemas"]["CapabilitySpec"];
+            };
+        };
+        /** MediaConfigRead */
+        MediaConfigRead: {
+            /** Media Config Version */
+            media_config_version: number;
+            /** Image Model Binding Id */
+            image_model_binding_id: string | null;
+            /** Video Model Binding Id */
+            video_model_binding_id: string | null;
+            /** Voice Model Binding Id */
+            voice_model_binding_id: string | null;
+            /** Voice Options */
+            voice_options: {
+                [key: string]: unknown;
+            };
+        };
+        /** MediaConfigWrite */
+        MediaConfigWrite: {
+            /** Expected Version */
+            expected_version: number;
+            /** Image Model Binding Id */
+            image_model_binding_id?: string | null;
+            /** Video Model Binding Id */
+            video_model_binding_id?: string | null;
+            /** Voice Model Binding Id */
+            voice_model_binding_id?: string | null;
+            /** Voice Options */
+            voice_options?: {
+                [key: string]: unknown;
             };
         };
         /** MediaNodeRunReplayRequest */
@@ -20485,6 +20533,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExecutionModelPreflightRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_media_config_api_v1_workspaces__workspace_id__model_profiles__profile_id__media_config_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                profile_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaConfigRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_media_config_api_v1_workspaces__workspace_id__model_profiles__profile_id__media_config_put: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                profile_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MediaConfigWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaConfigRead"];
                 };
             };
             /** @description Validation Error */

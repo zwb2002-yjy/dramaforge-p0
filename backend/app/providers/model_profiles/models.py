@@ -7,6 +7,7 @@ These are pure data models with no ORM/IO. A profile only references
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID
 
@@ -14,6 +15,17 @@ from pydantic import BaseModel, Field
 
 from app.providers.capabilities import Capability
 from app.providers.model_profiles.slots import ModelSlot
+
+
+@dataclass(frozen=True)
+class MediaConfig:
+    """Project media defaults + voice options (D6, one CAS row)."""
+
+    media_config_version: int
+    image_model_binding_id: UUID | None
+    video_model_binding_id: UUID | None
+    voice_model_binding_id: UUID | None
+    voice_options: dict[str, object]
 
 
 class ModelSlotBinding(BaseModel):

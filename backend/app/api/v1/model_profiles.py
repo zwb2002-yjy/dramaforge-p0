@@ -14,6 +14,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.access.projects import ProjectService
 from app.api.deps import (
@@ -28,6 +29,7 @@ from app.providers.execution_preflight import (
     resolve_execution_model_preflight,
 )
 from app.providers.model_profiles.models import (
+    MediaConfig,
     ModelSlotBinding,
     SimpleModeSelection,
 )
@@ -422,3 +424,79 @@ async def get_execution_model_preflight(
 
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     return await resolve_execution_model_preflight(session, project=project, video_mode=video_mode)
+
+
+class MediaConfigRead(BaseModel):
+    media_config_version: int
+    image_model_binding_id: UUID | None
+    video_model_binding_id: UUID | None
+    voice_model_binding_id: UUID | None
+    voice_options: dict[str, object]
+
+
+class MediaConfigWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=1)
+    image_model_binding_id: UUID | None = None
+    video_model_binding_id: UUID | None = None
+    voice_model_binding_id: UUID | None = None
+    voice_options: dict[str, object] = Field(default_factory=dict)
+
+
+def _media_config_read(config: MediaConfig) -> MediaConfigRead:
+    return MediaConfigRead(
+        media_config_version=config.media_config_version,
+        image_model_binding_id=config.image_model_binding_id,
+        video_model_binding_id=config.video_model_binding_id,
+        voice_model_binding_id=config.voice_model_binding_id,
+        voice_options=dict(config.voice_options),
+    )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/model-profiles/{profile_id}/media-config",
+    response_model=MediaConfigRead,
+    dependencies=[Depends(require_selected_workspace)],
+)
+async def get_media_config(
+    workspace_id: UUID,
+    profile_id: UUID,
+    workspace: SelectedWorkspace,
+    session: SessionDep,
+) -> MediaConfigRead:
+    _assert_selected_workspace(workspace_id, workspace)
+    service = ProductionModelProfileService(session)
+    profile = await service.get(profile_id=profile_id)
+    _assert_workspace_profile(profile, workspace_id)
+    return _media_config_read(await service.media_config(profile_id=profile_id))
+
+
+@router.put(
+    "/workspaces/{workspace_id}/model-profiles/{profile_id}/media-config",
+    response_model=MediaConfigRead,
+    dependencies=[Depends(require_selected_workspace)],
+)
+async def update_media_config(
+    workspace_id: UUID,
+    profile_id: UUID,
+    body: MediaConfigWrite,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> MediaConfigRead:
+    _assert_selected_workspace(workspace_id, workspace)
+    service = ProductionModelProfileService(session)
+    profile = await service.get(profile_id=profile_id)
+    _assert_workspace_profile(profile, workspace_id)
+    updated = await service.update_media_config(
+        profile_id=profile_id,
+        actor_id=user.id,
+        expected_version=body.expected_version,
+        image_model_binding_id=body.image_model_binding_id,
+        video_model_binding_id=body.video_model_binding_id,
+        voice_model_binding_id=body.voice_model_binding_id,
+        voice_options=dict(body.voice_options),
+    )
+    await session.commit()
+    return _media_config_read(service._media_config(updated))

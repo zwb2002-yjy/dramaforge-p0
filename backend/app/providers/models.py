@@ -195,6 +195,9 @@ class ProviderModelBinding(Base):
             "catalog_entry_id",
             name="uq_provider_model_binding_revision",
         ),
+        UniqueConstraint(
+            "workspace_id", "id", name="uq_provider_model_binding_workspace"
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
