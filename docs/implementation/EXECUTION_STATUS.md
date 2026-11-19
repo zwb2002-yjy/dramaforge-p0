@@ -1697,3 +1697,19 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
   `test_workbench_execution.py`全通过；定向组108 passed；ruff/mypy 398文件通过。
 
 未完成且不冒称：资产batch stage（asset_image/video/voice）与媒体安全合同扩展；I8a阶段整体收口。
+
+## I8a-03j 资产batch预览与逐项原回执（2026-11-19，EV110）
+
+- 新增`app/production/asset_batch.py`：`preview_asset_batch`逐item构建资产计划，返回`batch_fingerprint`、
+  ready/blocked（带原因码）与`max_provider_operations`，零写入。
+- `dispatch_asset_batch`校验batch fingerprint与上限，逐item派生`request_key:item_id`经
+  `submit_asset_execution`受理，返回逐项原`ExecutionReceipt`与拒绝原因；部分成功如实呈现，重复同key
+  不补发。
+- HTTP：新增`POST /projects/{p}/batch-production/preview`（asset body）；`POST /projects/{p}/batch-production`
+  改为shot|asset判别union（按stage），shot分支行为不变。
+
+已测（定向）：
+- `test_asset_commands.py` 5 passed（新增batch预览/派发/重放/版本变化阻塞）；定向组66 passed；
+  generated.ts 386 schema、api:authority通过。
+
+未完成且不冒称：媒体安全合同扩展（图像/音频参考限制）、I8a阶段整体收口。

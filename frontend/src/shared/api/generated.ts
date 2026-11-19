@@ -393,7 +393,8 @@ export interface paths {
         /** Preview Batch Production */
         get: operations["preview_batch_production_api_v1_projects__project_id__batch_production_preview_get"];
         put?: never;
-        post?: never;
+        /** Preview Asset Batch Route */
+        post: operations["preview_asset_batch_route_api_v1_projects__project_id__batch_production_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4214,6 +4215,85 @@ export interface components {
             /** Publication Id */
             publication_id: string | null;
         };
+        /** AssetBatchDispatchBody */
+        AssetBatchDispatchBody: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            stage: "asset_image";
+            /** Items */
+            items: components["schemas"]["AssetBatchItem"][];
+            /** Batch Fingerprint */
+            batch_fingerprint: string;
+            /** Request Key */
+            request_key: string;
+            /** Max Provider Operations */
+            max_provider_operations: number;
+        };
+        /** AssetBatchItem */
+        AssetBatchItem: {
+            /** Item Id */
+            item_id: string;
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            request: components["schemas"]["AssetImagePlanBody"];
+        };
+        /** AssetBatchPreviewBody */
+        AssetBatchPreviewBody: {
+            /**
+             * Stage
+             * @constant
+             */
+            stage: "asset_image";
+            /** Items */
+            items: components["schemas"]["AssetBatchItem"][];
+        };
+        /** AssetBatchPreviewItem */
+        AssetBatchPreviewItem: {
+            /** Item Id */
+            item_id: string;
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "blocked";
+            /** Reason Code */
+            reason_code?: string | null;
+            /** Plan Fingerprint */
+            plan_fingerprint?: string | null;
+            /** Binding Id */
+            binding_id?: string | null;
+            /** Model Id */
+            model_id?: string | null;
+        };
+        /** AssetBatchPreviewRead */
+        AssetBatchPreviewRead: {
+            /**
+             * Stage
+             * @default asset_image
+             * @constant
+             */
+            stage: "asset_image";
+            /** Batch Fingerprint */
+            batch_fingerprint: string;
+            /** Ready Count */
+            ready_count: number;
+            /** Blocked Count */
+            blocked_count: number;
+            /** Max Provider Operations */
+            max_provider_operations: number;
+            /** Items */
+            items: components["schemas"]["AssetBatchPreviewItem"][];
+        };
         /** AssetCandidateBody */
         AssetCandidateBody: {
             /** Request Key */
@@ -4700,7 +4780,7 @@ export interface components {
         /** BatchProductionDispatchBody */
         BatchProductionDispatchBody: {
             /**
-             * Stage
+             * @description discriminator enum property added by openapi-typescript
              * @enum {string}
              */
             stage: "image_keyframe" | "video";
@@ -13219,6 +13299,47 @@ export interface operations {
             };
         };
     };
+    preview_asset_batch_route_api_v1_projects__project_id__batch_production_preview_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssetBatchPreviewBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetBatchPreviewRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     read_production_todos_api_v1_projects__project_id__production_todos_get: {
         parameters: {
             query?: {
@@ -13275,7 +13396,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["BatchProductionDispatchBody"];
+                "application/json": components["schemas"]["BatchProductionDispatchBody"] | components["schemas"]["AssetBatchDispatchBody"];
             };
         };
         responses: {

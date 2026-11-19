@@ -425,3 +425,69 @@ async def test_asset_run_completes_through_the_worker(session, world, monkeypatc
     assert run.status == "completed", (run.status, run.error_code, run.error_summary)
     assert run.result_artifact_id is not None
     assert result is not None
+
+
+async def test_asset_batch_previews_and_dispatches_each_item(session, world):
+    from app.execution.models import NodeRun
+    from app.production.asset_batch import (
+        AssetBatchDispatchBody,
+        AssetBatchItem,
+        AssetBatchPreviewBody,
+        dispatch_asset_batch,
+        preview_asset_batch,
+    )
+
+    plan_body = _plan_body()
+    preview_body = AssetBatchPreviewBody(
+        stage="asset_image",
+        items=[
+            AssetBatchItem(
+                item_id="a", asset_id=world["asset"].id, request=plan_body
+            ),
+            AssetBatchItem(
+                item_id="b", asset_id=world["asset"].id, request=plan_body
+            ),
+        ],
+    )
+    preview = await preview_asset_batch(
+        session, project=world["project"], body=preview_body
+    )
+    assert preview.ready_count == 2 and preview.blocked_count == 0
+    assert preview.max_provider_operations == 2
+    assert all(item.plan_fingerprint for item in preview.items)
+
+    dispatch_body = AssetBatchDispatchBody(
+        **preview_body.model_dump(),
+        batch_fingerprint=preview.batch_fingerprint,
+        request_key="batch:one",
+        max_provider_operations=2,
+    )
+    result = await dispatch_asset_batch(
+        session, project=world["project"], actor=world["user"], body=dispatch_body
+    )
+    assert len(result.accepted) == 2 and not result.rejected
+    runs = (
+        await session.execute(
+            select(NodeRun).where(NodeRun.project_id == world["project"].id)
+        )
+    ).scalars().all()
+    assert len(runs) == 2
+
+    replay = await dispatch_asset_batch(
+        session, project=world["project"], actor=world["user"], body=dispatch_body
+    )
+    assert [item.node_run_id for item in replay.accepted] == [
+        item.node_run_id for item in result.accepted
+    ]
+
+    stale = await preview_asset_batch(
+        session, project=world["project"], body=preview_body
+    )
+    world["asset"].version = 2
+    await session.flush()
+    blocked = await preview_asset_batch(
+        session, project=world["project"], body=preview_body
+    )
+    assert blocked.blocked_count == 2
+    assert {item.reason_code for item in blocked.items} == {"ASSET_VERSION_CONFLICT"}
+    assert stale.batch_fingerprint != blocked.batch_fingerprint

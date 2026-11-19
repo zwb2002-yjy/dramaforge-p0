@@ -1602,7 +1602,11 @@ provider_type,capability,prompt,parameters,output_count,references,max_provider_
 64位`plan_fingerprint`）与`Idempotency-Key`，返回原`ExecutionReceipt`；服务在项目锁内校验asset版本与
 计划指纹，创建/复用asset scope Graph并只入队一个`NodeRun(status=queued)`，快照含`asset_id`、`target`、
 `plan_fingerprint`、`resolution`与参考；同key重放返回原回执，不同载荷409 `ASSET_COMMAND_REUSED`。
-资产batch仍待实施；asset run已用fake runtime/compiler验证经原Worker完成并产出Artifact候选。
+资产batch（I8a-03j）：`POST /projects/{p}/batch-production/preview`接收`{stage:"asset_image",
+items:[{item_id,asset_id,request}]}`（1..20），纯读返回`batch_fingerprint`、逐item ready/blocked与
+`max_provider_operations`；`POST /projects/{p}/batch-production`接受shot|asset判别body，asset分支要求
+`batch_fingerprint/request_key/max_provider_operations`，逐item经单命令入口受理并返回原Receipt/拒绝原因，
+部分成功如实呈现。asset run已用fake runtime/compiler验证经原Worker完成并产出Artifact候选。
 
 实际源码：ProductionCommands/WorkbenchExecutionService及ProductionCommandAuthorization目前以shot_id为目标，
 GraphService只接受shot/episode/shot_experiment/project；assets接口是管理/候选/采用，没有独立资产图像生产入口。
