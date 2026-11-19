@@ -2134,3 +2134,14 @@ I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖�
   shared_asset_count=1且cross_episode_sharing=ready）；定向组61 passed；generated.ts 407 schema。
 
 未完成且不冒称：共享资产在镜头计划/生成中的端到端解析验收、三类作品完整生产编排。
+
+## I8b-01d 跨集共享资产的计划解析（2026-11-19，EV140）
+
+- 新增`test_cross_episode_shared_asset.py`：两集各一镜头，分别建立指向**同一**Asset/AssetVersion的
+  `ShotReferenceBinding`；两镜头各自`build_plan`后`planned_references`都解析到同一Artifact与AssetVersion。
+- 证明共享不靠复制资产或假镜头：每集用自己的binding，解析结果一致。
+
+已测（定向）：
+- `test_cross_episode_shared_asset.py` 1 passed；定向组62 passed；ruff通过。
+
+未完成且不冒称：共享资产在**生成**（NodeRun/Provider）中的端到端、三类作品完整生产编排。
