@@ -86,6 +86,7 @@ async def build_edit_session_for_project(
     project_id: UUID,
     user_id: UUID,
     name: str = "Long-form Edit",
+    episode_id: UUID | None = None,
 ) -> dict[str, object]:
     """Build an edit session over the full Episode -> Scene -> Shot hierarchy.
 
@@ -109,6 +110,14 @@ async def build_edit_session_for_project(
         .scalars()
         .all()
     )
+    if episode_id is not None:
+        scoped = [episode for episode in episodes if episode.id == episode_id]
+        if not scoped:
+            raise ValidationAppError(
+                "episode is not in this project",
+                details={"code": "EDIT_EPISODE_NOT_FOUND", "episode_id": str(episode_id)},
+            )
+        episodes = scoped
 
     clips: list[dict[str, object]] = []
     lineage: list[dict[str, object]] = []
@@ -183,6 +192,7 @@ async def build_edit_session_for_project(
             "metadata": {"auto_built": True, "assembly": "episode_scene_shot"},
         },
         production_lineage={"clips": lineage, "lineage_readonly": True},
+        episode_id=episode_id,
     )
     return {
         "session_id": str(row.id),

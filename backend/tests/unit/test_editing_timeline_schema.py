@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.access.models import Project, User, Workspace
@@ -686,6 +686,32 @@ async def test_scope_switch_keeps_the_version_conflict_contract(
             episode_id=None,
             expected_session_version=9,
         )
+
+
+@pytest.mark.asyncio
+async def test_building_a_session_for_one_episode_scopes_it(session: AsyncSession) -> None:
+    from app.assets.models import Episode
+    from app.editing.timeline_builder import build_edit_session_for_project
+
+    project, user, shot, artifact = await _shot(session)
+    assert artifact is not None
+    episode = await session.scalar(select(Episode).where(Episode.project_id == project.id))
+    assert episode is not None
+
+    built = await build_edit_session_for_project(
+        session, project_id=project.id, user_id=user.id, episode_id=episode.id
+    )
+    assert len(built["clips"]) == 1
+    row = await EditingAdapter(session).load_timeline(
+        project_id=project.id, session_id=UUID(str(built["session_id"]))
+    )
+    assert row.episode_id == episode.id
+
+    with pytest.raises(ValidationAppError) as unknown:
+        await build_edit_session_for_project(
+            session, project_id=project.id, user_id=user.id, episode_id=uuid4()
+        )
+    assert unknown.value.details["code"] == "EDIT_EPISODE_NOT_FOUND"
 
 
 @pytest.mark.asyncio

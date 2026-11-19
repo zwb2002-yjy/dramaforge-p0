@@ -2481,3 +2481,14 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - 证据：`test_editing_timeline_schema.py` **17 passed**、编辑组 **28 passed**；ruff 通过、
   `mypy app` 404 文件通过；`generated.ts` 重生（**410 schema**，`api:check`/`api:authority` 通过）。
 - **下一步**：渲染快照与导出绑定（I9-02：固定版本/hash、原回执优先、MP4/SRT 可解码、逐集交付）。
+
+### I9-01f 已实施：按集构建编辑时间线（2026-11-19，EV158）
+
+- `build_edit_session_for_project(..., episode_id=…)`：只装配该集的 scene/shot，并让新会话**直接带该集
+  作用域**；不属于本项目的集返回 `EDIT_EPISODE_NOT_FOUND`，不静默退化成“全项目”。
+- `POST /projects/{p}/edit-sessions` 请求新增 `episode_id`：前端可用同一入口创建“分集剪辑会话”，
+  不必先建全项目时间线再切换。
+- 证据：`test_editing_timeline_schema.py` **18 passed**、编辑组 **29 passed**；ruff 通过、
+  `mypy app` 404 文件通过；`generated.ts` 已重生（410 schema）。
+- I9-01（剪辑数据/服务/HTTP 面）至此收口；**下一步进入 I9-02**：渲染快照与导出绑定
+  （固定版本/hash、原回执优先、MP4/SRT 可解码、逐集交付）。

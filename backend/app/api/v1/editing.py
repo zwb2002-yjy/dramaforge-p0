@@ -62,6 +62,7 @@ class EditSessionCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(default=_DEFAULT_SESSION_NAME, min_length=1, max_length=200)
+    episode_id: UUID | None = None
 
 
 class EditTimelinePayload(BaseModel):
@@ -223,6 +224,7 @@ async def create_edit_session(
         project_id=project_id,
         user_id=user.id,
         name=body.name,
+        episode_id=body.episode_id,
     )
     # Load the just-flushed row before commit while the project RLS context is
     # active.  ``set_config(..., true)`` is transaction-local on PostgreSQL;

@@ -6520,6 +6520,8 @@ export interface components {
              * @default Long-form Edit
              */
             name: string;
+            /** Episode Id */
+            episode_id?: string | null;
         };
         /** EditSessionRead */
         EditSessionRead: {
