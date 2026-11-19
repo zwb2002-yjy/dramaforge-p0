@@ -2082,3 +2082,17 @@ I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖�
 被测页面代码与I5 Full通过时一致 → p95差异归因为宿主/冷启动环境因素，而非列表渲染回退。
 
 结论：Full仍FAIL（仅此项），不声称阶段Full；收口需在空闲宿主重跑该阶段。
+
+## I7-03 恢复信号只读端点（2026-11-19，EV136）
+
+- 新增`GET /projects/{p}/director/runtime/turns/{turn_id}/resume`：读取该turn最新**待处理**resume wakeup
+  （`completed_at`/`dead_letter_at`为空），返回`signal_id/reference_id/expected_runtime_revision/
+  attempt_count/created_at`；无信号404 `DIRECTOR_RESUME_NOT_PENDING`；不触发执行。
+- 前端新增`fetchPendingRuntimeResume`（复用`runtimeTurnResume`路由模板，契约测试自动覆盖）。
+- UI「继续」按钮仍待挂载：`DirectorTurnStatus`当前无宿主页面（I7工作台面未建），组件/接口已就绪。
+
+已测（定向）：
+- 后端`test_runtime_resume_read.py` 2 passed（待处理信号可读、已完成wakeup不暴露）；
+  定向组59 passed；前端`directorApiContract` 8 passed；generated.ts 405 schema。
+
+未完成且不冒称：恢复按钮的工作台挂载、N08/N10三栏核对。

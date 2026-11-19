@@ -1389,7 +1389,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Read Director Runtime Resume
+         * @description Read the pending resume signal so the user can retry it explicitly.
+         */
+        get: operations["read_director_runtime_resume_api_v1_projects__project_id__director_runtime_turns__turn_id__resume_get"];
         put?: never;
         /** Resume Director Runtime Turn */
         post: operations["resume_director_runtime_turn_api_v1_projects__project_id__director_runtime_turns__turn_id__resume_post"];
@@ -10575,6 +10579,28 @@ export interface components {
              */
             created_at: string;
         };
+        /** RuntimeResumeRead */
+        RuntimeResumeRead: {
+            /**
+             * Signal Id
+             * Format: uuid
+             */
+            signal_id: string;
+            /**
+             * Reference Id
+             * Format: uuid
+             */
+            reference_id: string;
+            /** Expected Runtime Revision */
+            expected_runtime_revision: number;
+            /** Attempt Count */
+            attempt_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** SceneActionRead */
         SceneActionRead: {
             /**
@@ -16178,6 +16204,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DirectorTurnRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_director_runtime_resume_api_v1_projects__project_id__director_runtime_turns__turn_id__resume_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                turn_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeResumeRead"];
                 };
             };
             /** @description Validation Error */

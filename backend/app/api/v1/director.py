@@ -45,6 +45,7 @@ from app.director.runtime.capabilities import (
 )
 from app.director.runtime.control import DirectorRuntimeControlService
 from app.director.runtime.delegation import DirectorRuntimeDelegationService
+from app.director.runtime.models import DirectorRuntimeWakeup
 from app.director.runtime.routing import DirectorEngineRouter
 from app.director.runtime.start import DirectorRuntimeStartService
 from app.director.runtime.wakeups import DirectorRuntimeWakeupService
@@ -633,6 +634,63 @@ async def get_director_turn(
         turn = await service.read_turn(turn_id)
     return DirectorTurnRead.from_model(turn)
 
+
+
+class RuntimeResumeRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signal_id: UUID
+    reference_id: UUID
+    expected_runtime_revision: int
+    attempt_count: int
+    created_at: datetime
+
+
+@router.get(
+    "/projects/{project_id}/director/runtime/turns/{turn_id}/resume",
+    response_model=RuntimeResumeRead,
+)
+async def read_director_runtime_resume(
+    project_id: UUID,
+    turn_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> RuntimeResumeRead:
+    """Read the pending resume signal so the user can retry it explicitly."""
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=user,
+    )
+    turn = await DirectorTurnService(session).get(project_id=project_id, turn_id=turn_id)
+    if turn.runtime_execution_id is None:
+        raise NotFoundError(
+            "no pending resume signal",
+            details={"code": "DIRECTOR_RESUME_NOT_PENDING"},
+        )
+    wakeup = await session.scalar(
+        select(DirectorRuntimeWakeup)
+        .where(
+            DirectorRuntimeWakeup.project_id == project.id,
+            DirectorRuntimeWakeup.runtime_execution_id == turn.runtime_execution_id,
+            DirectorRuntimeWakeup.kind == "resume",
+            DirectorRuntimeWakeup.completed_at.is_(None),
+            DirectorRuntimeWakeup.dead_letter_at.is_(None),
+        )
+        .order_by(DirectorRuntimeWakeup.created_at.desc())
+        .limit(1)
+    )
+    if wakeup is None:
+        raise NotFoundError(
+            "no pending resume signal",
+            details={"code": "DIRECTOR_RESUME_NOT_PENDING"},
+        )
+    payload = wakeup.payload or {}
+    return RuntimeResumeRead(
+        signal_id=UUID(str(payload["signal_id"])),
+        reference_id=UUID(str(payload["reference_id"])),
+        expected_runtime_revision=int(str(payload["expected_revision"])),
+        attempt_count=wakeup.attempt_count,
+        created_at=wakeup.created_at,
+    )
 
 @router.post(
     "/projects/{project_id}/director/runtime/turns/{turn_id}/resume",

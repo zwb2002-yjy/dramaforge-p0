@@ -696,6 +696,12 @@ Binding存在但已停用不能作为新选择保存；已保存选择后来失�
 错误响应带稳定code与安全的field_path/current_version，可见字段可用于差异合并；不回显凭据或私有Provider响应。
 每次保存不调用Provider；配置保存成功与连接检查/生成成功不可混为一种toast。
 
+### 恢复信号（I7）
+
+`GET /projects/{p}/director/runtime/turns/{turn_id}/resume`：只读返回该turn待处理的resume wakeup
+`{signal_id,reference_id,expected_runtime_revision,attempt_count,created_at}`；无待处理信号404
+`DIRECTOR_RESUME_NOT_PENDING`。已有`POST …/resume`用同一身份重驱；读端点不触发任何执行。
+
 ### 创作方向（I7）
 
 `GET/POST /projects/{p}/creative-direction`：项目级创作方向说明，存于`ProjectCreativeProfile.strategy_snapshot.

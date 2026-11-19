@@ -347,3 +347,13 @@ export function listBusinessFlowSteps(
     directorPath(projectId, "businessFlowSteps", { flow_id: flowId }),
   );
 }
+export type RuntimeResumeRead = components["schemas"]["RuntimeResumeRead"];
+
+export function fetchPendingRuntimeResume(
+  projectId: string,
+  turnId: string,
+): Promise<RuntimeResumeRead> {
+  return apiGet<RuntimeResumeRead>(
+    directorPath(projectId, "runtimeTurnResume", { turn_id: turnId }),
+  );
+}
