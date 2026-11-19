@@ -150,6 +150,57 @@ async def test_one_failing_episode_does_not_abort_the_batch(session: AsyncSessio
 
 
 @pytest.mark.asyncio
+async def test_a_blocked_episode_recovers_after_the_cause_is_fixed(
+    session: AsyncSession,
+) -> None:
+    """Retry is an explicit re-run: fixing the cause starts only what was blocked."""
+    project, user, _shot_row, artifact, _saved, _export, _store = await _exported_session(session)
+    episode = await session.scalar(
+        select(Episode).where(Episode.project_id == project.id, Episode.episode_number == 1)
+    )
+    assert episode is not None
+    built = await build_edit_session_for_project(
+        session, project_id=project.id, user_id=user.id, episode_id=episode.id
+    )
+    scoped_session_id = UUID(str(built["session_id"]))
+    await session.commit()
+
+    # Break it: the clip loses its artifact binding, so the batch blocks it.
+    broken = await EditingAdapter(session).load_timeline(
+        project_id=project.id, session_id=scoped_session_id
+    )
+    original = dict(broken.timeline)
+    timeline = dict(original)
+    timeline["clips"] = [{**timeline["clips"][0], "artifact_id": None}]
+    broken.timeline = timeline
+    await session.flush()
+    first = await EpisodeDeliveryService(session).start(
+        project=project, actor_id=user.id, format="mp4"
+    )
+    await session.commit()
+    assert first[0].status == "blocked"
+    assert first[0].blockers == ("EXPORT_CLIP_UNBOUND",)
+
+    # Fix the cause and re-run: the same call now starts the episode.
+    broken.timeline = original
+    await session.flush()
+    second = await EpisodeDeliveryService(session).start(
+        project=project, actor_id=user.id, format="mp4"
+    )
+    await session.commit()
+    assert second[0].status == "started"
+    assert second[0].export_id is not None and second[0].node_run_id is not None
+    assert artifact is not None
+
+    # A further re-run is idempotent: same receipt, no second export.
+    third = await EpisodeDeliveryService(session).start(
+        project=project, actor_id=user.id, format="mp4"
+    )
+    await session.commit()
+    assert third[0].export_id == second[0].export_id
+
+
+@pytest.mark.asyncio
 async def test_plan_reports_every_episode_in_order(session: AsyncSession) -> None:
     project, user, _shot_row, _artifact, _saved, _export, _store = await _exported_session(session)
     for number in (2, 3):

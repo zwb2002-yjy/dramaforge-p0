@@ -2605,6 +2605,20 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
   因此本轮不重复跑一次注定失败的 Full；Full 仍需在空闲/足算力机器上执行。
 - **下一步**：并发执行与自动重试编排；I9 阶段终点 Full（空闲宿主）。
 
+### I9-02j 已实施：批量交付的恢复语义（2026-11-19，EV168）
+
+- 明确“重试 = 修好原因后重跑 `start`”，不在编排层做并发：单 DB 会话上串行派发是设计选择，
+  真正的并发执行在 Worker 按 run 进行。此前记录的“并发编排”一项据此关闭（不是遗漏）。
+- 行为证据：分集会话的 clip 失去 artifact 绑定时该集 `EXPORT_CLIP_UNBOUND`；恢复时间线后同一
+  `start` 调用该集转为 `started`（得到导出 + 渲染 run），再次重跑仍返回**同一导出**（幂等键含
+  episode/session/version，不会产生第二份回执）。
+- 证据：`test_episode_delivery.py` **5 passed**；`ruff check app tests` 通过。
+
+**I9 阶段状态**：I9-01（时间线 schema2/快照/分集作用域/切换集）与 I9-02（导出冻结回执、DB09
+删除保护、渲染 NodeRun 与 MP4/SRT、Range 交付下载、逐集批量交付与失败隔离/恢复）均已实现并各有
+定向证据。**唯一未完成的阶段出口条件仍是 Full**（需空闲宿主）。下一步转入 **I10-01**：目标机
+安装/重启/备份恢复的隔离验证准备；真实作品与正式发布仍待 Owner 授权。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
