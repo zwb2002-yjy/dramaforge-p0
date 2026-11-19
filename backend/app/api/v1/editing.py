@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from sqlalchemy import select
 
@@ -470,30 +470,26 @@ async def create_export_render(
 async def download_export_content(
     project_id: UUID,
     export_id: UUID,
+    request: Request,
     user: CurrentUser,
     session: SessionDep,
 ) -> Response:
     """Serve the rendered artifact an export delivers; refuse unfinished ones."""
-    from app.storage.minio_store import get_object_store
+    from app.api.content_streaming import content_response
 
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     export, artifact = await ExportService(session).delivery_artifact(
         project_id=project_id, export_id=export_id
     )
-    data = await get_object_store().get_bytes(object_key=artifact.object_key)
     suffix = artifact.mime_type.rsplit("/", 1)[-1] or "bin"
     scope = export.episode_id or "project"
     filename = f"episode-{scope}-{export.id}.{suffix}"
-    return Response(
-        content=data,
-        media_type=artifact.mime_type,
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Length": str(len(data)),
-            "Cache-Control": "private, no-store",
-            "X-Content-Type-Options": "nosniff",
-            "Accept-Ranges": "bytes",
-        },
+    return await content_response(
+        request,
+        object_key=artifact.object_key,
+        mime_type=artifact.mime_type,
+        byte_size=artifact.byte_size,
+        extra_headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

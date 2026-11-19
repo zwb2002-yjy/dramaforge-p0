@@ -2562,6 +2562,19 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - 如实说明：测试环境走 `_test_render` 的**确定性字节**路径（同版本同字节），生产路径为真实
   ffmpeg 5.1（镜像内已确认存在）；本次**未**对真实用户媒体执行渲染。
 - **下一步**：Range 分段交付下载、逐集批量渲染编排；随后 I9 阶段终点跑 Full。
+
+### I9-02f 已实施：交付下载支持 Range（EV164）
+
+- 新增 `app/api/content_streaming.py`：`parse_range`（只接受单个 `bytes=` 区间；多区间、非法、
+  越界一律视为不可满足）与 `content_response`（整段 200、单区间 206 且带
+  `Content-Range: bytes a-b/size`、不可满足 416 且带 `bytes */size`，统一
+  `Accept-Ranges`/`nosniff`/`private, no-store`）。
+- 公共资产内容下载（`public_assets._content_response`）与原导出下载改为**共用同一实现**，
+  删除其私有 `_parse_range`——两条私有媒体下载不再可能分叉。
+- 证据：`test_export_snapshot.py` **6 passed**（新增 `bytes=0-3`→206 且逐字节相符、
+  `bytes=999999-`→416 的 `Content-Range` 断言）；`test_public_assets.py` 既有 Range/HEAD 用例全绿；
+  内容/交付组 **24 passed**；`ruff check app tests` 通过、`mypy app` 408 文件通过。
+- **下一步**：逐集批量渲染编排；随后 I9 阶段终点跑 Full（需空闲宿主）。
 - **已修（I9-02b，EV160）**：`exports.episode_id` 外键由 `ON DELETE SET NULL` 改为
   `ON DELETE RESTRICT`（迁移 `20261119_0123`，downgrade 回 SET NULL）。隔离 PG `editor_0123` 实测：
   有导出的集执行 `DELETE FROM episodes` 被 `fk_exports_episode` 拒绝、导出行仍在；`alembic check`

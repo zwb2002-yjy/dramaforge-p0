@@ -254,9 +254,7 @@ async def patch_public_link(
     session: SessionDep,
     _: CsrfDep,
 ) -> PublicLinkReadModel:
-    value = await ProjectPublicAssetLinkService(
-        session, actor=user, project_id=project_id
-    ).patch(
+    value = await ProjectPublicAssetLinkService(session, actor=user, project_id=project_id).patch(
         link_id,
         expected_version=body.expected_version,
         local_label=body.local_label,
@@ -266,66 +264,14 @@ async def patch_public_link(
     return _link_read(value)
 
 
-def _parse_range(value: str, size: int) -> tuple[int, int] | None:
-    if not value.startswith("bytes=") or "," in value or size <= 0:
-        return None
-    spec = value[6:].strip()
-    if "-" not in spec:
-        return None
-    start_text, end_text = spec.split("-", 1)
-    try:
-        if start_text == "":
-            length = int(end_text)
-            if length <= 0:
-                return None
-            start = max(size - length, 0)
-            end = size - 1
-        else:
-            start = int(start_text)
-            end = int(end_text) if end_text else size - 1
-    except ValueError:
-        return None
-    if start < 0 or start >= size or end < start:
-        return None
-    return start, min(end, size - 1)
-
-
 async def _content_response(request: Request, content: PublicContent) -> Response:
-    from app.storage.minio_store import get_object_store
+    from app.api.content_streaming import content_response
 
-    store = get_object_store()
-    headers = {
-        "Accept-Ranges": "bytes",
-        "X-Content-Type-Options": "nosniff",
-        "Cache-Control": "private, no-store",
-    }
-    range_header = request.headers.get("range")
-    if range_header:
-        parsed = _parse_range(range_header, content.byte_size)
-        if parsed is None:
-            return Response(
-                status_code=416,
-                headers={**headers, "Content-Range": f"bytes */{content.byte_size}"},
-            )
-        start, end = parsed
-        data = await store.get_range(
-            object_key=content.object_key, offset=start, length=end - start + 1
-        )
-        return Response(
-            content=data,
-            status_code=206,
-            media_type=content.mime_type,
-            headers={
-                **headers,
-                "Content-Range": f"bytes {start}-{end}/{content.byte_size}",
-                "Content-Length": str(len(data)),
-            },
-        )
-    data = await store.get_bytes(object_key=content.object_key)
-    return Response(
-        content=data,
-        media_type=content.mime_type,
-        headers={**headers, "Content-Length": str(len(data))},
+    return await content_response(
+        request,
+        object_key=content.object_key,
+        mime_type=content.mime_type,
+        byte_size=content.byte_size,
     )
 
 
@@ -347,9 +293,7 @@ async def read_public_content(
     user: CurrentUser,
     session: SessionDep,
 ) -> Response:
-    content = await PublicAssetService(session, actor=user).read_content(
-        publication_id, item_id
-    )
+    content = await PublicAssetService(session, actor=user).read_content(publication_id, item_id)
     return await _content_response(request, content)
 
 
@@ -360,15 +304,11 @@ async def head_public_content(
     user: CurrentUser,
     session: SessionDep,
 ) -> Response:
-    content = await PublicAssetService(session, actor=user).read_content(
-        publication_id, item_id
-    )
+    content = await PublicAssetService(session, actor=user).read_content(publication_id, item_id)
     return Response(status_code=200, headers=_content_headers(content))
 
 
-@router.get(
-    "/projects/{project_id}/public-asset-links/{link_id}/items/{item_id}/content"
-)
+@router.get("/projects/{project_id}/public-asset-links/{link_id}/items/{item_id}/content")
 async def read_project_public_content(
     project_id: UUID,
     link_id: UUID,
@@ -383,9 +323,7 @@ async def read_project_public_content(
     return await _content_response(request, content)
 
 
-@router.head(
-    "/projects/{project_id}/public-asset-links/{link_id}/items/{item_id}/content"
-)
+@router.head("/projects/{project_id}/public-asset-links/{link_id}/items/{item_id}/content")
 async def head_project_public_content(
     project_id: UUID,
     link_id: UUID,

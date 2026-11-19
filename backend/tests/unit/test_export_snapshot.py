@@ -10,7 +10,13 @@ from app.editing.adapter import EditingAdapter
 from app.execution.models import Artifact
 from app.shared.errors import ValidationAppError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 from tests.unit.test_editing_timeline_schema import _clip, _shot
+
+
+def _request(range_header: str | None = None) -> Request:
+    headers = [(b"range", range_header.encode())] if range_header else []
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": headers})
 
 
 async def _saved_session(session: AsyncSession):
@@ -182,7 +188,11 @@ async def test_delivery_download_serves_only_rendered_exports(session: AsyncSess
     # A queued receipt is not a film: no result artifact means no delivery.
     with pytest.raises(ValidationAppError) as pending:
         await download_export_content(
-            project_id=project.id, export_id=export.id, user=user, session=session
+            project_id=project.id,
+            export_id=export.id,
+            request=_request(),
+            user=user,
+            session=session,
         )
     assert pending.value.details["code"] == "EXPORT_NOT_DELIVERABLE"
 
@@ -209,7 +219,11 @@ async def test_delivery_download_serves_only_rendered_exports(session: AsyncSess
     await session.commit()
 
     response = await download_export_content(
-        project_id=project.id, export_id=export.id, user=user, session=session
+        project_id=project.id,
+        export_id=export.id,
+        request=_request(),
+        user=user,
+        session=session,
     )
     assert response.media_type == "video/mp4"
     assert response.body == b"\x00\x00\x00\x18ftypmp42rendered-film"
@@ -217,6 +231,29 @@ async def test_delivery_download_serves_only_rendered_exports(session: AsyncSess
     assert response.headers["cache-control"] == "private, no-store"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert "attachment" in response.headers["content-disposition"]
+
+    # A single range is served as 206 with an exact Content-Range.
+    partial = await download_export_content(
+        project_id=project.id,
+        export_id=export.id,
+        request=_request("bytes=0-3"),
+        user=user,
+        session=session,
+    )
+    assert partial.status_code == 206
+    assert partial.body == response.body[:4]
+    assert partial.headers["content-range"] == f"bytes 0-3/{len(response.body)}"
+
+    # An unsatisfiable range is 416, never a silent full body.
+    unsatisfiable = await download_export_content(
+        project_id=project.id,
+        export_id=export.id,
+        request=_request("bytes=999999-"),
+        user=user,
+        session=session,
+    )
+    assert unsatisfiable.status_code == 416
+    assert unsatisfiable.headers["content-range"] == f"bytes */{len(response.body)}"
 
 
 @pytest.mark.asyncio
@@ -240,7 +277,11 @@ async def test_delivery_download_rejects_another_projects_export(
     await session.flush()
     with pytest.raises(ForbiddenError):
         await download_export_content(
-            project_id=project.id, export_id=export.id, user=stranger, session=session
+            project_id=project.id,
+            export_id=export.id,
+            request=_request(),
+            user=stranger,
+            session=session,
         )
 
 
