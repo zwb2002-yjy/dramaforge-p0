@@ -1866,3 +1866,19 @@ prepare独立授权记录。
   ruff/mypy 400文件通过。
 
 未完成且不冒称：视频Artifact下载/完成（需HTTP下载fake）、voice_concat执行计划、prepare独立授权记录。
+
+## I8a-03t 分段语音拼接执行（2026-11-19，EV121）
+
+- 新增`app/execution/voice_concat.py`：`voice_concat`节点从required GraphEdge读取各分段voice run的
+  Artifact，校验WAV格式一致后本地拼接并写audio Artifact；缺分段时`ProviderTaskPendingError`（延后重试），
+  零Provider调用。
+- `execute_media_node_run`新增`voice_concat`分支。
+- `submit_asset_voice_batch`：长文本按段建`voice_seg_i`节点+`voice_concat`节点（required edges），
+  入队N个分段run+1个concat run；`GraphService.create_version`支持同一asset Graph新增版本（不违反
+  project+scope唯一约束）；单段文本拒绝（`ASSET_VOICE_SINGLE_SEGMENT`）。
+
+已测（定向）：
+- `test_asset_commands.py` 11 passed（新增分段批：N+1 runs、分段完成、concat完成且帧数=段数×1200）；
+  定向组144 passed；ruff/mypy 401文件通过。
+
+未完成且不冒称：prepare独立授权记录、I8a整体Full（按门分级留待正式CI/I10候选）。

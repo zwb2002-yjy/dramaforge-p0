@@ -1611,7 +1611,8 @@ voice_execution,planned_nodes}`与`preview_fingerprint`，零NodeRun/零Provider
 
 资产语音/视频命令（I8a-03l/m）：`POST /assets/{a}/executions`接受判别联合
 `{stage:"asset_image"|"asset_voice"|"asset_video",request}`；语音分支按句界分段（每段≤500字）并在预览返回`segments/requires_concat/max_provider_operations`；
-单命令仅受理单段，长文本422 `ASSET_VOICE_SEGMENTED_BATCH_REQUIRED`（改用batch/Graph）。
+单命令仅受理单段，长文本422 `ASSET_VOICE_SEGMENTED_BATCH_REQUIRED`；分段批受理
+（I8a-03t）为每段一个voice NodeRun加一个本地`voice_concat`节点（required GraphEdge依赖，零Provider调用）。
 视频分支要求`duration_seconds`在模型合同内（否则422 `ASSET_VIDEO_DURATION_REQUIRED`/`ASSET_PARAMETER_UNKNOWN`）；语音分支冻结`voice_execution`（项目语音binding身份+音色）并只入队一个`voice`节点NodeRun，
 同key重放返回原回执；Worker经`execute_voice_node_run`完成并写audio Artifact。资产batch（I8a-03j）：`POST /projects/{p}/batch-production/preview`接收`{stage:"asset_image",
 items:[{item_id,stage:"asset_image"|"asset_voice",asset_id,request}]}`（1..20；I8a-03q起支持混合image/voice项），纯读返回`batch_fingerprint`、逐item ready/blocked与

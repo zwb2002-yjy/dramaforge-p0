@@ -157,6 +157,11 @@ async def execute_media_node_run(
             node=node,
             obj_store=obj_store,
         )
+    if node_type == "voice_concat":
+        from app.execution.voice_concat import execute_voice_concat_node_run
+
+        await execute_voice_concat_node_run(session, run=run, node=node, store=obj_store)
+        return await _completed_result(session, run=run, node_type=node_type)
     if node_type == "composite":
         return await _complete_composite_node(
             session,

@@ -254,6 +254,34 @@ class GraphService:
         await self._session.refresh(graph)
         return graph
 
+    async def create_version(
+        self,
+        *,
+        graph_id: UUID,
+        definition: dict[str, object],
+        created_by: UUID,
+    ) -> GraphVersion:
+        """Add one draft version to an existing graph; publish switches current."""
+        graph = await self._session.get(ProductionGraph, graph_id)
+        if graph is None:
+            raise ValidationAppError("graph not found")
+        validate_graph_definition(definition)
+        latest = await self._session.scalar(
+            select(GraphVersion.version_number)
+            .where(GraphVersion.graph_id == graph_id)
+            .order_by(GraphVersion.version_number.desc())
+            .limit(1)
+        )
+        version = GraphVersion(
+            graph_id=graph_id,
+            version_number=(latest or 0) + 1,
+            status=GraphStatus.DRAFT.value,
+            definition_hash=definition_hash(definition),
+            definition=definition,
+        )
+        self._session.add(version)
+        await self._session.flush()
+        return version
     async def materialize_definition(self, *, version_id: UUID) -> MaterializedGraph:
         """Idempotently materialize one draft definition into GraphNode/GraphEdge.
 

@@ -641,6 +641,19 @@ async def test_asset_batch_previews_and_dispatches_each_item(session, world):
     assert stale.batch_fingerprint != blocked.batch_fingerprint
 
 
+def _distinct_wav(index: int) -> bytes:
+    import io
+    import wave
+
+    target = io.BytesIO()
+    with wave.open(target, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes(bytes([index % 256]) * 2400)
+    return target.getvalue()
+
+
 def _silence_wav() -> bytes:
     import io
     import wave
@@ -768,7 +781,8 @@ async def test_voice_command_rejects_segmented_text(session, world):
     from app.shared.errors import ValidationAppError
 
     plan_body = AssetVoicePlanBody(
-        expected_asset_version=1, text="古桥始建于明代。" * 60
+        expected_asset_version=1,
+        text="".join(f"第{i}句，古桥始建于明代，桥身以青石砌成。" for i in range(40)),
     )
     plan = await build_asset_voice_plan(
         session, project=world["project"], asset_id=world["audio"].id, body=plan_body
@@ -953,3 +967,94 @@ async def test_asset_video_run_submits_once_through_the_worker(session, world, m
     assert operation.actual_provider == "agnes"
     assert operation.actual_model == "unit-agnes-video"
     assert runtime.submits == 1
+
+
+async def test_segmented_voice_batch_concats_segments(session, world, monkeypatch):
+    import io
+    import wave
+
+    from app.execution.models import NodeRun
+    from app.execution.product_path import execute_media_node_run
+    from app.production.asset_commands import (
+        AssetVoiceExecutionBody,
+        submit_asset_voice_batch,
+    )
+    from app.production.asset_plan import AssetVoicePlanBody, build_asset_voice_plan
+    from app.storage.minio_store import reset_object_store_for_tests
+
+    plan_body = AssetVoicePlanBody(
+        expected_asset_version=1,
+        text="".join(f"第{i}句，古桥始建于明代，桥身以青石砌成。" for i in range(40)),
+    )
+    plan = await build_asset_voice_plan(
+        session, project=world["project"], asset_id=world["audio"].id, body=plan_body
+    )
+    assert len(plan.segments) > 1
+    body = AssetVoiceExecutionBody(
+        **plan_body.model_dump(), plan_fingerprint=plan.plan_fingerprint
+    )
+    receipt = await submit_asset_voice_batch(
+        session,
+        actor=world["user"],
+        project_id=world["project"].id,
+        asset_id=world["audio"].id,
+        body=body,
+        idempotency_key="voice:segments",
+    )
+    runs = (
+        await session.execute(
+            select(NodeRun).where(NodeRun.project_id == world["project"].id)
+        )
+    ).scalars().all()
+    assert len(runs) == len(plan.segments) + 1
+    segment_runs = [run for run in runs if run.id != receipt.node_run_id]
+    assert all(run.input_snapshot.get("segment_index") is not None for run in segment_runs)
+    concat_run = next(run for run in runs if run.id == receipt.node_run_id)
+    assert concat_run.input_snapshot["node_key"] == "voice_concat"
+    assert concat_run.input_snapshot["segment_count"] == len(plan.segments)
+
+    class FakeVoiceAdapter:
+        def __init__(self) -> None:
+            self.blobs: dict[str, bytes] = {}
+
+        async def create(self, request):
+            key = f"voice-{len(self.blobs)}"
+            self.blobs[key] = _distinct_wav(len(self.blobs))
+            return {"remote_task_id": key, "status": "succeeded"}
+
+        async def poll(self, remote_task_id):
+            return {"status": "succeeded" if remote_task_id in self.blobs else "failed"}
+
+    adapter = FakeVoiceAdapter()
+
+    async def fake_adapter(*args, **kwargs):
+        return adapter
+
+    monkeypatch.setattr("app.execution.voice_path.get_voice_adapter", fake_adapter)
+    store = reset_object_store_for_tests()
+    for run in segment_runs:
+        await execute_media_node_run(session, node_run_id=run.id, store=store)
+    await session.commit()
+    for run in segment_runs:
+        await session.refresh(run)
+        assert run.status in {"completed", "cached"}, (
+            run.status,
+            run.error_code,
+            run.error_summary,
+        )
+    await execute_media_node_run(session, node_run_id=concat_run.id, store=store)
+    await session.commit()
+    await session.refresh(concat_run)
+    assert concat_run.status == "completed", (
+        concat_run.status,
+        concat_run.error_code,
+        concat_run.error_summary,
+    )
+    assert concat_run.result_artifact_id is not None
+    artifact = await session.get(
+        __import__("app.execution.models", fromlist=["Artifact"]).Artifact,
+        concat_run.result_artifact_id,
+    )
+    data = await store.get_bytes(object_key=artifact.object_key)
+    with wave.open(io.BytesIO(data), "rb") as wav:
+        assert wav.getnframes() == len(plan.segments) * 1200
