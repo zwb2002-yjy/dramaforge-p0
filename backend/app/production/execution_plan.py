@@ -26,7 +26,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from app.providers.capabilities import Capability
 from app.providers.intents import (
@@ -160,7 +160,8 @@ class WorkbenchExecutionPlan(BaseModel):
         pattern=_FINGERPRINT_PATTERN,
     )
     project_id: UUID
-    shot_id: UUID
+    shot_id: UUID | None = None
+    asset_id: UUID | None = None
     experiment_branch_id: UUID | None = None
     stage: PlanStage
     prompt: str = Field(min_length=1)
@@ -190,6 +191,12 @@ class WorkbenchExecutionPlan(BaseModel):
     option_sources: dict[str, str] = Field(default_factory=dict)
     requested_options: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
     supports_prompt_override: bool = False
+
+    @model_validator(mode="after")
+    def require_single_target(self) -> WorkbenchExecutionPlan:
+        if (self.shot_id is None) == (self.asset_id is None):
+            raise ValueError("plan requires exactly one of shot_id or asset_id")
+        return self
 
     def freeze(self) -> WorkbenchExecutionPlan:
         """Return a copy with a deterministic ``plan_fingerprint``.

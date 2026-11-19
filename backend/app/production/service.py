@@ -215,10 +215,19 @@ class GraphService:
         created_by: UUID,
         definition: dict[str, object] | None = None,
     ) -> ProductionGraph:
-        if scope_type not in {"shot", "episode", "shot_experiment", "project"}:
+        if scope_type not in {"shot", "episode", "shot_experiment", "project", "asset"}:
             raise ValidationAppError(
-                "scope_type must be shot, episode, shot_experiment or project"
+                "scope_type must be shot, episode, shot_experiment, project or asset"
             )
+        if scope_type == "asset":
+            from app.assets.models import Asset
+
+            asset = await self._session.get(Asset, scope_entity_id)
+            if asset is None or asset.project_id != project_id:
+                raise ValidationAppError(
+                    "asset scope must name a project asset",
+                    details={"code": "GRAPH_ASSET_SCOPE_INVALID"},
+                )
         body = definition or {"nodes": [], "edges": []}
         validate_graph_definition(body)
         graph = ProductionGraph(

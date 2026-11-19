@@ -238,3 +238,33 @@ async def test_shot_experiment_graph_independent_from_formal(session: AsyncSessi
     # B is its own published graph
     assert graph_b.scope_type == "shot_experiment"
     assert graph_b.scope_entity_id == experiment_id
+
+
+@pytest.mark.asyncio
+async def test_asset_scope_requires_a_project_asset(session: AsyncSession) -> None:
+    from app.assets.models import Asset
+
+    user, project = await _project(session)
+    service = GraphService(session)
+    with pytest.raises(ValidationAppError) as missing:
+        await service.create_graph(
+            project_id=project.id,
+            scope_type="asset",
+            scope_entity_id=uuid4(),
+            template_key="asset-image",
+            created_by=user.id,
+        )
+    assert missing.value.details["code"] == "GRAPH_ASSET_SCOPE_INVALID"
+    asset = Asset(project_id=project.id, kind="character", name="Hero")
+    session.add(asset)
+    await session.flush()
+    graph = await service.create_graph(
+        project_id=project.id,
+        scope_type="asset",
+        scope_entity_id=asset.id,
+        template_key="asset-image",
+        created_by=user.id,
+        definition={"nodes": [{"key": "image", "type": "keyframe"}], "edges": []},
+    )
+    assert graph.scope_type == "asset"
+    assert graph.scope_entity_id == asset.id

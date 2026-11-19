@@ -1581,3 +1581,19 @@ FinalFilm prepare与逐命令授权。
   generated.ts 378 schema、api:authority/typecheck通过。
 
 未完成且不冒称：资产命令提交（executions/batch）与Graph asset scope、媒体安全合同扩展（I8a-03剩余）。
+
+## I8a-03c 资产目标进入计划与Graph（2026-11-19，EV103）
+
+为资产命令提交准备两个共享结构：执行计划的目标判别与Graph的asset scope。
+
+已实施：
+- `WorkbenchExecutionPlan`：`shot_id`改可空、新增`asset_id`与"恰好一个目标"校验；旧shot构造不变，
+  资产计划可冻结并计算fingerprint。
+- `GraphService.create_graph`接受`scope_type="asset"`，校验scope实体是本项目Asset（否则422
+  `GRAPH_ASSET_SCOPE_INVALID`）；资产Graph仍走同一版本/节点物化路径。
+
+已测（定向）：
+- `test_execution_plan.py`与`test_graph_service.py` 19 passed（新增目标独占与asset scope/跨项目拒绝）。
+
+未完成且不冒称：`ProductionCommands`资产提交（ExecutionBody/回执/WorkbenchExecutionService的asset分支）、
+Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
