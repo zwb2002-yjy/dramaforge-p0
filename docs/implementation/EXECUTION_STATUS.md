@@ -1414,7 +1414,31 @@ I5按机制验收退出，允许进入I8a。
 - 新增`test_voice_binding.py` 3 passed：无绑定missing、配置绑定configured含选项、停用与错配unavailable。
 - 定向组29 passed（voice_binding/speech_http/media_config/model_profiles）；ruff/mypy 397文件通过。
 
-未完成且不冒称：生产语音路径切换、Edge/espeak删除、FinalFilm prepare与逐命令授权。
+未完成且不冒称：生产调用方切换到binding（shot_service/experiment/final_film）、Edge/espeak删除、
+FinalFilm prepare与逐命令授权。
+
+## I8a-02d 语音模型运行时与冻结身份（2026-11-19，EV99）
+
+让冻结的语音身份可以是项目语音Binding，并由HTTP适配器完成一次合成调用。
+
+已实施：
+- `VoiceExecutionSpec`新增`engine="voice_model"`与`binding_id/provider_type/model_id/protocol_profile/
+  manifest_hash`（旧engine值保留用于历史Spec只读）；`voice_identity`返回
+  `(provider_type, model_id, voice-model:<hash12>)`。
+- `freeze_voice_execution(..., binding=...)`：configured→冻结binding身份与音色；missing/unavailable→
+  `ProviderNotConfiguredError`；无音色→422 `VOICE_SELECTION_REQUIRED`。
+- 新增`app/providers/speech_runtime.py`：`SpeechHttpAdapter`按协议构造并POST一次，解码WAV存入blobs；
+  非2xx→`ProviderError`，非法载荷→`SpeechProtocolError`；无重试、无fallback。
+- `get_voice_adapter(spec, session=..., transport=...)`改为async：`voice_model`加载binding/连接/凭据
+  （`read_credential_by_id`）并构建适配器；`execute_voice_node_run`传入session；旧引擎路径保留至下一片删除。
+
+已测（定向）：
+- 新增`test_speech_runtime.py` 4 passed：binding冻结与身份、missing/unavailable拒绝、MockTransport一次
+  POST+WAV/JSON解码、400与坏载荷拒绝。
+- 定向组50 passed（voice_config/speech_runtime/speech_http/voice_binding/final_film/shot_design）；
+  ruff/mypy 398文件通过。
+
+未完成且不冒称：生产调用方切换与Edge/espeak删除、FinalFilm prepare与逐命令授权。
 
 ## I8a-02c voice-options Binding能力投影（2026-11-19，EV98）
 
@@ -1433,4 +1457,28 @@ I5按机制验收退出，允许进入I8a。
 - 后端`test_voice_binding.py` 5 passed（含投影：schema音色解析、missing/unavailable）。
 - 定向组后端28 passed、前端22 passed；generated.ts 371 schema、typecheck/prettier/lint/UI权威通过。
 
-未完成且不冒称：生产语音路径切换、Edge/espeak删除、FinalFilm prepare与逐命令授权。
+未完成且不冒称：生产调用方切换到binding（shot_service/experiment/final_film）、Edge/espeak删除、
+FinalFilm prepare与逐命令授权。
+
+## I8a-02d 语音模型运行时与冻结身份（2026-11-19，EV99）
+
+让冻结的语音身份可以是项目语音Binding，并由HTTP适配器完成一次合成调用。
+
+已实施：
+- `VoiceExecutionSpec`新增`engine="voice_model"`与`binding_id/provider_type/model_id/protocol_profile/
+  manifest_hash`（旧engine值保留用于历史Spec只读）；`voice_identity`返回
+  `(provider_type, model_id, voice-model:<hash12>)`。
+- `freeze_voice_execution(..., binding=...)`：configured→冻结binding身份与音色；missing/unavailable→
+  `ProviderNotConfiguredError`；无音色→422 `VOICE_SELECTION_REQUIRED`。
+- 新增`app/providers/speech_runtime.py`：`SpeechHttpAdapter`按协议构造并POST一次，解码WAV存入blobs；
+  非2xx→`ProviderError`，非法载荷→`SpeechProtocolError`；无重试、无fallback。
+- `get_voice_adapter(spec, session=..., transport=...)`改为async：`voice_model`加载binding/连接/凭据
+  （`read_credential_by_id`）并构建适配器；`execute_voice_node_run`传入session；旧引擎路径保留至下一片删除。
+
+已测（定向）：
+- 新增`test_speech_runtime.py` 4 passed：binding冻结与身份、missing/unavailable拒绝、MockTransport一次
+  POST+WAV/JSON解码、400与坏载荷拒绝。
+- 定向组50 passed（voice_config/speech_runtime/speech_http/voice_binding/final_film/shot_design）；
+  ruff/mypy 398文件通过。
+
+未完成且不冒称：生产调用方切换与Edge/espeak删除、FinalFilm prepare与逐命令授权。

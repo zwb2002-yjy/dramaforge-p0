@@ -50,7 +50,7 @@ async def execute_voice_node_run(
         )
     spec = VoiceExecutionSpec.model_validate(raw_spec)
     provider, model, path_version = voice_identity(spec)
-    adapter = get_voice_adapter(spec)
+    adapter = await get_voice_adapter(spec, session=session)
     operation = await session.scalar(
         select(ProviderOperation)
         .where(ProviderOperation.node_run_id == run.id)

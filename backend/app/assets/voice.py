@@ -14,13 +14,20 @@ class ShotVoiceSettings(BaseModel):
 
 
 class VoiceExecutionSpec(BaseModel):
+    """Frozen speech identity: a voice-model binding or a historical local engine."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    engine: Literal["edge-tts", "espeak-ng", "pcm-silence"]
+    engine: Literal["edge-tts", "espeak-ng", "pcm-silence", "voice_model"]
     voice: str = Field(min_length=1, max_length=120)
     rate_percent: int = Field(default=0, ge=-30, le=30)
     engine_version: str
     output_format: Literal["audio/wav"] = "audio/wav"
+    binding_id: UUID | None = None
+    provider_type: str | None = None
+    model_id: str | None = None
+    protocol_profile: str | None = None
+    manifest_hash: str | None = None
 
 
 class VoiceOptionRead(BaseModel):

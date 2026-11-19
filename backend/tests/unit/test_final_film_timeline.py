@@ -1018,7 +1018,7 @@ async def test_voice_worker_records_frozen_identity_and_rejects_invalid_audio(
     adapter.create = create
     received = []
 
-    def fake_adapter(spec):
+    async def fake_adapter(spec, **_kwargs):
         received.append(spec)
         return adapter
 

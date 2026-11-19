@@ -28,6 +28,8 @@ class VoiceBindingStatus:
     provider_type: str | None
     voice_options: dict[str, object]
     reason_code: str | None
+    protocol_profile: str | None = None
+    manifest_hash: str | None = None
 
 
 def _missing() -> VoiceBindingStatus:
@@ -90,6 +92,8 @@ async def resolve_voice_binding(
         provider_type=entry.provider_type,
         voice_options=dict(profile.voice_options),
         reason_code=None,
+        protocol_profile=entry.protocol_profile,
+        manifest_hash=entry.contract_manifest_hash,
     )
 
 

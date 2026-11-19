@@ -49,26 +49,29 @@ def test_voice_rate_is_bounded(rate: int) -> None:
         ShotVoiceSettings(rate_percent=rate)
 
 
-def test_disabled_service_cannot_fall_back(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_disabled_service_cannot_fall_back(monkeypatch: pytest.MonkeyPatch) -> None:
     spec = freeze_voice_execution({}, settings=_settings())
     monkeypatch.setattr(
         "app.providers.voice_runtime.get_settings", lambda: _settings(tts_enabled=False)
     )
     with pytest.raises(ProviderNotConfiguredError):
-        get_voice_adapter(spec)
+        await get_voice_adapter(spec)
 
 
-def test_worker_keeps_frozen_voice_when_instance_default_changes(
+@pytest.mark.asyncio
+async def test_worker_keeps_frozen_voice_when_instance_default_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     spec = freeze_voice_execution({}, settings=_settings())
     monkeypatch.setattr(
         "app.providers.voice_runtime.get_settings", lambda: _settings(tts_voice="zh-CN-YunxiNeural")
     )
-    adapter = get_voice_adapter(spec)
+    adapter = await get_voice_adapter(spec)
     assert adapter.model == "zh-CN-XiaoxiaoNeural"  # type: ignore[attr-defined]
 
 
+@pytest.mark.asyncio
 async def test_empty_dialogue_is_real_silence_without_network_or_enabled_tts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -76,7 +79,7 @@ async def test_empty_dialogue_is_real_silence_without_network_or_enabled_tts(
     monkeypatch.setattr(
         "app.providers.voice_runtime.get_settings", lambda: _settings(tts_enabled=False)
     )
-    adapter = get_voice_adapter(spec)
+    adapter = await get_voice_adapter(spec)
     result = await adapter.create({"prompt": ""})
     data = adapter.blobs[result["remote_task_id"]]
     with wave.open(io.BytesIO(data), "rb") as wav:

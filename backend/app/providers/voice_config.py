@@ -12,6 +12,8 @@ from app.assets.voice import (
     VoiceOptionsRead,
 )
 from app.config import Settings, get_settings
+from app.providers.errors import ProviderNotConfiguredError
+from app.providers.voice_binding import VoiceBindingStatus
 from app.shared.errors import ValidationAppError
 
 EDGE_TTS_VERSION = "7.2.8"
@@ -31,12 +33,35 @@ def freeze_voice_execution(
     *,
     settings: Settings | None = None,
     silent: bool = False,
+    binding: "VoiceBindingStatus | None" = None,
 ) -> VoiceExecutionSpec:
     config = settings or get_settings()
     raw = director_state.get("voice") or {}
     voice = ShotVoiceSettings.model_validate(raw)
     if silent:
         return VoiceExecutionSpec(engine="pcm-silence", voice="none", engine_version="1")
+    if binding is not None:
+        if binding.status != "configured":
+            raise ProviderNotConfiguredError(
+                "项目语音模型不可用；不会自动切换到其他引擎。"
+            )
+        selected = voice.voice_id or binding.voice_options.get("voice_id")
+        if not isinstance(selected, str) or not selected:
+            raise ValidationAppError(
+                "请选择该语音模型支持的音色后再生成配音。",
+                details={"code": "VOICE_SELECTION_REQUIRED"},
+            )
+        return VoiceExecutionSpec(
+            engine="voice_model",
+            voice=selected,
+            rate_percent=voice.rate_percent,
+            engine_version=f"voice-model:{str(binding.manifest_hash or "")[:12]}",
+            binding_id=binding.binding_id,
+            provider_type=binding.provider_type,
+            model_id=binding.model_id,
+            protocol_profile=binding.protocol_profile,
+            manifest_hash=binding.manifest_hash,
+        )
     selected = voice.voice_id or config.tts_voice
     if config.tts_engine == "edge-tts":
         allowed = {entry.id for entry in EDGE_VOICES}
@@ -125,6 +150,12 @@ async def voice_options_for_project(
     )
 
 def voice_identity(spec: VoiceExecutionSpec) -> tuple[str, str, str]:
+    if spec.engine == "voice_model":
+        return (
+            spec.provider_type or "voice_model",
+            spec.model_id or spec.voice,
+            f"voice-model:{str(spec.manifest_hash or "")[:12]}",
+        )
     if spec.engine == "edge-tts":
         return "edge_tts", spec.voice, "edge-voice-v1"
     if spec.engine == "pcm-silence":
