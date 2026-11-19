@@ -192,6 +192,16 @@ export type AgentProposalRead = components["schemas"]["DirectorAgentProposalRead
 export type AgentActivityRead =
   paths["/api/v1/projects/{project_id}/director/turns/{turn_id}/tools"]["get"]["responses"][200]["content"]["application/json"];
 
+export async function openProjectDirectorThread(projectId: string) {
+  const csrf = await fetchCsrf();
+  return apiSend<components["schemas"]["DirectorAgentThreadRef"]>(
+    "POST",
+    directorPath(projectId, "agentThreads"),
+    { scope_type: "project", scope_entity_id: projectId },
+    csrf,
+  );
+}
+
 export async function openDirectorAgentThread(projectId: string, shotId: string) {
   const csrf = await fetchCsrf();
   return apiSend<components["schemas"]["DirectorAgentThreadRef"]>(

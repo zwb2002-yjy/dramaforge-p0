@@ -2011,3 +2011,18 @@ I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖�
 ## 全量unit回归（2026-11-19，EV130）
 
 `pytest tests/unit`在backend quality镜像内全量通过：**2696 passed**（585.23s，0 failed），覆盖I8a媒体配置/语音/资产命令与批次/voice_concat、I6b领域流程端到端、I7创作方向及既有回归。本轮未跑Docker Full Gate（按门分级留待正式CI/I10同一候选）；前端typecheck/lint/prettier/UI权威与定向Vitest同批通过。
+
+## I7-02 方向讨论（项目级线程）（2026-11-19，EV131）
+
+- `CreativeDirectionPanel`新增讨论区：`开始方向讨论`经`POST /director/threads`（scope_type=project，
+  每项目作用域唯一线程，幂等）打开/复用线程；`发送讨论`经`POST /threads/{id}/messages`受理
+  （intent=conversation）；待回复时每2s轮询`GET /threads/{id}`，assistant消息出现即停。
+- 每条assistant消息提供`采用为方向`：只把文本写入方向草稿，用户仍需显式`保存创作方向`（CAS）。
+- 前端新增`openProjectDirectorThread`；讨论只读消息、不自动保存、不触发生成。
+
+已测（定向）：
+- `CreativeDirectionPanel.test.tsx` 3 passed（新增讨论：打开线程→显示assistant→采用为方向写入草稿）；
+  `ScriptWorkspace.test.tsx` 9 passed、`directorApiContract` 5 passed；前端定向17 passed；
+  typecheck/lint/prettier/UI权威通过。
+
+未完成且不冒称：讨论的多轮记忆/摘要（依赖既有agent线程，未额外建模）、resume signal UI、N08/N10核对。
