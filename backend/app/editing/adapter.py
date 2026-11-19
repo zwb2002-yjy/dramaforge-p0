@@ -125,6 +125,8 @@ class EditingAdapter:
             project_id=project_id,
             timeline=timeline,
             episode_id=row.episode_id,
+            previous_timeline=dict(row.timeline or {}),
+            session_version=row.version + 1,
         )
         row.timeline = dict(document)
         row.version += 1

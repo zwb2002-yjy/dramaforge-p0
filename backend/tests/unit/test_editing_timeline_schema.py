@@ -183,9 +183,9 @@ async def test_schema2_refuses_unverifiable_source_kinds(session: AsyncSession) 
     row = await adapter.create_session(project_id=project.id, user_id=user.id, name="Edit")
     adopted = _clip(shot, artifact)
     adopted["source"] = {
-        "kind": "asset_version",
-        "asset_id": str(uuid4()),
-        "asset_version_id": str(uuid4()),
+        "kind": "public_material",
+        "publication_id": str(uuid4()),
+        "publication_item_id": str(uuid4()),
     }
     with pytest.raises(ValidationAppError) as refused:
         await adapter.save_timeline(
@@ -195,7 +195,109 @@ async def test_schema2_refuses_unverifiable_source_kinds(session: AsyncSession) 
             expected_session_version=1,
         )
     assert refused.value.details["code"] == "EDIT_SOURCE_UNVERIFIED"
-    assert refused.value.details["kind"] == "asset_version"
+    assert refused.value.details["kind"] == "public_material"
+    await session.rollback()
+
+
+async def _adopted_version(session: AsyncSession, *, project: Project, user: User):
+    """One formal, current asset version with a playable video reference."""
+    from app.assets.models import Asset, AssetVersion, AssetVersionReference
+
+    asset = Asset(project_id=project.id, kind="character", name="Hero", version=1)
+    session.add(asset)
+    await session.flush()
+    version = AssetVersion(
+        project_id=project.id,
+        asset_id=asset.id,
+        version_number=1,
+        kind="character",
+        name="Hero",
+        description="",
+        metadata_json={},
+        status="formal",
+        created_by=user.id,
+    )
+    session.add(version)
+    await session.flush()
+    asset.current_version_id = version.id
+    media = Artifact(
+        project_id=project.id,
+        artifact_type="video",
+        storage_state="available",
+        object_key=f"obj/{uuid4().hex}",
+        content_hash="d" * 64,
+        mime_type="video/mp4",
+        byte_size=4096,
+    )
+    session.add(media)
+    await session.flush()
+    session.add(
+        AssetVersionReference(
+            project_id=project.id,
+            asset_version_id=version.id,
+            artifact_id=media.id,
+            reference_role="performance",
+            label="take",
+            sort_order=0,
+            metadata_json={},
+        )
+    )
+    await session.flush()
+    return asset, version, media
+
+
+@pytest.mark.asyncio
+async def test_adopted_asset_version_clip_is_verified_and_snapshotted(
+    session: AsyncSession,
+) -> None:
+    project, user, shot, artifact = await _shot(session)
+    assert artifact is not None
+    asset, version, media = await _adopted_version(session, project=project, user=user)
+    adapter = EditingAdapter(session)
+    row = await adapter.create_session(project_id=project.id, user_id=user.id, name="Edit")
+    clip = _clip(shot, artifact)
+    clip["source"] = {
+        "kind": "asset_version",
+        "asset_id": str(asset.id),
+        "asset_version_id": str(version.id),
+    }
+    saved = await adapter.save_timeline(
+        project_id=project.id,
+        session_id=row.id,
+        timeline={"schema_version": 2, "clips": [clip], "metadata": {}},
+        expected_session_version=1,
+    )
+    snapshot = saved.timeline["clips"][0]["selection_snapshot"]
+    assert snapshot["kind"] == "asset_version"
+    assert snapshot["artifact_id"] == str(media.id)
+    assert snapshot["artifact_hash"] == media.content_hash
+
+
+@pytest.mark.asyncio
+async def test_stale_or_medialess_asset_version_is_rejected(session: AsyncSession) -> None:
+    project, user, shot, artifact = await _shot(session)
+    assert artifact is not None
+    asset, version, _media = await _adopted_version(session, project=project, user=user)
+    adapter = EditingAdapter(session)
+    row = await adapter.create_session(project_id=project.id, user_id=user.id, name="Edit")
+    clip = _clip(shot, artifact)
+    clip["source"] = {
+        "kind": "asset_version",
+        "asset_id": str(asset.id),
+        "asset_version_id": str(version.id),
+    }
+    # A newer candidate takes over the asset: the pinned version is no longer current.
+    version.status = "historical"
+    asset.current_version_id = None
+    await session.flush()
+    with pytest.raises(ValidationAppError) as rejected:
+        await adapter.save_timeline(
+            project_id=project.id,
+            session_id=row.id,
+            timeline={"schema_version": 2, "clips": [clip], "metadata": {}},
+            expected_session_version=1,
+        )
+    assert rejected.value.details["code"] == "EDIT_SOURCE_NOT_ADOPTED"
     await session.rollback()
 
 
@@ -296,6 +398,96 @@ async def test_episode_scoped_session_accepts_its_own_clip_and_rejects_foreign_e
             name="Foreign",
             episode_id=uuid4(),
         )
+
+
+@pytest.mark.asyncio
+async def test_save_records_a_server_side_selection_snapshot(session: AsyncSession) -> None:
+    project, user, shot, artifact = await _shot(session)
+    assert artifact is not None
+    adapter = EditingAdapter(session)
+    row = await adapter.create_session(project_id=project.id, user_id=user.id, name="Edit")
+    saved = await adapter.save_timeline(
+        project_id=project.id,
+        session_id=row.id,
+        timeline={"schema_version": 2, "clips": [_clip(shot, artifact)], "metadata": {}},
+        expected_session_version=1,
+    )
+    snapshot = saved.timeline["clips"][0]["selection_snapshot"]
+    assert snapshot["schema_version"] == 2
+    assert snapshot["session_version"] == 2
+    assert snapshot["clip_id"] == "clip-1"
+    assert snapshot["kind"] == "shot_formal"
+    assert snapshot["artifact_hash"] == artifact.content_hash
+    assert snapshot["identity"]["artifact_id"] == str(artifact.id)
+    assert snapshot["confirmed_at"]
+
+
+@pytest.mark.asyncio
+async def test_unchanged_source_reuses_the_previous_observation(session: AsyncSession) -> None:
+    """Saving again without touching the source must not re-date the proof."""
+    project, user, shot, artifact = await _shot(session)
+    assert artifact is not None
+    adapter = EditingAdapter(session)
+    row = await adapter.create_session(project_id=project.id, user_id=user.id, name="Edit")
+    first = await adapter.save_timeline(
+        project_id=project.id,
+        session_id=row.id,
+        timeline={"schema_version": 2, "clips": [_clip(shot, artifact)], "metadata": {}},
+        expected_session_version=1,
+    )
+    original = dict(first.timeline["clips"][0]["selection_snapshot"])
+    second = await adapter.save_timeline(
+        project_id=project.id,
+        session_id=row.id,
+        timeline={"schema_version": 2, "clips": [_clip(shot, artifact)], "metadata": {}},
+        expected_session_version=2,
+    )
+    reused = second.timeline["clips"][0]["selection_snapshot"]
+    assert reused["confirmed_at"] == original["confirmed_at"]
+    assert reused["session_version"] == original["session_version"]
+
+
+@pytest.mark.asyncio
+async def test_changed_source_redates_and_keeps_the_initial_source(
+    session: AsyncSession,
+) -> None:
+    project, user, shot, artifact = await _shot(session)
+    assert artifact is not None
+    adapter = EditingAdapter(session)
+    row = await adapter.create_session(project_id=project.id, user_id=user.id, name="Edit")
+    await adapter.save_timeline(
+        project_id=project.id,
+        session_id=row.id,
+        timeline={"schema_version": 2, "clips": [_clip(shot, artifact)], "metadata": {}},
+        expected_session_version=1,
+    )
+    replacement = Artifact(
+        project_id=project.id,
+        artifact_type="video",
+        storage_state="available",
+        object_key=f"obj/{uuid4().hex}",
+        content_hash="c" * 64,
+        mime_type="video/mp4",
+        byte_size=2048,
+    )
+    session.add(replacement)
+    await session.flush()
+    shot.formal_video_artifact_id = replacement.id
+    await session.flush()
+    updated = await adapter.save_timeline(
+        project_id=project.id,
+        session_id=row.id,
+        timeline={
+            "schema_version": 2,
+            "clips": [_clip(shot, replacement)],
+            "metadata": {},
+        },
+        expected_session_version=2,
+    )
+    snapshot = updated.timeline["clips"][0]["selection_snapshot"]
+    assert snapshot["artifact_hash"] == replacement.content_hash
+    assert snapshot["session_version"] == 3
+    assert snapshot["initial_source"]["artifact_id"] == str(artifact.id)
 
 
 @pytest.mark.asyncio

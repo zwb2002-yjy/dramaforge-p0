@@ -2435,3 +2435,19 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
   `downgrade 0120` → `upgrade head` 全部成功；随后删库并 `compose down`，无残留容器。
 - **下一步**：`episode_id` 暴露到读模型、`selection_snapshot`、切换集需版本化 Save 且显式检查全部
   Clip（不静默删 Clip）、渲染快照与导出绑定（I9-02）。
+
+### I9-01c 已实施：Save 期 `selection_snapshot` 与已采用资产版本来源（2026-11-19，EV155）
+
+- 每个 schema 2 clip 在 Save 时由**服务端**写入 `selection_snapshot`（`schema_version`/
+  `session_version`/`clip_id`/`kind`/`identity`/`artifact_id`/`artifact_hash`/`confirmed_at`）；
+  它是“编辑器保存时看到的是什么”的观测，不是第二份可写 Formal 事实。
+- 来源未变时**沿用原观测**（不重写 `confirmed_at`/`session_version`）；来源改变则重写观测并保留
+  `initial_source`，导出/渲染可据此证明变更历史。
+- `asset_version` 来源现可验证：版本须在本项目、属于指定 Asset、`status=formal` 且是该 Asset 当前
+  `current_version_id`（否则 `EDIT_SOURCE_NOT_ADOPTED`），且须存在可播放的视频
+  `AssetVersionReference`（否则 `EDIT_SOURCE_NO_MEDIA`）；观测记录解析出的媒体 artifact 与 hash。
+- `public_material` 仍 fail-closed（`EDIT_SOURCE_UNVERIFIED`），待公共素材资质接线。
+- 证据：`test_editing_timeline_schema.py` **13 passed**、编辑组 **24 passed**；ruff 通过、
+  `mypy app` 404 文件通过。
+- **下一步**：公共素材（public_material）资质接线、切换集版本化 Save、`episode_id` 读模型、
+  渲染快照与导出绑定（I9-02）。

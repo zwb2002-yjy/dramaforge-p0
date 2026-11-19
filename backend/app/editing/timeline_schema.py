@@ -14,6 +14,7 @@ about production truth.  Schema 2 makes that claim explicit and typed:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Literal, cast
 from uuid import UUID
 
@@ -21,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.assets.models import Scene, Shot
+from app.assets.models import Asset, AssetVersion, AssetVersionReference, Scene, Shot
 from app.execution.models import Artifact
 from app.shared.errors import ValidationAppError
 
@@ -30,7 +31,8 @@ TIMELINE_SCHEMA_V2 = 2
 SUPPORTED_SCHEMA_VERSIONS = frozenset({TIMELINE_SCHEMA_V1, TIMELINE_SCHEMA_V2})
 
 ClipSourceKind = Literal["shot_formal", "asset_version", "public_material"]
-VERIFIABLE_SOURCE_KINDS: frozenset[str] = frozenset({"shot_formal"})
+# Kinds whose eligibility can be proven from data this service already owns.
+VERIFIABLE_SOURCE_KINDS: frozenset[str] = frozenset({"shot_formal", "asset_version"})
 
 
 class ClipSource(BaseModel):
@@ -58,6 +60,8 @@ class TimelineClip(BaseModel):
     transition: dict[str, Any] | None = None
     source: ClipSource
     audio_source: ClipSource | None = None
+    # Server-written observation of the source at Save; never client-authoritative.
+    selection_snapshot: dict[str, Any] | None = None
 
 
 class TimelineDocument(BaseModel):
@@ -160,6 +164,71 @@ def parse_schema2(timeline: dict[str, object]) -> TimelineDocument:
     )
 
 
+async def _verify_asset_version(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    source: ClipSource,
+    index: int,
+) -> Artifact:
+    """An adopted asset version is usable only while its current formal media exists."""
+    assert source.asset_id is not None and source.asset_version_id is not None
+    version = await session.get(AssetVersion, source.asset_version_id)
+    asset = await session.get(Asset, source.asset_id)
+    if (
+        version is None
+        or asset is None
+        or version.project_id != project_id
+        or version.asset_id != asset.id
+        or asset.project_id != project_id
+        or asset.status == "recycled"
+    ):
+        raise ValidationAppError(
+            "clip asset version is not available in this project",
+            details={"code": "EDIT_SOURCE_NOT_ADOPTED", "clip_index": index},
+        )
+    if version.status != "formal" or asset.current_version_id != version.id:
+        raise ValidationAppError(
+            "clip asset version is not the current formal version",
+            details={"code": "EDIT_SOURCE_NOT_ADOPTED", "clip_index": index},
+        )
+    artifact = await session.scalar(
+        select(Artifact)
+        .join(AssetVersionReference, AssetVersionReference.artifact_id == Artifact.id)
+        .where(
+            AssetVersionReference.asset_version_id == version.id,
+            Artifact.artifact_type == "video",
+            Artifact.storage_state == "available",
+            Artifact.deleted_at.is_(None),
+        )
+        .order_by(AssetVersionReference.sort_order, Artifact.id)
+        .limit(1)
+    )
+    if artifact is None:
+        raise ValidationAppError(
+            "clip asset version has no playable media",
+            details={"code": "EDIT_SOURCE_NO_MEDIA", "clip_index": index},
+        )
+    return artifact
+
+
+async def _verify_source(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    source: ClipSource,
+    index: int,
+    episode_id: UUID | None,
+) -> Artifact | None:
+    """Verify one clip source and return the media artifact it resolves to."""
+    if source.kind == "shot_formal":
+        await _verify_shot_formal(
+            session, project_id=project_id, source=source, index=index, episode_id=episode_id
+        )
+        return await session.get(Artifact, source.artifact_id) if source.artifact_id else None
+    return await _verify_asset_version(session, project_id=project_id, source=source, index=index)
+
+
 async def _verify_shot_formal(
     session: AsyncSession,
     *,
@@ -198,17 +267,57 @@ async def _verify_shot_formal(
         )
 
 
+async def _observe_source(
+    session: AsyncSession,
+    *,
+    clip_id: str,
+    source: ClipSource,
+    session_version: int,
+    media_artifact: Artifact | None,
+) -> dict[str, Any]:
+    """Server-side observation of what this clip actually points at now.
+
+    This is an observation, not a second Formal fact: it records the identity the
+    timeline was saved against so a later render/export can prove what the editor
+    saw.  Only verified kinds reach here.
+    """
+    return {
+        "schema_version": TIMELINE_SCHEMA_V2,
+        "session_version": session_version,
+        "clip_id": clip_id,
+        "kind": source.kind,
+        "identity": source.model_dump(mode="json", exclude_none=True),
+        "artifact_hash": media_artifact.content_hash if media_artifact else None,
+        "artifact_id": str(media_artifact.id) if media_artifact else None,
+        "confirmed_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def _same_observation(previous: object, current: dict[str, Any]) -> bool:
+    if not isinstance(previous, dict):
+        return False
+    return bool(
+        previous.get("kind") == current["kind"]
+        and previous.get("identity") == current["identity"]
+        and previous.get("artifact_hash") == current["artifact_hash"]
+    )
+
+
 async def normalize_timeline_for_save(
     session: AsyncSession,
     *,
     project_id: UUID,
     timeline: dict[str, object],
     episode_id: UUID | None = None,
+    previous_timeline: dict[str, object] | None = None,
+    session_version: int | None = None,
 ) -> dict[str, object]:
     """Return the exact document to persist, or fail closed.
 
     Schema 1 keeps its historical meaning and is returned unchanged: an explicit
-    user save is the only moment a timeline may become schema 2.
+    user save is the only moment a timeline may become schema 2.  Every schema 2
+    clip gains a server-written ``selection_snapshot``; when the source is
+    unchanged the previous legal observation is reused instead of re-dating it.
     """
     version = declared_schema_version(timeline)
     if version == TIMELINE_SCHEMA_V1:
@@ -216,7 +325,10 @@ async def normalize_timeline_for_save(
         # historical documents keep their exact stored shape.
         return {key: value for key, value in timeline.items() if key != "schema_version"}
     document = parse_schema2(timeline)
+    previous_by_clip = _previous_snapshots(previous_timeline)
+    stored: list[dict[str, Any]] = []
     for index, clip in enumerate(document.clips):
+        media: Artifact | None = None
         for source in (clip.source, clip.audio_source):
             if source is None:
                 continue
@@ -229,14 +341,58 @@ async def normalize_timeline_for_save(
                         "kind": source.kind,
                     },
                 )
-            await _verify_shot_formal(
+            verified = await _verify_source(
                 session,
                 project_id=project_id,
                 source=source,
                 index=index,
                 episode_id=episode_id,
             )
-    return document.model_dump(mode="json")
+            media = media or verified
+        payload = clip.model_dump(mode="json")
+        previous = previous_by_clip.get(clip.id)
+        observed = await _observe_source(
+            session,
+            clip_id=clip.id,
+            source=clip.source,
+            session_version=session_version or 1,
+            media_artifact=media,
+        )
+        if _same_observation(previous, observed):
+            # Unchanged source: keep the original observation and its timestamp.
+            snapshot = dict(cast(dict[str, Any], previous))
+        else:
+            initial = (
+                previous.get("initial_source")
+                if isinstance(previous, dict) and previous.get("initial_source")
+                else clip.source.model_dump(mode="json", exclude_none=True)
+            )
+            snapshot = {**observed, "initial_source": initial}
+        payload["selection_snapshot"] = snapshot
+        stored.append(payload)
+    return {
+        "schema_version": TIMELINE_SCHEMA_V2,
+        "clips": stored,
+        "metadata": document.metadata,
+    }
+
+
+def _previous_snapshots(previous_timeline: dict[str, object] | None) -> dict[str, dict[str, Any]]:
+    """Index the previous document's own snapshots by clip id, if it was schema 2."""
+    if not previous_timeline or previous_timeline.get("schema_version") != TIMELINE_SCHEMA_V2:
+        return {}
+    raw_clips = previous_timeline.get("clips")
+    if not isinstance(raw_clips, list):
+        return {}
+    indexed: dict[str, dict[str, Any]] = {}
+    for raw in raw_clips:
+        if not isinstance(raw, dict):
+            continue
+        clip_id = raw.get("id")
+        snapshot = raw.get("selection_snapshot")
+        if isinstance(clip_id, str) and isinstance(snapshot, dict):
+            indexed[clip_id] = cast(dict[str, Any], snapshot)
+    return indexed
 
 
 __all__ = [
