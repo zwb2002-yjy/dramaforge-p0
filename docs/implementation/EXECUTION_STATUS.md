@@ -2673,6 +2673,24 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - **下一步（I10-01 剩余）**：restic 快照运行与同一静止窗口；在隔离资源上做一次真实恢复演练
   （含恢复后业务演练：队列、失去通知、Worker 重启、未知提交计数不增）。
 
+### I10-01d 已实施：备份运行编排（单一静止窗口）（2026-11-19，EV172）
+
+- 新增 `app/maintenance/backup_runner.py`：
+  - `plan_commands` 由 manifest 生成计划：每个数据库成员一条
+    `pg_dump --format=custom --no-owner`（**各自独立归档文件**，仅检查点成员追加 `--schema`），
+    每个桶一条 `restic backup <staging>/objects/<bucket> --tag bucket:<bucket>`。
+  - `run_backup` 在**暂停写入之后**按序执行，`finally` 中无条件恢复写入；任一命令非 0 即
+    `BACKUP_COMMAND_FAILED` 并**不产出 manifest**——部分 bundle 不被当成成功；成功时返回
+    `quiesce_started_at/finished_at/stages/command_count/completed` 证据。
+- 命令执行器作为 `CommandRunner` 注入，本模块不含 subprocess 调用；真实 `pg_dump`/`restic`
+  适配留待具备 restic 的环境（当前镜像未安装 restic）。
+- 证据：`test_backup_runner.py` **5 passed**（计划覆盖全部成员且归档文件互不相同、仅检查点带
+  `--schema`、桶按 manifest 排序并带 tag、空 manifest 拒绝、暂停→执行→恢复的顺序与证据字段、
+  第二条命令失败即中止且仍恢复写入、空命令列表根本不打开窗口）；`ruff check app tests` 通过、
+  `mypy app` 413 文件通过。
+- **下一步（I10-01 剩余）**：真实 `pg_dump`/`restic` 适配与容量/峰值内存检查；在隔离资源上做一次
+  真实恢复演练（含恢复后业务演练：队列、失去通知、Worker 重启、未知提交计数不增）。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
