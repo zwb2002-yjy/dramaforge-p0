@@ -2793,6 +2793,22 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 `app.main` 或等价注册），再用 `GraphService` 建图、用服务/ORM 造数据，而不是靠手写最少 import。
 本轮资源已清理（删库 + `compose down --volumes`），未保留半成品脚本。
 
+### I10-01i 已实施：恢复演练在真实 PostgreSQL 上通过（2026-11-19，EV177）
+
+按前两轮记录的前置结论一次跑通：
+
+- 脚本 `import app.main` 注册**完整模型注册表**（等价 conftest），用 `GraphService.create_graph` +
+  `materialize_definition` 取真实 `GraphVersion/GraphNode`，再写入四类异常态调用
+  `drill_recovery_state`。
+- 真实 PG 输出 `passed=false`，`checks=[queue_idempotency, running_lease,
+  unknown_submission_identity]`，四条失败齐全：`DRILL_QUEUE_KEY_MISSING`、`DRILL_STALE_LEASE`、
+  `DRILL_ORPHANED_RUNNING`、`DRILL_UNKNOWN_WITHOUT_REMOTE_ID`（后两条带 `node_run_id` /
+  `provider_operation_id`）。
+- 演练后删库、`compose down --volumes`、删除脚本，无残留容器/卷。
+- 意义：演练判据在真实 PG 的外键、枚举类型与部分唯一索引下同样成立，是 SQLite 单测之外的第二层证据。
+- **下一步**：restic 快照调用与 staging 峰值内存实测；随后 I10-02 三作品端到端与真实验收
+  （需 Owner 授权）。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
