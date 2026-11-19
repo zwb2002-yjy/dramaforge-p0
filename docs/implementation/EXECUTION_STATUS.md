@@ -1378,3 +1378,22 @@ I5按机制验收退出，允许进入I8a。
   `MediaConfigSection.test.tsx` 2 passed；受影响组94后端+48前端passed；generated.ts 368 schema。
 
 未完成且不冒称：媒体配置API的独立HTTP测试、I8a-02（语音Binding/Edge退出）、I8a-03（媒体安全/逐命令授权）。
+
+## I8a-02a 语音模型HTTP协议适配（2026-11-19，EV96）
+
+先落I8a-02的传输层：三种语音模型的请求构造与字节解码，纯适配、不选模型、不兜底、不重试。
+
+已实施：
+- 新增`app/providers/speech_http.py`：`SpeechRequest`/`SpeechWireRequest`与三个协议
+  `openai_speech_v1`（JSON请求；原始audio/wav或`b64_json`）、`minimax_tts_v1`（`data.audio` hex或base64，
+  `base_resp.status_code`非0拒绝）、`volcengine_tts_v1`（`data` base64，`code`非0/3000拒绝）；
+  统一`_require_wav`校验RIFF/WAVE，非法载荷`SPEECH_RESPONSE_INVALID/NOT_WAV`，未知协议
+  `SPEECH_PROTOCOL_UNKNOWN`。
+- 适配器不含网络调用、模型选择、凭据读取或fallback；由后续切片接入binding解析与生产路径。
+
+已测（定向）：
+- 新增`test_speech_http.py` 5 passed：OpenAI原始字节与b64_json、MiniMax hex与provider错误、
+  Volcengine base64与坏载荷、未知协议fail-closed；ruff/mypy 396文件通过。
+
+未完成且不冒称：voice media_type/purpose/capability枚举与manifest、binding解析与`voice-options`投影、
+生产语音路径切换与Edge/espeak删除、FinalFilm prepare与逐命令授权（I8a-02剩余）。
