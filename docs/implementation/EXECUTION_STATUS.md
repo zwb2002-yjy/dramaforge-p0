@@ -2722,6 +2722,20 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - **下一步（I10-01 剩余）**：restic 对象快照接线与 staging 峰值内存实测；恢复后业务演练
   （队列、失去通知、Worker 重启、未知提交计数不增）。
 
+### I10-01g 已实施：对象流式 staging（2026-11-19，EV175）
+
+- 新增 `app/maintenance/object_staging.py`：
+  - `stage_object` 以 64KiB 块 `iter_bytes` **流式**写入受限 staging 目录，边写边算 sha256 与字节数；
+    超 `max_object_bytes` 即 `BACKUP_OBJECT_TOO_LARGE` 并**删除半成品**（不留下看似可恢复的截断文件）；
+    空对象 `BACKUP_OBJECT_INVALID`。
+  - `_safe_target` 拒绝绝对路径、`..`、非法桶名以及逃出 staging 根的目标（`BACKUP_OBJECT_INVALID`）。
+  - `stage_objects` 按 key 排序去重，累计超 `max_total_bytes` 即 `BACKUP_CAPACITY_INSUFFICIENT`；
+    `staging_free_bytes` 提供容量检查所需的实测可用空间。
+- 证据：`test_object_staging.py` **5 passed**（7 字节小块流式读取仍得到正确 size/sha256 与落地内容、
+  超限拒绝且无残留、空对象/`../`/非法桶名分别拒绝、去重与顺序确定 + 总量上限、可用字节为正）；
+  `ruff check app tests` 通过、`mypy app` 415 文件通过。
+- **下一步（I10-01 剩余）**：restic 快照调用与 staging 峰值内存实测；恢复后业务演练。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
