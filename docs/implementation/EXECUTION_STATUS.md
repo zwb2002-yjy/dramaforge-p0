@@ -1652,3 +1652,15 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
 
 未完成且不冒称：Worker对asset快照的端到端执行（eligibility已具备，仍需图片adapter mock seam与完成/候选断言）、
 `ExecutionAccepted`事件asset目标、资产batch与媒体安全合同。
+
+## I8a-03g 资产命令的生产事件目标（2026-11-19，EV107）
+
+- `ExecutionAccepted`改为`shot_id|asset_id`恰好一个目标；`notice_scope`对asset返回`("asset", asset_id)`，
+  shot通知语义不变；历史事件仍按原字段只读。
+- `submit_asset_execution`在入队事务内追加`execution_accepted`通知（aggregate=asset），与业务事实同事务。
+
+已测（定向）：
+- `test_asset_commands.py` 3 passed（新增通知aggregate_type=asset、aggregate_id=asset.id断言）；
+  定向组64 passed；generated.ts 381 schema、api:authority通过。
+
+未完成且不冒称：Worker对asset快照的端到端执行（fake runtime/compiler harness）、资产batch与媒体安全合同。

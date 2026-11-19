@@ -200,6 +200,14 @@ async def test_asset_command_queues_one_run_and_replays_the_receipt(session, wor
         )
         == 1
     )
+    from app.events.models import EventLog
+
+    notice = await session.scalar(
+        select(EventLog).where(EventLog.event_type == "execution_accepted")
+    )
+    assert notice is not None
+    assert notice.aggregate_type == "asset"
+    assert notice.aggregate_id == world["asset"].id
 
     replay = await submit_asset_execution(
         session,

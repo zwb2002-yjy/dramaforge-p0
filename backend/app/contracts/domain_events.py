@@ -3,15 +3,22 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ExecutionAccepted(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["execution_accepted"] = "execution_accepted"
-    shot_id: UUID
+    shot_id: UUID | None = None
+    asset_id: UUID | None = None
     node_run_id: UUID
+
+    @model_validator(mode="after")
+    def require_single_target(self) -> "ExecutionAccepted":
+        if (self.shot_id is None) == (self.asset_id is None):
+            raise ValueError("execution notice requires exactly one target")
+        return self
 
 
 class ExecutionChanged(BaseModel):
@@ -137,6 +144,10 @@ def notice_scope(notice: ProductionNotice) -> tuple[str, UUID]:
         return "business_flow", notice.instance_id
     if isinstance(notice, BusinessStepChanged):
         return "business_step", notice.step_id
+    if isinstance(notice, ExecutionAccepted) and notice.asset_id is not None:
+        return "asset", notice.asset_id
+    if notice.shot_id is None:
+        raise ValueError("production notice has no target")
     return "shot", notice.shot_id
 
 

@@ -224,6 +224,15 @@ async def submit_asset_execution(
     )
     session.add(run)
     await session.flush()
+    from app.contracts.domain_events import ExecutionAccepted
+    from app.production.application.events import append_production_notice
+
+    await append_production_notice(
+        session,
+        project_id=project.id,
+        actor_id=actor.id,
+        notice=ExecutionAccepted(asset_id=asset.id, node_run_id=run.id),
+    )
     return ExecutionReceipt(
         node_run_id=run.id,
         graph_id=graph.id,
