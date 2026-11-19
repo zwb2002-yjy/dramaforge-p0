@@ -2736,6 +2736,21 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
   `ruff check app tests` 通过、`mypy app` 415 文件通过。
 - **下一步（I10-01 剩余）**：restic 快照调用与 staging 峰值内存实测；恢复后业务演练。
 
+#### 恢复后业务演练：设计前提先核对（本轮实读结论，未落代码）
+
+起草“恢复后演练”时先用测试造了四类异常态，结果被数据库约束直接挡回——这本身是有效结论，故先记录再实现：
+
+- `ProviderOperation` 上有**部分唯一索引** `uq_provider_operations_node_run`（`node_run_id` 唯一）：
+  一个 NodeRun **只能挂一条** Operation，因此“同一 attempt 两条可能 create”与“重试新建第二条
+  Operation”都是**结构上不可能**的状态，不能作为演练判据。真正可漂移的是：同一 Operation 行在
+  `unknown_submission` 后是否被**盲重发**（必须仍只有一个远端身份、只做观察）。
+- `NodeRun.idempotency_key` 由插入测试同样被拒（非空/唯一约束），所以“排队任务缺幂等键”也不可达；
+  排队演练应改为验证“queued 行能否被恢复扫描到且键可复用”，而非检查缺失。
+- 仍可达且有意义的检查：running 行**超出最大租约**（`DRILL_STALE_LEASE`）、running 行**无租约时间戳**
+  （`DRILL_ORPHANED_RUNNING`）、`unknown_submission` 却声称有远端 ID（`DRILL_UNKNOWN_WITHOUT_REMOTE_ID`）。
+- 本轮未提交演练代码（草案已删除），避免留下与 schema 假设冲突的模块；下一轮按上述可达判据重写，
+  并在隔离 PG 上跑一次（SQLite 的部分唯一索引行为需与 PG 对齐后再断言）。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
