@@ -237,6 +237,48 @@ async def agnes_image_binding(session: AsyncSession, *, project: Project, owner:
     )
 
 
+async def configure_image_default(
+    session: AsyncSession, *, project: Project, owner: User, binding
+) -> None:
+    """Point the project's effective profile at the verified image binding.
+
+    A project-level production run resolves the model from its media defaults;
+    without this the Workbench correctly reports every shot as blocked.  The
+    project-level profile row is created here because a workspace-level row must
+    keep its media slots empty.
+    """
+    from app.providers.model_profiles.orm import ProductionModelProfile
+    from app.providers.model_profiles.service import ProductionModelProfileService
+
+    profile = await ProductionModelProfileService(session).get_project_profile(
+        project_id=project.id
+    )
+    slot_binding = {
+        "visual.keyframe": {
+            "slot": "visual.keyframe",
+            "model_id": IMAGE_MODEL_ID,
+            "native_options": {},
+            "enabled": True,
+        }
+    }
+    if profile is None:
+        profile = ProductionModelProfile(
+            workspace_id=project.workspace_id,
+            project_id=project.id,
+            name="default",
+            version=1,
+            is_default=True,
+            bindings=slot_binding,
+            created_by=owner.id,
+            updated_by=owner.id,
+        )
+        session.add(profile)
+        await session.flush()
+    profile.bindings = {**profile.bindings, **slot_binding}
+    profile.image_model_binding_id = binding.id
+    await session.flush()
+
+
 async def shared_asset_reference(
     session: AsyncSession,
     *,

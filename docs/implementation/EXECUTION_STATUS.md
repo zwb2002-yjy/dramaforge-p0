@@ -2230,3 +2230,32 @@ I7-03（resume只读端点）与 I8b-01a–01e（就绪模型/两集/共享资�
 
 未完成且不冒称：视频/合成段与分集交付（I9）、三类作品的真实付费Provider端到端（I10硬门）、
 Full Gate 仍待空闲宿主重跑`workbench-resource`。
+
+## I8b-03a 项目级生产批预览（只读）（2026-11-19，EV145）
+
+补上“用户按项目决定生产”的只读编排面：一次看清哪些镜头现在就能开工、哪些被阻断、一次批次最多会
+产生多少次付费操作，且不写库、不调 Provider、不改动既有逐命令授权门。
+
+已实施：
+- **`app/production/batch_plan.py`**：`ProductionBatchPlanService.preview(project, stage, shot_ids?)`
+  - 按 `episode_number → scene_number → sort_order → shot_number` 稳定排序遍历项目内镜头；
+  - 逐镜复用 `WorkbenchExecutionService.build_plan`（同一份计划与指纹），因此“能开工”与真正派发
+    用的是同一套判定，不存在第二套规则；
+  - 每镜给出 `planned`（含`plan_fingerprint`）/`blocked`（含阻断码）/`formal`（该阶段正式媒体已存在）；
+    `build_plan` 的业务拒绝被收敛为逐镜阻断，不中断整批；
+  - `max_operations = planned_count`（付费操作上界，调用方只可调低），`batch_fingerprint` 冻结
+    “有序镜头 + 计划指纹 + 阶段”，供后续获授权批次核对自己面对的是同一份预览；
+  - 只允许 `image_keyframe`/`video` 两个生产阶段（`BATCH_STAGE_UNSUPPORTED`），编辑/交付不在本批；
+    传入项目外镜头直接 `BATCH_SHOT_UNKNOWN`，不静默缩小冻结集合。
+- 测试夹具新增 `configure_image_default`：把项目级 profile 的 `visual.keyframe` 槽与 D6
+  `image_model_binding_id` 同时指向已验证的图像 binding——这正是“项目级解析”与“D6 媒体默认”两套
+  读取路径的共同前提。
+
+已测（定向）：
+- `test_production_batch_plan.py` 7 passed：三类作品全镜可计划且顺序与结构一致、同输入指纹稳定、
+  某镜转正式后退出付费集并使指纹变化、未配模型与“无正式首帧的视频”逐镜报阻断而不抛错、
+  阶段白名单与项目外镜头拒绝、按给定镜头收窄到 1。
+- 受影响定向组 **62 passed**；`ruff check app tests` 通过；`mypy app` 403 文件 Success。
+
+未完成且不冒称：本能力目前**没有 HTTP 入口**（未加路由、未重生`generated.ts`），也没有“获授权后
+按批 create”的写路径——批量付费创建仍必须走既有单命令授权与`max_operations`上界，属后续切片。
