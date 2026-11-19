@@ -179,7 +179,7 @@ class Export(Base):
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     episode_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("episodes.id", ondelete="SET NULL"), nullable=True
+        ForeignKey("episodes.id", ondelete="RESTRICT"), nullable=True
     )
     # Frozen edit-session snapshot this export binds; composite FK keeps the
     # session in the same project.

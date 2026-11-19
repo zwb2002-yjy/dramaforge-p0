@@ -2515,6 +2515,7 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - **下一步（I9-02 剩余）**：真实渲染——render NodeRun 冻结 `edit_session_id/timeline_version/
   timeline_hash/来源与资格`，产出 MP4 与 SRT 并校验可解码，Export 只绑定该不可变渲染快照；
   逐集交付下载。渲染属生成动作，需按合同取得 Owner 授权。
-- **已知待修（下一批）**：`exports.episode_id` 目前是 `ON DELETE SET NULL`，而 DB09 要求
-  “删除集不能把交付变成项目级”。正确做法是把该外键改为 `RESTRICT`（或补集删除守卫），
-  并在隔离 PG 上验证“有导出的集不可删”；本轮未改，以免在没有删除路径与对应测试前做出未验证的语义变更。
+- **已修（I9-02b，EV160）**：`exports.episode_id` 外键由 `ON DELETE SET NULL` 改为
+  `ON DELETE RESTRICT`（迁移 `20261119_0123`，downgrade 回 SET NULL）。隔离 PG `editor_0123` 实测：
+  有导出的集执行 `DELETE FROM episodes` 被 `fk_exports_episode` 拒绝、导出行仍在；`alembic check`
+  无漂移，downgrade→upgrade 往返成功。DB09“删除集不能把交付变成项目级”现已成立。
