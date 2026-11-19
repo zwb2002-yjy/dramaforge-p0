@@ -1935,5 +1935,7 @@ I6b开工：把默认BusinessFlow注册表从单一shot流程扩为覆盖project
 创建的实例没有step行（`DirectorBusinessFlowStep`为空），`advance`因此返回`flow_progress_pending`。
 进一步探针：`apply_plan`确实为领域实例创建了两个step（list_assets/read_asset，均pending），
 但`advance`连续多轮后step仍为pending、实例waiting(`flow_progress_pending`)，说明`ready_steps`在该实例上
-返回空或wave执行被静默跳过；probe流程的既有测试通过。探针已回退。下一轮在`advance`内加临时断言定位
-（对比probe实例字段：supervisor_run_id/plan_id/plan_revision/scope_type与step.dependencies的读取）。
+返回空或wave执行被静默跳过；probe流程的既有测试通过。追加探针：在commit后单独调用`ready_steps(instance)`返回`list_assets`（可执行），但随后`advance`
+返回waiting且step仍显示pending。最可能原因是探针复用同一session的identity map读到旧step状态
+（`_settle_instance`与后续查询未`populate_existing`），而非生产路径缺陷；worker每次用新session。
+下一轮：用独立session（worker同款factory）重跑，或对`_steps_of`加`populate_existing`验证。
