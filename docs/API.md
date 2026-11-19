@@ -696,6 +696,13 @@ Binding存在但已停用不能作为新选择保存；已保存选择后来失�
 错误响应带稳定code与安全的field_path/current_version，可见字段可用于差异合并；不回显凭据或私有Provider响应。
 每次保存不调用Provider；配置保存成功与连接检查/生成成功不可混为一种toast。
 
+### 创作方向（I7）
+
+`GET/POST /projects/{p}/creative-direction`：项目级创作方向说明，存于`ProjectCreativeProfile.strategy_snapshot.
+creative_direction`；POST要求`expected_profile_version`（CAS，冲突409 `CREATIVE_PROFILE_VERSION_CONFLICT`），
+direction 1..4000字且去首尾空白；不生成任何内容、不改写其他strategy事实。前端`CreativeDirectionPanel`
+挂在故事剧本页，作为生成故事brief的上下文。
+
 ### 平台管理、推荐与单次选择
 
 平台沿既有`/workspaces/{workspace_id}/provider-connections`、Binding/Catalog/能力检查读取及版本化写入，

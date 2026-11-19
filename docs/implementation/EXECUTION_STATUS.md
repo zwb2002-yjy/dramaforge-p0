@@ -1993,3 +1993,17 @@ I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖�
 
 下一片建议：先做「方向讨论」的最小闭环（项目级讨论→确认后写入创作方向），或先补 resume 所需 signal 暴露；
 两者都需在现有Director turn/thread契约上增量，不新建并行对话Runtime。
+
+## I7-01 项目创作方向（2026-11-19，EV129）
+
+- 后端`GET/POST /projects/{p}/creative-direction`：读写`ProjectCreativeProfile.strategy_snapshot.creative_direction`；
+  POST用`expected_profile_version`做CAS（409 `CREATIVE_PROFILE_VERSION_CONFLICT`），direction 1..4000、
+  去首尾空白；不触发生成、不改写其他strategy事实。
+- 前端`CreativeDirectionPanel`挂在故事剧本页，读取/保存方向并作为生成故事brief的上下文。
+
+已测（定向）：
+- 后端`test_creative_direction.py` 1 passed（空态/保存CAS/陈旧版本409/空白422）；
+  前端`CreativeDirectionPanel.test.tsx` 2 passed、`ScriptWorkspace.test.tsx` 9 passed；
+  后端定向86 passed；typecheck/lint/prettier/UI权威通过；generated.ts 404 schema。
+
+未完成且不冒称：方向讨论的多轮对话形态（当前为显式说明字段）、resume signal UI、三栏工作台与N08/N10逐项核对。

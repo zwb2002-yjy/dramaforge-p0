@@ -888,6 +888,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/creative-direction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Creative Direction */
+        get: operations["get_creative_direction_api_v1_projects__project_id__creative_direction_get"];
+        put?: never;
+        /**
+         * Set Creative Direction
+         * @description One explicit direction note with profile-version CAS; no implicit rewrite.
+         */
+        post: operations["set_creative_direction_api_v1_projects__project_id__creative_direction_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/creative-profile": {
         parameters: {
             query?: never;
@@ -5760,6 +5781,20 @@ export interface components {
             status: "exact" | "approximate" | "unsupported";
             /** Reason */
             reason: string;
+        };
+        /** CreativeDirectionBody */
+        CreativeDirectionBody: {
+            /** Expected Profile Version */
+            expected_profile_version: number;
+            /** Direction */
+            direction: string;
+        };
+        /** CreativeDirectionRead */
+        CreativeDirectionRead: {
+            /** Profile Version */
+            profile_version: number;
+            /** Direction */
+            direction: string;
         };
         /** CreativeProfileUpdateBody */
         CreativeProfileUpdateBody: {
@@ -14871,6 +14906,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectUpdateImpact"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_creative_direction_api_v1_projects__project_id__creative_direction_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreativeDirectionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_creative_direction_api_v1_projects__project_id__creative_direction_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreativeDirectionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreativeDirectionRead"];
                 };
             };
             /** @description Validation Error */

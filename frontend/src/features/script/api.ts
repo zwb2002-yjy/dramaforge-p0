@@ -118,3 +118,21 @@ export function describeScriptImportOutcome(result: {
   }
   return { tone: "created", message: `导入成功：${counts}。` };
 }
+export type CreativeDirectionRead = components["schemas"]["CreativeDirectionRead"];
+
+export async function fetchCreativeDirection(projectId: string): Promise<CreativeDirectionRead> {
+  return apiGet<CreativeDirectionRead>(`/api/v1/projects/${projectId}/creative-direction`);
+}
+
+export async function saveCreativeDirection(
+  projectId: string,
+  input: { expected_profile_version: number; direction: string },
+): Promise<CreativeDirectionRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<CreativeDirectionRead>(
+    "POST",
+    `/api/v1/projects/${projectId}/creative-direction`,
+    input,
+    csrf,
+  );
+}

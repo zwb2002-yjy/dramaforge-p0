@@ -250,6 +250,54 @@ class ProjectService:
         await self._session.refresh(project)
         return project
 
+    async def get_creative_direction(
+        self, *, project_id: UUID, actor: User
+    ) -> tuple[int, str]:
+        """Return the explicit project creative direction and profile version."""
+        await self.get_project_for_owner(project_id=project_id, actor=actor)
+        profile = await self._session.scalar(
+            select(ProjectCreativeProfile).where(
+                ProjectCreativeProfile.project_id == project_id
+            )
+        )
+        if profile is None:
+            raise NotFoundError("creative profile not found")
+        direction = str((profile.strategy_snapshot or {}).get("creative_direction") or "")
+        return profile.version, direction
+
+    async def set_creative_direction(
+        self,
+        *,
+        project_id: UUID,
+        actor: User,
+        expected_profile_version: int,
+        direction: str,
+    ) -> tuple[int, str]:
+        """CAS one explicit direction note; never rewrites other strategy facts."""
+        await self.get_project_for_owner(project_id=project_id, actor=actor)
+        profile = await self._session.scalar(
+            select(ProjectCreativeProfile)
+            .where(ProjectCreativeProfile.project_id == project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if profile is None:
+            raise NotFoundError("creative profile not found")
+        if profile.version != expected_profile_version:
+            raise ConflictError(
+                "creative profile changed",
+                details={
+                    "code": "CREATIVE_PROFILE_VERSION_CONFLICT",
+                    "current": profile.version,
+                },
+            )
+        profile.strategy_snapshot = {
+            **dict(profile.strategy_snapshot or {}),
+            "creative_direction": direction.strip(),
+        }
+        profile.version += 1
+        await self._session.flush()
+        return profile.version, direction.strip()
     async def update_project(
         self, *, project_id: UUID, actor: User, expected_version: int,
         updates: dict[str, object],

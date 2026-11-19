@@ -260,6 +260,50 @@ async def update_project(
     return _project_read(project, await _profile_for_project(session, project.id))
 
 
+
+class CreativeDirectionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_profile_version: int = Field(ge=1)
+    direction: str = Field(min_length=1, max_length=4000)
+
+
+class CreativeDirectionRead(BaseModel):
+    profile_version: int
+    direction: str
+
+
+@router.get("/projects/{project_id}/creative-direction", response_model=CreativeDirectionRead)
+async def get_creative_direction(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> CreativeDirectionRead:
+    version, direction = await ProjectService(session).get_creative_direction(
+        project_id=project_id, actor=user
+    )
+    return CreativeDirectionRead(profile_version=version, direction=direction)
+
+
+@router.post("/projects/{project_id}/creative-direction", response_model=CreativeDirectionRead)
+async def set_creative_direction(
+    project_id: UUID,
+    body: CreativeDirectionBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> CreativeDirectionRead:
+    """One explicit direction note with profile-version CAS; no implicit rewrite."""
+    version, direction = await ProjectService(session).set_creative_direction(
+        project_id=project_id,
+        actor=user,
+        expected_profile_version=body.expected_profile_version,
+        direction=body.direction,
+    )
+    await session.commit()
+    return CreativeDirectionRead(profile_version=version, direction=direction)
+
+
 @router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(
     project_id: UUID,

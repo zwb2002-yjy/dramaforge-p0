@@ -23,6 +23,7 @@ import {
   type StoryProposalOperation,
   type StoryProposalRead,
 } from "./api";
+import { CreativeDirectionPanel } from "./CreativeDirectionPanel";
 import { ScriptImportPanel } from "./ScriptImportPanel";
 import { storyCreateIdempotencyKey } from "./createKey";
 import type { DirectorInvocationEvidence } from "../director/suggestion-types";
@@ -531,6 +532,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
             title={`当前正式剧本 · ${data.document.filename}`}
             description="待确认提案不会覆盖这里；只有明确采用后才会更新"
           >
+            <CreativeDirectionPanel projectId={projectId} />
             <section className="qc-script-document" data-testid="script-document">
               <h2>{data.document.filename}</h2>
               <code className="qc-script-raw">{data.document.raw_text}</code>
