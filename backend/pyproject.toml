@@ -45,6 +45,7 @@ dev = [
   "types-redis>=4.6.0",
   "PyYAML>=6.0.0,<7",
   "types-PyYAML>=6.0.0",
+  "aiohttp>=3.9,<4",
 ]
 
 # Keep transitive DNS parsing on the patched release when relocking.
