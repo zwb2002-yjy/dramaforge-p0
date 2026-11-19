@@ -1743,3 +1743,18 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
 - 定向组74 passed；generated.ts 393 schema、api:authority通过。
 
 未完成且不冒称：资产视频计划/命令、长文本分段与拼接、媒体安全合同复核、I8a收口。
+
+## I8a-03m 资产视频计划（2026-11-19，EV113）
+
+- 新增`AssetVideoPlanBody`/`AssetVideoPlanRead`/`build_asset_video_plan`：要求`Asset.kind=video`、
+  项目视频binding（可requested覆盖）、V1`video.generate`合同、`output_options`参数校验、参考角色合同
+  校验；capability按是否带first/last_frame选择`video.image_to_video`/`video.text_to_video`；
+  冻结`ExecutionModelResolution`+连接修订；requirements编译Prompt；返回fingerprint；零写入/零调用。
+- 计划端点判别联合增加`asset_video`分支。
+
+已测（定向）：
+- `test_asset_plan.py` 8 passed（新增视频计划与kind拒绝）；定向组71 passed；
+  generated.ts 396 schema、api:authority通过。
+
+未完成且不冒称：资产视频命令提交（video run）、首帧来源确认（采用图像版本/私有原图）、长文本分段拼接、
+媒体安全合同复核、I8a收口。

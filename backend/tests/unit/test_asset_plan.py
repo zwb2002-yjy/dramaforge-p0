@@ -146,6 +146,58 @@ async def world(session: AsyncSession):
         updated_by=user.id,
     )
     session.add(profile)
+    from app.providers.catalog_loader import hash_manifest
+    from model_infra_fixture import unit_video_manifest
+
+    video_manifest = unit_video_manifest()
+    video_entry = ModelCatalogEntry(
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        model_id="unit-agnes-video",
+        model_revision="v1",
+        display_name="Unit Video",
+        media_kind="video",
+        capability_manifest_json=video_manifest,
+        option_schema_json={},
+        documented_at=date(2026, 8, 10),
+        contract_manifest_hash=hash_manifest(video_manifest),
+    )
+    session.add(video_entry)
+    await session.flush()
+    video_binding = ProviderModelBinding(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        media_type="video",
+        model_id="unit-agnes-video",
+        purpose="video",
+        enabled=True,
+        catalog_entry_id=video_entry.id,
+        capability_manifest_hash=video_entry.contract_manifest_hash,
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(video_binding)
+    await session.flush()
+    profile.video_model_binding_id = video_binding.id
+    await session.flush()
+    video_asset = Asset(project_id=project.id, kind="video", name="Clip", version=1)
+    session.add(video_asset)
+    await session.flush()
+    video_version = AssetVersion(
+        project_id=project.id,
+        asset_id=video_asset.id,
+        version_number=1,
+        kind="video",
+        name="Clip",
+        description="",
+        metadata_json={},
+        status="candidate",
+        created_by=user.id,
+    )
+    session.add(video_version)
+    await session.flush()
+    video_asset.current_version_id = video_version.id
+    await session.flush()
     voice_entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="openai_speech_v1",
@@ -221,6 +273,8 @@ async def world(session: AsyncSession):
         "project": project,
         "asset": asset,
         "audio": audio,
+        "video": video_asset,
+        "video_binding": video_binding,
         "binding": binding,
         "voice_binding": voice_binding,
         "version": version,
@@ -421,3 +475,40 @@ async def test_voice_plan_rejects_wrong_kind_and_missing_binding(session, world)
             body=AssetVoicePlanBody(expected_asset_version=1, text="x"),
         )
     assert missing.value.details["code"] == "VOICE_BINDING_MISSING"
+
+
+async def test_video_plan_uses_the_project_video_binding(session, world):
+    from app.production.asset_plan import AssetVideoPlanBody, build_asset_video_plan
+
+    body = AssetVideoPlanBody(
+        expected_asset_version=1,
+        requirements=AssetCreativeRequirements(summary="古桥在晨雾中缓缓显现"),
+        mode_id="text_to_video",
+    )
+    plan = await build_asset_video_plan(
+        session, project=world["project"], asset_id=world["video"].id, body=body
+    )
+    assert plan.stage == "asset_video"
+    assert plan.target.kind == "asset"
+    assert plan.binding_id == world["video_binding"].id
+    assert plan.capability == "video.text_to_video"
+    assert plan.duration_seconds is None
+    assert plan.resolution["status"] == "RESOLVED"
+    assert len(plan.plan_fingerprint) == 64
+
+
+async def test_video_plan_rejects_wrong_kind(session, world):
+    from app.production.asset_plan import AssetVideoPlanBody, build_asset_video_plan
+
+    with pytest.raises(ValidationAppError) as kind:
+        await build_asset_video_plan(
+            session,
+            project=world["project"],
+            asset_id=world["asset"].id,
+            body=AssetVideoPlanBody(
+                expected_asset_version=1,
+                requirements=AssetCreativeRequirements(summary="x"),
+                mode_id="text_to_video",
+            ),
+        )
+    assert kind.value.details["code"] == "ASSET_VIDEO_KIND"

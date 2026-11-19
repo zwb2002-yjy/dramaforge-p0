@@ -4769,6 +4769,81 @@ export interface components {
              */
             created_at: string;
         };
+        /** AssetVideoPlanBody */
+        AssetVideoPlanBody: {
+            /** Expected Asset Version */
+            expected_asset_version: number;
+            requirements: components["schemas"]["AssetCreativeRequirements"];
+            /** Mode Id */
+            mode_id: string;
+            /** Prompt Override */
+            prompt_override?: string | null;
+            /** Requested Binding Id */
+            requested_binding_id?: string | null;
+            /** References */
+            references?: components["schemas"]["AssetImageReference"][];
+            /** Source Context Refs */
+            source_context_refs?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Parameters */
+            parameters?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+        };
+        /** AssetVideoPlanInput */
+        AssetVideoPlanInput: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            stage: "asset_video";
+            request: components["schemas"]["AssetVideoPlanBody"];
+        };
+        /** AssetVideoPlanRead */
+        AssetVideoPlanRead: {
+            target: components["schemas"]["AssetPlanTarget"];
+            /**
+             * Stage
+             * @default asset_video
+             * @constant
+             */
+            stage: "asset_video";
+            /** Plan Fingerprint */
+            plan_fingerprint: string;
+            /** Resolution */
+            resolution?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * Binding Id
+             * Format: uuid
+             */
+            binding_id: string;
+            /** Model Id */
+            model_id: string;
+            /** Provider Type */
+            provider_type: string;
+            /** Capability */
+            capability: string;
+            /** Prompt */
+            prompt: string;
+            /** Parameters */
+            parameters: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** References */
+            references: components["schemas"]["AssetPlannedReference"][];
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /**
+             * Max Provider Operations
+             * @default 1
+             */
+            max_provider_operations: number;
+            /** Notices */
+            notices?: string[];
+        };
         /**
          * AssetVoiceExecutionBody
          * @description One explicit asset voice command: the previewed plan plus its fingerprint.
@@ -12422,7 +12497,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AssetImagePlanInput"] | components["schemas"]["AssetVoicePlanInput"];
+                "application/json": components["schemas"]["AssetImagePlanInput"] | components["schemas"]["AssetVoicePlanInput"] | components["schemas"]["AssetVideoPlanInput"];
             };
         };
         responses: {
@@ -12432,7 +12507,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AssetExecutionPlanRead"] | components["schemas"]["AssetVoicePlanRead"];
+                    "application/json": components["schemas"]["AssetExecutionPlanRead"] | components["schemas"]["AssetVoicePlanRead"] | components["schemas"]["AssetVideoPlanRead"];
                 };
             };
             /** @description Validation Error */

@@ -38,9 +38,12 @@ from app.production.asset_plan import (
     AssetExecutionBody,
     AssetExecutionPlanRead,
     AssetImagePlanBody,
+    AssetVideoPlanBody,
+    AssetVideoPlanRead,
     AssetVoicePlanBody,
     AssetVoicePlanRead,
     build_asset_image_plan,
+    build_asset_video_plan,
     build_asset_voice_plan,
 )
 from app.shared.errors import ConflictError, NotFoundError
@@ -58,8 +61,13 @@ class AssetVoicePlanInput(BaseModel):
     request: AssetVoicePlanBody
 
 
+class AssetVideoPlanInput(BaseModel):
+    stage: Literal["asset_video"]
+    request: AssetVideoPlanBody
+
+
 AssetPlanInput = Annotated[
-    AssetImagePlanInput | AssetVoicePlanInput,
+    AssetImagePlanInput | AssetVoicePlanInput | AssetVideoPlanInput,
     Field(discriminator="stage"),
 ]
 
@@ -243,7 +251,7 @@ async def create_project_asset(
 
 @router.post(
     "/projects/{project_id}/assets/{asset_id}/execution-plan",
-    response_model=AssetExecutionPlanRead | AssetVoicePlanRead,
+    response_model=AssetExecutionPlanRead | AssetVoicePlanRead | AssetVideoPlanRead,
 )
 async def plan_asset_media(
     project_id: UUID,
@@ -251,13 +259,17 @@ async def plan_asset_media(
     body: AssetPlanInput,
     user: CurrentUser,
     session: SessionDep,
-) -> AssetExecutionPlanRead | AssetVoicePlanRead:
+) -> AssetExecutionPlanRead | AssetVoicePlanRead | AssetVideoPlanRead:
     """Read-only asset plan: zero Graph/NodeRun/Provider side effects."""
     project = await ProjectService(session).get_project_for_owner(
         project_id=project_id, actor=user
     )
     if isinstance(body, AssetVoicePlanInput):
         return await build_asset_voice_plan(
+            session, project=project, asset_id=asset_id, body=body.request
+        )
+    if isinstance(body, AssetVideoPlanInput):
+        return await build_asset_video_plan(
             session, project=project, asset_id=asset_id, body=body.request
         )
     return await build_asset_image_plan(

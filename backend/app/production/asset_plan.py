@@ -203,11 +203,11 @@ async def _resolve_references(
     session: AsyncSession,
     *,
     project: Project,
-    body: AssetImagePlanBody,
+    references: list[AssetImageReference],
     operation: OperationManifest,
 ) -> list[AssetPlannedReference]:
     planned: list[AssetPlannedReference] = []
-    for reference in body.references:
+    for reference in references:
         row = await session.scalar(
             select(AssetVersionReference).where(
                 AssetVersionReference.id == reference.asset_version_reference_id,
@@ -308,7 +308,7 @@ async def build_asset_image_plan(
             },
         )
     references = await _resolve_references(
-        session, project=project, body=body, operation=operation
+        session, project=project, references=body.references, operation=operation
     )
     prompt = _compile_prompt(body.requirements, body.prompt_override)
     payload = {
@@ -360,6 +360,9 @@ def plan_payload_digest(plan: AssetExecutionPlanRead) -> str:
 
 __all__ = [
     "AssetCreativeRequirements",
+    "AssetVideoPlanBody",
+    "AssetVideoPlanRead",
+    "build_asset_video_plan",
     "AssetVoicePlanBody",
     "AssetVoicePlanRead",
     "build_asset_voice_plan",
@@ -476,4 +479,177 @@ async def build_asset_voice_plan(
         provider_type=binding.provider_type,
         text=body.text,
         voice_options=options,
+    )
+
+class AssetVideoPlanBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_asset_version: int = Field(ge=1)
+    requirements: AssetCreativeRequirements
+    mode_id: str = Field(min_length=1, max_length=120)
+    prompt_override: str | None = Field(default=None, min_length=1, max_length=20000)
+    requested_binding_id: UUID | None = None
+    references: list[AssetImageReference] = Field(default_factory=list)
+    source_context_refs: list[dict[str, JsonValue]] = Field(default_factory=list)
+    parameters: dict[str, JsonValue] = Field(default_factory=dict)
+
+
+class AssetVideoPlanRead(BaseModel):
+    target: AssetPlanTarget
+    stage: Literal["asset_video"] = "asset_video"
+    plan_fingerprint: str
+    resolution: dict[str, JsonValue] = Field(default_factory=dict)
+    binding_id: UUID
+    model_id: str
+    provider_type: str
+    capability: str
+    prompt: str
+    parameters: dict[str, JsonValue]
+    references: list[AssetPlannedReference]
+    duration_seconds: float | None = None
+    max_provider_operations: int = 1
+    notices: list[str] = Field(default_factory=list)
+
+
+async def build_asset_video_plan(
+    session: AsyncSession,
+    *,
+    project: Project,
+    asset_id: UUID,
+    body: AssetVideoPlanBody,
+) -> AssetVideoPlanRead:
+    """Read-only asset video plan; the target must be a video asset, never a shot."""
+    from app.providers.capabilities import Capability
+    from app.providers.model_profiles.slots import ModelSlot
+    from app.providers.model_resolution import ExecutionModelResolver
+
+    asset = await session.scalar(
+        select(Asset).where(Asset.id == asset_id, Asset.project_id == project.id)
+    )
+    if asset is None:
+        raise NotFoundError("Asset not found")
+    if asset.version != body.expected_asset_version:
+        raise ConflictError(
+            "asset version changed; review the current plan",
+            details={"code": "ASSET_VERSION_CONFLICT", "current": asset.version},
+        )
+    if asset.kind != "video":
+        raise ValidationAppError(
+            "video plans require a video asset",
+            details={"code": "ASSET_VIDEO_KIND"},
+        )
+    profile = await ProductionModelProfileService(session).get_effective_for_project(
+        project=project
+    )
+    binding_id = body.requested_binding_id or (
+        profile.video_model_binding_id if profile is not None else None
+    )
+    if binding_id is None:
+        raise ValidationAppError(
+            "项目未配置视频模型；请在项目设置中选择后再预览。",
+            details={"code": "ASSET_VIDEO_BINDING_MISSING"},
+        )
+    binding = await session.get(ProviderModelBinding, binding_id)
+    if binding is None or binding.workspace_id != project.workspace_id:
+        raise NotFoundError("Video binding not found")
+    if not binding.enabled:
+        raise ValidationAppError(
+            "已保存的视频模型当前不可用；不会自动切换到其他模型。",
+            details={"code": "ASSET_VIDEO_BINDING_DISABLED"},
+        )
+    if binding.media_type != "video":
+        raise ValidationAppError(
+            "所选模型不是视频模型。",
+            details={"code": "ASSET_VIDEO_BINDING_KIND"},
+        )
+    entry = (
+        await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+        if binding.catalog_entry_id is not None
+        else None
+    )
+    if entry is None or entry.media_kind != "video":
+        raise ValidationAppError(
+            "视频模型目录不可用。",
+            details={"code": "ASSET_VIDEO_CATALOG_MISSING"},
+        )
+    manifest = read_catalog_manifest(entry.capability_manifest_json)
+    if not isinstance(manifest, ModelCapabilityManifest):
+        raise ValidationAppError(
+            "该模型的V2清单尚未接入资产计划。",
+            details={"code": "ASSET_MANIFEST_V2_NOT_WIRED"},
+        )
+    operation = manifest.operations.get("video.generate")
+    if operation is None:
+        raise ValidationAppError(
+            "该模型未声明视频生成能力。",
+            details={"code": "ASSET_CAPABILITY_UNSUPPORTED"},
+        )
+    _validate_parameters(operation, body.parameters)
+    references = await _resolve_references(
+        session, project=project, references=body.references, operation=operation
+    )
+    capability = (
+        Capability.VIDEO_IMAGE_TO_VIDEO
+        if any(item.role in {"first_frame", "last_frame"} for item in references)
+        else Capability.VIDEO_TEXT_TO_VIDEO
+    )
+    resolution = await ExecutionModelResolver(session).resolve(
+        project=project,
+        slot=ModelSlot.VIDEO_SHOT,
+        capability=capability,
+        purpose="video",
+        mode_id=body.mode_id,
+        requested_binding_id=binding.id,
+    )
+    from sqlalchemy import select as _select
+
+    from app.providers.models import ProviderConnectionRevision
+
+    revision = await session.scalar(
+        _select(ProviderConnectionRevision)
+        .where(ProviderConnectionRevision.connection_id == binding.connection_id)
+        .order_by(ProviderConnectionRevision.revision_no.desc())
+        .limit(1)
+    )
+    if revision is None:
+        raise ValidationAppError(
+            "视频模型连接缺少不可变修订。",
+            details={"code": "ASSET_CONNECTION_REVISION_UNAVAILABLE"},
+        )
+    resolution = resolution.model_copy(
+        update={
+            "provider_connection_revision_id": revision.id,
+            "credential_revision_id": revision.credential_revision_id,
+        }
+    )
+    prompt = _compile_prompt(body.requirements, body.prompt_override)
+    raw_duration = body.parameters.get("duration_seconds")
+    duration = float(raw_duration) if isinstance(raw_duration, (int, float)) else None
+    payload = {
+        "target": {
+            "kind": "asset",
+            "asset_id": str(asset.id),
+            "asset_version": asset.version,
+        },
+        "stage": "asset_video",
+        "binding_id": str(binding.id),
+        "catalog_entry_id": str(entry.id),
+        "mode_id": body.mode_id,
+        "prompt": prompt,
+        "parameters": body.parameters,
+        "references": [item.model_dump(mode="json") for item in references],
+        "source_context_refs": body.source_context_refs,
+    }
+    return AssetVideoPlanRead(
+        target=AssetPlanTarget(asset_id=asset.id, asset_version=asset.version),
+        plan_fingerprint=fingerprint_plan(payload),
+        resolution=resolution.model_dump(mode="json"),
+        binding_id=binding.id,
+        model_id=binding.model_id,
+        provider_type=entry.provider_type,
+        capability=capability.value,
+        prompt=prompt,
+        parameters=body.parameters,
+        references=references,
+        duration_seconds=duration,
     )
