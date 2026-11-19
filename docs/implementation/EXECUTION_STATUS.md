@@ -2344,3 +2344,19 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 故提前跑一次完整 Full，用于在空闲宿主上复测该唯一未通过项并验证 EV143–EV149 累积后的整链
 （backend 单测+PG+迁移、frontend vitest+typecheck+E2E、媒体/网关/LiteLLM/机构真实栈）；结果未出前
 不宣布任何阶段 Full。
+
+## I9 计划（下一阶段，未开工）
+
+依据 [DATA_MODEL](../DATA_MODEL.md) 的 timeline schema2 合同与 [MASTER_EXECUTION_PLAN](MASTER_EXECUTION_PLAN.md) 的 I9-01/02：
+
+1. **I9-01a timeline schema2 与 Save/Formal 分离**：`Clip.source`/`audio_source` 判别引用（shot 正式产物、
+   已采用资产版本、公共素材固定版本），Save 时由服务侧写 `selection_snapshot`（schema/session_version/
+   clip source/hash/确认身份与版本），客户端 metadata 不作可信证明；schema1 时间线保留原解释，
+   只有用户显式 Save 新版本才转 schema2；旧导出不重算 hash。
+2. **I9-01b 分集作用域**：`edit_sessions.episode_id` + 候选键/索引与延迟 FK；已保存时间线中的 Shot
+   必须经 Scene→Episode 属于该集；切换集需版本化 Save 并显式检查全部 Clip，不静默删 Clip。
+3. **I9-02a 渲染快照与导出绑定**：render NodeRun 冻结同一来源与资格；Export 只绑定该不可变快照，
+   不复制源媒体所有权；原回执优先、MP4/SRT 可解码。
+4. **I9-02b 逐集交付**：`exports`/`export_items` 按集绑定，另一集 Clip 混入拒绝，删除集不把交付变成项目级。
+
+每片默认跑对应测试组；I9 阶段终点再跑 Full。真实导出生成需 Owner 授权（硬门）。
