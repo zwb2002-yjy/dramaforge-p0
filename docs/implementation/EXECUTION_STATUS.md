@@ -2451,3 +2451,19 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
   `mypy app` 404 文件通过。
 - **下一步**：公共素材（public_material）资质接线、切换集版本化 Save、`episode_id` 读模型、
   渲染快照与导出绑定（I9-02）。
+
+### I9-01d 已实施：公共素材来源资质（2026-11-19，EV156）
+
+- `public_material` 来源改为经**消费项目自己的固定链接**解析并校验：链接属于本项目且未 detach、
+  链接拥有所指 publication、publication `available` 且未撤回、item 属于该 publication、
+  其 artifact 为可用视频；不满足分别给 `EDIT_SOURCE_NOT_ADOPTED` / `EDIT_SOURCE_NO_MEDIA`。
+  观测照常记录解析出的媒体 artifact 与 hash。
+- `asset_version` / `public_material` 来源现在拒绝携带异类身份字段（不能同时声称 shot/artifact 与
+  asset 或 public id），杜绝客户端夹带第二份主张。
+- 测试用真实 `PublicAssetService.publish` + `ProjectPublicAssetLinkService.create` 构造夹具：
+  公共素材经链接解析并落快照、伪造 id 被拒（JSON 不可信）、detach 与撤回均被拒。
+- 证据：`test_editing_timeline_schema.py` **15 passed**、schema+编辑 API **25 passed**；
+  `ruff check app tests` 通过、`mypy app` 404 文件通过。
+- 至此 schema 2 的三类来源（镜头正式产物 / 已采用资产版本 / 公共素材）**全部可验证**。
+- **下一步**：切换集版本化 Save（显式检查全部 Clip、不静默删）、`episode_id` 读模型、
+  渲染快照与导出绑定（I9-02）。

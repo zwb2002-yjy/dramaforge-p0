@@ -176,26 +176,27 @@ async def test_schema2_rejects_a_source_that_is_not_the_current_formal_video(
 
 
 @pytest.mark.asyncio
-async def test_schema2_refuses_unverifiable_source_kinds(session: AsyncSession) -> None:
+async def test_schema2_refuses_public_material_without_a_real_link(session: AsyncSession) -> None:
     project, user, shot, artifact = await _shot(session)
     assert artifact is not None
     adapter = EditingAdapter(session)
     row = await adapter.create_session(project_id=project.id, user_id=user.id, name="Edit")
-    adopted = _clip(shot, artifact)
-    adopted["source"] = {
+    forged = _clip(shot, artifact)
+    forged["source"] = {
         "kind": "public_material",
         "publication_id": str(uuid4()),
         "publication_item_id": str(uuid4()),
+        "public_asset_link_id": str(uuid4()),
     }
     with pytest.raises(ValidationAppError) as refused:
         await adapter.save_timeline(
             project_id=project.id,
             session_id=row.id,
-            timeline={"schema_version": 2, "clips": [adopted], "metadata": {}},
+            timeline={"schema_version": 2, "clips": [forged], "metadata": {}},
             expected_session_version=1,
         )
-    assert refused.value.details["code"] == "EDIT_SOURCE_UNVERIFIED"
-    assert refused.value.details["kind"] == "public_material"
+    # Identities in the JSON are never trusted; the link must really exist.
+    assert refused.value.details["code"] == "EDIT_SOURCE_NOT_ADOPTED"
     await session.rollback()
 
 
@@ -488,6 +489,132 @@ async def test_changed_source_redates_and_keeps_the_initial_source(
     assert snapshot["artifact_hash"] == replacement.content_hash
     assert snapshot["session_version"] == 3
     assert snapshot["initial_source"]["artifact_id"] == str(artifact.id)
+
+
+async def _published_material(session: AsyncSession, *, project: Project, user: User):
+    """Publish an adopted version and link it into the consuming project."""
+    from app.assets.public_asset_models import PublicAssetPublicationItem
+    from app.assets.public_assets import (
+        ProjectPublicAssetLinkService,
+        PublicAssetService,
+        PublicDisplay,
+    )
+
+    _asset, version, media = await _adopted_version(session, project=project, user=user)
+    publication = await PublicAssetService(session, actor=user).publish(
+        version.id,
+        display=PublicDisplay(name="Hero take", description="", style_labels=[]),
+    )
+    item = (
+        await session.scalars(
+            select(PublicAssetPublicationItem).where(
+                PublicAssetPublicationItem.publication_id == publication.id
+            )
+        )
+    ).first()
+    assert item is not None
+    link, _created = await ProjectPublicAssetLinkService(
+        session, actor=user, project_id=project.id
+    ).create(
+        publication_id=publication.id,
+        local_label="hero",
+        request_key=f"link-{uuid4().hex}",
+    )
+    return publication, item, link, media
+
+
+@pytest.mark.asyncio
+async def test_public_material_clip_resolves_through_the_project_link(
+    session: AsyncSession,
+) -> None:
+    project, user, shot, artifact = await _shot(session)
+    assert artifact is not None
+    publication, item, link, media = await _published_material(session, project=project, user=user)
+    adapter = EditingAdapter(session)
+    row = await adapter.create_session(project_id=project.id, user_id=user.id, name="Edit")
+    clip = _clip(shot, artifact)
+    clip["source"] = {
+        "kind": "public_material",
+        "publication_id": str(publication.id),
+        "publication_item_id": str(item.id),
+        "public_asset_link_id": str(link.id),
+    }
+    saved = await adapter.save_timeline(
+        project_id=project.id,
+        session_id=row.id,
+        timeline={"schema_version": 2, "clips": [clip], "metadata": {}},
+        expected_session_version=1,
+    )
+    snapshot = saved.timeline["clips"][0]["selection_snapshot"]
+    assert snapshot["kind"] == "public_material"
+    assert snapshot["artifact_id"] == str(media.id)
+    assert snapshot["artifact_hash"] == media.content_hash
+
+
+@pytest.mark.asyncio
+async def test_detached_public_link_or_withdrawn_publication_is_rejected(
+    session: AsyncSession,
+) -> None:
+    from datetime import UTC, datetime
+
+    project, user, shot, artifact = await _shot(session)
+    assert artifact is not None
+    publication, item, link, _media = await _published_material(session, project=project, user=user)
+    adapter = EditingAdapter(session)
+    row = await adapter.create_session(project_id=project.id, user_id=user.id, name="Edit")
+    clip = _clip(shot, artifact)
+    clip["source"] = {
+        "kind": "public_material",
+        "publication_id": str(publication.id),
+        "publication_item_id": str(item.id),
+        "public_asset_link_id": str(link.id),
+    }
+
+    from app.assets.public_asset_models import ProjectPublicAssetLink
+
+    stored_link = await session.get(ProjectPublicAssetLink, link.id)
+    assert stored_link is not None
+    stored_link.detached_at = datetime.now(UTC)
+    await session.flush()
+    with pytest.raises(ValidationAppError) as detached:
+        await adapter.save_timeline(
+            project_id=project.id,
+            session_id=row.id,
+            timeline={"schema_version": 2, "clips": [clip], "metadata": {}},
+            expected_session_version=1,
+        )
+    assert detached.value.details["code"] == "EDIT_SOURCE_NOT_ADOPTED"
+    await session.rollback()
+
+    project2, user2, shot2, artifact2 = await _shot(session)
+    assert artifact2 is not None
+    publication2, item2, link2, _media2 = await _published_material(
+        session, project=project2, user=user2
+    )
+    adapter2 = EditingAdapter(session)
+    row2 = await adapter2.create_session(project_id=project2.id, user_id=user2.id, name="Edit")
+    withdrawn = _clip(shot2, artifact2)
+    withdrawn["source"] = {
+        "kind": "public_material",
+        "publication_id": str(publication2.id),
+        "publication_item_id": str(item2.id),
+        "public_asset_link_id": str(link2.id),
+    }
+    from app.assets.public_asset_models import PublicAssetPublication
+
+    stored_publication = await session.get(PublicAssetPublication, publication2.id)
+    assert stored_publication is not None
+    stored_publication.status = "withdrawn"
+    stored_publication.withdrawn_at = datetime.now(UTC)
+    await session.flush()
+    with pytest.raises(ValidationAppError) as revoked:
+        await adapter2.save_timeline(
+            project_id=project2.id,
+            session_id=row2.id,
+            timeline={"schema_version": 2, "clips": [withdrawn], "metadata": {}},
+            expected_session_version=1,
+        )
+    assert revoked.value.details["code"] == "EDIT_SOURCE_NOT_ADOPTED"
 
 
 @pytest.mark.asyncio

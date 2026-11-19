@@ -23,6 +23,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assets.models import Asset, AssetVersion, AssetVersionReference, Scene, Shot
+from app.assets.public_asset_models import (
+    ProjectPublicAssetLink,
+    PublicAssetPublication,
+    PublicAssetPublicationItem,
+)
 from app.execution.models import Artifact
 from app.shared.errors import ValidationAppError
 
@@ -32,7 +37,9 @@ SUPPORTED_SCHEMA_VERSIONS = frozenset({TIMELINE_SCHEMA_V1, TIMELINE_SCHEMA_V2})
 
 ClipSourceKind = Literal["shot_formal", "asset_version", "public_material"]
 # Kinds whose eligibility can be proven from data this service already owns.
-VERIFIABLE_SOURCE_KINDS: frozenset[str] = frozenset({"shot_formal", "asset_version"})
+VERIFIABLE_SOURCE_KINDS: frozenset[str] = frozenset(
+    {"shot_formal", "asset_version", "public_material"}
+)
 
 
 class ClipSource(BaseModel):
@@ -121,10 +128,26 @@ def _require_kind_fields(source: ClipSource, *, index: int) -> None:
             raise _invalid(
                 "asset_version source needs asset_id and asset_version_id", clip_index=index
             )
+        if any(
+            value is not None
+            for value in (
+                source.shot_id,
+                source.artifact_id,
+                source.publication_id,
+                source.publication_item_id,
+                source.public_asset_link_id,
+            )
+        ):
+            raise _invalid("asset_version source carries foreign identity", clip_index=index)
         return
-    if source.publication_id is None or source.publication_item_id is None:
+    if (
+        source.publication_id is None
+        or source.publication_item_id is None
+        or source.public_asset_link_id is None
+    ):
         raise _invalid(
-            "public_material source needs publication_id and publication_item_id",
+            "public_material source needs publication_id, publication_item_id "
+            "and public_asset_link_id",
             clip_index=index,
         )
 
@@ -212,6 +235,70 @@ async def _verify_asset_version(
     return artifact
 
 
+async def _verify_public_material(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    source: ClipSource,
+    index: int,
+) -> Artifact:
+    """A public clip resolves only through this project's own fixed link."""
+    assert (
+        source.publication_id is not None
+        and source.publication_item_id is not None
+        and source.public_asset_link_id is not None
+    )
+    link = await session.scalar(
+        select(ProjectPublicAssetLink).where(
+            ProjectPublicAssetLink.id == source.public_asset_link_id,
+            ProjectPublicAssetLink.project_id == project_id,
+        )
+    )
+    if link is None or link.detached_at is not None:
+        raise ValidationAppError(
+            "clip public link is not available in this project",
+            details={"code": "EDIT_SOURCE_NOT_ADOPTED", "clip_index": index},
+        )
+    if link.publication_id != source.publication_id:
+        raise ValidationAppError(
+            "clip public link does not own that publication",
+            details={"code": "EDIT_SOURCE_NOT_ADOPTED", "clip_index": index},
+        )
+    publication = await session.get(PublicAssetPublication, source.publication_id)
+    if (
+        publication is None
+        or publication.status != "available"
+        or publication.withdrawn_at is not None
+    ):
+        raise ValidationAppError(
+            "clip public publication is withdrawn or unavailable",
+            details={"code": "EDIT_SOURCE_NOT_ADOPTED", "clip_index": index},
+        )
+    item = await session.scalar(
+        select(PublicAssetPublicationItem).where(
+            PublicAssetPublicationItem.id == source.publication_item_id,
+            PublicAssetPublicationItem.publication_id == publication.id,
+        )
+    )
+    if item is None:
+        raise ValidationAppError(
+            "clip public item does not belong to that publication",
+            details={"code": "EDIT_SOURCE_NOT_ADOPTED", "clip_index": index},
+        )
+    artifact = await session.get(Artifact, item.artifact_id)
+    if (
+        artifact is None
+        or artifact.storage_state != "available"
+        or artifact.deleted_at is not None
+        or artifact.artifact_type != "video"
+    ):
+        raise ValidationAppError(
+            "clip public item has no playable video",
+            details={"code": "EDIT_SOURCE_NO_MEDIA", "clip_index": index},
+        )
+    return artifact
+
+
 async def _verify_source(
     session: AsyncSession,
     *,
@@ -226,7 +313,11 @@ async def _verify_source(
             session, project_id=project_id, source=source, index=index, episode_id=episode_id
         )
         return await session.get(Artifact, source.artifact_id) if source.artifact_id else None
-    return await _verify_asset_version(session, project_id=project_id, source=source, index=index)
+    if source.kind == "asset_version":
+        return await _verify_asset_version(
+            session, project_id=project_id, source=source, index=index
+        )
+    return await _verify_public_material(session, project_id=project_id, source=source, index=index)
 
 
 async def _verify_shot_formal(
