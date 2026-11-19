@@ -135,6 +135,7 @@
 | EV127 | I6b-05领域流程换计划定向证据：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径） | ①`test_business_flow_worker_e2e.py` 3 passed：成功路径、部分失败（list_assets保留succeeded）、换计划（失败实例终态后追加新计划，新实例经worker推进至succeeded）。②定向组75 passed（worker_e2e/business_flows/architecture）；ruff/mypy通过。 | 证明领域流程失败后可经新计划重建并完成；**未实施**流程UI入口 |
 | EV128 | I6b-06业务流程只读面板定向证据：`tmp/run-targeted.ps1 -Stage FrontendTests`（等价stock targeted路径） | ①`BusinessFlowPanel.test.tsx` 2 passed：列出流程（definition_key/status/wait_reason）并展开按需读取步骤（aria-expanded切换）、无流程空态。②`directorApiContract.test.ts` 5 passed：新增三条flow路由模板均存在于生成OpenAPI契约。③前端定向7 passed；typecheck/lint/prettier/UI权威通过（117 TSX surfaces）。 | 证明业务流程可只读查看且路由与契约一致；**未实施**面板挂载到工作台（依赖I7 MasterRun界面） |
 | EV129 | I7-01项目创作方向定向证据：`tmp/run-targeted.ps1` BackendTests/FrontendTests（等价stock targeted路径） | ①后端`test_creative_direction.py` 1 passed：初始空方向(profile_version=1)、保存后version=2且去空白、陈旧版本409 CREATIVE_PROFILE_VERSION_CONFLICT、空白422。②前端`CreativeDirectionPanel.test.tsx` 2 passed（加载/保存带expected_profile_version、空白禁用保存）、`ScriptWorkspace.test.tsx` 9 passed（挂载不破坏既有页面）。③后端定向86 passed；typecheck/lint/prettier/UI权威通过；generated.ts 404 schema。 | 证明项目创作方向可显式保存并作为故事brief上下文；**未实施**多轮方向对话、resume signal UI、N08/N10核对 |
+| EV130 | 全量unit回归（I8a/I6b/I7切片后）：`docker run --network none`（backend quality镜像，等价Full后端unit阶段） | `pytest tests/unit` **2696 passed**（585.23s，0 failed）；覆盖I8a媒体配置/语音/资产命令/批次/拼接、I6b领域流程端到端、I7创作方向等本轮新增用例与既有回归。前端在同一批次内另跑typecheck/lint/prettier/UI权威与定向Vitest。 | 证明累计切片未破坏既有单元契约；**未运行**Docker Full Gate（按门分级留待正式CI/I10候选） |
 
 ## 需求与测试分层（设计映射，不是执行结果）
 
