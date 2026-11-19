@@ -147,6 +147,7 @@
 | EV139 | I8b-01c跨集共享资产计数：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径） | ①就绪模型新增shared_asset_count与cross_episode_sharing（≥2集共同引用同一asset_version_id才计数）。②`test_production_readiness.py` 4 passed：两集各一镜头绑定同一asset_version→shared_asset_count=1、cross_episode_sharing=ready；单集/两集/缺失场景仍正确。③定向组61 passed；generated.ts 407 schema。 | 证明跨集共享可被只读模型识别；**未实施**共享资产在计划/生成中的端到端解析、完整生产编排 |
 | EV140 | I8b-01d跨集共享资产的计划解析：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径） | `test_cross_episode_shared_asset.py` 1 passed：两集镜头各自`ShotReferenceBinding`指向同一asset_version，两次`build_plan`的planned_references均解析到同一artifact_id/asset_version_id；定向组62 passed；ruff通过。 | 证明跨集共享在计划层解析一致；**未实施**生成端到端、完整生产编排 |
 | EV141 | I8b-01e共享资产冻结进两次派发：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径） | `test_cross_episode_shared_asset.py` 2 passed：两集镜头`create_and_dispatch`后，两个NodeRun快照references[0]均冻结同一artifact_id/asset_version_id，且graph_version_id不同（各镜头独立图）；定向组63 passed；ruff通过。 | 证明共享在派发边界冻结一致；**未实施**Provider提交端到端、完整生产编排 |
+| EV142 | I7-03/I8b-01a–01e累积切片的后端全量回归：`docker run --rm --network none`（backend quality镜像，挂载`backend/app`+`backend/tests`只读，`pytest tests/unit`） | `tests/unit` **2704 passed**（1672.12s，0 failed/0 skipped）。对比EV130的2696基线+本会话新增8个用例（resume 2、readiness 4、shared asset 2）。 | 证明本会话切片未引入后端回归；这是单元层全量，不等于Full Gate |
 
 ## 需求与测试分层（设计映射，不是执行结果）
 

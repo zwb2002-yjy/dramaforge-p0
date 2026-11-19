@@ -2158,3 +2158,16 @@ I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖�
 - `test_cross_episode_shared_asset.py` 2 passed（计划解析+派发冻结）；定向组63 passed；ruff通过。
 
 未完成且不冒称：共享资产在Provider提交/生成中的端到端、三类作品完整生产编排。
+
+## 后端单元全量回归（2026-11-19，EV142）
+
+I7-03（resume只读端点）与 I8b-01a–01e（就绪模型/两集/共享资产计划与派发）累积后，在 quality 镜像里
+跑后端单元全量，确认没有回归：
+
+- `docker run --rm --network none`（`dramaforge-backend-quality:local`，`backend/app`+`backend/tests`
+  只读挂载，`pytest tests/unit`）→ **2704 passed**（1672.12s），0 failed / 0 error / 0 skipped。
+- 对比 EV130 基线 2696 → 本会话新增 8 个用例（resume 2、readiness 4、shared asset 2）。
+- 这是单元层全量，**不等于** Full Gate：未跑 PG 集成、迁移 check、前端 E2E/资源性能与真实机构栈。
+
+未完成且不冒称：Full Gate 仍卡在 `frontend-quality` 的 `workbench-resource` p95（需空闲宿主重跑）；
+共享资产 Provider 提交端到端、三类作品完整生产编排、I9 交付段仍未实施。
