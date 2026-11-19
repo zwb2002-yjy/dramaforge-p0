@@ -2637,6 +2637,25 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - **下一步（I10-01 剩余）**：restic 快照运行、PG 一致快照与 MinIO 清单的同一静止窗口、
   恢复目标多资源映射（`--target-config`）与恢复后验证（Alembic/角色/RLS/对象 hash/未决远端ID）。
 
+### I10-01b 已实施：恢复后验证（2026-11-19，EV170）
+
+- 新增 `app/maintenance/restore_verification.py`：`verify_restore` 一次核四类，并**收集全部失败**
+  （不首错即停）：
+  1. `alembic head` 与 manifest 主库记录不符 → `RESTORE_SCHEMA_MISMATCH`；manifest 无任何 revision →
+     `RESTORE_MANIFEST_INCOMPLETE`。
+  2. 运行时角色 posture：`is_superuser`/`bypass_rls` → `RESTORE_ROLE_UNSAFE`；`owns_tables` →
+     `RESTORE_ROLE_OWNS_TABLES`（`pg_restore --no-owner` 缺失的后果）；未报告 → `RESTORE_ROLE_UNKNOWN`。
+  3. 对象：复用 `verify_manifest`（尺寸/hash/未声明桶）。
+  4. 未决远端身份：`count_pending` 统计 `NodeRun`(queued/running/cancel_requested) 与
+     `ProviderOperation`(submission_started/submitted/running/unknown_submission)，与 manifest 逐项
+     比对，不符 → `RESTORE_PENDING_MISMATCH`。
+- `require_passed` 把全部失败码聚合为 `RESTORE_VERIFICATION_FAILED`，恢复结论不再靠“行数/对象数
+  看起来对”。
+- 证据：`test_restore_verification.py` **6 passed**（+ 清单用例共 **12 passed**）；`ruff check app tests`
+  通过、`mypy app` 411 文件通过。
+- **下一步（I10-01 剩余）**：restic 快照运行与同一静止窗口；多资源 `--target-config` 恢复映射；
+  在隔离资源上做一次真实恢复演练。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
