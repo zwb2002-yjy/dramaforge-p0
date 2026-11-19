@@ -34,6 +34,7 @@ from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 IMAGE_MODEL_ID = "agnes-image-2.5-flash"
+VIDEO_MODEL_ID = "agnes-video-2.5-flash"
 DATA_URI_PREFIX = "data:image/png;base64,"
 
 WORK_TYPE_EPISODES: dict[str, tuple[int | None, int]] = {
@@ -58,11 +59,15 @@ def submission_reference(request: httpx.Request) -> bytes:
     return base64.b64decode(data_uri[len(DATA_URI_PREFIX) :])
 
 
-def install_fake_agnes(monkeypatch, *, colors: list[str]) -> list[httpx.Request]:
+def install_fake_agnes(
+    monkeypatch, *, colors: list[str], video_requests: list[httpx.Request] | None = None
+) -> list[httpx.Request]:
     """Serve discovery plus one distinct generated image per submission.
 
     Byte-identical outputs across shots are rejected by the artifact
     independence guard, so each submission answers with its own colour.
+    Video creates and polls are answered too; they stay ``running`` so a test
+    that only observes the submit boundary keeps its result queued.
     """
     from app.execution import media_io
 
@@ -71,9 +76,20 @@ def install_fake_agnes(monkeypatch, *, colors: list[str]) -> list[httpx.Request]
 
     def receive(request: httpx.Request) -> httpx.Response:
         assert request.headers.get("Authorization") == "Bearer fixture-agnes-key"
-        if request.method == "GET":
-            assert request.url.path == "/v1/models"
-            return httpx.Response(200, json={"data": [{"id": IMAGE_MODEL_ID}]})
+        if request.method == "GET" and request.url.path == "/v1/models":
+            return httpx.Response(
+                200, json={"data": [{"id": IMAGE_MODEL_ID}, {"id": VIDEO_MODEL_ID}]}
+            )
+        if request.method == "POST" and request.url.path == "/v1/videos":
+            if video_requests is not None:
+                video_requests.append(request)
+            return httpx.Response(
+                200, json={"video_id": "vid-1", "task_id": "task-1", "status": "queued"}
+            )
+        if request.method == "GET" and request.url.path == "/agnesapi":
+            if video_requests is not None:
+                video_requests.append(request)
+            return httpx.Response(200, json={"status": "running", "progress": 0.1})
         assert request.url.path == "/v1/images/generations"
         submitted.append(request)
         return httpx.Response(
@@ -237,16 +253,44 @@ async def agnes_image_binding(session: AsyncSession, *, project: Project, owner:
     )
 
 
-async def configure_image_default(
-    session: AsyncSession, *, project: Project, owner: User, binding
-) -> None:
-    """Point the project's effective profile at the verified image binding.
+async def agnes_video_binding(
+    session: AsyncSession, *, project: Project, owner: User, connection_id
+):
+    """Add the video model binding to the same verified Agnes connection."""
+    from app.providers.catalog_models import ModelCatalogEntry
+    from app.providers.connection_service import ProviderConnectionService
+    from sqlalchemy import select
 
-    A project-level production run resolves the model from its media defaults;
-    without this the Workbench correctly reports every shot as blocked.  The
-    project-level profile row is created here because a workspace-level row must
-    keep its media slots empty.
-    """
+    entry = (
+        await session.scalars(
+            select(ModelCatalogEntry).where(
+                ModelCatalogEntry.model_id == VIDEO_MODEL_ID,
+                ModelCatalogEntry.lifecycle == "active",
+            )
+        )
+    ).one()
+    return await ProviderConnectionService(session).create_model_binding(
+        workspace_id=project.workspace_id,
+        connection_id=connection_id,
+        actor=owner,
+        model_id=VIDEO_MODEL_ID,
+        media_type="video",
+        purpose="video",
+        capability_contract_id=entry.id,
+        enabled=True,
+    )
+
+
+async def _configure_default(
+    session: AsyncSession,
+    *,
+    project: Project,
+    owner: User,
+    binding,
+    slot: str,
+    field: str,
+    model_id: str,
+) -> None:
     from app.providers.model_profiles.orm import ProductionModelProfile
     from app.providers.model_profiles.service import ProductionModelProfileService
 
@@ -254,12 +298,7 @@ async def configure_image_default(
         project_id=project.id
     )
     slot_binding = {
-        "visual.keyframe": {
-            "slot": "visual.keyframe",
-            "model_id": IMAGE_MODEL_ID,
-            "native_options": {},
-            "enabled": True,
-        }
+        slot: {"slot": slot, "model_id": model_id, "native_options": {}, "enabled": True}
     }
     if profile is None:
         profile = ProductionModelProfile(
@@ -275,8 +314,44 @@ async def configure_image_default(
         session.add(profile)
         await session.flush()
     profile.bindings = {**profile.bindings, **slot_binding}
-    profile.image_model_binding_id = binding.id
+    setattr(profile, field, binding.id)
     await session.flush()
+
+
+async def configure_image_default(
+    session: AsyncSession, *, project: Project, owner: User, binding
+) -> None:
+    """Point the project's effective profile at the verified image binding.
+
+    A project-level production run resolves the model from its media defaults;
+    without this the Workbench correctly reports every shot as blocked.  The
+    project-level profile row is created here because a workspace-level row must
+    keep its media slots empty.
+    """
+    await _configure_default(
+        session,
+        project=project,
+        owner=owner,
+        binding=binding,
+        slot="visual.keyframe",
+        field="image_model_binding_id",
+        model_id=IMAGE_MODEL_ID,
+    )
+
+
+async def configure_video_default(
+    session: AsyncSession, *, project: Project, owner: User, binding
+) -> None:
+    """Same for the video slot, so a video plan resolves without a request id."""
+    await _configure_default(
+        session,
+        project=project,
+        owner=owner,
+        binding=binding,
+        slot="video.shot",
+        field="video_model_binding_id",
+        model_id=VIDEO_MODEL_ID,
+    )
 
 
 async def shared_asset_reference(
@@ -357,6 +432,57 @@ async def shared_asset_reference(
     return asset, version, artifact, shared_png
 
 
+def stage_input(
+    project: Project,
+    *,
+    shot: Shot,
+    binding_id,
+    stage: str = "image_keyframe",
+    reference: ShotReferenceIntent | None = None,
+) -> WorkbenchExecutionInput:
+    """One production-stage command; placeholders keep the helper generic."""
+    _ = stage if reference is not None else None
+    video = stage == "video"
+    return WorkbenchExecutionInput(
+        project_id=project.id,
+        shot_id=shot.id,
+        stage=stage,  # type: ignore[arg-type]
+        prompt=shot.video_prompt if video else "frame",
+        semantic_intent={"intent": "shot_keyframe"},
+        mode_id="image_to_video" if video else "text_to_image",
+        requested_binding_id=binding_id,
+        expected_shot_version=shot.version,
+        references=[reference] if reference is not None else [],
+    )
+
+
+async def dispatch_stage(
+    session: AsyncSession,
+    *,
+    project: Project,
+    shot: Shot,
+    binding_id,
+    user_id,
+    stage: str = "image_keyframe",
+    reference: ShotReferenceIntent | None = None,
+):
+    """Plan, prove the compiler wire, then queue one production-stage NodeRun."""
+    workbench = WorkbenchExecutionService(session, user_id=user_id)
+    command = stage_input(
+        project, shot=shot, binding_id=binding_id, stage=stage, reference=reference
+    )
+    plan = await workbench.build_plan(project=project, execution_input=command)
+    proof = await workbench.preview_compiler_contract(project=project, plan=plan)
+    assert proof is not None and proof.wire_fingerprint is not None
+    run = await workbench.create_and_dispatch(
+        project=project,
+        execution_input=command,
+        prepared_plan=plan,
+        confirmed_compiler_wire_fingerprint=proof.wire_fingerprint,
+    )
+    return plan, run
+
+
 def keyframe_input(
     project: Project,
     *,
@@ -364,16 +490,8 @@ def keyframe_input(
     binding_id,
     reference: ShotReferenceIntent | None = None,
 ) -> WorkbenchExecutionInput:
-    return WorkbenchExecutionInput(
-        project_id=project.id,
-        shot_id=shot.id,
-        stage="image_keyframe",
-        prompt="frame",
-        semantic_intent={"intent": "shot_keyframe"},
-        mode_id="text_to_image",
-        requested_binding_id=binding_id,
-        expected_shot_version=shot.version,
-        references=[reference] if reference is not None else [],
+    return stage_input(
+        project, shot=shot, binding_id=binding_id, stage="image_keyframe", reference=reference
     )
 
 
@@ -387,15 +505,12 @@ async def dispatch_keyframe(
     reference: ShotReferenceIntent | None = None,
 ):
     """Plan, prove the compiler wire, then queue one keyframe NodeRun."""
-    workbench = WorkbenchExecutionService(session, user_id=user_id)
-    command = keyframe_input(project, shot=shot, binding_id=binding_id, reference=reference)
-    plan = await workbench.build_plan(project=project, execution_input=command)
-    proof = await workbench.preview_compiler_contract(project=project, plan=plan)
-    assert proof is not None and proof.wire_fingerprint is not None
-    run = await workbench.create_and_dispatch(
+    return await dispatch_stage(
+        session,
         project=project,
-        execution_input=command,
-        prepared_plan=plan,
-        confirmed_compiler_wire_fingerprint=proof.wire_fingerprint,
+        shot=shot,
+        binding_id=binding_id,
+        user_id=user_id,
+        stage="image_keyframe",
+        reference=reference,
     )
-    return plan, run

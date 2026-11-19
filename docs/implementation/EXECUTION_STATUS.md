@@ -2280,3 +2280,31 @@ Full Gate 仍待空闲宿主重跑`workbench-resource`。
 
 未完成且不冒称：获授权后的批量 create（写路径）、视频/合成生产段、I9 交付段；
 Full Gate 仍待空闲宿主重跑 `workbench-resource`。
+
+## I8b-04a 视频段提交（正式首帧→Provider create）（2026-11-19，EV147）
+
+把生产段从“关键帧”推进到“视频创建”：用已批准的正式首帧，向 Provider 创建一个远端视频任务。
+
+已实施：
+- `test_shot_video_production.py`：真实链依次完成 关键帧生成 → 人工批准 → `set_formal_keyframe`
+  → 视频stage计划 → 派发 → `execute_media_node_run` 提交。断言：
+  - 提交即让出（`ProviderTaskPendingError`），符合“创建后只观察、不重复创建”的既有语义；
+  - 只有一次 `POST /v1/videos`，`model=agnes-video-2.5-flash`；
+  - 请求体里是**签名后的** `https://media.example/…` 引用 URL，且**不含**首帧原始 base64
+    （该合同声明公共 URL 传输，不是内嵌字节）；
+  - `ProviderOperation.provider_operation_id=vid-1`，`formal_video_artifact_id` 仍为空（远端仍在跑）。
+- 夹具扩展（`production_harness.py`）：`agnes_video_binding`（同一已验证连接上加视频binding）、
+  `configure_video_default`（`video.shot`槽 + D6`video_model_binding_id`）、
+  `dispatch_stage`/`stage_input`（阶段参数化，`dispatch_keyframe` 成为其特例）；
+  伪 Agnes 同时应答 `/v1/models`（含图像与视频两个模型）、`/v1/videos`、`/agnesapi`。
+
+按现状记录的产品事实（未改成“看起来更好”的假象）：
+- `agnes-video-v2.0` 已 **retired**，活跃视频合同是 `agnes-video-2.5-flash`
+  （`frame` 输入合同要求显式 `first_frame` 引用；引用走公共签名 URL，需要 `REFERENCE_PUBLIC_BASE_URL`）。
+
+已测（定向）：
+- `test_shot_video_production.py` 1 passed；夹具受影响组 **14 passed**
+  （视频提交、三类作品、共享资产提交、生产批预览）；`ruff check app tests` 通过。
+
+未完成且不冒称：轮询完成 → 下载 → 正式视频 → 合成段；I9 剪辑与分集交付；
+获授权后的批量 create；Full Gate 的 `workbench-resource` 复测。
