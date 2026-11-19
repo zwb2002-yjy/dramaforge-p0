@@ -402,6 +402,7 @@ describe("ShotProductionActions", () => {
     });
     const reference: ShotExecutionReference = {
       binding_id: "binding-1",
+      source: "private",
       purpose: "action",
       asset_version_id: "version-1",
       artifact_id: "artifact-1",
@@ -450,6 +451,7 @@ describe("ShotProductionActions", () => {
     });
     const lastFrame: ShotExecutionReference = {
       binding_id: "binding-last",
+      source: "private",
       purpose: "last_frame",
       asset_version_id: "version-last",
       artifact_id: "artifact-last",
@@ -460,6 +462,7 @@ describe("ShotProductionActions", () => {
     const unrelated: ShotExecutionReference = {
       ...lastFrame,
       binding_id: "binding-style",
+      source: "private",
       purpose: "style",
       artifact_id: "artifact-style",
     };
@@ -491,6 +494,7 @@ describe("ShotProductionActions", () => {
     });
     const reference: ShotExecutionReference = {
       binding_id: "binding-1",
+      source: "private",
       purpose: "identity",
       asset_version_id: "version-1",
       artifact_id: "artifact-1",
@@ -847,6 +851,7 @@ describe("ShotProductionActions", () => {
 
     const reference: ShotExecutionReference = {
       binding_id: "binding-1",
+      source: "private",
       purpose: "identity",
       asset_version_id: "version-1",
       artifact_id: "artifact-1",

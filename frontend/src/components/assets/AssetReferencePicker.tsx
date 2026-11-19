@@ -513,13 +513,16 @@ export function AssetReferencePicker({
  * into the exact WorkbenchExecutionInput shape. */
 function toExecutionReference(reference: ResolvedReferenceRead): ShotExecutionReference {
   const resolutionMode =
-    reference.source === "pinned_version"
-      ? "pinned_version"
-      : reference.source === "direct_artifact"
-        ? "direct_artifact"
-        : "current_formal";
+    reference.source === "public_link"
+      ? "public_link"
+      : reference.source === "pinned_version"
+        ? "pinned_version"
+        : reference.source === "direct_artifact"
+          ? "direct_artifact"
+          : "current_formal";
   return {
     binding_id: reference.binding_id,
+    source: reference.source === "public_link" ? "public" : "private",
     purpose: reference.purpose,
     asset_version_id: reference.asset_version_id ?? null,
     artifact_id: reference.artifact_id,

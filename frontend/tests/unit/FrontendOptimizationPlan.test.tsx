@@ -77,6 +77,7 @@ const SHOT_COMPLETED: ShotLite = {
 
 const REFERENCES: ShotExecutionReference[] = [
   {
+    source: "private",
     purpose: "identity",
     artifact_id: "artifact-char-ref-1",
     resolution_mode: "current_formal",

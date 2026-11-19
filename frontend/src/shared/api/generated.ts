@@ -10431,6 +10431,17 @@ export interface components {
         ShotReferenceIntent: {
             /** Binding Id */
             binding_id?: string | null;
+            /**
+             * Source
+             * @default private
+             */
+            source: string;
+            /** Publication Id */
+            publication_id?: string | null;
+            /** Publication Item Id */
+            publication_item_id?: string | null;
+            /** Public Asset Link Id */
+            public_asset_link_id?: string | null;
             /** Purpose */
             purpose: string;
             /** Asset Version Id */

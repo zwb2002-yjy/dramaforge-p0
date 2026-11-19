@@ -1314,4 +1314,8 @@ I5阶段Full待阶段终点。
   `test_public_assets.py`、`test_shot_reference_binding.py`、`test_provider_references.py`。
 - ruff/mypy 395文件通过。
 
-未完成且不冒称：I5阶段终点Full待跑（本片收口后一次未过滤Full）；通过后才宣布I5退出。
+- Full `df-quality-i5-04`首跑**FAIL**：后端全绿（2690 unit/204 PG），前端`api:check`报generated.ts过期；
+  根因是`ShotReferenceIntent`新增字段改变了OpenAPI schema（366→含source/publication等），本片未同步重生
+  生成类型。已重生`generated.ts`并修正受影响前端夹具（AssetReferencePicker按resolve来源映射
+  source/resolution_mode；测试夹具补source），定向typecheck+49用例通过。复跑Full见下条。
+- 复跑无过滤Full见下条；通过后才宣布I5退出。
