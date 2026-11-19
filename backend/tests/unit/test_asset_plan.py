@@ -94,6 +94,19 @@ async def world(session: AsyncSession):
     )
     session.add(connection)
     await session.flush()
+    from app.providers.models import ProviderConnectionRevision
+
+    session.add(
+        ProviderConnectionRevision(
+            connection_id=connection.id,
+            revision_no=1,
+            provider_type="agnes",
+            protocol_profile="agnes_cn_v1",
+            base_url="https://api.agnes-ai.cn",
+            credential_revision_id=credential.id,
+        )
+    )
+    await session.flush()
     entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
@@ -196,6 +209,8 @@ async def test_plan_binds_asset_and_compiles_prompt_without_writes(session, worl
     assert len(plan.plan_fingerprint) == 64
     assert plan.resolution["status"] == "RESOLVED"
     assert plan.resolution["provider_model_binding_id"] == str(world["binding"].id)
+    assert plan.resolution["provider_connection_revision_id"]
+    assert plan.resolution["credential_revision_id"]
     assert plan.max_provider_operations == 1
 
 

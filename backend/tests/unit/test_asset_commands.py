@@ -94,6 +94,19 @@ async def world(session: AsyncSession):
     )
     session.add(connection)
     await session.flush()
+    from app.providers.models import ProviderConnectionRevision
+
+    session.add(
+        ProviderConnectionRevision(
+            connection_id=connection.id,
+            revision_no=1,
+            provider_type="agnes",
+            protocol_profile="agnes_cn_v1",
+            base_url="https://api.agnes-ai.cn",
+            credential_revision_id=credential.id,
+        )
+    )
+    await session.flush()
     entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
@@ -115,6 +128,13 @@ async def world(session: AsyncSession):
         model_id="asset-image",
         purpose="keyframe",
         enabled=True,
+        documented=True,
+        contract_tested=True,
+        account_verified=True,
+        quality_gated=True,
+        remote_resource_kind="model",
+        remote_resource_id="asset-image",
+        invoke_model_value="asset-image",
         catalog_entry_id=entry.id,
         capability_manifest_hash=entry.contract_manifest_hash,
         created_by=user.id,
@@ -285,3 +305,4 @@ async def test_list_asset_executions_reads_the_original_runs(session, world):
             project_id=world["project"].id,
             asset_id=uuid4(),
         )
+

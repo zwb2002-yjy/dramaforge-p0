@@ -1664,3 +1664,19 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
   定向组64 passed；generated.ts 381 schema、api:authority通过。
 
 未完成且不冒称：Worker对asset快照的端到端执行（fake runtime/compiler harness）、资产batch与媒体安全合同。
+
+## I8a-03h 资产计划的连接修订身份与Worker探针（2026-11-19，EV108）
+
+- `build_asset_image_plan`把连接的最新`ProviderConnectionRevision`写入`resolution`
+  （`provider_connection_revision_id`/`credential_revision_id`），缺修订422
+  `ASSET_CONNECTION_REVISION_UNAVAILABLE`；Worker不再需要重解析可变连接。
+- 用fake `ProviderRuntime`/`ImageCompiler`驱动`execute_media_node_run`探针（未提交）：asset快照依次通过
+  eligibility、连接修订、compiler wire选项核对，最后停在create admission的
+  `MODEL_VISIBILITY_NOT_VERIFIED`（需`ProviderModelAvailability`+`ProviderAvailabilityEvidence`fixture）。
+  这说明asset run已进入真实提交准入，而非绕过；下一轮补可见性fixture即可完成端到端。
+
+已测（定向）：
+- `test_asset_plan.py` 4 passed（新增resolution修订断言）、`test_asset_commands.py` 3 passed；
+  定向组64 passed；ruff/mypy 398文件通过。
+
+未完成且不冒称：Worker asset快照端到端完成（可见性fixture）、资产batch与媒体安全合同。

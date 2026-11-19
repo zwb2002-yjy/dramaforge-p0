@@ -276,6 +276,27 @@ async def build_asset_image_plan(
         mode_id=body.mode_id,
         requested_binding_id=binding.id,
     )
+    from sqlalchemy import select as _select
+
+    from app.providers.models import ProviderConnectionRevision
+
+    revision = await session.scalar(
+        _select(ProviderConnectionRevision)
+        .where(ProviderConnectionRevision.connection_id == binding.connection_id)
+        .order_by(ProviderConnectionRevision.revision_no.desc())
+        .limit(1)
+    )
+    if revision is None:
+        raise ValidationAppError(
+            "图片模型连接缺少不可变修订。",
+            details={"code": "ASSET_CONNECTION_REVISION_UNAVAILABLE"},
+        )
+    resolution = resolution.model_copy(
+        update={
+            "provider_connection_revision_id": revision.id,
+            "credential_revision_id": revision.credential_revision_id,
+        }
+    )
     _validate_parameters(operation, body.parameters)
     max_outputs = operation.output_constraints.get("max_outputs")
     if isinstance(max_outputs, int) and body.output_count > max_outputs:
