@@ -1597,3 +1597,18 @@ FinalFilm prepare与逐命令授权。
 
 未完成且不冒称：`ProductionCommands`资产提交（ExecutionBody/回执/WorkbenchExecutionService的asset分支）、
 Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
+
+## I8a-03d 资产计划的冻结模型身份与命令body（2026-11-19，EV104）
+
+让资产预览携带命令要冻结的模型解析身份，并定义单命令body。
+
+已实施：
+- `build_asset_image_plan`调用`ExecutionModelResolver.resolve(slot=VISUAL_KEYFRAME,capability=IMAGE_GENERATE,
+  purpose=keyframe,requested_binding_id=binding)`，把`ExecutionModelResolution`写入
+  `AssetExecutionPlanRead.resolution`（供命令快照冻结，不在Worker重解析）。
+- 新增`AssetExecutionBody(AssetImagePlanBody)`+必填`plan_fingerprint`，作为资产单命令的输入合同。
+
+已测（定向）：
+- `test_asset_plan.py` 4 passed（新增断言resolution.status=RESOLVED、binding一致）。
+
+未完成且不冒称：资产命令服务（Graph/NodeRun/回执创建）、Worker资产执行、资产batch与媒体安全合同。

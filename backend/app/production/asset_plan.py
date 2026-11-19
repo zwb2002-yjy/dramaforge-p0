@@ -77,6 +77,12 @@ class AssetImagePlanBody(BaseModel):
     output_count: int = Field(default=1, ge=1, le=8)
 
 
+class AssetExecutionBody(AssetImagePlanBody):
+    """One explicit asset command: the previewed plan plus its frozen fingerprint."""
+
+    plan_fingerprint: str = Field(min_length=64, max_length=64)
+
+
 class AssetPlanTarget(BaseModel):
     kind: Literal["asset"] = "asset"
     asset_id: UUID
@@ -94,6 +100,8 @@ class AssetExecutionPlanRead(BaseModel):
     target: AssetPlanTarget
     stage: Literal["asset_image"] = "asset_image"
     plan_fingerprint: str
+    # Frozen model identity the command freezes into the NodeRun snapshot.
+    resolution: dict[str, JsonValue] = Field(default_factory=dict)
     binding_id: UUID
     model_id: str
     provider_type: str
@@ -256,6 +264,18 @@ async def build_asset_image_plan(
     binding, entry, operation = await _resolve_image_binding(
         session, project=project, requested_binding_id=body.requested_binding_id
     )
+    from app.providers.capabilities import Capability
+    from app.providers.model_profiles.slots import ModelSlot
+    from app.providers.model_resolution import ExecutionModelResolver
+
+    resolution = await ExecutionModelResolver(session).resolve(
+        project=project,
+        slot=ModelSlot.VISUAL_KEYFRAME,
+        capability=Capability.IMAGE_GENERATE,
+        purpose="keyframe",
+        mode_id=body.mode_id,
+        requested_binding_id=binding.id,
+    )
     _validate_parameters(operation, body.parameters)
     max_outputs = operation.output_constraints.get("max_outputs")
     if isinstance(max_outputs, int) and body.output_count > max_outputs:
@@ -296,6 +316,7 @@ async def build_asset_image_plan(
             asset_id=asset.id, asset_version=asset.version
         ),
         plan_fingerprint=fingerprint,
+        resolution=resolution.model_dump(mode="json"),
         binding_id=binding.id,
         model_id=binding.model_id,
         provider_type=entry.provider_type,

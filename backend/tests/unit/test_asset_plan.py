@@ -194,6 +194,8 @@ async def test_plan_binds_asset_and_compiles_prompt_without_writes(session, worl
     assert plan.capability == "image.generate"
     assert "一位明代书生" in plan.prompt and "外观：清瘦，束发" in plan.prompt
     assert len(plan.plan_fingerprint) == 64
+    assert plan.resolution["status"] == "RESOLVED"
+    assert plan.resolution["provider_model_binding_id"] == str(world["binding"].id)
     assert plan.max_provider_operations == 1
 
 
