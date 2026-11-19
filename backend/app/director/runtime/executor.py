@@ -74,19 +74,24 @@ class DirectorRuntimeExecutor:
             await self._session.commit()
             await self._restore_scope(request.scope)
         lease = await self._claim(request.scope, request.runtime_execution_id)
+        # Short admission: the control lock is released before the graph runs.
+        ticket = await self._controls.begin_step(lease)
+        await self._session.commit()
+        await self._restore_scope(request.scope)
         try:
-            async with self._controls.guard(lease):
-                async with scoped_checkpointer(
-                    self._settings, project_id=request.scope.project_id,
-                ) as saver:
-                    runtime = LangGraphDirectorRuntime(
-                        checkpointer=saver,
-                        tools=self._tools,
-                        resume_claims=_AcceptedResumeClaim(UUID(int=0)),
-                    )
-                    view = await runtime.start(request)
-                await self._projector.project(view)
-                await self._controls.settle(lease, runtime_status=view.status)
+            async with scoped_checkpointer(
+                self._settings, project_id=request.scope.project_id,
+            ) as saver:
+                runtime = LangGraphDirectorRuntime(
+                    checkpointer=saver,
+                    tools=self._tools,
+                    resume_claims=_AcceptedResumeClaim(UUID(int=0)),
+                )
+                view = await runtime.start(request)
+            # Short publication: refused outright when a stop or control write
+            # won the race while the step was running.
+            await self._controls.commit_step(ticket, runtime_status=view.status)
+            await self._projector.project(view)
             await self._session.commit()
             await self._restore_scope(request.scope)
             return view
@@ -139,36 +144,38 @@ class DirectorRuntimeExecutor:
         claimed = await self._controls.claim_signal(signal=signal, lease=lease)
         await self._session.commit()
         await self._restore_scope(signal.scope)
+        ticket = await self._controls.begin_step(lease)
+        await self._session.commit()
+        await self._restore_scope(signal.scope)
         try:
-            async with self._controls.guard(lease):
-                async with scoped_checkpointer(
-                    self._settings, project_id=signal.scope.project_id,
-                ) as saver:
-                    runtime = LangGraphDirectorRuntime(
-                        checkpointer=saver,
-                        tools=self._tools,
-                        resume_claims=_AcceptedResumeClaim(signal.signal_id),
+            async with scoped_checkpointer(
+                self._settings, project_id=signal.scope.project_id,
+            ) as saver:
+                runtime = LangGraphDirectorRuntime(
+                    checkpointer=saver,
+                    tools=self._tools,
+                    resume_claims=_AcceptedResumeClaim(signal.signal_id),
+                )
+                current = await runtime.read(scope=signal.scope, turn_id=signal.turn_id)
+                if current.runtime_execution_id != runtime_execution_id:
+                    raise NotFoundError("Director runtime execution not found")
+                if current.revision < signal.expected_revision:
+                    raise ConflictError(
+                        "Director runtime signal is ahead of its checkpoint",
+                        details={"code": "DIRECTOR_RUNTIME_REVISION_CONFLICT"},
                     )
-                    current = await runtime.read(scope=signal.scope, turn_id=signal.turn_id)
-                    if current.runtime_execution_id != runtime_execution_id:
-                        raise NotFoundError("Director runtime execution not found")
-                    if current.revision < signal.expected_revision:
-                        raise ConflictError(
-                            "Director runtime signal is ahead of its checkpoint",
-                            details={"code": "DIRECTOR_RUNTIME_REVISION_CONFLICT"},
-                        )
-                    view = (
-                        await runtime.resume(signal)
-                        if current.revision == signal.expected_revision
-                        else current
+                view = (
+                    await runtime.resume(signal)
+                    if current.revision == signal.expected_revision
+                    else current
+                )
+                if not claimed and view.revision == signal.expected_revision:
+                    raise ConflictError(
+                        "Claimed Director signal has no checkpoint result",
+                        details={"code": "DIRECTOR_RESUME_SIGNAL_INCOMPLETE"},
                     )
-                    if not claimed and view.revision == signal.expected_revision:
-                        raise ConflictError(
-                            "Claimed Director signal has no checkpoint result",
-                            details={"code": "DIRECTOR_RESUME_SIGNAL_INCOMPLETE"},
-                        )
-                await self._projector.project(view)
-                await self._controls.settle(lease, runtime_status=view.status)
+            await self._controls.commit_step(ticket, runtime_status=view.status)
+            await self._projector.project(view)
             await self._session.commit()
             await self._restore_scope(signal.scope)
             return view

@@ -23,6 +23,11 @@
       "reason": "ARCHITECTURE_MAPPING §4.6: Project creation validates, compiles and freezes its initial creative profile. Remove after application orchestration injects validated inputs while preserving atomic project/profile creation, ownership and versions."
     },
     {
+      "from": "app.assets.public_assets",
+      "to": "app.execution.models",
+      "reason": "ARCHITECTURE_MAPPING §4.13: A public publication validates its real media references and reads observed artifact facts (type/mime/size) without exposing the private source project. Remove through the same production-facts boundary as asset creation."
+    },
+    {
       "from": "app.assets.from_artifact_service",
       "to": "app.execution.models",
       "reason": "ARCHITECTURE_MAPPING §4.13: Asset creation validates an existing Artifact before atomic Asset/Version/Reference creation. Remove through an explicit production-facts boundary preserving ownership, storage/type checks and idempotency."
@@ -66,6 +71,11 @@
       "from": "app.director.recommendation",
       "to": "app.providers.model_profiles.slots",
       "reason": "ARCHITECTURE_MAPPING §4.3: Director reads effective project model configuration or task-slot identity. Remove when neutral text/model contracts supply the same exact identities without default substitution."
+    },
+    {
+      "from": "app.director.research_import",
+      "to": "app.providers.model_profiles.slots",
+      "reason": "ARCHITECTURE_MAPPING §4.3: Accepted research analysis freezes the same planning-script task-slot identity as the Director context it executes under. Remove when neutral text/model contracts supply the same exact identities without default substitution."
     },
     {
       "from": "app.director.runtime.delegation",
@@ -186,11 +196,6 @@
       "from": "app.director.workflows.contracts",
       "to": "app.providers.capabilities",
       "reason": "ARCHITECTURE_MAPPING §4.4: Workflow planning/read models consume capability and manifest types, not media execution. Remove after neutral contracts and explicit input conversion preserve serialization, capacity limits and approximation consent."
-    },
-    {
-      "from": "app.director.workflows.library",
-      "to": "app.production.templates",
-      "reason": "ARCHITECTURE_MAPPING §4.5: Workflow registry reuses the canonical dialogue graph factory and quality policy. Remove after one neutral template-discovery boundary preserves golden graph equivalence; do not copy graph definitions."
     },
     {
       "from": "app.director.workflows.library",
@@ -326,6 +331,11 @@
       "from": "app.shared.rls_scopes",
       "to": "app.director.turn_models",
       "reason": "ARCHITECTURE_MAPPING §4.9: Non-PostgreSQL scope discovery reads persisted ownership; PostgreSQL uses dedicated RLS context queries. Remove after an explicit scope-composition boundary preserves tenant isolation and recovery; never trust queued ownership claims."
+    },
+    {
+      "from": "app.shared.rls_scopes",
+      "to": "app.director.business_flow_models",
+      "reason": "ARCHITECTURE_MAPPING §4.9: Non-PostgreSQL scope discovery reads persisted BusinessFlow ownership; PostgreSQL uses the dedicated pending_business_flow_contexts RLS resolver. Remove after an explicit scope-composition boundary preserves tenant isolation and recovery; never trust queued ownership claims."
     },
     {
       "from": "app.shared.rls_scopes",

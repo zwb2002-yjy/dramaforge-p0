@@ -246,6 +246,7 @@ Camera: static
                 json={
                     "workspace_id": workspace_id,
                     "name": f"Agnes Golden {uuid4().hex[:8]}",
+                    "work_type": "single_comic",
                     "aspect_ratio": "9:16",
                     "target_platform": "general",
                 },

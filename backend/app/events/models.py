@@ -16,6 +16,31 @@ from app.shared.pg_enums import OUTBOX_STATUS, col_enum
 
 class EventLog(Base):
     __tablename__ = "event_log"
+    __table_args__ = (
+        # One acceptance per request key and per accepted attempt. The partial
+        # expression indexes are PostgreSQL-only (the portable test database has no
+        # JSONB); the revision row lock already serializes acceptance.
+        Index(
+            "uq_project_file_acceptance_key",
+            "project_id",
+            "aggregate_id",
+            text("(payload ->> 'request_key')"),
+            unique=True,
+            postgresql_where=text(
+                "event_type = 'project_file.extraction_requested' AND schema_version = 2"
+            ),
+        ).ddl_if(dialect="postgresql"),
+        Index(
+            "uq_project_file_acceptance_attempt",
+            "project_id",
+            "aggregate_id",
+            text("(payload ->> 'accepted_attempt')"),
+            unique=True,
+            postgresql_where=text(
+                "event_type = 'project_file.extraction_requested' AND schema_version = 2"
+            ),
+        ).ddl_if(dialect="postgresql"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     event_id: Mapped[UUID] = mapped_column(nullable=False, unique=True, default=uuid4)

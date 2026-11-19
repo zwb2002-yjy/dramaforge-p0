@@ -22,7 +22,8 @@ def _parse_copy_sources(dockerfile_text: str) -> list[str]:
         # COPY [--chown=...] src [src ...] dest
         body = stripped[len("COPY ") :]
         parts = [p for p in body.split() if not p.startswith("--")]
-        if len(parts) < 2:
+        if len(parts) < 2 or "--from=" in body:
+            # Stage copies reference image paths, not files in the build context.
             continue
         # last is dest; earlier are sources
         sources.extend(parts[:-1])

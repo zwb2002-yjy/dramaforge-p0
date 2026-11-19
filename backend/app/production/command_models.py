@@ -14,6 +14,7 @@ class ProductionCommandAuthorization(Base):
     __tablename__ = "production_command_authorizations"
     __table_args__ = (
         UniqueConstraint("project_id", "command_key", name="uq_production_authorized_command"),
+        UniqueConstraint("id", "project_id", name="uq_command_auth_scope"),
         CheckConstraint(
             "status IN ('approved','accepted','revoked')", name="ck_command_auth_status"
         ),

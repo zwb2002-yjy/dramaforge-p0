@@ -4,11 +4,15 @@ import type { WorkspaceView } from "../../hooks/useProjectWorkspaceState";
 export const GLOBAL_NAV_LABELS = {
   projects: "我的项目",
   projectsCompact: "项目",
+  knowledge: "文化知识库",
+  knowledgeCompact: "知识",
   settings: "设置",
 };
 
 export const PROJECT_VIEW_LABELS: Record<WorkspaceView, string> = {
   production: "项目总览",
+  files: "项目资料",
+  research: "文化研究",
   script: "故事剧本",
   assets: "角色与素材",
   scenes: "分镜制作",

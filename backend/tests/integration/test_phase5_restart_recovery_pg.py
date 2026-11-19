@@ -112,6 +112,7 @@ async def _project(session: AsyncSession) -> tuple[User, UUID, UUID]:
     await session.flush()
     await set_rls_context(session, user_id=user.id, workspace_id=workspace.id)
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=workspace.id,
         name=f"P5Proj-{suffix}",
         aspect_ratio="9:16",

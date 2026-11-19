@@ -112,6 +112,18 @@ test("AUTO delegates one frozen Shot plan to the Director runtime", async ({ pag
   await inspector.getByTestId("shot-generate-more").getByRole("button").first().click();
   await inspector.getByTestId("delegate-keyframe-to-director").click();
 
+  // Wait for the delegation request before asserting the panel state: under a
+  // loaded host the request can outlive the default attribute-retry window.
+  await expect
+    .poll(() =>
+      state.editing.requests.some(
+        (request) =>
+          request.method === "POST" &&
+          request.path ===
+            `/api/v1/projects/${PROJECT_ID}/director/runtime/shots/${SHOT_ID}/executions`,
+      ),
+    )
+    .toBe(true);
   // Delegation reveals the local AI director for this shot.
   await expect(
     inspector.getByTestId("shot-inspector-director").getByRole("button").first(),

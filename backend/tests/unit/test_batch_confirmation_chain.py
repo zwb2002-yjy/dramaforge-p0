@@ -94,6 +94,7 @@ def _seed_project(
             "/api/v1/projects",
             headers={CSRF_HEADER: _csrf(client)},
             json={
+                "work_type": "serial_comic",
                 "name": "Batch Project",
                 "aspect_ratio": "9:16",
                 "workspace_id": workspace_id,

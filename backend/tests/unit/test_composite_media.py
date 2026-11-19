@@ -110,6 +110,7 @@ async def _make_composite_fixture(
     await session.flush()
     await session.flush()
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=workspace.id,
         name="Composite media",
         aspect_ratio="9:16",

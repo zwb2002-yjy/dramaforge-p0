@@ -42,9 +42,9 @@ jobs:
           set -euo pipefail
           if [ "$BASE_REF" = "main" ]; then
             case "$HEAD_REF" in
-              dev|agent/hotfix-*) ;;
+              dev) ;;
               *)
-                echo "Stable releases must target main from dev; only agent/hotfix-* branches are allowed for urgent fixes."
+                echo "Stable releases must target main from dev; integrate fixes into dev first."
                 exit 1
                 ;;
             esac

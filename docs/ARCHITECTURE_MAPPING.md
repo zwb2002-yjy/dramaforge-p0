@@ -74,9 +74,10 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
    错误语义和测试 seam，不能用空壳转发掩盖依赖。
 4. **workflows 跨 creative/production 职责**：执行模板、参与计划与引用能力跨域；
    是否拆分物理路径需结合实际调用，不先大搬文件。
-5. **模板目录分散**：`execution/shot_pipeline.py`、`production/templates.py` 与
-   `director/workflows/template_nodes.py` 三处 Graph/Workflow 模板来源需要统一发现
-   路径（概念上仍是单一 ProductionGraph 世界观）。
+5. **（已解决，编号保留）Workflow 规划与执行图分离**：Workflow registry 只保留版本化
+   规划元数据、资格判断及只读展示；无运行时消费者的图构造器及其强制注册要求已移除。
+   模板 key/version/contract hash 不变，真实 Shot 图仍由 `execution/shot_pipeline.py`
+   唯一定义，FinalFilm 内部图只负责成片渲染。不再维护未执行的平行图定义。
 6. **creative_capabilities 与 access → creative 初始化依赖**：职责与 director 路径
    不完全一致；`access/projects` 对 creative_templates 的依赖仍需明确是应用层注入
    还是允许的初始化依赖。
@@ -492,20 +493,109 @@ Compiler/normalizer 与现有执行消费处；剧本使用既有 `director/stor
 | 多轮 Agent 工具调用 | EXTEND | `director/agent_harness.py` 已有有界 LangGraph loop，`agent_service.py` 有 Turn/调用回执；当前工具主要为读取和镜头提示词提案，缺机构研究工具及长期主 Run 监督 | 错误反馈、限额、取消、拒绝后停止、重复请求回执 |
 | 工具策略 | EXTEND | `agent_tools.py`、`agent_audit.py`、`api/director_model_tools.py` 管理 schema/scope/版本及安全回执；尚无项目资料云端外发许可模型 | scope 拒绝不可纠正绕过；所有实际出口覆盖与撤销竞态 |
 | 用户门与生产委托 | REUSE / EXTEND | `proposal_commands.py` 验证对象版本，`runtime/delegation.py` 绑定用户授权和冻结计划；自然语言 Turn 与委托 Turn 尚需统一监督关联 | 过期、版本改变、未知提交、重复委托和恢复不新增生产 |
-| 持久 Workflow | NEW / EXTEND | `director/workflows/contracts.py` 是 Shot/Scene 规划模板，不能当成跨 Run 的 WorkflowInstance/Step；扩展现有 Director 持久状态，生产仍交唯一 Runtime | 依赖、局部失败保留、受控并行、中途变更和恢复 |
-| 项目资料与研究 | EXTEND / NEW | `assets/source_parser.py` 提供本地原文定位提取，`assets/project_files.py` 与 ProjectFile/ProjectFileRevision 保存项目私有原件版本、提取回执及 Outbox；HTTP/Worker 消费者、研究修正和 Director 读取尚未接入，不能将原文提取视为研究分析 | 文件版本、解除关联、跨项目隔离、用户修正优先、旧任务拒绝；真实格式样本及未支持结构反馈 |
+| MasterRun / BusinessFlow | NEW / EXTEND | 持续目标与跨Turn业务步骤尚未实现；旧workflows目录混合模板/生产读模型/创意规划，按O2/O3分类改名；仍交唯一Production Runtime | 当前计划/retain资格、局部失败保留、受控并行、中途变更和恢复 |
+| 项目资料与研究 | EXTEND / NEW | `assets/source_parser.py` 提供本地原文定位提取；ProjectFile/Revision、HTTP上传与dispatcher处理循环已接入；完整格式/研究修正/语义结果与机构界面仍缺失，不能将原文提取视为研究分析 | 文件版本、解除关联、跨项目隔离、用户修正优先、旧任务拒绝；真实格式样本及未支持结构反馈 |
 | 专业 Skills | EXTEND | `creative_capabilities/agent_skills.py` 冻结现有方法上下文，不授予权限；补研究方法、输入输出验证与允许工具交集，不能把静态 prompt 当执行引擎 | 未选 Skill 不激活、不能扩权、来源约束 |
 | 公共生成资产 | EXTEND | `AssetVersion` 是项目内不可变版本；不能将其直接去掉 project 限制作为公共库。需要实例内共享引用、来源限制与项目变体 | 采用后入库、固定版本、私有原件不可读、限制传播 |
 | 机构创作界面 | EXTEND | 复用当前项目与 Director/提案入口，新增资料与研究反馈；专业工作台不能冒充自然语言主导的机构闭环 | 上传—分析—修正—建议—确认—交付，失败/恢复/可访问性 |
 | 三类作品与设备部署 | VERIFY | 复用现有生产链、Editing/FinalFilm 和 Compose；动画宣传片、单集、多集及 WSL2 实机均需独立场景证据 | 自动化回归、重启恢复、真实样本和人工作品评审 |
 
-先交付资料与研究纵向切片：原件存储与项目关联 → 本地文本解析/来源定位 → 逐文件后台
-分析及可恢复失败 → 用户修正/版本并发 → Director 受控读取 → 浏览器闭环。多模态解析
+机构版先建立统一控制与外发安全，再启用真实资料研究；资料设计和合成原件/解析验证可先行。
+资料纵向切片：原件存储与项目关联 → 本地文本解析/来源定位 → 逐文件后台
+分析及可恢复失败 → 用户修正/版本并发 → Director受控读取 → 浏览器闭环。研究运行依赖BusinessFlow核心先行，见最终实施依赖。多模态解析
 逐种启用，不支持的格式明确返回不可分析状态；未经许可不静默转云端。新增持久对象
 必须同时有 RLS、迁移、真实 PostgreSQL 验证和 API 合同，不建立只有表名的平行事实库。
 
-后续统一主 Run 时复用 DirectorTurn、ToolCall、RuntimeControl、唤醒与生产回执的已有
-身份；先证明不能表达的关系再新增最小对象。Checkpoint 仅保存执行快照和业务引用。
+持续目标按O1复用DirectorTurn、ToolCall、RuntimeControl、唤醒与生产回执身份，新增目标/计划/业务步骤关系
+已有DATA_MODEL与DIRECTOR_RUNTIME目标合同；实现仍未完成。Checkpoint仅保存执行快照和业务引用。
 新付费 Create 仍要求当前明确授权；模型切换不能重写已提交任务身份。回滚代码与数据库
 迁移须分开验证，不以重新提交旧生产操作作为回滚。整体完成以三类作品、资料格式、
 权限/并发/恢复及目标部署验收为准；本节的 REUSE 分类不代表该能力已完成最终验收。
+
+## 8. 机构版全量追踪与实施处置（D8设计基线，未实施）
+
+本节把D0历史追踪回填现有架构差距权威，不创建第二份宪法。产品正文归PRODUCT/CREATION_FLOW，
+数据归DATA_MODEL，接口归API，工作台归FRONTEND_WORKBENCH；测试文件/批次分别归
+[TEST_EVIDENCE](implementation/TEST_EVIDENCE.md)与[MASTER_EXECUTION_PLAN](implementation/MASTER_EXECUTION_PLAN.md)。
+表内实体/表/API为目标落点，不表示已建表或运行通过。当前实例Schema未知仍是I0硬准入，不伪造D0严格通过。
+
+### 能力处置及事实层次
+
+HEAD与原工作区未提交差异的精确身份在唯一EXECUTION_STATUS记录；本表不把原dirty成果记成本任务代码实现。
+
+| 领域 | 处置 | 真实文件依据与理由 | 当前事实层次/实施目标 |
+|---|---|---|---|
+| 项目/分集 | EXTEND | access/models.py、projects.py、assets/models.py已有Project/Episode；缺work_type/目标及跨集会话合同 | 既有为HEAD；机构列/约束/API为未实施设计 |
+| 原件/提取 | REUSE / EXTEND | assets/project_files.py、source_parser.py和api/v1/project_files.py已有私有原件/版本/本地原文 | HEAD已接入；完整七格式、快照/新定位/资源恢复待实现，测试定义不等于格式通过 |
+| 研究/知识 | NEW | 当前没有ResearchResult/Knowledge持久能力；D2/D4/D7要求独立事实/来源/修正/发布 | 27新表清单相关子集和新API均未实施，不复用Asset表假装知识库 |
+| 公共资产 | EXTEND / NEW | AssetVersion/Artifact当前同项目；from_artifact/version_service及引用/令牌消费者已核对 | 现有链REUSE；Publication/Link/用途限制/窄权限与E05回执NEW，原版本/产物所有权不改 |
+| Director/Harness | REUSE / REFACTOR / EXTEND | agent_service/harness/tools、runtime/control/executor已有；同步/长锁/旧Agent租约与统一异步目标有差距 | HEAD事实；受控Worker/短事务/epoch/checkpoint隔离待实施；O6不授权提前删旧租约 |
+| MasterRun/BusinessFlow | NEW | 现有Turn/Invocation/Tool回执不足以表达持续目标与跨Turn业务步骤 | 新Run/Plan/Receipt、Flow三表是不同事实；不复制NodeRun/Artifact，不新Runtime |
+| 生产链 | REUSE / EXTEND | production/execution现有Graph/NodeRun/Operation/Artifact；非空node_run_id唯一；当前commands/grant仅Shot | 保持0..1与原身份恢复；E07补asset scope/授权及原命令入口，FFmpeg沿原Operation，不改正式归属 |
+| 旧Workflow命名 | REFACTOR / REMOVE | director/workflows混合模板/读投影/创意规划，API两条旧读路径和前端导航仍在 | 部分模板工厂清退为原工作区dirty；O2具体改名尚未实施。移除旧wire/DTO别名，不机械删不同含义的turn_kind |
+| 模型/语音 | REFACTOR / EXTEND / REMOVE | model_profiles/两resolver语义不同，voice_config/runtime依实例TTS与edge-tts7.2.8 | E04项目唯一默认/单次覆盖/语音Binding待实现；删除活动Edge/旧默认消费者，保留历史冻结身份 |
+| 外发 | REUSE / NEW / EXTEND | providers/egress.py是SSRF守卫，不是项目内容策略；真实Proxy路由需核验 | 新SourceUse/策略/目的地与原Invocation/Operation准入；无新外发Runtime，不新增金额预算 |
+| 前端 | REFACTOR / EXTEND | React/AntD/路由/Query可复用，旧专业布局与N08/N10不符 | 业务src未重构；design/prototypes仅合成可操作原型。目标单一三栏、三级模型、独立知识 |
+| Review/Editing/Export | REUSE / EXTEND | 既有Review/Formal/EditSession/Export；final_film.py含原未提交重构 | 明确区分HEAD与dirty；分集范围/准备授权/版本化交付待实现，不声称原样片就是机构验收 |
+| 部署/备份 | REUSE / EXTEND / VERIFY | 当前Compose/WSL方式与maintenance脚本；单库/单桶和目标核验不足完整恢复 | E06为维护容器CLI选择；新模式/多库恢复未实现，实际机器/容量/备份效果待验证 |
+| 测试/CI | REUSE / EXTEND / VERIFY | 现有quality脚本/镜像/CI为真实命令来源；CI本身有原dirty | 新16组/真实隔离旅程为测试计划；Full、真实Provider、目标机与作品质量均未通过 |
+
+REMOVE只针对被新唯一实现替代的活动代码/DTO/wire/依赖；历史方案和既有执行数据不在普通清理范围。
+涉及真实持久数据或不可逆迁移时先做保护与明确授权；不从“未发布”推导可以清空用户工作区。
+
+### R01–R38设计追踪
+
+API列为API.md中的唯一接口族/事件类型简称；完整字段/错误/版本规则不在本表重复。T组的实际文件与验收详见TEST_EVIDENCE。
+
+| 需求 | 领域实体/数据模型 | API / Event落点 | 用户入口与权限 | 实施/自动化/最终验收 |
+|---|---|---|---|---|
+| R01 | Project/Episode；projects作品类型/目标/version、episodes | projects Create/Update/Read、ProjectChanged | 项目卡/概览；所选Workspace+Owner、CAS | I1/I7；T01/14/15；保存恢复/切换不串项目 |
+| R02 | ProjectFile/Revision、SourceExtraction/Fragment | files/revisions/original；project.source.changed/extracted | 项目资料；私有Project RLS、原件hash | I1/I4；T02；重放一修订与原件版本可读 |
+| R03 | SourceExtraction.processor_evidence/coverage、SourceFragment.locator | source-capabilities/extractions/fragments | 资料预览/定位；处理限额、本地处理、许可后才云 | I4；T02 media；七格式真实定位及超限失败 |
+| R04 | project_files/file_revisions独立归属、原件存储hash | files上传/关联/解除接口 | 资料列表；跨项目不能共用分析/授权或泄露去重命中 | I1/I4；T02/13；同字节不同项目保持隔离 |
+| R05 | FileRevision处理attempt、Flow/Turn/Invocation、Analysis清单 | analysis-preview/analyses、目标控制、analysis_published | 逐文件进度/失败恢复；O7基础与明确操作范围 | I2b/I6a/I4；T02/07/08；重启与迟到拒绝 |
+| R06 | ResearchResult/Revision、Analysis.category_outcomes | research-results/revisions、analyses读取 | 文化研究六类；项目权限、AI不能写user_asserted | I4；T03；none/incomplete不伪造发现 |
+| R07 | ResearchCitation→固定Fragment/Revision | research-revisions/source-fragments/original | 来源侧栏；源可用性/真实定位/用途复核 | I4；T02/03/09；可追原版、伪引用拒绝 |
+| R08 | Result.current、不可变user/restore Revision | revisions/restore、result_changed | 研究直接编辑/恢复；CAS、原key回执 | I4/I7；T03/14；即时读回、冲突不丢稿 |
+| R09 | Analysis结果清单与候选Revision/base | analysis-preview/analyses/accept | 再分析差异；不覆盖当前用户修正 | I4；T03/07；并发修正保留 |
+| R10 | File.detached_at、历史Revision/Citation | DELETE files、source.changed | 解除关联；原件常规读取拒绝，历史不删 | I1/I4/I5；T02/03/05；限制与不可用区别 |
+| R11 | KnowledgeEntry/Revision/SourceLink/ProjectKnowledgeReference | knowledge entries/revisions/withdraw/references；owner.knowledge.changed | 独立知识库；同owner跨Workspace、私有源不公开 | I4；T04/13/15；固定快照与跨owner拒绝 |
+| R12 | Thread/Message/Turn、StoryProposal/Item | director messages/proposals/apply | 右侧讨论与中央故事；只生成候选、明确采用 | I7；T11/14/15；推荐理由/反馈不自动写正式 |
+| R13 | ScriptDocument/Episode/Scene/Shot、ProposalItem | 既有script/story typed Apply、分集读取 | 故事与内容/分集；父子依赖、版本核验 | I7/I9；T11/12；无孤儿、旧提案拒绝 |
+| R14 | Asset/Version/Reference、asset-scope Graph/授权、正式设定 | assets/execution-plan/executions、采用/引用与creative provenance | 人物/场景/素材分类；独立生成不造镜头、同名ID消歧 | I5/I8a/I7；T05/10/11/15；生成候选不覆写正式设定 |
+| R15 | 原NodeRun/ProviderOperation/Artifact、AssetVersion | production历史/候选/资产版本读接口 | 中央候选和聊天结果卡；当前权限、未采用不公共 | I5/I8；T05/08/10；失败与候选可追踪 |
+| R16 | Publication/Items、ProjectPublicAssetLink | 两采用入口/public-assets/links；owner.public_asset.changed | 公共资产；同owner、窄读取不开放私有源 | I5；T05/09；原子入库及固定版本复用 |
+| R17 | Link、AssetVersion.base_public* | assets候选/变体与links PATCH | 项目变体；只改消费项目，不复制生产真相 | I5；T05；源版本/他项目引用不变 |
+| R18 | SourceUseSubject/Revision、ArtifactSourceUse、Publication资格 | source-use/impact、withdraw/link detach | 使用限制/影响；撤销新使用、历史保留 | I3/I5；T05/09；先撤销零发送/在途不重提 |
+| R19 | Turn/Invocation/ToolCall、Skill快照 | messages/tools/proposals、turn.changed | 持续Director；工具白名单/权限交集/有界调用 | I2b/I6；T08/11；拒绝后零调用、无第二Agent Runtime |
+| R20 | MasterRun/Plan/ControlReceipt | create_goal、master-runs/plan/apply/controls | 目标与进度；合法origin、verify真实谓词 | I2；T06；跨Turn、普通问答无Run、终态不复活 |
+| R21 | BusinessFlowInstance/Step/Attempt | business-flows/steps/attempts只读、typed计划 | 任务进度投影；固定定义/依赖、每attempt单回执 | I6a/I6b；T07；并行/部分成功/未知槽保护 |
+| R22 | RuntimeControl、SignalClaim、checkpoint_ref/epoch、旧Turn租约 | 原runtime控制/旧Agent只读恢复协议 | 停止/恢复；按冻结state版本路由 | I2a/I2b；T08；短锁/断线/迟到/重启，未排空不删列 |
+| R23 | 新Plan与flow_dispositions、原成功Artifact | plan proposal/apply、控制事件 | 修改意图/影响确认；retain/supersede不自动换已批准内容 | I6/I7；T06/07/11；旧成功保留、无隐式重做 |
+| R24 | ContextBuilder读取固定研究/知识/资产/版本、Turn输入快照 | ui_context/media_parts、context失效读回 | 对话所选对象与约束；最小scope/来源许可/预算 | I4/I6/I7；T03/04/08/11；资料变化只提示 |
+| R25 | Profile默认、Binding/Catalog/Manifest、Graph/NodeRun/Operation/Artifact、VoiceSpec | model-profile/recommendations/execution-plan/prepare-preview、配置事件 | 平台/项目/单次模型；无静默fallback、真实能力 | I3/I8；T09/10/15；三媒体真实协议/解码与独立真实模型验收 |
+| R26 | Review证据/人工判断、Shot Formal、原Repair步骤 | 既有review/formal/repair受理与回执 | 中央审片/修改意见；判断和Formal分别确认 | I8/I9；T11/12/15；拒绝不采用、局部修复保留成功 |
+| R27 | EditSession固定scope/timeline、Export/Items、render NodeRun | timeline Save/preview、prepare-preview/prepare/render、deliveries | 成片交付；保存与导出独立、scope/来源用途校验 | I9；T12；真实MP4/SRT、原版本/hash/血缘 |
+| R28 | 原Proposal/Item、Production授权、各领域版本回执 | Apply/Save/Formal/Export/控制各原入口 | 明确范围与后果；旧批准/超范围拒绝 | I2–I9；T06/09/11/12/15；每门独立，研究不误套审批 |
+| R29 | EgressPolicyRevision/Head、DestinationRevision、SourceUse、准入快照 | egress-policy/destinations/各预览和实际发送 | 项目许可/平台管理；O4分类、required_purposes全覆盖 | I3；T09；真实路由/漂移/撤销/拒绝零发送 |
+| R30 | 原控制/操作/回执、Inbox/Wakeup/Outbox | requests/Turn/Operation GET、恢复控制/SSE resync | 失败/待核对；读原身份、禁止unknown盲重试 | I2/I3/I6/I9/I10；T06–13/15；Create计数不增 |
+| R31 | Run/Plan限额与原调用/attempt事实累计 | messages limits、Plan、controls | 计划范围/受控并行；只收紧、未知不退次数 | I2/I6；T06–09；换Turn/计划不重置 |
+| R32 | Auth/Owner/RLS、组合FK/不可变修订、审计快照 | 全部scope API、无敏感事件/日志 | 平台/项目边界；伪actor/注入/私有ID拒绝 | I1–I10；T03–09/13/15；真实受限PG及安全日志 |
+| R33 | animation_promo Project、正式媒体与Project Export | 原项目/故事/生产/交付链 | 宣传目标/受众→作品；用户文化质量判断 | I8/I9/I10；T15/16；合成全链与真实宣传片分别证明 |
+| R34 | single_comic Project、唯一Episode、固定交付 | 原分集/生产/交付链 | 单集完整故事/对白；局部修改新确认 | I8/I9/I10；T15/16；连续性、字幕和可读成片 |
+| R35 | serial_comic、多Episode/共享设定、逐集EditSession/Export | 分集scope/deliveries、project_delivery predicate | 分集选择/整剧摘要；另一集结果不被覆写 | I8/I9/I10；T11/12/15/16；至少两集逐集验收 |
+| R36 | 既有Compose/PG/对象存储/私有checkpoint/Proxy及备份bundle | 网关/健康/maintenance受控CLI | 浏览器；现有Windows/WSL2方式、受控恢复 | I0/I10；T13/16；实际安装/重启/完整恢复 |
+| R37 | 单一三栏UI、Query事实、局部草稿、共享候选ID | 统一API client/生成DTO/SSE失效 | N08/N10入口、键盘/窄桌面、三级配置；无技术术语必经步骤 | I7/I10；T14/15；断网/冲突/刷新不串数据 |
+| R38 | 唯一权威/候选SHA/镜像/测试证据（不是新业务表） | 原quality/CI/部署验收入口 | 仅实证完成，不把原型/定义当实现 | I10；全部T组+Full；同clean候选完整验收 |
+
+本表每行均有设计落点；这些落点是否正确实现必须由未来T组及最终验收证明。I0真实实例不符设计假设时，
+先记录差异并按权威修订，不静默删数据、换模型或降低完成范围。
+
+### 输入与权威关系
+
+CURRENT仍是唯一入口。v1统一方案原件、第三轮候选/修订、评审/独立审计与外部D0七文件是可追踪输入，
+不是与现有权威并列的长期宪法。第三轮README明确所谓v2为候选组合，不虚构另有已批准v2文件。
+O1–O7及N02–N10已回填对应权威；工程选择E01–E06由本次授权设计收敛，不冒充Owner逐项指定。
+旧专业UI条款按现状标注，目标由N08/N10覆盖；ADR0008单一工作台/Quick退役保留，布局条款已注明替代。
+旧多Operation示意、资料先于安全顺序、无项目模型/无常驻聊天目标、自动实施权限冲突已按真实约束及最新指令修正。
+不能把被替代的历史设计建议、仅有测试定义的能力、HEAD或工作区dirty源码和实际运行通过混为一个状态。

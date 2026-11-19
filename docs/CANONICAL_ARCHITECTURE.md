@@ -126,6 +126,12 @@ Director Runtime **不允许**：
 当前实现见 [DIRECTOR_RUNTIME.md](DIRECTOR_RUNTIME.md)。
 当前代码的越界点见 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md)。
 
+机构版目标按已确认O1–O3增加MasterRun持续目标、不可变计划与BusinessFlow业务步骤事实，
+仍由同一Director Runtime组织；不是新的Agent引擎或Production Runtime。Turn是有界轮次，
+Flow步骤是业务依赖，NodeRun是生产执行，三者不能成为同义状态库。具体目标设计见DIRECTOR_RUNTIME
+和DATA_MODEL，不因本文登记目标就表示源码已实现。O5只允许统一授权/外发检查后的Worker文本推理，
+不放开Director直接媒体Provider权限；O6控制接口和异步回归前不得提前删除旧租约字段。
+
 ### 2.2 Production Runtime
 
 ```text
@@ -233,7 +239,7 @@ Creative Layer 向生产编译传递的创意语义以 CreativeIntent 为唯一�
 | Director / Production Command | 显式业务操作、权限及幂等入口，不替代创意事实 |
 | ExecutionPlan / 冻结模型计划 | 将已确认内容落实为可执行步骤、引用和精确执行身份 |
 | EffectiveProviderRequest | 按 ModelManifest 编译的供应商请求；不得重新选择或解释 Style / Skill |
-| NodeRun / ProviderOperation / Artifact | 执行、外部调用与产物事实，不反向改写创意决定 |
+| NodeRun / ProviderOperation / Artifact | 生产执行、后端操作与产物事实，不反向改写创意决定；Director文本仍由Invocation记账，不复制到生产链 |
 
 Provider 消费确定的执行请求。CreativeIntent 与模型能力参与生产编译，不要求 Provider
 直接 import Creative 编译器；Director 文本推理及账号/连接管理也不强制套用媒体创意协议。
@@ -325,7 +331,7 @@ Frontend UI 经统一 API Client 访问 Backend API；API 与 Worker 是不同�
 > **Creative Layer 把创意决定编译成 CreativeIntent。**
 > **ProductionGraph 决定为了实现 CreativeIntent 需要执行哪些生产步骤。**
 > **NodeRun 记录每一个生产步骤的执行事实。**
-> **ProviderOperation 记录真实外部模型调用。**
+> **ProviderOperation 记录原执行后端操作，包含远端调用或已注册的本地媒体处理。**
 > **Artifact 记录最终生产结果。**
 
 创作语义进入媒体生产时的概念关系如下；这是业务关系摘要，不是每个请求必须执行的调用栈：

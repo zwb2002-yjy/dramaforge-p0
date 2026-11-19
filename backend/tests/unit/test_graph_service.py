@@ -72,6 +72,7 @@ async def _project(session: AsyncSession) -> tuple[User, object]:
     session.add(workspace)
     await session.flush()
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=workspace.id,
         name=f"Graph-{uuid4().hex[:8]}",
         aspect_ratio="9:16",

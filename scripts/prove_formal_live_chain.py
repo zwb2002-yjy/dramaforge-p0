@@ -101,7 +101,7 @@ def main() -> int:
 
         project = post(
             "/api/v1/projects",
-            {"workspace_id": workspace_id, "name": "Formal Live Chain Probe", "aspect_ratio": "9:16"},
+            {"workspace_id": workspace_id, "name": "Formal Live Chain Probe", "aspect_ratio": "9:16", "work_type": "single_comic"},
         )
         project.raise_for_status()
         project_id = str(project.json()["id"])

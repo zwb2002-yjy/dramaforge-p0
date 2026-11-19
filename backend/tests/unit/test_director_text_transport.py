@@ -10,7 +10,9 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from app.access.egress_models import ProviderDestinationRevision
 from app.access.models import Project, User, Workspace
+from app.access.project_data_policy import ProjectDataPolicy
 from app.assets.models import Episode, Scene, Shot
 from app.config import Settings
 from app.director.invocation_models import DirectorInvocation
@@ -939,3 +941,48 @@ async def test_unknown_schema_repair_keeps_exact_invocation_and_never_replays(se
     assert turn.schema_repair_count == 1
     await _assert_stored_failure(service, project, user, request)
     assert len(calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_egress_policy_refusal_sends_zero_requests(session: AsyncSession) -> None:
+    user, project, scene, shot, _second = await _seed(session)
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover - must not run
+        calls.append(request)
+        raise AssertionError("a refused policy must not reach the provider")
+
+    destination = ProviderDestinationRevision(
+        workspace_id=project.workspace_id,
+        binding_ref=str(uuid4()),
+        revision=1,
+        origin_expected_revision=0,
+        upstream_origin="http://litellm-proxy:4000",
+        processing_location="local",
+        purposes=["director_text"],
+        declaration_hash="a" * 64,
+        configuration_hash="b" * 64,
+        route_manifest={"schema_version": 1},
+        location_evidence={},
+        created_by=user.id,
+    )
+    session.add(destination)
+    await session.flush()
+    await ProjectDataPolicy(session, actor=user, project=project).put(
+        expected_revision=0,
+        mode="allowlisted",
+        allowed_destination_revision_ids=[str(destination.id)],
+        allowed_purposes=["director_text"],
+    )
+    service = ShotDirectorSuggestionService(
+        session, text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
+    )
+    with pytest.raises(ValidationAppError) as refused:
+        await service.suggest(
+            project_id=project.id,
+            actor=user,
+            request=_request(scene, shot, key="shot-turn:egress"),
+        )
+    assert refused.value.details["code"] == "EGRESS_DESTINATION_REQUIRED"
+    assert calls == []
+    assert await session.scalar(select(func.count()).select_from(DirectorInvocation)) == 0

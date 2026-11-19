@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, Field, SecretStr
 from sqlalchemy import select
 
+from app.access.egress_models import ProviderDestinationRevision
 from app.access.projects import ProjectService
 from app.api.deps import (
     CsrfDep,
@@ -28,6 +29,7 @@ from app.providers.catalog_publication import (
 )
 from app.providers.catalog_service import ModelCatalogService
 from app.providers.connection_service import ProviderConnectionService
+from app.providers.destinations import DestinationService
 from app.providers.knowledge_projection import (
     ModelKnowledgeRead,
     knowledge_for_model,
@@ -882,3 +884,87 @@ async def put_project_binding(
         model_binding_id=binding.model_binding_id,
         selection_strategy=binding.selection_strategy,
     )
+
+
+# ----- trusted egress destinations (workspace management) -------------------
+class DestinationRead(BaseModel):
+    id: UUID
+    binding_ref: str
+    revision: int
+    configuration_hash: str
+    processing_location: str
+    route_manifest: dict[str, object]
+    purposes: list[str]
+    declaration_hash: str
+    location_evidence: dict[str, object]
+    created_at: datetime
+
+
+class DestinationWrite(BaseModel):
+    binding_ref: str = Field(min_length=1, max_length=200)
+    expected_revision: int = Field(ge=0)
+    expected_configuration_hash: str = Field(min_length=64, max_length=64)
+    processing_location: Literal["local", "external", "unknown"]
+    purposes: list[str] = Field(min_length=1, max_length=100)
+    additional_result_origins: list[str] = Field(default_factory=list, max_length=8)
+
+
+def _destination_read(row: ProviderDestinationRevision) -> DestinationRead:
+    return DestinationRead(
+        id=row.id,
+        binding_ref=row.binding_ref,
+        revision=row.revision,
+        configuration_hash=row.configuration_hash,
+        processing_location=row.processing_location,
+        route_manifest=dict(row.route_manifest or {}),
+        purposes=[str(value) for value in row.purposes],
+        declaration_hash=row.declaration_hash,
+        location_evidence=dict(row.location_evidence or {}),
+        created_at=row.created_at,
+    )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/provider-destinations",
+    response_model=list[DestinationRead],
+)
+async def list_provider_destinations(
+    workspace_id: UUID,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+    binding_ref: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[DestinationRead]:
+    service = DestinationService(session, actor=user, workspace=workspace)
+    rows = await service.list_destinations(
+        binding_ref=binding_ref, limit=limit, offset=offset,
+    )
+    return [_destination_read(row) for row in rows]
+
+
+@router.post(
+    "/workspaces/{workspace_id}/provider-destinations",
+    response_model=DestinationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def declare_provider_destination(
+    workspace_id: UUID,
+    body: DestinationWrite,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+) -> DestinationRead:
+    service = DestinationService(session, actor=user, workspace=workspace)
+    row = await service.declare(
+        binding_ref=body.binding_ref,
+        expected_revision=body.expected_revision,
+        expected_configuration_hash=body.expected_configuration_hash,
+        processing_location=body.processing_location,
+        purposes=body.purposes,
+        additional_result_origins=body.additional_result_origins,
+    )
+    await session.commit()
+    return _destination_read(row)

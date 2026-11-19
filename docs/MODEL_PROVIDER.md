@@ -564,7 +564,7 @@ AgnesVideoCompiler 分支接受该 schema-1 方言（2.5 输出约束且无 inpu
   binding、完整模型 ID、来源和阻塞原因；逻辑方案显示“使用默认方案”但没有可执行
   Provider binding 时必须在提交前阻塞，不能等第一次生成再暴露错误。
 
-- 上述模型绑定只负责文本、图片与视频模型选择；配音不属于 Model Profile。
+- **当前旧实现说明，目标由N06/N08及本文D6合同替代**：上述模型绑定只负责文本、图片与视频模型选择；配音不属于 Model Profile。
   配音在镜头「对白」设置中选择音色 / 语速，由 `voice_config` 冻结
   `voice_execution`，Worker 只按该冻结身份调用 Edge TTS / eSpeak / 静音实现。
   配置读取不等于联网可用性，失败后不自动换服务。迁移 `20261008_0086` 清除旧开发库
@@ -989,3 +989,366 @@ preview fingerprint。价格与实际收费由供应商账户管理，DramaForge
 一致、无秘密、草稿保留、无意外新任务；同一远端401、429、超时在文本与媒体路径
 保持相同类别语义。真实验证遇到未分类错误应记录脱敏 correlation ID 并按未知状态
 停止，补齐 fixture 后回归；不为了“通过”改成通用成功或自动换模型。
+
+<a id="institution-egress"></a>
+## 机构版公共资产与外发合同（D5设计审查通过，未实施）
+
+继承O4暂维持现行策略、O5受控Worker文本、O7安全先于真实资料；同用户跨全部Workspace共享仅适用于
+已发布知识/已采用公共资产（N05），不共享模型连接凭据或私有资料。模型替代按N04重新预览和授权，
+已提交与未知提交保留原身份。本节已完成逐出口设计审查，尚未实施，不能宣称运行防线已验证。
+
+### 公共资产采用的事实边界
+
+原附件05明确链路为“用户采用→Formal Asset Version→公共资产库”，当前对应
+AssetVersionService.promote与AssetFromArtifactService.create（后者直接创建formal版本）。
+两条入口都必须在采用的同一事务建立Publication/Items/来源限制证据和owner事件，重放返回同一版本，
+不能只给一种入口接公共库，也不能另加一个“发布”审批才兑现已确认的自动入库规则。
+
+Shot的Formal指针、AssetVersion的formal状态与成片Export是不同业务事实。
+镜头表情/姿态/使用配置不自动产生永久公共人物版本；用户将候选/正式镜头“保存为资产”时沿上述统一采用链，
+自动入库，不把该动作变成第二生产路径。Export不自动把项目私有原件/研究或整个成片包公开。
+界面需清楚显示“正式镜头”与“已采用资产”，不把同名Formal合并为一个授权。
+
+每个公共item必须指真实被采用的生成Artifact及原AssetVersionReference，检查实际NodeRun来源、
+媒体可用性、角色/类型及输入限制。用户上传原件/参考Artifact不因出现在同一Asset卡片里自动公开；
+混合版本只发布符合生成/采用条件的items，缺必要公开材料时显示受限，不偷偷携带私有参考bytes。
+公共展示只用safe白名单，私有prompt/完整metadata/引用地址/调用凭据永不整体复制。
+源限制或血缘缺失仍登记采用与库记录，但资格restricted；不能为达到“自动入库”而删除限制。
+
+纯公共引用创建ProjectPublicAssetLink，不复制版本或媒体；真正修改才产生本项目AssetVersion变体，
+原公共版本固定。变体继续保留原输入限制；镜头姿态仅绑定配置，不自动写公共人物current。
+归档源项目保留被引用内容，受限硬删必须单独维护授权。限制撤销阻止新引用/新发送，
+已成功/在途产物保留并提示复核，不触发自动重做。
+
+### 当前源码核验得到的出口
+
+| 路径 | 已确认事实 | 必须补齐的机构准入 |
+|---|---|---|
+| Director文本 | AgentMessage.content当前是str；Gateway profile只chat_text_v1/chat_tools_v1；Invocation拥有调用事实 | 统一身份/Scope/策略及实际下游声明；Worker开放在I3后；不能宣称已支持Vision消息 |
+| 图片/视频 | 当前Compiler/ProviderOperation链与冻结Binding | 同一原Operation发送前内容/来源/目的地准入，保留无静默fallback |
+| 配音 | voice_path复用NodeRun→Operation→Artifact；VoiceExecutionSpec冻结Edge/eSpeak/静音引擎 | Edge是网络路径，即使不收费也需外发许可；本地eSpeak/静音不冒充网络模型通过 |
+| 引用素材 | reference_delivery签发短期Artifact令牌，现为同项目 | 公共source/consumer资格、当前政策及令牌下载重验；URL签名不构成内容许可 |
+| SSRF | egress.py连接时解析/验证并固定目标IP，拒绝混合不许可地址 | 只是网络目的地守卫，不能替代项目内容或来源用途许可 |
+| 原件/中间存储 | 既有内部对象存储接口 | 依据真实部署认定local/internal；新增外部存储无原操作证据时拒绝，不默认算本地 |
+
+
+### 模型能力与冻结身份
+
+沿现有三层分工：创意意图→版本化能力合同→确定性Compiler/实际Runtime。
+不按模型名、目录列表或一次连通成功猜测能力，也不把Gateway配置成功等同实际生成可用。
+消费身份包含连接/凭证修订、Binding或ConnectionTextModelId、Manifest/编译器版本、目的地声明版本；
+公共资产跨Workspace共享不共享这些连接身份，消费项目必须使用自己的已选连接。
+
+| 用途 | 唯一执行/证据 | 必需能力与限制 |
+|---|---|---|
+| 方向/研究/工具推理 | 既有DirectorInvocation，经内部LiteLLM | text/structured/tools分别声明；6/12/120有界Turn护栏及Run累计限额 |
+| 图像理解 | 同一Invocation，新增明确多模态合同 | image输入+结构化输出，若用于Agent须同时tool能力；缺声明拒绝，不改成纯文本猜图 |
+| 图片生成 | 原NodeRun/ProviderOperation/Artifact | 明确输入模式、尺寸/比例/参考角色/可写参数；预览hash与发送一致 |
+| 视频生成 | 原生产链 | t2v/首帧/尾帧/首尾帧/多模态参考按既有InputContract；时长/分辨率/音轨等精确验证 |
+| 配音 | 原VoiceExecutionSpec及voice_path的Operation | 新操作使用项目/镜头指定的语音Binding；无配置提示设置，Edge按N06退役；空对白静音独立 |
+| 原件ASR/OCR | D4本地处理证据与固定解析步骤 | 固定CLI/模型hash/语言/覆盖；不是配音，不推导ASR已获云端许可 |
+
+正式生成继续经现有模型目录及接入规范。初期不承诺任意厂商或任意声音克隆；三类媒体必须各有实际可用配置及独立验收，
+不能用本地静音/模拟文件代替完整音频生产验收。新增云ASR/OCR只有形成适配合同和准入后才可启用，
+本期必需路径由D4本地方案满足，不临时发任意第三方HTTP。
+
+### Vision消息扩展（目标chat_tools_vision_v1）
+
+现有AgentMessage/TextMessage只支持文字，不伪称可直接发送图片。新增明确profile
+chat_tools_vision_v1及版本化Gateway reference，保留chat_text_v1/chat_tools_v1旧身份与wire合同。
+新profile明确具备文本+图像输入及工具协议；仅目录声明不足，须协议fixture和实际账号能力分别验证。
+不自动把旧连接升级成新profile，不在不支持Vision时忽略图片继续回答。
+
+在现有消息结构增加media_parts（默认空，仅新profile允许非空），不增加第二套消息历史/Runtime。
+每项是服务端解析的SourceMediaRef：project_file_revision+fragment、当前项目Artifact，
+或明确ProjectPublicAssetLink+PublicationItem三选一；带固定revision/hash及可选受支持crop/time。
+只有user输入可以带附件；system/assistant/tool不得借模型返回值注入未授权附件。
+不接受任意远端URL、object_key、本地路径、data:文本或客户端自报MIME作为可信来源。
+
+服务器先按Scope/固定版本解析并验证原字节、类型、尺寸与用途，再执行可预览的确定性缩放/裁切；
+处理结果hash、变换、原来源ID和字节数进入Invocation.request_snapshot，不把base64放进公开日志/SSE。
+实际发送由同一LiteLLM adapter把文字与图像parts编译成受控多模态payload；身份/用途/准入覆盖最终字节hash。
+默认上限4张、合计4MiB处理后字节、长边1024（均不得超过模型合同）；文字预算仍按现有64KiB上下文规则，
+媒体字节/像素另有独立有界配额，不能“未计入文字预算”就变成无限输入。质量需要更高分辨率则明确重设处理计划，
+不能偷偷删图、压缩到不可辨认后声称分析完成。
+
+图像预处理在事务外，提交前重验源版本/限制/变换hash。原文件本身不改；错误定位明确失败，
+Vision输出引用只能来自本次附件/fragment，猜测区域只能标解释，不冒充精确OCR框。
+Gateway管理/注册/冻结引用、消息DTO、客户端、上下文预算、模型支持矩阵及所有profile消费者须同切片更新，
+不手写另一份支持矩阵，不绕内部Proxy直接向云端发送。
+
+### 外发三路径与发送资格
+
+admission_class由服务端入口、冻结合同及实际输入分类，客户端不可声明自己是legacy。
+新Worker/研究/Vision/公共引用及机构数据路径都需统一准入；只保留原已存在current路径的既有行为。
+项目切到严格策略后所有入口均强制策略，不能换旧API逃逸。
+
+| 路径 | 判定 |
+|---|---|
+| 已有current调用 | 保留现有连接/凭证/SSRF/冻结身份约束；逐步补证，不全局强改local_only，也不把unknown称本地 |
+| 新机构/自主能力，即使mode=current | 必须解析真实目的地、当前权限/来源用途、明确本次操作授权及原调用准入证据；未知目的地拒绝 |
+| local_only | 所有出口只允许可信本地处理证明；本地Proxy转云不满足，源引用/Edge TTS也不能遗漏 |
+| allowlisted | 精确目的地revision与purpose均被允许；变更连接/路由/用途使旧预览失效 |
+
+project策略许可、SourceUse用途限制、用户本次操作授权三者取交集。知识/公共资产可见不等于可发送；
+多模态请求另由实际载荷推导required_purposes：研究Vision同时要求research_text/vision_input，
+对话Vision同时要求director_text/vision_input；与主要业务purpose一起冻结，不能匹配到一个允许项就放行全部附件。
+用户允许一个目标/批次不授权其他资料、目的地或无限调用。单纯数据下载/模型列表查询不创建新调用授权。
+当前连接配置不能代替该条原件/衍生材料的来源限制。
+
+### 实际出口与核验点
+
+| 出口 | 在哪里检查 | 冻结/恢复证据 |
+|---|---|---|
+| 文本/工具/研究/Vision→内部Proxy→真实上游 | Invocation发送前，Gateway管理引用解析实际上游/模型配置 | 原Invocation的egress_admission、context/payload hash、精确connection/gateway/destination修订 |
+| 图片/视频Create | media_submission最终准备到submission_started提交处 | 原ProviderOperation request_summary及冻结身份；network stage不重新选模型 |
+| Provider Binding配音 | voice_path及speech_http_v1发送前 | 原VoiceExecutionSpec/Operation、Binding/目的地与文本hash；Edge新操作ENGINE_RETIRED且零发送 |
+| 本地静音/OCR/ASR；旧eSpeak仅历史身份 | 声明本地处理身份与无远端数据路径；新配音不回退旧引擎 | 原Operation或SourceExtraction processor_evidence；缺组件不切云 |
+| URL素材签发/Provider拉取 | reference_delivery签发与每次token下载 | 原token、consumer/source绑定、来源限制、purpose、policy/destination修订；只给这一项bytes |
+| 内联图片/视频/音频引用 | 编译为实际发送bytes前、Create准入前 | 原Artifact/文件修订与变换hash；不能因不是URL就跳过外发 |
+| Poll/cancel/download原远端结果 | 原Operation冻结身份；网络守卫和当前连接资格 | 只恢复原任务；下载URL/重定向另做目标校验，不把GET带出的token当普通公开信息 |
+| 内部对象存储 | 部署目的地声明、对象范围/权限；不得只看地址名 | 原调用/原件上传回执及对象hash；新自主外部存储无可绑定回执时拒绝 |
+| 导出到用户浏览器 | 原Export/Artifact权限与版本、来源用途 | 请求明确交付对象；不把普通下载授权扩大为后台上传到第三方 |
+| 日志/指标/异常/代理诊断 | 请求与错误公开前字段白名单 | correlation ID、状态、大小/hash/版本；无凭据/私有原文/签名URL/base64；不新增遥测发送 |
+
+新自主/严格路径中上游URL、重定向、代理或SDK目的地无法确定就DESTINATION_UNRESOLVED。
+egress.py只保护网络地址与DNS固定，不做内容授权；同样内容授权不豁免SSRF。
+已核验的Edge SDK路径不通过原httpx守卫，按N06直接退役，不再为它建设新准入接线。
+替代的speech_http_v1必须实际使用统一网络守卫和内容准入；不能只包装同名check而继续走旧SDK。
+
+### 准入、撤销与可能已发送的边界
+
+原操作创建时先prepared，不发送。锁Project集合/策略head/来源资格及原操作，
+校验权限、Scope、payload/模型/目的地身份、当前许可及调用次数；
+将egress_admission与submission_started（或token创建）同事务提交，再锁外发送。
+准入不可覆盖；同操作重放不等于再次发送。撤销先提交则新发送拒绝；准入先提交则可能已在途，
+不能保证收回已发数据。原调用后续结果可保存，但不能借结果到达自动Formal/Apply或重新放开许可。
+
+目的地revision绑定实际上游origin及所有必要后续origin（如结果下载/CDN/语音代理），不只记本地Proxy地址。
+管理路径修改上游/模型配置必须建立新连接/目的地修订并使旧资格失效；
+Proxy alias在活跃冻结调用期间不得原地改路由、自动负载均衡到未声明目的地或开启fallback。
+发送前核对可信配置hash，发现带外修改阻断并报告，而非信任过期缓存。
+在应用检查和实际远端之间不能承诺分布式原子撤回；受管配置不可原地变更是部署合同，
+必须由D7/I3的管理接口、ACL和配置漂移测试证明。
+
+有remote ID的poll/download/cancel沿原身份；只携带恢复所必需的ID/凭证，不附新项目正文。
+新资格被撤销时不重新Create；若撤销明确禁止后续联系该服务，显示recovery_blocked并保留原身份等待Owner处理，
+不能自作主张换服务接管任务。普通来源“停止新使用”不删除原调用结果或历史凭据引用。
+token下载每次重验，过期/撤回统一不可见；已经被远端拉取的字节不声称可追回。
+
+### 拒绝、429与重试证据
+
+当前provider_execution对PROVIDER_RATE_LIMITED可能重排并使用rejected Operation再次提交；
+原生Gateway则只有已证明发送前失败的一次重试。机构合同统一以**提交确定性**而非HTTP状态号决定：
+- 明确尚未发送的连接失败可做一次受同身份/限额约束的传输重试，仍不得换模型。
+- submission_started后断线/超时/解析错误、无可信“未受理”证据的429/5xx，均可能已发送，转unknown并核对原事实。
+- 已证明拒绝且没有远端任务的429仍不默认无限自动Create；进入可重试等待。新的用户明确重试先重预览/授权，
+  使用可追踪的新操作身份，保留原拒绝证据及最多操作范围。
+- Provider适配器若声明“确定未受理”须有版本化协议及fixture证据，不能由LLM或仅error_code猜测。
+  不允许当前宽泛rejected分支绕过新准入、次数上限或覆盖旧admission。
+
+该改变是落实已确认的未知提交不重发，不修改O4外发默认。I阶段需核对所有scheduler/Arq/SDK重试层，
+同一错误只有一个重试责任层；禁止Gateway、SDK、Worker叠加重试。历史可能计费调用不自动重建。
+
+
+### 采用、引用、变体与来源生命周期的细化
+
+采用回执绑定source_project/Asset/候选版本、actor、expected_asset_version、request_key/hash及安全展示内容。
+首次采用的AssetVersion保存accepted_asset_revision与adoption_request_key/hash（D7收敛，覆盖私有/手工版本），
+重复先读原回执，再判断当前版本；后来已有新版本也不能重放旧请求再次把current拨回。
+promote及from-artifact两个入口均使用同一领域采用事务。private/manual版本无生成内容时保持项目内事实，
+不能仅因status=formal就公开上传参考。
+
+当前版本的直接AssetVersionReference仍只能指本项目Artifact，保持复合FK。
+元数据或设定层的项目变体可引用base_public_asset_link，不复制源媒体，也不伪造一条跨项目的本地Reference：
+统一解析器返回{variant_version_id?,source_reference_id,public_link_id,publication_item_id,artifact_id}。
+所有ID固定进编译指纹，当前许可重验；不能因发现本地variant版本就跳过其公共基底限制。
+metadata-only变体不是一次新的AI媒体生产，不自动升级公共人物版本；实际生成新媒体并采用后，
+新Publication只纳入该版本真实的本地生成References，继承限制，不夹带原私有参考。
+旧公共基底可作为独立明确引用继续使用，不能暗中把所有基底媒体复制为新版本的本地产物。
+
+公开卡片始终区别可发现与可使用：restricted只展示必要的安全标签/原因，不能返回受限媒体bytes或私有资料名。
+解除ProjectPublicAssetLink保留历史并提示依赖变体，后续该链接的新使用拒绝；恢复链接须明确操作，不自动替换到新publication。
+源Project归档不等于撤销已有公共授权，不能因为源项目不可编辑就使合法公共版本失效。
+ProjectFile解除关联使原件读取/新分析及研究依据不可用，但不自动撤销已经声明的派生资产使用权；
+是否允许派生资产新使用以SourceUse当前限制与用途为准，原来源不可用的事实仍须显示。
+明确SourceUse撤销才阻断相应用途；这是可用性与许可的区分，不为缺失血缘补造许可。
+
+采用/公开/用途变更的写入和owner事件同事务，消费者读取当前资格而非信旧SSE。
+新生成输出的来源闭包在原NodeRun输入冻结，落库只保留当时真实依据；来源后来撤销不删除历史产物。
+若引用链环、来源缺失、非法跨owner或无法解析当前限制，返回受限/需核验，不递归无限读取或默认为允许。
+
+### 权限与安全测试矩阵
+
+| Case | 必须证明 |
+|---|---|
+| SEC01 | current原路径回归；新Worker/研究/Vision/公共输入无法伪报legacy；严格策略覆盖所有入口 |
+| SEC02 | 本地Proxy转云正确识别external；未知上游/代理/SDK路径拒绝；配置漂移无静默路由替代 |
+| SEC03 | policy/source撤销与提交标记并发有确定先后；原admission不可覆盖，迟到结果不自动采用 |
+| SEC04 | 文本/多模态/媒体/TTS/引用URL/内联引用/存储各拒绝路径实际发送计数为0 |
+| SEC05 | token签发/下载真实PG，源/消费owner/FK/过期/撤回/猜ID错误均拒绝；不暴露私有原件 |
+| SEC06 | 同用户两Workspace共享成功，另一用户拒绝；采用混合私有参考的版本不泄露私有items |
+| SEC07 | 两采用入口、丢响应重放、并发采用/换current、固定版本/metadata-only变体无复制Artifact或重复采用 |
+| SEC08 | 来源归档/解除关联/许可撤销三种行为区分；公共依赖不被CASCADE销毁；新使用许可无绕过 |
+| SEC09 | 429/5xx/超时/断线按提交确定性；未知零重发，证明未发送的有限重试无叠加SDK重试 |
+| SEC10 | Provider返回恶意metadata/重定向/混合DNS/伪造模型身份，不能覆盖server admission或ExecutionIdentity |
+| SEC11 | Vision旧profile拒绝附件，新profile角色/大小/像素/Schema/来源/响应停因均校验，不丢图降级 |
+| SEC12 | 日志/SSE/错误/Proxy诊断无原文、Base64、密钥或签名URL；owner事件没有NULL通配跨用户泄露 |
+| SEC13 | Graph/工具/Skills提示注入、重复决定/旧授权/越权scope被服务端拒绝，拒绝后无后续模型/工具调用 |
+| SEC14 | 手动生产/恢复在Director停用时可用；所需连接/媒体能力无法满足时明确阻断而不是换模型 |
+
+Provider响应metadata只能填白名单诊断字段，不能用字典覆盖合并改写
+egress_admission、execution_identity、冻结输入/授权、storage对象清单等服务器字段。
+数据库冻结字段保护作为兜底；未知返回字段先剔除并记录安全错误码，不把含密钥的原响应放进公开错误。
+若已有原远端结果，应保留其合法ID/结果证据，不因诊断字段被拒绝而再发Create。
+
+上述测试必须包括真实受限PG角色、代理/SDK计数替身及故障注入。仅调用authorize_send的unit通过
+不能证明边缘TTS、下载/重定向或外部对象存储已经接线；实际未覆盖路径必须在能力报告中不可用，
+但不能从完整机构版完成条件中删去必需图片/视频/音频/资料能力。
+
+
+### Edge TTS退出与默认配音（Owner N06）
+
+Owner已明确清理此前Edge TTS配置，并确认默认配音为项目指定语音模型，未配置时提示设置。
+此前“为Edge增加受限connector/新准入”的待实施方案因此取消，不再为退役能力建设新适配器。
+真实当前源码仍有Edge SDK分块/环境代理/握手重连；这是删除范围与历史核验依据，不是保留新Create入口的理由。
+[已核对的锁定版本源码](https://raw.githubusercontent.com/rany2/edge-tts/7.2.8/src/edge_tts/communicate.py)
+
+删除范围包括EdgeNeuralAdapter模块、活动engine分支、固定Edge音色/版本常量、
+edge-tts依赖及lock项、Edge专用配置/Compose透传/env示例、默认选择和退役专属测试。
+真实.env只在实施切换时移除确认不再有消费者的旧TTS设置行；不打印其值、不碰其它凭据。
+同步更新声音UI/API/生成类型、安装/部署说明和相应测试。共享aiohttp等依赖只有无其他消费者才可移除，
+不能因属于传递依赖就整批删除。
+
+新默认按N08收敛为本次显式语音绑定→项目指定语音绑定；没有有效绑定显示“请设置项目语音模型”。
+不回退Edge、环境中的旧TTS_VOICE或本地eSpeak。无对白的明确静音不是TTS替代，保持本地PCM用途。
+本地测试或确有用途的历史eSpeak能力不自动成为产品默认；不得借清Edge扩大删除范围。
+
+已持久的Edge执行身份、Operation与可用Artifact不改写、不伪造为新模型生成。
+已完成音频直接读取原Artifact；未知/缺结果的旧任务显示旧引擎停用/需核对，不重新合成。
+切换前核验实际在途任务并保留其证据；不终止其他会话、不删除其产物。历史解码仅供只读，
+不能成为隐蔽的Edge执行兼容入口。新操作请求Edge一律ENGINE_RETIRED，断言零网络发送。
+
+当前模型对非空node_run_id有唯一Operation索引；多Operation旧示意与源码差异保留可追踪记录，
+本期长配音用显式分段voice NodeRun及本地拼接，不无理由放宽唯一性。
+
+
+### 前端与模型配置重构边界（Owner N07，D6进行中）
+
+Owner明确当前前端显示与模型配置形式不符合需求。下文URL/Key/模型ID等是后端接入所需事实，
+不意味着必须在创作页面直接铺开这些字段，也不要求沿用当前供应商面板/默认Profile/项目覆盖的交互形式。
+D6须从机构用户完成任务的路径重新设计配置。Owner N08已明确平台/项目/单次三级：平台集中管理连接和能力，
+项目分别指定图片/视频/语音默认，单次可临时覆盖并重新确认差异及兼容性；不支持参数不展示，
+既有不兼容输入必须显式调整而非静默丢弃。三级是用户可理解的配置职责，不批准三套重复模型事实。
+平台管理仍遵守连接Workspace归属；普通用户创作面不暴露凭据/地址/原生JSON。差距与验收见
+[FRONTEND_WORKBENCH](FRONTEND_WORKBENCH.md#d6重构检查清单与实际差距)。
+连接配置、项目选择、提交时冻结身份是不同生命周期；新交互不能让一次“设置”含糊地同时修改三者。
+配音纳入项目指定模型并遵循N06。若新配置流程要求改变持久解析合同，D2/D5/D7对应权威须共同修订，
+不能用旧界面限制产品重构，也不能用新界面绕过现行权限与版本检查。当前没有这项重构的实现或验收证据。
+
+### 可配置音频模型接入（首期，沿既有voice_execution）
+
+本节语音接入身份继续有效。项目默认的持久位置及优先级按下文D6三级配置收敛，
+替代此前“ProjectCreativeProfile.voice_defaults / Shot持久模型覆盖”的未实施设计选择；不变更历史已冻结执行。
+
+现有ModelSlot/Capability没有通用声音槽，不能以Edge配置声称已实现可配置音频模型。
+补齐独立voice_execution的Provider Binding模式，不恢复退役的AUDIO_TTS/audio.tts槽位或第二套配置。
+连接/凭证/Binding/CatalogEntry使用现有Provider身份，新增speech_http_v1协议合同，
+语音继续走voice NodeRun→Operation→Artifact链，媒体不经文本LiteLLM Proxy。
+
+首个协议形状采用同步HTTP speech请求：model/input/voice必需，格式/速度/指令只在模型合同声明时接受；
+返回音频bytes，MIME/大小/解码验证后按冻结规则规范化WAV。路径、Bearer身份、超时/未知提交、
+SSRF/外发/来源用途与其他媒体同门。协议支持不等于任意兼容服务或账号已可用。
+参考的Speech API提供此形状，但当前列出的旧型号已有退役计划，不把旧型号写成发布默认。
+[官方协议参考](https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create)
+
+VoiceExecutionSpec新增engine=provider_binding分支：binding_id/connection_revision_id/credential_revision_id/
+catalog_entry_id/manifest_hash/compiler_version/destination_revision_id、voice、rate、请求格式与规范化版本全部冻结。
+旧snapshot保留原身份供读取，不作为新操作授权；Edge活动执行按N06移除。
+本次显式语音Binding覆盖优先于项目Profile语音默认；无有效绑定提示设置，
+不再使用部署环境默认音色或eSpeak回退。默认只用于预览初始化，执行前必须显式冻结。
+配置页面提供URL/Key/模型ID、合同允许音色/参数，分别显示合同支持与实际账号证据。
+消费项目只能使用本Workspace绑定，N05公共素材共享不共享模型凭据。
+
+长文本按模型上限预先分段，各段独立明确命令/NodeRun，最后本地拼接，不在Adapter里无限拆分或重试。
+回执绑定段hash/顺序/原Artifact/实际时长，字幕依实际音轨验证。播放已有音频无新调用，
+新音色试听是新的生产操作，费用/外发需当前授权。
+I8必须完成配置→预检→授权→生成→解码→使用→重启恢复的音频切片，
+不能以静音、固定两音色或仅schema代替该产品验收。
+
+### D5审查结论
+
+设计审查通过：公共采用两入口、私有/公开引用与变体、source许可、三路径准入、Vision/音频接入、
+文本/媒体/TTS/引用/存储/日志出口、撤销和未知提交边界均有合同与SEC01–14测试落点。
+新N06已覆盖此前Edge补guard方案：删除活动Edge配置/依赖/入口，项目语音Binding未配置则提示设置，
+保留历史只读，不重新生成。旧音频槽不恢复，不把固定TTS或模拟音频当作模型接入已完成。
+源码/官方锁定SDK审查发现429重提、SDK分块/环境代理、当前唯一Operation索引与旧例图差异，已进入实施约束。
+DATA_MODEL已回填route_manifest、采用回执、媒体证据；原voice_defaults候选由D6统一项目Profile替代。
+D7还需明确所有代码文件、请求schema和迁移序列。
+当前没有实际外发/权限/模型账号测试PASS，I3/I5/I8必须用受限PG和请求计数验证，不以本设计代替正式门。
+
+独立资产图像生产按D8 API/Graph合同扩展同一图片链。当前image Binding的purpose=keyframe是既有图像协议分类值，
+不会因此要求创建Shot；新asset目标按media_type=image及实际image.generate/image.edit能力验证，
+不原地重命名旧Binding破坏历史身份，也不生成一套同名“资产模型”连接。正式资产采用仍是独立用户决定。
+
+## 机构版三级模型配置收敛（D6设计选择，待D8交叉冻结，未实施）
+
+依据Owner N06/N08/N10，不改变已确认的两Runtime、外发和执行身份规则。此节是具体工程设计选择，
+不是Owner亲自确认的Schema。用户本次仅授权设计/原型，不能据此修改模型或执行迁移。
+
+### 当前事实与待替换行为
+
+实际读取`model_profiles/orm.py`、`models.py`、`schemas.py`、`service.py`、`resolver.py`、
+`model_resolution.py`、`selection.py`及`api/v1/model_profiles.py`：
+- ProductionModelProfile已有每项目唯一行、version及slot bindings；同一表还保存workspace文本/媒体默认。
+- 媒体ExecutionModelResolver按request→project slot→workspace slot→ProjectProviderBinding逐槽解析；
+  已选来源不可用时终止，但缺项仍可能来自用户未在当前项目确认的较低来源。
+- 通用ModelBindingResolver先选整个project或workspace profile，缺slot可转system default；
+  它与媒体resolver的缺项语义并不相同，不能用一个旧effective列表代表实际制作就绪。
+- 项目model-profile首次PUT会copy_from工作空间默认；简单图片选择写多个visual槽，不包含visual.image_edit。
+- 旧ProjectProviderBinding仍是显式绑定写入面；旧语音采用实例引擎，不是三级配置已落地。
+
+### 唯一写入与解析目标
+
+1. **平台接入**复用ProviderConnection/不可变连接修订、ProviderModelBinding、ModelCatalogEntry和现有能力证据。
+   UI称平台管理，数据仍限当前Workspace授权；同用户跨Workspace资产共享不扩大凭据权限。
+   连接检查、目录读取、能力说明与真实生成证据分列；不以测试按钮隐含付费生成。
+2. **项目媒体默认**统一扩展既有ProductionModelProfile的项目行，保存图片/视频/语音三个明确Binding引用及语音选项。
+   它们是此三类默认的唯一事实；不再向多个媒体slot、ProjectProviderBinding或ProjectCreativeProfile重复写同一选择。
+   新项目为空，缺项显示未配置。平台推荐只返回候选与理由，用户接受后进入草稿，再显式保存。
+   原text planning bindings仍用现有Profile/受管Gateway身份，不把媒体改成文本Proxy调用。
+3. **单次生成**在原执行意图/预览上保存可选requested_binding_id与参数，不另建配置表。未指定时解析项目对应默认；
+   指定时只影响本次。旧Shot保存的媒体/语音模型选择不成为隐蔽第四层来源，迁移时列为待核对项。
+   参数、音色与语速可作为创作输入保留，但不能因此偷偷带入另一个模型。
+4. 媒体解析为“本次显式绑定→项目对应默认→明确缺失”，没有workspace媒体default、旧binding或注册顺序兜底。
+   Binding一经选中，停用/权限/能力/账号/外发不符合即阻断，不能继续找下一模型。
+   图片各用途使用同一项目图片默认作为候选身份，仍按本次image.generate/image.edit等能力分别校验；
+   默认模型不支持编辑时给出替代建议并重新确认，不以“默认图片”承诺所有图像能力。
+5. 执行前仍由原SelectionPlan/ExecutionModelResolution和VoiceExecutionSpec冻结真实身份，
+   包含项目配置version、具体绑定/连接/凭据/目录/Manifest/目的地修订及输入指纹。
+   Runtime只消费冻结结果；新配置不改变在途/未知提交/历史任务的查询、下载或恢复身份。
+
+### 配置与生成的并发边界
+
+项目设置单事务CAS保存，零Provider操作；三个媒体选择可部分PATCH但每次仅一个原Profile版本增量。
+接口空值表示明确清空，字段缺省表示不改；未配置是合法保存状态但不能执行该类生成。
+项目默认变化使依赖旧默认的未提交预览失效；本次显式选择也须验证其实际依赖修订，不把无关字段变化解释为换模型。
+具体指纹同时记录所用配置来源及绑定身份：若实现初期按整个Profile.version保守失效，允许多一次重新预览，
+禁止不校验身份而继续提交。能力/连接/引用/素材/授权变化都需重新预览；旧授权不能复用给新模型。
+前端隐藏新模型不支持的控件，但保留旧草稿并显示不兼容项；明确重置/转换后再提交，不静默删参数或素材。
+高级Prompt仍走同一上下文/外发检查及冻结，不是原生Provider请求注入入口。
+
+### 旧配置处理与验证
+
+迁移前逐项目输出旧解析结果与所有显式来源，只读记录差异。仅唯一、同Workspace且无歧义的既有显式项目选择
+可按冻结映射导入；workspace继承、不同图片槽选择不同模型、旧Shot覆盖、重名绑定、停用或失效配置进入待核对清单。
+不得为了三下拉好看任意选一个，也不能把停用解释成未配置然后启用别的模型。
+受影响项目的新生成在完成核对前保持阻断，历史冻结执行照常只读恢复。
+旧写面全部消费者迁完并回归后关闭；旧媒体Profile键/ProjectProviderBinding不是长期fallback或双写。
+若涉及旧持久数据清理，按主合同硬门另行授权；设计/隔离迁移测试不等于获准删除实例记录。
+文本默认不依赖注册顺序：新受控调用须明确受管Gateway身份；缺失则提示平台设置。旧文本/媒体所有消费者
+必须逐项分类，不能只改模型设置页面就宣称已统一。
+
+验收配置用例MC01–08：缺失零发送；同名跨连接精确引用；项目CAS冲突保留草稿；临时覆盖不改默认；
+不兼容切换不丢输入；新预览与提交身份一致；旧未知操作不重发；旧配置冲突清单不自动裁决。
+实际字段/约束见DATA_MODEL的D6回填，API形状见API的D6目标节；均尚未运行产品测试。

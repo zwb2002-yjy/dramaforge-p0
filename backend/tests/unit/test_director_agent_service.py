@@ -1,4 +1,8 @@
-"""Agent service integration with real domain reads and fake text transport."""
+"""Agent service integration with real domain reads and fake text transport.
+
+Every request is accepted durably first and then adopted by exactly one worker
+execution. The tests below never call a removed synchronous entry point.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +16,13 @@ from app.access.models import Project, User, Workspace
 from app.assets.models import Episode, Scene, Shot
 from app.contracts.agent import AgentModelResponse, AgentToolCall
 from app.director import text_transport
-from app.director.agent_service import AgentRequest, AgentThreadCreate, DirectorAgentService
+from app.director.agent_service import (
+    AgentAcceptance,
+    AgentRequest,
+    AgentThreadCreate,
+    AgentTurnResult,
+    DirectorAgentService,
+)
 from app.director.assistant_models import DirectorMessage, DirectorToolCall
 from app.director.invocation_models import DirectorInvocation
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
@@ -21,6 +31,7 @@ from app.execution.models import NodeRun, ProviderOperation
 from app.shared.base import Base
 from app.shared.errors import ConflictError, NotFoundError
 from langgraph.checkpoint.memory import MemorySaver
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -98,6 +109,54 @@ async def agent_world() -> AsyncIterator[AgentWorld]:
     await engine.dispose()
 
 
+async def accept_turn(
+    world: AgentWorld,
+    thread_id: UUID,
+    request: AgentRequest,
+    *,
+    model: object | None = None,
+) -> AgentAcceptance:
+    acceptance, created = await world.service.accept(thread_id, request, model=model)
+    assert created, "the first acceptance must create the durable request"
+    return acceptance
+
+
+async def execute(
+    world: AgentWorld,
+    acceptance: AgentAcceptance,
+    *,
+    model: object | None = None,
+) -> AgentTurnResult:
+    return await world.service.execute_queued(
+        acceptance.turn_id,
+        model=model,
+        checkpointer=MemorySaver(),
+    )
+
+
+async def submit(
+    world: AgentWorld,
+    thread_id: UUID,
+    request: AgentRequest,
+    *,
+    model: object | None = None,
+) -> AgentTurnResult:
+    acceptance = await accept_turn(world, thread_id, request, model=model)
+    return await execute(world, acceptance, model=model)
+
+
+async def replay(
+    world: AgentWorld,
+    thread_id: UUID,
+    request: AgentRequest,
+    *,
+    model: object | None = None,
+) -> tuple[AgentAcceptance, AgentTurnResult]:
+    acceptance, created = await world.service.accept(thread_id, request, model=model)
+    assert not created, "a repeated request key must replay the original acceptance"
+    return acceptance, await execute(world, acceptance, model=model)
+
+
 def read_shot(shot_id: UUID, call_id: str = "read-shot") -> AgentModelResponse:
     return AgentModelResponse(
         tool_calls=[
@@ -120,11 +179,11 @@ async def test_real_tool_result_reaches_model_and_answer_is_durable(
         read_shot(world.shot_id),
         AgentModelResponse(text="The bridge shot is ready."),
     )
-    result = await world.service.run(
+    result = await submit(
+        world,
         thread.id,
         AgentRequest(content="Read my shot", request_key="read-1"),
         model=model,
-        checkpointer=MemorySaver(),
     )
     assert result.status == "completed" and result.model_calls == 2 and result.tool_calls == 1
     assert result.assistant_message_id is not None
@@ -152,23 +211,23 @@ async def test_request_replay_does_not_resubmit_and_changed_payload_conflicts(
     thread = await world.service.open_thread(AgentThreadCreate())
     model = ScriptedModel(AgentModelResponse(text="What would you like to make?"))
     request = AgentRequest(content="Hello", request_key="once")
-    first = await world.service.run(thread.id, request, model=model, checkpointer=MemorySaver())
-    replay = await world.service.run(thread.id, request, model=model, checkpointer=MemorySaver())
-    assert replay.turn_id == first.turn_id and len(model.calls) == 1
+    first_acceptance = await accept_turn(world, thread.id, request, model=model)
+    first = await execute(world, first_acceptance, model=model)
+    replay_acceptance, replayed = await replay(world, thread.id, request, model=model)
+    assert replay_acceptance == first_acceptance
+    assert replayed == first and len(model.calls) == 1
     with pytest.raises(ConflictError):
-        await world.service.run(
+        await world.service.accept(
             thread.id,
             AgentRequest(content="Different intent", request_key="once"),
-            model=model,
-            checkpointer=MemorySaver(),
         )
     assert len(model.calls) == 1
     model.responses.append(AgentModelResponse(text="We can continue with that direction."))
-    continuation = await world.service.run(
+    continuation = await submit(
+        world,
         thread.id,
         AgentRequest(content="Continue our conversation", request_key="next-turn"),
         model=model,
-        checkpointer=MemorySaver(),
     )
     assert continuation.status == "completed" and continuation.turn_id != first.turn_id
     history = model.calls[1]["messages"]
@@ -200,11 +259,11 @@ async def test_prompt_proposal_is_real_pending_and_never_applies(agent_world: Ag
         ),
     )
     request = AgentRequest(content="Suggest a faithful image prompt", request_key="propose-once")
-    result = await world.service.run(thread.id, request, model=model, checkpointer=MemorySaver())
+    result = await submit(world, thread.id, request, model=model)
     assert result.status == "completed" and len(result.proposal_ids) == 1
     assert len(model.calls) == 2
-    replay = await world.service.run(thread.id, request, model=model, checkpointer=MemorySaver())
-    assert replay.proposal_ids == result.proposal_ids and len(model.calls) == 2
+    _acceptance, replayed = await replay(world, thread.id, request, model=model)
+    assert replayed.proposal_ids == result.proposal_ids and len(model.calls) == 2
     async with world.factory() as session:
         proposal = await session.get(DirectorProposal, result.proposal_ids[0])
         items = list(await session.scalars(select(DirectorProposalItem)))
@@ -241,12 +300,12 @@ async def test_scope_denial_stops_batch_and_replay_reads_failed_receipt(
         AgentToolCall(call_id="must-not-run", name="project_get", arguments={}),
     ]))
     request = AgentRequest(content="Inspect another shot", request_key="denied-once")
-    result = await world.service.run(thread.id, request, model=model, checkpointer=MemorySaver())
+    result = await submit(world, thread.id, request, model=model)
     assert result.status == "failed" and result.stop_reason == "permission_denied"
     assert result.proposal_ids == [] and result.assistant_message_id is None
     assert len(model.calls) == 1 and result.tool_calls == 1
-    replay = await world.service.run(thread.id, request, model=model, checkpointer=MemorySaver())
-    assert replay == result and len(model.calls) == 1
+    _acceptance, replayed = await replay(world, thread.id, request, model=model)
+    assert replayed == result and len(model.calls) == 1
     async with world.factory() as session:
         audits = list(await session.scalars(select(DirectorToolCall)))
         assert len(audits) == 1
@@ -262,12 +321,12 @@ async def test_unknown_submission_is_journaled_and_never_replayed(agent_world: A
     thread = await world.service.open_thread(AgentThreadCreate())
     model = ScriptedModel(TimeoutError("possibly billed request"))
     request = AgentRequest(content="Analyze", request_key="unknown-once")
-    result = await world.service.run(thread.id, request, model=model, checkpointer=MemorySaver())
+    result = await submit(world, thread.id, request, model=model)
     assert result.status == "failed" and result.stop_reason == "unknown_submission"
     saved_turn = await world.service.read_turn(result.turn_id)
     assert saved_turn.transport_status == "unknown_submission"
-    replay = await world.service.run(thread.id, request, model=model, checkpointer=MemorySaver())
-    assert replay.turn_id == result.turn_id and len(model.calls) == 1
+    _acceptance, replayed = await replay(world, thread.id, request, model=model)
+    assert replayed.turn_id == result.turn_id and len(model.calls) == 1
     async with world.factory() as session:
         invocation = await session.scalar(select(DirectorInvocation))
         assert invocation and invocation.status == "unknown_submission"
@@ -295,11 +354,11 @@ async def test_stop_during_network_preserves_receipt_without_more_tools(
             return read_shot(world.shot_id)
 
     model = StopModel()
-    result = await world.service.run(
+    result = await submit(
+        world,
         thread.id,
         AgentRequest(content="Read shot", request_key="stop-me"),
         model=model,
-        checkpointer=MemorySaver(),
     )
     assert result.status == "cancelled" and len(model.calls) == 1
     async with world.factory() as session:
@@ -311,13 +370,13 @@ async def test_stale_version_stops_instead_of_using_new_facts(agent_world: Agent
     world = agent_world
     thread = await world.service.open_thread(AgentThreadCreate())
     model = ScriptedModel(read_shot(world.shot_id))
-    result = await world.service.run(
+    result = await submit(
+        world,
         thread.id,
         AgentRequest(
             content="Read shot", request_key="stale", expected_versions={f"shot:{world.shot_id}": 2}
         ),
         model=model,
-        checkpointer=MemorySaver(),
     )
     assert result.status == "stale" and len(model.calls) <= 1
     assert result.proposal_ids == []
@@ -346,11 +405,11 @@ async def test_actual_read_versions_guard_answer_after_concurrent_edit(
         read_shot(world.shot_id),
         AgentModelResponse(text="An answer based on the old shot."),
     )
-    result = await world.service.run(
+    result = await submit(
+        world,
         thread.id,
         AgentRequest(content="Inspect my shot", request_key="observed-version"),
         model=model,
-        checkpointer=MemorySaver(),
     )
     assert len(model.calls) == 2
     assert result.status == "stale" and result.stop_reason == "context_stale"
@@ -389,11 +448,11 @@ async def test_answer_is_rechecked_after_checkpoint_before_final_commit(
 
     monkeypatch.setattr(world.service, "_finish", changed_after_graph)
     model = ScriptedModel(read_shot(world.shot_id), AgentModelResponse(text="Old source answer."))
-    result = await world.service.run(
+    result = await submit(
+        world,
         thread.id,
         AgentRequest(content="Read shot", request_key="late-context-change"),
         model=model,
-        checkpointer=MemorySaver(),
     )
     assert result.status == "stale" and result.assistant_message_id is None
     assert len(model.calls) == 2
@@ -410,11 +469,11 @@ async def test_thread_and_scope_cannot_cross_projects(agent_world: AgentWorld) -
     thread = await other.open_thread(AgentThreadCreate())
     model = ScriptedModel(AgentModelResponse(text="Must not be reached"))
     with pytest.raises(NotFoundError):
-        await world.service.run(
+        await submit(
+            world,
             thread.id,
             AgentRequest(content="Read", request_key="foreign"),
             model=model,
-            checkpointer=MemorySaver(),
         )
     with pytest.raises(NotFoundError):
         await other.open_thread(AgentThreadCreate(scope_type="shot", scope_entity_id=world.shot_id))
@@ -432,14 +491,13 @@ async def test_receipt_lookup_never_admits_missing_requests(agent_world: AgentWo
         assert await session.scalar(select(func.count(DirectorTurn.id))) == 0
         assert await session.scalar(select(func.count(DirectorInvocation.id))) == 0
     model = ScriptedModel(AgentModelResponse(text="A completed request."))
-    saved = await world.service.run(
-        thread.id,
-        AgentRequest(content="Read", request_key=key),
-        model=model,
-        checkpointer=MemorySaver(),
+    saved = await submit(
+        world, thread.id, AgentRequest(content="Read", request_key=key), model=model
     )
     restored = await world.service.read_request(thread.id, key)
-    assert restored == saved and len(model.calls) == 1
+    assert restored.acceptance.turn_id == saved.turn_id
+    assert restored.acceptance.request_key == key
+    assert restored.turn == saved and len(model.calls) == 1
 
 
 async def test_thread_defaults_to_latest_page_and_can_read_older_messages(
@@ -448,11 +506,11 @@ async def test_thread_defaults_to_latest_page_and_can_read_older_messages(
     world = agent_world
     thread = await world.service.open_thread(AgentThreadCreate())
     for index in range(4):
-        await world.service.run(
+        await submit(
+            world,
             thread.id,
             AgentRequest(content=f"question-{index}", request_key=f"page-{index}"),
             model=ScriptedModel(AgentModelResponse(text=f"answer-{index}")),
-            checkpointer=MemorySaver(),
         )
     latest = await world.service.read_thread(thread.id, limit=2)
     assert latest["offset"] == 6 and latest["total"] == 8
@@ -489,11 +547,11 @@ async def test_connection_revision_change_stops_before_second_model_submission(
 
     monkeypatch.setattr(text_transport, "resolve_agent_text_model", resolve)
     monkeypatch.setattr(text_transport.ResolvedAgentTextModel, "generate", generate)
-    result = await world.service.run(
+    result = await submit(
+        world,
         thread.id,
         AgentRequest(content="Read the shot", request_key="rotated-connection"),
         model=binding,
-        checkpointer=MemorySaver(),
     )
     assert result.status == "stale" and len(scripted.calls) == 1
     assert result.assistant_message_id is None
@@ -515,14 +573,68 @@ async def test_reported_model_cost_is_kept_without_guessing_unknown_calls(
         if final_cost == "unknown"
         else AgentModelResponse(text="Read complete.", reported_cost=final_cost),
     )
-    result = await world.service.run(
+    result = await submit(
+        world,
         thread.id,
         AgentRequest(content="Read", request_key="reported-cost"),
         model=model,
-        checkpointer=MemorySaver(),
     )
     assert result.status == ("failed" if final_cost == "unknown" else "completed")
     turn = await world.service.read_turn(result.turn_id)
     reported = isinstance(final_cost, Decimal)
     assert turn.cost_status == ("reported" if reported else "unknown")
     assert turn.provider_cost == (Decimal("0.30") if reported else None)
+
+
+async def test_create_goal_binds_one_run_while_conversation_creates_none(
+    agent_world: AgentWorld,
+) -> None:
+    from app.director.master_run_models import DirectorMasterRun
+    from sqlalchemy import func, select
+
+    world = agent_world
+    thread = await world.service.open_thread(AgentThreadCreate())
+    conversation = await submit(
+        world,
+        thread.id,
+        AgentRequest(content="What is here?", request_key="conv-1"),
+        model=ScriptedModel(AgentModelResponse(text="Ready.")),
+    )
+    assert conversation.master_run_id is None
+    async with world.factory() as session:
+        assert await session.scalar(select(func.count(DirectorMasterRun.id))) == 0
+    created = await submit(
+        world,
+        thread.id,
+        AgentRequest(content="整理古城灯会资料", request_key="goal-1", intent="create_goal"),
+        model=ScriptedModel(AgentModelResponse(text="Goal recorded.")),
+    )
+    assert created.master_run_id is not None
+    async with world.factory() as session:
+        run = await session.get(DirectorMasterRun, created.master_run_id)
+        assert run is not None and run.origin_turn_id == created.turn_id
+        assert run.goal == "整理古城灯会资料" and run.status == "planning"
+    continued = await submit(
+        world,
+        thread.id,
+        AgentRequest(
+            content="继续整理", request_key="goal-2",
+            intent="continue_goal", master_run_id=created.master_run_id,
+        ),
+        model=ScriptedModel(AgentModelResponse(text="Continuing.")),
+    )
+    assert continued.master_run_id == created.master_run_id
+    async with world.factory() as session:
+        assert await session.scalar(select(func.count(DirectorMasterRun.id))) == 1
+
+
+def test_agent_request_intent_contract_rejects_inconsistent_bindings() -> None:
+    from app.director.agent_service import AgentRequest
+
+    with pytest.raises(ValidationError):
+        AgentRequest(content="x", request_key="k", intent="continue_goal")
+    with pytest.raises(ValidationError):
+        AgentRequest(
+            content="x", request_key="k", intent="conversation", master_run_id=uuid4(),
+        )
+    assert AgentRequest(content="x", request_key="k").intent == "conversation"

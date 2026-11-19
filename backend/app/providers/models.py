@@ -12,6 +12,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Numeric,
     String,
@@ -22,6 +23,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.providers import availability_models as _availability_models  # noqa: F401
 from app.shared.base import Base
+from app.shared.db_types import JSON_DOCUMENT
 
 
 class ProviderConnection(Base):
@@ -318,6 +320,40 @@ class ArtifactReferenceToken(Base):
             "(created_by_run_id IS NOT NULL) <> (created_by_user_id IS NOT NULL)",
             name="ck_artifact_reference_token_creator",
         ),
+        CheckConstraint(
+            "(publication_id IS NULL) = (publication_item_id IS NULL) "
+            "AND (publication_id IS NULL) = (public_asset_link_id IS NULL) "
+            "AND (publication_id IS NULL) = (owner_user_id IS NULL)",
+            name="ck_artifact_reference_token_public_all_or_none",
+        ),
+        ForeignKeyConstraint(
+            ["publication_id", "project_id", "workspace_id", "owner_user_id"],
+            [
+                "public_asset_publications.id",
+                "public_asset_publications.source_project_id",
+                "public_asset_publications.workspace_id",
+                "public_asset_publications.owner_user_id",
+            ],
+            name="fk_artifact_reference_token_publication",
+        ),
+        ForeignKeyConstraint(
+            ["publication_item_id", "publication_id", "artifact_id", "owner_user_id"],
+            [
+                "public_asset_publication_items.id",
+                "public_asset_publication_items.publication_id",
+                "public_asset_publication_items.artifact_id",
+                "public_asset_publication_items.owner_user_id",
+            ],
+            name="fk_artifact_reference_token_item",
+        ),
+        ForeignKeyConstraint(
+            ["public_asset_link_id", "project_id"],
+            [
+                "project_public_asset_links.id",
+                "project_public_asset_links.project_id",
+            ],
+            name="fk_artifact_reference_token_link",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -330,7 +366,14 @@ class ArtifactReferenceToken(Base):
     artifact_id: Mapped[UUID] = mapped_column(
         ForeignKey("artifacts.id", ondelete="CASCADE"), nullable=False
     )
+    publication_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    publication_item_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    public_asset_link_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    owner_user_id: Mapped[UUID | None] = mapped_column(nullable=True)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    egress_admission: Mapped[dict[str, object] | None] = mapped_column(
+        JSON_DOCUMENT, nullable=True,
+    )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by_run_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("node_runs.id", ondelete="CASCADE"), nullable=True

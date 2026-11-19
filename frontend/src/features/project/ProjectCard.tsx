@@ -3,6 +3,7 @@ import { Button, Card } from "../../components/ui";
 import type { ProjectRead } from "./api";
 import { ProjectActions } from "./ProjectActions";
 import { projectCopy as copy } from "./projectCopy";
+import { WORK_TYPE_LABELS } from "./projectIntent";
 
 /** One explicit open target per project; the independent menu keeps delete gated. */
 export function ProjectCard({
@@ -29,7 +30,8 @@ export function ProjectCard({
         <div className="df-project-card-body">
           <h2 title={project.name}>{project.name}</h2>
           <span className="df-project-card-meta">
-            {format} · {project.aspect_ratio}
+            {project.work_type ? WORK_TYPE_LABELS[project.work_type] : "作品类型待确认"} · {format}{" "}
+            · {project.aspect_ratio}
           </span>
         </div>
         <div className="df-project-card-actions">

@@ -27,6 +27,7 @@ def _project_with_shot(client: TestClient) -> tuple[str, str]:
     created = client.post(
         "/api/v1/projects",
         json={
+            "work_type": "serial_comic",
             "workspace_id": workspace_id,
             "name": "Design Project",
             "aspect_ratio": "16:9",

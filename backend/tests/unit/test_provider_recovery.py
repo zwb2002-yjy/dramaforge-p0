@@ -701,12 +701,15 @@ async def test_dispatcher_retries_recovery_errors_without_blocking_outbox_and_jo
     monkeypatch,
 ):
     import asyncio
+    from unittest.mock import Mock
 
     from app.workers import dispatcher
 
     recovery_entered = asyncio.Event()
     recovery_stopped = asyncio.Event()
     outbox_progressed = asyncio.Event()
+    source_entered = asyncio.Event()
+    source_stopped = asyncio.Event()
     contexts = []
     dispatches = 0
 
@@ -729,6 +732,18 @@ async def test_dispatcher_retries_recovery_errors_without_blocking_outbox_and_jo
                 outbox_progressed.set()
         return 1
 
+    async def source_loop():
+        source_entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            source_stopped.set()
+
+    # This exercises the resident process's scheduling/lifetime, not storage.
+    # Leaving the third loop unbound used to open a real connection in Full.
+    database_factory = Mock(side_effect=AssertionError("unit dispatcher must not open a database"))
+    monkeypatch.setattr(dispatcher, "get_session_factory", database_factory)
+    monkeypatch.setattr(dispatcher, "_process_sources_forever", source_loop)
     monkeypatch.setattr(dispatcher, "recover_interrupted_provider_jobs", recovery_tick)
     monkeypatch.setattr(dispatcher, "dispatch_once", outbox_tick)
     monkeypatch.setattr(dispatcher, "PROVIDER_RECOVERY_POLL_SECONDS", 0.01)
@@ -736,6 +751,7 @@ async def test_dispatcher_retries_recovery_errors_without_blocking_outbox_and_jo
     resident = asyncio.create_task(dispatcher.run_forever())
     try:
         await asyncio.wait_for(outbox_progressed.wait(), timeout=2)
+        await asyncio.wait_for(source_entered.wait(), timeout=2)
         assert len(contexts) == 2
         assert contexts[0] is contexts[1]
         assert not recovery_stopped.is_set()
@@ -744,8 +760,11 @@ async def test_dispatcher_retries_recovery_errors_without_blocking_outbox_and_jo
         with pytest.raises(asyncio.CancelledError):
             await resident
     assert recovery_stopped.is_set()
+    assert source_stopped.is_set()
+    database_factory.assert_not_called()
     assert not any(
-        task.get_name() in {"provider-recovery", "outbox-dispatch"} for task in asyncio.all_tasks()
+        task.get_name() in {"provider-recovery", "outbox-dispatch", "project-source-processing"}
+        for task in asyncio.all_tasks()
     )
 
 

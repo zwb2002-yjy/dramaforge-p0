@@ -834,6 +834,19 @@ async def test_asset_mutation_responses_keep_tags_across_commit_pg(
     tag = AssetTag(project_id=project.id, name="lead", normalized_name="lead")
     pg_session.add_all([asset, tag])
     await pg_session.flush()
+    version = AssetVersion(
+        project_id=project.id,
+        asset_id=asset.id,
+        version_number=1,
+        kind="character",
+        name="Lead",
+        description="",
+        status="formal",
+        created_by=user.id,
+    )
+    pg_session.add(version)
+    await pg_session.flush()
+    asset.current_version_id = version.id
     pg_session.add(AssetTagLink(asset_id=asset.id, tag_id=tag.id))
     await pg_session.commit()
     # The session-scoped role survives each endpoint commit; LOCAL GUCs do not.
@@ -849,11 +862,18 @@ async def test_asset_mutation_responses_keep_tags_across_commit_pg(
             assert await _asset_tag_names(pg_session, asset.id) == []
         await set_rls_context(pg_session, user_id=user.id, workspace_id=workspace.id,
                               project_id=project.id)
+        from starlette.responses import Response as StarletteResponse
+
         replay = await create_asset_from_artifact(
-            project_id=project.id, body=body, user=user, session=pg_session,
-            _csrf=None, idempotency_key="replay-tagged-card",
+            project_id=project.id,
+            body=body,
+            user=user,
+            session=pg_session,
+            response=StarletteResponse(),
+            _csrf=None,
+            idempotency_key="replay-tagged-card",
         )
-        assert replay.id == asset.id and replay.tags == ["lead"]
+        assert replay.asset_id == asset.id and replay.publication_id is None
     finally:
         await pg_session.rollback()
         await pg_session.execute(text("RESET ROLE"))

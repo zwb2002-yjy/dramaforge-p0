@@ -27,6 +27,7 @@ def setup_project(client: TestClient) -> tuple[str, dict[str, object], dict[str,
     response = client.post(
         "/api/v1/projects",
         json={
+            "work_type": "serial_comic",
             "workspace_id": workspace,
             "name": "待删除的项目",
             "aspect_ratio": "9:16",
@@ -48,6 +49,7 @@ def test_delete_removes_project_from_list_and_workbench_and_frees_name(client: T
     recreated = client.post(
         "/api/v1/projects",
         json={
+            "work_type": "serial_comic",
             "workspace_id": workspace,
             "name": project["name"],
             "aspect_ratio": "9:16",

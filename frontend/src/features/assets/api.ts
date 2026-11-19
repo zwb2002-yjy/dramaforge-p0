@@ -3,6 +3,7 @@ import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 
 export type AssetRead = components["schemas"]["AssetRead"];
+export type AssetAdoptionReceiptRead = components["schemas"]["AssetAdoptionReceiptRead"];
 export type AssetTagRead = components["schemas"]["AssetTagRead"];
 export type AssetVersionRead = components["schemas"]["AssetVersionRead"];
 export type AssetCardRead = components["schemas"]["AssetCardRead"];
@@ -170,9 +171,10 @@ export async function createAssetFromArtifact(
     reference_role: string;
   },
   requestKey: string,
-): Promise<AssetRead> {
+  publicDisplay?: { name: string; description?: string; style_labels?: string[] },
+): Promise<AssetAdoptionReceiptRead> {
   const csrf = await fetchCsrf();
-  return apiSend<AssetRead>(
+  return apiSend<AssetAdoptionReceiptRead>(
     "POST",
     `/api/v1/projects/${projectId}/assets/from-artifact`,
     {
@@ -182,6 +184,13 @@ export async function createAssetFromArtifact(
       description: input.description ?? "",
       metadata: input.metadata ?? {},
       reference_role: input.reference_role,
+      public_display: publicDisplay
+        ? {
+            name: publicDisplay.name,
+            description: publicDisplay.description ?? "",
+            style_labels: publicDisplay.style_labels ?? [],
+          }
+        : null,
     },
     csrf,
     { "Idempotency-Key": requestKey },

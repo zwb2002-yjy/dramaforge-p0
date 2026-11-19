@@ -13,13 +13,14 @@ from uuid import uuid4
 import pytest
 from app.access.models import Project, User, Workspace
 from app.assets.models import ProjectFile, ProjectFileRevision
-from app.assets.project_files import ProjectFileService
+from app.assets.project_files import ProjectFileService, current_processor_profile
+from app.assets.source_models import SourceExtraction, SourceFragment
 from app.events.models import OutboxEvent
 from app.shared.db import set_rls_context
-from app.shared.errors import ConflictError
+from app.shared.errors import AppError, ConflictError
 from app.storage.minio_store import InMemoryObjectStore
 from app.workers.project_files import process_project_files
-from sqlalchemy import delete, func, insert, select, text
+from sqlalchemy import delete, func, insert, select, text, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from test_director_turn_lifecycle_pg import (
@@ -149,9 +150,17 @@ async def test_concurrent_source_admission_and_rls_at_migration_head():
                     project_id=project_id,
                 )
                 try:
-                    await service.retry_extraction(invalid_id, request_key="retry-failed")
+                    await service.accept_extraction(
+                        invalid_id,
+                        action="retry",
+                        request_key="retry-failed",
+                        expected_file_version=2,
+                        expected_attempt=1,
+                        expected_extraction_id=None,
+                        processor_profile_revision=current_processor_profile(),
+                    )
                     await session.commit()
-                except ConflictError:
+                except AppError:
                     await session.rollback()  # Update won; the old revision cannot be retried.
 
         await asyncio.wait_for(
@@ -205,10 +214,20 @@ async def test_concurrent_source_admission_and_rls_at_migration_head():
 
         blocked = migration("downgrade", "20261111_0097")
         assert blocked.returncode != 0
-        assert "PROJECT_FILES_REQUIRE_ARCHIVE_BEFORE_DOWNGRADE" in blocked.stderr
+        # Parsed sources now own immutable extraction evidence; that newer guard
+        # refuses first and the head must stay put.
+        assert "SOURCE_EXTRACTIONS_REQUIRE_ARCHIVE_BEFORE_DOWNGRADE" in blocked.stderr
         async with factory() as session:
             assert await session.scalar(select(func.count(ProjectFileRevision.id))) == 4
+            assert (
+                await session.scalar(select(func.count()).select_from(SourceExtraction))
+            ) >= 1
             # Only this test-owned database: exercise an empty-source rollback.
+            await session.execute(
+                update(ProjectFileRevision).values(current_extraction_id=None)
+            )
+            await session.execute(delete(SourceFragment))
+            await session.execute(delete(SourceExtraction))
             await session.execute(delete(ProjectFileRevision))
             await session.execute(delete(ProjectFile))
             await session.commit()

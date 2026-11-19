@@ -30,6 +30,7 @@ async def _seed(session: AsyncSession) -> tuple[Project, User]:
     session.add(workspace)
     await session.flush()
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=workspace.id,
         name=f"P-{uuid4().hex[:8]}",
         aspect_ratio="9:16",
@@ -280,6 +281,7 @@ def test_story_proposal_api_create_preview_and_apply(client: TestClient) -> None
     created = client.post(
         "/api/v1/projects",
         json={
+            "work_type": "serial_comic",
             "workspace_id": workspace_id,
             "name": "Story API project",
             "aspect_ratio": "16:9",

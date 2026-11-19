@@ -140,6 +140,13 @@ try {
     # provider; the integration fixture supplies deterministic mock models.
     docker compose -f docker-compose.quality.yml up --no-build --abort-on-container-exit --exit-code-from litellm-integration-quality litellm-quality litellm-integration-quality
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    # Real application role/API/Workers, separate synthetic DB/Redis namespace,
+    # and an internal-only browser network. No existing business stack is used.
+    docker compose -f docker-compose.quality.yml up -d --no-build --wait --wait-timeout 120 institution-api-quality institution-dispatcher-quality institution-worker-default-quality institution-worker-director-quality institution-worker-heavy-quality institution-upstream-quality
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    docker compose -f docker-compose.quality.yml run --rm --no-deps institution-browser-quality
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $ChecksPassed = $true
 }
 finally {

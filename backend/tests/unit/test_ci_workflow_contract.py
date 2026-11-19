@@ -68,9 +68,10 @@ def test_branch_flow_leaves_dev_open_but_protects_main() -> None:
     for base, head, allowed in [
         ("dev", "codex/workbench-optimization", True),
         ("dev", "unreviewed-feature", True),
+        ("dev", "agent/hotfix-provider", True),
         ("main", "codex/workbench-optimization", False),
         ("main", "dependabot/npm_and_yarn/frontend/prettier-3.9.6", False),
-        ("main", "agent/hotfix-provider", True),
+        ("main", "agent/hotfix-provider", False),
         ("main", "dev", True),
     ]:
         result = subprocess.run(

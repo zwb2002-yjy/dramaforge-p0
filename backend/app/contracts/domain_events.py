@@ -39,15 +39,104 @@ class ProposalDecided(BaseModel):
     proposal_id: UUID
 
 
+class ProjectChanged(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["project_changed"] = "project_changed"
+    project_id: UUID
+    project_version: int = Field(ge=1)
+
+
+class MasterRunChanged(BaseModel):
+    """Control/state change of one continuous goal; no goal text or plan body."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["master_run_changed"] = "master_run_changed"
+    run_id: UUID
+    revision: int = Field(ge=1)
+    status: str
+    desired_state: str
+    control_epoch: int = Field(ge=0)
+
+
+class MasterRunPlanProposed(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["master_run_plan_proposed"] = "master_run_plan_proposed"
+    run_id: UUID
+    plan_id: UUID
+    plan_revision: int = Field(ge=1)
+    decision_ref: UUID
+
+
+class MasterRunPlanApplied(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["master_run_plan_applied"] = "master_run_plan_applied"
+    run_id: UUID
+    plan_id: UUID
+    plan_revision: int = Field(ge=1)
+    applied_run_revision: int = Field(ge=1)
+    control_epoch: int = Field(ge=0)
+
+
+class BusinessFlowChanged(BaseModel):
+    """Flow instance progress; no input body, tool arguments or receipts."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["business_flow_changed"] = "business_flow_changed"
+    run_id: UUID
+    instance_id: UUID
+    revision: int = Field(ge=1)
+    status: str
+
+
+class BusinessStepChanged(BaseModel):
+    """Step progress inside one flow instance; attempts are read through it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["business_step_changed"] = "business_step_changed"
+    instance_id: UUID
+    step_id: UUID
+    revision: int = Field(ge=1)
+    status: str
+
+
+class ProjectEgressPolicyChanged(BaseModel):
+    """One committed policy revision; no destination origins or payload summary."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["project_egress_policy_changed"] = "project_egress_policy_changed"
+    project_id: UUID
+    policy_revision: int = Field(ge=1)
+
+
 ProductionNotice = Annotated[
-    ExecutionAccepted | ExecutionChanged | FormalSelected | ProposalDecided,
+    ExecutionAccepted | ExecutionChanged | FormalSelected | ProposalDecided | ProjectChanged
+    | MasterRunChanged | MasterRunPlanProposed | MasterRunPlanApplied
+    | BusinessFlowChanged | BusinessStepChanged
+    | ProjectEgressPolicyChanged,
     Field(discriminator="kind"),
 ]
 
 
 def notice_scope(notice: ProductionNotice) -> tuple[str, UUID]:
+    if isinstance(notice, ProjectChanged):
+        return "project", notice.project_id
+    if isinstance(notice, ProjectEgressPolicyChanged):
+        return "project_egress_policy", notice.project_id
     if isinstance(notice, ProposalDecided):
         return "proposal", notice.proposal_id
+    if isinstance(notice, (MasterRunChanged, MasterRunPlanProposed, MasterRunPlanApplied)):
+        return "master_run", notice.run_id
+    if isinstance(notice, BusinessFlowChanged):
+        return "business_flow", notice.instance_id
+    if isinstance(notice, BusinessStepChanged):
+        return "business_step", notice.step_id
     return "shot", notice.shot_id
 
 

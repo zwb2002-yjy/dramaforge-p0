@@ -23,6 +23,36 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
+from app.assets.knowledge_models import (  # noqa: F401  (registration only)
+    KnowledgeEntry,
+    KnowledgeRevision,
+    KnowledgeSourceLink,
+    ProjectKnowledgeReference,
+)
+
+# Same-domain leaf module for immutable extraction snapshots; imported here so a
+# single models entry registers every asset table for metadata and migrations.
+from app.assets.public_asset_models import (  # noqa: F401  (registration only)
+    ProjectPublicAssetLink,
+    PublicAssetPublication,
+    PublicAssetPublicationItem,
+)
+from app.assets.research_analysis_models import (  # noqa: F401  (registration only)
+    ResearchAnalysis,
+    ResearchAnalysisInvocation,
+    ResearchAnalysisResult,
+)
+from app.assets.research_models import (  # noqa: F401  (registration only)
+    ResearchCitation,
+    ResearchResult,
+    ResearchResultRevision,
+)
+from app.assets.source_models import SourceExtraction, SourceFragment  # noqa: F401
+from app.assets.source_use_models import (  # noqa: F401  (registration only)
+    ArtifactSourceUse,
+    SourceUseRevision,
+    SourceUseSubject,
+)
 from app.shared.base import Base
 from app.shared.db_types import HASH_64, JSON_DOCUMENT
 
@@ -281,6 +311,46 @@ class AssetVersion(Base):
     __tablename__ = "asset_versions"
     __table_args__ = (
         UniqueConstraint("asset_id", "version_number", name="uq_asset_version_number"),
+        UniqueConstraint("id", "project_id", name="uq_asset_version_scope"),
+        CheckConstraint(
+            "(base_publication_id IS NULL) = (base_public_asset_link_id IS NULL)",
+            name="ck_asset_version_public_base",
+        ),
+        CheckConstraint(
+            "(adoption_request_key IS NULL) = (adoption_request_hash IS NULL) "
+            "AND (adoption_request_key IS NULL) = (adopted_asset_revision IS NULL)",
+            name="ck_asset_version_adoption_all_or_none",
+        ),
+        CheckConstraint(
+            "(creation_request_key IS NULL) = (creation_request_hash IS NULL)",
+            name="ck_asset_version_creation_all_or_none",
+        ),
+        Index(
+            "uq_asset_version_creation_key",
+            "project_id",
+            "creation_request_key",
+            unique=True,
+            postgresql_where=text("creation_request_key IS NOT NULL"),
+        ),
+        Index(
+            "uq_asset_version_adoption_key",
+            "project_id",
+            "adoption_request_key",
+            unique=True,
+            postgresql_where=text("adoption_request_key IS NOT NULL"),
+        ),
+        ForeignKeyConstraint(
+            ["base_public_asset_link_id", "project_id", "base_publication_id"],
+            [
+                "project_public_asset_links.id",
+                "project_public_asset_links.project_id",
+                "project_public_asset_links.publication_id",
+            ],
+            name="fk_asset_version_public_base",
+            deferrable=True,
+            initially="DEFERRED",
+            use_alter=True,
+        ),
         CheckConstraint("version_number > 0", name="ck_asset_version_number_positive"),
         CheckConstraint(
             "status IN ('candidate','formal','historical','rejected')",
@@ -303,6 +373,13 @@ class AssetVersion(Base):
         "metadata", JSON_DOCUMENT, nullable=False, default=dict
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="candidate")
+    base_publication_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    base_public_asset_link_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    creation_request_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    creation_request_hash: Mapped[str | None] = mapped_column(HASH_64, nullable=True)
+    adoption_request_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    adoption_request_hash: Mapped[str | None] = mapped_column(HASH_64, nullable=True)
+    adopted_asset_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
@@ -324,6 +401,10 @@ class AssetVersionReference(Base):
             "asset_version_id",
             "artifact_id",
             name="uq_asset_version_reference_artifact",
+        ),
+        UniqueConstraint(
+            "id", "asset_version_id", "artifact_id", "project_id",
+            name="uq_asset_version_reference_scope",
         ),
     )
 
@@ -468,6 +549,31 @@ class ProjectFileRevision(Base):
             ["file_id", "project_id"], ["project_files.id", "project_files.project_id"],
             name="fk_project_file_revision_scope", ondelete="RESTRICT",
         ),
+        # Deferred: the pointer may be set in the same transaction that inserts
+        # the extraction, and it can only ever name this revision's own snapshot.
+        # ``use_alter`` breaks the extraction <-> revision cycle; the portable
+        # unit-test database omits it (the migration owns the PostgreSQL DDL).
+        ForeignKeyConstraint(
+            ["current_extraction_id", "id", "project_id"],
+            [
+                "source_extractions.id",
+                "source_extractions.file_revision_id",
+                "source_extractions.project_id",
+            ],
+            name="fk_project_file_revision_current_extraction",
+            ondelete="NO ACTION", deferrable=True, initially="DEFERRED", use_alter=True,
+        ).ddl_if(dialect="postgresql"),
+        ForeignKeyConstraint(
+            ["current_analysis_id", "id", "project_id"],
+            [
+                "research_analyses.id",
+                "research_analyses.file_revision_id",
+                "research_analyses.project_id",
+            ],
+            name="fk_project_file_revision_current_analysis",
+            ondelete="NO ACTION", deferrable=True, initially="DEFERRED", use_alter=True,
+        ).ddl_if(dialect="postgresql"),
+        UniqueConstraint("id", "file_id", "project_id", name="uq_project_file_revision_scope"),
         UniqueConstraint("file_id", "number", name="uq_project_file_revision_number"),
         UniqueConstraint("project_id", "request_key", name="uq_project_file_request"),
         CheckConstraint("number > 0", name="ck_project_file_revision_number"),
@@ -475,6 +581,10 @@ class ProjectFileRevision(Base):
         CheckConstraint("attempt > 0", name="ck_project_file_revision_attempt"),
         CheckConstraint(
             "status IN ('pending','parsed','failed')", name="ck_project_file_revision_status",
+        ),
+        CheckConstraint(
+            "processor_profile_revision IS NULL OR length(processor_profile_revision) = 64",
+            name="ck_project_file_revision_profile",
         ),
         Index("ix_project_file_revision_hash", "project_id", "content_hash"),
         Index("ix_project_file_revision_pending", "id",
@@ -496,9 +606,13 @@ class ProjectFileRevision(Base):
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     error_code: Mapped[str | None] = mapped_column(String(80))
     parser_version: Mapped[str | None] = mapped_column(String(80))
-    excerpts: Mapped[list[dict[str, object]]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=list,
-    )
+    # Frozen at acceptance: the worker must use exactly this processor contract.
+    # NULL marks a legacy row accepted before profiles existed; it needs an explicit
+    # retry instead of silently running under today's tools.
+    processor_profile_revision: Mapped[str | None] = mapped_column(String(64))
+    current_extraction_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    # Forward-only pointer to the latest published analysis manifest of this revision.
+    current_analysis_id: Mapped[UUID | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(),
     )

@@ -23,6 +23,7 @@ def test_duplicate_project_name_returns_business_conflict(client: TestClient) ->
     workspace_id = str(client.get("/api/v1/workspaces").json()[0]["id"])
     client.headers["X-Workspace-Id"] = workspace_id
     payload = {
+        "work_type": "serial_comic",
         "workspace_id": workspace_id,
         "name": "新短剧",
         "aspect_ratio": "9:16",

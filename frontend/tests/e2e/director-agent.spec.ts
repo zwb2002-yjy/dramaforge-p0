@@ -86,6 +86,16 @@ async function installAgentMock(
     tool_calls: round.status === "completed" ? 2 : 1,
     version: round.version,
   });
+  const acceptance = (round: Round) => ({
+    thread_id: round.threadId,
+    turn_id: turnId(round),
+    user_message_id: `ffffffff-ffff-4fff-8fff-fffffffffff${round.shotId === SHOT_ID ? 1 : 2}`,
+    master_run_id: null,
+    status: "queued",
+    accepted_revision: 1,
+    read_url: `${BASE}/threads/${round.threadId}/requests?request_key=${encodeURIComponent(round.requestKey)}`,
+    request_key: round.requestKey,
+  });
   const turn = (round: Round) => ({
     ...receipt(round),
     id: turnId(round),
@@ -182,7 +192,7 @@ async function installAgentMock(
         };
         rounds.set(threadId, round);
         if (options.loseResponse) await route.abort("failed");
-        else await route.fulfill({ json: receipt(round) });
+        else await route.fulfill({ status: 202, json: acceptance(round) });
         return;
       }
       const round = rounds.get(threadId);
@@ -195,7 +205,10 @@ async function installAgentMock(
             status: 404,
             json: { code: "AGENT_REQUEST_NOT_FOUND", detail: "Request not found" },
           });
-        } else await route.fulfill({ json: receipt(round) });
+        } else
+          await route.fulfill({
+            json: { acceptance: acceptance(round), turn: receipt(round) },
+          });
         return;
       }
       if (!action && method === "GET") {

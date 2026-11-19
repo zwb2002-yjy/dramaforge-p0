@@ -1,10 +1,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button, Dialog, Dropdown } from "../../components/ui";
 import { deleteProject, type ProjectRead } from "./api";
 import { forgetProject } from "../../lib/navigationPreferences";
 import { queryKeys } from "../../lib/queryKeys";
+import { ProjectIntentEditor } from "./ProjectIntentEditor";
 
 export function ProjectActions({
   project,
@@ -13,6 +14,7 @@ export function ProjectActions({
 }) {
   const [target, setTarget] = useState<Pick<ProjectRead, "id" | "name" | "version"> | null>(null);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const queryClient = useQueryClient();
   const deletion = useMutation({
@@ -38,6 +40,12 @@ export function ProjectActions({
         menu={{
           items: [
             {
+              key: "edit",
+              label: "编辑项目",
+              icon: <Pencil size={16} aria-hidden="true" />,
+              onClick: () => setEditing(true),
+            },
+            {
               key: "delete",
               label: "删除项目",
               danger: true,
@@ -59,6 +67,17 @@ export function ProjectActions({
           <MoreHorizontal size={18} aria-hidden="true" />
         </Button>
       </Dropdown>
+      {editing && (
+        <ProjectIntentEditor
+          key={project.id}
+          projectId={project.id}
+          projectName={project.name}
+          onClose={() => {
+            setEditing(false);
+            trigger.current?.focus({ preventScroll: true });
+          }}
+        />
+      )}
       {target && (
         <Dialog
           open={open}

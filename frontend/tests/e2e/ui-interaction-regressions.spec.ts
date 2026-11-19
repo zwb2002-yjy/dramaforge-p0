@@ -71,17 +71,19 @@ test("a submitted creation form freezes popup choices and retains its draft afte
   await page.goto("/?create=true");
   const creation = page.getByRole("region", { name: "新建项目", exact: true });
   await creation.getByLabel("项目名", { exact: true }).fill("保留我的故事");
+  await creation.getByRole("combobox", { name: "作品类型", exact: true }).click();
+  await page.getByRole("option", { name: "单集漫剧", exact: true }).click();
   const start = creation.getByRole("combobox", { name: "创作起点", exact: true });
   await start.click();
   await page.getByRole("option", { name: "从模板开始", exact: true }).click();
   await expect(creation.getByRole("combobox", { name: "创作模板", exact: true })).toBeVisible();
-  await creation.getByRole("button", { name: "风格与类型（可选）", exact: true }).click();
-  const genre = creation.getByRole("combobox", { name: "创作类型", exact: true });
+  await creation.getByRole("button", { name: "风格与题材（可选）", exact: true }).click();
+  const genre = creation.getByRole("combobox", { name: "题材偏好", exact: true });
   await expect(genre).toBeEnabled();
   await creation.getByRole("button", { name: "创建并进入剧本", exact: true }).click();
   await expect.poll(() => submissions.length).toBe(1);
   await expect(creation.getByRole("button", { name: "正在创建…", exact: true })).toBeDisabled();
-  for (const label of ["创作类型", "画面风格"]) {
+  for (const label of ["作品类型", "题材偏好", "画面风格"]) {
     const select = creation.getByRole("combobox", { name: label, exact: true });
     await expect(select).toBeDisabled();
     const root = select.locator(
@@ -93,7 +95,10 @@ test("a submitted creation form freezes popup choices and retains its draft afte
     await expect(page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)")).toHaveCount(
       0,
     );
-    await expect(root).toHaveAttribute("data-selected-value", "");
+    await expect(root).toHaveAttribute(
+      "data-selected-value",
+      label === "作品类型" ? "single_comic" : "",
+    );
   }
   release();
   await expect(creation.getByRole("alert")).toContainText("创建失败");
@@ -111,6 +116,11 @@ test("a submitted creation form freezes popup choices and retains its draft afte
     {
       workspace_id: WORKSPACE_ID,
       name: "保留我的故事",
+      work_type: "single_comic",
+      creative_goal: "",
+      audience: "",
+      planned_duration_seconds: null,
+      planned_episode_count: null,
       aspect_ratio: "9:16",
       start_type: "TEMPLATE",
       template_key: "dual_character_conflict_v1",

@@ -28,7 +28,6 @@ import {
   readDirectorAgentThread,
   sendDirectorAgentMessage,
   stopDirectorAgentTurn,
-  type AgentTurnResult,
 } from "./api";
 import { agentErrorMessage, agentProposalResultLabel, agentStatusLabel } from "./agentPanelLabels";
 import {
@@ -167,10 +166,10 @@ function AgentPanelScope({
       getDirectorAgentRequest(projectId, lastRequest!.threadId, lastRequest!.requestKey, signal),
     enabled: enabled && Boolean(lastRequest),
     retry: false,
-    refetchInterval: (query) =>
-      enabled && recovery.pending && (!query.state.data || !TERMINAL.has(query.state.data.status))
-        ? 3000
-        : false,
+    refetchInterval: (query) => {
+      const turn = query.state.data?.turn;
+      return enabled && recovery.pending && (!turn || !TERMINAL.has(turn.status)) ? 3000 : false;
+    },
   });
   const thread = useQuery({
     queryKey: [...base, "thread", threadId, offset ?? "latest"],
@@ -185,16 +184,17 @@ function AgentPanelScope({
         thread.data.scope_type === "shot" &&
         thread.data.scope_entity_id === shot.id
       : openedThreadId !== null && openedThreadId === threadId);
-  const receiptMismatch = Boolean(receipt.data && receipt.data.thread_id !== threadId);
+  const receiptMismatch = Boolean(receipt.data && receipt.data.acceptance.thread_id !== threadId);
   const scopeVerified = threadVerified && !receiptMismatch;
   const scopedReceipt = scopeVerified ? receipt.data : undefined;
+  const receiptTurn = scopedReceipt?.turn;
   const scopedTurn = scopeVerified && selected?.thread_id === threadId ? selected : undefined;
-  const status = scopedReceipt?.status ?? scopedTurn?.status;
-  const turnId = scopedReceipt?.turn_id ?? scopedTurn?.id;
-  const revision = scopedReceipt?.version ?? scopedTurn?.revision;
+  const status = receiptTurn?.status ?? scopedTurn?.status;
+  const turnId = receiptTurn?.turn_id ?? scopedTurn?.id;
+  const revision = receiptTurn?.version ?? scopedTurn?.revision;
   const submissionUnknown =
-    scopedReceipt?.transport_status === "unknown_submission" ||
-    scopedReceipt?.stop_reason === "unknown_submission";
+    receiptTurn?.transport_status === "unknown_submission" ||
+    receiptTurn?.stop_reason === "unknown_submission";
   const active = Boolean(status && ACTIVE.has(status));
   const activity = useQuery({
     queryKey: [...base, "activity", turnId, activityOffset],
@@ -206,7 +206,7 @@ function AgentPanelScope({
   const proposalIds = scopeVerified
     ? [
         ...new Set([
-          ...ids(scopedReceipt?.proposal_ids),
+          ...ids(receiptTurn?.proposal_ids),
           ...agentTurns
             .filter((turn) => turn.thread_id === threadId)
             .flatMap((turn) => ids(turn.output_snapshot.proposal_ids)),
@@ -232,7 +232,7 @@ function AgentPanelScope({
     ]);
   };
   useEffect(() => {
-    const result = scopedReceipt;
+    const result = receiptTurn;
     if (
       !result ||
       !TERMINAL.has(result.status) ||
@@ -251,7 +251,7 @@ function AgentPanelScope({
       void client.invalidateQueries({ queryKey: [...base, "thread"] });
       void client.invalidateQueries({ queryKey: [...base, "turns"] });
     }
-  }, [scopedReceipt, submissionUnknown, recovery, key, client, base]);
+  }, [receiptTurn, submissionUnknown, recovery, key, client, base]);
 
   const send = useMutation({
     retry: false,
@@ -278,12 +278,13 @@ function AgentPanelScope({
       setOffset(undefined);
       setError(null);
       try {
-        const result = await sendDirectorAgentMessage(projectId, openedId, {
+        const acceptance = await sendDirectorAgentMessage(projectId, openedId, {
           content,
           request_key: pending.requestKey,
+          intent: "conversation",
           expected_versions: { [`shot:${shot.id}`]: shot.version },
         });
-        return { result, pending };
+        return { acceptance, pending };
       } catch (failure) {
         if (failure instanceof ApiError && failure.details.request_accepted === false) {
           const settled = settleAgentPanelRecovery(key, pending);
@@ -295,8 +296,15 @@ function AgentPanelScope({
         throw failure;
       }
     },
-    onSuccess: ({ result, pending }) => {
-      client.setQueryData([...base, "receipt", pending.threadId, pending.requestKey], result);
+    onSuccess: ({ acceptance, pending }) => {
+      // The acceptance is a durable fact; current progress is read, never assumed.
+      if (
+        acceptance.thread_id !== pending.threadId ||
+        acceptance.request_key !== pending.requestKey
+      ) {
+        setError(new Error("受理回执与本次请求不一致，已暂停自动读取。"));
+        return;
+      }
       if (current()) void refresh();
     },
     onError: (failure) => {
@@ -316,9 +324,8 @@ function AgentPanelScope({
         request_key: `stop:${crypto.randomUUID()}`,
       });
     },
-    onSuccess: (result) => {
+    onSuccess: () => {
       if (!current()) return;
-      if (lastRequest) client.setQueryData<AgentTurnResult | null>(receiptKey, result);
       void refresh();
     },
     onError: (failure) => {

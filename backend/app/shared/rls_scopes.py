@@ -14,7 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import func, or_, select, text, true
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import TextClause
@@ -440,7 +440,6 @@ async def list_recoverable_director_turn_rls_scopes(
     rows = await session.execute(
         select(DirectorTurn.id, DirectorTurn.project_id)
         .where(
-            DirectorTurn.turn_kind != "agent",
             DirectorTurn.status.in_({"queued", "thinking", "awaiting_user", "awaiting_execution"}),
             or_(
                 DirectorTurn.deadline <= datetime.now(UTC),
@@ -448,6 +447,12 @@ async def list_recoverable_director_turn_rls_scopes(
                     (DirectorTurn.status == "thinking")
                     & (DirectorTurn.transport_status == "submission_started")
                     & (DirectorTurn.updated_at < cutoff)
+                ),
+                (
+                    (DirectorTurn.turn_kind == "agent")
+                    & (DirectorTurn.status == "thinking")
+                    & DirectorTurn.agent_lease_expires_at.is_not(None)
+                    & (DirectorTurn.agent_lease_expires_at <= datetime.now(UTC))
                 ),
             ),
         )
@@ -459,6 +464,182 @@ async def list_recoverable_director_turn_rls_scopes(
         scope = await _project_scope(session, project_id, DirectorTurnRlsScope)
         if scope is not None:
             scopes.append((turn_id, scope))
+    return scopes
+
+
+async def resolve_agent_turn_rls_scope(
+    session: AsyncSession,
+    *,
+    turn_id: UUID,
+) -> DirectorTurnRlsScope | None:
+    """Resolve one Agent Turn's ownership before any project-scoped read."""
+
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        return await _resolve_postgresql_scope(
+            session,
+            text(
+                """
+                SELECT owner_user_id, workspace_id, project_id
+                FROM app.pending_agent_director_turns(NULL, NULL, :turn_id)
+                """
+            ),
+            {"turn_id": turn_id},
+            DirectorTurnRlsScope,
+        )
+
+    from app.director.turn_models import DirectorTurn
+
+    turn = await session.get(DirectorTurn, turn_id)
+    if turn is None or turn.turn_kind != "agent":
+        return None
+    return await _project_scope(session, turn.project_id, DirectorTurnRlsScope)
+
+
+async def list_pending_agent_turn_rls_scopes(
+    session: AsyncSession,
+    *,
+    limit: int,
+    after_turn_id: UUID | None = None,
+) -> list[tuple[UUID, DirectorTurnRlsScope]]:
+    """Find durably accepted Agent Turns a worker may adopt.
+
+    The scan is the wakeup recovery path: a Redis job or Outbox publish that is
+    lost cannot lose the work while the Turn row stays ``queued``.
+    """
+
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        return await _list_postgresql_scopes(
+            session,
+            text(
+                """
+                SELECT turn_id, owner_user_id, workspace_id, project_id
+                FROM app.pending_agent_director_turns(:limit, :after_turn_id, NULL)
+                """
+            ),
+            {"limit": limit, "after_turn_id": after_turn_id},
+            DirectorTurnRlsScope,
+            "turn_id",
+        )
+
+    from app.director.turn_models import DirectorTurn
+
+    rows = await session.execute(
+        select(DirectorTurn.id, DirectorTurn.project_id)
+        .where(
+            DirectorTurn.turn_kind == "agent",
+            DirectorTurn.status == "queued",
+            or_(DirectorTurn.deadline.is_(None), DirectorTurn.deadline > datetime.now(UTC)),
+        )
+        .where(
+            DirectorTurn.id > after_turn_id
+            if after_turn_id is not None
+            else DirectorTurn.id.is_not(None)
+        )
+        .order_by(DirectorTurn.id)
+        .limit(limit)
+    )
+    scopes: list[tuple[UUID, DirectorTurnRlsScope]] = []
+    for turn_id, project_id in rows.tuples().all():
+        scope = await _project_scope(session, project_id, DirectorTurnRlsScope)
+        if scope is not None:
+            scopes.append((turn_id, scope))
+    return scopes
+
+
+async def resolve_business_flow_rls_scope(
+    session: AsyncSession,
+    *,
+    instance_id: UUID,
+) -> DirectorTurnRlsScope | None:
+    """Resolve one flow instance's ownership before any project-scoped read."""
+
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        return await _resolve_postgresql_scope(
+            session,
+            text(
+                """
+                SELECT owner_user_id, workspace_id, project_id
+                FROM app.pending_business_flow_contexts(NULL, NULL, :instance_id)
+                """
+            ),
+            {"instance_id": instance_id},
+            DirectorTurnRlsScope,
+        )
+
+    from app.director.business_flow_models import DirectorBusinessFlowInstance
+
+    instance = await session.get(DirectorBusinessFlowInstance, instance_id)
+    if instance is None:
+        return None
+    return await _project_scope(session, instance.project_id, DirectorTurnRlsScope)
+
+
+async def list_pending_business_flow_rls_scopes(
+    session: AsyncSession,
+    *,
+    limit: int,
+    after_instance_id: UUID | None = None,
+) -> list[tuple[UUID, DirectorTurnRlsScope]]:
+    """Find non-terminal BusinessFlow instances that still have actionable steps.
+
+    The scan is the durable wakeup path for the Director worker: a lost Redis
+    job cannot lose a flow while its instance keeps a pending/ready/running step.
+    """
+
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        return await _list_postgresql_scopes(
+            session,
+            text(
+                """
+                SELECT instance_id, owner_user_id, workspace_id, project_id
+                FROM app.pending_business_flow_contexts(:limit, :after_instance_id, NULL)
+                """
+            ),
+            {"limit": limit, "after_instance_id": after_instance_id},
+            DirectorTurnRlsScope,
+            "instance_id",
+        )
+
+    from app.director.business_flow_models import (
+        DirectorBusinessFlowInstance,
+        DirectorBusinessFlowStep,
+    )
+
+    actionable = (
+        select(DirectorBusinessFlowStep.id)
+        .where(
+            DirectorBusinessFlowStep.instance_id == DirectorBusinessFlowInstance.id,
+            DirectorBusinessFlowStep.status.in_(("pending", "ready", "running")),
+        )
+        .exists()
+    )
+    rows = await session.execute(
+        select(DirectorBusinessFlowInstance.id, DirectorBusinessFlowInstance.project_id)
+        .where(
+            DirectorBusinessFlowInstance.status.not_in(("succeeded", "failed", "cancelled")),
+            actionable,
+        )
+        .where(
+            DirectorBusinessFlowInstance.id > after_instance_id
+            if after_instance_id is not None
+            else DirectorBusinessFlowInstance.id.is_not(None)
+        )
+        .order_by(DirectorBusinessFlowInstance.id)
+        .limit(limit)
+    )
+    scopes: list[tuple[UUID, DirectorTurnRlsScope]] = []
+    for instance_id, project_id in rows.tuples().all():
+        scope = await _project_scope(session, project_id, DirectorTurnRlsScope)
+        if scope is not None:
+            scopes.append((instance_id, scope))
     return scopes
 
 
@@ -509,6 +690,87 @@ async def list_reconcilable_director_turn_rls_scopes(
     scopes: list[tuple[UUID, DirectorTurnRlsScope]] = []
     for turn_id, project_id in rows.tuples().all():
         scope = await _project_scope(session, project_id, DirectorTurnRlsScope)
+        if scope is not None:
+            scopes.append((turn_id, scope))
+    return scopes
+
+
+async def resolve_research_turn_rls_scope(
+    session: AsyncSession,
+    *,
+    turn_id: UUID,
+) -> DirectorTurnRlsScope | None:
+    """Resolve one research-analysis Turn's ownership before any scoped read."""
+
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        return await _resolve_postgresql_scope(
+            session,
+            text(
+                """
+                SELECT owner_user_id, workspace_id, project_id
+                FROM app.pending_research_analysis_turns(NULL, NULL, :turn_id)
+                """
+            ),
+            {"turn_id": turn_id},
+            DirectorTurnRlsScope,
+        )
+
+    from app.director.turn_models import DirectorTurn
+
+    turn = await session.get(DirectorTurn, turn_id)
+    if turn is None or turn.scope_type != "research_analysis":
+        return None
+    return await _project_scope(session, turn.project_id, DirectorTurnRlsScope)
+
+
+async def list_pending_research_turn_rls_scopes(
+    session: AsyncSession,
+    *,
+    limit: int,
+    after_turn_id: UUID | None = None,
+) -> list[tuple[UUID, DirectorTurnRlsScope]]:
+    """Find queued research-analysis Turns a worker may adopt.
+
+    The Turn row is the durable wakeup: a lost Redis job cannot lose the work
+    while the Turn stays ``queued``.
+    """
+
+    bind = session.get_bind()
+    dialect = bind.dialect.name if bind is not None else ""
+    if dialect == "postgresql":
+        return await _list_postgresql_scopes(
+            session,
+            text(
+                """
+                SELECT turn_id, owner_user_id, workspace_id, project_id
+                FROM app.pending_research_analysis_turns(:limit, :after_turn_id, NULL)
+                """
+            ),
+            {"limit": limit, "after_turn_id": after_turn_id},
+            DirectorTurnRlsScope,
+            "turn_id",
+        )
+
+    from app.director.turn_models import DirectorTurn
+
+    rows = await session.execute(
+        select(DirectorTurn.id)
+        .where(
+            DirectorTurn.scope_type == "research_analysis",
+            DirectorTurn.status == "queued",
+            DirectorTurn.id > after_turn_id if after_turn_id is not None else true(),
+        )
+        .order_by(DirectorTurn.id)
+        .limit(limit)
+    )
+    scopes: list[tuple[UUID, DirectorTurnRlsScope]] = []
+    for turn_id in rows.scalars():
+        turn = await session.get(DirectorTurn, turn_id)
+        if turn is None:
+            continue
+        scope = await _project_scope(session, turn.project_id, DirectorTurnRlsScope)
         if scope is not None:
             scopes.append((turn_id, scope))
     return scopes

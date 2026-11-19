@@ -60,6 +60,14 @@ if ($Scenario) {
         if ($command -match ' down ' -and $global:QualityLifecycleScenario -eq 'cleanup-failed') {
             $global:LASTEXITCODE = 19
         }
+        if ($global:QualityLifecycleScenario -eq 'institution-start-failed' -and
+            $command -match ' up .*--wait .*institution-api-quality') {
+            $global:LASTEXITCODE = 23
+        }
+        if ($global:QualityLifecycleScenario -eq 'institution-browser-failed' -and
+            $command -match ' run .*institution-browser-quality') {
+            $global:LASTEXITCODE = 29
+        }
     }
     if ($Scenario.StartsWith('offline-')) {
         . (Join-Path $ScenarioRoot 'scripts/quality_output.ps1')
@@ -106,7 +114,7 @@ if (-not (Test-Path -LiteralPath $shellPath) -and [IO.Path]::DirectorySeparatorC
 if (-not (Test-Path -LiteralPath $shellPath)) {
     throw "No PowerShell host found for the lifecycle test: $shellPath"
 }
-$scenarios = @('success', 'keep', 'failed', 'cleanup-failed', 'nonempty', 'external', 'parent-link', 'child-link', 'owner-changed', 'invalid-id', 'offline-success', 'offline-failed', 'offline-keep')
+$scenarios = @('success', 'keep', 'failed', 'cleanup-failed', 'nonempty', 'external', 'parent-link', 'child-link', 'owner-changed', 'invalid-id', 'institution-start-failed', 'institution-browser-failed', 'offline-success', 'offline-failed', 'offline-keep')
 try {
     # Exercise source preflight against real Git state, without Docker or bundles.
     $sourceRoot = Join-Path $testRoot 'offline-source'
@@ -222,6 +230,8 @@ try {
             $ErrorActionPreference = $previousPreference
         }
         $expectedCode = if ($name -eq 'failed') { 17 }
+            elseif ($name -eq 'institution-start-failed') { 23 }
+            elseif ($name -eq 'institution-browser-failed') { 29 }
             elseif ($name -in @('cleanup-failed', 'nonempty', 'child-link', 'owner-changed', 'invalid-id')) { 1 }
             else { 0 }
         if ($resultCode -ne $expectedCode) {
@@ -245,6 +255,12 @@ try {
         }
         $callsFile = Join-Path $caseRoot 'calls.txt'
         $calls = if (Test-Path -LiteralPath $callsFile) { Get-Content -LiteralPath $callsFile -Raw } else { '' }
+        if ($name -eq 'institution-start-failed' -and $calls -match ' run .*institution-browser-quality') {
+            throw 'Failed institution startup must not execute browser tests.'
+        }
+        if ($name.StartsWith('institution-') -and $calls -notmatch ' down --volumes --remove-orphans') {
+            throw 'Failed institution gate must reclaim its own resources.'
+        }
         if ($name.StartsWith('offline-')) {
             if ($calls -notmatch '-p dramaforge-install-synthetic down --volumes --remove-orphans') {
                 throw "${name}: owned install resources were not reclaimed."
@@ -253,7 +269,8 @@ try {
             $position = -1
             foreach ($stage in @('run .* backend-quality', 'run .* frontend-quality',
                 '--exit-code-from media-resource-quality', '--exit-code-from auth-gateway-integration-quality',
-                '--exit-code-from litellm-integration-quality')) {
+                '--exit-code-from litellm-integration-quality',
+                'up .*--wait .*institution-api-quality', 'run .*institution-browser-quality')) {
                 $match = [regex]::Match($calls, $stage)
                 if (-not $match.Success -or $match.Index -le $position) { throw "${name}: missing or reordered stage $stage" }
                 $position = $match.Index

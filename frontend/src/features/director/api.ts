@@ -182,6 +182,8 @@ export async function refreshDirectorTurn(
 }
 
 export type AgentTurnResult = components["schemas"]["AgentTurnResult"];
+export type AgentAcceptance = components["schemas"]["AgentAcceptance"];
+export type AgentRequestState = components["schemas"]["AgentRequestState"];
 export type AgentThreadRead = components["schemas"]["DirectorAgentThreadRead"];
 export type AgentProposalRead = components["schemas"]["DirectorAgentProposalRead"];
 export type AgentActivityRead =
@@ -216,7 +218,7 @@ export async function sendDirectorAgentMessage(
   projectId: string,
   threadId: string,
   input: components["schemas"]["AgentRequest"],
-): Promise<AgentTurnResult> {
+): Promise<AgentAcceptance> {
   let csrf: string;
   try {
     csrf = await fetchCsrf();
@@ -246,10 +248,10 @@ export async function getDirectorAgentRequest(
   threadId: string,
   requestKey: string,
   signal?: AbortSignal,
-): Promise<AgentTurnResult | null> {
+): Promise<AgentRequestState | null> {
   try {
     const query = new URLSearchParams({ request_key: requestKey });
-    return await apiGet<AgentTurnResult>(
+    return await apiGet<AgentRequestState>(
       `${directorPath(projectId, "agentRequest", { thread_id: threadId })}?${query}`,
       undefined,
       signal,

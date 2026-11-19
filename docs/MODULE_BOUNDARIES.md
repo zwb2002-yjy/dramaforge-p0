@@ -239,3 +239,34 @@ facade / compatibility import；当前未发布策略要求直接更新调用方
   不表示所有依赖已经符合目标架构。新增豁免必须作为显式架构决策审阅，不能自动重建基线来过门。
 - 检查覆盖 backend 的绝对/相对 import、package re-export 与字符串字面量动态导入；
   不证明反射/计算式导入、前端 HTTP 路径或业务调用语义合规，这些仍由专门测试和 Review 验证。
+
+## 机构版执行与领域装配目标（D3，未实施）
+
+沿现有分类和ALLOWED依赖，不新增任意跨层的Application/Composition包。
+具体新叶模块可按实现切片细分，但所有者如下，不能通过路径重分类改变正式事实归属。
+
+| 能力 | 物理落点与依赖 | 不可越过的界限 |
+|---|---|---|
+| MasterRun/Plan/Flow/监督 | app/director内新领域服务/模型，依domain/contract/shared | 不import Production/Provider实现；只消费注入端口 |
+| RuntimeControl/Graph/Checkpoint | app/director/runtime，DTO进入app/contracts | 不把checkpoint正文变成业务事实，不跨域写正式对象 |
+| 原子受理/文本端口桥接 | app/workers/director_adapters.py及既有API装配；session/RLS由入站持有 | 仅调用领域校验/命令并原子提交；无业务状态机/隐藏授权/Provider决策 |
+| 本地解析/研究/知识/公共引用/来源限制 | app/assets的领域叶模块，延续当前域分类 | 不访问Director/Provider ORM或网络；研究模型输出经可信装配调用领域写入 |
+| 模型准入/实际发送 | 现有Provider与Production各出口；project策略由受控domain/shared原语提供检查 | 不改变原Operation/Invocation身份；无第二发送流水Runtime |
+| 私有与公共引用字节 | 原Storage/受限资格读取端口 | 只返回合法被引用对象；公共可见不意味着源项目任意SELECT |
+| Frontend | 现有React路由/统一client/Query/SSE | 不以mock状态、浏览器LLM调用或自行写状态绕后端用户门 |
+
+实际扫描允许backend_worker/backend_api装配所有既有业务层；Director只接收中立协议，
+Provider不为适配DTO新增provider→contract边，由入站桥接既有Provider结果。
+Domain研究写服务接受其领域内定义的AnalysisResultIntent及已验证来源身份，
+不能为了读取Invocation而import app.director；装配先通过Director结果端口核对调用事实，再交领域服务。
+模型文件的跨域FK使用字符串表引用，不以FK需求引入运行时反向import。
+
+完整模型注册继续使用当前model_registry已有的assets.models、director.turn_models/runtime.models、
+providers.models入口；新增叶模型在所属域入口集中导入注册，不添加shared registry→新叶域的债务边。
+不创建平行ORM类或同义重导出API。Alembic metadata与后台进程必须实测全模型可达，
+不能凭import声明就宣布注册完成。若实现选择改变此方案，先在本权威与映射解释真实依赖，
+不能通过baseline自动生成放行新增债务。
+
+现有domain_tools/reconcile/text_transport的直接跨层依赖按对应切片收敛到注入端口；
+修复后移除精确已消失的baseline项，不改其他会话未提交的baseline，不以大目录搬迁代替行为回归。
+自动研究与公开知识/公共资产均复用现有两Runtime和领域服务，没有Research Runtime或Asset Runtime。

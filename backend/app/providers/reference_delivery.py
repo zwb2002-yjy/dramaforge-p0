@@ -14,7 +14,9 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access.egress_admission import EgressAdmission
 from app.access.models import Project
+from app.assets.models import AssetVersion
 from app.config import Settings, get_settings
 from app.execution.branches import branch_priority
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun
@@ -42,6 +44,9 @@ class PublicArtifactReference:
     mime_type: str
     content_hash: str
     expires_at: datetime
+    publication_id: UUID | None = None
+    publication_item_id: UUID | None = None
+    public_asset_link_id: UUID | None = None
 
 
 def _public_origin(settings: Settings) -> str:
@@ -170,6 +175,12 @@ async def issue_artifact_reference(
     created_by_run_id: UUID | None = None,
     created_by_user_id: UUID | None = None,
     settings: Settings | None = None,
+    destination_id: UUID | None = None,
+    processing_location: str = "external",
+    publication_id: UUID | None = None,
+    publication_item_id: UUID | None = None,
+    public_asset_link_id: UUID | None = None,
+    owner_user_id: UUID | None = None,
 ) -> ArtifactReferenceGrant:
     if (created_by_run_id is None) == (created_by_user_id is None):
         raise ValueError("reference grant requires exactly one audited creator")
@@ -186,11 +197,67 @@ async def issue_artifact_reference(
             "reference Artifact is unavailable",
             details={"code": "UPSTREAM_ARTIFACT_MISSING"},
         )
+    # A public reference URL is an outbound path: the project policy is checked
+    # before a token exists, so a refusal leaves no redeemable grant behind.
+    admission = await EgressAdmission(session).decide(
+        project,
+        purpose="reference_delivery",
+        required_purposes=["reference_delivery"],
+        destination_id=destination_id,
+        processing_location=processing_location,
+    )
+    if not admission.allowed:
+        raise ValidationAppError(
+            "项目外发策略不允许签发本次引用地址",
+            details={"code": admission.reason_code},
+        )
     cfg = settings or get_settings()
     origin = _public_origin(cfg)
     token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
     expires_at = datetime.now(UTC) + timedelta(seconds=cfg.reference_token_ttl_seconds)
+    public_identity = (publication_id, publication_item_id, public_asset_link_id, owner_user_id)
+    if any(value is not None for value in public_identity) and not all(
+        value is not None for value in public_identity
+    ):
+        raise ValidationAppError(
+            "public reference tokens need the complete public identity",
+            details={"code": "REFERENCE_PUBLIC_IDENTITY_INCOMPLETE"},
+        )
+    if public_asset_link_id is not None:
+        from app.assets.public_asset_models import (
+            ProjectPublicAssetLink,
+            PublicAssetPublication,
+            PublicAssetPublicationItem,
+        )
+
+        link = await session.get(ProjectPublicAssetLink, public_asset_link_id)
+        publication = (
+            await session.get(PublicAssetPublication, publication_id)
+            if publication_id is not None
+            else None
+        )
+        item = (
+            await session.get(PublicAssetPublicationItem, publication_item_id)
+            if publication_item_id is not None
+            else None
+        )
+        if (
+            link is None
+            or publication is None
+            or item is None
+            or link.project_id != artifact.project_id
+            or link.publication_id != publication.id
+            or publication.source_project_id != artifact.project_id
+            or item.publication_id != publication.id
+            or item.artifact_id != artifact.id
+            or link.detached_at is not None
+            or publication.status != "available"
+        ):
+            raise ValidationAppError(
+                "public reference identity is not eligible",
+                details={"code": "REFERENCE_PUBLIC_NOT_AVAILABLE"},
+            )
     session.add(
         ArtifactReferenceToken(
             workspace_id=workspace_id,
@@ -200,6 +267,11 @@ async def issue_artifact_reference(
             expires_at=expires_at,
             created_by_run_id=created_by_run_id,
             created_by_user_id=created_by_user_id,
+            egress_admission=admission.evidence(),
+            publication_id=publication_id,
+            publication_item_id=publication_item_id,
+            public_asset_link_id=public_asset_link_id,
+            owner_user_id=owner_user_id,
         )
     )
     await session.flush()
@@ -314,7 +386,8 @@ async def resolve_public_reference(
                     text(
                         """
                     SELECT artifact_id, project_id, object_key, mime_type,
-                           content_hash, expires_at
+                           content_hash, expires_at, publication_id,
+                           publication_item_id, public_asset_link_id
                     FROM app.artifact_reference_for_token(:token_hash)
                     """
                     ),
@@ -333,6 +406,9 @@ async def resolve_public_reference(
             mime_type=str(row["mime_type"]),
             content_hash=str(row["content_hash"]),
             expires_at=row["expires_at"],
+            publication_id=row["publication_id"],
+            publication_item_id=row["publication_item_id"],
+            public_asset_link_id=row["public_asset_link_id"],
         )
     record = await session.scalar(
         select(ArtifactReferenceToken).where(
@@ -348,6 +424,43 @@ async def resolve_public_reference(
         or artifact.deleted_at is not None
     ):
         raise NotFoundError("reference not found")
+    if record.publication_id is not None:
+        from app.assets.public_asset_models import (
+            ProjectPublicAssetLink,
+            PublicAssetPublication,
+            PublicAssetPublicationItem,
+        )
+
+        publication = await session.get(PublicAssetPublication, record.publication_id)
+        link = (
+            await session.get(ProjectPublicAssetLink, record.public_asset_link_id)
+            if record.public_asset_link_id is not None
+            else None
+        )
+        item = (
+            await session.get(
+                PublicAssetPublicationItem, record.publication_item_id
+            )
+            if record.publication_item_id is not None
+            else None
+        )
+        version = (
+            await session.get(AssetVersion, publication.source_asset_version_id)
+            if publication is not None
+            else None
+        )
+        if (
+            publication is None
+            or link is None
+            or item is None
+            or version is None
+            or publication.status != "available"
+            or publication.withdrawn_at is not None
+            or link.detached_at is not None
+            or version.status != "formal"
+            or item.artifact_id != artifact.id
+        ):
+            raise NotFoundError("reference not found")
     return PublicArtifactReference(
         artifact_id=artifact.id,
         project_id=artifact.project_id,
@@ -355,6 +468,9 @@ async def resolve_public_reference(
         mime_type=artifact.mime_type,
         content_hash=artifact.content_hash,
         expires_at=record.expires_at,
+        publication_id=record.publication_id,
+        publication_item_id=record.publication_item_id,
+        public_asset_link_id=record.public_asset_link_id,
     )
 
 

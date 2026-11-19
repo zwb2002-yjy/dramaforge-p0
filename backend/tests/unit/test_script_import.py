@@ -55,6 +55,7 @@ async def _project(session: AsyncSession):
     session.add(workspace)
     await session.flush()
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=workspace.id,
         name=f"Script-{uuid4().hex[:6]}",
         aspect_ratio="9:16",
@@ -71,6 +72,39 @@ def test_parse_script_fixture() -> None:
     assert len(parsed.scenes) == 2
     assert sum(len(s.shots) for s in parsed.scenes) == 3
     assert parsed.scenes[0].shots[0].visual
+
+
+@pytest.mark.parametrize("kind,limit", [("single_comic", 1), ("serial_comic", 2)])
+async def test_script_import_rejects_episode_over_plan_without_partial_document(
+    session, kind, limit
+):
+    from app.assets.models import Episode
+
+    user, project = await _project(session)
+    project.work_type = kind
+    project.planned_episode_count = limit if kind == "serial_comic" else None
+    await session.commit()
+    source = SCRIPT.read_text(encoding="utf-8")
+    for number in range(1, limit + 1):
+        await import_script(
+            session, project_id=project.id, actor_id=user.id, actor=user,
+            filename=f"episode-{number}.md",
+            text=source.replace("# Episode 1", f"# Episode {number}", 1),
+        )
+    await session.commit()
+    documents_before = await session.scalar(select(func.count()).select_from(ScriptDocument))
+    shots_before = await session.scalar(select(func.count()).select_from(Shot))
+    with pytest.raises(ConflictError) as caught:
+        await import_script(
+            session, project_id=project.id, actor_id=user.id, actor=user,
+            filename="extra.md", text=source.replace("# Episode 1", f"# Episode {limit + 1}", 1),
+        )
+    assert caught.value.details["code"] == "PROJECT_STRUCTURE_CONFLICT"
+    assert await session.scalar(select(func.count()).select_from(Episode)) == limit
+    assert (
+        await session.scalar(select(func.count()).select_from(ScriptDocument)) == documents_before
+    )
+    assert await session.scalar(select(func.count()).select_from(Shot)) == shots_before
 
 
 @pytest.mark.asyncio

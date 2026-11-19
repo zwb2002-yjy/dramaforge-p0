@@ -8,6 +8,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access.egress_admission import EgressAdmission
 from app.access.models import User
 from app.access.projects import ProjectService
 from app.assets.models import Shot
@@ -85,6 +86,18 @@ class ProductionCommands:
             project_id=project_id,
             actor=actor,
         )
+        # The project policy is checked before any receipt, lock or provider
+        # operation exists: a refusal must leave zero outbound requests behind.
+        decision = await EgressAdmission(self._session).decide(
+            project,
+            purpose="video_generation" if body.stage == "video" else "image_generation",
+            processing_location="external",
+        )
+        if not decision.allowed:
+            raise ValidationAppError(
+                "项目外发策略不允许本次生成",
+                details={"code": decision.reason_code},
+            )
         service = WorkbenchExecutionService(self._session, user_id=actor.id)
         identity = workbench_request_hash(body.model_dump(mode="json"))
         await service.lock_command_scope(project_id=project_id)

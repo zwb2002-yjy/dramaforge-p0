@@ -19,17 +19,11 @@ function json(body: unknown, status = 200) {
   );
 }
 
-const ASSET = {
-  id: "33333333-3333-4333-8333-333333333333",
-  project_id: PROJECT_ID,
-  kind: "character",
-  name: "林墨",
-  description: "",
-  metadata: {},
-  status: "active",
-  version: 1,
-  created_at: "2026-09-15T00:00:00Z",
-  updated_at: "2026-09-15T00:00:00Z",
+const RECEIPT = {
+  asset_id: "33333333-3333-4333-8333-333333333333",
+  asset_version_id: "44444444-4444-4444-8444-444444444444",
+  accepted_asset_revision: 1,
+  publication_id: null,
 };
 
 function renderDialog(props: Partial<React.ComponentProps<typeof AddArtifactToAssetDialog>> = {}) {
@@ -72,7 +66,7 @@ describe("AddArtifactToAssetDialog", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
-      return json(ASSET, 201);
+      return json(RECEIPT, 201);
     });
 
     renderDialog({ artifactType: "video", defaultKind: "character" });
@@ -88,7 +82,7 @@ describe("AddArtifactToAssetDialog", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
-      return json(ASSET, 201);
+      return json(RECEIPT, 201);
     });
 
     renderDialog({ artifactType: "image", defaultKind: "character" });
@@ -108,7 +102,7 @@ describe("AddArtifactToAssetDialog", () => {
         key: headers["Idempotency-Key"],
         body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {},
       });
-      return json(ASSET, 201);
+      return json(RECEIPT, 201);
     });
     const { onCreated } = renderDialog();
 
@@ -120,7 +114,7 @@ describe("AddArtifactToAssetDialog", () => {
 
     const result = await screen.findByTestId("add-asset-result");
     expect(result).toHaveTextContent("已创建资产「林墨」");
-    expect(result).toHaveTextContent("status=formal");
+    expect(result).toHaveTextContent("revision 1");
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe(`/api/v1/projects/${PROJECT_ID}/assets/from-artifact`);
     expect(calls[0]?.key).toMatch(/^asset-from-artifact:/);
@@ -142,7 +136,7 @@ describe("AddArtifactToAssetDialog", () => {
         url,
         body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {},
       });
-      if (url.endsWith("/assets/from-artifact")) return json(ASSET, 201);
+      if (url.endsWith("/assets/from-artifact")) return json(RECEIPT, 201);
       return json({ id: "binding-1" }, 201);
     });
     renderDialog();
@@ -157,7 +151,7 @@ describe("AddArtifactToAssetDialog", () => {
     const binding = calls.find((call) => call.url.includes("/references"));
     expect(binding?.url).toBe(`/api/v1/projects/${PROJECT_ID}/shots/${SHOT_ID}/references`);
     expect(binding?.body).toMatchObject({
-      asset_id: ASSET.id,
+      asset_id: RECEIPT.asset_id,
       artifact_id: ARTIFACT_ID,
       purpose: "identity",
       resolution_mode: "direct_artifact",
@@ -176,7 +170,7 @@ describe("AddArtifactToAssetDialog", () => {
         url,
         body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {},
       });
-      if (url.endsWith("/assets/from-artifact")) return json({ ...ASSET, kind }, 201);
+      if (url.endsWith("/assets/from-artifact")) return json(RECEIPT, 201);
       return json({ id: "binding-1" }, 201);
     });
     renderDialog({ artifactType: kind, defaultKind: kind });
@@ -216,7 +210,7 @@ describe("AddArtifactToAssetDialog", () => {
       keys.push(headers["Idempotency-Key"]);
       attempts += 1;
       if (attempts === 1) return Promise.reject(new TypeError("response lost"));
-      return json(ASSET, 201);
+      return json(RECEIPT, 201);
     });
     renderDialog();
 
@@ -243,7 +237,7 @@ describe("AddArtifactToAssetDialog", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
-      return json(ASSET, 201);
+      return json(RECEIPT, 201);
     });
     renderDialog({ shotId: null });
 

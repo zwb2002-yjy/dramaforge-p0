@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User
 from app.access.projects import ProjectService
+from app.assets.episodes import lock_episode_project, require_new_episode_capacity
 from app.assets.models import Episode, Scene, ScriptDocument, Shot
 from app.shared.errors import ValidationAppError
 
@@ -233,6 +234,7 @@ async def import_script(
             )
         scene_numbers.add(scene_input.scene_number)
     content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    project = await lock_episode_project(session, project_id)
     existing_doc = (
         await session.execute(
             select(ScriptDocument)
@@ -317,6 +319,12 @@ async def import_script(
             outcome=IMPORT_OUTCOME_REUSED,
         )
 
+    existing = await session.scalar(select(Episode).where(
+        Episode.project_id == project_id, Episode.episode_number == parsed.episode_number,
+    ))
+    if existing is None:
+        await require_new_episode_capacity(session, project)
+
     fmt = "md" if filename.lower().endswith(".md") else "txt"
     doc = ScriptDocument(
         project_id=project_id,
@@ -330,14 +338,6 @@ async def import_script(
     await session.flush()
 
     # Upsert episode by number
-    existing = (
-        await session.execute(
-            select(Episode).where(
-                Episode.project_id == project_id,
-                Episode.episode_number == parsed.episode_number,
-            )
-        )
-    ).scalar_one_or_none()
     if existing is None:
         ep = Episode(
             project_id=project_id,

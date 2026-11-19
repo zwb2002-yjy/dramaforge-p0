@@ -119,10 +119,10 @@ def _create_project(client: TestClient, workspace_id: str) -> str:
     project = client.post(
         "/api/v1/projects",
         json={
+            "work_type": "serial_comic",
             "workspace_id": workspace_id,
             "name": "MPProject",
             "aspect_ratio": "9:16",
-            "budget_limit": "50.00",
         },
         headers={CSRF_HEADER: _csrf(client)},
     )

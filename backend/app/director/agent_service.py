@@ -10,14 +10,23 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from time import perf_counter
-from typing import Any, Literal
+from typing import Any, Literal, Self
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError, field_validator
-from sqlalchemy import func, select
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.models import Project, ProjectCreativeProfile
+from app.access.models import Project, ProjectCreativeProfile, User
 from app.assets.agent_read_service import AgentReadService
 from app.assets.models import Asset, Scene, Shot
 from app.contracts.agent import AgentMessage, AgentModelResponse, AgentToolCall
@@ -38,10 +47,14 @@ from app.director.assistant_models import DirectorMessage, DirectorThread, Direc
 from app.director.creative_capabilities.agent_skills import build_agent_skill_context
 from app.director.invocation_models import DirectorInvocation
 from app.director.invocations import InvocationService
+from app.director.master_runs import MasterRunService
 from app.director.text_transport import ResolvedAgentTextModel, resolve_agent_text_model
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import TERMINAL_TURN_STATUSES
+from app.events.service import EventService
 from app.shared.errors import AppError, ConflictError, NotFoundError, ValidationAppError
+
+ACCEPTED_EVENT_TOPIC = "director.turn.accepted"
 
 
 def fingerprint(value: object) -> str:
@@ -65,6 +78,8 @@ class AgentRequest(BaseModel):
 
     content: str = Field(min_length=1, max_length=16000)
     request_key: str = Field(min_length=1, max_length=160)
+    intent: Literal["conversation", "create_goal", "continue_goal"] = "conversation"
+    master_run_id: UUID | None = None
     expected_versions: dict[str, StrictInt] = Field(default_factory=dict, max_length=100)
     skill_ids: list[str] | None = Field(default=None, max_length=20)
     limits: AgentLimits = Field(default_factory=AgentLimits)
@@ -79,12 +94,21 @@ class AgentRequest(BaseModel):
             UUID(identity)
         return value
 
+    @model_validator(mode="after")
+    def validate_intent_binding(self) -> Self:
+        if self.intent == "continue_goal" and self.master_run_id is None:
+            raise ValueError("continue_goal requires master_run_id")
+        if self.intent != "continue_goal" and self.master_run_id is not None:
+            raise ValueError("only continue_goal may name an existing master run")
+        return self
+
 
 class AgentTurnResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     turn_id: UUID
     thread_id: UUID
+    master_run_id: UUID | None = None
     status: str
     transport_status: str
     assistant_message_id: UUID | None = None
@@ -94,6 +118,35 @@ class AgentTurnResult(BaseModel):
     model_calls: int = 0
     tool_calls: int = 0
     version: int
+
+
+class AgentAcceptance(BaseModel):
+    """Immutable admission fact for one accepted Agent request.
+
+    ``status`` stays ``queued`` after completion: this object describes what was
+    accepted, never how the Turn later finished. Current progress is read from
+    the Turn receipt (``AgentRequestState.turn``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    thread_id: UUID
+    turn_id: UUID
+    user_message_id: UUID
+    master_run_id: UUID | None = None
+    status: Literal["queued"] = "queued"
+    accepted_revision: int
+    read_url: str
+    request_key: str
+
+
+class AgentRequestState(BaseModel):
+    """The durable acceptance plus the current Turn receipt for one request key."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    acceptance: AgentAcceptance
+    turn: AgentTurnResult
 
 
 class AgentThreadCreate(BaseModel):
@@ -252,8 +305,8 @@ class DirectorAgentService:
                 "has_previous": page_offset > 0 and total > 0,
             }
 
-    async def read_request(self, thread_id: UUID, request_key: str) -> AgentTurnResult:
-        """Find a receipt without ever admitting a new or previously lost request."""
+    async def read_request(self, thread_id: UUID, request_key: str) -> AgentRequestState:
+        """Find a durable acceptance without admitting a new or previously lost request."""
         async with self._db() as session:
             await self._thread(session, thread_id)
             turn = await session.scalar(
@@ -271,21 +324,30 @@ class DirectorAgentService:
                     "Agent request receipt not found",
                     details={"code": "AGENT_REQUEST_NOT_FOUND"},
                 )
-            await self._recover_expired(session, turn)
-            return self.result(turn)
+            await recover_expired(session, project_id=self.project_id, turn=turn)
+            return AgentRequestState(
+                acceptance=await self._acceptance(session, turn),
+                turn=self.result(turn),
+            )
 
-    async def run(
+    async def accept(
         self,
         thread_id: UUID,
         request: AgentRequest,
         *,
-        checkpointer: Any,
         model: ResolvedAgentTextModel | None = None,
-    ) -> AgentTurnResult:
+    ) -> tuple[AgentAcceptance, bool]:
+        """Persist the acceptance (message, queued Turn, Outbox) without executing.
+
+        The returned boolean is ``True`` only when this call created the
+        acceptance. Everything validated here is durable: model binding, skills,
+        scope, frozen context snapshot and request hash. No text request is
+        submitted and no checkpoint is opened, so an HTTP disconnect cannot
+        cancel accepted work and no second execution owner exists.
+        """
         if not request.content.strip() or not request.request_key.strip():
             raise ValidationAppError("Content and request key cannot be blank")
         input_hash = fingerprint({"thread_id": thread_id, "request": request.model_dump()})
-        token = uuid4()
         async with self._db() as session:
             project = await session.scalar(
                 select(Project)
@@ -306,14 +368,9 @@ class DirectorAgentService:
                 .with_for_update()
             )
             if existing is not None:
-                if (
-                    existing.turn_kind != "agent"
-                    or existing.thread_id != thread_id
-                    or existing.request_summary.get("input_hash") != input_hash
-                ):
-                    raise ConflictError("Request key was reused with different input")
-                await self._recover_expired(session, existing)
-                return self.result(existing)
+                self._require_same_request(existing, thread_id=thread_id, input_hash=input_hash)
+                await recover_expired(session, project_id=self.project_id, turn=existing)
+                return await self._acceptance(session, existing), False
             # A second active turn must not race the same conversation context.
             active = await session.scalar(
                 select(DirectorTurn)
@@ -325,7 +382,7 @@ class DirectorAgentService:
                 .with_for_update()
             )
             if active is not None:
-                await self._recover_expired(session, active)
+                await recover_expired(session, project_id=self.project_id, turn=active)
                 if active.status not in TERMINAL_TURN_STATUSES:
                     raise ConflictError(
                         "This Director thread already has an active turn",
@@ -396,33 +453,6 @@ class DirectorAgentService:
                     "Director conversation history is incomplete",
                     details={"code": "AGENT_HISTORY_INVALID"},
                 ) from exc
-            # Historical chat is advisory; exact current facts are retrieved by tools.
-            messages = [
-                AgentMessage(role="system", content=SYSTEM_INSTRUCTION),
-                AgentMessage(
-                    role="system",
-                    content=json.dumps(
-                        {
-                            "scope": context.model_dump(mode="json"),
-                            "skills": skills,
-                            "history_is_advisory": True,
-                        },
-                        ensure_ascii=False,
-                    ),
-                ),
-            ]
-            messages.append(
-                AgentMessage(
-                    role="system",
-                    content=json.dumps({"creative_state": creative_state}, ensure_ascii=False),
-                )
-            )
-            if history.history_notice is not None:
-                messages.append(history.history_notice)
-            if history.legacy_advisory is not None:
-                messages.append(history.legacy_advisory)
-            messages.extend(history.messages)
-            messages.append(AgentMessage(role="user", content=request.content))
             snapshot = {
                 "skills": skills,
                 "tools": [s.model_dump(mode="json") for s in self.registry.specs(context)],
@@ -449,13 +479,14 @@ class DirectorAgentService:
                 state_schema_version=STATE_VERSION,
                 runtime_execution_id=uuid4(),
                 runtime_revision=1,
-                status="thinking",
+                status="queued",
+                wait_reason="director_worker",
                 deadline=deadline,
-                agent_control_epoch=1,
-                agent_lease_token=token,
-                agent_lease_expires_at=deadline,
+                agent_control_epoch=0,
                 request_summary={
                     "input_hash": input_hash,
+                    "accepted_revision": 1,
+                    "request": request.model_dump(mode="json"),
                     "max_steps": request.limits.model_calls,
                     "limits": request.limits.model_dump(),
                 },
@@ -467,19 +498,124 @@ class DirectorAgentService:
             )
             session.add(turn)
             await session.flush()
-            session.add(
-                DirectorMessage(
-                    thread_id=thread_id,
-                    project_id=self.project_id,
-                    turn_id=turn_id,
-                    ordinal=0,
-                    role="user",
-                    content=request.content,
-                    created_by=self.actor_id,
-                    created_at=admitted_at,
-                )
+            # A continuous goal is bound to its originating Turn in this same
+            # transaction; ordinary conversation never creates a run.
+            if request.intent == "create_goal":
+                project_row = await session.get(Project, self.project_id)
+                actor_row = await session.get(User, self.actor_id)
+                if project_row is None or actor_row is None:
+                    raise NotFoundError("Director goal scope not found")
+                runner = MasterRunService(session, actor=actor_row, project=project_row)
+                await runner.create_for_origin_turn(turn_id=turn.id, goal=request.content)
+                await session.flush()
+            elif request.intent == "continue_goal" and request.master_run_id is not None:
+                project_row = await session.get(Project, self.project_id)
+                actor_row = await session.get(User, self.actor_id)
+                if project_row is None or actor_row is None:
+                    raise NotFoundError("Director goal scope not found")
+                bound = await MasterRunService(
+                    session, actor=actor_row, project=project_row,
+                ).get(request.master_run_id)
+                turn.master_run_id = bound.id
+                await session.flush()
+            message = DirectorMessage(
+                thread_id=thread_id,
+                project_id=self.project_id,
+                turn_id=turn_id,
+                ordinal=0,
+                role="user",
+                content=request.content,
+                created_by=self.actor_id,
+                created_at=admitted_at,
             )
-        tools = self.registry.openai_tools(context)
+            session.add(message)
+            await session.flush()
+            await EventService(session).append_with_outbox(
+                project_id=self.project_id,
+                actor_id=self.actor_id,
+                aggregate_type="director_turn",
+                aggregate_id=turn.id,
+                event_type=ACCEPTED_EVENT_TOPIC,
+                topic=ACCEPTED_EVENT_TOPIC,
+                payload={
+                    "turn_id": str(turn.id),
+                    "thread_id": str(thread_id),
+                    "user_message_id": str(message.id),
+                    "project_id": str(self.project_id),
+                    "request_key": turn.request_key,
+                    "accepted_revision": 1,
+                },
+            )
+            return self._acceptance_of(turn, message), True
+
+    async def execute_queued(
+        self,
+        turn_id: UUID,
+        *,
+        checkpointer: Any,
+        model: ResolvedAgentTextModel | None = None,
+    ) -> AgentTurnResult:
+        """Adopt one queued Turn atomically, then execute it as its only owner.
+
+        The claim is a single compare-and-set that advances the control epoch and
+        installs this worker's lease. A second worker therefore observes either
+        ``thinking`` (no execution) or a terminal Turn, never a duplicate model
+        submission. Execution never resumes a ``thinking`` Turn: a crashed owner
+        is failed by recovery instead of replaying a possibly billed request.
+        """
+        token = uuid4()
+        async with self._db() as session:
+            turn = await self._turn(session, turn_id)
+            if turn.status == "queued":
+                claimed = await session.scalar(
+                    update(DirectorTurn)
+                    .execution_options(synchronize_session=False)
+                    .where(
+                        DirectorTurn.id == turn_id,
+                        DirectorTurn.project_id == self.project_id,
+                        DirectorTurn.turn_kind == "agent",
+                        DirectorTurn.status == "queued",
+                        or_(DirectorTurn.deadline.is_(None), DirectorTurn.deadline > _now()),
+                    )
+                    .values(
+                        status="thinking",
+                        wait_reason="director_analysis",
+                        agent_lease_token=token,
+                        agent_lease_expires_at=turn.deadline,
+                        agent_control_epoch=DirectorTurn.agent_control_epoch + 1,
+                        revision=DirectorTurn.revision + 1,
+                        last_error=None,
+                    )
+                    .returning(DirectorTurn.id)
+                )
+                await session.refresh(turn)
+                if claimed is None:
+                    await _fail_expired(session, project_id=self.project_id, turn=turn)
+                    return self.result(turn)
+            elif turn.status in TERMINAL_TURN_STATUSES:
+                return self.result(turn)
+            else:
+                # Another owner already holds this Turn; never join its execution.
+                return self.result(turn)
+            try:
+                limits = AgentLimits.model_validate(turn.request_summary["limits"])
+                context = self._execution_context(turn)
+                messages = await self._execution_inputs(session, turn=turn, context=context)
+                if model is None:
+                    project = await self._reader(session).project()
+                    model = await resolve_agent_text_model(session, project=project)
+            except Exception:
+                await _finish_failed(
+                    session,
+                    project_id=self.project_id,
+                    turn=turn,
+                    token=token,
+                    reason="runtime_failed",
+                )
+                return self.result(turn)
+            tools = self.registry.openai_tools(context)
+        assert model is not None
+        harness: DirectorAgentHarness
 
         async def guard() -> None:
             async with self._db() as session:
@@ -501,14 +637,14 @@ class DirectorAgentService:
 
         harness = DirectorAgentHarness(
             checkpointer=checkpointer,
-            limits=request.limits,
+            limits=limits,
             model=call_model,
             tool=call_tool,
             guard=guard,
             tools=tools,
         )
         try:
-            async with asyncio.timeout(request.limits.deadline_seconds):
+            async with asyncio.timeout(limits.deadline_seconds):
                 state = await harness.run(
                     messages=messages,
                     checkpoint_key=f"dramaforge:{self.project_id}:{turn_id}",
@@ -523,6 +659,122 @@ class DirectorAgentService:
             # Public errors deliberately omit exception messages and tool/model payloads.
             reason, answer = "runtime_failed", ""
         return await self._finish(turn_id, token, reason, answer)
+
+    def _execution_context(self, turn: DirectorTurn) -> ToolContext:
+        assert turn.thread_id is not None
+        return ToolContext.model_validate(
+            {
+                "actor_id": self.actor_id,
+                "workspace_id": self.workspace_id,
+                "project_id": self.project_id,
+                "turn_id": turn.id,
+                "thread_id": turn.thread_id,
+                "scope_type": turn.scope_type,
+                "scope_entity_id": turn.scope_entity_id,
+                "expected_versions": dict(turn.input_versions),
+                "deadline": utc(turn.deadline) if turn.deadline is not None else None,
+            }
+        )
+
+    async def _execution_inputs(
+        self,
+        session: AsyncSession,
+        *,
+        turn: DirectorTurn,
+        context: ToolContext,
+    ) -> list[AgentMessage]:
+        """Rebuild the exact prompt from the frozen acceptance snapshot."""
+        assert turn.thread_id is not None
+        message = await self._user_message(session, turn)
+        snapshot = turn.intent_snapshot or {}
+        skills = snapshot.get("skills")
+        creative_state = snapshot.get("creative_state")
+        try:
+            history = await load_agent_history(
+                session,
+                project_id=self.project_id,
+                thread_id=turn.thread_id,
+            )
+        except AgentHistoryInvalid as exc:
+            raise AgentHalt("history_invalid") from exc
+        # Historical chat is advisory; exact current facts are retrieved by tools.
+        messages = [
+            AgentMessage(role="system", content=SYSTEM_INSTRUCTION),
+            AgentMessage(
+                role="system",
+                content=json.dumps(
+                    {
+                        "scope": context.model_dump(mode="json"),
+                        "skills": skills,
+                        "history_is_advisory": True,
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+            AgentMessage(
+                role="system",
+                content=json.dumps({"creative_state": creative_state}, ensure_ascii=False),
+            ),
+        ]
+        if history.history_notice is not None:
+            messages.append(history.history_notice)
+        if history.legacy_advisory is not None:
+            messages.append(history.legacy_advisory)
+        messages.extend(history.messages)
+        messages.append(AgentMessage(role="user", content=message.content))
+        return messages
+
+    async def _user_message(self, session: AsyncSession, turn: DirectorTurn) -> DirectorMessage:
+        message = await session.scalar(
+            select(DirectorMessage).where(
+                DirectorMessage.project_id == self.project_id,
+                DirectorMessage.turn_id == turn.id,
+                DirectorMessage.ordinal == 0,
+                DirectorMessage.role == "user",
+            )
+        )
+        if message is None:
+            raise NotFoundError("Accepted Agent request message is missing")
+        return message
+
+    async def _acceptance(
+        self, session: AsyncSession, turn: DirectorTurn
+    ) -> AgentAcceptance:
+        return self._acceptance_of(turn, await self._user_message(session, turn))
+
+    def _acceptance_of(self, turn: DirectorTurn, message: DirectorMessage) -> AgentAcceptance:
+        assert turn.thread_id is not None
+        accepted_revision = (turn.request_summary or {}).get("accepted_revision")
+        return AgentAcceptance(
+            thread_id=turn.thread_id,
+            turn_id=turn.id,
+            user_message_id=message.id,
+            master_run_id=turn.master_run_id,
+            accepted_revision=accepted_revision if isinstance(accepted_revision, int) else 1,
+            read_url=(
+                f"/api/v1/projects/{self.project_id}/director/threads/{turn.thread_id}"
+                f"/requests?request_key={quote(turn.request_key, safe='')}"
+            ),
+            request_key=turn.request_key,
+        )
+
+    @staticmethod
+    def _require_same_request(
+        turn: DirectorTurn, *, thread_id: UUID, input_hash: str
+    ) -> None:
+        if (
+            turn.turn_kind != "agent"
+            or turn.thread_id != thread_id
+            or (turn.request_summary or {}).get("input_hash") != input_hash
+        ):
+            raise ConflictError(
+                "Request key was reused with different input",
+                details={
+                    "code": "AGENT_REQUEST_KEY_REUSED",
+                    "turn_id": str(turn.id),
+                    "request_accepted": False,
+                },
+            )
 
     async def _turn(self, session: AsyncSession, turn_id: UUID) -> DirectorTurn:
         turn = await session.scalar(
@@ -611,8 +863,8 @@ class DirectorAgentService:
             raise AgentHalt("context_stale")
         return turn
 
-    async def replay(self, thread_id: UUID, request: AgentRequest) -> AgentTurnResult | None:
-        """Read a durable receipt without requiring the model or checkpoint service."""
+    async def replay(self, thread_id: UUID, request: AgentRequest) -> AgentAcceptance | None:
+        """Read a durable acceptance without requiring the model or checkpoint service."""
         input_hash = fingerprint({"thread_id": thread_id, "request": request.model_dump()})
         async with self._db() as session:
             await self._thread(session, thread_id)
@@ -626,19 +878,14 @@ class DirectorAgentService:
             )
             if turn is None:
                 return None
-            if (
-                turn.turn_kind != "agent"
-                or turn.thread_id != thread_id
-                or turn.request_summary.get("input_hash") != input_hash
-            ):
-                raise ConflictError("Request key was reused with different input")
-            await self._recover_expired(session, turn)
-            return self.result(turn)
+            self._require_same_request(turn, thread_id=thread_id, input_hash=input_hash)
+            await recover_expired(session, project_id=self.project_id, turn=turn)
+            return await self._acceptance(session, turn)
 
     async def read_turn(self, turn_id: UUID) -> DirectorTurn:
         async with self._db() as session:
             turn = await self._turn(session, turn_id)
-            await self._recover_expired(session, turn)
+            await recover_expired(session, project_id=self.project_id, turn=turn)
             return turn
 
     async def read_tools(
@@ -913,65 +1160,6 @@ class DirectorAgentService:
             )
             return dict(receipt)
 
-    async def _recover_expired(self, session: AsyncSession, turn: DirectorTurn) -> None:
-        if turn.status in TERMINAL_TURN_STATUSES:
-            if await self._settle_interrupted_calls(session, turn):
-                turn.revision += 1
-            return
-        if turn.agent_lease_expires_at and utc(turn.agent_lease_expires_at) > datetime.now(UTC):
-            return
-        turn.status = "failed"
-        await self._settle_interrupted_calls(session, turn)
-        turn.wait_reason = (
-            "unknown_submission" if turn.transport_status == "unknown_submission" else "interrupted"
-        )
-        turn.agent_lease_token = None
-        turn.agent_control_epoch += 1
-        turn.revision += 1
-
-    async def _settle_interrupted_calls(
-        self,
-        session: AsyncSession,
-        turn: DirectorTurn,
-    ) -> bool:
-        """Commit interruption evidence with the Turn, without waiting for its old handler.
-
-        A stop does not revoke an already submitted request. Its unknown outcome
-        can still be completed by a late response; the terminal Turn cannot revive.
-        The caller holds the Turn lock before any Invocation/ToolCall lock.
-        """
-        calls = list(
-            await session.scalars(
-                select(DirectorInvocation)
-                .where(
-                    DirectorInvocation.project_id == self.project_id,
-                    DirectorInvocation.turn_id == turn.id,
-                    DirectorInvocation.status.in_(("submission_started", "unknown_submission")),
-                )
-                .order_by(DirectorInvocation.id)
-            )
-        )
-        changed = False
-        for call in calls:
-            if call.status == "submission_started":
-                await InvocationService(session).mark_unknown(
-                    project_id=self.project_id,
-                    invocation_id=call.id,
-                )
-                changed = True
-        if calls:
-            changed = changed or turn.transport_status != "unknown_submission"
-            changed = changed or turn.cost_status != "unknown" or turn.provider_cost is not None
-            turn.transport_status = "unknown_submission"
-            turn.cost_status = "unknown"
-            turn.provider_cost = None
-        settled = await AgentToolAudit(session).settle(
-            project_id=self.project_id,
-            turn_id=turn.id,
-            status="cancelled" if turn.status == "cancelled" else "failed",
-        )
-        return changed or settled > 0
-
     async def _finish(
         self,
         turn_id: UUID,
@@ -982,7 +1170,9 @@ class DirectorAgentService:
         async with self._db() as session:
             turn = await self._turn(session, turn_id)
             if turn.status in TERMINAL_TURN_STATUSES:
-                await self._settle_interrupted_calls(session, turn)
+                await settle_interrupted_calls(
+                    session, project_id=self.project_id, turn=turn
+                )
                 return self.result(turn)
             if turn.agent_lease_token != token:
                 return self.result(turn)
@@ -1003,7 +1193,7 @@ class DirectorAgentService:
             turn.agent_lease_expires_at = None
             turn.agent_control_epoch += 1
             turn.revision += 1
-            await self._settle_interrupted_calls(session, turn)
+            await settle_interrupted_calls(session, project_id=self.project_id, turn=turn)
             if answer and turn.status == "completed":
                 message = DirectorMessage(
                     id=uuid4(),
@@ -1041,7 +1231,7 @@ class DirectorAgentService:
                 turn.wait_reason = "user_stop"
                 turn.revision += 1
                 turn.response_summary = {**turn.response_summary, "stop_request_key": request_key}
-                await self._settle_interrupted_calls(session, turn)
+                await settle_interrupted_calls(session, project_id=self.project_id, turn=turn)
             return self.result(turn)
 
     @staticmethod
@@ -1051,6 +1241,7 @@ class DirectorAgentService:
             {
                 "turn_id": turn.id,
                 "thread_id": turn.thread_id,
+                "master_run_id": turn.master_run_id,
                 "status": turn.status,
                 "transport_status": turn.transport_status,
                 "assistant_message_id": turn.output_snapshot.get("assistant_message_id"),
@@ -1062,3 +1253,145 @@ class DirectorAgentService:
                 "version": turn.revision,
             }
         )
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _deadline_passed(deadline: datetime | None) -> bool:
+    return deadline is not None and utc(deadline) <= _now()
+
+
+async def recover_expired(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    turn: DirectorTurn,
+) -> bool:
+    """Fail-stop an unowned Turn; never resume it or resubmit a text request.
+
+    A ``queued`` Turn is executable until its deadline, so reading one is not a
+    recovery event. A ``thinking`` Turn whose lease expired lost its only owner;
+    its possibly billed submission becomes ``unknown_submission`` and the Turn
+    cannot be adopted again.
+    """
+    if turn.status in TERMINAL_TURN_STATUSES:
+        if await settle_interrupted_calls(session, project_id=project_id, turn=turn):
+            turn.revision += 1
+            return True
+        return False
+    if turn.status == "queued":
+        return await _fail_expired(session, project_id=project_id, turn=turn)
+    if turn.agent_lease_expires_at and utc(turn.agent_lease_expires_at) > _now():
+        return False
+    turn.status = "failed"
+    await settle_interrupted_calls(session, project_id=project_id, turn=turn)
+    turn.wait_reason = (
+        "unknown_submission" if turn.transport_status == "unknown_submission" else "interrupted"
+    )
+    turn.last_error = "The Agent turn lost its worker lease; it is not resumed automatically."
+    turn.agent_lease_token = None
+    turn.agent_lease_expires_at = None
+    turn.agent_control_epoch += 1
+    turn.revision += 1
+    return True
+
+
+async def _fail_expired(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    turn: DirectorTurn,
+) -> bool:
+    if turn.status != "queued" or not _deadline_passed(turn.deadline):
+        return False
+    turn.status = "failed"
+    turn.wait_reason = "deadline_exceeded"
+    turn.last_error = "The accepted Agent request expired before a worker adopted it."
+    turn.agent_lease_token = None
+    turn.agent_lease_expires_at = None
+    turn.agent_control_epoch += 1
+    turn.revision += 1
+    await settle_interrupted_calls(session, project_id=project_id, turn=turn)
+    return True
+
+
+async def _finish_failed(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    turn: DirectorTurn,
+    token: UUID,
+    reason: str,
+) -> None:
+    """Fail a Turn this worker owns; a late owner never overrides another epoch."""
+    if turn.agent_lease_token != token:
+        return
+    turn.status = "failed"
+    turn.wait_reason = reason
+    turn.last_error = f"Director Agent turn stopped: {reason}."
+    turn.agent_lease_token = None
+    turn.agent_lease_expires_at = None
+    turn.agent_control_epoch += 1
+    turn.revision += 1
+    await settle_interrupted_calls(session, project_id=project_id, turn=turn)
+
+
+async def settle_interrupted_calls(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    turn: DirectorTurn,
+) -> bool:
+    """Commit interruption evidence with the Turn, without waiting for its old handler.
+
+    A stop does not revoke an already submitted request. Its unknown outcome can
+    still be completed by a late response; the terminal Turn cannot revive. The
+    caller holds the Turn lock before any Invocation/ToolCall lock.
+    """
+    calls = list(
+        await session.scalars(
+            select(DirectorInvocation)
+            .where(
+                DirectorInvocation.project_id == project_id,
+                DirectorInvocation.turn_id == turn.id,
+                DirectorInvocation.status.in_(("submission_started", "unknown_submission")),
+            )
+            .order_by(DirectorInvocation.id)
+        )
+    )
+    changed = False
+    for call in calls:
+        if call.status == "submission_started":
+            await InvocationService(session).mark_unknown(
+                project_id=project_id,
+                invocation_id=call.id,
+            )
+            changed = True
+    if calls:
+        changed = changed or turn.transport_status != "unknown_submission"
+        changed = changed or turn.cost_status != "unknown" or turn.provider_cost is not None
+        turn.transport_status = "unknown_submission"
+        turn.cost_status = "unknown"
+        turn.provider_cost = None
+    settled = await AgentToolAudit(session).settle(
+        project_id=project_id,
+        turn_id=turn.id,
+        status="cancelled" if turn.status == "cancelled" else "failed",
+    )
+    return changed or settled > 0
+
+
+__all__ = [
+    "ACCEPTED_EVENT_TOPIC",
+    "AgentAcceptance",
+    "AgentRequest",
+    "AgentRequestState",
+    "AgentThreadCreate",
+    "AgentTurnResult",
+    "DirectorAgentService",
+    "SYSTEM_INSTRUCTION",
+    "recover_expired",
+    "settle_interrupted_calls",
+]

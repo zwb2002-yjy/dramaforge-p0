@@ -9,7 +9,15 @@ import "./project-shell-visual.css";
 import "./creation-controls.css";
 
 export type ProjectWorkspaceView =
-  "overview" | "script" | "assets" | "scenes" | "production" | "review" | "edit";
+  | "overview"
+  | "files"
+  | "research"
+  | "script"
+  | "assets"
+  | "scenes"
+  | "production"
+  | "review"
+  | "edit";
 
 type ProjectWorkspaceShellProps = {
   projectId: string;

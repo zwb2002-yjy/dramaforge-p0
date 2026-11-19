@@ -7,6 +7,8 @@ import {
   FileText,
   Film,
   FolderKanban,
+  FolderOpen,
+  Library,
   Package,
   CheckCheck,
   Scissors,
@@ -37,7 +39,7 @@ type WorkstationShellProps = {
   children: ReactNode;
 };
 
-type PrimarySection = "projects" | "project" | "settings";
+type PrimarySection = "projects" | "project" | "knowledge" | "settings";
 
 function projectIdFromPath(pathname: string): string | null {
   return (
@@ -49,6 +51,7 @@ function projectIdFromPath(pathname: string): string | null {
 
 function primarySectionFromPath(pathname: string): PrimarySection {
   if (pathname.startsWith("/settings")) return "settings";
+  if (pathname.startsWith("/knowledge")) return "knowledge";
   if (pathname.startsWith("/projects/")) return "project";
   return "projects";
 }
@@ -359,11 +362,18 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
         </Link>
         <nav aria-label="一级导航">
           <PrimaryLink
-            active={primary !== "settings"}
+            active={primary === "projects" || primary === "project"}
             label={GLOBAL_NAV_LABELS.projects}
             visibleLabel={GLOBAL_NAV_LABELS.projectsCompact}
             to="/"
             icon={FolderKanban}
+          />
+          <PrimaryLink
+            active={primary === "knowledge"}
+            label={GLOBAL_NAV_LABELS.knowledge}
+            visibleLabel={GLOBAL_NAV_LABELS.knowledgeCompact}
+            to="/knowledge"
+            icon={Library}
           />
           <div className="df-primary-bottom">
             <PrimaryLink
@@ -403,6 +413,18 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
                     label={PROJECT_VIEW_LABELS.production}
                     to={`/projects/${projectId}/production`}
                     icon={Clapperboard}
+                  />
+                  <ContextLink
+                    active={creationView === "files"}
+                    label={PROJECT_VIEW_LABELS.files}
+                    to={`/projects/${projectId}/files`}
+                    icon={FolderOpen}
+                  />
+                  <ContextLink
+                    active={creationView === "research"}
+                    label={PROJECT_VIEW_LABELS.research}
+                    to={`/projects/${projectId}/research`}
+                    icon={Library}
                   />
                   <ContextLink
                     active={creationView === "script"}

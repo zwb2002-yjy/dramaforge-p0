@@ -4,7 +4,7 @@ These are provider-neutral, deterministic, version-aware contracts that describe
 *how a shot/scene should be produced* — not a prompt and not a Provider call.
 
 A template is frozen by ``contract_hash`` (computed from the serializable field
-subset, excluding the ``graph_factory`` callable).  Retry / Resume must use the
+subset).  Retry / Resume must use the
 same frozen template identity (G-WF-03); the registry is forbidden from doing
 Provider requests, credential access, model selection or fallback model work.
 """
@@ -13,17 +13,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.providers.capabilities import Capability
-
-# A provider-neutral graph definition builder.  The concrete signature varies by
-# template but always returns a ProductionGraph ``definition`` dict.
-GraphFactory = Callable[..., dict[str, object]]
 
 
 class WorkflowScope(StrEnum):
@@ -120,9 +115,8 @@ def workflow_template_contract_hash(spec: WorkflowTemplateSpec) -> str:
 class WorkflowTemplateSpec:
     """Typed manifest for one versioned production workflow template.
 
-    ``graph_factory`` is deliberately excluded from the contract hash (and from
-    any serialization): it is the code that builds the ProductionGraph, while
-    ``contract_hash`` guarantees the *semantic contract* is frozen.
+    Planning metadata only; execution uses the canonical Shot production graph.
+    ``contract_hash`` freezes the semantic contract independently of execution.
     """
 
     template_key: str
@@ -146,7 +140,6 @@ class WorkflowTemplateSpec:
     )
     quality_policy_id: str = ""
     repair_policy_id: str = ""
-    graph_factory: GraphFactory | None = None
 
     @property
     def contract_hash(self) -> str:

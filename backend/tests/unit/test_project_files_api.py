@@ -40,12 +40,33 @@ def test_http_upload_background_extract_versions_unlink_and_scope(api, monkeypat
     assert asyncio.run(process_project_files(factory, store=store)) == {"processed": 1, "failed": 0}
     # A new scanner invocation models a restarted worker: no completed work is redone.
     assert asyncio.run(process_project_files(factory, store=store)) == {"processed": 0, "failed": 0}
-    excerpts = client.get(revision_path, params={"limit": 1}).json()
-    assert excerpts["total"] == 2 and excerpts["next_offset"] == 1
-    assert excerpts["excerpts"][0]["location"] == {"line": 1}
-    assert client.get(revision_path, params={"offset": 1}).json()["excerpts"][0]["location"] == {
-        "line": 3,
+    revision_read = client.get(revision_path).json()
+    assert revision_read["source"]["status"] == "parsed"
+    assert revision_read["source_available"] is True
+    assert revision_read["extraction"]["attempt"] == 1
+    current = client.get(f"/api/v1/projects/{project}/files/{source['id']}").json()
+    assert current["current_extraction_id"] is not None
+    extraction = client.get(
+        f"/api/v1/projects/{project}/extractions/{current['current_extraction_id']}"
+    ).json()
+    assert extraction["extraction_schema_version"] == 2
+    assert extraction["coverage"]["complete"] is True
+    assert extraction["processor_evidence"]["coordinate_system"]["index_base"] == 0
+    fragments_path = (
+        f"/api/v1/projects/{project}/extractions/{current['current_extraction_id']}/fragments"
+    )
+    page = client.get(fragments_path, params={"limit": 1}).json()
+    assert page["total"] == 2 and page["next_offset"] == 1
+    assert page["items"][0]["locator"] == {
+        "kind": "paragraph", "container_key": "text-lines", "paragraph_start": 0,
+        "paragraph_end": 1, "char_start": 0, "char_end": len("古桥"),
     }
+    assert page["items"][0]["text_content"] == "古桥"
+    assert page["items"][0]["extraction_schema_version"] == 2
+    assert page["items"][0]["evidence_meta"]["original_location"] == {"line": 1}
+    second = client.get(fragments_path, params={"offset": 1}).json()
+    assert second["items"][0]["locator"]["paragraph_start"] == 2
+    assert client.get(fragments_path, params={"locator_kind": "table_cells"}).json()["items"] == []
     downloaded = client.get(revision_path + "/original")
     assert (
         downloaded.content == original and downloaded.headers["x-content-type-options"] == "nosniff"
@@ -113,10 +134,37 @@ def test_storage_failure_is_per_file_retry_is_fenced_and_upload_is_bounded(api, 
         store.put_bytes(object_key=key, data=b"temporarily missing", mime_type="text/plain")
     )
     retry_path = f"/api/v1/projects/{project}/file-revisions/{broken['revision_id']}/retry"
-    retried = client.post(
-        retry_path, json={"request_key": "retry-once"}, headers={CSRF_HEADER: _csrf(client)}
+    profile = client.get(
+        f"/api/v1/projects/{project}/source-capabilities"
+    ).json()["profile_revision"]
+    retry_body = {
+        "request_key": "retry-once",
+        "expected_file_version": 1,
+        "expected_attempt": 1,
+        "processor_profile_revision": profile,
+    }
+    retried = client.post(retry_path, json=retry_body, headers={CSRF_HEADER: _csrf(client)})
+    assert retried.status_code == 202, retried.text
+    acceptance = retried.json()
+    assert acceptance["accepted_attempt"] == 2 and acceptance["action"] == "retry"
+    assert acceptance["file_revision_id"] == broken["revision_id"]
+    assert len(acceptance["event_id"]) == 36
+    # A drifted profile is refused before anything is accepted.
+    drifted = client.post(
+        retry_path,
+        json={**retry_body, "request_key": "retry-drift", "processor_profile_revision": "0" * 64},
+        headers={CSRF_HEADER: _csrf(client)},
     )
-    assert retried.status_code == 200 and retried.json()["attempt"] == 2
+    assert drifted.status_code == 409
+    assert drifted.json()["code"] == "SOURCE_PROFILE_DRIFT"
+    # A stale basis is refused; the accepted attempt stays intact.
+    stale = client.post(
+        retry_path,
+        json={**retry_body, "request_key": "retry-stale", "expected_attempt": 5},
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["code"] == "SOURCE_STALE_ACCEPTANCE"
 
     async def old_worker_result():
         async with factory() as session:
@@ -128,15 +176,17 @@ def test_storage_failure_is_per_file_retry_is_fenced_and_upload_is_bounded(api, 
             )
             await service.fail_extraction(UUID(broken["revision_id"]), expected_attempt=1)
             row = await service.extract(UUID(broken["revision_id"]), expected_attempt=1)
-            assert row.status == "pending" and row.attempt == 2 and row.excerpts == []
+            assert row.status == "pending" and row.attempt == 2
+            assert row.current_extraction_id is None
             await session.commit()
 
     asyncio.run(old_worker_result())
     assert asyncio.run(process_project_files(factory, store=store))["processed"] == 1
-    replay = client.post(
-        retry_path, json={"request_key": "retry-once"}, headers={CSRF_HEADER: _csrf(client)}
-    )
-    assert replay.json()["attempt"] == 2 and replay.json()["status"] == "parsed"
+    replay = client.post(retry_path, json=retry_body, headers={CSRF_HEADER: _csrf(client)})
+    assert replay.status_code == 202
+    assert replay.json()["event_id"] == acceptance["event_id"]
+    assert client.get(path + "/" + broken["id"]).json()["status"] == "parsed"
+    assert client.get(path + "/" + broken["id"]).json()["attempt"] == 2
     monkeypatch.setattr(project_files, "MAX_SOURCE_BYTES", 2)
     oversized = client.post(
         path,
@@ -200,3 +250,29 @@ def test_blocked_failure_receipt_does_not_starve_later_files(api, monkeypatch):
         )
     )
     assert asyncio.run(process_project_files(factory, store=store)) == {"processed": 1, "failed": 0}
+
+
+def test_source_capabilities_report_real_components_without_parsing(api, monkeypatch):
+    client, _factory = api
+    store = InMemoryObjectStore()
+    monkeypatch.setattr(project_files, "get_object_store", lambda: store)
+    workspace = _register(client)
+    project = _project(client, workspace, "Capabilities")
+    path = f"/api/v1/projects/{project}/source-capabilities"
+    response = client.get(path)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert len(payload["profile_revision"]) == 64
+    formats = {item["format"]: item for item in payload["formats"]}
+    assert {"txt", "docx", "pdf", "xlsx", "image", "audio", "video"} <= set(formats)
+    assert all(isinstance(item["available"], bool) for item in formats.values())
+    assert formats["txt"]["available"] is True
+    assert payload["components"]["native_text"] is True
+    assert payload["auto_analysis"]["enabled"] is False
+    assert payload["auto_analysis"]["requires_confirmation"] is True
+    # Read-only: no extraction or upload rows are created by a capability query.
+    assert client.get(path).json()["profile_revision"] == payload["profile_revision"]
+    assert client.get(f"/api/v1/projects/{project}/files").json() == []
+    unknown = f"{'0' * 8}-0000-0000-0000-000000000000"
+    missing = client.get(f"/api/v1/projects/{unknown}/source-capabilities")
+    assert missing.status_code == 404

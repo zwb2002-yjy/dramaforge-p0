@@ -79,6 +79,16 @@ const json = (body: unknown, status = 200) =>
     status,
     headers: { "Content-Type": "application/json" },
   });
+const acceptance = (requestKey: string) => ({
+  thread_id: "thread-1",
+  turn_id: "turn-1",
+  user_message_id: "user-message-1",
+  master_run_id: null,
+  status: "queued",
+  accepted_revision: 1,
+  read_url: `/api/v1/projects/project-1/director/threads/thread-1/requests?request_key=${encodeURIComponent(requestKey)}`,
+  request_key: requestKey,
+});
 
 function setup({
   restored = false,
@@ -149,11 +159,11 @@ function setup({
           messageErrorStatus,
         );
       outcome = { ...result };
-      return json(outcome);
+      return json(acceptance(requestKey), 202);
     }
     if (path.includes("/threads/thread-1/requests?"))
       return outcome
-        ? json(outcome)
+        ? json({ acceptance: acceptance(requestKey), turn: outcome })
         : json({ code: "AGENT_REQUEST_NOT_FOUND", detail: "Not yet visible" }, 404);
     if (path.includes("/threads/thread-1?"))
       return json({

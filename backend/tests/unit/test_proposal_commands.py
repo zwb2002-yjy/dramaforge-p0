@@ -32,6 +32,7 @@ async def _seed(session: AsyncSession) -> tuple[Project, Shot, User]:
     session.add(workspace)
     await session.flush()
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=workspace.id,
         name=f"P-{uuid4().hex[:8]}",
         aspect_ratio="9:16",
@@ -71,6 +72,25 @@ def test_whitelist_contains_required_commands() -> None:
         "experiment.create",
     }
     assert required.issubset(COMMAND_WHITELIST)
+
+
+async def test_story_apply_cannot_create_a_second_episode_in_a_single_comic(session):
+    from app.assets.models import Episode
+    from sqlalchemy import func
+
+    project, shot, actor = await _seed(session)
+    project.work_type = "single_comic"
+    await session.commit()
+    registry = ProposalCommandRegistry(session, actor_id=actor.id)
+    with pytest.raises(ProposalCommandError) as caught:
+        await registry.apply(
+            project_id=project.id, command="story.upsert_episode",
+            payload={"episode_number": 2, "title": "不应采用", "synopsis": "候选"},
+            expected_target_version=None,
+        )
+    assert caught.value.details["code"] == "PROJECT_STRUCTURE_CONFLICT"
+    assert await session.scalar(select(func.count()).select_from(Episode)) == 1
+    assert await session.get(Shot, shot.id) is not None
 
 
 @pytest.mark.asyncio

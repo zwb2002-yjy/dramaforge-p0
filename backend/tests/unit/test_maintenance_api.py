@@ -163,10 +163,10 @@ def test_maintenance_api_replays_only_with_the_observed_failure(
     project = client.post(
         "/api/v1/projects",
         json={
+            "work_type": "serial_comic",
             "workspace_id": workspace_id,
             "name": f"recovery-{uuid4().hex[:8]}",
             "aspect_ratio": "9:16",
-            "budget_limit": "0",
         },
         headers={CSRF_HEADER: _csrf(client)},
     )

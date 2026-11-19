@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.base import Base
@@ -44,6 +44,9 @@ class DirectorProposalItem(Base):
     """One typed, independently acceptable proposal item (03 §64/§67/§68)."""
 
     __tablename__ = "director_proposal_items"
+    __table_args__ = (
+        UniqueConstraint("id", "project_id", name="uq_director_proposal_item_scope"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     proposal_id: Mapped[UUID] = mapped_column(

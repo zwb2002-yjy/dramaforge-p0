@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Header, Response
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
 from app.access.projects import ProjectService
@@ -322,10 +323,41 @@ class AssetCardRead(BaseModel):
     missing_reference_roles: list[str]
 
 
+class PromoteBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_key: str = Field(min_length=1, max_length=160)
+    expected_asset_version: int = Field(ge=1)
+    public_display: PublicDisplayBody | None = None
+
+
 class AssetCandidateBody(BaseModel):
+    request_key: str = Field(min_length=1, max_length=160)
+    expected_asset_version: int = Field(ge=1)
+    base_public_asset_link_id: UUID | None = None
     name: str | None = Field(default=None, max_length=160)
     description: str | None = Field(default=None, max_length=12000)
     metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class CandidateReceiptRead(BaseModel):
+    asset_id: UUID
+    asset_version_id: UUID
+    version_number: int
+    created_asset_revision: int
+
+
+class PublicDisplayBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=2_000)
+    style_labels: list[str] = Field(default_factory=list, max_length=20)
+
+
+class AssetAdoptionReceiptRead(BaseModel):
+    asset_id: UUID
+    asset_version_id: UUID
+    accepted_asset_revision: int
+    publication_id: UUID | None
 
 
 class AssetFromArtifactBody(BaseModel):
@@ -335,6 +367,7 @@ class AssetFromArtifactBody(BaseModel):
     description: str = Field(default="", max_length=12000)
     metadata: dict[str, object] = Field(default_factory=dict)
     reference_role: str = Field(default="primary", min_length=1, max_length=40)
+    public_display: PublicDisplayBody | None = None
 
 
 @router.get("/projects/{project_id}/asset-tags", response_model=list[AssetTagRead])
@@ -439,7 +472,7 @@ async def restore_asset(
 
 @router.post(
     "/projects/{project_id}/assets/from-artifact",
-    response_model=AssetRead,
+    response_model=AssetAdoptionReceiptRead,
     status_code=201,
 )
 async def create_asset_from_artifact(
@@ -448,16 +481,19 @@ async def create_asset_from_artifact(
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
+    response: Response,
     idempotency_key: str | None = Header(
         default=None, alias="Idempotency-Key", min_length=1, max_length=160
     ),
-) -> AssetRead:
+) -> AssetAdoptionReceiptRead:
     """Explicitly add a generated artifact as an asset card. Nothing is automatic.
 
     Retrying the same submission with the same ``Idempotency-Key`` returns the
     original card instead of creating a second one.
     """
-    asset = await AssetFromArtifactService(session).create(
+    from app.assets.public_assets import PublicDisplay
+
+    receipt = await AssetFromArtifactService(session).create_with_receipt(
         project_id=project_id,
         actor=user,
         request=AssetFromArtifactRequest(
@@ -469,10 +505,25 @@ async def create_asset_from_artifact(
             reference_role=body.reference_role,
         ),
         request_key=idempotency_key,
+        public_display=(
+            PublicDisplay(
+                name=body.public_display.name,
+                description=body.public_display.description,
+                style_labels=body.public_display.style_labels,
+            )
+            if body.public_display is not None
+            else None
+        ),
     )
-    response = _asset_read(asset, tags=await _asset_tag_names(session, asset.id))
     await session.commit()
-    return response
+    if not receipt.created:
+        response.status_code = 200
+    return AssetAdoptionReceiptRead(
+        asset_id=receipt.asset_id,
+        asset_version_id=receipt.asset_version_id,
+        accepted_asset_revision=receipt.accepted_asset_revision,
+        publication_id=receipt.publication_id,
+    )
 
 
 @router.get("/projects/{project_id}/assets/{asset_id}/card", response_model=AssetCardRead)
@@ -490,7 +541,7 @@ async def read_asset_card(
 
 @router.post(
     "/projects/{project_id}/assets/{asset_id}/versions",
-    response_model=AssetVersionRead,
+    response_model=CandidateReceiptRead,
     status_code=201,
 )
 async def create_asset_candidate(
@@ -499,37 +550,85 @@ async def create_asset_candidate(
     body: AssetCandidateBody,
     user: CurrentUser,
     session: SessionDep,
+    response: Response,
     _csrf: CsrfDep,
-) -> AssetVersionRead:
-    version = await AssetVersionService(session).create_candidate(
+) -> CandidateReceiptRead:
+    request_hash = hashlib.sha256(
+        f"candidate:{asset_id}:{body.expected_asset_version}:{body.name or ''}:"
+        f"{body.description or ''}:{body.base_public_asset_link_id or ''}".encode()
+    ).hexdigest()
+    receipt = await AssetVersionService(session).create_candidate_with_receipt(
         project_id=project_id,
         asset_id=asset_id,
         actor=user,
+        expected_asset_version=body.expected_asset_version,
+        request_key=body.request_key,
+        request_hash=request_hash,
         name=body.name,
         description=body.description,
         metadata_json=dict(body.metadata),
+        base_public_asset_link_id=body.base_public_asset_link_id,
     )
     await session.commit()
-    return _version_read(version)
+    if not receipt.created:
+        response.status_code = 200
+    return CandidateReceiptRead(
+        asset_id=receipt.asset_id,
+        asset_version_id=receipt.asset_version_id,
+        version_number=receipt.version_number,
+        created_asset_revision=receipt.created_asset_revision,
+    )
 
 
 @router.post(
     "/projects/{project_id}/assets/{asset_id}/versions/{version_id}/promote",
-    response_model=AssetVersionRead,
+    response_model=AssetAdoptionReceiptRead,
+    status_code=201,
 )
 async def promote_asset_version(
     project_id: UUID,
     asset_id: UUID,
     version_id: UUID,
+    body: PromoteBody,
     user: CurrentUser,
     session: SessionDep,
+    response: Response,
     _csrf: CsrfDep,
-) -> AssetVersionRead:
-    version = await AssetVersionService(session).promote(
-        project_id=project_id, asset_id=asset_id, version_id=version_id, actor=user
+) -> AssetAdoptionReceiptRead:
+    from app.assets.public_assets import PublicDisplay
+
+    display = (
+        PublicDisplay(
+            name=body.public_display.name,
+            description=body.public_display.description,
+            style_labels=body.public_display.style_labels,
+        )
+        if body.public_display is not None
+        else None
+    )
+    request_hash = hashlib.sha256(
+        f"promote:{asset_id}:{version_id}:{body.expected_asset_version}:"
+        f"{display.name if display else ''}".encode()
+    ).hexdigest()
+    receipt = await AssetVersionService(session).promote_with_receipt(
+        project_id=project_id,
+        asset_id=asset_id,
+        version_id=version_id,
+        actor=user,
+        expected_asset_version=body.expected_asset_version,
+        request_key=body.request_key,
+        request_hash=request_hash,
+        public_display=display,
     )
     await session.commit()
-    return _version_read(version)
+    if not receipt.created:
+        response.status_code = 200
+    return AssetAdoptionReceiptRead(
+        asset_id=receipt.asset_id,
+        asset_version_id=receipt.asset_version_id,
+        accepted_asset_revision=receipt.accepted_asset_revision,
+        publication_id=receipt.publication_id,
+    )
 
 
 @router.post(

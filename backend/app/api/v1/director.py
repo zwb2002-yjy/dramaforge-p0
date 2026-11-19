@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Literal, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -24,7 +24,9 @@ from app.config import get_settings
 from app.contracts.director_runtime import ResumeSignal, RuntimeScope, StopRequest
 from app.contracts.production_commands import ExecutionBody
 from app.director.agent_service import (
+    AgentAcceptance,
     AgentRequest,
+    AgentRequestState,
     AgentThreadCreate,
     AgentTurnResult,
     DirectorAgentService,
@@ -41,7 +43,6 @@ from app.director.runtime.capabilities import (
     build_director_capabilities,
     require_director_runtime_available,
 )
-from app.director.runtime.checkpoint import scoped_checkpointer
 from app.director.runtime.control import DirectorRuntimeControlService
 from app.director.runtime.delegation import DirectorRuntimeDelegationService
 from app.director.runtime.routing import DirectorEngineRouter
@@ -380,31 +381,40 @@ async def read_director_thread(
 
 @router.get(
     "/projects/{project_id}/director/threads/{thread_id}/requests",
-    response_model=AgentTurnResult,
+    response_model=AgentRequestState,
 )
 async def read_director_agent_request(
     project_id: UUID, thread_id: UUID, user: CurrentUser, session: SessionDep,
     request_key: str = Query(min_length=1, max_length=160),
-) -> AgentTurnResult:
+) -> AgentRequestState:
     service = await _agent_service(project_id, user, session)
     return await service.read_request(thread_id, request_key)
 
 
 @router.post(
     "/projects/{project_id}/director/threads/{thread_id}/messages",
-    response_model=AgentTurnResult,
+    response_model=AgentAcceptance,
+    status_code=status.HTTP_202_ACCEPTED,
 )
-async def run_director_agent_turn(
+async def accept_director_agent_turn(
     project_id: UUID,
     thread_id: UUID,
     body: AgentRequest,
     user: CurrentUser,
     session: SessionDep,
+    response: Response,
     _csrf: CsrfDep,
-) -> AgentTurnResult:
+) -> AgentAcceptance:
+    """Durably accept one Agent request; execution belongs to the Director worker.
+
+    A repeat of the same normalized request returns the original acceptance with
+    HTTP 200. This handler never opens a checkpoint, calls a model, or leaves an
+    in-memory background task: an HTTP disconnect cannot cancel accepted work.
+    """
     service = await _agent_service(project_id, user, session)
     replay = await service.replay(thread_id, body)
     if replay is not None:
+        response.status_code = status.HTTP_200_OK
         return replay
     settings = get_settings()
     try:
@@ -412,8 +422,8 @@ async def run_director_agent_turn(
     except AppError as exc:
         exc.details = {**exc.details, "request_accepted": False}
         raise
-    async with scoped_checkpointer(settings, project_id=project_id) as checkpointer:
-        return await service.run(thread_id, body, checkpointer=checkpointer)
+    acceptance, _created = await service.accept(thread_id, body)
+    return acceptance
 
 
 @router.post(

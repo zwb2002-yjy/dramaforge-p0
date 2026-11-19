@@ -360,6 +360,7 @@ def _create_project(client: TestClient, *, name: str) -> str:
     response = client.post(
         "/api/v1/projects",
         json={
+            "work_type": "serial_comic",
             "workspace_id": client.headers["X-Workspace-Id"],
             "name": name,
             "aspect_ratio": "16:9",

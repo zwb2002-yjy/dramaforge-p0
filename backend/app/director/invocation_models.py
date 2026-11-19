@@ -29,6 +29,7 @@ class DirectorInvocation(Base):
             ondelete="CASCADE", name="fk_director_invocation_turn_scope",
         ),
         UniqueConstraint("turn_id", "invocation_key", name="uq_director_invocation_key"),
+        UniqueConstraint("id", "project_id", name="uq_director_invocation_scope"),
         CheckConstraint("attempt > 0", name="ck_director_invocation_attempt"),
         CheckConstraint(
             "status IN ('prepared','submission_started','completed','failed','unknown_submission')",

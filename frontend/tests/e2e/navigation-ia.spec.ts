@@ -60,7 +60,7 @@ test("global navigation owns projects and settings; the project top bar controls
   const primaryNavigation = page.getByRole("navigation", { name: "一级导航" });
   await expect(primaryNavigation.getByRole("link", { name: "我的项目" })).toBeVisible();
   const creationEntry = page.getByRole("button", { name: "项目导航" });
-  await expect(primaryNavigation.getByRole("link")).toHaveCount(2);
+  await expect(primaryNavigation.getByRole("link")).toHaveCount(3);
   await expect(creationEntry).toHaveAttribute("aria-controls", "project-navigation");
   await expect(primaryNavigation.getByRole("link", { name: "设置" })).toBeVisible();
 
@@ -72,9 +72,9 @@ test("global navigation owns projects and settings; the project top bar controls
   await expect(page.getByText("正在恢复上次创作位置…")).toHaveCount(0);
 
   const creationNavigation = page.getByRole("navigation", { name: "创作导航" });
-  await expect(creationNavigation.getByRole("link")).toHaveCount(6);
+  await expect(creationNavigation.getByRole("link")).toHaveCount(8);
   await expect(creationNavigation).toContainText(
-    /项目总览.*故事剧本.*角色与素材.*分镜制作.*审片确认.*剪辑成片/s,
+    /项目总览.*项目资料.*文化研究.*故事剧本.*角色与素材.*分镜制作.*审片确认.*剪辑成片/s,
   );
   await expect(creationNavigation).toContainText("审片确认");
   await expect(creationNavigation).not.toContainText("专业");

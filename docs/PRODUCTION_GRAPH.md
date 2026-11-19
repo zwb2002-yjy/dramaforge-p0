@@ -39,7 +39,7 @@ Director 的控制流叫 **Director Runtime Flow**，见
 |---|---|---|
 | **Node** | ProductionGraph 内一个有明确输入输出的**生产步骤定义**。不是普通函数 | `execution/models.py::GraphNode`（`node_key` / `node_type` / `cacheable`） |
 | **NodeRun** | 某个 Node 的**一次实际执行事实**（排队 → 运行 → 终态） | `execution/models.py::NodeRun` |
-| **ProviderOperation** | 一次**真实外部模型/API 调用**事实 | `execution/models.py::ProviderOperation` |
+| **ProviderOperation** | 一次已冻结执行后端操作事实（远端模型/API或已注册本地媒体处理），仍由NodeRun拥有 | `execution/models.py::ProviderOperation` |
 | **Artifact** | 生产出来的**不可变结果**及血缘 | `execution/models.py::Artifact`、`artifact_lineage.py` |
 
 固定关系：
@@ -53,7 +53,7 @@ GraphNode
       ↓
 NodeRun          1..N
       ↓
-ProviderOperation   0..N
+ProviderOperation   0..1（每个非空NodeRun关联，当前唯一索引）
       ↓
 Artifact
 ```
@@ -72,14 +72,15 @@ VideoGenerationNode        ← 定义（一种）
 ### 2.2 NodeRun vs ProviderOperation
 
 ```text
-NodeRun: GenerateVideo
-  ├── ProviderOperation #1 失败
-  └── ProviderOperation #2 成功
+NodeRun #1001: GenerateVideo → ProviderOperation #1 失败/待核对
+用户明确重新生成，且原操作已核清：
+NodeRun #1026: GenerateVideo → ProviderOperation #2 成功
 ```
 
 - NodeRun 表示 **DramaForge 的业务执行步骤**。
-- ProviderOperation 表示 **真实外部调用事实**。
+- ProviderOperation表示**原执行后端操作事实**；本地FFmpeg也沿此链，是否外发由冻结执行路径判断。
 - **只有 NodeRun 一个 owner**（`ProviderOperation.node_run_id`）。
+- 当前非空node_run_id唯一；同操作的恢复/已证明未发送的传输重试不新建第二Operation。未知提交禁止盲重发。
 
 ### 2.3 Candidate / Formal 不属于 Graph Node
 
@@ -103,7 +104,7 @@ Video 执行按冻结输入模式决定引用：`first_frame` / `first_last_fram
 ## 三、Graph definition 的真实形态
 
 Graph 的 `definition` 是一个 JSON 文档（`GraphVersion.definition`），由
-`graph_factory` 构造：
+对应生产路径的定义函数构造，Workflow 规划目录不负责构造执行图：
 
 ```json
 {
@@ -119,22 +120,22 @@ Graph 的 `definition` 是一个 JSON 文档（`GraphVersion.definition`），�
 `publish`。节点结构变化会被 `materialize_definition` 与 `create_graph` 校验
 （`production/service.py`）。
 
-### 3.1 三处模板来源及 FinalFilm 内部图（当前事实）
+### 3.1 执行图与 Workflow 规划目录（当前事实）
 
 | 来源 | template_key | 是否被真实生产执行 |
 |---|---|---|
 | `execution/shot_pipeline.py::shot_pipeline_definition` | `shot-p0-v1` | **是**——Workbench execution 与 Experiment 的规范 Shot 图 |
-| `production/templates.py::dialogue_post_dub_definition` | `dialogue-post-dub-shot-v1` | 仅作为 Workflow 模板目录内容（见下） |
 | `production/final_film.py` 的内部图 | `final-film-v1` | **是**——成片尾部渲染 |
-| `director/workflows/template_nodes.py`（5 个） | `single-character-monologue-v1`、`two-character-dialogue-v1`、`action-motion-shot-v1`、`establishing-reaction-insert-v1`、`montage-sequence-v1` | **否**——仅供 `workflow_planning` / `workflow_overview` 规划与只读展示 |
+| `director/workflows/library.py`（6 个规划模板） | `dialogue-post-dub-shot-v1`、`single-character-monologue-v1`、`two-character-dialogue-v1`、`action-motion-shot-v1`、`establishing-reaction-insert-v1`、`montage-sequence-v1` | **否**——仅供 `workflow_planning` / `workflow_overview` 规划与只读展示，不包含图构造器 |
 
 **关键事实：`director/workflows/` 不是第二套 Graph 世界观。**
-`WorkflowTemplateRegistry` 里的 `graph_factory` 正是 ProductionGraph 的
-`definition` 构造器（`director/workflows/contracts.py` 注释即声明
-"always returns a ProductionGraph ``definition`` dict"）。它是**模板目录 + 只读导航**，
-不是并行执行引擎：真实的 Shot 生产固定使用 `shot-p0-v1`。
+`WorkflowTemplateRegistry` 保存冻结的规划合同，不构造 ProductionGraph。
+无消费者的 `graph_factory` 字段、注册强制要求和图构造实现已移除；模板身份与
+合同 hash 保持不变。真实的 Shot 生产固定使用 `shot-p0-v1`。
 
-因此这是**发现性问题（模板目录分散在三个模块）**，不是**概念性问题（两套 Graph）**。
+FinalFilm 的 Worker 入口统一负责事务、RLS、上传日志和失败恢复；媒体准备/渲染、
+交付媒体校验、Artifact/Export 事实写入分别由内部函数处理。媒体处理不打开数据库
+事务，事实写入不自行提交；上传前日志提交、交付成对提交与清理顺序保持一致。
 详见 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md) §4 问题 5。
 
 ---
@@ -281,3 +282,31 @@ Review 节点产出证据 Artifact，作为分支判定依据。
 - 引入第二套 Graph 世界观（`DirectorGraph` / `CreativeGraph` / `SkillGraph` /
   `EditingGraph` / `UIWorkflowGraph`）；
 - 引入 `GenerationTask` / `RenderTask` / `WorkflowTask` / `MediaJob` 等同义概念。
+
+## 机构语音分段计划目标（D5，未实施）
+
+当前ORM与0004迁移对非空ProviderOperation.node_run_id有唯一索引，D8已同步修正上文旧多Operation示意。
+本期不放宽此索引，重做/未知提交仍按MODEL_PROVIDER的证据与授权处理，不把新用户动作塞进旧操作身份。
+
+长语音计划按已冻结文本/模型限制生成voice:{ordinal}节点，每段返回一个NodeRun/Operation回执；
+BusinessFlow分别展开Step，手动路径也逐命令受理，不通过Director才可运行。
+最终voice_concat是本地生产节点，输入为顺序明确的可用音频Artifact/hash及规范化规格，
+输出WAV Artifact；它不调用模型、不拼接私有请求日志，不拥有第二份语音状态。
+若所需段缺失/失败/未知则等待或失败，不能自己重提缺段；已成功段仍保留。
+voice_concat键/版本/输入schema/边集合进入GraphVersion.definition_hash和冻结计划；
+真实媒体处理在原Production Runtime，用户不操作节点图。
+
+预检展示段数与最大外部操作范围，完整声音预览/审片仍针对最终音轨。边界停顿与字幕时间
+根据实际片段时长统一映射，不能把计划时长当真实产物时长。不得通过多个“音频任务”同义实体
+或取消唯一索引来绕开原命令幂等。实施与回归见D7及I8/I9合同。
+
+## 独立资产媒体节点目标（D8，未实施）
+
+新增注册asset_image/asset_video/asset_voice节点合同（各自v1），Graph scope为真实asset，template_key为asset-media-v1。
+只由可信服务构造该固定定义，不恢复graph_factory或接收用户JSON DAG。相同Asset复用其Graph，
+每次确认的生成意图产生原NodeRun新attempt，模型/参数/输入冻结在input_snapshot；图定义不成为可变默认模型表。
+使用现有统一媒体Compiler/ProviderRuntime、VoiceSpec与Outbox/Worker执行，替换Shot专属读写钩子为按target判别的受控结果处理，
+不是复制一套asset Runtime。图片编辑、视频模式及语音参数须当前Manifest支持，不静默忽略参考。
+语音分段与voice_concat复用前节配方，逐操作受理；操作依赖由原Graph等待，不创建集合Operation。
+Artifact先作为候选；保存/采用资产仍归资产领域，生成完成不改Asset.current_version_id或Publication。
+多个候选按模型真实输出/多条单命令分别表示；NodeRun非空Operation唯一约束保持，固定新scope需完整权限与事件测试。

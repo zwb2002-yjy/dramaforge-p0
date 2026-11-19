@@ -51,10 +51,24 @@ function setup() {
 }
 afterEach(() => vi.restoreAllMocks());
 
+it("requires an explicit work type without creating an implicit default", async () => {
+  const { writes, props } = setup();
+  fireEvent.click(screen.getByRole("button", { name: "创建并进入剧本" }));
+  await waitFor(() =>
+    expect(screen.getByRole("combobox", { name: "作品类型" })).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    ),
+  );
+  expect(writes).toEqual([]);
+  expect(props.onCreated).not.toHaveBeenCalled();
+});
+
 it("creates with explicit defaults only after submission and trims the project name", async () => {
   const { writes, props } = setup();
   expect(screen.getByLabelText("项目名")).toHaveFocus();
   fireEvent.change(screen.getByLabelText("项目名"), { target: { value: "  雨夜  " } });
+  await selectValue(screen.getByRole("combobox", { name: "作品类型" }), "single_comic");
   expect(writes).toEqual([]);
   fireEvent.click(screen.getByRole("button", { name: "创建并进入剧本" }));
   await waitFor(() => expect(props.onCreated).toHaveBeenCalledWith("project-new"));
@@ -62,6 +76,11 @@ it("creates with explicit defaults only after submission and trims the project n
     {
       workspace_id: workspace.id,
       name: "雨夜",
+      work_type: "single_comic",
+      creative_goal: "",
+      audience: "",
+      planned_duration_seconds: null,
+      planned_episode_count: null,
       aspect_ratio: "9:16",
       start_type: "FREE",
       template_key: null,
@@ -86,6 +105,7 @@ it("preserves the draft on cancel/reopen and prevents whitespace-only submission
 
 it("submits the selected template and autonomy, not hidden defaults", async () => {
   const { writes, props } = setup();
+  await selectValue(screen.getByRole("combobox", { name: "作品类型" }), "single_comic");
   expect(screen.getByRole("combobox", { name: "创作起点" })).toBeVisible();
   await selectValue(screen.getByLabelText("创作起点"), "TEMPLATE");
   await selectValue(await screen.findByLabelText("创作模板"), "single_monologue_v1");

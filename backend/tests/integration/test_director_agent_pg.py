@@ -13,7 +13,12 @@ from app.access.models import Project, User, Workspace
 from app.assets.models import Episode, Scene, Shot
 from app.contracts.agent import AgentModelResponse, AgentToolCall
 from app.director.agent_audit import AgentToolAudit
-from app.director.agent_service import AgentRequest, AgentThreadCreate, DirectorAgentService
+from app.director.agent_service import (
+    AgentRequest,
+    AgentThreadCreate,
+    AgentTurnResult,
+    DirectorAgentService,
+)
 from app.director.agent_tools import ToolExecutor
 from app.director.assistant_models import DirectorMessage, DirectorThread, DirectorToolCall
 from app.director.invocation_models import DirectorInvocation
@@ -309,7 +314,7 @@ def test_tool_audit_rls_allows_owned_crud_and_blocks_other_project(
         assert denied.value.orig.sqlstate == "42501"
 
 
-def test_workflow_recovery_scans_exclude_agent_turns_and_keep_function_permissions(
+def test_recovery_scans_include_agent_lease_expiry_and_keep_function_permissions(
     agent_database: AgentDatabase,
 ) -> None:
     own = agent_database.tenants[0]
@@ -332,7 +337,30 @@ def test_workflow_recovery_scans_exclude_agent_turns_and_keep_function_permissio
                 )
                 session.add(turn)
                 session.flush()
-                (excluded if kind == "agent" else expected[scan]).add(turn.id)
+                if kind == "agent" and scan == "reconcilable":
+                    # Agent Turns never reconcile through the runtime checkpoint scan.
+                    excluded.add(turn.id)
+                else:
+                    expected[scan].add(turn.id)
+        # A live worker lease is not a recovery candidate; the Turn stays adoptable.
+        leased = _turn(
+            own,
+            turn_kind="agent",
+            status="thinking",
+            deadline=None,
+            agent_lease_token=uuid4(),
+            agent_lease_expires_at=datetime.now(UTC) + timedelta(minutes=5),
+            agent_control_epoch=1,
+        )
+        session.add(leased)
+        # A queued Agent Turn with a future deadline is executable, not recoverable.
+        queued = _turn(
+            own,
+            turn_kind="agent",
+            status="queued",
+            deadline=datetime.now(UTC) + timedelta(minutes=5),
+        )
+        session.add(queued)
         # Existing-style creation keeps workflow defaults without invented context.
         legacy = DirectorTurn(
             project_id=own.project_id,
@@ -364,6 +392,7 @@ def test_workflow_recovery_scans_exclude_agent_turns_and_keep_function_permissio
             actual = set(connection.execute(query, {"stale": expired}).scalars())
             assert expected[name] <= actual
             assert not actual.intersection(excluded)
+            assert leased.id not in actual and queued.id not in actual
         for signature in (
             "app.recoverable_director_turn_contexts(integer,timestamptz)",
             "app.reconcilable_director_turn_contexts(integer,uuid)",
@@ -477,6 +506,25 @@ async def _cancel_pending(*tasks: asyncio.Task) -> None:
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
+async def _submit(
+    service: DirectorAgentService,
+    thread_id: UUID,
+    request: AgentRequest,
+    *,
+    model: object,
+    expect_created: bool = True,
+) -> AgentTurnResult:
+    """Accept durably, then adopt and execute as the single worker owner."""
+    acceptance, created = await service.accept(thread_id, request, model=model)
+    if expect_created:
+        assert created
+    return await service.execute_queued(
+        acceptance.turn_id,
+        model=model,
+        checkpointer=MemorySaver(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_real_agent_concurrent_admission_has_one_model_submission(
     agent_runtime: AgentRuntime,
@@ -513,11 +561,12 @@ async def test_real_agent_concurrent_admission_has_one_model_submission(
                     )
                     tasks = [
                         asyncio.create_task(
-                            service.run(
+                            _submit(
+                                service,
                                 runtime.thread_id,
                                 request,
                                 model=model,
-                                checkpointer=MemorySaver(),
+                                expect_created=False,
                             )
                         )
                         for service in (first, second)
@@ -531,18 +580,16 @@ async def test_real_agent_concurrent_admission_has_one_model_submission(
             receipt = next(iter(done)).result()
             assert receipt.status == "thinking" and model.calls == 1
             with pytest.raises(ConflictError):
-                await second.run(
+                await second.accept(
                     runtime.thread_id,
                     request.model_copy(update={"content": "A different request"}),
                     model=model,
-                    checkpointer=MemorySaver(),
                 )
             with pytest.raises(ConflictError):
-                await second.run(
+                await second.accept(
                     runtime.thread_id,
                     request.model_copy(update={"request_key": "concurrent-other"}),
                     model=model,
-                    checkpointer=MemorySaver(),
                 )
             # Reads complete from another connection while the model remains suspended.
             current = await second.read_turn(receipt.turn_id)
@@ -611,12 +658,7 @@ async def test_agent_stop_survives_fresh_reader_and_late_read_receipt(
     model.release.set()
     request = AgentRequest(content="Inspect this project", request_key="stop-read")
     running = asyncio.create_task(
-        runtime.service().run(
-            runtime.thread_id,
-            request,
-            model=model,
-            checkpointer=MemorySaver(),
-        )
+        _submit(runtime.service(), runtime.thread_id, request, model=model)
     )
     try:
         async with asyncio.timeout(20):
@@ -645,7 +687,9 @@ async def test_agent_stop_survives_fresh_reader_and_late_read_receipt(
             restored = await fresh.read_turn(turn_id)
             replay = await fresh.replay(runtime.thread_id, request)
             assert stopped.status == restored.status == "cancelled"
-            assert replay is not None and replay.turn_id == turn_id and replay.status == "cancelled"
+            assert replay is not None and replay.turn_id == turn_id
+            fresh_receipt = await fresh.read_request(runtime.thread_id, request.request_key)
+            assert fresh_receipt.turn.status == "cancelled"
             assert not running.done()  # Cleanup is proven without assistance from the live handler.
             with Session(runtime.database.engine) as session:
                 audit = session.scalar(
@@ -694,24 +738,21 @@ async def test_expired_agent_recovery_and_late_model_result_do_not_deadlock_or_r
     model = BarrierModel(AgentModelResponse(text="A late model answer."))
     request = AgentRequest(content="Plan the film", request_key="expired-model")
     running = asyncio.create_task(
-        runtime.service().run(
-            runtime.thread_id,
-            request,
-            model=model,
-            checkpointer=MemorySaver(),
-        )
+        _submit(runtime.service(), runtime.thread_id, request, model=model)
     )
     recovery_locked = asyncio.Event()
     release_recovery = asyncio.Event()
     late_turn_lock_requested = asyncio.Event()
     fresh = runtime.service()
-    original_recover = fresh._recover_expired
+    import app.director.agent_service as agent_service
+
+    original_recover = agent_service.recover_expired
     recovered_invocation_states: list[str] = []
 
-    async def paused_recovery(session, turn):
+    async def paused_recovery(session, *, project_id, turn):
         recovery_locked.set()  # read_turn already owns the actual PG Turn row lock.
         await release_recovery.wait()
-        await original_recover(session, turn)
+        await original_recover(session, project_id=project_id, turn=turn)
         recovered_invocation_states.extend(
             await session.scalars(
                 select(DirectorInvocation.status).where(DirectorInvocation.turn_id == turn.id),
@@ -726,7 +767,7 @@ async def test_expired_agent_recovery_and_late_model_result_do_not_deadlock_or_r
         ):
             late_turn_lock_requested.set()
 
-    monkeypatch.setattr(fresh, "_recover_expired", paused_recovery)
+    monkeypatch.setattr(agent_service, "recover_expired", paused_recovery)
     recovery = None
     listener_added = False
     try:
@@ -759,13 +800,14 @@ async def test_expired_agent_recovery_and_late_model_result_do_not_deadlock_or_r
             assert recovered_invocation_states == ["unknown_submission"]
             assert result.stop_reason == "unknown_submission"
             assert result.assistant_message_id is None
-            replay = await runtime.service().run(
-                runtime.thread_id,
-                request,
-                model=model,
-                checkpointer=MemorySaver(),
+            replay_acceptance, created = await runtime.service().accept(
+                runtime.thread_id, request, model=model
             )
-            assert replay.turn_id == turn_id and replay.status == "failed" and model.calls == 1
+            assert created is False and replay_acceptance.turn_id == turn_id
+            replayed = await runtime.service().execute_queued(
+                turn_id, model=model, checkpointer=MemorySaver()
+            )
+            assert replayed.status == "failed" and model.calls == 1
         with Session(runtime.database.engine) as session:
             invocations = list(
                 session.scalars(
@@ -813,12 +855,7 @@ async def test_agent_stop_marks_inflight_model_unknown_without_reviving_on_late_
     model = BarrierModel(AgentModelResponse(text="This answer arrived after stop."))
     request = AgentRequest(content="Analyze this film", request_key="stop-model")
     running = asyncio.create_task(
-        runtime.service().run(
-            runtime.thread_id,
-            request,
-            model=model,
-            checkpointer=MemorySaver(),
-        )
+        _submit(runtime.service(), runtime.thread_id, request, model=model)
     )
     try:
         async with asyncio.timeout(20):
@@ -851,13 +888,14 @@ async def test_agent_stop_marks_inflight_model_unknown_without_reviving_on_late_
             model.release.set()
             result = await running
             assert result.status == "cancelled" and result.assistant_message_id is None
-            replay = await runtime.service().run(
-                runtime.thread_id,
-                request,
-                model=model,
-                checkpointer=MemorySaver(),
+            replay_acceptance, created = await runtime.service().accept(
+                runtime.thread_id, request, model=model
             )
-            assert replay.turn_id == turn_id and replay.status == "cancelled" and model.calls == 1
+            assert created is False and replay_acceptance.turn_id == turn_id
+            replayed = await runtime.service().execute_queued(
+                turn_id, model=model, checkpointer=MemorySaver()
+            )
+            assert replayed.status == "cancelled" and model.calls == 1
         with Session(runtime.database.engine) as session:
             invocation = session.scalar(
                 select(DirectorInvocation).where(
@@ -986,12 +1024,7 @@ async def test_cancelling_proposal_before_receipt_rolls_back_all_proposal_facts(
     monkeypatch.setattr(AgentToolAudit, "complete", pause_receipt)
     monkeypatch.setattr(service, "_finish", pause_finish)
     running = asyncio.create_task(
-        service.run(
-            runtime.thread_id,
-            request,
-            model=model,
-            checkpointer=MemorySaver(),
-        )
+        _submit(service, runtime.thread_id, request, model=model)
     )
     try:
         async with asyncio.timeout(20):
@@ -1019,15 +1052,14 @@ async def test_cancelling_proposal_before_receipt_rolls_back_all_proposal_facts(
             )
             assert stopped.status == "cancelled"
             replay = await fresh.replay(runtime.thread_id, request)
-            assert replay is not None and replay.status == "cancelled" and replay.proposal_ids == []
+            assert replay is not None and replay.turn_id == observed_turn_id
+            receipt = await fresh.read_request(runtime.thread_id, request.request_key)
+            assert receipt.turn.status == "cancelled" and receipt.turn.proposal_ids == []
             release_finish.set()
             with pytest.raises(asyncio.CancelledError):
                 await running
-            again = await runtime.service().run(
-                runtime.thread_id,
-                request,
-                model=model,
-                checkpointer=MemorySaver(),
+            again = await _submit(
+                runtime.service(), runtime.thread_id, request, model=model, expect_created=False
             )
             assert again.status == "cancelled" and again.proposal_ids == [] and model.calls == 1
         with Session(runtime.database.engine) as session:
@@ -1076,12 +1108,7 @@ async def test_stop_after_proposal_commit_preserves_one_pending_proposal_and_rec
 
     monkeypatch.setattr(service, "_finish", pause_finish)
     running = asyncio.create_task(
-        service.run(
-            runtime.thread_id,
-            request,
-            model=model,
-            checkpointer=MemorySaver(),
-        )
+        _submit(service, runtime.thread_id, request, model=model)
     )
     try:
         async with asyncio.timeout(20):
@@ -1116,13 +1143,14 @@ async def test_stop_after_proposal_commit_preserves_one_pending_proposal_and_rec
             release_finish.set()
             result = await running
             assert result.status == "cancelled" and result.proposal_ids == [proposal_id]
-            replay = await runtime.service().run(
-                runtime.thread_id,
-                request,
-                model=model,
-                checkpointer=MemorySaver(),
+            replay_acceptance, created = await runtime.service().accept(
+                runtime.thread_id, request, model=model
             )
-            assert replay.status == "cancelled" and replay.proposal_ids == [proposal_id]
+            assert created is False and replay_acceptance.turn_id == turn_id
+            replayed = await runtime.service().execute_queued(
+                turn_id, model=model, checkpointer=MemorySaver()
+            )
+            assert replayed.status == "cancelled" and replayed.proposal_ids == [proposal_id]
             assert model.calls == 1
         with Session(runtime.database.engine) as session:
             for row_type in (DirectorProposal, DirectorProposalItem, DirectorToolCall):

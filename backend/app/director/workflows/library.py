@@ -1,15 +1,9 @@
-"""Workflow Template library (WF3/WF4).
+"""Versioned Workflow planning metadata for eligibility and read-only navigation.
 
-Registers the provider-neutral production templates that the Director /
-Workbench execution path selects from.  Keeps the existing
-``dialogue-post-dub-shot-v1`` graph definition byte-for-byte stable (legacy path
-still imports ``app.director.production_templates`` directly); the registry is
-the canonical place to resolve a template for a new shot/scene.
+Production uses the canonical Shot pipeline; this catalog does not construct graphs.
 """
 
 from __future__ import annotations
-
-from collections.abc import Iterable
 
 from app.director.workflows.contracts import (
     WorkflowScope,
@@ -18,37 +12,10 @@ from app.director.workflows.contracts import (
     WorkflowTemplateSpec,
 )
 from app.director.workflows.registry import WorkflowTemplateRegistry
-from app.director.workflows.template_nodes import (
-    action_motion_shot_definition,
-    establishing_reaction_insert_definition,
-    montage_sequence_definition,
-    single_character_monologue_definition,
-    two_character_dialogue_definition,
-)
-from app.production.templates import (
-    DIALOGUE_POST_DUB_SHOT_V1,
-    QUALITY_POLICY_V1,
-    dialogue_post_dub_definition,
-)
 from app.providers.capabilities import Capability
 
-
-def dialogue_graph_factory(
-    *,
-    character_reference_keys: Iterable[str],
-    primary_character_reference_key: str,
-    context: dict[str, object],
-) -> dict[str, object]:
-    """Provider-neutral graph builder for ``dialogue-post-dub-shot-v1``.
-
-    Delegates to the existing stable definition so WF3 does not rewrite any
-    graph node.  Golden behavior and quality policy are preserved.
-    """
-    return dialogue_post_dub_definition(
-        character_reference_keys=character_reference_keys,
-        primary_character_reference_key=primary_character_reference_key,
-        context=context,
-    )
+DIALOGUE_POST_DUB_SHOT_V1 = "dialogue-post-dub-shot-v1"
+QUALITY_POLICY_V1 = "live-dialogue-quality-v1"
 
 
 def dialogue_post_dub_spec() -> WorkflowTemplateSpec:
@@ -84,7 +51,6 @@ def dialogue_post_dub_spec() -> WorkflowTemplateSpec:
             formal_outputs=["formal_keyframe", "formal_video"],
             review_nodes=["identity_review", "video_drift_review", "continuity_review"],
         ),
-        graph_factory=dialogue_graph_factory,
     )
 
 
@@ -137,7 +103,6 @@ def single_character_monologue_spec() -> WorkflowTemplateSpec:
             formal_outputs=["formal_keyframe", "formal_video"],
             review_nodes=["identity_review", "video_drift_review", "continuity_review"],
         ),
-        graph_factory=single_character_monologue_definition,
     )
 
 
@@ -173,7 +138,6 @@ def two_character_dialogue_spec() -> WorkflowTemplateSpec:
             formal_outputs=["formal_keyframe", "formal_video"],
             review_nodes=["identity_review", "video_drift_review", "continuity_review"],
         ),
-        graph_factory=two_character_dialogue_definition,
     )
 
 
@@ -184,8 +148,7 @@ def action_motion_shot_spec() -> WorkflowTemplateSpec:
         scope=WorkflowScope.SHOT,
         display_name="Action / motion shot",
         description=(
-            "High-motion shot: no dialogue voice, motion and body-anatomy "
-            "repair emphasis."
+            "High-motion shot: no dialogue voice, motion and body-anatomy repair emphasis."
         ),
         intent_tags=("action", "motion", "physical"),
         supported_mediums=("image", "video"),
@@ -209,7 +172,6 @@ def action_motion_shot_spec() -> WorkflowTemplateSpec:
             formal_outputs=["formal_keyframe", "formal_video"],
             review_nodes=["identity_review", "video_drift_review", "continuity_review"],
         ),
-        graph_factory=action_motion_shot_definition,
     )
 
 
@@ -245,7 +207,6 @@ def establishing_reaction_insert_spec() -> WorkflowTemplateSpec:
             formal_outputs=["formal_keyframe", "formal_video"],
             review_nodes=["video_drift_review", "continuity_review"],
         ),
-        graph_factory=establishing_reaction_insert_definition,
     )
 
 
@@ -256,8 +217,7 @@ def montage_sequence_spec() -> WorkflowTemplateSpec:
         scope=WorkflowScope.SCENE,
         display_name="Montage sequence",
         description=(
-            "Scene-scope montage: multiple short shot contributions assembled "
-            "into one composite."
+            "Scene-scope montage: multiple short shot contributions assembled into one composite."
         ),
         intent_tags=("montage", "sequence"),
         supported_mediums=("image", "video"),
@@ -281,7 +241,6 @@ def montage_sequence_spec() -> WorkflowTemplateSpec:
             formal_outputs=["formal_video"],
             review_nodes=["continuity_review"],
         ),
-        graph_factory=montage_sequence_definition,
     )
 
 

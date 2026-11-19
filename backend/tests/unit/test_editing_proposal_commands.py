@@ -476,6 +476,7 @@ async def test_rejected_edit_session_proposal_does_not_apply_or_bump(
 async def test_cross_project_edit_session_is_rejected(session: AsyncSession) -> None:
     project, edit_session, user, _shot, _asset, _graph, _run, _operation = await _seed(session)
     project_b = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=project.workspace_id,
         name="Other Project",
         aspect_ratio="16:9",

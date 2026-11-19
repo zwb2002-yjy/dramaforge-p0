@@ -269,6 +269,7 @@ async def test_empty_manual_project_reaches_real_mp4_srt_with_director_stopped(
             await session.flush()
             await set_rls_context(session, user_id=actor.id, workspace_id=workspace.id)
             project = await ProjectService(session).create_project(
+                work_type="serial_comic",
                 workspace_id=workspace.id,
                 name="D8 empty MANUAL project",
                 aspect_ratio="16:9",

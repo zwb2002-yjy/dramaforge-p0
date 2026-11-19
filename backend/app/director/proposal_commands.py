@@ -17,7 +17,8 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.models import User
+from app.access.models import Project, User
+from app.assets.episodes import lock_episode_project, require_new_episode_capacity
 from app.assets.models import Asset, Episode, Scene, ScriptDocument, Shot
 from app.assets.version_service import AssetVersionService
 from app.editing.models import EditSession
@@ -33,7 +34,7 @@ from app.production.experiment_service import (
     create_experiment_branch,
 )
 from app.production.models import ShotReferenceBinding
-from app.shared.errors import AppError, ValidationAppError
+from app.shared.errors import AppError, ConflictError, ValidationAppError
 
 COMMAND_WHITELIST = frozenset(
     {
@@ -55,6 +56,7 @@ COMMAND_WHITELIST = frozenset(
         "experiment.create",
         "edit_session.apply_timeline_plan",
         "editing.repair_proposal",
+        "director.master_run_plan_apply",
     }
 )
 
@@ -243,6 +245,7 @@ async def _apply_story_upsert_episode(
     payload: dict[str, Any],
     expected_version: int | None,
 ) -> None:
+    project = await lock_episode_project(session, project_id)
     episode, episode_number = await _episode_number_row(
         session,
         project_id=project_id,
@@ -254,6 +257,10 @@ async def _apply_story_upsert_episode(
     title = str(payload.get("title") or "")[:160]
     synopsis = str(payload.get("synopsis") or "")
     if episode is None:
+        try:
+            await require_new_episode_capacity(session, project)
+        except ConflictError as exc:
+            raise ProposalCommandError(str(exc), details=exc.details) from exc
         episode = Episode(
             project_id=project_id,
             episode_number=episode_number,
@@ -887,6 +894,46 @@ async def _apply_experiment_create(
         raise ProposalCommandError(str(exc), details={"code": exc.code}) from exc
 
 
+async def _apply_master_run_plan(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    payload: dict[str, Any],
+    actor_id: UUID,
+) -> None:
+    """Confirm one accepted plan under the frozen MasterRun CAS basis."""
+    from app.director.master_runs import MasterRunService
+    from app.shared.errors import NotFoundError
+
+    try:
+        run_id = UUID(str(payload["master_run_id"]))
+        plan_id = UUID(str(payload["plan_id"]))
+        expected_revision = int(payload["expected_run_revision"])
+        expected_epoch = int(payload["expected_control_epoch"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ProposalCommandError(
+            "计划确认参数不完整", details={"code": "MASTER_RUN_PLAN_APPLY_INPUT"},
+        ) from exc
+    project = await session.get(Project, project_id)
+    actor = await session.get(User, actor_id)
+    if project is None or actor is None:
+        raise ProposalCommandError(
+            "项目或执行人不存在", details={"code": "MASTER_RUN_PLAN_APPLY_SCOPE"},
+        )
+    service = MasterRunService(session, actor=actor, project=project)
+    try:
+        await service.apply_plan(
+            run_id=run_id, plan_id=plan_id,
+            expected_revision=expected_revision, expected_control_epoch=expected_epoch,
+        )
+    except NotFoundError as exc:
+        raise ProposalCommandError(
+            str(exc), details={"code": "MASTER_RUN_PLAN_NOT_FOUND"},
+        ) from exc
+    except AppError as exc:
+        raise ProposalCommandError(str(exc), details={"code": exc.code}) from exc
+
+
 class ProposalCommandRegistry:
     """Typed command registry (03 §65). Only whitelisted commands apply."""
 
@@ -1022,6 +1069,13 @@ class ProposalCommandRegistry:
                 project_id=project_id,
                 payload=payload,
                 expected_target_version=expected_target_version,
+            )
+        elif command == "director.master_run_plan_apply":
+            await _apply_master_run_plan(
+                self._session,
+                project_id=project_id,
+                payload=payload,
+                actor_id=self._actor_id,
             )
         else:  # pragma: no cover - registry covers all whitelisted commands
             raise ProposalCommandError(f"command not implemented: {command}")

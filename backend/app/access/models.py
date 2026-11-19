@@ -24,6 +24,13 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
+# Same-domain leaf models: egress declarations/policy are registered through this
+# access models entry so the shared registry keeps its recorded dependencies.
+from app.access.egress_models import (  # noqa: F401  (registration only)
+    ProjectEgressPolicyHead,
+    ProjectEgressPolicyRevision,
+    ProviderDestinationRevision,
+)
 from app.shared.base import Base
 from app.shared.db_types import CURRENCY_CODE, JSON_DOCUMENT
 from app.shared.enums import ProjectStage
@@ -34,6 +41,7 @@ class Workspace(Base):
     __tablename__ = "workspaces"
     __table_args__ = (
         UniqueConstraint("owner_user_id", "name", name="uq_workspaces_owner_name"),
+        UniqueConstraint("id", "owner_user_id", name="uq_workspaces_id_owner"),
         CheckConstraint("version > 0", name="ck_workspaces_version_positive"),
     )
 
@@ -105,6 +113,26 @@ class Project(Base):
         CheckConstraint("aspect_ratio IN ('9:16','16:9')", name="ck_projects_aspect"),
         CheckConstraint("budget_limit >= 0", name="ck_projects_budget"),
         CheckConstraint("version > 0", name="ck_projects_version"),
+        UniqueConstraint("id", "workspace_id", name="uq_projects_id_workspace"),
+        CheckConstraint(
+            "work_type IS NULL OR work_type IN "
+            "('animation_promo','single_comic','serial_comic')",
+            name="ck_projects_work_type",
+        ),
+        CheckConstraint("length(creative_goal) <= 16000", name="ck_projects_creative_goal_length"),
+        CheckConstraint("length(audience) <= 2000", name="ck_projects_audience_length"),
+        CheckConstraint(
+            "planned_duration_seconds IS NULL OR "
+            "(planned_duration_seconds > 0 AND planned_duration_seconds < 1000000000)",
+            name="ck_projects_planned_duration",
+        ),
+        CheckConstraint(
+            "planned_episode_count IS NULL OR (planned_episode_count > 0 AND "
+            "(work_type IS NULL OR "
+            "(work_type = 'single_comic' AND planned_episode_count = 1) OR "
+            "(work_type = 'serial_comic' AND planned_episode_count >= 2)))",
+            name="ck_projects_episode_plan",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -119,6 +147,11 @@ class Project(Base):
     )
     aspect_ratio: Mapped[str] = mapped_column(String(8), nullable=False)
     target_platform: Mapped[str] = mapped_column(String(40), nullable=False, default="general")
+    work_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    creative_goal: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    audience: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    planned_duration_seconds: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), nullable=True)
+    planned_episode_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     style_bible: Mapped[dict[str, object]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=dict
     )

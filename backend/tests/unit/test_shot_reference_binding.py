@@ -17,9 +17,16 @@ def _csrf(client: TestClient) -> str:
 def test_reference_rejects_foreign_experiment_branch(client: TestClient, operation: str) -> None:
     project_id, shot_id, asset_id = _project_with_shot_and_asset(client)
     workspace_id = client.headers["X-Workspace-Id"]
-    other = client.post("/api/v1/projects",
-        json={"workspace_id": workspace_id, "name": "Other", "aspect_ratio": "16:9"},
-        headers={CSRF_HEADER: _csrf(client)})
+    other = client.post(
+        "/api/v1/projects",
+        json={
+            "work_type": "serial_comic",
+            "workspace_id": workspace_id,
+            "name": "Other",
+            "aspect_ratio": "16:9",
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
     assert other.status_code == 201, other.text
     branch = client.post(f"/api/v1/projects/{other.json()['id']}/experiments",
         json={"name": "Foreign", "idempotency_key": f"foreign-{uuid4()}"},
@@ -55,7 +62,12 @@ def _project_with_shot_and_asset(client: TestClient) -> tuple[str, str, str]:
     client.headers["X-Workspace-Id"] = workspace_id
     created = client.post(
         "/api/v1/projects",
-        json={"workspace_id": workspace_id, "name": "Binding Project", "aspect_ratio": "16:9"},
+        json={
+            "work_type": "serial_comic",
+            "workspace_id": workspace_id,
+            "name": "Binding Project",
+            "aspect_ratio": "16:9",
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert created.status_code in {200, 201}, created.text

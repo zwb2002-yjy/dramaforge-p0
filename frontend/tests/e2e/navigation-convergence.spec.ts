@@ -243,7 +243,7 @@ test("A01-A05: one global entry, reading order and a single card action", async 
   const { writes, errors } = await setup(page);
   await page.goto("/");
   const primary = page.getByRole("navigation", { name: "一级导航" });
-  await expect(primary.getByRole("link")).toHaveCount(2);
+  await expect(primary.getByRole("link")).toHaveCount(3);
   await expect(primary).toHaveText(/项目.*设置/s);
   await expect(primary.getByRole("link", { name: "我的项目", exact: true })).toHaveAttribute(
     "href",
@@ -407,6 +407,8 @@ test("A10-A11: empty list, search miss and explicit creation have distinct paths
     route.fulfill({ status: 201, json: { id: PROJECT_ID } }),
   );
   await page.getByRole("button", { name: "新建项目", exact: true }).click();
+  await page.getByRole("combobox", { name: "作品类型", exact: true }).click();
+  await page.getByRole("option", { name: "动画宣传片", exact: true }).click();
   await page.getByRole("button", { name: "创建并进入剧本" }).click();
   await expect(page).toHaveURL(`${ROOT}/script`);
   expect(writes).toEqual(["/api/v1/projects"]);

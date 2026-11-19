@@ -344,11 +344,14 @@ async def test_service_freezes_real_adopted_context_and_rechecks_it_without_read
             return response
 
     model = AdoptedContextModel(AgentModelResponse(text="The saved creative choices are recorded."))
-    result = await world.service.run(
+    acceptance, created = await world.service.accept(
         thread.id,
         AgentRequest(content="Explain my adopted choices", request_key="creative-state"),
         model=model,
-        checkpointer=MemorySaver(),
+    )
+    assert created
+    result = await world.service.execute_queued(
+        acceptance.turn_id, model=model, checkpointer=MemorySaver()
     )
     assert len(model.calls) == result.model_calls == 1
     assert result.tool_calls == 0
@@ -472,14 +475,17 @@ async def test_saved_creative_instructions_cannot_grant_forbidden_tool_permissio
         ),
         AgentModelResponse(text=explanation),
     )
-    result = await world.service.run(
+    acceptance, created = await world.service.accept(
         thread.id,
         AgentRequest(
             content="Explain my saved choices; do not execute or adopt anything.",
             request_key=f"deny-{forbidden_tool}",
         ),
         model=model,
-        checkpointer=MemorySaver(),
+    )
+    assert created
+    result = await world.service.execute_queued(
+        acceptance.turn_id, model=model, checkpointer=MemorySaver()
     )
     assert result.status == "completed" and result.model_calls == 2 and result.tool_calls == 1
     assert result.proposal_ids == []

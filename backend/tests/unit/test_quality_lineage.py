@@ -32,6 +32,7 @@ async def _seed_chain(
     user = await session.scalar(select(User).where(User.id == workspace.owner_user_id))
     assert user is not None
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=workspace.id, name="QL", aspect_ratio="9:16", actor=user
     )
     graph = await GraphService(session).create_graph(

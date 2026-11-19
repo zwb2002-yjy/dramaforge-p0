@@ -8,7 +8,7 @@ import {
   createShotReference,
   roleLabel,
   rolesForAssetKind,
-  type AssetRead,
+  type AssetAdoptionReceiptRead,
 } from "./api";
 
 type AddArtifactToAssetDialogProps = {
@@ -25,7 +25,7 @@ type AddArtifactToAssetDialogProps = {
   sourceLabel: string;
   /** Shot that may be bound to the new asset version afterwards. */
   shotId?: string | null;
-  onCreated?: (asset: AssetRead) => void | Promise<void>;
+  onCreated?: (receipt: AssetAdoptionReceiptRead, displayName: string) => void | Promise<void>;
   onClose: () => void;
 };
 
@@ -68,7 +68,7 @@ export function AddArtifactToAssetDialog({
     rolesForAssetKind(initialKind)[0] ?? "primary",
   );
   const [description, setDescription] = useState("");
-  const [created, setCreated] = useState<AssetRead | null>(null);
+  const [created, setCreated] = useState<AssetAdoptionReceiptRead | null>(null);
   const [bound, setBound] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // One explicit operation keeps one request key across retries; a second,
@@ -89,10 +89,10 @@ export function AddArtifactToAssetDialog({
         },
         requestKey.current,
       ),
-    onSuccess: async (asset) => {
+    onSuccess: async (receipt) => {
       setError(null);
-      setCreated(asset);
-      await onCreated?.(asset);
+      setCreated(receipt);
+      await onCreated?.(receipt, name.trim());
     },
     onError: (cause: unknown) => {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -100,7 +100,7 @@ export function AddArtifactToAssetDialog({
   });
 
   const bindMut = useMutation({
-    mutationFn: async (asset: AssetRead) => {
+    mutationFn: async (receipt: AssetAdoptionReceiptRead) => {
       if (!shotId) throw new Error("请先选择镜头，再绑定资产版本。");
       // Bind the exact Artifact this dialog turned into the asset ("direct
       // artifact"). AssetRead does not carry the current version id, and the
@@ -117,10 +117,10 @@ export function AddArtifactToAssetDialog({
                 : kind === "character"
                   ? "identity"
                   : "generic_reference",
-        asset_id: asset.id,
+        asset_id: receipt.asset_id,
         artifact_id: artifactId,
         resolution_mode: "direct_artifact",
-        label: asset.name,
+        label: name.trim(),
       });
     },
     onSuccess: () => {
@@ -147,7 +147,9 @@ export function AddArtifactToAssetDialog({
 
       {created ? (
         <div data-testid="add-asset-result" role="status">
-          <p>已创建资产「{created.name}」，并将此版本设为正式（v1，status=formal）。</p>
+          <p>
+            已创建资产「{name.trim()}」并采用该版本（revision {created.accepted_asset_revision}）。
+          </p>
           {shotId ? (
             <Button
               type="button"

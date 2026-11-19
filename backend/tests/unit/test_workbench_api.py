@@ -452,6 +452,7 @@ def _project_id(client: TestClient) -> str:
         "/api/v1/projects",
         headers={CSRF_HEADER: _csrf(client)},
         json={
+            "work_type": "serial_comic",
             "name": "WB Project",
             "aspect_ratio": "9:16",
             "workspace_id": client.headers["X-Workspace-Id"],

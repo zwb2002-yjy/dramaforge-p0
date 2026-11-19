@@ -6,6 +6,7 @@ from app.api.v1 import (
     assets,
     auth,
     batch_production,
+    business_flows,
     creative_capabilities,
     director,
     director_board,
@@ -14,20 +15,25 @@ from app.api.v1 import (
     experiments,
     final_film,
     generations,
+    knowledge,
     maintenance,
     model_candidates,
     model_inspection,
     model_profiles,
     opencut,
     production,
+    project_egress,
     project_files,
     projects,
     provider_connections,
     provider_references,
+    public_assets,
     references,
+    research,
     review,
     scenes,
     scripts,
+    source_use,
     story,
     worker,
     workflow_overview,
@@ -39,7 +45,9 @@ api_router = APIRouter()
 api_router.include_router(assets.router)
 api_router.include_router(auth.router)
 api_router.include_router(batch_production.router)
+api_router.include_router(business_flows.router)
 api_router.include_router(projects.router)
+api_router.include_router(project_egress.router)
 api_router.include_router(project_files.router)
 api_router.include_router(director.router)
 api_router.include_router(director_board.router)
@@ -48,13 +56,17 @@ api_router.include_router(production.router)
 api_router.include_router(review.router)
 api_router.include_router(scenes.router)
 api_router.include_router(scripts.router)
+api_router.include_router(source_use.router)
 api_router.include_router(story.router)
 api_router.include_router(provider_connections.router)
 api_router.include_router(provider_references.router)
 api_router.include_router(references.router)
+api_router.include_router(research.router)
 api_router.include_router(model_candidates.router)
 api_router.include_router(model_inspection.router)
 api_router.include_router(generations.router)
+api_router.include_router(knowledge.router)
+api_router.include_router(public_assets.router)
 api_router.include_router(model_profiles.router)
 api_router.include_router(opencut.router)
 api_router.include_router(worker.router)

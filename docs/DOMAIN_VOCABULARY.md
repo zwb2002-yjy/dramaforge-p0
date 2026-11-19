@@ -23,7 +23,7 @@ Updated: 2026-10-08；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 | 术语 | 唯一含义 | 代码锚点 |
 |---|---|---|
 | **Workspace** | 顶层租户/空间容器，所有 Project 归属它 | `access/models.py::Workspace` |
-| **Project** | 一部作品；主链的起点，所有生产事实的项目范围 | `access/models.py::Project` |
+| **Project** | 一部作品或同一连续系列；主链的起点，所有生产事实的项目范围 | `access/models.py::Project` |
 | **Creative Profile** | 每个 Project 唯一一份的创作档案：启动方式、导演自主度、选中的类型/风格/技能/镜头语言 | `access/models.py::ProjectCreativeProfile`（`project_creative_profiles`，`project_id` unique） |
 | **Story** | 故事层内容，由 Director 提案产生，用户显式 Apply 后成为事实 | `director/story_proposal.py`、`director/story_generation.py` |
 | **Script** | 剧本文档；导入或生成的脚本事实 | `assets/models.py::ScriptDocument`、`assets/script_import.py` |
@@ -134,7 +134,7 @@ explicit user value > accepted proposal > project override > pack default
 | **GraphEdge** | Graph 版本内的节点依赖边 | `execution/models.py::GraphEdge` |
 | **Node** | ProductionGraph 内一个有明确输入和输出的**生产步骤定义**。不是普通函数 | 持久化节点类型见 [PRODUCTION_GRAPH.md](PRODUCTION_GRAPH.md) 第三节 |
 | **NodeRun** | 某个 Node 的**一次实际执行事实**（排队 → 运行 → 终态）。同一个 Node 的多次重做是多个 NodeRun | `execution/models.py::NodeRun` |
-| **ProviderOperation** | 一次真实的外部模型/API 调用事实。**只有 NodeRun 一个 owner**，关系为 `NodeRun 1..N ProviderOperation` | `execution/models.py::ProviderOperation` |
+| **ProviderOperation** | 一次已冻结执行后端操作事实，可为远端模型/API或已注册本地媒体处理。**只有 NodeRun 一个 owner**；当前非空node_run_id唯一，对应每NodeRun `0..1` | `execution/models.py::ProviderOperation`；本地例见`production/final_film.py` |
 | **Artifact** | 不可变产物及其血缘 | `execution/models.py::Artifact`、`execution/artifact_lineage.py` |
 | **Outbox** | 事务性事件外发与死信 | `events/`、`workers/dispatcher.py` |
 | **WorkbenchExecutionPlan** | 冻结的执行计划：模型身份、引用编译、阶段与节点契约在提交前被显式冻结 | `production/execution_plan.py::WorkbenchExecutionPlan` |
@@ -181,12 +181,46 @@ explicit user value > accepted proposal > project override > pack default
 | 禁止新增 | 应使用 |
 |---|---|
 | `GenerationTask`、`RenderTask`、`WorkflowTask`、`MediaJob`、`VideoJob`、`GenerationRun`、`GenerationService`（作为新概念） | **NodeRun** |
-| `ProviderCall`、`ModelCall`、`ApiCall` | **ProviderOperation** |
+| `ProviderCall`、`ModelCall`、`ApiCall`（作为重复生产事实实体） | **ProviderOperation**；Director文本调用仍用其既有Invocation，不因此创建NodeRun/Operation副本 |
 | `DirectorGraph`、`CreativeGraph`、`SkillGraph`、`EditingGraph`、`UIWorkflowGraph` | **Director Runtime Flow**（控制流）或 **ProductionGraph**（执行计划） |
-| `ProductionWorkbench`、`CreativeWorkspace`、`SceneWorkbench`、`ShotWorkbench`、`DirectorBoard`（作为一级产品区域） | 一级区域只保留 **Project Lobby / Creation / Production / Editing**；上述名称最多只能是 Production 区域**内部组件或视图** |
+| `ProductionWorkbench`、`CreativeWorkspace`、`SceneWorkbench`、`ShotWorkbench`、`DirectorBoard`（作为并列产品入口） | 机构版按N08/N10统一项目/资料/研究/内容/素材/交付及三栏；独立文化知识和平台设置是明确全局能力。技术组件名不得变成第二套工作台/Runtime |
 | `CreativeRuntime`、`SkillRuntime`、`StyleRuntime`、`EditingRuntime` | 禁止存在；Creative Layer 是能力集合，Editing 属于成片领域 |
 | `Character`、`CharacterReference`（兼容层） | **AssetVersionReference** |
 | `Quick Creation`、`V1 Workbench`、`Professional`（作为并列产品） | 只有一个产品主链 |
+
+## 机构版新增领域术语（D2目标，未实施）
+
+本节补充共享概念，具体表列/生命周期以[DATA_MODEL](DATA_MODEL.md#institution-schema)和Runtime权威为准。
+新概念与旧事实不同，不将新增目标描述为当前代码能力；D2数据设计已审查，D8前继续与执行/API合同交叉核对。
+
+| 术语 | 唯一含义 | 当前/目标落点 |
+|---|---|---|
+| ProjectFile / ProjectFileRevision | 项目私有资料关联 / 不可变原件版本；解除关联不物理删除 | assets/models.py已有 |
+| SourceExtraction / SourceFragment | 一次成功解析的不可变内容快照 / 带定位的原文片段 | 目标source_extractions/source_fragments，替换excerpts消费者；不是研究结果或新Runtime |
+| ResearchResult / ResearchResultRevision | 稳定研究条目及当前有效指针 / 不可变AI候选、用户编辑或恢复快照 | 目标research_results/research_result_revisions |
+| ResearchCitation | 某研究修订到确切原件修订与解析片段的引用 | 目标research_citations；来源失效不改写历史 |
+| ResearchAnalysis | 一次分析的不可变覆盖清单与输出/Invocation引用，允许某类零发现 | 目标research_analyses；执行状态仍归Turn/Flow，不新增分析Runtime |
+| SourceUseSubject / SourceUseRevision | 某原件修订或Artifact的当前使用限制指针 / 不可变声明与撤销 | 目标source_use_subjects/source_use_revisions；区别于外发目的地策略 |
+| ArtifactSourceUse | 生成Artifact到实际消费来源及当时限制版本的不可变依赖 | 目标artifact_source_uses；不改变produced_by_run_id或生产所有权 |
+| KnowledgeEntry / KnowledgeRevision | 独立文化知识身份与发布状态 / 显式选择的内容版本 | 目标knowledge_entries/knowledge_revisions，按N05同用户跨Workspace共享；不等同私有研究 |
+| KnowledgeSourceLink | 知识发布到私有研究的受限溯源关系 | 目标项目RLS，仅来源项目可读 |
+| ProjectKnowledgeReference | 项目对已发布知识固定版本及用途的引用 | 目标项目引用；不跟随知识current自动更新 |
+| MasterRun | 跨多个Turn监督的持续创作目标 | 第三轮候选，目标director_master_runs；不是每个HTTP请求 |
+| MasterRunPlanRevision | 目标的不可变计划版本 | 目标director_master_run_plans；复用typed Proposal决定 |
+| MasterRunControlReceipt | pause/resume/cancel/verify受理结果的不可变幂等回执 | 目标专用回执表；不是任务或生产状态 |
+| BusinessFlowDefinition | 代码注册的版本化业务步骤/条件/恢复合同 | 目标Python LangGraph注册入口；不是用户JSON解释器 |
+| BusinessFlowInstance / BusinessFlowStep / BusinessFlowStepAttempt | 跨Turn业务流程 / 业务步骤 / 一次冻结输入的业务尝试 | 第三轮三表目标；production attempt只关联一个NodeRun |
+| RuntimeControl | 有界执行的授权、lease/epoch、停止与恢复控制端口 | runtime/control.py已有局部；O6统一接口先于删旧Turn字段 |
+| EgressPolicyRevision | 项目内容外发许可不可变版本 | 目标策略revision/head；与SSRF网络守卫不同 |
+| PublicAssetPublication | 用户采用的生成AssetVersion在实例库的发布资格及安全展示投影 | D2候选public_asset_publications；原版本/Artifact所有权不变，不是第二可变资产 |
+| ProjectPublicAssetLink | 消费项目对某已发布AssetVersion的固定引用与项目显示标签 | D2候选project_public_asset_links；不复制媒体/资产版本 |
+| ProviderDestinationRevision | 实际处理目的地的可信版本化声明 | 目标workspace声明；Proxy在本地不等于上游在本地 |
+
+Project含单部作品或同一连续系列，Episode表示分集。Character可在用户语言中表示角色，
+代码仍以Asset/AssetVersion/Reference为身份，不恢复旧Character兼容表。
+公共资产已核对卡片/引用API/编译/令牌消费者，目标限制传播/组合键/API合同回填DATA_MODEL、MODEL_PROVIDER、API；仍未实施，不能创建第二套可变Asset真相。
+旧Workflow符号的正式改名按模板/生产读模型/创意规划分别处理，保留不同含义的turn_kind='workflow'，
+不机械全仓替换。具体命名映射见DIRECTOR_RUNTIME的O2消费者合同，尚待实施。
 
 **已存在的同义风险（当前处置见映射，不按历史 Phase 编号启动新任务，见
 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md)）：**
@@ -195,4 +229,4 @@ explicit user value > accepted proposal > project override > pack default
 |---|---|---|
 | `Experiment`（`ExperimentBranch`） | 唯一当前实验分支；旧 `ProductionExperiment` / `ShotExperiment` 已删除 | 旧 ORM/表不在当前 schema；历史实例数据与证据按 DEVELOPMENT 生命周期处置 |
 | `Node` 与 `GraphNode` | `Node` 是概念，`GraphNode` 是持久化实例 | KEEP，成对使用 |
-| `Workflow` | 仅存在于 `director/workflows/`，指"镜头生产模板目录" | RENAME/MERGE，见映射文档 |
+| `Workflow`旧命名 | `director/workflows/`混合模板、生产聚合读模型、创意规划/连续性/质量；Turn的workflow表示另一个事实 | 按O2/O3分类改名，D3补精确消费者映射；不是整个目录迁入Production或恢复旧Workflow运行表 |

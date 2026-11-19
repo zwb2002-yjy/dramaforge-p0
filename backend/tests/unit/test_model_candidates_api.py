@@ -150,10 +150,10 @@ def test_model_candidates_api_lists_unverified_binding_as_ineligible(
     project = client.post(
         "/api/v1/projects",
         json={
+            "work_type": "serial_comic",
             "workspace_id": workspace_id,
             "name": f"candidates-{uuid4().hex[:8]}",
             "aspect_ratio": "9:16",
-            "budget_limit": "0",
         },
         headers={CSRF_HEADER: _csrf(client)},
     )
@@ -253,7 +253,12 @@ def test_project_provider_bindings_can_be_read_back_with_their_model_identity(
 
     project = client.post(
         "/api/v1/projects",
-        json={"workspace_id": workspace_id, "name": "Binding read", "aspect_ratio": "16:9"},
+        json={
+            "work_type": "serial_comic",
+            "workspace_id": workspace_id,
+            "name": "Binding read",
+            "aspect_ratio": "16:9",
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert project.status_code == 201, project.text

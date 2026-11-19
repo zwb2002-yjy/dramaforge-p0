@@ -345,3 +345,90 @@ docker compose --profile maintenance run --rm maintenance restore-verify \
 镜像、API、Workers 与 `DRAMAFORGE_SOURCE_COMMIT` 必须对应同一提交，不挂载其它 worktree
 充当新实例。旧项目数据卷不能自动合并或启动旧任务；需要恢复时单独保管，已明确弃用的
 环境按上述历史批次清理，不默认永久保管。
+
+## 机构版验证合同（D7设计，待实施）
+
+需求逐项与测试文件映射维护在[TEST_EVIDENCE](implementation/TEST_EVIDENCE.md)的D7矩阵；
+该矩阵是拟实施验收，不是通过记录。原型DOM通过、单测通过、真实PG通过、Full Gate、真实作品与目标机验收分开。
+下面命令记录D7核对的真实现有入口，不将命令定义当执行证据；D8后按主合同/N11及当时范围实际运行。
+
+### 已核对的执行入口
+
+来源：frontend/package.json、backend/pyproject.toml、两个Dockerfile.quality、docker-compose.quality.yml、
+scripts/run_quality_in_docker.ps1和当前工作区CI。脚本只支持Full/BackendTests/FrontendTests三个Stage，
+BackendTests/FrontendTests构建当前源码镜像并以固定image ID、network none运行；没有PG依赖，不能用它们执行PG验收。
+
+```powershell
+# 范围内后端单测；这里列出的是当前真实存在的回归文件。
+.\scripts\run_quality_in_docker.ps1 -Stage BackendTests -TestArgs @('tests/unit/test_project_files.py', 'tests/unit/test_source_parser.py', '-q')
+# 前端逻辑/交互单测；不等于浏览器或真实API验收。
+.\scripts\run_quality_in_docker.ps1 -Stage FrontendTests
+# 同一候选完整门，不允许TestArgs过滤。
+.\scripts\run_quality_in_docker.ps1 -Stage Full
+```
+
+集成/媒体/浏览器回归沿Full的同一quality Compose网络和现有编排：backend-quality在真实PG上upgrade/check与integration，
+frontend-quality从该后端导出OpenAPI检查生成类型并执行真实生产build/routes/Playwright；media-resource-quality等服务
+承载FFmpeg/媒体及隔离网络合同。目标新测试放入对应现有发现目录，不能另建一个弱化的“机构版Full”。
+普通切片若只需一次PG反馈，可由协调者在自己已确认拥有的隔离quality栈复用同一backend质量镜像/环境执行精确pytest文件；
+必须记录该真实Compose project和镜像ID，不能用BackendTests的network none冒充PG，不能临时连宿主/业务实例。
+未创建隔离栈时不写一个假定存在项目名的命令；正式收尾仍跑无过滤Full，不用窄门拼接。
+
+backend Dockerfile当前Full包含ruff/mypy/unit、alembic upgrade head/check、带--fail-on-skip的integration，
+另由quality编排执行Proxy/媒体/网关合同；源码中对某些Proxy测试的ignore对应后续专用服务，不是可随意增加跳过项。
+前端build已经包含typecheck，除定位失败无需额外重复；generated.ts由后端真实OpenAPI生成，不手写DTO或改期望适配缺陷。
+CI当前文件调用同一-Stage Full；工作区CI本身有原未提交修改，不能据本地文件声称远端CI已执行或规则已生效。
+
+### 测试数据与证据级别
+
+- unit：纯领域输入、Fake/MockTransport和真实受理/编译代码，断言业务结果、错误与副作用计数，避免只匹配源代码字符串。
+- PG：独立临时库、真实Alembic/触发器/组合FK/GRANT/FORCE RLS，运行角色非owner、NOBYPASSRLS；
+  admin只建fixture和核对不可见事实，受测调用不能借admin session绕过权限。
+- processor/media：固定合成PDF/DOCX/TXT/扫描图/音视频/CSV/XLSX，实际运行锁定处理器/FFmpeg并核验定位/hash/时长，
+  不能把stub OCR/ASR返回字符串称全格式通过。离线模型/二进制缺失是未通过，正式门不可skip。
+- 浏览器：固定API fixture验证交互边界；另有连接真实隔离API/PG/对象存储/Workers的机构旅程，按N08/N10三栏结构，
+  两种证据分别命名，不能用professional-mocks代替真实受理/持久恢复。
+- 上游：默认所有quality新调用都去受限计数Mock服务，拒绝路径断言0，未知提交断言Create累计仍1；
+  真实Provider与真实机构资料均有独立Owner授权及明确操作上限，没有授权不执行，也不以mock填通过。
+- 目标机：Windows/WSL2现有Docker方式、浏览器、服务重启、restic/多库恢复与真实保护集另测，
+  Linux CI及原型localhost服务不能代替此层。媒体可解码与文化/叙事/视觉质量评审分别给结论。
+
+固定fixture包含两个用户、同用户两个Workspace、至少三个项目、连续剧两集、重复/更新/解除关联资料、
+来源许可撤销、同名不同身份人物、共享资产固定版本、已保存草稿、known remote和unknown_submission。
+过程记录预期输出、模型请求计数、持久ID/版本及安全事件；不把真实原件/Key/base64装进测试报告。
+故障注入以确定屏障控制发送前/准入后/远端受理后/落库前/Outbox发送前后；不靠随机sleep假装覆盖竞态。
+恢复测试不得通过删失败任务、改status、清unknown标记或重建幂等键获得绿色结果。
+
+### 最终候选与禁止降级
+
+局部反馈可以针对未提交工作区，但记录dirty与实际镜像ID；不能伪称等于干净HEAD。
+最终可审计证据沿现有evidence_context校验：起止SHA相同且clean，容器由该候选及锁定依赖构建。
+既有dirty需先审查整合，不reset/覆盖；若尚未形成干净候选就明确最终证据未成立，不关闭I10。
+通过后的检查只在受影响源码/依赖/环境变化或未决问题时重跑；D8文档冻结不触发付费测试。
+任一必须的权限/迁移/恢复/三作品/部署/Full项缺失都保留未完成，不通过删用例或降低断言换PASS。
+
+### 真实机构旅程接入现有Full（I0接线已写入，运行待验证）
+
+已读取当前Playwright global-setup和vite.config：它们用进程内Vite及DRAMAFORGE_E2E_API_URL代理，
+现有director-agent/editing-deliverables等用例使用professional-mocks，不能证明真实API/PG/Worker持久闭环。
+已新增`frontend/tests/institution/`与`playwright.institution.config.ts`，
+复用现有global-setup和浏览器启动设置，testDir与现有mock套件分开。测试不拦截业务API制造成功，不使用test.skip。
+通过现有npm脚本传`--config playwright.institution.config.ts`；配置拒绝非隔离API地址。当前容器尚未运行，不能声称浏览器套件通过。
+
+已在原docker-compose.quality.yml与Full协调脚本中增加同候选的隔离fixture服务：
+institution-api-quality、institution-dispatcher-quality、institution-worker-default/director/heavy-quality、
+institution-upstream-quality、institution-browser-quality。它们复用业务镜像/入口，不是新产品Runtime，
+仅在本次独占df-quality-*项目运行；与当前postgres/redis/minio-quality及计数Mock服务组成内部网络。
+所有业务URL/密钥/数据库/桶均显式合成配置，不继承本地.env中的真实Provider信息，不挂载Docker socket。
+真实业务测试进程只连internal网络，模型流量仅准入计数Mock，不能走互联网fallback。
+新测试库/桶与其他quality测试隔离，Redis使用独立DB14；institution-bootstrap-quality只接受固定合成目标、拒绝已有同名库，
+执行迁移并核对app/checkpoint角色不绕过RLS。清理由Full现有资源所有权检查负责，不能用于现有实例。
+
+Full在原检查之外启动这组服务、等待真实ready、执行机构浏览器套件并收集退出码，任何失败使同一次Full失败。
+不是拼接另一次窄测试的成功报告；CI仍调用同一-Stage Full，不另加弱化工作流。
+这一层验证真实API/PG/对象存储/Worker与浏览器状态，使用合成媒体与Mock上游；
+Vite代理不是部署后Nginx验收，已有Nginx合同与I10正式镜像/目标机检查仍保留。
+
+I0首条baseline用例覆盖真实注册/项目/合成TXT上传、dispatcher解析、来源内容读回、浏览器刷新持久性、
+跨用户拒绝与Mock上游零调用。尚未覆盖新机构能力或三作品完整旅程；后续各批直接扩展此套件。
+当前Worker健康沿用队列心跳，只是新隔离队列中的启动检查，不冒充目标中的每进程维护mode/readiness。

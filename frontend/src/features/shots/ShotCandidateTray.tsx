@@ -386,8 +386,8 @@ export function ShotCandidateTray({
           artifactType={assetCandidate.artifactType}
           sourceLabel={`${shotCandidateStageLabel(assetCandidate.stage)}候选`}
           shotId={shot.id}
-          onCreated={async (asset) => {
-            setFeedback({ kind: "success", message: `已加入资产：${asset.name}` });
+          onCreated={async (_receipt, displayName) => {
+            setFeedback({ kind: "success", message: `已加入资产：${displayName}` });
             await queryClient.invalidateQueries({ queryKey: queryKeys.asset.root(projectId) });
           }}
           onClose={() => setAssetCandidate(null)}

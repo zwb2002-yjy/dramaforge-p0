@@ -753,6 +753,7 @@ class Acceptance:
                     "/projects",
                     {
                         "workspace_id": WORKSPACE,
+                        "work_type": "single_comic",
                         "name": name,
                         "aspect_ratio": "9:16",
                         "start_type": start,
@@ -950,6 +951,7 @@ class Acceptance:
             {
                 "workspace_id": WORKSPACE,
                 "name": f"R7 replacement template_auto {self.state['run_key']}",
+                "work_type": "single_comic",
                 "aspect_ratio": "9:16",
                 "start_type": "TEMPLATE",
                 "director_autonomy": "AUTO",
@@ -1658,6 +1660,7 @@ class Acceptance:
             {
                 "workspace_id": WORKSPACE,
                 "name": f"R7 manual regression {self.state['run_key']}",
+                "work_type": "single_comic",
                 "aspect_ratio": "9:16",
                 "start_type": "FREE",
                 "director_autonomy": "MANUAL",

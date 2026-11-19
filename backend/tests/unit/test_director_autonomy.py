@@ -37,6 +37,7 @@ def _register_and_create_project(client: TestClient) -> tuple[str, str]:
     created = client.post(
         "/api/v1/projects",
         json={
+            "work_type": "serial_comic",
             "workspace_id": workspace_id,
             "name": "Autonomy Project",
             "aspect_ratio": "9:16",

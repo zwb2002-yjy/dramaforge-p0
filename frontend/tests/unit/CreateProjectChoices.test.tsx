@@ -29,7 +29,7 @@ function show() {
       />
     </QueryClientProvider>,
   );
-  fireEvent.click(screen.getByRole("button", { name: "风格与类型（可选）" }));
+  fireEvent.click(screen.getByRole("button", { name: "风格与题材（可选）" }));
   return onCreated;
 }
 it("submits the explicit type and style in the single creation request", async () => {
@@ -39,13 +39,19 @@ it("submits the explicit type and style in the single creation request", async (
   } as never);
   vi.mocked(createProject).mockResolvedValue({ id: "p1" } as never);
   const onCreated = show();
+  await selectValue(screen.getByRole("combobox", { name: "作品类型" }), "single_comic");
   await findSelectOption(screen.getByLabelText("画面风格"), "电影写实");
-  await selectValue(screen.getByRole("combobox", { name: "创作类型" }), "drama");
+  await selectValue(screen.getByRole("combobox", { name: "题材偏好" }), "drama");
   await selectValue(screen.getByRole("combobox", { name: "画面风格" }), "film");
   fireEvent.submit(screen.getByRole("textbox", { name: "项目名" }).closest("form")!);
   await waitFor(() => expect(createProject).toHaveBeenCalledTimes(1));
   expect(createProject).toHaveBeenCalledWith(
-    expect.objectContaining({ genre_key: "drama", style_key: "film", workspace_id: "w1" }),
+    expect.objectContaining({
+      work_type: "single_comic",
+      genre_key: "drama",
+      style_key: "film",
+      workspace_id: "w1",
+    }),
   );
   await waitFor(() => expect(onCreated).toHaveBeenCalledWith("p1"));
 });

@@ -20,6 +20,11 @@ from app.access.models import User
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import Asset, AssetVersion, AssetVersionReference, Shot
+from app.assets.public_asset_models import (
+    ProjectPublicAssetLink,
+    PublicAssetPublication,
+    PublicAssetPublicationItem,
+)
 from app.assets.version_service import AssetVersionService
 from app.execution.models import Artifact
 from app.production.models import (
@@ -35,6 +40,9 @@ router = APIRouter(tags=["references"], dependencies=[Depends(require_selected_w
 
 
 class BindingCreate(BaseModel):
+    source: str = Field(default="private", pattern="^(private|public)$")
+    public_asset_link_id: UUID | None = None
+    publication_item_id: UUID | None = None
     stage: str = Field(default="both", pattern="^(image|video|both)$")
     experiment_branch_id: UUID | None = None
     asset_id: UUID | None = None
@@ -72,6 +80,8 @@ class BindingRead(BaseModel):
     project_id: UUID
     shot_id: UUID
     experiment_branch_id: UUID | None
+    public_asset_link_id: UUID | None
+    publication_item_id: UUID | None
     stage: str
     asset_id: UUID | None
     asset_version_id: UUID | None
@@ -107,6 +117,8 @@ def _binding_read(binding: ShotReferenceBinding) -> BindingRead:
         shot_id=binding.shot_id,
         experiment_branch_id=binding.experiment_branch_id,
         stage=binding.stage,
+        public_asset_link_id=binding.public_asset_link_id,
+        publication_item_id=binding.publication_item_id,
         asset_id=binding.asset_id,
         asset_version_id=binding.asset_version_id,
         artifact_id=binding.artifact_id,
@@ -139,6 +151,46 @@ def _validate_binding_source(
     if resolution_mode == "direct_artifact" and artifact_id is None:
         raise ValidationAppError("direct_artifact bindings require artifact_id")
 
+
+async def _validate_public_binding_source(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    public_asset_link_id: UUID,
+    publication_item_id: UUID,
+) -> None:
+    link = await session.scalar(
+        select(ProjectPublicAssetLink).where(
+            ProjectPublicAssetLink.id == public_asset_link_id,
+            ProjectPublicAssetLink.project_id == project_id,
+        )
+    )
+    if link is None:
+        raise ValidationAppError(
+            "public link does not belong to the current project",
+            details={"code": "REFERENCE_PROJECT_MISMATCH"},
+        )
+    if link.detached_at is not None:
+        raise ValidationAppError(
+            "public link is detached", details={"code": "REFERENCE_PUBLIC_LINK_DETACHED"}
+        )
+    publication = await session.get(PublicAssetPublication, link.publication_id)
+    if publication is None or publication.status != "available":
+        raise ValidationAppError(
+            "public asset is not available",
+            details={"code": "REFERENCE_PUBLIC_NOT_AVAILABLE"},
+        )
+    item = await session.scalar(
+        select(PublicAssetPublicationItem).where(
+            PublicAssetPublicationItem.id == publication_item_id,
+            PublicAssetPublicationItem.publication_id == publication.id,
+        )
+    )
+    if item is None:
+        raise ValidationAppError(
+            "public item does not belong to the publication",
+            details={"code": "REFERENCE_PUBLIC_ITEM_UNKNOWN"},
+        )
 
 async def _validate_binding_source_ownership(
     session: AsyncSession,
@@ -293,31 +345,65 @@ class ShotReferenceService:
             )
         if body.stage not in SHOT_REFERENCE_STAGES:
             raise ValidationAppError("stage must be image, video, or both")
-        if body.resolution_mode not in SHOT_REFERENCE_RESOLUTION_MODES:
-            raise ValidationAppError("unknown resolution_mode")
-        _validate_binding_source(
-            asset_id=body.asset_id,
-            asset_version_id=body.asset_version_id,
-            artifact_id=body.artifact_id,
-            resolution_mode=body.resolution_mode,
-        )
-        await _validate_binding_source_ownership(
-            self._session,
-            project_id=project_id,
-            asset_id=body.asset_id,
-            asset_version_id=body.asset_version_id,
-            artifact_id=body.artifact_id,
-            experiment_branch_id=body.experiment_branch_id,
-        )
+        if body.source == "public":
+            if body.public_asset_link_id is None or body.publication_item_id is None:
+                raise ValidationAppError(
+                    "public bindings require public_asset_link_id and publication_item_id",
+                    details={"code": "REFERENCE_PUBLIC_SOURCE_REQUIRED"},
+                )
+            if (
+                body.asset_id is not None
+                or body.asset_version_id is not None
+                or body.artifact_id is not None
+            ):
+                raise ValidationAppError(
+                    "public bindings cannot also carry private asset fields",
+                    details={"code": "REFERENCE_SOURCE_AMBIGUOUS"},
+                )
+            await _validate_public_binding_source(
+                self._session,
+                project_id=project_id,
+                public_asset_link_id=body.public_asset_link_id,
+                publication_item_id=body.publication_item_id,
+            )
+            resolution_mode = "public_link"
+        else:
+            if body.resolution_mode not in SHOT_REFERENCE_RESOLUTION_MODES:
+                raise ValidationAppError("unknown resolution_mode")
+            if (
+                body.public_asset_link_id is not None
+                or body.publication_item_id is not None
+            ):
+                raise ValidationAppError(
+                    "private bindings cannot carry public link fields",
+                    details={"code": "REFERENCE_SOURCE_AMBIGUOUS"},
+                )
+            _validate_binding_source(
+                asset_id=body.asset_id,
+                asset_version_id=body.asset_version_id,
+                artifact_id=body.artifact_id,
+                resolution_mode=body.resolution_mode,
+            )
+            await _validate_binding_source_ownership(
+                self._session,
+                project_id=project_id,
+                asset_id=body.asset_id,
+                asset_version_id=body.asset_version_id,
+                artifact_id=body.artifact_id,
+                experiment_branch_id=body.experiment_branch_id,
+            )
+            resolution_mode = body.resolution_mode
         binding = ShotReferenceBinding(
             project_id=project_id,
             shot_id=shot_id,
             experiment_branch_id=body.experiment_branch_id,
             stage=body.stage,
+            public_asset_link_id=body.public_asset_link_id,
+            publication_item_id=body.publication_item_id,
             asset_id=body.asset_id,
             asset_version_id=body.asset_version_id,
             artifact_id=body.artifact_id,
-            resolution_mode=body.resolution_mode,
+            resolution_mode=resolution_mode,
             purpose=body.purpose,
             label=body.label,
             sort_order=body.sort_order,
@@ -457,6 +543,49 @@ class ShotReferenceService:
         binding: ShotReferenceBinding,
         actor: User,
     ) -> list[ResolvedReferenceRead]:
+        if binding.public_asset_link_id is not None:
+            link = await self._session.get(
+                ProjectPublicAssetLink, binding.public_asset_link_id
+            )
+            item = (
+                await self._session.get(
+                    PublicAssetPublicationItem, binding.publication_item_id
+                )
+                if binding.publication_item_id is not None
+                else None
+            )
+            if link is None or item is None or link.detached_at is not None:
+                return []
+            publication = await self._session.get(
+                PublicAssetPublication, link.publication_id
+            )
+            if (
+                publication is None
+                or publication.status != "available"
+                or publication.withdrawn_at is not None
+            ):
+                return []
+            source_version = await self._session.get(
+                AssetVersion, publication.source_asset_version_id
+            )
+            if source_version is None or source_version.status != "formal":
+                return []
+            artifact = await self._session.get(Artifact, item.artifact_id)
+            if artifact is None or artifact.deleted_at is not None:
+                return []
+            return [
+                ResolvedReferenceRead(
+                    binding_id=binding.id,
+                    stage=binding.stage,
+                    purpose=binding.purpose,
+                    role=binding.purpose,
+                    artifact_id=artifact.id,
+                    label=binding.label or publication.safe_name,
+                    source="public_link",
+                    mime_type=artifact.mime_type or "application/octet-stream",
+                    fingerprint=artifact.content_hash,
+                )
+            ]
         if binding.resolution_mode == "direct_artifact":
             if binding.artifact_id is None:
                 return []

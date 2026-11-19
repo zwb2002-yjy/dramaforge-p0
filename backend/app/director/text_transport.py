@@ -13,6 +13,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access.egress_admission import EgressAdmission
 from app.access.models import Project, User
 from app.contracts.agent import AgentMessage, AgentModelResponse
 from app.director.context_builder import DirectorContextBuilder
@@ -546,11 +547,14 @@ class DirectorTextRuntimeAdapter:
                 schema_repair_count=schema_repair_count,
             )
             code = _error_code(exc)
-            if isinstance(exc, ValidationAppError) and code in {
-                "DIRECTOR_TEXT_CALL_FAILED",
-                "DIRECTOR_TEXT_CALL_UNKNOWN",
-                "INVALID_DIRECTOR_TEXT_OUTPUT",
-            }:
+            if isinstance(exc, ValidationAppError) and (
+                code in {
+                    "DIRECTOR_TEXT_CALL_FAILED",
+                    "DIRECTOR_TEXT_CALL_UNKNOWN",
+                    "INVALID_DIRECTOR_TEXT_OUTPUT",
+                }
+                or code.startswith(("EGRESS_", "SOURCE_USE_"))
+            ):
                 exc.details.setdefault("turn_id", str(turn.id))
                 raise
             if code.startswith("MODEL_PROFILE_"):
@@ -745,7 +749,23 @@ class DirectorTextRuntimeAdapter:
         purpose: str,
         output_type: type[BaseModel],
     ) -> ProviderCreateResult:
+        # Admission happens before any journal start or provider call: a refused
+        # policy must produce zero outbound requests, not a compensated failure.
+        decision = await EgressAdmission(self._session).decide(
+            project,
+            purpose="director_text",
+            processing_location="local",
+        )
+        if not decision.allowed:
+            raise ValidationAppError(
+                "项目外发策略不允许本次文本外发",
+                details={"code": decision.reason_code},
+            )
         journal = InvocationService(self._session)
+        snapshot = {
+            **request.model_dump(mode="json"),
+            "egress_admission": decision.evidence(),
+        }
         invocation = await journal.prepare(
             project_id=project.id,
             turn_id=turn.id,
@@ -753,7 +773,7 @@ class DirectorTextRuntimeAdapter:
             step_key=f"text:{purpose}",
             attempt=1,
             model_resolution=dict(turn.model_resolution),
-            request_snapshot=request.model_dump(mode="json"),
+            request_snapshot=snapshot,
             output_schema=output_type.model_json_schema(mode="validation"),
             intent_version=content_hash(turn.intent_snapshot),
         )

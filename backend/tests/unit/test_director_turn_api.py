@@ -67,7 +67,12 @@ def _project(client: TestClient, workspace_id: str, name: str) -> str:
     response = client.post(
         "/api/v1/projects",
         headers={CSRF_HEADER: _csrf(client)},
-        json={"name": name, "aspect_ratio": "9:16", "workspace_id": workspace_id},
+        json={
+            "work_type": "serial_comic",
+            "name": name,
+            "aspect_ratio": "9:16",
+            "workspace_id": workspace_id,
+        },
     )
     assert response.status_code in {200, 201}, response.text
     return str(response.json()["id"])

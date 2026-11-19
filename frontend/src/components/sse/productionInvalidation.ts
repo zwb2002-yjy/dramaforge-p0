@@ -1,7 +1,12 @@
 import type { Query } from "@tanstack/react-query";
 
 type RecordValue = Record<string, unknown>;
-export type ProductionChange = { projectId: string; kind: string; shotId?: string };
+export type ProductionChange = {
+  projectId: string;
+  kind: string;
+  shotId?: string;
+  workspaceId?: string;
+};
 
 const PROJECT_FACTS = new Set([
   "production-summary",
@@ -42,8 +47,14 @@ export function parseProductionChange(data: unknown, workspaceId: string): Produ
   if (typeof projectId !== "string" || !projectId) return null;
   if (payload?.project_id && payload.project_id !== projectId) return null;
   const notice = record(payload?.notice);
+  if (
+    notice?.kind === "project_changed" &&
+    (notice.project_id !== projectId || envelope.workspace_id !== workspaceId)
+  )
+    return null;
   return {
     projectId,
+    workspaceId,
     kind: typeof notice?.kind === "string" ? notice.kind : "unknown",
     shotId: typeof notice?.shot_id === "string" ? notice.shot_id : undefined,
   };
@@ -54,6 +65,13 @@ export function productionQueryAffected(query: Query, changes: ProductionChange[
   const [root, projectId, entityId] = query.queryKey;
   if (typeof root !== "string") return false;
   return changes.some((change) => {
+    if (change.kind === "project_changed") {
+      if (root === "workspace-projects") return projectId === change.workspaceId;
+      return (
+        change.projectId === projectId &&
+        (root === "project" || root === "project-workspace-context" || root === "workflow-overview")
+      );
+    }
     if (change.projectId !== projectId) return false;
     if (PROJECT_FACTS.has(root)) return true;
     if (root === "scene-workspace") {

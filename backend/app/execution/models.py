@@ -247,6 +247,7 @@ class NodeRun(Base):
     __tablename__ = "node_runs"
     __table_args__ = (
         UniqueConstraint("project_id", "idempotency_key", name="uq_node_runs_idempotency"),
+        UniqueConstraint("id", "project_id", name="uq_node_run_scope"),
         UniqueConstraint(
             "graph_node_id", "attempt_no", name="node_runs_graph_node_id_attempt_no_key"
         ),

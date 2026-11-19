@@ -30,6 +30,41 @@ export const queryKeys = {
       ["project-creative-options", workspaceId] as const,
   },
 
+  source: {
+    root: (projectId: string) => ["project-sources", projectId] as const,
+    files: (projectId: string) => ["project-sources", projectId, "files"] as const,
+    capabilities: (projectId: string) => ["project-sources", projectId, "capabilities"] as const,
+    revision: (projectId: string, revisionId: string | null | undefined) =>
+      ["project-sources", projectId, "revision", revisionId] as const,
+    fragments: (
+      projectId: string,
+      extractionId: string | null | undefined,
+      offset: number,
+      locatorKind: string,
+    ) => ["project-sources", projectId, "fragments", extractionId, offset, locatorKind] as const,
+  },
+
+  research: {
+    root: (projectId: string) => ["research", projectId] as const,
+    results: (projectId: string, kind: string, q: string) =>
+      ["research", projectId, "results", kind, q] as const,
+    revision: (projectId: string, revisionId: string | null | undefined) =>
+      ["research", projectId, "revision", revisionId] as const,
+    revisions: (projectId: string, resultId: string | null | undefined) =>
+      ["research", projectId, "revisions", resultId] as const,
+    analyses: (projectId: string, revisionId: string | null) =>
+      ["research", projectId, "analyses", revisionId] as const,
+    analysis: (projectId: string, analysisId: string | null | undefined) =>
+      ["research", projectId, "analysis", analysisId] as const,
+  },
+
+  knowledge: {
+    root: () => ["knowledge"] as const,
+    entries: (status: string, kind: string, q: string) =>
+      ["knowledge", "entries", status, kind, q] as const,
+    entry: (entryId: string | null | undefined) => ["knowledge", "entry", entryId] as const,
+    revisions: (entryId: string | null | undefined) => ["knowledge", "revisions", entryId] as const,
+  },
   scene: {
     workspaceRoot: (projectId: string) => ["scene-workspace", projectId] as const,
     list: (projectId: string) => ["scenes", projectId] as const,

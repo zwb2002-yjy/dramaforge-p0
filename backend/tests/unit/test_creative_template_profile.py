@@ -29,6 +29,7 @@ async def _seed(session: AsyncSession) -> tuple[Project, User]:
     session.add(workspace)
     await session.flush()
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=workspace.id,
         name=f"P-{uuid4().hex[:8]}",
         aspect_ratio="9:16",
@@ -87,6 +88,7 @@ async def test_free_create_has_free_profile(session: AsyncSession) -> None:
     session.add(workspace)
     await session.flush()
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=workspace.id,
         name="Free Project",
         aspect_ratio="16:9",
@@ -123,6 +125,7 @@ def test_project_api_returns_template_profile(client: TestClient) -> None:
     created = client.post(
         "/api/v1/projects",
         json={
+            "work_type": "serial_comic",
             "workspace_id": workspace_id,
             "name": "Template Project",
             "aspect_ratio": "9:16",
@@ -145,6 +148,7 @@ async def test_explicit_project_choices_compile_once_without_media(session: Asyn
     original, user = await _seed(session)
     genre, style = GENRE_PROFILES[0], STYLE_PACKS[0]
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=original.workspace_id,
         name="My creative choices",
         aspect_ratio="16:9",
@@ -183,6 +187,7 @@ async def test_invalid_creation_choices_do_not_create_project(
     with pytest.raises(ValidationAppError):
         await ProjectService(session).create_project(
             workspace_id=original.workspace_id,
+            work_type="serial_comic",
             name="Invalid",
             aspect_ratio="9:16",
             actor=user,

@@ -42,6 +42,8 @@ from app.storage.scratch import OwnedMediaDirectory
 
 if TYPE_CHECKING:
     from app.execution.product_path import ExecuteNodeResult
+    from app.production.timeline_renderer import TimelineRenderClip, TimelineRenderResult
+    from app.storage.minio_store import StoredObject
 
 _TAIL_NODE_KEYS = [
     "video_drift_review",
@@ -1427,6 +1429,354 @@ async def get_final_film_status(
     return await _job_read(session, run=run, edit_session=edit_session)
 
 
+@dataclass(frozen=True)
+class _RenderedFinalFilm:
+    rendered: TimelineRenderResult
+    formal_lineage: list[dict[str, Any]]
+    duration: Decimal
+
+
+async def _render_final_film_media(
+    *,
+    project_id: UUID,
+    snapshot: dict[str, Any],
+    resolved: list[tuple[_TimelineRef, NodeRun, Artifact, dict[str, Any]]],
+    artifacts: dict[UUID, Artifact],
+    obj_store: ObjectStore,
+    directory: Path,
+    metadata: Any,
+    music_id: Any,
+) -> _RenderedFinalFilm:
+    """Materialize frozen inputs and render without opening a database transaction.
+
+    The caller owns the scratch directory and closes metadata reads before entry.
+    """
+    from app.production.timeline_renderer import (
+        TimelineRenderClip,
+        TimelineRenderError,
+        render_timeline,
+    )
+
+    media_cache: dict[UUID, MaterializedFile] = {}
+    timeline_clips: list[TimelineRenderClip] = []
+    formal_lineage: list[dict[str, Any]] = []
+    frozen_references = snapshot.get("formal_references")
+    frozen_dialogue = {
+        str(item.get("clip_id")): str(item.get("dialogue") or "")
+        for item in (frozen_references if isinstance(frozen_references, list) else [])
+        if isinstance(item, dict)
+    }
+    for ref, composite_run, composite_artifact, media in resolved:
+        _video_artifact, video_path = await _read_artifact_file(
+            artifacts,
+            obj_store,
+            ref.artifact_id,
+            project_id=project_id,
+            artifact_type="video",
+            directory=directory,
+            cache=media_cache,
+        )
+        voice_input = media.get("voice")
+        default_audio_id = (
+            UUID(str(voice_input["artifact_id"]))
+            if isinstance(voice_input, dict) and voice_input.get("artifact_id")
+            else None
+        )
+        selected_audio_id = ref.audio_id or default_audio_id
+        audio_path = None
+        if selected_audio_id is not None and not bool(ref.raw_clip.get("muted")):
+            _audio_artifact, audio_path = await _read_artifact_file(
+                artifacts,
+                obj_store,
+                selected_audio_id,
+                project_id=project_id,
+                artifact_type="audio",
+                directory=directory,
+                cache=media_cache,
+            )
+        # Subtitle defaults were frozen at queue time. Empty/disabled text
+        # must never resurrect a subsequently edited Canonical Shot dialogue.
+        subtitle_text = (
+            ""
+            if ref.subtitle_enabled is False
+            else ref.subtitle
+            if ref.subtitle is not None
+            else frozen_dialogue.get(ref.clip_id, "")
+        )
+        timeline_clips.append(
+            TimelineRenderClip(
+                clip_id=ref.clip_id,
+                video_artifact_id=str(ref.artifact_id),
+                video_path=video_path,
+                audio_path=audio_path,
+                subtitle_text=subtitle_text,
+                source_in_seconds=ref.source_in_seconds,
+                source_out_seconds=(
+                    float(
+                        str(
+                            ref.raw_clip.get(
+                                "source_out_seconds", ref.raw_clip.get("trim_end_seconds")
+                            )
+                        )
+                    )
+                    if ref.raw_clip.get("source_out_seconds", ref.raw_clip.get("trim_end_seconds"))
+                    is not None
+                    else None
+                ),
+                duration_seconds=ref.duration_seconds,
+                transition_kind=ref.transition_kind,
+                transition_duration_seconds=ref.transition_duration_seconds,
+                audio_artifact_id=str(selected_audio_id) if selected_audio_id else None,
+                audio_volume=ref.audio_volume,
+            )
+        )
+        formal_lineage.append(
+            {
+                "clip_id": ref.clip_id,
+                "shot_id": str(ref.shot_id),
+                "formal_video_artifact_id": str(ref.artifact_id),
+                "composite_artifact_id": str(composite_artifact.id),
+                "composite_run_id": str(composite_run.id),
+                "media_inputs": media,
+                "timeline_edit": {
+                    "source_in_seconds": ref.source_in_seconds,
+                    "duration_seconds": ref.duration_seconds,
+                    "subtitle": subtitle_text,
+                    "audio_artifact_id": str(selected_audio_id) if selected_audio_id else None,
+                    "transition": ref.transition_kind,
+                    "transition_duration_seconds": ref.transition_duration_seconds,
+                },
+            }
+        )
+    music_path = None
+    if music_id:
+        _music_artifact, music_path = await _read_artifact_file(
+            artifacts,
+            obj_store,
+            UUID(str(music_id)),
+            project_id=project_id,
+            artifact_type="audio",
+            directory=directory,
+            cache=media_cache,
+        )
+    lineage = hashlib.sha256(
+        json.dumps(formal_lineage, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    try:
+        rendered = await render_timeline(
+            timeline_clips,
+            lineage=lineage,
+            music_path=music_path,
+            output_path=directory / "final.mp4",
+            music_volume=(
+                float(metadata.get("music_volume", 0.12)) if isinstance(metadata, dict) else 0.12
+            ),
+        )
+    except TimelineRenderError as exc:
+        raise ValidationAppError(str(exc), details={"code": "FINAL_FILM_RENDER_FAILED"}) from exc
+    duration = _validate_final_film_media(rendered, timeline_clips)
+    return _RenderedFinalFilm(rendered, formal_lineage, duration)
+
+
+def _validate_final_film_media(
+    rendered: TimelineRenderResult, timeline_clips: list[TimelineRenderClip]
+) -> Decimal:
+    """Require delivery media proof before any upload can begin."""
+    probe = rendered.ffprobe
+    streams = [item for item in probe.get("streams", []) if isinstance(item, dict)]
+    video = next((item for item in streams if item.get("codec_type") == "video"), {})
+    audio = next((item for item in streams if item.get("codec_type") == "audio"), {})
+    render_summary = dict(rendered.summary)
+    measured_duration = float((probe.get("format") or {}).get("duration") or 0)
+    planned_duration = float(render_summary.get("rendered_duration_seconds", 0))
+    assertions = {
+        "timeline_duration_matches": (
+            planned_duration > 0
+            and measured_duration + 0.001 >= planned_duration
+            and abs(measured_duration - planned_duration) <= 0.15
+        ),
+        "mp4_container": "mp4" in str((probe.get("format") or {}).get("format_name") or ""),
+        "h264_video": video.get("codec_name") == "h264",
+        "aac_audio": audio.get("codec_name") == "aac",
+        "dialogue_audio_present": any(clip.audio_path is not None for clip in timeline_clips)
+        and bool(audio),
+        "burned_subtitles": bool(render_summary.get("subtitle_burn_applied")),
+        "subtitles_match_timeline": (
+            int(render_summary.get("subtitle_cue_count", -1))
+            == sum(bool(clip.subtitle_text.strip()) for clip in timeline_clips)
+            and (
+                not any(clip.subtitle_text.strip() for clip in timeline_clips)
+                or bool(render_summary.get("subtitle_burn_applied"))
+            )
+        ),
+        "timeline_edits_applied": render_summary.get("timeline_renderer") == "ffmpeg-v2",
+    }
+    required = {
+        key: value
+        for key, value in assertions.items()
+        if key not in {"dialogue_audio_present", "burned_subtitles"}
+    }
+    if not all(required.values()):
+        raise ValidationAppError(
+            "Final Film media proof is incomplete",
+            details={
+                "code": "FINAL_FILM_MEDIA_ASSERTION_FAILED",
+                "assertions": assertions,
+            },
+        )
+    probe["assertions"] = assertions
+    duration = Decimal(str(float((probe.get("format") or {}).get("duration") or 0))).quantize(
+        Decimal("0.001")
+    )
+    return duration
+
+
+async def _stage_final_film_delivery(
+    session: AsyncSession,
+    *,
+    run: NodeRun,
+    node: GraphNode,
+    operation: ProviderOperation,
+    edit_session_id: UUID,
+    snapshot: dict[str, Any],
+    media: _RenderedFinalFilm,
+    stored: StoredObject,
+    subtitle_stored: StoredObject | None,
+) -> Artifact:
+    """Stage the MP4/subtitle pair and export facts in the caller's transaction.
+
+    The caller locks the active operation first and owns commit/rollback and
+    upload-journal recovery. This function never uploads or commits.
+    """
+    formal_lineage, duration = media.formal_lineage, media.duration
+    probe = media.rendered.ffprobe
+    render_summary = dict(media.rendered.summary)
+    video = next(
+        (
+            item
+            for item in probe.get("streams", [])
+            if isinstance(item, dict) and item.get("codec_type") == "video"
+        ),
+        {},
+    )
+    operation.request_summary = {**operation.request_summary, "uploads_finished": True}
+    run.input_snapshot = {**snapshot, "formal_references": formal_lineage}
+    artifact = await get_or_create_artifact(
+        session,
+        project_id=run.project_id,
+        artifact_type="video",
+        object_key=stored.object_key,
+        content_hash=stored.content_hash,
+        mime_type=stored.mime_type,
+        byte_size=stored.byte_size,
+        produced_by_run_id=run.id,
+        # A Final Film is an assembly of an already-frozen timeline, not shot
+        # media. Rendering the same saved version twice produces the same
+        # bytes on purpose, and the product requires that re-export to return
+        # the original result instead of failing; the shot-scoped rule that
+        # forbids one NodeRun from claiming another's bytes does not apply.
+        allow_cross_run_reuse=True,
+    )
+    subtitle_artifact = None
+    if subtitle_stored is not None:
+        subtitle_artifact = await get_or_create_artifact(
+            session,
+            project_id=run.project_id,
+            artifact_type="subtitle",
+            object_key=subtitle_stored.object_key,
+            content_hash=subtitle_stored.content_hash,
+            mime_type=subtitle_stored.mime_type,
+            byte_size=subtitle_stored.byte_size,
+            produced_by_run_id=run.id,
+            # Same reasoning as the film bytes above: identical subtitles for
+            # an unchanged timeline are the expected outcome of a re-export.
+            allow_cross_run_reuse=True,
+        )
+    subtitle_delivery = {
+        "subtitle_artifact_id": str(subtitle_artifact.id) if subtitle_artifact else None,
+        "subtitle_content_hash": subtitle_artifact.content_hash if subtitle_artifact else None,
+        "subtitle_byte_size": subtitle_artifact.byte_size if subtitle_artifact else 0,
+        "subtitle_cue_count": int(render_summary.get("subtitle_cue_count", 0)),
+    }
+    artifact.duration_seconds = duration
+    artifact.width = int(video["width"]) if video.get("width") else None
+    artifact.height = int(video["height"]) if video.get("height") else None
+    operation.status = "succeeded"
+    operation.provider_cost = Decimal("0")
+    operation.response_summary = {
+        "ffprobe": probe,
+        "timeline_render": render_summary,
+        "duration_seconds": str(duration),
+    }
+    operation.completed_at = datetime.now(UTC)
+    run.status = "completed"
+    run.result_artifact_id = artifact.id
+    run.provider_cost = Decimal("0")
+    run.finished_at = datetime.now(UTC)
+    run.output_summary = {
+        "status": "completed",
+        "artifact_id": str(artifact.id),
+        "ffprobe": probe,
+        "timeline_render": render_summary,
+        "formal_references": formal_lineage,
+    }
+    node.latest_successful_run_id = run.id
+    export = Export(
+        project_id=run.project_id,
+        format=_FINAL_FILM_FORMAT,
+        status="completed",
+        requested_by=run.created_by,
+        idempotency_key=str(snapshot.get("idempotency_key") or ""),
+        manifest={
+            "project_id": str(run.project_id),
+            "edit_session_id": str(edit_session_id),
+            "timeline_version": snapshot.get("timeline_version"),
+            "timeline": snapshot.get("timeline"),
+            "request_fingerprint": run.input_hash,
+            "formal_references": formal_lineage,
+            "artifact_id": str(artifact.id),
+            "node_run_id": str(run.id),
+            "provider_operation_id": str(operation.id),
+            "duration_seconds": str(duration),
+            "source_commit": snapshot.get("source_commit"),
+            "idempotency_key": snapshot.get("idempotency_key"),
+            "ffprobe": probe,
+            "render_summary": render_summary,
+            **subtitle_delivery,
+        },
+        result_artifact_id=artifact.id,
+        completed_at=datetime.now(UTC),
+    )
+    session.add(export)
+    await session.flush()
+    for ordinal, item in enumerate(formal_lineage, start=1):
+        session.add(
+            ExportItem(
+                export_id=export.id,
+                ordinal=ordinal,
+                source_artifact_id=UUID(str(item["composite_artifact_id"])),
+                role="shot_composite",
+                metadata_json=item,
+            )
+        )
+    if subtitle_artifact is not None:
+        session.add(
+            ExportItem(
+                export_id=export.id,
+                ordinal=len(formal_lineage) + 1,
+                source_artifact_id=subtitle_artifact.id,
+                role="final_subtitle",
+                metadata_json={
+                    "timeline_version": snapshot.get("timeline_version"),
+                    "node_run_id": str(run.id),
+                    "mp4_artifact_id": str(artifact.id),
+                    **subtitle_delivery,
+                },
+            )
+        )
+    return artifact
+
+
 async def execute_final_film_node_run(
     session: AsyncSession,
     *,
@@ -1436,11 +1786,6 @@ async def execute_final_film_node_run(
 ) -> ExecuteNodeResult:
     """Worker-only Final Film execution after NodeRun claim."""
     from app.execution.product_path import ExecuteNodeResult
-    from app.production.timeline_renderer import (
-        TimelineRenderClip,
-        TimelineRenderError,
-        render_timeline,
-    )
     from app.shared.db import set_node_run_rls_context
 
     snapshot = dict(run.input_snapshot or {})
@@ -1507,7 +1852,6 @@ async def execute_final_film_node_run(
     run_id, operation_id = run.id, operation.id
     scratch = OwnedMediaDirectory(operation_id=run_id)
     directory = scratch.path
-    media_cache: dict[UUID, MaterializedFile] = {}
     try:
         # Resolve all immutable metadata in one short transaction. Reading an
         # Artifact lazily inside the media loop would reopen a transaction for
@@ -1544,174 +1888,17 @@ async def execute_final_film_node_run(
                 "Final Film input exceeds the local resource limit",
                 details={"code": "FINAL_FILM_INPUT_TOO_LARGE"},
             )
-        timeline_clips: list[TimelineRenderClip] = []
-        formal_lineage: list[dict[str, Any]] = []
-        frozen_references = snapshot.get("formal_references")
-        frozen_dialogue = {
-            str(item.get("clip_id")): str(item.get("dialogue") or "")
-            for item in (frozen_references if isinstance(frozen_references, list) else [])
-            if isinstance(item, dict)
-        }
-        for ref, composite_run, composite_artifact, media in resolved:
-            _video_artifact, video_path = await _read_artifact_file(
-                artifacts,
-                obj_store,
-                ref.artifact_id,
-                project_id=run.project_id,
-                artifact_type="video",
-                directory=directory,
-                cache=media_cache,
-            )
-            voice_input = media.get("voice")
-            default_audio_id = (
-                UUID(str(voice_input["artifact_id"]))
-                if isinstance(voice_input, dict) and voice_input.get("artifact_id")
-                else None
-            )
-            selected_audio_id = ref.audio_id or default_audio_id
-            audio_path = None
-            if selected_audio_id is not None and not bool(ref.raw_clip.get("muted")):
-                _audio_artifact, audio_path = await _read_artifact_file(
-                    artifacts,
-                    obj_store,
-                    selected_audio_id,
-                    project_id=run.project_id,
-                    artifact_type="audio",
-                    directory=directory,
-                    cache=media_cache,
-                )
-            # Subtitle defaults were frozen at queue time. Empty/disabled text
-            # must never resurrect a subsequently edited Canonical Shot dialogue.
-            subtitle_text = (
-                ""
-                if ref.subtitle_enabled is False
-                else ref.subtitle
-                if ref.subtitle is not None
-                else frozen_dialogue.get(ref.clip_id, "")
-            )
-            timeline_clips.append(
-                TimelineRenderClip(
-                    clip_id=ref.clip_id,
-                    video_artifact_id=str(ref.artifact_id),
-                    video_path=video_path,
-                    audio_path=audio_path,
-                    subtitle_text=subtitle_text,
-                    source_in_seconds=ref.source_in_seconds,
-                    source_out_seconds=(
-                        float(
-                            str(
-                                ref.raw_clip.get(
-                                    "source_out_seconds", ref.raw_clip.get("trim_end_seconds")
-                                )
-                            )
-                        )
-                        if ref.raw_clip.get(
-                            "source_out_seconds", ref.raw_clip.get("trim_end_seconds")
-                        )
-                        is not None
-                        else None
-                    ),
-                    duration_seconds=ref.duration_seconds,
-                    transition_kind=ref.transition_kind,
-                    transition_duration_seconds=ref.transition_duration_seconds,
-                    audio_artifact_id=str(selected_audio_id) if selected_audio_id else None,
-                    audio_volume=ref.audio_volume,
-                )
-            )
-            formal_lineage.append(
-                {
-                    "clip_id": ref.clip_id,
-                    "shot_id": str(ref.shot_id),
-                    "formal_video_artifact_id": str(ref.artifact_id),
-                    "composite_artifact_id": str(composite_artifact.id),
-                    "composite_run_id": str(composite_run.id),
-                    "media_inputs": media,
-                    "timeline_edit": {
-                        "source_in_seconds": ref.source_in_seconds,
-                        "duration_seconds": ref.duration_seconds,
-                        "subtitle": subtitle_text,
-                        "audio_artifact_id": str(selected_audio_id) if selected_audio_id else None,
-                        "transition": ref.transition_kind,
-                        "transition_duration_seconds": ref.transition_duration_seconds,
-                    },
-                }
-            )
-        music_path = None
-        if music_id:
-            _music_artifact, music_path = await _read_artifact_file(
-                artifacts,
-                obj_store,
-                UUID(str(music_id)),
-                project_id=run.project_id,
-                artifact_type="audio",
-                directory=directory,
-                cache=media_cache,
-            )
-        lineage = hashlib.sha256(
-            json.dumps(formal_lineage, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
-        try:
-            rendered = await render_timeline(
-                timeline_clips,
-                lineage=lineage,
-                music_path=music_path,
-                output_path=directory / "final.mp4",
-                music_volume=(
-                    float(metadata.get("music_volume", 0.12))
-                    if isinstance(metadata, dict)
-                    else 0.12
-                ),
-            )
-        except TimelineRenderError as exc:
-            raise ValidationAppError(
-                str(exc), details={"code": "FINAL_FILM_RENDER_FAILED"}
-            ) from exc
-        probe = rendered.ffprobe
-        streams = [item for item in probe.get("streams", []) if isinstance(item, dict)]
-        video = next((item for item in streams if item.get("codec_type") == "video"), {})
-        audio = next((item for item in streams if item.get("codec_type") == "audio"), {})
-        render_summary = dict(rendered.summary)
-        measured_duration = float((probe.get("format") or {}).get("duration") or 0)
-        planned_duration = float(render_summary.get("rendered_duration_seconds", 0))
-        assertions = {
-            "timeline_duration_matches": (
-                planned_duration > 0
-                and measured_duration + 0.001 >= planned_duration
-                and abs(measured_duration - planned_duration) <= 0.15
-            ),
-            "mp4_container": "mp4" in str((probe.get("format") or {}).get("format_name") or ""),
-            "h264_video": video.get("codec_name") == "h264",
-            "aac_audio": audio.get("codec_name") == "aac",
-            "dialogue_audio_present": any(clip.audio_path is not None for clip in timeline_clips)
-            and bool(audio),
-            "burned_subtitles": bool(render_summary.get("subtitle_burn_applied")),
-            "subtitles_match_timeline": (
-                int(render_summary.get("subtitle_cue_count", -1))
-                == sum(bool(clip.subtitle_text.strip()) for clip in timeline_clips)
-                and (
-                    not any(clip.subtitle_text.strip() for clip in timeline_clips)
-                    or bool(render_summary.get("subtitle_burn_applied"))
-                )
-            ),
-            "timeline_edits_applied": render_summary.get("timeline_renderer") == "ffmpeg-v2",
-        }
-        required = {
-            key: value
-            for key, value in assertions.items()
-            if key not in {"dialogue_audio_present", "burned_subtitles"}
-        }
-        if not all(required.values()):
-            raise ValidationAppError(
-                "Final Film media proof is incomplete",
-                details={
-                    "code": "FINAL_FILM_MEDIA_ASSERTION_FAILED",
-                    "assertions": assertions,
-                },
-            )
-        probe["assertions"] = assertions
-        duration = Decimal(str(float((probe.get("format") or {}).get("duration") or 0))).quantize(
-            Decimal("0.001")
+        film = await _render_final_film_media(
+            project_id=run.project_id,
+            snapshot=snapshot,
+            resolved=resolved,
+            artifacts=artifacts,
+            obj_store=obj_store,
+            directory=directory,
+            metadata=metadata,
+            music_id=music_id,
         )
+        rendered = film.rendered
         # Persist the intended keys BEFORE the first upload. A process kill at
         # any upload boundary leaves a recoverable journal, including a failed
         # write that reached MinIO before raising locally.
@@ -1744,121 +1931,17 @@ async def execute_final_film_node_run(
                 "Final Film attempt is no longer active",
                 details={"code": "FINAL_FILM_ATTEMPT_EXPIRED"},
             )
-        operation.request_summary = {**operation.request_summary, "uploads_finished": True}
-        run.input_snapshot = {**snapshot, "formal_references": formal_lineage}
-        artifact = await get_or_create_artifact(
+        artifact = await _stage_final_film_delivery(
             session,
-            project_id=run.project_id,
-            artifact_type="video",
-            object_key=stored.object_key,
-            content_hash=stored.content_hash,
-            mime_type=stored.mime_type,
-            byte_size=stored.byte_size,
-            produced_by_run_id=run.id,
-            # A Final Film is an assembly of an already-frozen timeline, not shot
-            # media. Rendering the same saved version twice produces the same
-            # bytes on purpose, and the product requires that re-export to return
-            # the original result instead of failing; the shot-scoped rule that
-            # forbids one NodeRun from claiming another's bytes does not apply.
-            allow_cross_run_reuse=True,
+            run=run,
+            node=node,
+            operation=operation,
+            edit_session_id=edit_session.id,
+            snapshot=snapshot,
+            media=film,
+            stored=stored,
+            subtitle_stored=subtitle_stored,
         )
-        subtitle_artifact = None
-        if subtitle_stored is not None:
-            subtitle_artifact = await get_or_create_artifact(
-                session,
-                project_id=run.project_id,
-                artifact_type="subtitle",
-                object_key=subtitle_stored.object_key,
-                content_hash=subtitle_stored.content_hash,
-                mime_type=subtitle_stored.mime_type,
-                byte_size=subtitle_stored.byte_size,
-                produced_by_run_id=run.id,
-                # Same reasoning as the film bytes above: identical subtitles for
-                # an unchanged timeline are the expected outcome of a re-export.
-                allow_cross_run_reuse=True,
-            )
-        subtitle_delivery = {
-            "subtitle_artifact_id": str(subtitle_artifact.id) if subtitle_artifact else None,
-            "subtitle_content_hash": subtitle_artifact.content_hash if subtitle_artifact else None,
-            "subtitle_byte_size": subtitle_artifact.byte_size if subtitle_artifact else 0,
-            "subtitle_cue_count": int(render_summary.get("subtitle_cue_count", 0)),
-        }
-        artifact.duration_seconds = duration
-        artifact.width = int(video["width"]) if video.get("width") else None
-        artifact.height = int(video["height"]) if video.get("height") else None
-        operation.status = "succeeded"
-        operation.provider_cost = Decimal("0")
-        operation.response_summary = {
-            "ffprobe": probe,
-            "timeline_render": render_summary,
-            "duration_seconds": str(duration),
-        }
-        operation.completed_at = datetime.now(UTC)
-        run.status = "completed"
-        run.result_artifact_id = artifact.id
-        run.provider_cost = Decimal("0")
-        run.finished_at = datetime.now(UTC)
-        run.output_summary = {
-            "status": "completed",
-            "artifact_id": str(artifact.id),
-            "ffprobe": probe,
-            "timeline_render": render_summary,
-            "formal_references": formal_lineage,
-        }
-        node.latest_successful_run_id = run.id
-        export = Export(
-            project_id=run.project_id,
-            format=_FINAL_FILM_FORMAT,
-            status="completed",
-            requested_by=run.created_by,
-            idempotency_key=str(snapshot.get("idempotency_key") or ""),
-            manifest={
-                "project_id": str(run.project_id),
-                "edit_session_id": str(edit_session.id),
-                "timeline_version": snapshot.get("timeline_version"),
-                "timeline": snapshot.get("timeline"),
-                "request_fingerprint": run.input_hash,
-                "formal_references": formal_lineage,
-                "artifact_id": str(artifact.id),
-                "node_run_id": str(run.id),
-                "provider_operation_id": str(operation.id),
-                "duration_seconds": str(duration),
-                "source_commit": snapshot.get("source_commit"),
-                "idempotency_key": snapshot.get("idempotency_key"),
-                "ffprobe": probe,
-                "render_summary": render_summary,
-                **subtitle_delivery,
-            },
-            result_artifact_id=artifact.id,
-            completed_at=datetime.now(UTC),
-        )
-        session.add(export)
-        await session.flush()
-        for ordinal, item in enumerate(formal_lineage, start=1):
-            session.add(
-                ExportItem(
-                    export_id=export.id,
-                    ordinal=ordinal,
-                    source_artifact_id=UUID(str(item["composite_artifact_id"])),
-                    role="shot_composite",
-                    metadata_json=item,
-                )
-            )
-        if subtitle_artifact is not None:
-            session.add(
-                ExportItem(
-                    export_id=export.id,
-                    ordinal=len(formal_lineage) + 1,
-                    source_artifact_id=subtitle_artifact.id,
-                    role="final_subtitle",
-                    metadata_json={
-                        "timeline_version": snapshot.get("timeline_version"),
-                        "node_run_id": str(run.id),
-                        "mp4_artifact_id": str(artifact.id),
-                        **subtitle_delivery,
-                    },
-                )
-            )
         await session.commit()
         delivery_committed = True
         result = ExecuteNodeResult(

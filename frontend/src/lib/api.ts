@@ -137,6 +137,29 @@ export async function apiSend<T>(
   return (await response.json()) as T;
 }
 
+/** Raw binary body upload; the server owns size limits and never trusts a filename. */
+export async function apiUpload<T>(
+  path: string,
+  body: Blob,
+  csrf: string | null,
+  contentType = "application/octet-stream",
+): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": contentType,
+  };
+  if (csrf) headers["X-CSRF-Token"] = csrf;
+  Object.assign(headers, workspaceHeaders());
+  const response = await fetch(apiUrl(path), {
+    method: "POST",
+    credentials: "include",
+    headers,
+    body,
+  });
+  if (!response.ok) throw await parseError(response);
+  return (await response.json()) as T;
+}
+
 export type HealthResponse = {
   status: string;
   service: string;

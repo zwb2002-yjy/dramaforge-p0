@@ -1,7 +1,8 @@
-"""Authenticated HTTP -> real Agent resolver/runtime -> explicit Proposal Apply on PG.
+"""Authenticated HTTP acceptance -> Director worker -> explicit Proposal Apply on PG.
 
 Only the external text HTTP transport and checkpoint storage are synthetic.
-Authentication, workspace selection, application-role RLS, resolver, adapter,
+Authentication, workspace selection, application-role RLS, durable acceptance,
+the Outbox fact, the worker adoption (epoch/lease fencing), resolver, adapter,
 Agent service, proposal creation and Apply remain the product implementations.
 """
 
@@ -12,19 +13,22 @@ import json
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import httpx
 import pytest
 from app.access.models import Project, User, Workspace
-from app.api.v1 import director
 from app.assets.models import Episode, Scene, Shot
 from app.config import clear_settings_cache, get_settings
+from app.director import agent_worker
 from app.director.agent_tools import ToolExecutor
+from app.director.agent_worker import execute_accepted_agent_turn
 from app.director.assistant_models import DirectorMessage, DirectorToolCall
 from app.director.invocation_models import DirectorInvocation
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.turn_models import DirectorTurn
+from app.events.models import OutboxEvent
 from app.execution.models import NodeRun, ProviderOperation
 from app.main import create_app
 from app.providers.litellm_gateway.client import LiteLLMGatewayClient
@@ -142,6 +146,7 @@ class HttpAgent:
     database: HttpDatabase
     client: httpx.AsyncClient
     app: object
+    factory: async_sessionmaker[AsyncSession]
     workspace_id: UUID
     other_workspace_id: UUID
     project_id: UUID
@@ -284,7 +289,8 @@ async def http_agent(
             assert project_id == project.id
             yield MemorySaver()
 
-        monkeypatch.setattr(director, "scoped_checkpointer", checkpoint)
+        # The Worker owns the checkpoint scope; the HTTP acceptance never opens it.
+        monkeypatch.setattr(agent_worker, "scoped_checkpointer", checkpoint)
 
         async def sessions() -> AsyncIterator[AsyncSession]:
             async with app_factory() as session:
@@ -314,6 +320,7 @@ async def http_agent(
                 http_database,
                 client,
                 app,
+                app_factory,
                 workspace.id,
                 other_workspace.id,
                 project.id,
@@ -339,6 +346,56 @@ async def _open_thread(agent: HttpAgent) -> str:
     return str(response.json()["id"])
 
 
+async def _accept(
+    agent: HttpAgent,
+    thread_id: str,
+    body: dict[str, object],
+    *,
+    expected_status: int = 202,
+) -> dict:
+    response = await agent.client.post(
+        f"{agent.threads_path}/{thread_id}/messages",
+        json=body,
+        headers=agent.headers,
+    )
+    assert response.status_code == expected_status, response.text
+    return response.json()
+
+
+async def _execute(agent: HttpAgent, turn_id: str) -> dict[str, object]:
+    """Run the product worker adoption path for one accepted Turn."""
+    return await execute_accepted_agent_turn(
+        agent.factory,
+        turn_id=UUID(turn_id),
+        settings=get_settings(),
+    )
+
+
+async def _state(agent: HttpAgent, thread_id: str, request_key: str) -> dict:
+    response = await agent.client.get(
+        f"{agent.threads_path}/{thread_id}/requests",
+        params={"request_key": request_key},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def _settle(
+    agent: HttpAgent,
+    thread_id: str,
+    acceptance: dict,
+    *,
+    attempts: int = 3,
+) -> dict:
+    """Execute accepted work and read the durable receipt until it is terminal."""
+    for _attempt in range(attempts):
+        await _execute(agent, str(acceptance["turn_id"]))
+        state = await _state(agent, thread_id, str(acceptance["request_key"]))
+        if state["turn"]["status"] in {"completed", "failed", "cancelled", "stale"}:
+            return state
+    raise AssertionError("accepted Agent work did not reach a terminal receipt")
+
+
 @pytest.mark.asyncio
 async def test_authenticated_agent_proposal_and_explicit_apply_are_one_current_chain(
     http_agent: HttpAgent,
@@ -351,8 +408,34 @@ async def test_authenticated_agent_proposal_and_explicit_apply_are_one_current_c
         "request_key": "http-propose-once",
     }
     response = await agent.client.post(path, json=body, headers=agent.headers)
-    assert response.status_code == 200, response.text
-    result = response.json()
+    assert response.status_code == 202, response.text
+    acceptance = response.json()
+    assert acceptance["status"] == "queued"
+    assert acceptance["request_key"] == body["request_key"]
+    assert acceptance["accepted_revision"] == 1
+    assert acceptance["user_message_id"]
+    assert agent.chat.requests == []
+    assert acceptance["read_url"].endswith("request_key=http-propose-once")
+    with Session(agent.database.engine) as session:
+        queued = session.get(DirectorTurn, UUID(acceptance["turn_id"]))
+        assert queued is not None and queued.status == "queued"
+        assert queued.agent_lease_token is None and queued.agent_control_epoch == 0
+        message = session.get(DirectorMessage, UUID(acceptance["user_message_id"]))
+        assert message is not None and message.turn_id == queued.id
+        outbox = list(
+            session.scalars(
+                select(OutboxEvent).where(
+                    OutboxEvent.project_id == agent.project_id,
+                    OutboxEvent.topic == "director.turn.accepted",
+                )
+            )
+        )
+        assert len(outbox) == 1
+        assert outbox[0].payload["turn_id"] == acceptance["turn_id"]
+
+    state = await _settle(agent, thread_id, acceptance)
+    assert state["acceptance"] == acceptance
+    result = state["turn"]
     assert result["status"] == "completed" and len(result["proposal_ids"]) == 1
     assert len(agent.chat.requests) == 2
     proposal_id = result["proposal_ids"][0]
@@ -380,8 +463,11 @@ async def test_authenticated_agent_proposal_and_explicit_apply_are_one_current_c
         assert len(invocation_models) == 2
         assert invocation_models[0] == invocation_models[1]
         assert invocation_models[0]["text_capabilities"]["tool_calling"] is True
+        claimed = session.get(DirectorTurn, UUID(result["turn_id"]))
+        assert claimed is not None
+        assert claimed.agent_control_epoch == 2 and claimed.agent_lease_token is None
     replay = await agent.client.post(path, json=body, headers=agent.headers)
-    assert replay.status_code == 200 and replay.json()["proposal_ids"] == [proposal_id]
+    assert replay.status_code == 200 and replay.json() == acceptance
     assert len(agent.chat.requests) == 2
     proposal_path = f"/api/v1/projects/{agent.project_id}/director/proposals/{proposal_id}"
     read = await agent.client.get(proposal_path)
@@ -419,8 +505,7 @@ async def test_authenticated_agent_proposal_and_explicit_apply_are_one_current_c
     assert reviewed.json()["items"][0]["status"] == "accepted"
     after_apply_replay = await agent.client.post(path, json=body, headers=agent.headers)
     assert after_apply_replay.status_code == 200
-    assert after_apply_replay.json()["turn_id"] == result["turn_id"]
-    assert after_apply_replay.json()["proposal_ids"] == [proposal_id]
+    assert after_apply_replay.json() == acceptance
     with Session(agent.database.engine) as session:
         shot = session.get(Shot, agent.shot_id)
         other = session.get(Shot, agent.other_shot_id)
@@ -463,10 +548,10 @@ async def test_explicit_agent_rejection_is_idempotent_and_never_changes_shots(
     thread_id = await _open_thread(agent)
     message_path = f"{agent.threads_path}/{thread_id}/messages"
     body = {"content": "Suggest a careful image prompt.", "request_key": "reject-proposal"}
-    response = await agent.client.post(message_path, json=body, headers=agent.headers)
-    assert response.status_code == 200, response.text
-    assert response.json()["status"] == "completed"
-    proposal_id = response.json()["proposal_ids"][0]
+    acceptance = await _accept(agent, thread_id, body)
+    state = await _settle(agent, thread_id, acceptance)
+    assert state["turn"]["status"] == "completed"
+    proposal_id = state["turn"]["proposal_ids"][0]
     path = f"/api/v1/projects/{agent.project_id}/director/proposals/{proposal_id}"
     review = await agent.client.get(path)
     assert review.status_code == 200 and review.json()["status"] == "pending"
@@ -480,7 +565,7 @@ async def test_explicit_agent_rejection_is_idempotent_and_never_changes_shots(
     assert reviewed.status_code == 200 and reviewed.json()["status"] == "decided"
     assert reviewed.json()["items"][0]["status"] == "rejected"
     replay = await agent.client.post(message_path, json=body, headers=agent.headers)
-    assert replay.status_code == 200 and replay.json()["proposal_ids"] == [proposal_id]
+    assert replay.status_code == 200 and replay.json() == acceptance
     with Session(agent.database.engine) as session:
         after_shots = {
             shot.id: {column.key: getattr(shot, column.key) for column in Shot.__table__.columns}
@@ -549,17 +634,18 @@ async def test_real_resolver_stops_before_second_http_after_connection_is_disabl
     # The resolver, registry, adapter and model validation remain unmodified.
     monkeypatch.setattr(ToolExecutor, "execute", disable_after_actual_read)
     thread_id = await _open_thread(agent)
-    path = f"{agent.threads_path}/{thread_id}/messages"
     body = {"content": "Read the shot before suggesting changes.", "request_key": "binding-changed"}
-    response = await agent.client.post(path, json=body, headers=agent.headers)
-    assert response.status_code == 200, response.text
-    receipt = response.json()
-    assert receipt["status"] == "stale" and receipt["stop_reason"] == "context_stale"
-    assert receipt["model_calls"] == 1 and receipt["tool_calls"] == 1
-    assert receipt["proposal_ids"] == [] and receipt["assistant_message_id"] is None
-    replay = await agent.client.post(path, json=body, headers=agent.headers)
-    assert replay.status_code == 200 and replay.json()["turn_id"] == receipt["turn_id"]
-    assert replay.json()["status"] == "stale" and len(agent.chat.requests) == 1
+    acceptance = await _accept(agent, thread_id, body)
+    state = await _settle(agent, thread_id, acceptance)
+    result = state["turn"]
+    assert result["status"] == "stale" and result["stop_reason"] == "context_stale"
+    assert result["model_calls"] == 1 and result["tool_calls"] == 1
+    assert result["proposal_ids"] == [] and result["assistant_message_id"] is None
+    replay = await agent.client.post(
+        f"{agent.threads_path}/{thread_id}/messages", json=body, headers=agent.headers
+    )
+    assert replay.status_code == 200 and replay.json() == acceptance
+    assert len(agent.chat.requests) == 1
     with Session(agent.database.engine) as session:
         invocations = list(
             session.scalars(
@@ -595,7 +681,7 @@ async def test_real_resolver_stops_before_second_http_after_connection_is_disabl
 
 
 @pytest.mark.asyncio
-async def test_real_http_unknown_submission_replays_receipt_without_new_admission(
+async def test_real_http_unknown_submission_replays_acceptance_without_new_admission(
     http_agent: HttpAgent,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -604,9 +690,9 @@ async def test_real_http_unknown_submission_replays_receipt_without_new_admissio
     thread_id = await _open_thread(agent)
     path = f"{agent.threads_path}/{thread_id}/messages"
     body = {"content": "Inspect the selected shot.", "request_key": "http-unknown-submission"}
-    response = await agent.client.post(path, json=body, headers=agent.headers)
-    assert response.status_code == 200, response.text
-    receipt = response.json()
+    acceptance = await _accept(agent, thread_id, body)
+    state = await _settle(agent, thread_id, acceptance)
+    receipt = state["turn"]
     assert receipt["status"] == "failed" and receipt["stop_reason"] == "unknown_submission"
     assert receipt["model_calls"] == 1 and receipt["tool_calls"] == 0
     assert receipt["assistant_message_id"] is None and receipt["proposal_ids"] == []
@@ -638,11 +724,13 @@ async def test_real_http_unknown_submission_replays_receipt_without_new_admissio
     assert missing.status_code == 404
     assert missing.json()["details"]["code"] == "AGENT_REQUEST_NOT_FOUND"
     observed = await agent.client.get(lookup, params={"request_key": body["request_key"]})
-    assert observed.status_code == 200 and observed.json() == receipt
+    assert observed.status_code == 200
+    assert observed.json()["acceptance"] == acceptance
+    assert observed.json()["turn"] == receipt
     assert len(agent.chat.requests) == 1
     replay = await agent.client.post(path, json=body, headers=agent.headers)
     assert replay.status_code == 200, replay.text
-    assert replay.json() == receipt
+    assert replay.json() == acceptance
     assert len(agent.chat.requests) == 1
     with Session(agent.database.engine) as session:
         invocations = list(
@@ -685,17 +773,17 @@ async def test_explicit_apply_rejects_stale_agent_prompt_without_overwriting_use
 ) -> None:
     agent = http_agent
     thread_id = await _open_thread(agent)
-    response = await agent.client.post(
-        f"{agent.threads_path}/{thread_id}/messages",
-        json={
+    acceptance = await _accept(
+        agent,
+        thread_id,
+        {
             "content": "Suggest a faithful prompt for this shot.",
             "request_key": "stale-proposal",
         },
-        headers=agent.headers,
     )
-    assert response.status_code == 200, response.text
-    assert response.json()["status"] == "completed"
-    proposal_id = response.json()["proposal_ids"][0]
+    state = await _settle(agent, thread_id, acceptance)
+    assert state["turn"]["status"] == "completed"
+    proposal_id = state["turn"]["proposal_ids"][0]
     path = f"/api/v1/projects/{agent.project_id}/director/proposals/{proposal_id}"
     review = await agent.client.get(path)
     assert review.status_code == 200, review.text
@@ -734,6 +822,112 @@ async def test_explicit_apply_rejects_stale_agent_prompt_without_overwriting_use
 
 
 @pytest.mark.asyncio
+async def test_disconnected_acceptance_survives_restart_recovery_and_is_executed_once(
+    http_agent: HttpAgent,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HTTP disconnect, worker downtime and a stale lease never lose accepted work."""
+    agent = http_agent
+    thread_id = await _open_thread(agent)
+    body = {"content": "Read the shot after reconnecting.", "request_key": "disconnect-once"}
+    acceptance = await _accept(agent, thread_id, body)
+    # The client is gone: nothing was executed and no model request was submitted.
+    assert agent.chat.requests == []
+
+    # A worker that died while holding the lease is recovered as a terminal Turn.
+    with Session(agent.database.engine) as session:
+        turn = session.get(DirectorTurn, UUID(acceptance["turn_id"]))
+        assert turn is not None
+        turn.status = "thinking"
+        turn.agent_lease_token = uuid4()
+        turn.agent_control_epoch = 1
+        turn.agent_lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        turn.transport_status = "created"
+        session.commit()
+    from app.workers import jobs
+
+    monkeypatch.setattr(jobs, "get_session_factory", lambda: agent.factory)
+    recovered = await jobs.recover_interrupted_director_turns({})
+    assert recovered["recovered"] == 1
+    with Session(agent.database.engine) as session:
+        failed = session.get(DirectorTurn, UUID(acceptance["turn_id"]))
+        assert failed is not None and failed.status == "failed"
+        assert failed.agent_lease_token is None
+    # The fenced Turn is never adopted again and the model is never called.
+    assert (await _execute(agent, str(acceptance["turn_id"])))["status"] == "failed"
+    assert agent.chat.requests == []
+
+    # A fresh accepted request is still discoverable and executed exactly once.
+    second = await _accept(
+        agent, thread_id, {"content": "Read it now.", "request_key": "disconnect-second"}
+    )
+    from app.shared.db import list_pending_agent_turn_rls_scopes
+
+    async with agent.factory() as session:
+        pending = await list_pending_agent_turn_rls_scopes(session, limit=10)
+    assert [turn_id for turn_id, _scope in pending] == [UUID(second["turn_id"])]
+    state = await _settle(agent, thread_id, second)
+    assert state["turn"]["status"] == "completed"
+    assert len(agent.chat.requests) == 2
+    with Session(agent.database.engine) as session:
+        assert (
+            session.scalar(
+                select(func.count(DirectorInvocation.id)).where(
+                    DirectorInvocation.turn_id == UUID(second["turn_id"]),
+                )
+            )
+            == 2
+        )
+
+
+@pytest.mark.asyncio
+async def test_same_request_key_returns_original_acceptance_and_conflicts_on_new_input(
+    http_agent: HttpAgent,
+) -> None:
+    agent = http_agent
+    thread_id = await _open_thread(agent)
+    body = {"content": "Inspect the shot.", "request_key": "acceptance-identity"}
+    first = await _accept(agent, thread_id, body)
+    replay = await _accept(agent, thread_id, body, expected_status=200)
+    assert replay == first
+    assert agent.chat.requests == []
+    conflict = await agent.client.post(
+        f"{agent.threads_path}/{thread_id}/messages",
+        json={"content": "A different instruction.", "request_key": "acceptance-identity"},
+        headers=agent.headers,
+    )
+    assert conflict.status_code == 409, conflict.text
+    assert conflict.json()["details"]["code"] == "AGENT_REQUEST_KEY_REUSED"
+    assert agent.chat.requests == []
+    with Session(agent.database.engine) as session:
+        assert (
+            session.scalar(
+                select(func.count(DirectorTurn.id)).where(
+                    DirectorTurn.project_id == agent.project_id,
+                )
+            )
+            == 1
+        )
+        assert (
+            session.scalar(
+                select(func.count(DirectorMessage.id)).where(
+                    DirectorMessage.project_id == agent.project_id,
+                )
+            )
+            == 1
+        )
+        assert (
+            session.scalar(
+                select(func.count(OutboxEvent.id)).where(
+                    OutboxEvent.project_id == agent.project_id,
+                    OutboxEvent.topic == "director.turn.accepted",
+                )
+            )
+            == 1
+        )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("http_agent", ["chat_text_v1"], indirect=True)
 async def test_plain_chat_contract_is_rejected_before_any_model_submission(
     http_agent: HttpAgent,
@@ -765,6 +959,15 @@ async def test_plain_chat_contract_is_rejected_before_any_model_submission(
             session.scalar(
                 select(func.count(DirectorTurn.id)).where(
                     DirectorTurn.project_id == agent.project_id,
+                )
+            )
+            == 0
+        )
+        assert (
+            session.scalar(
+                select(func.count(OutboxEvent.id)).where(
+                    OutboxEvent.project_id == agent.project_id,
+                    OutboxEvent.topic == "director.turn.accepted",
                 )
             )
             == 0

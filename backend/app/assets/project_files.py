@@ -5,21 +5,102 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from dataclasses import asdict
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import PurePosixPath
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
 from app.access.projects import ProjectService
 from app.assets.models import ProjectFile, ProjectFileRevision
-from app.assets.source_parser import MAX_SOURCE_BYTES, SourceParseError, parse_source
+from app.assets.source_blocks import parse_pdf_with_blocks
+from app.assets.source_models import SourceExtraction, SourceFragment
+from app.assets.source_parser import (
+    MAX_SOURCE_BYTES,
+    ParsedSource,
+    SourceParseError,
+    parse_source,
+    processor_profile_revision,
+)
 from app.events.models import EventLog
 from app.events.service import EventService
-from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
+from app.shared.errors import (
+    AppError,
+    ConflictError,
+    NotFoundError,
+    ValidationAppError,
+)
 from app.storage.minio_store import ObjectStore
+
+EXTRACTION_EVENT = "project_file.extraction_requested"
+
+
+class SourceAcceptanceError(AppError):
+    """Stable 409 for retry/reparse acceptance conflicts (never a silent rewrite)."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(code=code, message=message, status_code=409)
+
+
+@dataclass(frozen=True)
+class ExtractionAcceptance:
+    """Durable receipt of one accepted attempt; the worker owns the actual work."""
+
+    file_revision_id: UUID
+    accepted_attempt: int
+    event_id: UUID
+    processor_profile_revision: str
+    action: str
+
+
+def current_processor_profile() -> str:
+    return processor_profile_revision()
+
+
+def _acceptance_hash(
+    *,
+    revision_id: UUID,
+    action: str,
+    request_key: str,
+    expected_file_version: int,
+    expected_attempt: int,
+    expected_extraction_id: UUID | None,
+    processor_profile_revision: str,
+) -> str:
+    payload = [
+        str(revision_id),
+        action,
+        request_key,
+        expected_file_version,
+        expected_attempt,
+        str(expected_extraction_id) if expected_extraction_id else None,
+        processor_profile_revision,
+    ]
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _fragment_content_hash(parsed: ParsedSource) -> str:
+    """Stable identity of the extracted content, independent of database ids."""
+    payload = [
+        [
+            fragment.ordinal,
+            fragment.locator_kind,
+            fragment.locator,
+            fragment.text,
+            fragment.extraction_method,
+            fragment.processor_ref,
+        ]
+        for fragment in parsed.fragments
+    ]
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
 
 
 class ProjectFileService:
@@ -226,28 +307,60 @@ class ProjectFileService:
             request_key=request_key,
             request_hash=request_hash,
             status="pending",
-            excerpts=[],
+            processor_profile_revision=current_processor_profile(),
         )
         self.session.add(revision)
         await self.session.flush()
-        await self._enqueue(revision)
+        await self._enqueue(
+            revision,
+            action="upload",
+            request_key=request_key,
+            request_hash=request_hash,
+            file_version=item.version,
+        )
         return revision
 
     async def _enqueue(
         self,
         revision: ProjectFileRevision,
         *,
-        retry_key: str | None = None,
-    ) -> None:
-        await EventService(self.session).append_with_outbox(
+        action: str,
+        request_key: str,
+        request_hash: str,
+        file_version: int,
+    ) -> EventLog:
+        """Freeze the accepted attempt and processor contract in one schema-2 event."""
+        event, _outbox = await EventService(self.session).append_with_outbox(
             project_id=self.project_id,
             aggregate_type="ProjectFileRevision",
             aggregate_id=revision.id,
-            event_type="project_file.extraction_requested",
-            topic="project_file.extraction_requested",
+            event_type=EXTRACTION_EVENT,
+            topic=EXTRACTION_EVENT,
             actor_id=self.actor.id,
-            payload={"revision_id": str(revision.id), "retry_key": retry_key},
+            schema_version=2,
+            payload={
+                "revision_id": str(revision.id),
+                "request_key": request_key,
+                "request_hash": request_hash,
+                "action": action,
+                "accepted_attempt": revision.attempt,
+                "file_version": file_version,
+                "processor_profile_revision": revision.processor_profile_revision,
+            },
         )
+        return event
+
+    async def _acceptance_event(self, revision_id: UUID, request_key: str) -> EventLog | None:
+        event: EventLog | None = await self.session.scalar(
+            select(EventLog).where(
+                EventLog.project_id == self.project_id,
+                EventLog.aggregate_id == revision_id,
+                EventLog.event_type == EXTRACTION_EVENT,
+                EventLog.schema_version == 2,
+                EventLog.payload["request_key"].as_string() == request_key,
+            )
+        )
+        return event
 
     async def unlink(self, file_id: UUID, *, expected_version: int) -> ProjectFile:
         await self._authorize()
@@ -260,40 +373,114 @@ class ProjectFileService:
         await self.session.flush()
         return item
 
-    async def retry_extraction(self, revision_id: UUID, *, request_key: str) -> ProjectFileRevision:
+    async def accept_extraction(
+        self,
+        revision_id: UUID,
+        *,
+        action: str,
+        request_key: str,
+        expected_file_version: int,
+        expected_attempt: int,
+        expected_extraction_id: UUID | None,
+        processor_profile_revision: str,
+    ) -> ExtractionAcceptance:
+        """Accept one explicit retry/reparse under a frozen processor contract.
+
+        Same key + same hash returns the original acceptance even after the current
+        state moved; a different payload under a used key is a conflict. The accepted
+        attempt is only recorded here; the worker performs the local work.
+        """
+        if action not in {"retry", "reparse"}:
+            raise ValidationAppError("Unsupported extraction action")
         if not 1 <= len(request_key) <= 160:
-            raise ValidationAppError("Invalid retry request key")
+            raise ValidationAppError("Invalid extraction request key")
+        if len(processor_profile_revision) != 64 or any(
+            character not in "0123456789abcdef" for character in processor_profile_revision
+        ):
+            raise ValidationAppError("Invalid processor profile revision")
+        request_hash = _acceptance_hash(
+            revision_id=revision_id,
+            action=action,
+            request_key=request_key,
+            expected_file_version=expected_file_version,
+            expected_attempt=expected_attempt,
+            expected_extraction_id=expected_extraction_id,
+            processor_profile_revision=processor_profile_revision,
+        )
         item, revision = await self.read_revision(revision_id)
-        # Match upload's project -> file -> revision lock order. Outbox inserts
-        # acquire project FK locks too, so taking the file lock first can deadlock.
-        await self.session.scalar(
-            select(Project)
-            .where(
-                Project.id == self.project_id,
+        if processor_profile_revision != current_processor_profile():
+            raise SourceAcceptanceError(
+                "SOURCE_PROFILE_DRIFT",
+                "The processor profile changed; refresh capabilities before accepting",
             )
-            .with_for_update()
+        # Match upload's project -> file -> revision lock order.
+        await self.session.scalar(
+            select(Project).where(Project.id == self.project_id).with_for_update()
         )
         item = await self._file(item.id, lock=True)
         await self.session.refresh(revision, with_for_update=True)
-        replay = await self.session.scalar(
-            select(EventLog.event_id).where(
-                EventLog.project_id == self.project_id,
-                EventLog.aggregate_id == revision.id,
-                EventLog.event_type == "project_file.extraction_requested",
-                EventLog.payload["retry_key"].as_string() == request_key,
-            )
-        )
+        replay = await self._acceptance_event(revision.id, request_key)
         if replay is not None:
-            return revision
+            if replay.payload.get("request_hash") != request_hash:
+                raise SourceAcceptanceError(
+                    "SOURCE_REQUEST_KEY_REUSED",
+                    "Extraction request key already used for a different request",
+                )
+            accepted_attempt = replay.payload.get("accepted_attempt")
+            accepted_profile = replay.payload.get("processor_profile_revision")
+            if not isinstance(accepted_attempt, int) or not isinstance(accepted_profile, str):
+                # A stored receipt without the frozen facts cannot be replayed.
+                raise SourceAcceptanceError(
+                    "SOURCE_STALE_ACCEPTANCE", "Stored extraction acceptance is incomplete"
+                )
+            return ExtractionAcceptance(
+                file_revision_id=revision.id,
+                accepted_attempt=accepted_attempt,
+                event_id=replay.event_id,
+                processor_profile_revision=accepted_profile,
+                action=str(replay.payload.get("action")),
+            )
         if item.detached_at or item.content_version != revision.number:
-            raise ConflictError("Only the current available source can be retried")
-        if revision.status != "failed":
-            raise ConflictError("Source extraction is not failed")
+            raise SourceAcceptanceError(
+                "SOURCE_UNAVAILABLE", "Only the current available source can be reprocessed"
+            )
+        if item.version != expected_file_version or revision.attempt != expected_attempt:
+            raise SourceAcceptanceError(
+                "SOURCE_STALE_ACCEPTANCE", "Source acceptance basis is stale"
+            )
+        if action == "reparse" and expected_extraction_id is None:
+            raise ValidationAppError("Reparse requires the current extraction id")
+        if (
+            expected_extraction_id is not None
+            and revision.current_extraction_id != expected_extraction_id
+        ):
+            raise SourceAcceptanceError(
+                "SOURCE_STALE_ACCEPTANCE", "Extraction pointer changed"
+            )
+        required_state = "failed" if action == "retry" else "parsed"
+        if revision.status != required_state:
+            raise SourceAcceptanceError(
+                "SOURCE_STATE_CONFLICT",
+                f"{action} requires a {required_state} source",
+            )
         revision.status = "pending"
         revision.attempt += 1
         revision.error_code = None
-        await self._enqueue(revision, retry_key=request_key)
-        return revision
+        revision.processor_profile_revision = processor_profile_revision
+        event = await self._enqueue(
+            revision,
+            action=action,
+            request_key=request_key,
+            request_hash=request_hash,
+            file_version=item.version,
+        )
+        return ExtractionAcceptance(
+            file_revision_id=revision.id,
+            accepted_attempt=revision.attempt,
+            event_id=event.event_id,
+            processor_profile_revision=processor_profile_revision,
+            action=action,
+        )
 
     async def extract(
         self, revision_id: UUID, *, expected_attempt: int | None = None
@@ -303,27 +490,155 @@ class ProjectFileService:
         attempt = revision.attempt if expected_attempt is None else expected_attempt
         if revision.status != "pending" or item.detached_at or revision.attempt != attempt:
             return revision
+        # The accepted attempt is bound to one processor contract. A changed profile
+        # (or a legacy row without a frozen profile) never runs under today's tools.
+        frozen_profile = revision.processor_profile_revision
+        profile_error: str | None = None
+        if frozen_profile is None:
+            profile_error = "source_profile_legacy"
+        elif frozen_profile != current_processor_profile():
+            profile_error = "source_profile_drift"
         # Local storage/CPU only. A temporary store failure leaves the durable
         # pending event recoverable; an invalid document becomes a per-file error.
         data = await self._original_bytes(revision)
-        try:
-            parsed = await asyncio.to_thread(parse_source, filename=revision.filename, data=data)
-            excerpts = [asdict(excerpt) for excerpt in parsed.excerpts]
-            error = None
-            parser_version = parsed.parser_version
-        except SourceParseError as exc:
-            excerpts, error, parser_version = [], exc.code, None
+        if profile_error is not None:
+            parsed, error = None, profile_error
+        else:
+            try:
+                parsed = await self._parse(revision, data)
+                error = None
+            except SourceParseError as exc:
+                parsed, error = None, exc.code
         # Same lock order as retry/unlink; duplicate deliveries are harmless.
         item = await self._file(item.id, lock=True)
         await self.session.refresh(revision, with_for_update=True)
         if revision.status != "pending" or item.detached_at or revision.attempt != attempt:
             return revision
-        revision.status = "failed" if error else "parsed"
-        revision.error_code = error
-        revision.parser_version = parser_version
-        revision.excerpts = excerpts
+        if error is not None or parsed is None:
+            revision.status = "failed"
+            revision.error_code = error
+            revision.parser_version = None
+            await self.session.flush()
+            return revision
+        extraction = await self._append_extraction(item, revision, parsed)
+        revision.status = "parsed"
+        revision.error_code = None
+        revision.parser_version = parsed.parser_version
+        # Forward-only pointer: an older attempt can never become current again.
+        revision.current_extraction_id = extraction.id
         await self.session.flush()
         return revision
+
+    async def _parse(self, revision: ProjectFileRevision, data: bytes) -> ParsedSource:
+        """Page-ranged PDFs resume from verified block receipts; other formats parse once."""
+        extension = PurePosixPath(revision.filename.replace("\\", "/")).suffix.lower()
+        if extension == ".pdf":
+            return await parse_pdf_with_blocks(
+                data,
+                store=self.store,
+                project_id=self.project_id,
+                content_hash=revision.content_hash,
+                revision_id=revision.id,
+                attempt=revision.attempt,
+            )
+        return await asyncio.to_thread(
+            parse_source, filename=revision.filename, data=data
+        )
+
+    async def _append_extraction(
+        self,
+        item: ProjectFile,
+        revision: ProjectFileRevision,
+        parsed: ParsedSource,
+    ) -> SourceExtraction:
+        """Append one immutable snapshot; the caller already holds the revision lock."""
+        extraction = SourceExtraction(
+            project_id=self.project_id,
+            file_id=item.id,
+            file_revision_id=revision.id,
+            attempt=revision.attempt,
+            parser_key=parsed.parser_key,
+            parser_version=parsed.parser_version,
+            content_hash=_fragment_content_hash(parsed),
+            extraction_schema_version=parsed.extraction_schema_version,
+            coverage=(
+                {**parsed.coverage, "limitations": list(parsed.limitations)}
+                if parsed.limitations
+                else parsed.coverage
+            ),
+            processor_evidence=parsed.processor_evidence,
+            completed_at=datetime.now(UTC),
+        )
+        self.session.add(extraction)
+        await self.session.flush()
+        self.session.add_all(
+            [
+                SourceFragment(
+                    project_id=self.project_id,
+                    extraction_id=extraction.id,
+                    file_revision_id=revision.id,
+                    ordinal=fragment.ordinal,
+                    locator_kind=fragment.locator_kind,
+                    locator=fragment.locator,
+                    text_content=fragment.text,
+                    content_hash=hashlib.sha256(fragment.text.encode()).hexdigest(),
+                    extraction_method=fragment.extraction_method,
+                    processor_ref=fragment.processor_ref,
+                    evidence_meta=fragment.evidence_meta,
+                )
+                for fragment in parsed.fragments
+            ]
+        )
+        await self.session.flush()
+        return extraction
+
+    async def read_extraction(self, extraction_id: UUID) -> SourceExtraction:
+        await self._authorize()
+        extraction = await self.session.scalar(
+            select(SourceExtraction).where(
+                SourceExtraction.id == extraction_id,
+                SourceExtraction.project_id == self.project_id,
+            )
+        )
+        if extraction is None:
+            raise NotFoundError("source extraction not found")
+        return extraction
+
+    async def list_fragments(
+        self,
+        extraction_id: UUID,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        locator_kind: str | None = None,
+    ) -> tuple[list[SourceFragment], int]:
+        """Return one ordered page plus the total count for the same filter."""
+        await self._authorize()
+        if not 1 <= limit <= 200 or offset < 0:
+            raise ValidationAppError("Invalid fragment page")
+        condition = [
+            SourceFragment.extraction_id == extraction_id,
+            SourceFragment.project_id == self.project_id,
+        ]
+        if locator_kind is not None:
+            condition.append(SourceFragment.locator_kind == locator_kind)
+        total = int(
+            await self.session.scalar(
+                select(func.count()).select_from(SourceFragment).where(*condition)
+            )
+            or 0
+        )
+        items = list(
+            await self.session.scalars(
+                select(SourceFragment)
+                .where(*condition)
+                .order_by(SourceFragment.ordinal)
+                .offset(offset)
+                .limit(limit)
+            )
+        )
+        return items, total
+
 
     async def fail_extraction(self, revision_id: UUID, *, expected_attempt: int) -> None:
         """Record a safe infrastructure failure; explicit retry remains per file."""

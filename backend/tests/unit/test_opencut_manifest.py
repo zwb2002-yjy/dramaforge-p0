@@ -27,6 +27,7 @@ async def _project(session: AsyncSession, *, suffix: str) -> tuple[User, Project
     session.add(workspace)
     await session.flush()
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=workspace.id,
         name=f"OpenCut {suffix}",
         aspect_ratio="16:9",

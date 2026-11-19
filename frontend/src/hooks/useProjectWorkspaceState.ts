@@ -10,6 +10,8 @@ import { queryKeys } from "../lib/queryKeys";
  */
 
 export const WORKSPACE_VIEWS = [
+  "files",
+  "research",
   "script",
   "assets",
   "scenes",

@@ -23,6 +23,9 @@ from app.storage.minio_store import ObjectStore
 
 logger = logging.getLogger(__name__)
 FAILURE_RECEIPT_TIMEOUT_SECONDS = 5.0
+# Local parse only: the bounded profile (25-page PDF blocks, 30 s ASR windows,
+# 40 MP images) can legitimately exceed the old 30 s scan interval on slow hosts.
+SOURCE_EXTRACTION_TIMEOUT_SECONDS = 900.0
 
 
 @dataclass
@@ -89,7 +92,7 @@ async def process_project_files(
         # Failed rows cannot monopolize the next page; an empty scan wraps.
         scan.after_revision_id = scope["revision_id"]
         try:
-            async with asyncio.timeout(30), factory() as session:
+            async with asyncio.timeout(SOURCE_EXTRACTION_TIMEOUT_SECONDS), factory() as session:
                 await set_rls_context(
                     session,
                     user_id=scope["owner_user_id"],

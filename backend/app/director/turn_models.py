@@ -26,6 +26,18 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+# Same-domain leaf models are registered through this existing models entry so
+# the shared registry keeps its single recorded director dependency.
+from app.director.business_flow_models import (  # noqa: F401  (registration only)
+    DirectorBusinessFlowInstance,
+    DirectorBusinessFlowStep,
+    DirectorBusinessFlowStepAttempt,
+)
+from app.director.master_run_models import (  # noqa: F401  (registration only)
+    DirectorMasterRun,
+    DirectorMasterRunControlReceipt,
+    DirectorMasterRunPlan,
+)
 from app.shared.base import Base
 from app.shared.db_types import CURRENCY_CODE, HASH_64, JSON_DOCUMENT
 
@@ -48,6 +60,35 @@ class DirectorTurn(Base):
     __table_args__ = (
         UniqueConstraint("id", "project_id", name="uq_director_turn_scope"),
         UniqueConstraint("project_id", "request_key", name="uq_director_turn_request"),
+        UniqueConstraint(
+            "id", "project_id", "workspace_id", "actor_id", "thread_id", "turn_kind",
+            name="uq_director_turn_origin_identity",
+        ),
+        UniqueConstraint(
+            "id", "master_run_id", "project_id", name="uq_director_turn_run_scope",
+        ),
+        UniqueConstraint(
+            "id", "master_run_id", "plan_revision", "project_id",
+            name="uq_director_turn_plan_scope",
+        ),
+        ForeignKeyConstraint(
+            ["master_run_id", "project_id"],
+            ["director_master_runs.id", "director_master_runs.project_id"],
+            ondelete="NO ACTION", name="fk_director_turn_master_run",
+            deferrable=True, initially="DEFERRED",
+        ),
+        ForeignKeyConstraint(
+            ["master_run_id", "plan_revision", "project_id"],
+            ["director_master_run_plans.master_run_id", "director_master_run_plans.revision",
+             "director_master_run_plans.project_id"],
+            ondelete="NO ACTION", name="fk_director_turn_master_plan",
+            deferrable=True, initially="DEFERRED",
+        ),
+        CheckConstraint(
+            "(plan_revision IS NULL OR plan_revision > 0) AND "
+            "(plan_revision IS NULL OR master_run_id IS NOT NULL)",
+            name="ck_director_turn_master_plan",
+        ),
         ForeignKeyConstraint(
             ["thread_id", "project_id"], ["director_threads.id", "director_threads.project_id"],
             ondelete="CASCADE", name="fk_director_turn_thread_scope",
@@ -57,7 +98,28 @@ class DirectorTurn(Base):
             ["director_turns.id", "director_turns.project_id"],
             ondelete="CASCADE", name="fk_director_turn_origin_scope",
         ),
+        ForeignKeyConstraint(
+            [
+                "business_flow_step_attempt_id", "master_run_id", "plan_revision",
+                "project_id", "scope_type", "scope_entity_id",
+            ],
+            [
+                "director_business_flow_step_attempts.id",
+                "director_business_flow_step_attempts.supervisor_run_id",
+                "director_business_flow_step_attempts.plan_revision",
+                "director_business_flow_step_attempts.project_id",
+                "director_business_flow_step_attempts.scope_type",
+                "director_business_flow_step_attempts.scope_entity_id",
+            ],
+            ondelete="NO ACTION", name="fk_director_turn_flow_attempt",
+            deferrable=True, initially="DEFERRED",
+        ),
         CheckConstraint("turn_kind IN ('agent','workflow')", name="ck_director_turn_kind"),
+        CheckConstraint(
+            "business_flow_step_attempt_id IS NULL OR "
+            "(master_run_id IS NOT NULL AND plan_revision IS NOT NULL)",
+            name="ck_director_turn_flow_attempt_scope",
+        ),
         CheckConstraint("agent_control_epoch >= 0", name="ck_director_turn_control_epoch"),
         CheckConstraint("revision > 0", name="ck_director_turn_revision_positive"),
         CheckConstraint("step_count >= 0", name="ck_director_turn_step_count_nonnegative"),
@@ -152,6 +214,9 @@ class DirectorTurn(Base):
     proposal_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("director_proposals.id", ondelete="SET NULL"), nullable=True
     )
+    master_run_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    plan_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    business_flow_step_attempt_id: Mapped[UUID | None] = mapped_column(nullable=True)
     dispatched_command_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
     node_run_ids: Mapped[list[object]] = mapped_column(JSON_DOCUMENT, nullable=False, default=list)
     step_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

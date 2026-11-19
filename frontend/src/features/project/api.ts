@@ -1,6 +1,7 @@
 import { ApiError, apiGet, apiSend, fetchCsrf } from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 import { listWorkspaces } from "../access/api";
+import { getSelectedWorkspaceId } from "../../lib/navigationPreferences";
 
 export type ProjectRead = components["schemas"]["ProjectRead"];
 
@@ -99,6 +100,11 @@ export async function createProject(
     components["schemas"]["ProjectCreate"],
     | "workspace_id"
     | "name"
+    | "work_type"
+    | "creative_goal"
+    | "audience"
+    | "planned_duration_seconds"
+    | "planned_episode_count"
     | "genre_key"
     | "style_key"
     | "aspect_ratio"
@@ -108,19 +114,40 @@ export async function createProject(
   >,
 ): Promise<components["schemas"]["ProjectRead"]> {
   const csrf = await fetchCsrf();
-  return apiSend(
+  return apiSend("POST", "/api/v1/projects", input, csrf);
+}
+
+async function projectIntentRequest<T>(
+  method: string,
+  path: string,
+  input: components["schemas"]["ProjectUpdate"],
+  workspaceId: string,
+): Promise<T> {
+  if (getSelectedWorkspaceId() !== workspaceId)
+    throw new Error("工作空间已切换，请返回原项目再操作。");
+  const csrf = await fetchCsrf();
+  if (getSelectedWorkspaceId() !== workspaceId)
+    throw new Error("工作空间已切换，请返回原项目再操作。");
+  return apiSend(method, path, input, csrf);
+}
+
+export function previewProjectIntent(
+  projectId: string,
+  input: components["schemas"]["ProjectUpdate"],
+  workspaceId: string,
+): Promise<components["schemas"]["ProjectUpdateImpact"]> {
+  return projectIntentRequest(
     "POST",
-    "/api/v1/projects",
-    {
-      workspace_id: input.workspace_id,
-      name: input.name,
-      ...(input.genre_key ? { genre_key: input.genre_key } : {}),
-      ...(input.style_key ? { style_key: input.style_key } : {}),
-      aspect_ratio: input.aspect_ratio,
-      start_type: input.start_type ?? "FREE",
-      template_key: input.template_key ?? null,
-      director_autonomy: input.director_autonomy ?? "ASSIST",
-    },
-    csrf,
+    `/api/v1/projects/${projectId}/intent-preview`,
+    input,
+    workspaceId,
   );
+}
+
+export function updateProject(
+  projectId: string,
+  input: components["schemas"]["ProjectUpdate"],
+  workspaceId: string,
+): Promise<ProjectRead> {
+  return projectIntentRequest("PATCH", `/api/v1/projects/${projectId}`, input, workspaceId);
 }

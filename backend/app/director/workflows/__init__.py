@@ -21,7 +21,6 @@ from app.director.workflows.continuity import (
     persist_continuity_context,
 )
 from app.director.workflows.contracts import (
-    GraphFactory,
     TemplateResolveSource,
     TemplateResolveStatus,
     WorkflowScope,
@@ -44,7 +43,6 @@ from app.director.workflows.layered_planning import (
 )
 from app.director.workflows.library import (
     build_workflow_registry,
-    dialogue_graph_factory,
     dialogue_post_dub_spec,
     get_default_registry,
 )
@@ -79,7 +77,6 @@ from app.director.workflows.shot_complexity import (
 
 __all__ = [
     "DialogueRole",
-    "GraphFactory",
     "IdentityResultStatus",
     "MAX_VISIBLE_CONTROLLED_CHARACTERS",
     "MultiCharacterIdentityReport",
@@ -121,7 +118,6 @@ __all__ = [
     "build_scene_continuity_report",
     "build_workflow_registry",
     "complexity_director_state",
-    "dialogue_graph_factory",
     "dialogue_post_dub_spec",
     "get_default_registry",
     "is_scene_failure_isolated",

@@ -26,7 +26,12 @@ def _project(client: TestClient) -> str:
     client.headers["X-Workspace-Id"] = workspace_id
     created = client.post(
         "/api/v1/projects",
-        json={"workspace_id": workspace_id, "name": "Tag Project", "aspect_ratio": "16:9"},
+        json={
+            "work_type": "serial_comic",
+            "workspace_id": workspace_id,
+            "name": "Tag Project",
+            "aspect_ratio": "16:9",
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert created.status_code in {200, 201}, created.text

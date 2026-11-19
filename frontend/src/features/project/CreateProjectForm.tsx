@@ -21,14 +21,19 @@ import { type WorkspaceRead } from "../access/api";
 import { queryKeys } from "../../lib/queryKeys";
 import "./create-project-form.css";
 import { fetchProjectCreativeOptions } from "./creative-options";
+import { ProjectIntentFields } from "./ProjectIntentFields";
+import {
+  EMPTY_PROJECT_INTENT,
+  projectIntentInput,
+  type ProjectIntentValues,
+} from "./projectIntent";
 
 const TEMPLATES = [
   { key: "dual_character_conflict_v1", name: "双人对白反转" },
   { key: "single_monologue_v1", name: "单人情绪独白" },
 ] as const;
 
-type ProjectValues = {
-  name: string;
+type ProjectValues = ProjectIntentValues & {
   aspectRatio: "9:16" | "16:9";
   startType: "TEMPLATE" | "FREE";
   templateKey: string;
@@ -37,7 +42,7 @@ type ProjectValues = {
   style: string;
 };
 const INITIAL_VALUES: ProjectValues = {
-  name: "新短剧",
+  ...EMPTY_PROJECT_INTENT,
   aspectRatio: "9:16",
   startType: "FREE",
   templateKey: TEMPLATES[0].key,
@@ -75,19 +80,15 @@ export function CreateProjectForm({
     staleTime: 60_000,
   });
   const create = useMutation({
-    mutationFn: ({
-      name,
-      aspectRatio,
-      startType,
-      templateKey,
-      autonomy,
-      genre,
-      style,
-    }: ProjectValues) => {
+    mutationFn: (values: ProjectValues) => {
+      const { name, aspectRatio, startType, templateKey, autonomy, genre, style } = values;
       if (!workspaceId || !workspaces.some((workspace) => workspace.id === workspaceId))
         throw new Error("请先选择工作空间");
       if (!name.trim()) throw new Error("请输入项目名称");
+      if (!values.workType) throw new Error("请选择作品类型");
       return createProject({
+        ...projectIntentInput(values),
+        work_type: values.workType,
         workspace_id: workspaceId,
         name: name.trim(),
         aspect_ratio: aspectRatio,
@@ -156,6 +157,7 @@ export function CreateProjectForm({
               ))}
             </Select>
           </Field>
+          <ProjectIntentFields />
           <section aria-label="创作选项">
             <Row gutter={["var(--df-space-4)", "var(--df-space-4)"]}>
               <Col xs={24} sm={12}>
@@ -194,11 +196,11 @@ export function CreateProjectForm({
               </Col>
             </Row>
           </section>
-          <Disclosure title="风格与类型（可选）">
+          <Disclosure title="风格与题材（可选）">
             <Row gutter={["var(--df-space-4)", "var(--df-space-4)"]}>
               <Col xs={24} sm={12}>
-                <Form.Item label="创作类型" name="genre">
-                  <Select aria-label="创作类型" disabled={options.isPending || options.isError}>
+                <Form.Item label="题材偏好" name="genre">
+                  <Select aria-label="题材偏好" disabled={options.isPending || options.isError}>
                     <option value="">
                       {startType === "TEMPLATE" ? "沿用模板建议" : "暂不指定"}
                     </option>

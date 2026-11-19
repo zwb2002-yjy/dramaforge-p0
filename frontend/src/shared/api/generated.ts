@@ -390,6 +390,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/director/master-runs/{run_id}/business-flows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Business Flows */
+        get: operations["list_business_flows_api_v1_projects__project_id__director_master_runs__run_id__business_flows_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/business-flows/{flow_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Business Flow */
+        get: operations["read_business_flow_api_v1_projects__project_id__director_business_flows__flow_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/business-flows/{flow_id}/steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Business Flow Steps */
+        get: operations["list_business_flow_steps_api_v1_projects__project_id__director_business_flows__flow_id__steps_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/business-flows/{flow_id}/steps/{step_id}/attempts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Business Flow Attempts */
+        get: operations["list_business_flow_attempts_api_v1_projects__project_id__director_business_flows__flow_id__steps__step_id__attempts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/voice-options": {
         parameters: {
             query?: never;
@@ -754,6 +822,24 @@ export interface paths {
         delete: operations["delete_project_api_v1_projects__project_id__delete"];
         options?: never;
         head?: never;
+        /** Update Project */
+        patch: operations["update_project_api_v1_projects__project_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/intent-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Project Update */
+        post: operations["preview_project_update_api_v1_projects__project_id__intent_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
         patch?: never;
         trace?: never;
     };
@@ -772,6 +858,44 @@ export interface paths {
         head?: never;
         /** Update Project Creative Profile */
         patch: operations["update_project_creative_profile_api_v1_projects__project_id__creative_profile_patch"];
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/egress-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Egress Policy */
+        get: operations["read_egress_policy_api_v1_projects__project_id__egress_policy_get"];
+        /** Put Egress Policy */
+        put: operations["put_egress_policy_api_v1_projects__project_id__egress_policy_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/source-capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Source Capabilities
+         * @description Read-only capability answer; zero parsing and zero model calls.
+         */
+        get: operations["read_source_capabilities_api_v1_projects__project_id__source_capabilities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/projects/{project_id}/files": {
@@ -827,6 +951,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/extractions/{extraction_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Extraction */
+        get: operations["read_extraction_api_v1_projects__project_id__extractions__extraction_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/extractions/{extraction_id}/fragments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Fragments */
+        get: operations["list_fragments_api_v1_projects__project_id__extractions__extraction_id__fragments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/file-revisions/{revision_id}/original": {
         parameters: {
             query?: never;
@@ -853,8 +1011,31 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Retry Source */
+        /**
+         * Retry Source
+         * @description Accept one retry of a failed local extraction under a frozen profile.
+         */
         post: operations["retry_source_api_v1_projects__project_id__file_revisions__revision_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/file-revisions/{revision_id}/reparse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reparse Source
+         * @description Accept one explicit re-identification of an already parsed source.
+         */
+        post: operations["reparse_source_api_v1_projects__project_id__file_revisions__revision_id__reparse_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -955,8 +1136,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Run Director Agent Turn */
-        post: operations["run_director_agent_turn_api_v1_projects__project_id__director_threads__thread_id__messages_post"];
+        /**
+         * Accept Director Agent Turn
+         * @description Durably accept one Agent request; execution belongs to the Director worker.
+         *
+         *     A repeat of the same normalized request returns the original acceptance with
+         *     HTTP 200. This handler never opens a checkpoint, calls a model, or leaves an
+         *     in-memory background task: an HTTP disconnect cannot cancel accepted work.
+         */
+        post: operations["accept_director_agent_turn_api_v1_projects__project_id__director_threads__thread_id__messages_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1896,6 +2084,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/file-revisions/{revision_id}/source-use": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read File Source Use */
+        get: operations["read_file_source_use_api_v1_projects__project_id__file_revisions__revision_id__source_use_get"];
+        /** Write File Source Use */
+        put: operations["write_file_source_use_api_v1_projects__project_id__file_revisions__revision_id__source_use_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/artifacts/{artifact_id}/source-use": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Artifact Source Use */
+        get: operations["read_artifact_source_use_api_v1_projects__project_id__artifacts__artifact_id__source_use_get"];
+        /** Write Artifact Source Use */
+        put: operations["write_artifact_source_use_api_v1_projects__project_id__artifacts__artifact_id__source_use_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/source-use-subjects/{subject_id}/impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Source Use Impact */
+        get: operations["read_source_use_impact_api_v1_projects__project_id__source_use_subjects__subject_id__impact_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/story/proposals": {
         parameters: {
             query?: never;
@@ -2221,6 +2462,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/provider-destinations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Provider Destinations */
+        get: operations["list_provider_destinations_api_v1_workspaces__workspace_id__provider_destinations_get"];
+        put?: never;
+        /** Declare Provider Destination */
+        post: operations["declare_provider_destination_api_v1_workspaces__workspace_id__provider_destinations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/provider-references/{token}": {
         parameters: {
             query?: never;
@@ -2286,6 +2545,186 @@ export interface paths {
         put?: never;
         /** Resolve Shot References */
         post: operations["resolve_shot_references_api_v1_projects__project_id__shots__shot_id__references_resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/research-results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Research Results */
+        get: operations["list_research_results_api_v1_projects__project_id__research_results_get"];
+        put?: never;
+        /** Create Research Result */
+        post: operations["create_research_result_api_v1_projects__project_id__research_results_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/research-results/{result_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Research Result */
+        get: operations["read_research_result_api_v1_projects__project_id__research_results__result_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Archive Research Result */
+        patch: operations["archive_research_result_api_v1_projects__project_id__research_results__result_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/research-results/{result_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Research Revisions */
+        get: operations["list_research_revisions_api_v1_projects__project_id__research_results__result_id__revisions_get"];
+        put?: never;
+        /** Append Research Revision */
+        post: operations["append_research_revision_api_v1_projects__project_id__research_results__result_id__revisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/research-revisions/{revision_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Research Revision */
+        get: operations["read_research_revision_api_v1_projects__project_id__research_revisions__revision_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/research-results/{result_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept Research Candidate */
+        post: operations["accept_research_candidate_api_v1_projects__project_id__research_results__result_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/research-results/{result_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Research Revision */
+        post: operations["restore_research_revision_api_v1_projects__project_id__research_results__result_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/file-revisions/{revision_id}/analysis-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Research Analysis
+         * @description Zero model calls, zero writes: freeze what an accepted analysis would read.
+         */
+        post: operations["preview_research_analysis_api_v1_projects__project_id__file_revisions__revision_id__analysis_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/file-revisions/{revision_id}/analyses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Research Analyses */
+        get: operations["list_research_analyses_api_v1_projects__project_id__file_revisions__revision_id__analyses_get"];
+        put?: never;
+        /**
+         * Accept Research Analysis
+         * @description Accept one frozen analysis request as a queued Director Turn (no model call).
+         */
+        post: operations["accept_research_analysis_api_v1_projects__project_id__file_revisions__revision_id__analyses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/analyses/{analysis_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Research Analysis */
+        get: operations["read_research_analysis_api_v1_projects__project_id__analyses__analysis_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/analyses/{analysis_id}/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Research Analysis Results */
+        get: operations["list_research_analysis_results_api_v1_projects__project_id__analyses__analysis_id__results_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2408,6 +2847,234 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Knowledge Entries */
+        get: operations["list_knowledge_entries_api_v1_knowledge_entries_get"];
+        put?: never;
+        /** Create Knowledge Entry */
+        post: operations["create_knowledge_entry_api_v1_knowledge_entries_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/entries/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Knowledge Entry */
+        get: operations["read_knowledge_entry_api_v1_knowledge_entries__entry_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/entries/{entry_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Knowledge Revisions */
+        get: operations["list_knowledge_revisions_api_v1_knowledge_entries__entry_id__revisions_get"];
+        put?: never;
+        /** Append Knowledge Revision */
+        post: operations["append_knowledge_revision_api_v1_knowledge_entries__entry_id__revisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/entries/{entry_id}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw Knowledge Entry */
+        post: operations["withdraw_knowledge_entry_api_v1_knowledge_entries__entry_id__withdraw_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/knowledge-references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Knowledge References */
+        get: operations["list_knowledge_references_api_v1_projects__project_id__knowledge_references_get"];
+        put?: never;
+        /** Create Knowledge Reference */
+        post: operations["create_knowledge_reference_api_v1_projects__project_id__knowledge_references_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/knowledge-references/{reference_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Knowledge Reference */
+        patch: operations["patch_knowledge_reference_api_v1_projects__project_id__knowledge_references__reference_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/public-assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Public Assets */
+        get: operations["list_public_assets_api_v1_public_assets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public-assets/{publication_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Public Asset */
+        get: operations["read_public_asset_api_v1_public_assets__publication_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Public Asset */
+        patch: operations["patch_public_asset_api_v1_public_assets__publication_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/public-assets/{publication_id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Public Asset Items */
+        get: operations["list_public_asset_items_api_v1_public_assets__publication_id__items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/public-asset-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Public Links */
+        get: operations["list_public_links_api_v1_projects__project_id__public_asset_links_get"];
+        put?: never;
+        /** Create Public Link */
+        post: operations["create_public_link_api_v1_projects__project_id__public_asset_links_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/public-asset-links/{link_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Patch Public Link */
+        patch: operations["patch_public_link_api_v1_projects__project_id__public_asset_links__link_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/public-assets/{publication_id}/items/{item_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Public Content */
+        get: operations["read_public_content_api_v1_public_assets__publication_id__items__item_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        /** Head Public Content */
+        head: operations["head_public_content_api_v1_public_assets__publication_id__items__item_id__content_head"];
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/public-asset-links/{link_id}/items/{item_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Project Public Content */
+        get: operations["read_project_public_content_api_v1_projects__project_id__public_asset_links__link_id__items__item_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        /** Head Project Public Content */
+        head: operations["head_project_public_content_api_v1_projects__project_id__public_asset_links__link_id__items__item_id__content_head"];
         patch?: never;
         trace?: never;
     };
@@ -2986,6 +3653,45 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AgentAcceptance
+         * @description Immutable admission fact for one accepted Agent request.
+         *
+         *     ``status`` stays ``queued`` after completion: this object describes what was
+         *     accepted, never how the Turn later finished. Current progress is read from
+         *     the Turn receipt (``AgentRequestState.turn``).
+         */
+        AgentAcceptance: {
+            /**
+             * Thread Id
+             * Format: uuid
+             */
+            thread_id: string;
+            /**
+             * Turn Id
+             * Format: uuid
+             */
+            turn_id: string;
+            /**
+             * User Message Id
+             * Format: uuid
+             */
+            user_message_id: string;
+            /** Master Run Id */
+            master_run_id?: string | null;
+            /**
+             * Status
+             * @default queued
+             * @constant
+             */
+            status: "queued";
+            /** Accepted Revision */
+            accepted_revision: number;
+            /** Read Url */
+            read_url: string;
+            /** Request Key */
+            request_key: string;
+        };
         /** AgentLimits */
         AgentLimits: {
             /**
@@ -3015,6 +3721,14 @@ export interface components {
             content: string;
             /** Request Key */
             request_key: string;
+            /**
+             * Intent
+             * @default conversation
+             * @enum {string}
+             */
+            intent: "conversation" | "create_goal" | "continue_goal";
+            /** Master Run Id */
+            master_run_id?: string | null;
             /** Expected Versions */
             expected_versions?: {
                 [key: string]: number;
@@ -3022,6 +3736,14 @@ export interface components {
             /** Skill Ids */
             skill_ids?: string[] | null;
             limits?: components["schemas"]["AgentLimits"];
+        };
+        /**
+         * AgentRequestState
+         * @description The durable acceptance plus the current Turn receipt for one request key.
+         */
+        AgentRequestState: {
+            acceptance: components["schemas"]["AgentAcceptance"];
+            turn: components["schemas"]["AgentTurnResult"];
         };
         /** AgentThreadCreate */
         AgentThreadCreate: {
@@ -3046,6 +3768,8 @@ export interface components {
              * Format: uuid
              */
             thread_id: string;
+            /** Master Run Id */
+            master_run_id?: string | null;
             /** Status */
             status: string;
             /** Transport Status */
@@ -3072,6 +3796,171 @@ export interface components {
             tool_calls: number;
             /** Version */
             version: number;
+        };
+        /** AnalysisAcceptanceInput */
+        AnalysisAcceptanceInput: {
+            /** Request Key */
+            request_key: string;
+            preview: components["schemas"]["AnalysisPreviewInput"];
+            /** Preview Fingerprint */
+            preview_fingerprint: string;
+        };
+        /** AnalysisDetail */
+        AnalysisDetail: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * File Revision Id
+             * Format: uuid
+             */
+            file_revision_id: string;
+            /**
+             * Source Extraction Id
+             * Format: uuid
+             */
+            source_extraction_id: string;
+            /** Coverage */
+            coverage: {
+                [key: string]: unknown;
+            };
+            /** Category Outcomes */
+            category_outcomes: {
+                [key: string]: unknown;
+            };
+            /** Manifest Hash */
+            manifest_hash: string;
+            /**
+             * Completed At
+             * Format: date-time
+             */
+            completed_at: string;
+            /** Results */
+            results: components["schemas"]["AnalysisResultRead"][];
+        };
+        /** AnalysisPage */
+        AnalysisPage: {
+            /** Items */
+            items: components["schemas"]["AnalysisSummary"][];
+            /** Total */
+            total: number;
+            /** Next Offset */
+            next_offset: number | null;
+        };
+        /** AnalysisPreviewInput */
+        AnalysisPreviewInput: {
+            /**
+             * Source Extraction Id
+             * Format: uuid
+             */
+            source_extraction_id: string;
+            /** Expected File Version */
+            expected_file_version: number;
+            /** Category Set */
+            category_set?: string[];
+            /** Target Results */
+            target_results?: components["schemas"]["TargetResultInput"][];
+            /** Requested Text Model Id */
+            requested_text_model_id?: string | null;
+        };
+        /** AnalysisPreviewRead */
+        AnalysisPreviewRead: {
+            /** Preview Fingerprint */
+            preview_fingerprint: string;
+            /**
+             * Source Revision Id
+             * Format: uuid
+             */
+            source_revision_id: string;
+            /**
+             * Source Extraction Id
+             * Format: uuid
+             */
+            source_extraction_id: string;
+            /** Input Versions */
+            input_versions: {
+                [key: string]: unknown;
+            };
+            /** Model Identity */
+            model_identity: {
+                [key: string]: unknown;
+            } | null;
+            /** Source Use Summary */
+            source_use_summary: {
+                [key: string]: unknown;
+            };
+            /** Max Model Calls */
+            max_model_calls: number;
+            /** Missing Categories */
+            missing_categories: string[];
+            /** Blockers */
+            blockers: string[];
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+        };
+        /** AnalysisResultPage */
+        AnalysisResultPage: {
+            /** Items */
+            items: components["schemas"]["AnalysisResultRead"][];
+            /** Total */
+            total: number;
+            /** Next Offset */
+            next_offset: number | null;
+        };
+        /** AnalysisResultRead */
+        AnalysisResultRead: {
+            /**
+             * Result Id
+             * Format: uuid
+             */
+            result_id: string;
+            /**
+             * Revision Id
+             * Format: uuid
+             */
+            revision_id: string;
+            /** Category */
+            category: string;
+            /** Disposition */
+            disposition: string;
+        };
+        /** AnalysisSummary */
+        AnalysisSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * File Revision Id
+             * Format: uuid
+             */
+            file_revision_id: string;
+            /**
+             * Source Extraction Id
+             * Format: uuid
+             */
+            source_extraction_id: string;
+            /** Coverage */
+            coverage: {
+                [key: string]: unknown;
+            };
+            /** Category Outcomes */
+            category_outcomes: {
+                [key: string]: unknown;
+            };
+            /** Manifest Hash */
+            manifest_hash: string;
+            /**
+             * Completed At
+             * Format: date-time
+             */
+            completed_at: string;
         };
         /** AnnotationCreateBody */
         AnnotationCreateBody: {
@@ -3195,8 +4084,31 @@ export interface components {
             /** Storage State */
             storage_state: string;
         };
+        /** AssetAdoptionReceiptRead */
+        AssetAdoptionReceiptRead: {
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /**
+             * Asset Version Id
+             * Format: uuid
+             */
+            asset_version_id: string;
+            /** Accepted Asset Revision */
+            accepted_asset_revision: number;
+            /** Publication Id */
+            publication_id: string | null;
+        };
         /** AssetCandidateBody */
         AssetCandidateBody: {
+            /** Request Key */
+            request_key: string;
+            /** Expected Asset Version */
+            expected_asset_version: number;
+            /** Base Public Asset Link Id */
+            base_public_asset_link_id?: string | null;
             /** Name */
             name?: string | null;
             /** Description */
@@ -3294,6 +4206,7 @@ export interface components {
              * @default primary
              */
             reference_role: string;
+            public_display?: components["schemas"]["PublicDisplayBody"] | null;
         };
         /** AssetRead */
         AssetRead: {
@@ -3510,6 +4423,15 @@ export interface components {
         /** BindingCreate */
         BindingCreate: {
             /**
+             * Source
+             * @default private
+             */
+            source: string;
+            /** Public Asset Link Id */
+            public_asset_link_id?: string | null;
+            /** Publication Item Id */
+            publication_item_id?: string | null;
+            /**
              * Stage
              * @default both
              */
@@ -3594,12 +4516,100 @@ export interface components {
             /** Public Registration Enabled */
             public_registration_enabled: boolean;
         };
+        /** BusinessFlowRead */
+        BusinessFlowRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Master Run Id
+             * Format: uuid
+             */
+            master_run_id: string;
+            /**
+             * Plan Id
+             * Format: uuid
+             */
+            plan_id: string;
+            /** Plan Revision */
+            plan_revision: number;
+            /** Definition Key */
+            definition_key: string;
+            /** Definition Version */
+            definition_version: string;
+            /** Revision */
+            revision: number;
+            /** Status */
+            status: string;
+            scope: components["schemas"]["FlowScopeRead"];
+            /** Wait Reason */
+            wait_reason: string | null;
+            /** Terminal Reason */
+            terminal_reason: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Finished At */
+            finished_at: string | null;
+        };
+        /** BusinessStepRead */
+        BusinessStepRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Instance Id
+             * Format: uuid
+             */
+            instance_id: string;
+            /** Step Key */
+            step_key: string;
+            /** Revision */
+            revision: number;
+            /** Status */
+            status: string;
+            /** Required */
+            required: boolean;
+            /** Dependencies */
+            dependencies: string[];
+            /** Wait Reason */
+            wait_reason: string | null;
+            /** Completion */
+            completion: {
+                [key: string]: unknown;
+            };
+            /** Result Refs */
+            result_refs: unknown[];
+        };
         /** CandidateIssueRead */
         CandidateIssueRead: {
             /** Code */
             code: string;
             /** Detail */
             detail: string;
+        };
+        /** CandidateReceiptRead */
+        CandidateReceiptRead: {
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /**
+             * Asset Version Id
+             * Format: uuid
+             */
+            asset_version_id: string;
+            /** Version Number */
+            version_number: number;
+            /** Created Asset Revision */
+            created_asset_revision: number;
         };
         /** CanvasRevisionRead */
         CanvasRevisionRead: {
@@ -3775,6 +4785,65 @@ export interface components {
             /** Transport Profile Id */
             transport_profile_id: string;
             reference_media_limits?: components["schemas"]["ReferenceMediaLimits"] | null;
+        };
+        /** CitationRead */
+        CitationRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Source Fragment Id
+             * Format: uuid
+             */
+            source_fragment_id: string;
+            /**
+             * File Revision Id
+             * Format: uuid
+             */
+            file_revision_id: string;
+            /** Claim Key */
+            claim_key: string;
+            /** Locator Override */
+            locator_override: {
+                [key: string]: unknown;
+            } | null;
+            /** Quoted Text */
+            quoted_text: string;
+            /** Source Available */
+            source_available: boolean;
+            /** Extraction Method */
+            extraction_method: string;
+            /** Limitations */
+            limitations?: string[];
+        };
+        /** CitationWrite */
+        CitationWrite: {
+            /**
+             * Source Fragment Id
+             * Format: uuid
+             */
+            source_fragment_id: string;
+            /**
+             * File Revision Id
+             * Format: uuid
+             */
+            file_revision_id: string;
+            /**
+             * Claim Key
+             * @default root
+             */
+            claim_key: string;
+            /** Locator Override */
+            locator_override?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Quoted Text
+             * @default
+             */
+            quoted_text: string;
         };
         /** CompilePreview */
         CompilePreview: {
@@ -4025,6 +5094,57 @@ export interface components {
         CsrfRead: {
             /** Csrf Token */
             csrf_token: string;
+        };
+        /** DestinationRead */
+        DestinationRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Binding Ref */
+            binding_ref: string;
+            /** Revision */
+            revision: number;
+            /** Configuration Hash */
+            configuration_hash: string;
+            /** Processing Location */
+            processing_location: string;
+            /** Route Manifest */
+            route_manifest: {
+                [key: string]: unknown;
+            };
+            /** Purposes */
+            purposes: string[];
+            /** Declaration Hash */
+            declaration_hash: string;
+            /** Location Evidence */
+            location_evidence: {
+                [key: string]: unknown;
+            };
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** DestinationWrite */
+        DestinationWrite: {
+            /** Binding Ref */
+            binding_ref: string;
+            /** Expected Revision */
+            expected_revision: number;
+            /** Expected Configuration Hash */
+            expected_configuration_hash: string;
+            /**
+             * Processing Location
+             * @enum {string}
+             */
+            processing_location: "local" | "external" | "unknown";
+            /** Purposes */
+            purposes: string[];
+            /** Additional Result Origins */
+            additional_result_origins?: string[];
         };
         /** DirectorAgentMessageRead */
         DirectorAgentMessageRead: {
@@ -4833,6 +5953,38 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** EgressPolicyPut */
+        EgressPolicyPut: {
+            /** Expected Revision */
+            expected_revision: number;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "current" | "local_only" | "allowlisted";
+            /** Allowed Destination Revision Ids */
+            allowed_destination_revision_ids?: string[];
+            /** Allowed Purposes */
+            allowed_purposes?: string[];
+        };
+        /** EgressPolicyRead */
+        EgressPolicyRead: {
+            /** Revision */
+            revision: number;
+            /** Revision Id */
+            revision_id: string | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "current" | "local_only" | "allowlisted";
+            /** Allowed Destination Revision Ids */
+            allowed_destination_revision_ids: string[];
+            /** Allowed Purposes */
+            allowed_purposes: string[];
+            /** Policy Hash */
+            policy_hash: string | null;
+        };
         /** EpisodeRead */
         EpisodeRead: {
             /**
@@ -5238,6 +6390,93 @@ export interface components {
             /** Job Ids */
             job_ids: string[];
         };
+        /** ExtractionAcceptanceRead */
+        ExtractionAcceptanceRead: {
+            /**
+             * File Revision Id
+             * Format: uuid
+             */
+            file_revision_id: string;
+            /** Accepted Attempt */
+            accepted_attempt: number;
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /** Processor Profile Revision */
+            processor_profile_revision: string;
+            /** Action */
+            action: string;
+        };
+        /** ExtractionRead */
+        ExtractionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * File Revision Id
+             * Format: uuid
+             */
+            file_revision_id: string;
+            /** Attempt */
+            attempt: number;
+            /** Parser Key */
+            parser_key: string;
+            /** Parser Version */
+            parser_version: string;
+            /** Extraction Schema Version */
+            extraction_schema_version: number;
+            /** Content Hash */
+            content_hash: string;
+            /** Coverage */
+            coverage: {
+                [key: string]: unknown;
+            };
+            /**
+             * Completed At
+             * Format: date-time
+             */
+            completed_at: string;
+            /** Processor Evidence */
+            processor_evidence: {
+                [key: string]: unknown;
+            };
+        };
+        /** ExtractionSummary */
+        ExtractionSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * File Revision Id
+             * Format: uuid
+             */
+            file_revision_id: string;
+            /** Attempt */
+            attempt: number;
+            /** Parser Key */
+            parser_key: string;
+            /** Parser Version */
+            parser_version: string;
+            /** Extraction Schema Version */
+            extraction_schema_version: number;
+            /** Content Hash */
+            content_hash: string;
+            /** Coverage */
+            coverage: {
+                [key: string]: unknown;
+            };
+            /**
+             * Completed At
+             * Format: date-time
+             */
+            completed_at: string;
+        };
         /** FinalFilmJobRead */
         FinalFilmJobRead: {
             /**
@@ -5414,6 +6653,16 @@ export interface components {
              * @default V1 Final Film
              */
             name: string;
+        };
+        /** FlowScopeRead */
+        FlowScopeRead: {
+            /** Type */
+            type: string;
+            /**
+             * Entity Id
+             * Format: uuid
+             */
+            entity_id: string;
         };
         /** FormalArtifactsRead */
         FormalArtifactsRead: {
@@ -5713,6 +6962,17 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** ImpactItem */
+        ImpactItem: {
+            /** Kind */
+            kind: string;
+            /** Id */
+            id: string;
+            /** Usage */
+            usage: string;
+            /** Status */
+            status: string;
+        };
         /**
          * InputModeSpec
          * @description Mode-specific input contract inside one capability (MS4-LITE).
@@ -5787,6 +7047,86 @@ export interface components {
             description?: string | null;
         };
         JsonValue: unknown;
+        /** KnowledgeAppend */
+        KnowledgeAppend: {
+            /** Request Key */
+            request_key: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Operation */
+            operation: string;
+            /** Title */
+            title: string;
+            /** Body */
+            body: {
+                [key: string]: unknown;
+            };
+            /** Allowed Uses */
+            allowed_uses?: string[];
+            /** Public Source Notes */
+            public_source_notes?: components["schemas"]["SourceNoteInput"][];
+            /** Source Links */
+            source_links?: components["schemas"]["SourceLinkWrite"][];
+        };
+        /** KnowledgeCreate */
+        KnowledgeCreate: {
+            /** Request Key */
+            request_key: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Kind */
+            kind: string;
+            /** Operation */
+            operation: string;
+            /** Title */
+            title: string;
+            /** Body */
+            body: {
+                [key: string]: unknown;
+            };
+            /** Allowed Uses */
+            allowed_uses?: string[];
+            /** Public Source Notes */
+            public_source_notes?: components["schemas"]["SourceNoteInput"][];
+            /** Source Links */
+            source_links?: components["schemas"]["SourceLinkWrite"][];
+        };
+        /** KnowledgeEntryPage */
+        KnowledgeEntryPage: {
+            /** Items */
+            items: components["schemas"]["KnowledgeEntryRead"][];
+            /** Total */
+            total: number;
+            /** Next Offset */
+            next_offset: number | null;
+        };
+        /** KnowledgeEntryRead */
+        KnowledgeEntryRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Version */
+            version: number;
+            /** Publication Status */
+            publication_status: string;
+            /** Current Revision Id */
+            current_revision_id: string | null;
+            /** Title */
+            title: string | null;
+            /** Summary */
+            summary: string | null;
+            /** Allowed Uses */
+            allowed_uses: string[];
+            /** Updated At */
+            updated_at: string | null;
+        };
         /** KnowledgeFieldRead */
         KnowledgeFieldRead: {
             /** Path */
@@ -5802,6 +7142,81 @@ export interface components {
             evidence_resolution: string;
             /** Blocker */
             blocker: string | null;
+        };
+        /** KnowledgeReceiptRead */
+        KnowledgeReceiptRead: {
+            /**
+             * Entry Id
+             * Format: uuid
+             */
+            entry_id: string;
+            /**
+             * Revision Id
+             * Format: uuid
+             */
+            revision_id: string;
+            /** Result Entry Version */
+            result_entry_version: number;
+            /** Publication Status */
+            publication_status: string;
+            /** Content Hash */
+            content_hash: string;
+        };
+        /** KnowledgeRevisionPage */
+        KnowledgeRevisionPage: {
+            /** Items */
+            items: components["schemas"]["KnowledgeRevisionRead"][];
+            /** Total */
+            total: number;
+            /** Next Offset */
+            next_offset: number | null;
+        };
+        /** KnowledgeRevisionRead */
+        KnowledgeRevisionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Entry Id
+             * Format: uuid
+             */
+            entry_id: string;
+            /** Number */
+            number: number;
+            /** Title */
+            title: string;
+            /** Body */
+            body: {
+                [key: string]: unknown;
+            };
+            /** Allowed Uses */
+            allowed_uses: string[];
+            /** Public Source Notes */
+            public_source_notes: {
+                [key: string]: unknown;
+            }[];
+            /** Content Hash */
+            content_hash: string;
+            /** Operation */
+            operation: string;
+            /** Publication Status */
+            publication_status: string;
+            /** Result Entry Version */
+            result_entry_version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** KnowledgeWithdraw */
+        KnowledgeWithdraw: {
+            /** Request Key */
+            request_key: string;
+            /** Expected Version */
+            expected_version: number;
         };
         /** LifecycleWarning */
         LifecycleWarning: {
@@ -6922,6 +8337,25 @@ export interface components {
         /** ProjectCreate */
         ProjectCreate: {
             /**
+             * Work Type
+             * @enum {string}
+             */
+            work_type: "animation_promo" | "single_comic" | "serial_comic";
+            /**
+             * Creative Goal
+             * @default
+             */
+            creative_goal: string;
+            /**
+             * Audience
+             * @default
+             */
+            audience: string;
+            /** Planned Duration Seconds */
+            planned_duration_seconds?: string | null;
+            /** Planned Episode Count */
+            planned_episode_count?: number | null;
+            /**
              * Workspace Id
              * Format: uuid
              */
@@ -7032,6 +8466,8 @@ export interface components {
             attempt: number;
             /** Error Code */
             error_code: string | null;
+            /** Current Extraction Id */
+            current_extraction_id: string | null;
             /** Source Available */
             source_available: boolean;
             /**
@@ -7059,6 +8495,16 @@ export interface components {
             aspect_ratio: string;
             /** Target Platform */
             target_platform: string;
+            /** Work Type */
+            work_type: ("animation_promo" | "single_comic" | "serial_comic") | null;
+            /** Creative Goal */
+            creative_goal: string;
+            /** Audience */
+            audience: string;
+            /** Planned Duration Seconds */
+            planned_duration_seconds: string | null;
+            /** Planned Episode Count */
+            planned_episode_count: number | null;
             /** Provider Dispatch Frozen */
             provider_dispatch_frozen: boolean;
             /** Version */
@@ -7086,6 +8532,52 @@ export interface components {
          * @enum {string}
          */
         ProjectStage: "draft" | "planning" | "production" | "review" | "delivering" | "archived";
+        /** ProjectUpdate */
+        ProjectUpdate: {
+            /** Expected Version */
+            expected_version: number;
+            /** Name */
+            name?: string | null;
+            /** Work Type */
+            work_type?: ("animation_promo" | "single_comic" | "serial_comic") | null;
+            /** Creative Goal */
+            creative_goal?: string | null;
+            /** Audience */
+            audience?: string | null;
+            /** Planned Duration Seconds */
+            planned_duration_seconds?: string | null;
+            /** Planned Episode Count */
+            planned_episode_count?: number | null;
+        };
+        /**
+         * ProjectUpdateImpact
+         * @description Read-only current structure, not an authorization or saved business fact.
+         */
+        ProjectUpdateImpact: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Project Version */
+            project_version: number;
+            /** Episode Count */
+            episode_count: number;
+            /** Can Apply */
+            can_apply: boolean;
+            /** Blockers */
+            blockers: string[];
+            /** Affected Export Id */
+            affected_export_id?: string | null;
+        };
+        /** PromoteBody */
+        PromoteBody: {
+            /** Request Key */
+            request_key: string;
+            /** Expected Asset Version */
+            expected_asset_version: number;
+            public_display?: components["schemas"]["PublicDisplayBody"] | null;
+        };
         /** ProposalDecision */
         ProposalDecision: {
             /**
@@ -7217,6 +8709,157 @@ export interface components {
             /** Models */
             models: components["schemas"]["ProviderPluginModelRead"][];
         };
+        /** PublicAssetPage */
+        PublicAssetPage: {
+            /** Items */
+            items: components["schemas"]["PublicAssetReadModel"][];
+            /** Total */
+            total: number;
+            /** Next Offset */
+            next_offset: number | null;
+        };
+        /** PublicAssetPatch */
+        PublicAssetPatch: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Withdrawn */
+            withdrawn: boolean;
+        };
+        /** PublicAssetReadModel */
+        PublicAssetReadModel: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Safe Name */
+            safe_name: string;
+            /** Safe Description */
+            safe_description: string;
+            /** Style Labels */
+            style_labels: string[];
+            /** Publication Hash */
+            publication_hash: string;
+            /** Revision */
+            revision: number;
+            /** Status */
+            status: string;
+            /** Usable */
+            usable: boolean;
+            /** Reason Codes */
+            reason_codes: string[];
+            /** Items */
+            items: components["schemas"]["PublicItemRead"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** PublicDisplayBody */
+        PublicDisplayBody: {
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Style Labels */
+            style_labels?: string[];
+        };
+        /** PublicItemPage */
+        PublicItemPage: {
+            /** Items */
+            items: components["schemas"]["PublicItemRead"][];
+            /** Total */
+            total: number;
+            /** Next Offset */
+            next_offset: number | null;
+        };
+        /** PublicItemRead */
+        PublicItemRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Media Kind */
+            media_kind: string;
+            /** Role */
+            role: string;
+            /** Mime Type */
+            mime_type: string | null;
+            /** Width */
+            width: number | null;
+            /** Height */
+            height: number | null;
+            /** Duration Ms */
+            duration_ms: number | null;
+            /** Preview Available */
+            preview_available: boolean;
+        };
+        /** PublicLinkCreate */
+        PublicLinkCreate: {
+            /** Request Key */
+            request_key: string;
+            /**
+             * Publication Id
+             * Format: uuid
+             */
+            publication_id: string;
+            /**
+             * Local Label
+             * @default
+             */
+            local_label: string;
+        };
+        /** PublicLinkPage */
+        PublicLinkPage: {
+            /** Items */
+            items: components["schemas"]["PublicLinkReadModel"][];
+            /** Total */
+            total: number;
+            /** Next Offset */
+            next_offset: number | null;
+        };
+        /** PublicLinkPatch */
+        PublicLinkPatch: {
+            /** Expected Version */
+            expected_version: number;
+            /** Local Label */
+            local_label?: string | null;
+            /** Attached */
+            attached?: boolean | null;
+        };
+        /** PublicLinkReadModel */
+        PublicLinkReadModel: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Publication Id
+             * Format: uuid
+             */
+            publication_id: string;
+            /** Local Label */
+            local_label: string;
+            /** Version */
+            version: number;
+            /** Detached At */
+            detached_at: string | null;
+            /** Availability */
+            availability: string;
+        };
         /** QualityEvidenceRead */
         QualityEvidenceRead: {
             /**
@@ -7344,6 +8987,68 @@ export interface components {
             durations?: {
                 [key: string]: components["schemas"]["ReferenceDurationLimit"];
             };
+        };
+        /** ReferencePage */
+        ReferencePage: {
+            /** Items */
+            items: components["schemas"]["ReferenceReadModel"][];
+            /** Total */
+            total: number;
+            /** Next Offset */
+            next_offset: number | null;
+        };
+        /** ReferencePatch */
+        ReferencePatch: {
+            /** Expected Version */
+            expected_version: number;
+            /** Attached */
+            attached: boolean;
+        };
+        /** ReferenceReadModel */
+        ReferenceReadModel: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Knowledge Entry Id
+             * Format: uuid
+             */
+            knowledge_entry_id: string;
+            /**
+             * Knowledge Revision Id
+             * Format: uuid
+             */
+            knowledge_revision_id: string;
+            /** Allowed Use */
+            allowed_use: string;
+            /** Version */
+            version: number;
+            /** Detached At */
+            detached_at: string | null;
+            /** Availability */
+            availability: string;
+        };
+        /** ReferenceWrite */
+        ReferenceWrite: {
+            /**
+             * Knowledge Entry Id
+             * Format: uuid
+             */
+            knowledge_entry_id: string;
+            /**
+             * Knowledge Revision Id
+             * Format: uuid
+             */
+            knowledge_revision_id: string;
+            /** Allowed Use */
+            allowed_use: string;
         };
         /** RegisterRequest */
         RegisterRequest: {
@@ -7564,6 +9269,189 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** ResearchAccept */
+        ResearchAccept: {
+            /** Request Key */
+            request_key: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Base Revision Id */
+            base_revision_id?: string | null;
+            /**
+             * Candidate Revision Id
+             * Format: uuid
+             */
+            candidate_revision_id: string;
+        };
+        /** ResearchAcceptanceRead */
+        ResearchAcceptanceRead: {
+            /** Master Run Id */
+            master_run_id: string | null;
+            /** Flow Instance Id */
+            flow_instance_id: string | null;
+            /**
+             * Turn Id
+             * Format: uuid
+             */
+            turn_id: string;
+            /** Accepted Revision */
+            accepted_revision: string;
+            /** Read Url */
+            read_url: string;
+        };
+        /** ResearchArchive */
+        ResearchArchive: {
+            /** Expected Version */
+            expected_version: number;
+            /** Archived */
+            archived: boolean;
+        };
+        /** ResearchCreate */
+        ResearchCreate: {
+            /** Request Key */
+            request_key: string;
+            /** Kind */
+            kind: string;
+            /** Body */
+            body: {
+                [key: string]: unknown;
+            };
+            /**
+             * Verification
+             * @default unverified
+             */
+            verification: string;
+            /** Citations */
+            citations?: components["schemas"]["CitationWrite"][];
+        };
+        /** ResearchReceiptRead */
+        ResearchReceiptRead: {
+            /**
+             * Result Id
+             * Format: uuid
+             */
+            result_id: string;
+            /**
+             * Revision Id
+             * Format: uuid
+             */
+            revision_id: string;
+            /** Result Version */
+            result_version: number;
+            /** Revision Number */
+            revision_number: number;
+            /** Origin */
+            origin: string;
+            /** Content Hash */
+            content_hash: string;
+        };
+        /** ResearchRestore */
+        ResearchRestore: {
+            /** Request Key */
+            request_key: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Base Revision Id */
+            base_revision_id?: string | null;
+            /**
+             * Restore Revision Id
+             * Format: uuid
+             */
+            restore_revision_id: string;
+        };
+        /** ResearchResultPage */
+        ResearchResultPage: {
+            /** Items */
+            items: components["schemas"]["ResearchResultRead"][];
+            /** Total */
+            total: number;
+            /** Next Offset */
+            next_offset: number | null;
+        };
+        /** ResearchResultRead */
+        ResearchResultRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Kind */
+            kind: string;
+            /** Version */
+            version: number;
+            /** Archived At */
+            archived_at: string | null;
+            /** Current Revision Id */
+            current_revision_id: string | null;
+            current: components["schemas"]["RevisionSummary"] | null;
+        };
+        /** ResearchRevisionRead */
+        ResearchRevisionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Number */
+            number: number;
+            /** Origin */
+            origin: string;
+            /** Verification */
+            verification: string;
+            /** Content Hash */
+            content_hash: string;
+            /** Summary */
+            summary: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Result Id
+             * Format: uuid
+             */
+            result_id: string;
+            /** Body */
+            body: {
+                [key: string]: unknown;
+            };
+            /** Base Revision Id */
+            base_revision_id: string | null;
+            /** Restores Revision Id */
+            restores_revision_id: string | null;
+            /** Accepts Revision Id */
+            accepts_revision_id: string | null;
+            /** Applied Result Version */
+            applied_result_version: number | null;
+            /** Citations */
+            citations: components["schemas"]["CitationRead"][];
+        };
+        /** ResearchVersioned */
+        ResearchVersioned: {
+            /** Request Key */
+            request_key: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Base Revision Id */
+            base_revision_id?: string | null;
+            /** Body */
+            body: {
+                [key: string]: unknown;
+            };
+            /**
+             * Verification
+             * @default unverified
+             */
+            verification: string;
+            /** Citations */
+            citations?: components["schemas"]["CitationWrite"][];
+        };
         /** ResolvedReferenceRead */
         ResolvedReferenceRead: {
             /**
@@ -7783,6 +9671,38 @@ export interface components {
             /** Shot Version */
             shot_version: number;
             evidence: components["schemas"]["ReviewEvidenceRead"] | null;
+        };
+        /** RevisionPage */
+        RevisionPage: {
+            /** Items */
+            items: components["schemas"]["RevisionSummary"][];
+            /** Total */
+            total: number;
+            /** Next Offset */
+            next_offset: number | null;
+        };
+        /** RevisionSummary */
+        RevisionSummary: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Number */
+            number: number;
+            /** Origin */
+            origin: string;
+            /** Verification */
+            verification: string;
+            /** Content Hash */
+            content_hash: string;
+            /** Summary */
+            summary: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** SceneActionRead */
         SceneActionRead: {
@@ -8659,24 +10579,207 @@ export interface components {
             /** Expected Version */
             expected_version?: number | null;
         };
-        /** SourceExcerptsRead */
-        SourceExcerptsRead: {
-            source: components["schemas"]["ProjectFileRead"];
-            /** Parser Version */
-            parser_version: string | null;
-            /** Excerpts */
-            excerpts: {
+        /** SourceCapabilitiesRead */
+        SourceCapabilitiesRead: {
+            /** Profile Revision */
+            profile_revision: string;
+            /** Formats */
+            formats: components["schemas"]["SourceCapabilityFormat"][];
+            /** Components */
+            components: {
+                [key: string]: boolean;
+            };
+            /** Auto Analysis */
+            auto_analysis: {
                 [key: string]: unknown;
-            }[];
+            };
+        };
+        /** SourceCapabilityFormat */
+        SourceCapabilityFormat: {
+            /** Format */
+            format: string;
+            /** Extensions */
+            extensions: string[];
+            /** Available */
+            available: boolean;
+            /** Max Bytes */
+            max_bytes: number;
+            /** Max Duration Ms */
+            max_duration_ms: number | null;
+            /** Max Pixels */
+            max_pixels: number | null;
+            /** Supported Processing */
+            supported_processing: string[];
+            /** Limitations */
+            limitations: string[];
+        };
+        /** SourceFragmentPage */
+        SourceFragmentPage: {
+            /** Items */
+            items: components["schemas"]["SourceFragmentRead"][];
             /** Total */
             total: number;
             /** Next Offset */
             next_offset: number | null;
         };
+        /** SourceFragmentRead */
+        SourceFragmentRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Extraction Id
+             * Format: uuid
+             */
+            extraction_id: string;
+            /**
+             * File Revision Id
+             * Format: uuid
+             */
+            file_revision_id: string;
+            /** Ordinal */
+            ordinal: number;
+            /** Locator Kind */
+            locator_kind: string;
+            /** Locator */
+            locator: {
+                [key: string]: unknown;
+            };
+            /** Extraction Schema Version */
+            extraction_schema_version: number;
+            /** Text Content */
+            text_content: string;
+            /** Content Hash */
+            content_hash: string;
+            /** Extraction Method */
+            extraction_method: string;
+            /** Processor Ref */
+            processor_ref: string;
+            /** Evidence Meta */
+            evidence_meta: {
+                [key: string]: unknown;
+            };
+            /** Source Available */
+            source_available: boolean;
+            /** Limitations */
+            limitations?: string[];
+        };
+        /** SourceLinkWrite */
+        SourceLinkWrite: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Research Revision Id
+             * Format: uuid
+             */
+            research_revision_id: string;
+        };
+        /** SourceNoteInput */
+        SourceNoteInput: {
+            /** Label */
+            label: string;
+            /** Public Url */
+            public_url?: string | null;
+            /** Locator Note */
+            locator_note?: string | null;
+        };
         /** SourceRetry */
         SourceRetry: {
             /** Request Key */
             request_key: string;
+            /** Expected File Version */
+            expected_file_version: number;
+            /** Expected Attempt */
+            expected_attempt: number;
+            /** Expected Extraction Id */
+            expected_extraction_id?: string | null;
+            /** Processor Profile Revision */
+            processor_profile_revision: string;
+        };
+        /** SourceRevisionRead */
+        SourceRevisionRead: {
+            source: components["schemas"]["ProjectFileRead"];
+            extraction: components["schemas"]["ExtractionSummary"] | null;
+            /** Source Available */
+            source_available: boolean;
+        };
+        /** SourceUseImpact */
+        SourceUseImpact: {
+            /** Items */
+            items: components["schemas"]["ImpactItem"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** SourceUseRead */
+        SourceUseRead: {
+            /** Subject Id */
+            subject_id: string | null;
+            /** Version */
+            version: number;
+            /** Current Revision Id */
+            current_revision_id: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "unreviewed" | "declared" | "revoked";
+            /** Allowed Uses */
+            allowed_uses: string[];
+            /** Statement */
+            statement: string;
+            /** Evidence Note */
+            evidence_note: string;
+        };
+        /** SourceUseReceipt */
+        SourceUseReceipt: {
+            /**
+             * Subject Id
+             * Format: uuid
+             */
+            subject_id: string;
+            /**
+             * Revision Id
+             * Format: uuid
+             */
+            revision_id: string;
+            /** Result Version */
+            result_version: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "unreviewed" | "declared" | "revoked";
+            /** Content Hash */
+            content_hash: string;
+        };
+        /** SourceUseWrite */
+        SourceUseWrite: {
+            /** Request Key */
+            request_key: string;
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "declared" | "revoked";
+            /** Allowed Uses */
+            allowed_uses?: ("research" | "creation" | "library_reference" | "external_processing" | "export")[];
+            /**
+             * Statement
+             * @default
+             */
+            statement: string;
+            /**
+             * Evidence Note
+             * @default
+             */
+            evidence_note: string;
         };
         /**
          * StageGenerationSettings
@@ -8699,6 +10802,39 @@ export interface components {
             prompt_override?: string | null;
             /** Request Duration Seconds */
             request_duration_seconds?: number | null;
+        };
+        /** StepAttemptRead */
+        StepAttemptRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Step Id
+             * Format: uuid
+             */
+            step_id: string;
+            /** Attempt No */
+            attempt_no: number;
+            /** Revision */
+            revision: number;
+            /** Status */
+            status: string;
+            /** Action Kind */
+            action_kind: string;
+            /** Node Run Id */
+            node_run_id: string | null;
+            /** Receipt */
+            receipt: {
+                [key: string]: unknown;
+            } | null;
+            /** Result Refs */
+            result_refs: unknown[];
+            /** Unresolved External */
+            unresolved_external: boolean;
+            /** Error Code */
+            error_code: string | null;
         };
         /** StoryGenerationRequest */
         StoryGenerationRequest: {
@@ -8822,6 +10958,16 @@ export interface components {
          */
         SuggestionDirectorState: {
             [key: string]: unknown;
+        };
+        /** TargetResultInput */
+        TargetResultInput: {
+            /**
+             * Result Id
+             * Format: uuid
+             */
+            result_id: string;
+            /** Base Revision Id */
+            base_revision_id?: string | null;
         };
         /** TimelinePreviewClipRead */
         TimelinePreviewClipRead: {
@@ -9444,6 +11590,10 @@ export interface components {
             shot_id: string;
             /** Experiment Branch Id */
             experiment_branch_id: string | null;
+            /** Public Asset Link Id */
+            public_asset_link_id: string | null;
+            /** Publication Item Id */
+            publication_item_id: string | null;
             /** Stage */
             stage: string;
             /** Asset Id */
@@ -9728,7 +11878,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AssetVersionRead"];
+                    "application/json": components["schemas"]["CandidateReceiptRead"];
                 };
             };
             /** @description Validation Error */
@@ -9976,7 +12126,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AssetRead"];
+                    "application/json": components["schemas"]["AssetAdoptionReceiptRead"];
                 };
             };
             /** @description Validation Error */
@@ -10047,15 +12197,19 @@ export interface operations {
                 dramaforge_csrf?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromoteBody"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            200: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AssetVersionRead"];
+                    "application/json": components["schemas"]["AssetAdoptionReceiptRead"];
                 };
             };
             /** @description Validation Error */
@@ -10560,6 +12714,159 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BatchProductionDispatchRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_business_flows_api_v1_projects__project_id__director_master_runs__run_id__business_flows_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                run_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BusinessFlowRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_business_flow_api_v1_projects__project_id__director_business_flows__flow_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                flow_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BusinessFlowRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_business_flow_steps_api_v1_projects__project_id__director_business_flows__flow_id__steps_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                flow_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BusinessStepRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_business_flow_attempts_api_v1_projects__project_id__director_business_flows__flow_id__steps__step_id__attempts_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                flow_id: string;
+                step_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StepAttemptRead"][];
                 };
             };
             /** @description Validation Error */
@@ -11472,6 +13779,92 @@ export interface operations {
             };
         };
     };
+    update_project_api_v1_projects__project_id__patch: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_project_update_api_v1_projects__project_id__intent_preview_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectUpdateImpact"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_project_creative_profile_api_v1_projects__project_id__creative_profile_patch: {
         parameters: {
             query?: {
@@ -11502,6 +13895,123 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectCreativeProfileRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_egress_policy_api_v1_projects__project_id__egress_policy_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EgressPolicyRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_egress_policy_api_v1_projects__project_id__egress_policy_put: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EgressPolicyPut"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EgressPolicyRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_source_capabilities_api_v1_projects__project_id__source_capabilities_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceCapabilitiesRead"];
                 };
             };
             /** @description Validation Error */
@@ -11683,8 +14193,6 @@ export interface operations {
     read_source_revision_api_v1_projects__project_id__file_revisions__revision_id__get: {
         parameters: {
             query?: {
-                limit?: number;
-                offset?: number;
                 workspace_id?: string | null;
             };
             header?: {
@@ -11706,7 +14214,86 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SourceExcerptsRead"];
+                    "application/json": components["schemas"]["SourceRevisionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_extraction_api_v1_projects__project_id__extractions__extraction_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                extraction_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtractionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_fragments_api_v1_projects__project_id__extractions__extraction_id__fragments_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                locator_kind?: string | null;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                extraction_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceFragmentPage"];
                 };
             };
             /** @description Validation Error */
@@ -11783,12 +14370,56 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProjectFileRead"];
+                    "application/json": components["schemas"]["ExtractionAcceptanceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reparse_source_api_v1_projects__project_id__file_revisions__revision_id__reparse_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                revision_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceRetry"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtractionAcceptanceRead"];
                 };
             };
             /** @description Validation Error */
@@ -11992,7 +14623,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AgentTurnResult"];
+                    "application/json": components["schemas"]["AgentRequestState"];
                 };
             };
             /** @description Validation Error */
@@ -12006,7 +14637,7 @@ export interface operations {
             };
         };
     };
-    run_director_agent_turn_api_v1_projects__project_id__director_threads__thread_id__messages_post: {
+    accept_director_agent_turn_api_v1_projects__project_id__director_threads__thread_id__messages_post: {
         parameters: {
             query?: {
                 workspace_id?: string | null;
@@ -12031,12 +14662,12 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AgentTurnResult"];
+                    "application/json": components["schemas"]["AgentAcceptance"];
                 };
             };
             /** @description Validation Error */
@@ -14279,6 +16910,210 @@ export interface operations {
             };
         };
     };
+    read_file_source_use_api_v1_projects__project_id__file_revisions__revision_id__source_use_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                revision_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceUseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_file_source_use_api_v1_projects__project_id__file_revisions__revision_id__source_use_put: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                revision_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceUseWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceUseReceipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_artifact_source_use_api_v1_projects__project_id__artifacts__artifact_id__source_use_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                artifact_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceUseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_artifact_source_use_api_v1_projects__project_id__artifacts__artifact_id__source_use_put: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                artifact_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SourceUseWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceUseReceipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_source_use_impact_api_v1_projects__project_id__source_use_subjects__subject_id__impact_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                subject_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceUseImpact"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_project_story_proposals_api_v1_projects__project_id__story_proposals_get: {
         parameters: {
             query?: {
@@ -15209,6 +18044,89 @@ export interface operations {
             };
         };
     };
+    list_provider_destinations_api_v1_workspaces__workspace_id__provider_destinations_get: {
+        parameters: {
+            query?: {
+                binding_ref?: string | null;
+                limit?: number;
+                offset?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DestinationRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    declare_provider_destination_api_v1_workspaces__workspace_id__provider_destinations_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DestinationWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DestinationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     provider_reference_get: {
         parameters: {
             query?: never;
@@ -15460,6 +18378,588 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResolvedReferenceRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_research_results_api_v1_projects__project_id__research_results_get: {
+        parameters: {
+            query?: {
+                kind?: string | null;
+                q?: string | null;
+                archived?: boolean;
+                view?: string;
+                limit?: number;
+                offset?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchResultPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_research_result_api_v1_projects__project_id__research_results_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchReceiptRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_research_result_api_v1_projects__project_id__research_results__result_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                result_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchResultRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_research_result_api_v1_projects__project_id__research_results__result_id__patch: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                result_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchArchive"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchResultRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_research_revisions_api_v1_projects__project_id__research_results__result_id__revisions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                result_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevisionPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    append_research_revision_api_v1_projects__project_id__research_results__result_id__revisions_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                result_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchVersioned"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchReceiptRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_research_revision_api_v1_projects__project_id__research_revisions__revision_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                revision_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchRevisionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_research_candidate_api_v1_projects__project_id__research_results__result_id__accept_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                result_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchAccept"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchReceiptRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_research_revision_api_v1_projects__project_id__research_results__result_id__restore_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                result_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResearchRestore"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchReceiptRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_research_analysis_api_v1_projects__project_id__file_revisions__revision_id__analysis_preview_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                revision_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalysisPreviewInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisPreviewRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_research_analyses_api_v1_projects__project_id__file_revisions__revision_id__analyses_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                revision_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_research_analysis_api_v1_projects__project_id__file_revisions__revision_id__analyses_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                revision_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalysisAcceptanceInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResearchAcceptanceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_research_analysis_api_v1_projects__project_id__analyses__analysis_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                analysis_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_research_analysis_results_api_v1_projects__project_id__analyses__analysis_id__results_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                analysis_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisResultPage"];
                 };
             };
             /** @description Validation Error */
@@ -15730,6 +19230,816 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ManifestRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_knowledge_entries_api_v1_knowledge_entries_get: {
+        parameters: {
+            query?: {
+                kind?: string | null;
+                status?: string;
+                q?: string | null;
+                limit?: number;
+                offset?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeEntryPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_knowledge_entry_api_v1_knowledge_entries_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeReceiptRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_knowledge_entry_api_v1_knowledge_entries__entry_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                entry_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeEntryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_knowledge_revisions_api_v1_knowledge_entries__entry_id__revisions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                entry_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeRevisionPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    append_knowledge_revision_api_v1_knowledge_entries__entry_id__revisions_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                entry_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeAppend"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeReceiptRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    withdraw_knowledge_entry_api_v1_knowledge_entries__entry_id__withdraw_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                entry_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeWithdraw"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeReceiptRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_knowledge_references_api_v1_projects__project_id__knowledge_references_get: {
+        parameters: {
+            query?: {
+                active?: boolean;
+                limit?: number;
+                offset?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferencePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_knowledge_reference_api_v1_projects__project_id__knowledge_references_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferenceWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceReadModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_knowledge_reference_api_v1_projects__project_id__knowledge_references__reference_id__patch: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                reference_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferencePatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceReadModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_public_assets_api_v1_public_assets_get: {
+        parameters: {
+            query?: {
+                q?: string | null;
+                kind?: string | null;
+                status?: string | null;
+                limit?: number;
+                offset?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicAssetPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_public_asset_api_v1_public_assets__publication_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                publication_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicAssetReadModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_public_asset_api_v1_public_assets__publication_id__patch: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                publication_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicAssetPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicAssetReadModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_public_asset_items_api_v1_public_assets__publication_id__items_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                publication_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicItemPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_public_links_api_v1_projects__project_id__public_asset_links_get: {
+        parameters: {
+            query?: {
+                active?: boolean;
+                limit?: number;
+                offset?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicLinkPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_public_link_api_v1_projects__project_id__public_asset_links_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicLinkCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicLinkReadModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_public_link_api_v1_projects__project_id__public_asset_links__link_id__patch: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                link_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublicLinkPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicLinkReadModel"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_public_content_api_v1_public_assets__publication_id__items__item_id__content_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                publication_id: string;
+                item_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    head_public_content_api_v1_public_assets__publication_id__items__item_id__content_head: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                publication_id: string;
+                item_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_project_public_content_api_v1_projects__project_id__public_asset_links__link_id__items__item_id__content_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                link_id: string;
+                item_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    head_project_public_content_api_v1_projects__project_id__public_asset_links__link_id__items__item_id__content_head: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                link_id: string;
+                item_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

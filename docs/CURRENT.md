@@ -43,6 +43,12 @@ DramaForge 已启动机构版转型，目标用户是地方文化研究机构工
 Director Runtime 负责提案和编排；Production Runtime 负责真实生产执行。
 用户通过显式 Apply / Save / Formal / Export 门决定哪些内容进入正式生产事实。
 
+机构版完整设计与工程任务正在按 Owner 指定的主合同12、次合同11推进。产品与旅程合同分别回填
+[PRODUCT](PRODUCT.md) 和 [CREATION_FLOW](CREATION_FLOW.md)，不另建机构版架构宪法。
+当前阶段、未完成工作及实际证据的唯一执行入口为
+[implementation/EXECUTION_STATUS.md](implementation/EXECUTION_STATUS.md)。该目录是本次长期任务
+明确要求的执行管理材料，不替代各领域权威，不以设计完成表示代码或产品已验收。
+
 ## 当前权威文档
 
 | 领域 | 文档 |

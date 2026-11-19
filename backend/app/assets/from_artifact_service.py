@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.models import Project, User
 from app.access.projects import ProjectService
 from app.assets.models import Asset, AssetVersion, AssetVersionReference
+from app.assets.public_assets import PublicAssetService, PublicDisplay
 from app.execution.models import Artifact
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
@@ -101,6 +102,15 @@ def asset_creation_request_hash(
         separators=(",", ":"),
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True)
+class AssetAdoptionReceipt:
+    asset_id: UUID
+    asset_version_id: UUID
+    accepted_asset_revision: int
+    publication_id: UUID | None
+    created: bool
 
 
 class AssetFromArtifactService:
@@ -212,6 +222,48 @@ class AssetFromArtifactService:
         await self._session.flush()
         return asset
 
+    async def create_with_receipt(
+        self,
+        *,
+        project_id: UUID,
+        actor: User,
+        request: AssetFromArtifactRequest,
+        request_key: str | None = None,
+        public_display: PublicDisplay | None = None,
+    ) -> AssetAdoptionReceipt:
+        """Create/adopt the asset and, when requested, publish it in the same transaction."""
+        key = request_key.strip() if request_key else None
+        existing = (
+            await self._by_request_key(project_id=project_id, request_key=key)
+            if key
+            else None
+        )
+        asset = await self.create(
+            project_id=project_id,
+            actor=actor,
+            request=request,
+            request_key=request_key,
+        )
+        version = (
+            await self._session.get(AssetVersion, asset.current_version_id)
+            if asset.current_version_id is not None
+            else None
+        )
+        if version is None:
+            raise ValidationAppError("Asset has no current version")
+        publication_id: UUID | None = None
+        if public_display is not None:
+            published = await PublicAssetService(
+                self._session, actor=actor
+            ).publish(version.id, display=public_display)
+            publication_id = published.id
+        return AssetAdoptionReceipt(
+            asset_id=asset.id,
+            asset_version_id=version.id,
+            accepted_asset_revision=asset.version,
+            publication_id=publication_id,
+            created=existing is None,
+        )
     async def _by_request_key(self, *, project_id: UUID, request_key: str) -> Asset | None:
         return (
             await self._session.execute(

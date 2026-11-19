@@ -55,10 +55,10 @@ test("project cards have equal frames and creation asks for type and style", asy
   ).toBeLessThan(boxes[1].width / 3);
   await page.goto("/?create=true");
   await expect(page.getByRole("combobox", { name: "创作起点", exact: true })).toBeVisible();
-  await page.getByText("风格与类型（可选）", { exact: true }).click();
-  await expect(page.getByRole("combobox", { name: "创作类型", exact: true })).toBeVisible();
+  await page.getByText("风格与题材（可选）", { exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "题材偏好", exact: true })).toBeVisible();
   await expect(page.getByRole("combobox", { name: "画面风格", exact: true })).toBeVisible();
-  await selectValue(page.getByRole("combobox", { name: "创作类型", exact: true }), "drama");
+  await selectValue(page.getByRole("combobox", { name: "题材偏好", exact: true }), "drama");
   await selectValue(page.getByRole("combobox", { name: "画面风格", exact: true }), "film");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

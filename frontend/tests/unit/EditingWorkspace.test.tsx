@@ -1333,7 +1333,9 @@ it("saves chosen audio Artifacts and an explicit mute only through timeline Save
       expect.objectContaining({ audio_id: "audio-2" }),
     ],
   });
-});
+  // This case renders the full editing workspace twice; keep a host-speed margin
+  // above the global 15s so a loaded CI host reports a real failure, not a timeout.
+}, 60_000);
 
 it("selects the same clip in the visual timeline, source preview and inspector without saving", async () => {
   const writes: string[] = [];

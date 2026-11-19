@@ -133,8 +133,7 @@ async def test_engine_binding_fencing_signal_claims_and_project_rls():
 
             await scope(session)
             with pytest.raises(ConflictError) as stale:
-                async with service.guard(lease_one):
-                    pass
+                await service.begin_step(lease_one)
             assert stale.value.details["code"] == "DIRECTOR_RUNTIME_LEASE_STALE"
             await session.rollback()
 
@@ -200,4 +199,138 @@ async def test_engine_binding_fencing_signal_claims_and_project_rls():
     finally:
         await app_engine.dispose()
         await engine.dispose()
+        await _drop_database(dbname)
+
+
+@pytest.mark.asyncio
+async def test_step_admission_holds_no_lock_and_late_results_are_fenced():
+    dbname = f"dramaforge_step_fence_{uuid4().hex[:8]}"
+    await _create_database(dbname)
+    engine = create_async_engine(_async_url(dbname))
+    app_engine = create_async_engine(
+        _async_url(dbname), connect_args={"server_settings": {"role": "dramaforge_app"}},
+    )
+    try:
+        _alembic(dbname)
+        admin = async_sessionmaker(engine, expire_on_commit=False)
+        factory = async_sessionmaker(app_engine, expire_on_commit=False)
+        async with admin() as session:
+            project, _binding, actor = await _seed(session)
+            turn = DirectorTurn(
+                project_id=project.id,
+                workspace_id=project.workspace_id,
+                actor_id=actor.id,
+                scope_type="shot",
+                scope_entity_id=uuid4(),
+                request_key="step:bound",
+                context_hash="e" * 64,
+            )
+            session.add(turn)
+            await session.commit()
+
+        async def scope(session):
+            await set_rls_context(
+                session,
+                user_id=actor.id,
+                workspace_id=project.workspace_id,
+                project_id=project.id,
+            )
+
+        async with factory() as session:
+            await scope(session)
+            service = DirectorRuntimeControlService(session)
+            control = await service.bind(
+                project_id=project.id,
+                turn_id=turn.id,
+                engine_version=ENGINE_VERSION,
+                state_schema_version=STATE_SCHEMA_VERSION,
+            )
+            execution_id = control.runtime_execution_id
+            await session.commit()
+            await scope(session)
+            lease = await service.claim(
+                project_id=project.id,
+                runtime_execution_id=execution_id,
+                worker_id="worker-one",
+            )
+            await session.commit()
+            await scope(session)
+            # Admission commits and releases the row lock before the step runs.
+            ticket = await service.begin_step(lease)
+            await session.commit()
+            assert ticket.epoch == lease.epoch
+            assert ticket.revision >= 1
+
+        # Another worker only takes over after the lease expires, which is exactly
+        # the control write that must fence this worker's late result.
+        async with factory() as session:
+            await scope(session)
+            await session.execute(
+                update(DirectorRuntimeControl).where(
+                    DirectorRuntimeControl.runtime_execution_id == execution_id,
+                ).values(lease_expires_at=datetime.now(UTC) - timedelta(seconds=1))
+            )
+            await session.commit()
+            await scope(session)
+            replacement = await DirectorRuntimeControlService(session).claim(
+                project_id=project.id,
+                runtime_execution_id=execution_id,
+                worker_id="worker-two",
+            )
+            assert replacement.epoch == lease.epoch + 1
+            await session.commit()
+
+        async with factory() as session:
+            await scope(session)
+            with pytest.raises(ConflictError) as fenced:
+                await DirectorRuntimeControlService(session).commit_step(
+                    ticket, runtime_status="waiting",
+                )
+            assert fenced.value.details["code"] == "DIRECTOR_RUNTIME_LEASE_STALE"
+            await session.rollback()
+            await scope(session)
+            row = await session.get(DirectorRuntimeControl, execution_id)
+            assert row is not None
+            # The late result wrote nothing: the replacement lease is untouched.
+            assert row.lease_owner == "worker-two"
+            assert row.lease_epoch == lease.epoch + 1
+            assert row.status == "active"
+
+        # A stop requested during a step also fences that step's publication.
+        async with factory() as session:
+            await scope(session)
+            service = DirectorRuntimeControlService(session)
+            await session.execute(
+                update(DirectorRuntimeControl).where(
+                    DirectorRuntimeControl.runtime_execution_id == execution_id,
+                ).values(lease_expires_at=datetime.now(UTC) - timedelta(seconds=1))
+            )
+            await session.commit()
+            await scope(session)
+            running = await service.claim(
+                project_id=project.id,
+                runtime_execution_id=execution_id,
+                worker_id="worker-three",
+            )
+            await session.commit()
+            await scope(session)
+            stop_ticket = await service.begin_step(running)
+            await session.commit()
+            await scope(session)
+            await service.request_stop(project_id=project.id, runtime_execution_id=execution_id)
+            await session.commit()
+            await scope(session)
+            with pytest.raises(ConflictError) as stopped:
+                await DirectorRuntimeControlService(session).commit_step(
+                    stop_ticket, runtime_status="completed",
+                )
+            assert stopped.value.details["code"] == "DIRECTOR_RUNTIME_LEASE_STALE"
+            await session.rollback()
+            await scope(session)
+            final = await session.get(DirectorRuntimeControl, execution_id)
+            assert final is not None
+            assert final.status == "stopped" and final.stop_requested_at is not None
+    finally:
+        await engine.dispose()
+        await app_engine.dispose()
         await _drop_database(dbname)

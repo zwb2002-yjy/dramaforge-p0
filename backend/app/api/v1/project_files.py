@@ -12,12 +12,70 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import ProjectFile, ProjectFileRevision
-from app.assets.project_files import ProjectFileService
-from app.assets.source_parser import MAX_SOURCE_BYTES
+from app.assets.project_files import ExtractionAcceptance, ProjectFileService
+from app.assets.source_models import SourceExtraction, SourceFragment
+from app.assets.source_parser import MAX_SOURCE_BYTES, source_capabilities
 from app.shared.errors import AppError
 from app.storage.minio_store import get_object_store
 
 router = APIRouter(tags=["project-files"], dependencies=[Depends(require_selected_workspace)])
+
+
+class SourceCapabilityFormat(BaseModel):
+    format: str
+    extensions: list[str]
+    available: bool
+    max_bytes: int
+    max_duration_ms: int | None
+    max_pixels: int | None
+    supported_processing: list[str]
+    limitations: list[str]
+
+
+class SourceCapabilitiesRead(BaseModel):
+    profile_revision: str
+    formats: list[SourceCapabilityFormat]
+    components: dict[str, bool]
+    auto_analysis: dict[str, object]
+
+
+class ExtractionSummary(BaseModel):
+    id: UUID
+    file_revision_id: UUID
+    attempt: int
+    parser_key: str
+    parser_version: str
+    extraction_schema_version: int
+    content_hash: str
+    coverage: dict[str, object]
+    completed_at: datetime
+
+
+class ExtractionRead(ExtractionSummary):
+    processor_evidence: dict[str, object]
+
+
+class SourceFragmentRead(BaseModel):
+    id: UUID
+    extraction_id: UUID
+    file_revision_id: UUID
+    ordinal: int
+    locator_kind: str
+    locator: dict[str, object]
+    extraction_schema_version: int
+    text_content: str
+    content_hash: str
+    extraction_method: str
+    processor_ref: str
+    evidence_meta: dict[str, object]
+    source_available: bool
+    limitations: list[str] = Field(default_factory=list)
+
+
+class SourceFragmentPage(BaseModel):
+    items: list[SourceFragmentRead]
+    total: int
+    next_offset: int | None
 
 
 class ProjectFileRead(BaseModel):
@@ -33,21 +91,56 @@ class ProjectFileRead(BaseModel):
     status: str
     attempt: int
     error_code: str | None
+    current_extraction_id: UUID | None
     source_available: bool
     created_at: datetime
 
 
-class SourceExcerptsRead(BaseModel):
+class SourceRevisionRead(BaseModel):
     source: ProjectFileRead
-    parser_version: str | None
-    excerpts: list[dict[str, object]]
-    total: int
-    next_offset: int | None
+    extraction: ExtractionSummary | None
+    source_available: bool
 
 
 class SourceRetry(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_key: str = Field(min_length=1, max_length=160)
+    expected_file_version: int = Field(ge=1)
+    expected_attempt: int = Field(ge=1)
+    expected_extraction_id: UUID | None = None
+    processor_profile_revision: str = Field(min_length=64, max_length=64)
+
+
+class ExtractionAcceptanceRead(BaseModel):
+    file_revision_id: UUID
+    accepted_attempt: int
+    event_id: UUID
+    processor_profile_revision: str
+    action: str
+
+
+def _acceptance(acceptance: ExtractionAcceptance) -> ExtractionAcceptanceRead:
+    return ExtractionAcceptanceRead(
+        file_revision_id=acceptance.file_revision_id,
+        accepted_attempt=acceptance.accepted_attempt,
+        event_id=acceptance.event_id,
+        processor_profile_revision=acceptance.processor_profile_revision,
+        action=acceptance.action,
+    )
+
+
+def _summary(extraction: SourceExtraction) -> ExtractionSummary:
+    return ExtractionSummary(
+        id=extraction.id,
+        file_revision_id=extraction.file_revision_id,
+        attempt=extraction.attempt,
+        parser_key=extraction.parser_key,
+        parser_version=extraction.parser_version,
+        extraction_schema_version=extraction.extraction_schema_version,
+        content_hash=extraction.content_hash,
+        coverage=extraction.coverage,
+        completed_at=extraction.completed_at,
+    )
 
 
 def _read(item: ProjectFile, revision: ProjectFileRevision) -> ProjectFileRead:
@@ -64,8 +157,43 @@ def _read(item: ProjectFile, revision: ProjectFileRevision) -> ProjectFileRead:
         status=revision.status,
         attempt=revision.attempt,
         error_code=revision.error_code,
+        current_extraction_id=revision.current_extraction_id,
         source_available=item.detached_at is None,
         created_at=revision.created_at,
+    )
+
+
+
+def _fragment_limitations(fragment: SourceFragment) -> list[str]:
+    """Derived review hints; never a claim that the content is verified history."""
+    limitations: list[str] = []
+    if fragment.extraction_method == "transcript":
+        limitations.append("machine_transcript")
+    elif fragment.extraction_method == "visual_input":
+        limitations.append("visual_input_only")
+    elif fragment.extraction_method == "ocr":
+        confidence = fragment.evidence_meta.get("confidence")
+        if isinstance(confidence, (int, float)) and float(confidence) < 60:
+            limitations.append("low_ocr_confidence")
+        if fragment.evidence_meta.get("page_ocr"):
+            limitations.append("page_ocr")
+    return limitations
+
+
+@router.get(
+    "/projects/{project_id}/source-capabilities", response_model=SourceCapabilitiesRead
+)
+async def read_source_capabilities(
+    project_id: UUID, user: CurrentUser, session: SessionDep
+) -> SourceCapabilitiesRead:
+    """Read-only capability answer; zero parsing and zero model calls."""
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    payload = source_capabilities()
+    return SourceCapabilitiesRead(
+        profile_revision=payload["profile_revision"],
+        formats=[SourceCapabilityFormat.model_validate(item) for item in payload["formats"]],
+        components=payload["components"],
+        auto_analysis=payload["auto_analysis"],
     )
 
 
@@ -143,28 +271,91 @@ async def read_source(
 
 
 @router.get(
-    "/projects/{project_id}/file-revisions/{revision_id}", response_model=SourceExcerptsRead
+    "/projects/{project_id}/file-revisions/{revision_id}", response_model=SourceRevisionRead
 )
 async def read_source_revision(
     project_id: UUID,
     revision_id: UUID,
     user: CurrentUser,
     session: SessionDep,
-    limit: int = Query(default=100, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
-) -> SourceExcerptsRead:
+) -> SourceRevisionRead:
     service = ProjectFileService(
         session, store=get_object_store(), actor=user, project_id=project_id
     )
     item, revision = await service.read_revision(revision_id)
-    total = len(revision.excerpts)
-    return SourceExcerptsRead(
+    extraction = (
+        await service.read_extraction(revision.current_extraction_id)
+        if revision.current_extraction_id is not None
+        else None
+    )
+    return SourceRevisionRead(
         source=_read(item, revision),
-        parser_version=revision.parser_version,
-        excerpts=revision.excerpts[offset : offset + limit],
+        extraction=_summary(extraction) if extraction is not None else None,
+        source_available=item.detached_at is None,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/extractions/{extraction_id}", response_model=ExtractionRead
+)
+async def read_extraction(
+    project_id: UUID, extraction_id: UUID, user: CurrentUser, session: SessionDep
+) -> ExtractionRead:
+    service = ProjectFileService(
+        session, store=get_object_store(), actor=user, project_id=project_id
+    )
+    extraction = await service.read_extraction(extraction_id)
+    return ExtractionRead(
+        **_summary(extraction).model_dump(),
+        processor_evidence=extraction.processor_evidence,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/extractions/{extraction_id}/fragments",
+    response_model=SourceFragmentPage,
+)
+async def list_fragments(
+    project_id: UUID,
+    extraction_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    locator_kind: str | None = Query(default=None, max_length=24),
+) -> SourceFragmentPage:
+    service = ProjectFileService(
+        session, store=get_object_store(), actor=user, project_id=project_id
+    )
+    # Authorizes the project and rejects extractions of another project.
+    extraction = await service.read_extraction(extraction_id)
+    fragments, total = await service.list_fragments(
+        extraction_id, limit=limit, offset=offset, locator_kind=locator_kind
+    )
+    return SourceFragmentPage(
+        items=[
+            SourceFragmentRead(
+                id=fragment.id,
+                extraction_id=fragment.extraction_id,
+                file_revision_id=fragment.file_revision_id,
+                ordinal=fragment.ordinal,
+                locator_kind=fragment.locator_kind,
+                locator=fragment.locator,
+                extraction_schema_version=extraction.extraction_schema_version,
+                text_content=fragment.text_content,
+                content_hash=fragment.content_hash,
+                extraction_method=fragment.extraction_method,
+                processor_ref=fragment.processor_ref,
+                evidence_meta=fragment.evidence_meta,
+                source_available=True,
+                limitations=_fragment_limitations(fragment),
+            )
+            for fragment in fragments
+        ],
         total=total,
         next_offset=offset + limit if offset + limit < total else None,
     )
+
 
 
 @router.get("/projects/{project_id}/file-revisions/{revision_id}/original")
@@ -189,7 +380,9 @@ async def download_source(
 
 
 @router.post(
-    "/projects/{project_id}/file-revisions/{revision_id}/retry", response_model=ProjectFileRead
+    "/projects/{project_id}/file-revisions/{revision_id}/retry",
+    response_model=ExtractionAcceptanceRead,
+    status_code=202,
 )
 async def retry_source(
     project_id: UUID,
@@ -198,14 +391,52 @@ async def retry_source(
     user: CurrentUser,
     session: SessionDep,
     _: CsrfDep,
-) -> ProjectFileRead:
+) -> ExtractionAcceptanceRead:
+    """Accept one retry of a failed local extraction under a frozen profile."""
     service = ProjectFileService(
         session, store=get_object_store(), actor=user, project_id=project_id
     )
-    revision = await service.retry_extraction(revision_id, request_key=body.request_key)
-    item, _revision = await service.read_revision(revision_id)
+    acceptance = await service.accept_extraction(
+        revision_id,
+        action="retry",
+        request_key=body.request_key,
+        expected_file_version=body.expected_file_version,
+        expected_attempt=body.expected_attempt,
+        expected_extraction_id=body.expected_extraction_id,
+        processor_profile_revision=body.processor_profile_revision,
+    )
     await session.commit()
-    return _read(item, revision)
+    return _acceptance(acceptance)
+
+
+@router.post(
+    "/projects/{project_id}/file-revisions/{revision_id}/reparse",
+    response_model=ExtractionAcceptanceRead,
+    status_code=202,
+)
+async def reparse_source(
+    project_id: UUID,
+    revision_id: UUID,
+    body: SourceRetry,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> ExtractionAcceptanceRead:
+    """Accept one explicit re-identification of an already parsed source."""
+    service = ProjectFileService(
+        session, store=get_object_store(), actor=user, project_id=project_id
+    )
+    acceptance = await service.accept_extraction(
+        revision_id,
+        action="reparse",
+        request_key=body.request_key,
+        expected_file_version=body.expected_file_version,
+        expected_attempt=body.expected_attempt,
+        expected_extraction_id=body.expected_extraction_id,
+        processor_profile_revision=body.processor_profile_revision,
+    )
+    await session.commit()
+    return _acceptance(acceptance)
 
 
 @router.delete("/projects/{project_id}/files/{file_id}", response_model=ProjectFileRead)

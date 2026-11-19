@@ -13,8 +13,8 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 Artifact。没有第二套 Generation 真相；批量与逐操作授权只编排同一命令入口，
 不进入 Worker 形成第二套预算 / 批次 Runtime，也没有历史路径分支。
 编排侧见 [DIRECTOR_RUNTIME.md](DIRECTOR_RUNTIME.md)。
-ProductPolicyRevision、ProductPolicyState/Event 的不可变存储已建立；当前 Dispatch
-尚未选取并冻结该 Revision，不能以新表存在推断新策略准入已经生效。
+旧ProductPolicy存储已退役，不能据历史文字恢复平行策略事实。机构版项目外发策略revision/head、
+可信目的地与原Invocation/Operation准入证据仍是待实施目标，见DATA_MODEL机构Schema与MODEL_PROVIDER。
 
 ## 执行链
 
@@ -65,7 +65,7 @@ Provider 特定的 reference URL/bytes 决策在 provider delivery 层内部。
 | ProductionGraph / GraphVersion / GraphNode / GraphEdge | 项目执行图及其版本化节点/边。定义与准入规则见 [PRODUCTION_GRAPH.md](PRODUCTION_GRAPH.md)。 |
 | NodeRun | 一次节点执行：排队 → 运行 → 终态；每次 status 写入原子发出终端通知（迁移 20260910_0063 trigger）。 |
 | Outbox / OutboxDeadLetter | 事务性 Outbox 事件与死信（`outbox_events` / `outbox_dead_letters`）。 |
-| ProviderOperation | NodeRun 拥有的 provider 调用事实（含持久化 credential revision 身份）；只有 NodeRun 一个 owner。 |
+| ProviderOperation | NodeRun拥有的原执行后端操作；远端调用冻结credential revision，本地处理冻结执行器身份，不伪造远端凭据。只有NodeRun一个owner，当前每个非空NodeRun关联最多一条。 |
 | Artifact | 不可变产物及血缘（`artifact_lineage.py`）。 |
 | ShotHumanLock | Shot 级人工锁，防止并发执行冲突。 |
 | Candidate / Formal | 正式选择是显式用户确认（`formal_selection.py`）。 |
@@ -350,3 +350,27 @@ Repair 的“等待生成 / 等待审核与正式采用 / 可继续下一步 / �
 本节的离线测试与资源驱动需要随实现补入现有测试/脚本，不能当成现在已有的命令。
 通过离线门只证明合同、调度与资源行为；真实制作和作品质量仍按主合同 AC-18 单独验收。
 不在本节新增运行部署、付费操作或迁移授权。
+
+## 机构业务流程的生产交接目标（D3，未实施）
+
+BusinessFlow只提交一个业务动作对应的原生产命令，返回现有五字段ExecutionReceipt，不复制生产状态。
+Run/Plan/Step/Attempt不进入Production表作为另一层调度权威；source关联可用于血缘但不替代当前授权。
+具体受理事务由DIRECTOR_RUNTIME机构合同及MODULE_BOUNDARIES入站适配器组合：
+Project/Run资格、既有ProductionAuthorizations、NodeRun/Outbox、attempt绑定同事务，网络在提交后。
+
+手动入口不依赖Director。生产模块不import Director服务，也不读取LangGraph checkpoint；
+资格验证由上层调用Director端口完成，Production独立验证已有授权、真实模型/输入/版本/哈希。
+当前ProductionCommands由调用方commit，不在持有Project锁时另开一个session再次锁Project。
+编译所需网络/大媒体读取放锁外准备，短受理事务只做有界确定性检查与版本/哈希复核。
+
+Worker实际发送前核验当前项目策略、来源闭包、公共引用资格及精确目的地，
+再持久化原Operation.admission/submission_started；授权Story或Run计划不能替代这一步。
+已提交/未知调用继续用原身份poll/download/reconcile，撤销或取消不触发新Create。
+新模型替代只能建议，必须重新预览及授权，不能用其他模型伪装原Operation恢复。
+
+公共素材沿固定Publication/Item/ProjectLink解析得到原Artifact，不能把跨项目source强改成目标项目，
+也不能复制NodeRun来假装本项目生产。输出Artifact仍属于实际执行项目，并保留原输入限制与用途血缘。
+消费项目的外发许可和来源限制同时成立才可新发送；签名URL不是许可。
+来源后来撤销不丢弃已在途结果，后续新引用重新核验。分集成片按D2的EditSession/Export绑定独立验收。
+
+I2/I3/I6/I8/I9的断点、拒绝与恢复测试必须沿真实受理/执行路径，不能用内存假状态替代PG并发或原Operation恢复。

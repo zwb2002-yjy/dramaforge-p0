@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -195,7 +196,12 @@ SHOT_REFERENCE_PURPOSES = (
     "generic_reference",
 )
 SHOT_REFERENCE_STAGES = ("image", "video", "both")
-SHOT_REFERENCE_RESOLUTION_MODES = ("current_formal", "pinned_version", "direct_artifact")
+SHOT_REFERENCE_RESOLUTION_MODES = (
+    "current_formal",
+    "pinned_version",
+    "direct_artifact",
+    "public_link",
+)
 
 
 class ShotReferenceBinding(Base):
@@ -209,8 +215,18 @@ class ShotReferenceBinding(Base):
     __tablename__ = "shot_reference_bindings"
     __table_args__ = (
         CheckConstraint(
-            "asset_id IS NOT NULL OR asset_version_id IS NOT NULL OR artifact_id IS NOT NULL",
+            "(public_asset_link_id IS NOT NULL) OR asset_id IS NOT NULL "
+            "OR asset_version_id IS NOT NULL OR artifact_id IS NOT NULL",
             name="ck_shot_reference_binding_source",
+        ),
+        CheckConstraint(
+            "(public_asset_link_id IS NULL) = (publication_item_id IS NULL)",
+            name="ck_shot_reference_binding_public_pair",
+        ),
+        ForeignKeyConstraint(
+            ["public_asset_link_id", "project_id"],
+            ["project_public_asset_links.id", "project_public_asset_links.project_id"],
+            ondelete="RESTRICT", name="fk_shot_reference_binding_public_link",
         ),
         CheckConstraint(
             "(resolution_mode <> 'direct_artifact') OR artifact_id IS NOT NULL",
@@ -229,7 +245,8 @@ class ShotReferenceBinding(Base):
             name="ck_shot_reference_binding_stage",
         ),
         CheckConstraint(
-            "resolution_mode IN ('current_formal', 'pinned_version', 'direct_artifact')",
+            "resolution_mode IN ('current_formal', 'pinned_version', "
+            "'direct_artifact', 'public_link')",
             name="ck_shot_reference_binding_resolution_mode",
         ),
         CheckConstraint(
@@ -260,6 +277,8 @@ class ShotReferenceBinding(Base):
     artifact_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=True
     )
+    public_asset_link_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    publication_item_id: Mapped[UUID | None] = mapped_column(nullable=True)
     resolution_mode: Mapped[str] = mapped_column(
         String(24), nullable=False, default="current_formal"
     )

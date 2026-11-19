@@ -93,10 +93,47 @@ def session_stub(dialect="postgresql"):
         "ArtifactRlsScope",
         "OutboxEventRlsScope",
         "DirectorTurnRlsScope",
+        "list_pending_agent_turn_rls_scopes",
+        "resolve_agent_turn_rls_scope",
     ],
 )
 def test_db_explicit_reexports_preserve_identity(name):
     assert getattr(db, name) is getattr(rls_scopes, name)
+
+
+async def test_agent_turn_scans_use_the_scoped_resolver_only():
+    session = session_stub()
+    row = {
+        "turn_id": ENTITY,
+        "owner_user_id": USER,
+        "workspace_id": WORKSPACE,
+        "project_id": PROJECT,
+    }
+    result = MagicMock()
+    result.mappings.return_value.all.return_value = [row]
+    result.mappings.return_value.one_or_none.return_value = row
+    session.execute.return_value = result
+
+    listed = await db.list_pending_agent_turn_rls_scopes(
+        session, limit=7, after_turn_id=ENTITY
+    )
+    statement, params = session.execute.await_args.args
+    assert " ".join(str(statement).split()) == (
+        "SELECT turn_id, owner_user_id, workspace_id, project_id "
+        "FROM app.pending_agent_director_turns(:limit, :after_turn_id, NULL)"
+    )
+    assert params == {"limit": 7, "after_turn_id": ENTITY}
+    assert listed == [(ENTITY, db.DirectorTurnRlsScope(USER, WORKSPACE, PROJECT))]
+
+    resolved = await db.resolve_agent_turn_rls_scope(session, turn_id=ENTITY)
+    statement, params = session.execute.await_args.args
+    assert " ".join(str(statement).split()) == (
+        "SELECT owner_user_id, workspace_id, project_id "
+        "FROM app.pending_agent_director_turns(NULL, NULL, :turn_id)"
+    )
+    assert params == {"turn_id": ENTITY}
+    assert resolved == db.DirectorTurnRlsScope(USER, WORKSPACE, PROJECT)
+    session.get.assert_not_awaited()
 
 
 @pytest.mark.parametrize("name,function,kwargs,id_key,scope_type", DISCOVERY)

@@ -69,6 +69,7 @@ async def recover_interrupted_director_turns(ctx: dict[str, Any]) -> dict[str, i
     never invokes a text model, creates a NodeRun, or submits media.
     """
 
+    from app.director.agent_service import recover_expired
     from app.director.turn_service import DirectorTurnService
     from app.shared.db import (
         list_recoverable_director_turn_rls_scopes,
@@ -93,7 +94,19 @@ async def recover_interrupted_director_turns(ctx: dict[str, Any]) -> dict[str, i
             try:
                 service = DirectorTurnService(session)
                 before = await service.get(project_id=scope.project_id, turn_id=turn_id)
-                if before.turn_kind == "agent" or before.runtime_execution_id is not None:
+                if before.turn_kind == "agent":
+                    # An Agent Turn never resumes: a lost owner becomes terminal
+                    # so a possibly billed text submission is never replayed.
+                    changed = await recover_expired(
+                        session, project_id=scope.project_id, turn=before
+                    )
+                    if changed:
+                        recovered += 1
+                    else:
+                        unchanged += 1
+                    await session.commit()
+                    continue
+                if before.runtime_execution_id is not None:
                     unchanged += 1
                     await session.rollback()
                     continue

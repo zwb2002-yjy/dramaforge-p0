@@ -1,6 +1,48 @@
+x-institution-runtime: &institution-runtime
+  image: ${QUALITY_BACKEND_IMAGE:-dramaforge-backend-quality:local}
+  working_dir: /workspace/backend
+  networks: [institution-quality]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  environment: &institution-environment
+    # Development enables the real Redis SSE bridge; all identities are synthetic.
+    APP_ENV: development
+    DATABASE_URL: postgresql+asyncpg://dramaforge_app:quality-institution-app-password@postgres-quality:5432/dramaforge_institution
+    DIRECTOR_CHECKPOINT_DATABASE_URL: postgresql://dramaforge_director_checkpoint:quality-institution-checkpoint-password@postgres-quality:5432/dramaforge_institution
+    REDIS_URL: redis://redis-quality:6379/14
+    MINIO_ENDPOINT: http://minio-quality:9000
+    MINIO_ACCESS_KEY: quality-minio-user
+    MINIO_SECRET_KEY: quality-minio-password
+    MINIO_BUCKET: quality-institution
+    SESSION_SECRET: quality-institution-session-secret-32-characters
+    WORKER_TOKEN: quality-institution-worker-token
+    BYOK_FERNET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    PUBLIC_REGISTRATION_ENABLED: "true"
+    SESSION_COOKIE_SECURE: "false"
+    DIRECTOR_RUNTIME_ENGINE: langgraph
+    AGNES_ENABLED: "false"
+    MINIMAX_ENABLED: "false"
+    VOLCENGINE_ENABLED: "false"
+    TTS_ENABLED: "false"
+    LITELLM_GATEWAY_URL: ""
+    LITELLM_API_KEY: ""
+    HTTP_PROXY: ""
+    HTTPS_PROXY: ""
+    ALL_PROXY: ""
+    DB_POOL_SIZE: "3"
+    DB_MAX_OVERFLOW: "2"
+  depends_on:
+    institution-bootstrap-quality:
+      condition: service_completed_successfully
+    redis-quality:
+      condition: service_healthy
+    minio-quality:
+      condition: service_healthy
+
 services:
   postgres-quality:
     image: postgres:15-alpine
+    networks: [default, institution-quality]
     environment:
       POSTGRES_DB: dramaforge
       POSTGRES_USER: dramaforge
@@ -13,6 +55,7 @@ services:
 
   redis-quality:
     image: redis:7-alpine
+    networks: [default, institution-quality]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 3s
@@ -74,6 +117,7 @@ services:
   minio-quality:
     # Verified amd64 CI mirror; pin the manifest digest to avoid mutable-tag drift.
     image: ghcr.io/zwb2002-yjy/dramaforge-minio@sha256:34c8e2f52a5984492555427fee07254c80036bdb7079bb91679232abd7a4fa20
+    networks: [default, institution-quality]
     environment:
       MINIO_ROOT_USER: quality-minio-user
       MINIO_ROOT_PASSWORD: quality-minio-password
@@ -83,6 +127,86 @@ services:
       interval: 2s
       timeout: 3s
       retries: 20
+
+  institution-bootstrap-quality:
+    image: ${QUALITY_BACKEND_IMAGE:-dramaforge-backend-quality:local}
+    working_dir: /workspace/backend
+    networks: [institution-quality]
+    environment:
+      INSTITUTION_QUALITY_FIXTURE: "1"
+      SESSION_SECRET: quality-institution-session-secret-32-characters
+      BYOK_FERNET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    command: ["/workspace/backend/.venv/bin/python", "tests/fixtures/institution_bootstrap.py"]
+    depends_on:
+      postgres-quality:
+        condition: service_healthy
+
+  institution-api-quality:
+    <<: *institution-runtime
+    command: ["/workspace/backend/.venv/bin/uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--no-proxy-headers"]
+    healthcheck:
+      test: ["CMD", "/workspace/backend/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  institution-dispatcher-quality:
+    <<: *institution-runtime
+    command: ["/workspace/backend/.venv/bin/python", "-m", "app.workers.dispatcher"]
+
+  institution-worker-default-quality:
+    <<: *institution-runtime
+    command: ["/workspace/backend/.venv/bin/arq", "app.workers.default.WorkerSettings"]
+    healthcheck:
+      test: ["CMD", "/workspace/backend/.venv/bin/python", "-c", "import os; os.environ['DIRECTOR_QUEUE_NAME']='dramaforge:default'; from app.workers.healthcheck import main; raise SystemExit(main())"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  institution-worker-director-quality:
+    <<: *institution-runtime
+    command: ["/workspace/backend/.venv/bin/arq", "app.workers.director.WorkerSettings"]
+    healthcheck:
+      test: ["CMD", "/workspace/backend/.venv/bin/python", "-m", "app.workers.healthcheck"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  institution-worker-heavy-quality:
+    <<: *institution-runtime
+    command: ["/workspace/backend/.venv/bin/arq", "app.workers.heavy.WorkerSettings"]
+    healthcheck:
+      test: ["CMD", "/workspace/backend/.venv/bin/python", "-c", "import os; os.environ['DIRECTOR_QUEUE_NAME']='dramaforge:heavy'; from app.workers.healthcheck import main; raise SystemExit(main())"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  institution-upstream-quality:
+    image: ${QUALITY_BACKEND_IMAGE:-dramaforge-backend-quality:local}
+    networks: [institution-quality]
+    command: ["/workspace/backend/.venv/bin/python", "backend/tests/fixtures/mock_llm_server.py"]
+    healthcheck:
+      test: ["CMD", "/workspace/backend/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/events', timeout=3)"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  institution-browser-quality:
+    image: ${QUALITY_FRONTEND_IMAGE:-dramaforge-frontend-quality:local}
+    networks: [institution-quality]
+    working_dir: /workspace/frontend
+    environment:
+      CI: "true"
+      DRAMAFORGE_E2E_API_URL: http://institution-api-quality:8000
+      DRAMAFORGE_API_URL: http://institution-api-quality:8000
+    volumes:
+      - ${QUALITY_CONTRACT_DIR:-./tmp/quality-contract}/playwright-results:/workspace/frontend/test-results
+    command: ["npm", "run", "test:e2e", "--", "--config", "playwright.institution.config.ts"]
+    depends_on:
+      institution-api-quality:
+        condition: service_healthy
+      institution-upstream-quality:
+        condition: service_healthy
 
   media-resource-quality:
     image: ${QUALITY_BACKEND_IMAGE:-dramaforge-backend-quality:local}
@@ -237,3 +361,7 @@ services:
       interval: 3s
       timeout: 3s
       retries: 40
+
+networks:
+  institution-quality:
+    internal: true

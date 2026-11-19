@@ -40,3 +40,39 @@ def test_ci_and_release_invoke_unfiltered_full_gate() -> None:
             and "down --volumes --remove-orphans" in step.get("run", "")
             for step in steps
         )
+
+
+def test_institution_business_processes_have_no_external_network_or_credentials() -> None:
+    """An inherited Compose change must not expose the real-API fixture to providers."""
+    import yaml
+
+    compose = yaml.safe_load((REPO_ROOT / "docker-compose.quality.yml").read_text())
+    services = compose["services"]
+    assert compose["networks"]["institution-quality"]["internal"] is True
+    institution = {
+        name: value for name, value in services.items() if name.startswith("institution-")
+    }
+    assert len(institution) >= 8
+    for name, service in institution.items():
+        assert service["networks"] == ["institution-quality"], name
+        assert not service.get("ports"), name
+        assert not service.get("network_mode"), name
+        assert not service.get("env_file"), name
+        assert not service.get("privileged"), name
+        assert not service.get("extra_hosts"), name
+        for mount in service.get("volumes", []):
+            assert "/playwright-results:" in mount, (name, mount)
+        for key, value in service.get("environment", {}).items():
+            assert "${" not in str(value), (name, key)
+    for name in (
+        "institution-api-quality", "institution-dispatcher-quality",
+        "institution-worker-default-quality", "institution-worker-director-quality",
+        "institution-worker-heavy-quality",
+    ):
+        environment = services[name]["environment"]
+        assert "dramaforge_app:" in environment["DATABASE_URL"]
+        assert environment["DATABASE_URL"].endswith("/dramaforge_institution")
+        assert environment["REDIS_URL"].endswith("/14")
+        assert environment["MINIO_BUCKET"] == "quality-institution"
+        assert environment["APP_ENV"] != "test"  # Exercise the real SSE bridge.
+        assert environment["LITELLM_GATEWAY_URL"] == ""
