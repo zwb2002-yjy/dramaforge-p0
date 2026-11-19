@@ -91,28 +91,39 @@ async def _seed_voice_binding(session: AsyncSession, project: Project, user: Use
     )
     session.add(connection)
     await session.flush()
-    entry = ModelCatalogEntry(
-        provider_type="agnes",
-        protocol_profile="openai_speech_v1",
-        model_id="unit-voice",
-        model_revision="v1",
-        display_name="Unit Voice",
-        media_kind="voice",
-        lifecycle="active",
-        catalog_source="official_static",
-        capability_manifest_json={"manifest_version": "1", "media_kind": "voice"},
-        option_schema_json={
-            "voices": [
-                {"id": "v1", "label": "Voice", "locale": "zh-CN"},
-                {"id": "v2", "label": "Voice 2", "locale": "zh-CN"},
-            ],
-            "properties": {"voice_id": {}},
-        },
-        documented_at=date(2026, 11, 19),
-        contract_manifest_hash="a" * 64,
+    # Catalog entries are global and unique per revision; PG integration tests
+    # share one database, so reuse the row when another test already seeded it.
+    entry = await session.scalar(
+        select(ModelCatalogEntry).where(
+            ModelCatalogEntry.provider_type == "agnes",
+            ModelCatalogEntry.protocol_profile == "openai_speech_v1",
+            ModelCatalogEntry.model_id == "unit-voice",
+            ModelCatalogEntry.model_revision == "v1",
+        )
     )
-    session.add(entry)
-    await session.flush()
+    if entry is None:
+        entry = ModelCatalogEntry(
+            provider_type="agnes",
+            protocol_profile="openai_speech_v1",
+            model_id="unit-voice",
+            model_revision="v1",
+            display_name="Unit Voice",
+            media_kind="voice",
+            lifecycle="active",
+            catalog_source="official_static",
+            capability_manifest_json={"manifest_version": "1", "media_kind": "voice"},
+            option_schema_json={
+                "voices": [
+                    {"id": "v1", "label": "Voice", "locale": "zh-CN"},
+                    {"id": "v2", "label": "Voice 2", "locale": "zh-CN"},
+                ],
+                "properties": {"voice_id": {}},
+            },
+            documented_at=date(2026, 11, 19),
+            contract_manifest_hash="a" * 64,
+        )
+        session.add(entry)
+        await session.flush()
     binding = ProviderModelBinding(
         workspace_id=project.workspace_id,
         connection_id=connection.id,
