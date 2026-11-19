@@ -1632,5 +1632,8 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
 - 定向组87 passed（asset_commands/asset_plan/authorization/graph/execution_plan/architecture）；
   generated.ts 380 schema、api:authority通过。
 
+下一轮起点（已实测）：asset快照已进入`execute_media_node_run`→`prepare_media_submission`，当前停在
+模型eligibility评估（fixture缺可用性证据），需补齐fixture证据并确认图片adapter的mock seam。
+
 未完成且不冒称：Worker对asset快照的端到端执行验证、`GET /assets/{a}/executions`读取、
 `ExecutionAccepted`事件的asset目标、资产batch与媒体安全合同。
