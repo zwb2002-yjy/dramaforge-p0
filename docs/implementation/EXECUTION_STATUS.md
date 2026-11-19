@@ -2200,3 +2200,32 @@ I7-03（resume只读端点）与 I8b-01a–01e（就绪模型/两集/共享资�
 
 未完成且不冒称：三类作品（`animation_promo`/`single_comic`/`serial_comic`）完整生产编排端到端、
 真实付费Provider调用（需当前Owner授权，属I10硬门）、I9剪辑交付段。
+
+## I8b-02 三类作品生产段到正式媒体（2026-11-19，EV144）
+
+把“I8b-01 生产段到正式媒体”做成三类作品各自的完整业务结果，并顺带修掉就绪模型的一个真实统计缺陷。
+
+已实施：
+- 新增`backend/tests/unit/production_harness.py`：一套可复用的生产段夹具——按作品类型建项目与其结构
+  最小集（`single_comic` 1集、`serial_comic` 2集、`animation_promo` 1集且不填集数计划）、Agnes图像连接
+  （可解密的冻结凭据revision + 可见性探测 + binding）、共享资产版本与逐镜头引用绑定、以及
+  `dispatch_keyframe`（plan→真实编译器wire指纹→派发）。EV143 的用例改用同一套夹具，去重。
+- 新增`test_three_work_type_production.py`：三类作品各自把`keyframe`走到**正式媒体**——
+  `execute_media_node_run`（真实Worker媒体路径）→ `approve_candidate`（人工批准）→
+  `set_formal_keyframe`，再重读就绪：`formal_keyframe_count == shot_count` 且每镜头
+  `formal_keyframe_artifact_id` 非空；`serial_comic` 追加“2集×2镜”用例，4个镜头全部落在**同一**
+  共享资产版本上（`shared_asset_count=1`、`cross_episode_sharing` 不阻断、`asset.version==1`）。
+- **修复`app/production/readiness.py`的真实缺陷**：`shared_asset_count` 之前只统计
+  `shot_reference_bindings.asset_version_id`（钉版本）绑定，产品主用法 `resolution_mode=current_formal`
+  （只有`asset_id`）一律计为0，导致“两集共享同一角色资产”在就绪里显示为未共享。改为
+  `pinned ∪ current_formal(经Asset.current_version_id)` 的并集再按版本去重计集数；
+  新增`test_current_formal_binding_also_counts_as_cross_episode_sharing` 固定该行为。
+
+已测（定向）：
+- `test_three_work_type_production.py` 4 passed；`test_production_readiness.py` 5 passed；
+  受影响定向组 **121 passed**（shared asset×2、三类作品、readiness、workbench execution、
+  generic images、agnes flash、resume、asset plan、formal selection）。
+- `ruff check app tests` 通过；`mypy app` 402 文件 Success。
+
+未完成且不冒称：视频/合成段与分集交付（I9）、三类作品的真实付费Provider端到端（I10硬门）、
+Full Gate 仍待空闲宿主重跑`workbench-resource`。

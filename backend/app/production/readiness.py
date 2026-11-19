@@ -87,17 +87,44 @@ async def read_production_readiness(
         )
     ).one()
     shot_count, keyframes, videos, composites = (int(value or 0) for value in shot_rows)
+    from app.assets.models import Asset
     from app.production.models import ShotReferenceBinding
 
-    shared_subquery = (
-        select(ShotReferenceBinding.asset_version_id)
+    # A shot reference is either pinned to one version or resolved from the
+    # Asset's current formal version. Both shapes mean the same business fact
+    # "this episode uses this asset version", so count them together instead of
+    # only crediting the pinned form.
+    pinned = (
+        select(
+            ShotReferenceBinding.asset_version_id.label("asset_version_id"),
+            Episode.id.label("episode_id"),
+        )
+        .select_from(ShotReferenceBinding)
         .join(Shot, Shot.id == ShotReferenceBinding.shot_id)
         .join(Scene, Scene.id == Shot.scene_id)
         .join(Episode, Episode.id == Scene.episode_id)
         .where(Episode.project_id == project_id)
         .where(ShotReferenceBinding.asset_version_id.is_not(None))
-        .group_by(ShotReferenceBinding.asset_version_id)
-        .having(func.count(func.distinct(Episode.id)) >= 2)
+    )
+    current = (
+        select(
+            Asset.current_version_id.label("asset_version_id"),
+            Episode.id.label("episode_id"),
+        )
+        .select_from(ShotReferenceBinding)
+        .join(Shot, Shot.id == ShotReferenceBinding.shot_id)
+        .join(Scene, Scene.id == Shot.scene_id)
+        .join(Episode, Episode.id == Scene.episode_id)
+        .join(Asset, Asset.id == ShotReferenceBinding.asset_id)
+        .where(Episode.project_id == project_id)
+        .where(ShotReferenceBinding.asset_version_id.is_(None))
+        .where(Asset.current_version_id.is_not(None))
+    )
+    usage = pinned.union_all(current).subquery()
+    shared_subquery = (
+        select(usage.c.asset_version_id)
+        .group_by(usage.c.asset_version_id)
+        .having(func.count(func.distinct(usage.c.episode_id)) >= 2)
         .subquery()
     )
     shared_assets = int(
