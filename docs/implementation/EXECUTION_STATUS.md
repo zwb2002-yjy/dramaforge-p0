@@ -2782,6 +2782,17 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 
 - **下一步**：用 `GraphService` 建图后在隔离 PG 上跑 EV176 演练；restic 快照调用与 staging 峰值内存实测。
 
+#### PG 演练的第二次前置发现：手搓 `ProviderOperation` 需要完整模型注册表
+
+本轮改用 `GraphService` 建图（第一步已解决），但接着被同类的元数据缺口连续挡回：手写
+`ProviderOperation` 时 ORM 需要 `provider_model_catalog_entries`（`app.providers.catalog_models`）
+与 `encrypted_provider_credentials`（`app.security.models`）等表定义。逐个 import 是治标的做法，
+每次都会冒下一张表。
+
+结论（下一轮直接照做）：PG 演练脚本应像 `tests/conftest.py` 那样**一次性注册完整模型**（导入
+`app.main` 或等价注册），再用 `GraphService` 建图、用服务/ORM 造数据，而不是靠手写最少 import。
+本轮资源已清理（删库 + `compose down --volumes`），未保留半成品脚本。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
