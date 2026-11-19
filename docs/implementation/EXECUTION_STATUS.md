@@ -1414,4 +1414,23 @@ I5按机制验收退出，允许进入I8a。
 - 新增`test_voice_binding.py` 3 passed：无绑定missing、配置绑定configured含选项、停用与错配unavailable。
 - 定向组29 passed（voice_binding/speech_http/media_config/model_profiles）；ruff/mypy 397文件通过。
 
-未完成且不冒称：`voice-options`API投影、生产语音路径切换、Edge/espeak删除、FinalFilm prepare与逐命令授权。
+未完成且不冒称：生产语音路径切换、Edge/espeak删除、FinalFilm prepare与逐命令授权。
+
+## I8a-02c voice-options Binding能力投影（2026-11-19，EV98）
+
+把语音选项从实例引擎改为项目语音Binding的只读投影，前端按新状态显示。
+
+已实施：
+- `voice_options_for_project`：missing→`VOICE_BINDING_MISSING`；unavailable→binding身份+原因；configured→
+  binding/model/provider、`default_voice`（profile voice_options）、`voices`与`supported_controls`
+  （来自catalog entry `option_schema`）；零Provider调用。
+- `VoiceOptionsRead`改为`{status,binding_id,model_id,provider_type,reason_code,default_voice,voices,
+  supported_controls,notice}`；`GET /projects/{p}/voice-options`改用项目解析。
+- 前端`ShotVoiceSettings`按configured/unavailable/missing显示；`fetchVoiceOptions`校验新形状；
+  两个语音测试夹具更新。
+
+已测（定向）：
+- 后端`test_voice_binding.py` 5 passed（含投影：schema音色解析、missing/unavailable）。
+- 定向组后端28 passed、前端22 passed；generated.ts 371 schema、typecheck/prettier/lint/UI权威通过。
+
+未完成且不冒称：生产语音路径切换、Edge/espeak删除、FinalFilm prepare与逐命令授权。

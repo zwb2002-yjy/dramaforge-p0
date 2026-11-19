@@ -4714,7 +4714,7 @@ export interface components {
          * @description Stable business capabilities the product layer can request.
          * @enum {string}
          */
-        Capability: "text.generate" | "image.generate" | "image.edit" | "video.text_to_video" | "video.image_to_video" | "video.last_frame_to_video" | "video.first_last_frame" | "video.reference_to_video";
+        Capability: "text.generate" | "image.generate" | "image.edit" | "video.text_to_video" | "video.image_to_video" | "video.last_frame_to_video" | "video.first_last_frame" | "video.reference_to_video" | "voice.generate";
         /**
          * CapabilityAssessmentSummary
          * @description Assessed multi-subject capability of the keyframe model for a shot.
@@ -11359,7 +11359,7 @@ export interface components {
              * Operation
              * @enum {string}
              */
-            operation: "image.generate" | "image.edit" | "image.extend" | "image.layer_decomposition" | "image.interactive_edit" | "video.generate" | "video.edit" | "video.extend";
+            operation: "image.generate" | "image.edit" | "image.extend" | "image.layer_decomposition" | "image.interactive_edit" | "video.generate" | "video.edit" | "video.extend" | "voice.generate";
             /**
              * Claim Status
              * @default unknown
@@ -11503,25 +11503,32 @@ export interface components {
             /** Locale */
             locale: string;
         };
-        /** VoiceOptionsRead */
+        /**
+         * VoiceOptionsRead
+         * @description Read-only projection of the project voice binding (never an instance engine).
+         */
         VoiceOptionsRead: {
-            /** Engine */
-            engine: string;
-            /** Enabled */
-            enabled: boolean;
             /**
              * Status
              * @enum {string}
              */
-            status: "configured" | "disabled" | "invalid";
+            status: "configured" | "unavailable" | "missing";
+            /** Binding Id */
+            binding_id?: string | null;
+            /** Model Id */
+            model_id?: string | null;
+            /** Provider Type */
+            provider_type?: string | null;
+            /** Reason Code */
+            reason_code?: string | null;
             /** Default Voice */
-            default_voice: string;
-            /** Network */
-            network: boolean;
-            /** Service Notice */
-            service_notice: string;
+            default_voice?: string | null;
             /** Voices */
-            voices: components["schemas"]["VoiceOptionRead"][];
+            voices?: components["schemas"]["VoiceOptionRead"][];
+            /** Supported Controls */
+            supported_controls?: string[];
+            /** Notice */
+            notice?: string | null;
         };
         /**
          * WorkbenchExecutionPlan

@@ -39,7 +39,7 @@ from app.production.workbench_execution import (
     WorkbenchExecutionService,
 )
 from app.providers.compile_preview import CompilePreview
-from app.providers.voice_config import voice_options
+from app.providers.voice_config import voice_options_for_project
 from app.shared.errors import NotFoundError
 from app.workbench.scene_service import ShotWorkbenchService
 from app.workbench.shot_service import ShotDesignService
@@ -79,8 +79,10 @@ class ShotDesignRead(BaseModel):
 async def get_voice_options(
     project_id: UUID, user: CurrentUser, session: SessionDep
 ) -> VoiceOptionsRead:
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    return voice_options()
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=user
+    )
+    return await voice_options_for_project(session, project=project)
 
 
 @router.get("/projects/{project_id}/workspace-state", response_model=WorkspaceStateRead)

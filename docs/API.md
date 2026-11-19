@@ -717,6 +717,12 @@ unsupported控件不呈现为可填写，但已有草稿不兼容项明确返回
 提交沿已有用户授权与幂等命令，校验指纹、权限、限额和当前准入；未知提交仅查原回执，不用新Binding重发。
 这些字段的最终生产DTO与路由由D7按现有调用链完整核对，不能据本节建第二条媒体提交路径。
 
+I8a-02c已实施：`GET /projects/{p}/voice-options`改为项目语音Binding的只读能力投影，返回
+`{status:configured|unavailable|missing,binding_id,model_id,provider_type,reason_code,default_voice,
+voices[{id,label,locale}],supported_controls,notice}`；音色/控件来自binding对应catalog entry的
+`option_schema`，无binding为missing、停用/错配为unavailable并带原因；不再读取实例TTS_ENGINE、不探测Provider。
+旧响应字段`engine/enabled/network/service_notice`已移除，前端语音组件按新状态显示。
+
 `GET …/voice-options`目标改为项目/本次所选语音Binding的只读能力投影，返回binding身份、可用音色/参数、
 configured/unavailable/missing与原因；不再把实例TTS_ENGINE视作配置。仅列合同中确有依据的音色，不调用合成探测。
 同项目和当前Workspace授权；旧已冻结voice任务读取其原Spec而非这个实时接口。

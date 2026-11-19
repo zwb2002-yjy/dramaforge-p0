@@ -28,12 +28,12 @@ const SHOT: ShotLite = {
   formal_composite_artifact_id: null,
 };
 const OPTIONS: VoiceOptionsRead = {
-  engine: "edge-tts",
-  enabled: true,
   status: "configured",
+  binding_id: "binding-voice",
+  model_id: "voice-model",
+  provider_type: "agnes",
   default_voice: "voice-a",
-  network: true,
-  service_notice: "联网神经配音·Edge（非官方服务，无SLA）；配置未验证。",
+  notice: "联网神经配音·Edge（非官方服务，无SLA）；配置未验证。",
   voices: [
     { id: "voice-a", label: "目录声音甲", locale: "zh-CN" },
     { id: "voice-b", label: "目录声音乙", locale: "zh-CN" },

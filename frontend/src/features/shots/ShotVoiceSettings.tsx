@@ -56,23 +56,23 @@ export function ShotVoiceSettings({
       )}
       {config && (
         <>
-          <p className="muted" id={id + "-notice"}>
-            {config.service_notice}
-          </p>
-          {config.network && (
-            <p className="muted">
-              生成时对白文本将发送至微软在线语音服务；失败不会回退为旧机械音。
+          {config.notice && (
+            <p className="muted" id={id + "-notice"}>
+              {config.notice}
             </p>
           )}
-          {(!config.enabled || config.status === "disabled") && (
-            <p role="status">配音服务未启用。可以保存镜头设置，导出前需先启用服务。</p>
-          )}
-          {config.status === "invalid" && (
+          {config.status === "unavailable" && (
             <p role="alert">
-              配音配置无效。可以保存镜头设置，导出前需先修正配置；不会自动改用其他引擎。
+              已保存的语音模型当前不可用（{config.reason_code ?? "未知原因"}
+              ）；不会自动切换到其他引擎。
             </p>
           )}
-          {voices.length === 0 && <p role="status">当前配置未提供可选音色，已有设置不会被清空。</p>}
+          {config.status === "missing" && (
+            <p role="status">项目未配置语音模型；请在项目设置中选择后再生成配音。</p>
+          )}
+          {voices.length === 0 && config.status === "configured" && (
+            <p role="status">当前语音模型未提供可选音色，已有设置不会被清空。</p>
+          )}
         </>
       )}
       <Field>

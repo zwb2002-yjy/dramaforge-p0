@@ -11,6 +11,7 @@ from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.model_profiles.service import ProductionModelProfileService
 from app.providers.models import ProviderModelBinding
 from app.providers.voice_binding import resolve_voice_binding
+from app.providers.voice_config import voice_options_for_project
 from model_infra_fixture import seed_model_infra
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,7 +36,11 @@ async def world(session: AsyncSession):
 
 
 async def _voice_binding(
-    session: AsyncSession, world, *, enabled: bool = True
+    session: AsyncSession,
+    world,
+    *,
+    enabled: bool = True,
+    schema: dict[str, object] | None = None,
 ) -> ProviderModelBinding:
     connection_id = await session.scalar(
         select(ProviderModelBinding.connection_id).where(
@@ -50,7 +55,7 @@ async def _voice_binding(
         display_name="Unit Voice",
         media_kind="voice",
         capability_manifest_json={"manifest_version": "1", "media_kind": "voice"},
-        option_schema_json={},
+        option_schema_json=dict(schema or {}),
         pricing_snapshot_json={},
         documented_at=date(2026, 11, 19),
         contract_manifest_hash="a" * 64,
@@ -117,3 +122,41 @@ async def test_disabled_and_wrong_kind_bindings_are_unavailable(session, world):
     wrong = await resolve_voice_binding(session, project=world["project"])
     assert wrong.status == "unavailable"
     assert wrong.reason_code == "VOICE_BINDING_KIND_MISMATCH"
+
+
+async def test_voice_options_projection_from_binding_schema(session, world):
+    binding = await _voice_binding(
+        session,
+        world,
+        schema={
+            "voices": [
+                {"id": "v1", "label": "女声", "locale": "zh-CN"},
+                {"id": "v2", "label": "男声", "locale": "zh-CN"},
+                {"bad": True},
+            ],
+            "properties": {"voice_id": {}, "speed": {}},
+        },
+    )
+    profile = await _profile(session, world)
+    profile.voice_model_binding_id = binding.id
+    profile.voice_options = {"voice_id": "v1"}
+    await session.flush()
+    projection = await voice_options_for_project(session, project=world["project"])
+    assert projection.status == "configured"
+    assert projection.binding_id == binding.id
+    assert projection.default_voice == "v1"
+    assert [voice.id for voice in projection.voices] == ["v1", "v2"]
+    assert projection.supported_controls == ["speed", "voice_id"]
+
+
+async def test_voice_options_missing_and_unavailable(session, world):
+    missing = await voice_options_for_project(session, project=world["project"])
+    assert missing.status == "missing"
+    assert missing.reason_code == "VOICE_BINDING_MISSING"
+    binding = await _voice_binding(session, world, enabled=False)
+    profile = await _profile(session, world)
+    profile.voice_model_binding_id = binding.id
+    await session.flush()
+    unavailable = await voice_options_for_project(session, project=world["project"])
+    assert unavailable.status == "unavailable"
+    assert unavailable.reason_code == "VOICE_BINDING_DISABLED"

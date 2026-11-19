@@ -137,13 +137,10 @@ def test_voice_options_are_project_scoped_and_do_not_probe(client: TestClient, m
     response = client.get(f"/api/v1/projects/{project_id}/voice-options")
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["engine"] == "edge-tts"
-    assert data["status"] == "disabled"
-    assert {voice["id"] for voice in data["voices"]} == {
-        "zh-CN-XiaoxiaoNeural",
-        "zh-CN-YunxiNeural",
-    }
-    assert "未联网验证" in data["service_notice"]
+    assert data["status"] == "missing"
+    assert data["reason_code"] == "VOICE_BINDING_MISSING"
+    assert data["voices"] == []
+    assert data["binding_id"] is None
     assert client.get(f"/api/v1/projects/{uuid4()}/voice-options").status_code == 404
     del client.headers["X-Workspace-Id"]
     assert client.get(f"/api/v1/projects/{project_id}/voice-options").status_code in {400, 403, 422}

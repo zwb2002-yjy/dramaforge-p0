@@ -7,7 +7,7 @@ import pytest
 from app.assets.voice import ShotVoiceSettings
 from app.config import Settings
 from app.providers.errors import ProviderNotConfiguredError
-from app.providers.voice_config import freeze_voice_execution, voice_identity, voice_options
+from app.providers.voice_config import freeze_voice_execution, voice_identity
 from app.providers.voice_runtime import get_voice_adapter
 from app.shared.errors import ValidationAppError
 from pydantic import ValidationError
@@ -41,17 +41,6 @@ def test_edge_default_and_user_voice_have_distinct_frozen_identity() -> None:
 def test_mismatched_engine_voice_never_silently_falls_back(overrides: dict[str, object]) -> None:
     with pytest.raises(ValidationAppError):
         freeze_voice_execution({}, settings=_settings(**overrides))
-    assert voice_options(_settings(**overrides)).status == "invalid"
-
-
-def test_voice_options_are_configuration_not_live_provider_health() -> None:
-    read = voice_options(_settings(tts_proxy="http://private-proxy.invalid"))
-    assert read.status == "configured"
-    assert read.network is True
-    assert len(read.voices) == 2
-    assert "未联网验证" in read.service_notice
-    assert "private-proxy" not in read.model_dump_json()
-    assert voice_options(_settings(tts_enabled=False)).status == "disabled"
 
 
 @pytest.mark.parametrize("rate", [-31, 31])

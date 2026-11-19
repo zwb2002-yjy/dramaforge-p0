@@ -14,12 +14,12 @@ import {
 } from "../../src/features/shots/api";
 
 const OPTIONS: VoiceOptionsRead = {
-  engine: "edge-tts",
-  enabled: true,
   status: "configured",
+  binding_id: "binding-voice",
+  model_id: "voice-model",
+  provider_type: "agnes",
   default_voice: "catalog-woman",
-  network: true,
-  service_notice: "联网神经配音·Edge（非官方服务，无SLA）；仅读取配置，尚未验证服务可用性。",
+  notice: "联网神经配音·Edge（非官方服务，无SLA）；仅读取配置，尚未验证服务可用性。",
   voices: [
     { id: "catalog-woman", label: "目录女声", locale: "zh-CN" },
     { id: "catalog-man", label: "目录男声", locale: "zh-CN" },
@@ -69,8 +69,7 @@ describe("ShotVoiceSettings", () => {
     expect(
       await findSelectOption(screen.getByLabelText("配音音色"), "目录男声 · zh-CN"),
     ).toBeInTheDocument();
-    expect(screen.getByText(OPTIONS.service_notice)).toBeInTheDocument();
-    expect(screen.getByText(/对白文本将发送至微软/)).toHaveTextContent("失败不会回退为旧机械音");
+    expect(screen.getByText(OPTIONS.notice!)).toBeInTheDocument();
     expectSelectValue(screen.getByLabelText("配音音色"), "");
     expect(
       getSelectOption(screen.getByLabelText("配音音色"), "沿用实例默认（目录女声）"),
@@ -141,12 +140,12 @@ describe("ShotVoiceSettings", () => {
       await client.invalidateQueries({ queryKey: queryKeys.shot.voiceOptions("project-1") });
     });
     await waitFor(() => expect(screen.getByLabelText("配音音色")).toBeDisabled());
-    expect(screen.queryByText(OPTIONS.service_notice)).not.toBeInTheDocument();
+    expect(screen.queryByText(OPTIONS.notice!)).not.toBeInTheDocument();
     expectSelectValue(screen.getByLabelText("配音音色"), "voice:catalog-man");
     expect(changed).not.toHaveBeenCalled();
   });
 
-  it.each(["disabled", "invalid"] as const)(
+  it.each(["unavailable", "missing"] as const)(
     "shows %s configuration without changing saved settings",
     async (status) => {
       const notice = "本地配置说明：尚未连接或验证服务。";
@@ -154,17 +153,16 @@ describe("ShotVoiceSettings", () => {
         json({
           ...OPTIONS,
           status,
-          enabled: status !== "disabled",
-          network: false,
-          service_notice: notice,
+          notice,
         }),
       );
       const { changed } = renderSettings({ voice_id: "catalog-man", rate_percent: 5 });
       expect(await screen.findByText(notice)).toBeInTheDocument();
       expect(
-        screen.getByText(status === "disabled" ? /配音服务未启用/ : /配音配置无效/),
+        screen.getByText(
+          status === "unavailable" ? /已保存的语音模型当前不可用/ : /项目未配置语音模型/,
+        ),
       ).toBeInTheDocument();
-      expect(screen.queryByText(/对白文本将发送至微软/)).not.toBeInTheDocument();
       expect(changed).not.toHaveBeenCalled();
     },
   );

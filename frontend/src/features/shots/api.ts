@@ -60,12 +60,9 @@ export async function fetchVoiceOptions(
   );
   if (
     !data ||
-    typeof data.engine !== "string" ||
-    typeof data.enabled !== "boolean" ||
-    !["configured", "disabled", "invalid"].includes(data.status) ||
-    typeof data.default_voice !== "string" ||
-    typeof data.network !== "boolean" ||
-    typeof data.service_notice !== "string" ||
+    !["configured", "unavailable", "missing"].includes(data.status) ||
+    (data.binding_id !== null && typeof data.binding_id !== "string") ||
+    (data.default_voice !== null && typeof data.default_voice !== "string") ||
     !Array.isArray(data.voices) ||
     data.voices.some(
       (voice) =>

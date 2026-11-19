@@ -1,8 +1,10 @@
 """Explicit speech configuration and immutable execution identity; no network calls."""
 
 from collections.abc import Mapping
-from typing import Literal
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.access.models import Project
 from app.assets.voice import (
     ShotVoiceSettings,
     VoiceExecutionSpec,
@@ -54,37 +56,73 @@ def freeze_voice_execution(
     )
 
 
-def voice_options(settings: Settings | None = None) -> VoiceOptionsRead:
-    config = settings or get_settings()
-    network = config.tts_engine == "edge-tts"
-    entries = EDGE_VOICES if network else LEGACY_VOICES if config.tts_engine == "espeak-ng" else ()
-    status: Literal["configured", "disabled", "invalid"] = (
-        "configured" if config.tts_enabled else "disabled"
-    )
-    try:
-        freeze_voice_execution({}, settings=config)
-    except ValidationAppError:
-        status = "invalid"
-    notice = (
-        "Edge 神经配音是非官方联网服务：对白发送至微软，不使用付费 Key，"
-        "不保证可用性或商业使用许可。此处只读取配置，尚未联网验证；失败不会退回机械音。"
-        if network
-        else "本地 eSpeak 旧版机械音，无网络调用；仅保留显式选择，不作为自动回退。"
-    )
-    if status == "disabled":
-        notice = "配音服务未启用。" + notice
-    elif status == "invalid":
-        notice = "配音引擎或默认音色配置不匹配，请修正配置后再生成。" + notice
-    return VoiceOptionsRead(
-        engine=config.tts_engine,
-        enabled=config.tts_enabled,
-        status=status,
-        default_voice=config.tts_voice,
-        network=network,
-        service_notice=notice,
-        voices=list(entries),
-    )
+async def voice_options_for_project(
+    session: AsyncSession, *, project: Project
+) -> VoiceOptionsRead:
+    """Project the project's voice binding; never read the instance TTS engine."""
+    from app.providers.catalog_models import ModelCatalogEntry
+    from app.providers.voice_binding import resolve_voice_binding
 
+    status = await resolve_voice_binding(session, project=project)
+    if status.status == "missing":
+        return VoiceOptionsRead(
+            status="missing",
+            reason_code=status.reason_code,
+            notice="项目未配置语音模型；请在项目设置中选择语音模型后再生成配音。",
+        )
+    if status.status == "unavailable":
+        return VoiceOptionsRead(
+            status="unavailable",
+            binding_id=status.binding_id,
+            model_id=status.model_id,
+            provider_type=status.provider_type,
+            reason_code=status.reason_code,
+            notice="已保存的语音模型当前不可用；不会自动切换到其他引擎。",
+        )
+
+    from app.providers.models import ProviderModelBinding
+
+    binding = (
+        await session.get(ProviderModelBinding, status.binding_id)
+        if status.binding_id is not None
+        else None
+    )
+    entry = (
+        await session.get(ModelCatalogEntry, binding.catalog_entry_id)
+        if binding is not None and binding.catalog_entry_id is not None
+        else None
+    )
+    schema = dict(entry.option_schema_json) if entry is not None else {}
+    voices: list[VoiceOptionRead] = []
+    for item in schema.get("voices") or []:
+        if not isinstance(item, dict):
+            continue
+        voice_id = item.get("id")
+        if not isinstance(voice_id, str) or not voice_id:
+            continue
+        voices.append(
+            VoiceOptionRead(
+                id=voice_id,
+                label=str(item.get("label") or voice_id),
+                locale=str(item.get("locale") or ""),
+            )
+        )
+    controls = sorted(
+        key for key in (schema.get("properties") or {}) if isinstance(key, str)
+    )
+    return VoiceOptionsRead(
+        status="configured",
+        binding_id=status.binding_id,
+        model_id=status.model_id,
+        provider_type=status.provider_type,
+        default_voice=(
+            str(status.voice_options.get("voice_id"))
+            if status.voice_options.get("voice_id")
+            else None
+        ),
+        voices=voices,
+        supported_controls=controls,
+    )
 
 def voice_identity(spec: VoiceExecutionSpec) -> tuple[str, str, str]:
     if spec.engine == "edge-tts":
