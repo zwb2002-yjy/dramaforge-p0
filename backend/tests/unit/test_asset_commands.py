@@ -834,3 +834,122 @@ async def test_asset_batch_accepts_mixed_image_and_voice_items(session, world):
     ).scalars().all()
     assert {run.input_snapshot.get("node_key") for run in runs} == {"image", "voice"}
 
+
+
+async def test_asset_video_run_submits_once_through_the_worker(session, world, monkeypatch):
+    """The queued video run reaches the provider boundary exactly once."""
+    from app.execution.models import NodeRun, ProviderOperation
+    from app.execution.product_path import execute_media_node_run
+    from app.providers.runtime import (
+        CompiledVideoRequest,
+        ProviderResumeToken,
+        ResolvedRuntime,
+        SubmissionResult,
+    )
+    from app.storage.minio_store import reset_object_store_for_tests
+
+    class FakeVideoCompiler:
+        reference_transport = "bytes"
+
+        async def compile(self, intent, *args, **kwargs):
+            output = intent.output.model_dump(exclude_none=True)
+            return CompiledVideoRequest(
+                provider_type="agnes",
+                protocol_profile="agnes_cn_v1",
+                model_id="unit-agnes-video",
+                operation="video.generate",
+                wire_request={
+                    "model": "unit-agnes-video",
+                    "prompt": intent.prompt,
+                    **output,
+                },
+                request_schema_version="1",
+            )
+
+    class FakeVideoRuntime:
+        def __init__(self) -> None:
+            self.submits = 0
+
+        async def submit_video(self, request):
+            self.submits += 1
+            return SubmissionResult(
+                status="accepted",
+                remote_task_id="video-task-1",
+                resume_token=ProviderResumeToken(
+                    provider_type="agnes",
+                    protocol_profile="agnes_cn_v1",
+                    remote_task_id="video-task-1",
+                ),
+            )
+
+    runtime = FakeVideoRuntime()
+
+    async def fake_resolve(self, *, identity, workspace_id, operation=None, settings=None):
+        from app.providers.catalog_models import ModelCatalogEntry
+        from app.providers.models import ProviderConnection, ProviderModelBinding
+
+        connection = await self._session.get(ProviderConnection, identity.connection_id)
+        binding = await self._session.get(
+            ProviderModelBinding, identity.provider_model_binding_id
+        )
+        entry = await self._session.get(ModelCatalogEntry, identity.catalog_entry_id)
+        return ResolvedRuntime(
+            runtime=runtime,
+            image_compiler=None,
+            video_compiler=FakeVideoCompiler(),
+            connection=connection,
+            binding=binding,
+            catalog_entry=entry,
+            model_id="unit-agnes-video",
+            invoke_model_value="unit-agnes-video",
+        )
+
+    monkeypatch.setattr(
+        "app.providers.runtime.ProviderRuntimeResolver.resolve_runtime_for_identity",
+        fake_resolve,
+    )
+    from app.production.asset_commands import (
+        AssetVideoExecutionBody,
+        submit_asset_video_execution,
+    )
+    from app.production.asset_plan import AssetVideoPlanBody, build_asset_video_plan
+
+    plan_body = AssetVideoPlanBody(
+        expected_asset_version=1,
+        requirements=AssetCreativeRequirements(summary="古桥在晨雾中显现"),
+        mode_id="text_to_video",
+        parameters={"duration_seconds": 5},
+    )
+    plan = await build_asset_video_plan(
+        session, project=world["project"], asset_id=world["video"].id, body=plan_body
+    )
+    body = AssetVideoExecutionBody(
+        **plan_body.model_dump(), plan_fingerprint=plan.plan_fingerprint
+    )
+    receipt = await submit_asset_video_execution(
+        session,
+        actor=world["user"],
+        project_id=world["project"].id,
+        asset_id=world["video"].id,
+        body=body,
+    )
+    from app.shared.errors import ProviderTaskPendingError
+
+    with pytest.raises(ProviderTaskPendingError):
+        await execute_media_node_run(
+            session, node_run_id=receipt.node_run_id, store=reset_object_store_for_tests()
+        )
+    await session.commit()
+    run = await session.get(NodeRun, receipt.node_run_id)
+    assert run.status in {"queued", "running"}
+    operation = (
+        await session.execute(
+            select(ProviderOperation).where(
+                ProviderOperation.node_run_id == receipt.node_run_id
+            )
+        )
+    ).scalar_one()
+    assert operation.provider_operation_id == "video-task-1"
+    assert operation.actual_provider == "agnes"
+    assert operation.actual_model == "unit-agnes-video"
+    assert runtime.submits == 1

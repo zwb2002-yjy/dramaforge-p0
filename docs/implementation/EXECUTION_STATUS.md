@@ -1852,3 +1852,17 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
 
 未完成且不冒称：视频run Worker端到端完成（需真实选项映射的fake compiler）、voice_concat执行计划、
 prepare独立授权记录。
+
+## I8a-03s 资产视频run提交端到端（2026-11-19，EV120）
+
+- e2e测试：fake video compiler（按`intent.output`生成wire）+ fake runtime（返回`resume_token`），
+  `execute_media_node_run`对asset video run完成一次提交：ProviderOperation记录
+  `provider_operation_id=video-task-1`、`actual_provider=agnes`、`actual_model=unit-agnes-video`，
+  `runtime.submits==1`；随后按异步视频语义抛`ProviderTaskPendingError`并保持可轮询状态。
+- 该测试补齐了I8a收口审计中的“视频run端到端”缺口（提交边界，非最终Artifact下载）。
+
+已测（定向）：
+- `test_asset_commands.py` 10 passed（含视频提交e2e）；定向组110 passed；
+  ruff/mypy 400文件通过。
+
+未完成且不冒称：视频Artifact下载/完成（需HTTP下载fake）、voice_concat执行计划、prepare独立授权记录。
