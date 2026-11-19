@@ -512,3 +512,20 @@ async def test_video_plan_rejects_wrong_kind(session, world):
             ),
         )
     assert kind.value.details["code"] == "ASSET_VIDEO_KIND"
+
+
+async def test_voice_plan_segments_long_text(session, world):
+    from app.production.asset_plan import AssetVoicePlanBody, build_asset_voice_plan
+    from app.production.voice_segments import segment_text
+
+    long_text = "古桥始建于明代。" * 60
+    body = AssetVoicePlanBody(expected_asset_version=1, text=long_text)
+    plan = await build_asset_voice_plan(
+        session, project=world["project"], asset_id=world["audio"].id, body=body
+    )
+    assert plan.requires_concat is True
+    assert len(plan.segments) > 1
+    assert plan.max_provider_operations == len(plan.segments)
+    assert sum(item.chars for item in plan.segments) >= len(long_text.strip()) - 1
+    assert segment_text("短句。")[0].text == "短句。"
+    assert segment_text("") == []

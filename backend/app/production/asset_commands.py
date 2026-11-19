@@ -388,6 +388,14 @@ async def submit_asset_voice_execution(
             "plan fingerprint mismatch: inputs changed since preview",
             details={"code": "PLAN_FINGERPRINT_MISMATCH"},
         )
+    if plan.requires_concat:
+        raise ValidationAppError(
+            "长文本需分段批量提交；单命令只受理一个分段。",
+            details={
+                "code": "ASSET_VOICE_SEGMENTED_BATCH_REQUIRED",
+                "segments": len(plan.segments),
+            },
+        )
     status = await resolve_voice_binding(session, project=project)
     spec = freeze_voice_execution(
         {"voice": {"voice_id": plan.voice_options.get("voice_id")}},

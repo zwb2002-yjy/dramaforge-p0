@@ -386,6 +386,12 @@ class AssetVoicePlanBody(BaseModel):
     source_context_refs: list[dict[str, JsonValue]] = Field(default_factory=list)
 
 
+class AssetVoiceSegmentRead(BaseModel):
+    index: int
+    text: str
+    chars: int
+
+
 class AssetVoicePlanRead(BaseModel):
     target: AssetPlanTarget
     stage: Literal["asset_voice"] = "asset_voice"
@@ -396,6 +402,9 @@ class AssetVoicePlanRead(BaseModel):
     capability: Literal["voice.generate"] = "voice.generate"
     text: str
     voice_options: dict[str, JsonValue] = Field(default_factory=dict)
+    segments: list[AssetVoiceSegmentRead] = Field(default_factory=list)
+    requires_concat: bool = False
+    max_provider_operations: int = 1
     notices: list[str] = Field(default_factory=list)
 
 
@@ -459,6 +468,9 @@ async def build_asset_voice_plan(
             "所选音色不属于该语音模型；请显式重新选择并保存。",
             details={"code": "VOICE_UNKNOWN_FOR_BINDING"},
         )
+    from app.production.voice_segments import segment_text
+
+    segments = segment_text(body.text)
     payload = {
         "target": {
             "kind": "asset",
@@ -479,6 +491,12 @@ async def build_asset_voice_plan(
         provider_type=binding.provider_type,
         text=body.text,
         voice_options=options,
+        segments=[
+            AssetVoiceSegmentRead(index=item.index, text=item.text, chars=item.chars)
+            for item in segments
+        ],
+        requires_concat=len(segments) > 1,
+        max_provider_operations=max(len(segments), 1),
     )
 
 class AssetVideoPlanBody(BaseModel):

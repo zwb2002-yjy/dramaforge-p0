@@ -4990,8 +4990,29 @@ export interface components {
             voice_options?: {
                 [key: string]: components["schemas"]["JsonValue"];
             };
+            /** Segments */
+            segments?: components["schemas"]["AssetVoiceSegmentRead"][];
+            /**
+             * Requires Concat
+             * @default false
+             */
+            requires_concat: boolean;
+            /**
+             * Max Provider Operations
+             * @default 1
+             */
+            max_provider_operations: number;
             /** Notices */
             notices?: string[];
+        };
+        /** AssetVoiceSegmentRead */
+        AssetVoiceSegmentRead: {
+            /** Index */
+            index: number;
+            /** Text */
+            text: string;
+            /** Chars */
+            chars: number;
         };
         /** BatchPreviewItemRead */
         BatchPreviewItemRead: {

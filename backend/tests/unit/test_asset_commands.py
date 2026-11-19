@@ -724,3 +724,31 @@ async def test_asset_video_command_queues_one_run(session, world):
     assert run.input_snapshot["asset_id"] == str(world["video"].id)
     assert run.input_snapshot["duration_seconds"] == 5.0
     assert run.input_snapshot["execution_model_resolution"]["status"] == "RESOLVED"
+
+
+async def test_voice_command_rejects_segmented_text(session, world):
+    from app.production.asset_commands import (
+        AssetVoiceExecutionBody,
+        submit_asset_voice_execution,
+    )
+    from app.production.asset_plan import AssetVoicePlanBody, build_asset_voice_plan
+    from app.shared.errors import ValidationAppError
+
+    plan_body = AssetVoicePlanBody(
+        expected_asset_version=1, text="古桥始建于明代。" * 60
+    )
+    plan = await build_asset_voice_plan(
+        session, project=world["project"], asset_id=world["audio"].id, body=plan_body
+    )
+    body = AssetVoiceExecutionBody(
+        **plan_body.model_dump(), plan_fingerprint=plan.plan_fingerprint
+    )
+    with pytest.raises(ValidationAppError) as segmented:
+        await submit_asset_voice_execution(
+            session,
+            actor=world["user"],
+            project_id=world["project"].id,
+            asset_id=world["audio"].id,
+            body=body,
+        )
+    assert segmented.value.details["code"] == "ASSET_VOICE_SEGMENTED_BATCH_REQUIRED"

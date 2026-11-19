@@ -1788,3 +1788,17 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
 
 未完成且不冒称：prepare的逐命令授权记录（当前以显式用户请求+幂等fingerprint为授权边界）、
 视频run Worker端到端、长文本分段拼接、I8a收口。
+
+## I8a-03p 长文本语音分段预览与单命令边界（2026-11-19，EV116）
+
+- 新增`app/production/voice_segments.py`：按句界切分并贪心打包（每段≤500字），返回`VoiceSegment`。
+- `AssetVoicePlanRead`增加`segments/requires_concat/max_provider_operations`；预览明示分段与拼接需求。
+- `submit_asset_voice_execution`对多段文本返回422 `ASSET_VOICE_SEGMENTED_BATCH_REQUIRED`，
+  单命令只受理一个分段（多步走batch/Graph，不在一次Adapter调用里隐藏多次Provider Create）。
+
+已测（定向）：
+- `test_asset_plan.py` 10 passed（长文本分段、requires_concat、短句/空文本边界）；
+  `test_asset_commands.py` 7 passed（多段命令拒绝）；定向组74 passed；
+  generated.ts 401 schema、api:authority通过。
+
+未完成且不冒称：分段后的voice_concat执行计划与批量受理（D5完整拼接）、视频run端到端、prepare逐命令授权、I8a收口。
