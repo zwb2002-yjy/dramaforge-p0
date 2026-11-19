@@ -2145,3 +2145,16 @@ I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖�
 - `test_cross_episode_shared_asset.py` 1 passed；定向组62 passed；ruff通过。
 
 未完成且不冒称：共享资产在**生成**（NodeRun/Provider）中的端到端、三类作品完整生产编排。
+
+## I8b-01e 共享资产冻结进两次派发（2026-11-19，EV141）
+
+- `test_cross_episode_shared_asset.py`新增派发级用例：两集镜头各自`create_and_dispatch`，
+  两个NodeRun快照的`references[0]`都冻结同一`artifact_id`/`asset_version_id`，且分属不同Graph版本
+  （每镜头自己的图），证明共享发生在引用身份而非复制资产。
+- 执行级（Provider提交）未在测试中伪造wire证明：`COMPILER_WIRE_FINGERPRINT_MISMATCH`需要真实编译器的
+  wire证据，留待固定媒体端到端切片。
+
+已测（定向）：
+- `test_cross_episode_shared_asset.py` 2 passed（计划解析+派发冻结）；定向组63 passed；ruff通过。
+
+未完成且不冒称：共享资产在Provider提交/生成中的端到端、三类作品完整生产编排。
