@@ -133,6 +133,7 @@
 | EV125 | I6b-03领域流程端到端（worker自有session）定向证据：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径） | ①新增`test_business_flow_worker_e2e.py`：文件型SQLite+独立session factory，`execute_business_flow`驱动`project_asset_audit`实例至succeeded，两个step（list_assets/read_asset）均succeeded。②此前`flow_progress_pending`定位为内存SQLite共享连接导致的测试夹具问题（非产品缺陷），已用文件型DB证实。③定向组74 passed（worker_e2e/business_flows/api/architecture）；ruff/mypy通过。 | 证明领域BusinessFlow可经真实worker端到端完成；**未实施**并行/部分失败/换计划的领域用例扩展、流程UI入口 |
 | EV126 | I6b-04领域流程部分失败保留定向证据：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径） | ①`test_business_flow_worker_e2e.py` 2 passed：成功路径两步均succeeded；`read_asset`指向不存在asset时实例failed，而`list_assets`保持succeeded（部分成功不被回滚）。②定向组74 passed（worker_e2e/business_flows/architecture）；ruff/mypy通过。 | 证明领域流程部分失败如实保留已完成步骤；**未实施**领域级换计划用例、流程UI入口 |
 | EV127 | I6b-05领域流程换计划定向证据：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径） | ①`test_business_flow_worker_e2e.py` 3 passed：成功路径、部分失败（list_assets保留succeeded）、换计划（失败实例终态后追加新计划，新实例经worker推进至succeeded）。②定向组75 passed（worker_e2e/business_flows/architecture）；ruff/mypy通过。 | 证明领域流程失败后可经新计划重建并完成；**未实施**流程UI入口 |
+| EV128 | I6b-06业务流程只读面板定向证据：`tmp/run-targeted.ps1 -Stage FrontendTests`（等价stock targeted路径） | ①`BusinessFlowPanel.test.tsx` 2 passed：列出流程（definition_key/status/wait_reason）并展开按需读取步骤（aria-expanded切换）、无流程空态。②`directorApiContract.test.ts` 5 passed：新增三条flow路由模板均存在于生成OpenAPI契约。③前端定向7 passed；typecheck/lint/prettier/UI权威通过（117 TSX surfaces）。 | 证明业务流程可只读查看且路由与契约一致；**未实施**面板挂载到工作台（依赖I7 MasterRun界面） |
 
 ## 需求与测试分层（设计映射，不是执行结果）
 

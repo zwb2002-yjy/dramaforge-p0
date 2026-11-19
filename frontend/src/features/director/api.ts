@@ -30,6 +30,9 @@ export const DIRECTOR_ROUTE_TEMPLATES = {
   agentActivity: "/api/v1/projects/{project_id}/director/turns/{turn_id}/tools",
   agentProposal: "/api/v1/projects/{project_id}/director/proposals/{proposal_id}",
   agentApply: "/api/v1/projects/{project_id}/director/proposals/{proposal_id}/apply",
+  businessFlows: "/api/v1/projects/{project_id}/director/master-runs/{run_id}/business-flows",
+  businessFlow: "/api/v1/projects/{project_id}/director/business-flows/{flow_id}",
+  businessFlowSteps: "/api/v1/projects/{project_id}/director/business-flows/{flow_id}/steps",
 } as const;
 
 export type DirectorRouteKey = keyof typeof DIRECTOR_ROUTE_TEMPLATES;
@@ -317,5 +320,20 @@ export async function stopDirectorAgentTurn(
     directorPath(projectId, "agentTurnStop", { turn_id: turnId }),
     input,
     csrf,
+  );
+}
+export type BusinessFlowRead = components["schemas"]["BusinessFlowRead"];
+export type BusinessStepRead = components["schemas"]["BusinessStepRead"];
+
+export function listBusinessFlows(projectId: string, runId: string): Promise<BusinessFlowRead[]> {
+  return apiGetList<BusinessFlowRead>(directorPath(projectId, "businessFlows", { run_id: runId }));
+}
+
+export function listBusinessFlowSteps(
+  projectId: string,
+  flowId: string,
+): Promise<BusinessStepRead[]> {
+  return apiGetList<BusinessStepRead>(
+    directorPath(projectId, "businessFlowSteps", { flow_id: flowId }),
   );
 }

@@ -1963,3 +1963,17 @@ I6b开工：把默认BusinessFlow注册表从单一shot流程扩为覆盖project
 - `test_business_flow_worker_e2e.py` 3 passed（成功/部分失败/换计划）；定向组75 passed；ruff/mypy通过。
 
 I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖；剩余为流程UI入口，随后进入I7。
+
+## I6b-06 业务流程只读面板（2026-11-19，EV128）
+
+- 前端`features/director/api.ts`新增`listBusinessFlows`/`listBusinessFlowSteps`与三条路由模板
+  （master-run flows、flow、flow steps），由既有`directorApiContract`测试校验路由存在于生成契约。
+- 新增`BusinessFlowPanel`（Ant Design via components/ui）：列出流程定义/状态/wait_reason，
+  展开按需读取步骤；只读、无提交动作，刷新只重读。
+- 面板尚未挂载：当前工作台没有MasterRun展示面（属I7工作台范围），组件与API已就绪待I7接入。
+
+已测（定向）：
+- `BusinessFlowPanel.test.tsx` 2 passed（列表+展开步骤、空态）；`directorApiContract` 5 passed；
+  前端定向7 passed；typecheck/lint/prettier/UI权威通过。
+
+未完成且不冒称：面板挂载到工作台（依赖I7的MasterRun界面）。
