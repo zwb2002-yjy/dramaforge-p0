@@ -2656,6 +2656,23 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - **下一步（I10-01 剩余）**：restic 快照运行与同一静止窗口；多资源 `--target-config` 恢复映射；
   在隔离资源上做一次真实恢复演练。
 
+### I10-01c 已实施：多资源恢复目标映射（2026-11-19，EV171）
+
+- 新增 `app/maintenance/restore_target.py`：`validate_target_config` 要求目标**覆盖 manifest
+  每一个成员**（主库 / 检查点私有 schema / Proxy 库 / 每个桶）：
+  - 缺映射 → `RESTORE_TARGET_MEMBER_UNMAPPED`（detail 列出缺哪些）、重复映射 →
+    `RESTORE_TARGET_MEMBER_DUPLICATED`；
+  - 目标等于源（同 server+db 且同 schema；同 endpoint+同 bucket）→ `RESTORE_TARGET_IS_SOURCE`
+    ——隔离不是覆盖；
+  - 凭据只能给**引用**，出现 `://`/`@`/`password=` 等 → `RESTORE_TARGET_SECRET_INLINE`；
+  - `allow_clean` 必须配显式 `confirm_overwrite`，否则 `RESTORE_TARGET_OVERWRITE_UNCONFIRMED`；
+  - 未声明 `owner_task` → `RESTORE_TARGET_UNOWNED`。
+- 校验只做映射，不连接任何数据库或桶；返回按源身份排序的解析结果。
+- 证据：`test_restore_target.py` **6 passed**，维护组（清单+恢复验证+目标映射）**18 passed**；
+  `ruff check app tests` 通过、`mypy app` 412 文件通过。
+- **下一步（I10-01 剩余）**：restic 快照运行与同一静止窗口；在隔离资源上做一次真实恢复演练
+  （含恢复后业务演练：队列、失去通知、Worker 重启、未知提交计数不增）。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
