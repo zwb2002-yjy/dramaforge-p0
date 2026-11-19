@@ -3451,6 +3451,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/final-film/prepare-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Final Film
+         * @description Read-only prepare preview: zero NodeRun, zero Provider call.
+         */
+        post: operations["preview_final_film_api_v1_projects__project_id__final_film_prepare_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/final-film/render": {
         parameters: {
             query?: never;
@@ -7185,6 +7205,48 @@ export interface components {
              * @constant
              */
             mode: "prepare";
+        };
+        /** FinalFilmPreparePreviewItem */
+        FinalFilmPreparePreviewItem: {
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /** Speech Required */
+            speech_required: boolean;
+            /** Refresh Tail */
+            refresh_tail: boolean;
+            /** Voice Execution */
+            voice_execution: {
+                [key: string]: unknown;
+            };
+            /** Planned Nodes */
+            planned_nodes?: string[];
+        };
+        /** FinalFilmPreparePreviewRead */
+        FinalFilmPreparePreviewRead: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Edit Session Id
+             * Format: uuid
+             */
+            edit_session_id: string;
+            /** Timeline Version */
+            timeline_version: number;
+            /** Items */
+            items: components["schemas"]["FinalFilmPreparePreviewItem"][];
+            /** Preview Fingerprint */
+            preview_fingerprint: string;
+            /**
+             * Status
+             * @default preview
+             */
+            status: string;
         };
         /** FinalFilmPrepareRead */
         FinalFilmPrepareRead: {
@@ -21907,6 +21969,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FinalFilmPrepareRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_final_film_api_v1_projects__project_id__final_film_prepare_preview_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FinalFilmPrepareBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FinalFilmPreparePreviewRead"];
                 };
             };
             /** @description Validation Error */

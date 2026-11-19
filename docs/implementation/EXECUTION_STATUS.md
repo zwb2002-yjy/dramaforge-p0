@@ -1773,3 +1773,18 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
 
 未完成且不冒称：视频run的Worker端到端（fake video compiler/runtime）、首帧来源确认、长文本分段拼接、
 媒体安全合同复核、I8a收口。
+
+## I8a-03o 最终合成准备预览（只读）（2026-11-19，EV115）
+
+- 抽出`_desired_tail_state`（逐镜头speech_required/voice_execution/refresh_tail），`prepare_formal_tail`
+  与新`preview_formal_tail`共用，避免两套判断漂移。
+- `preview_formal_tail`纯读：返回逐镜头计划与`preview_fingerprint`，零NodeRun/零Provider调用；
+  `POST /projects/{p}/final-film/prepare-preview`（同一body）。
+- `prepare`行为不变（幂等fingerprint/入队），预览与准备使用同一套冻结语音身份。
+
+已测（定向）：
+- `test_final_film_timeline.py` 23 passed（新增预览只读：NodeRun数量不变、fingerprint稳定、逐镜头计划）；
+  定向组87 passed；generated.ts 400 schema、api:authority通过。
+
+未完成且不冒称：prepare的逐命令授权记录（当前以显式用户请求+幂等fingerprint为授权边界）、
+视频run Worker端到端、长文本分段拼接、I8a收口。

@@ -1113,3 +1113,39 @@ async def test_prepare_replaces_unpinned_composite_without_repeating_voice_or_vi
     )
     assert [run.input_snapshot["node_key"] for run in replacements] == ["composite"]
     assert replacements[0].input_snapshot["formal_video_artifact_id"] == str(videos[0].id)
+
+
+async def test_prepare_preview_is_read_only_and_stable(session: AsyncSession) -> None:
+    from sqlalchemy import func
+
+    from app.execution.models import NodeRun
+    from app.production.final_film import preview_formal_tail
+
+    project, user, edit, shots, _videos = await _seed_renderable_final_film(
+        session, canonical_graph=True
+    )
+    await _canonicalize_tail_fixture(session, project, user)
+    await session.flush()
+    before = await session.scalar(
+        select(func.count()).select_from(NodeRun).where(NodeRun.project_id == project.id)
+    )
+    first = await preview_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+    )
+    after = await session.scalar(
+        select(func.count()).select_from(NodeRun).where(NodeRun.project_id == project.id)
+    )
+    assert before == after
+    assert first.items
+    assert {item.shot_id for item in first.items} == {shot.id for shot in shots}
+    assert all(item.voice_execution for item in first.items)
+    second = await preview_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+    )
+    assert second.preview_fingerprint == first.preview_fingerprint

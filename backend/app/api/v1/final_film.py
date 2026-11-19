@@ -12,10 +12,12 @@ from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.production.final_film import (
     FinalFilmJobRead,
+    FinalFilmPreparePreviewRead,
     FinalFilmPrepareRead,
     get_final_film_status,
     list_final_film_jobs,
     prepare_formal_tail,
+    preview_formal_tail,
     queue_final_film_render,
 )
 
@@ -57,6 +59,28 @@ async def prepare_final_film(
         edit_session_id=body.edit_session_id,
         expected_timeline_version=body.expected_timeline_version,
         actor_id=user.id,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/final-film/prepare-preview",
+    response_model=FinalFilmPreparePreviewRead,
+)
+async def preview_final_film(
+    project_id: UUID,
+    body: FinalFilmPrepareBody,
+    user: CurrentUser,
+    session: SessionDep,
+) -> FinalFilmPreparePreviewRead:
+    """Read-only prepare preview: zero NodeRun, zero Provider call."""
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=user
+    )
+    return await preview_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=body.edit_session_id,
+        expected_timeline_version=body.expected_timeline_version,
     )
 
 

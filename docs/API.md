@@ -1605,6 +1605,10 @@ provider_type,capability,prompt,parameters,output_count,references,max_provider_
 64位`plan_fingerprint`）与`Idempotency-Key`，返回原`ExecutionReceipt`；服务在项目锁内校验asset版本与
 计划指纹，创建/复用asset scope Graph并只入队一个`NodeRun(status=queued)`，快照含`asset_id`、`target`、
 `plan_fingerprint`、`resolution`与参考；同key重放返回原回执，不同载荷409 `ASSET_COMMAND_REUSED`。
+最终合成准备预览（I8a-03o）：`POST /projects/{p}/final-film/prepare-preview`接收同一
+`{edit_session_id,expected_timeline_version}`，纯读返回逐镜头`{speech_required,refresh_tail,
+voice_execution,planned_nodes}`与`preview_fingerprint`，零NodeRun/零Provider调用；`prepare`仍负责实际入队。
+
 资产语音/视频命令（I8a-03l/m）：`POST /assets/{a}/executions`接受判别联合
 `{stage:"asset_image"|"asset_voice"|"asset_video",request}`；视频分支要求`duration_seconds`在模型合同内
 （否则422 `ASSET_VIDEO_DURATION_REQUIRED`/`ASSET_PARAMETER_UNKNOWN`）；语音分支冻结`voice_execution`（项目语音binding身份+音色）并只入队一个`voice`节点NodeRun，

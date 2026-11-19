@@ -85,6 +85,28 @@ class FinalFilmPrepareRead(BaseModel):
     status: str = "queued"
 
 
+
+class FinalFilmPreparePreviewItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    shot_id: UUID
+    speech_required: bool
+    refresh_tail: bool
+    voice_execution: dict[str, object]
+    planned_nodes: list[str] = Field(default_factory=lambda: ["voice", "composite"])
+
+
+class FinalFilmPreparePreviewRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: UUID
+    edit_session_id: UUID
+    timeline_version: int
+    items: list[FinalFilmPreparePreviewItem]
+    preview_fingerprint: str = Field(min_length=64, max_length=64)
+    status: str = "preview"
+
+
 class FinalFilmRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -432,6 +454,53 @@ async def _current_formal_tail_runs(
     return selected
 
 
+async def _desired_tail_state(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    shot: Shot,
+    refs: list[Any],
+) -> tuple[bool, dict[str, object], bool]:
+    """Per-shot tail plan shared by prepare and its read-only preview."""
+    speech_required = any(
+        ref.shot_id == shot.id and not bool(ref.raw_clip.get("muted")) and not ref.audio_id
+        for ref in refs
+    )
+    desired_voice = (
+        await freeze_project_voice(
+            session,
+            project_id=project_id,
+            director_state=dict(shot.director_state or {}),
+            silent=not speech_required or not shot.dialogue.strip(),
+        )
+    ).model_dump(mode="json")
+    prior_tail = await _current_formal_tail_runs(
+        session, project_id=project_id, shot_id=shot.id
+    )
+    prior_voice = prior_tail.get("voice")
+    prior_snapshot = (prior_voice.input_snapshot or {}) if prior_voice else {}
+    refresh_tail = (
+        prior_snapshot.get("voice_execution") != desired_voice
+        or prior_snapshot.get("dialogue") != shot.dialogue.strip()
+    )
+    if shot.formal_composite_artifact_id is not None:
+        composite_artifact = await session.get(Artifact, shot.formal_composite_artifact_id)
+        composite_run = (
+            await session.get(NodeRun, composite_artifact.produced_by_run_id)
+            if composite_artifact is not None
+            and composite_artifact.produced_by_run_id is not None
+            else None
+        )
+        media_inputs = (
+            (composite_run.input_snapshot or {}).get("media_inputs") if composite_run else None
+        )
+        video_input = media_inputs.get("video") if isinstance(media_inputs, dict) else None
+        refresh_tail = refresh_tail or not (
+            isinstance(video_input, dict)
+            and str(video_input.get("artifact_id")) == str(shot.formal_video_artifact_id)
+        )
+    return speech_required, desired_voice, refresh_tail
+
 async def prepare_formal_tail(
     session: AsyncSession,
     *,
@@ -465,44 +534,9 @@ async def prepare_formal_tail(
     all_run_ids: list[UUID] = []
     prepared_sources: list[dict[str, object]] = []
     for shot in shots:
-        # Muted clips and explicit audio overrides must not send dialogue to any TTS.
-        speech_required = any(
-            ref.shot_id == shot.id and not bool(ref.raw_clip.get("muted")) and not ref.audio_id
-            for ref in refs
+        speech_required, desired_voice, refresh_tail = await _desired_tail_state(
+            session, project_id=project_id, shot=shot, refs=refs
         )
-        desired_voice = (
-            await freeze_project_voice(
-                session,
-                project_id=project_id,
-                director_state=dict(shot.director_state or {}),
-                silent=not speech_required or not shot.dialogue.strip(),
-            )
-        ).model_dump(mode="json")
-        prior_tail = await _current_formal_tail_runs(
-            session, project_id=project_id, shot_id=shot.id
-        )
-        prior_voice = prior_tail.get("voice")
-        prior_snapshot = (prior_voice.input_snapshot or {}) if prior_voice else {}
-        refresh_tail = (
-            prior_snapshot.get("voice_execution") != desired_voice
-            or prior_snapshot.get("dialogue") != shot.dialogue.strip()
-        )
-        if shot.formal_composite_artifact_id is not None:
-            composite_artifact = await session.get(Artifact, shot.formal_composite_artifact_id)
-            composite_run = (
-                await session.get(NodeRun, composite_artifact.produced_by_run_id)
-                if composite_artifact is not None
-                and composite_artifact.produced_by_run_id is not None
-                else None
-            )
-            media_inputs = (
-                (composite_run.input_snapshot or {}).get("media_inputs") if composite_run else None
-            )
-            video_input = media_inputs.get("video") if isinstance(media_inputs, dict) else None
-            refresh_tail = refresh_tail or not (
-                isinstance(video_input, dict)
-                and str(video_input.get("artifact_id")) == str(shot.formal_video_artifact_id)
-            )
         run_ids = await queue_branch_nodes(
             session,
             project_id=project_id,
@@ -539,6 +573,54 @@ async def prepare_formal_tail(
         status="queued",
     )
 
+
+async def preview_formal_tail(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    edit_session_id: UUID,
+    expected_timeline_version: int | None,
+) -> FinalFilmPreparePreviewRead:
+    """Read-only prepare preview: what would be refreshed, with zero writes."""
+    await _project_or_404(session, project_id)
+    edit_session, refs = await _load_timeline_refs(
+        session,
+        project_id=project_id,
+        edit_session_id=edit_session_id,
+        expected_timeline_version=expected_timeline_version,
+    )
+    if not refs:
+        raise ValidationAppError(
+            "edit session timeline has no clips", details={"code": "EMPTY_TIMELINE"}
+        )
+    shots = await _formal_shots_for_refs(session, project_id=project_id, refs=refs)
+    items: list[FinalFilmPreparePreviewItem] = []
+    for shot in shots:
+        speech_required, desired_voice, refresh_tail = await _desired_tail_state(
+            session, project_id=project_id, shot=shot, refs=refs
+        )
+        items.append(
+            FinalFilmPreparePreviewItem(
+                shot_id=shot.id,
+                speech_required=speech_required,
+                refresh_tail=refresh_tail,
+                voice_execution=desired_voice,
+            )
+        )
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            [item.model_dump(mode="json") for item in items],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    return FinalFilmPreparePreviewRead(
+        project_id=project_id,
+        edit_session_id=edit_session.id,
+        timeline_version=edit_session.version,
+        items=items,
+        preview_fingerprint=fingerprint,
+    )
 
 async def _ensure_final_graph(
     session: AsyncSession,
