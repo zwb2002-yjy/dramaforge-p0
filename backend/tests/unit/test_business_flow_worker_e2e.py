@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+from typing import Any
+
 import pytest
 from app.assets.models import Asset
 from app.director.business_flow_models import (
@@ -19,11 +23,9 @@ from test_business_flows import _flow, _plan, _specs
 from test_master_runs import _decision, _seed, _turn
 
 
-@pytest.mark.asyncio
-async def test_domain_flow_completes_through_the_worker() -> None:
-    import tempfile
-    from pathlib import Path
-
+async def _run_project_asset_audit(
+    *, asset_id: str | None
+) -> tuple[dict[str, Any], list[tuple[str, str]]]:
     load_all_models()
     tmp_dir = tempfile.mkdtemp(prefix="flow-e2e-")
     db_path = Path(tmp_dir) / "flow.db"
@@ -38,13 +40,15 @@ async def test_domain_flow_completes_through_the_worker() -> None:
             asset = Asset(project_id=project.id, kind="character", name="Hero", version=1)
             session.add(asset)
             await session.flush()
+            input_data: dict[str, object] = {"limit": 5}
+            input_data["asset_id"] = asset_id or str(asset.id)
             flows = _specs(
                 project,
                 [
                     _flow(
                         flow_key="project_asset_audit",
                         definition_key="project_asset_audit",
-                        input_data={"limit": 5, "asset_id": str(asset.id)},
+                        input_data=input_data,
                     )
                 ],
             )
@@ -72,19 +76,34 @@ async def test_domain_flow_completes_through_the_worker() -> None:
             assert instance is not None
             instance_id = instance.id
 
-        result: dict[str, object] = {}
+        result: dict[str, Any] = {}
         for _ in range(6):
             result = await execute_business_flow(
                 factory, instance_id=instance_id, registry=DEFAULT_DEFINITIONS
             )
             if result.get("status") in {"succeeded", "failed", "cancelled"}:
                 break
-        assert result.get("status") == "succeeded", result
         async with factory() as session:
             steps = (
                 await session.execute(select(DirectorBusinessFlowStep))
             ).scalars().all()
-            assert {step.step_key for step in steps} == {"list_assets", "read_asset"}
-            assert all(step.status == "succeeded" for step in steps)
+            snapshot = [(step.step_key, step.status) for step in steps]
+        return result, snapshot
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_domain_flow_completes_through_the_worker() -> None:
+    result, steps = await _run_project_asset_audit(asset_id=None)
+    assert result.get("status") == "succeeded", result
+    assert dict(steps) == {"list_assets": "succeeded", "read_asset": "succeeded"}
+
+
+@pytest.mark.asyncio
+async def test_domain_flow_keeps_partial_success_when_a_step_fails() -> None:
+    result, steps = await _run_project_asset_audit(
+        asset_id="00000000-0000-4000-8000-000000000000"
+    )
+    assert result.get("status") == "failed", result
+    assert dict(steps) == {"list_assets": "succeeded", "read_asset": "failed"}

@@ -1941,3 +1941,14 @@ I6b开工：把默认BusinessFlow注册表从单一shot流程扩为覆盖project
 **已证实为测试夹具问题**：内存SQLite共享单连接导致多session交错失败；改用文件型SQLite后，
 `execute_business_flow`驱动`project_asset_audit`实例端到端成功（list_assets/read_asset均succeeded）。
 新增`test_business_flow_worker_e2e.py`固化该验证。
+
+## I6b-04 领域流程部分失败保留（2026-11-19，EV126）
+
+- 同一worker e2e夹具扩展部分失败场景：`project_asset_audit`第二步`read_asset`指向不存在的asset，
+  实例终态`failed`，但已成功的`list_assets`保留为`succeeded`（不因后续失败回滚已完成步骤）。
+
+已测（定向）：
+- `test_business_flow_worker_e2e.py` 2 passed（成功路径+部分失败路径）；定向组74 passed；
+  ruff/mypy通过。
+
+未完成且不冒称：领域级换计划（replan disposition）用例、流程UI入口。
