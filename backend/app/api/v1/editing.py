@@ -19,6 +19,7 @@ from sqlalchemy import select
 from app.access.models import User
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.delivery.episode_delivery import EpisodeDeliveryItem, EpisodeDeliveryService
 from app.delivery.export_service import ExportService
 from app.delivery.models import Export
 from app.delivery.render_execution import create_edit_session_render
@@ -491,6 +492,68 @@ async def download_export_content(
         byte_size=artifact.byte_size,
         extra_headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+class EpisodeDeliveryItemRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    episode_id: UUID
+    episode_number: int
+    session_id: UUID | None = None
+    session_version: int | None = None
+    export_id: UUID | None = None
+    node_run_id: UUID | None = None
+    status: str
+    blockers: list[str] = Field(default_factory=list)
+
+
+class EpisodeDeliveryRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: UUID
+    items: list[EpisodeDeliveryItemRead] = Field(default_factory=list)
+
+
+def _delivery_read(project_id: UUID, items: list[EpisodeDeliveryItem]) -> EpisodeDeliveryRead:
+    return EpisodeDeliveryRead(
+        project_id=project_id,
+        items=[EpisodeDeliveryItemRead.model_validate(item.as_dict()) for item in items],
+    )
+
+
+@router.get(
+    "/projects/{project_id}/deliveries/episodes",
+    response_model=EpisodeDeliveryRead,
+)
+async def plan_episode_deliveries(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> EpisodeDeliveryRead:
+    """Report per-episode deliverability; writes nothing."""
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    items = await EpisodeDeliveryService(session).plan(project_id=project_id)
+    return _delivery_read(project_id, items)
+
+
+@router.post(
+    "/projects/{project_id}/deliveries/episodes",
+    response_model=EpisodeDeliveryRead,
+)
+async def start_episode_deliveries(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+    format: str = "mp4",
+) -> EpisodeDeliveryRead:
+    """Freeze an export and a render run for every ready episode."""
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    items = await EpisodeDeliveryService(session).start(
+        project=project, actor_id=user.id, format=format
+    )
+    await session.commit()
+    return _delivery_read(project_id, items)
 
 
 @router.post(

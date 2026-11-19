@@ -1607,6 +1607,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/deliveries/episodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Plan Episode Deliveries
+         * @description Report per-episode deliverability; writes nothing.
+         */
+        get: operations["plan_episode_deliveries_api_v1_projects__project_id__deliveries_episodes_get"];
+        put?: never;
+        /**
+         * Start Episode Deliveries
+         * @description Freeze an export and a render run for every ready episode.
+         */
+        post: operations["start_episode_deliveries_api_v1_projects__project_id__deliveries_episodes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion": {
         parameters: {
             query?: never;
@@ -6867,6 +6891,38 @@ export interface components {
             allowed_purposes: string[];
             /** Policy Hash */
             policy_hash: string | null;
+        };
+        /** EpisodeDeliveryItemRead */
+        EpisodeDeliveryItemRead: {
+            /**
+             * Episode Id
+             * Format: uuid
+             */
+            episode_id: string;
+            /** Episode Number */
+            episode_number: number;
+            /** Session Id */
+            session_id?: string | null;
+            /** Session Version */
+            session_version?: number | null;
+            /** Export Id */
+            export_id?: string | null;
+            /** Node Run Id */
+            node_run_id?: string | null;
+            /** Status */
+            status: string;
+            /** Blockers */
+            blockers?: string[];
+        };
+        /** EpisodeDeliveryRead */
+        EpisodeDeliveryRead: {
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Items */
+            items?: components["schemas"]["EpisodeDeliveryItemRead"][];
         };
         /** EpisodeRead */
         EpisodeRead: {
@@ -17136,6 +17192,83 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plan_episode_deliveries_api_v1_projects__project_id__deliveries_episodes_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EpisodeDeliveryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_episode_deliveries_api_v1_projects__project_id__deliveries_episodes_post: {
+        parameters: {
+            query?: {
+                format?: string;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EpisodeDeliveryRead"];
                 };
             };
             /** @description Validation Error */

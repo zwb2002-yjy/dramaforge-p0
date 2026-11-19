@@ -2576,6 +2576,21 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
   内容/交付组 **24 passed**；`ruff check app tests` 通过、`mypy app` 408 文件通过。
 - **下一步**：逐集批量渲染编排；随后 I9 阶段终点跑 Full（需空闲宿主）。
 
+### I9-02h 已实施：逐集交付编排（2026-11-19，EV166）
+
+- 新增 `app/delivery/episode_delivery.py`：
+  - `plan` 按 `episode_number` 逐集报告可否交付；该集**没有**分集会话即 `blocked` +
+    `DELIVERY_SESSION_MISSING`（不隐式建会话，也不把项目级会话冒充分集交付）。
+  - `start` 对每集冻结一个导出（默认 `format=mp4`，幂等键
+    `episode-delivery:{episode}:{session}:{version}`）并派发渲染 run，逐集一一对应；
+    `result_artifact_id` 仍为空（未渲染不称已交付）。导出冻结版本与会话当前版本不一致时，
+    该集 `DELIVERY_RECEIPT_STALE` 且不派发。
+- HTTP 新增 `GET/POST /projects/{p}/deliveries/episodes`（只读计划 / 启动交付）。
+- 证据：`test_episode_delivery.py` **3 passed**，交付组 **23 passed**；ruff 通过、
+  `mypy app` 409 文件通过；`generated.ts` 重生（**415 schema**、`api:authority` 通过）。
+- **下一步**：批量渲染的并发/重试编排（current 为逐集串行派发）；随后 I9 阶段终点跑 Full
+  （需空闲宿主，`workbench-resource` 预算项仍是唯一未通过项）。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
