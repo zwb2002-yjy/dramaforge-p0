@@ -51,6 +51,16 @@ def png(color: str = "red") -> bytes:
     return buffer.getvalue()
 
 
+def mp4(size: int = 2048) -> bytes:
+    """Minimal accepted MP4: an ``ftyp`` box plus filler.
+
+    Metadata decoding is intentionally permissive in the test environment, so
+    this only has to satisfy the container signature the media guard checks.
+    """
+    header = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom"
+    return header + b"\x00" * max(0, size - len(header))
+
+
 def submission_reference(request: httpx.Request) -> bytes:
     """Decode the reference image the Worker embedded in an Agnes image body."""
     payload = json.loads(request.content)
@@ -60,19 +70,24 @@ def submission_reference(request: httpx.Request) -> bytes:
 
 
 def install_fake_agnes(
-    monkeypatch, *, colors: list[str], video_requests: list[httpx.Request] | None = None
+    monkeypatch,
+    *,
+    colors: list[str],
+    video_requests: list[httpx.Request] | None = None,
+    video_states: list[dict[str, object]] | None = None,
 ) -> list[httpx.Request]:
     """Serve discovery plus one distinct generated image per submission.
 
     Byte-identical outputs across shots are rejected by the artifact
     independence guard, so each submission answers with its own colour.
-    Video creates and polls are answered too; they stay ``running`` so a test
-    that only observes the submit boundary keeps its result queued.
+    Video creates answer ``queued``; polls consume ``video_states`` in order and
+    fall back to ``running`` so a submit-only test keeps its task queued.
     """
     from app.execution import media_io
 
     submitted: list[httpx.Request] = []
     generated = {f"/{index + 1}.png": png(color) for index, color in enumerate(colors)}
+    states = list(video_states or [])
 
     def receive(request: httpx.Request) -> httpx.Response:
         assert request.headers.get("Authorization") == "Bearer fixture-agnes-key"
@@ -89,7 +104,8 @@ def install_fake_agnes(
         if request.method == "GET" and request.url.path == "/agnesapi":
             if video_requests is not None:
                 video_requests.append(request)
-            return httpx.Response(200, json={"status": "running", "progress": 0.1})
+            state = states.pop(0) if states else {"status": "running", "progress": 0.1}
+            return httpx.Response(200, json=state)
         assert request.url.path == "/v1/images/generations"
         submitted.append(request)
         return httpx.Response(
@@ -97,16 +113,20 @@ def install_fake_agnes(
         )
 
     async def download_result(*, kind: str, artifact_uri: str, destination):
-        suffix = next(key for key in generated if artifact_uri.endswith(key))
+        if artifact_uri.endswith(".mp4"):
+            content, content_type = mp4(), "video/mp4"
+        else:
+            content = generated[next(key for key in generated if artifact_uri.endswith(key))]
+            content_type = "image/png"
 
         async def chunks():
-            yield generated[suffix]
+            yield content
 
         return await media_io._materialize_provider_media(
             kind=kind,
             chunks=chunks(),
             destination=destination,
-            content_type="image/png",
+            content_type=content_type,
         )
 
     monkeypatch.setattr(

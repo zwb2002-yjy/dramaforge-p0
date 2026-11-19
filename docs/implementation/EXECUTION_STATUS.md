@@ -2317,3 +2317,23 @@ I8b-01f–03a 累积后在 quality 镜像重跑后端单元全量：**2717 passe
 
 说明（如实记录）：该进程在 EV146（路由用例）与 EV147（视频提交用例）写入之前启动，两个新用例未计入；
 下轮需再跑一次全量收口后方可作为最新基线。
+
+## I8b-04b 视频段完成到正式视频（2026-11-19，EV149）
+
+补齐视频段的另一半：创建之后如何“只观察、不重建”地把远端任务收敛成正式视频。
+
+已实施（`test_shot_video_production.py` 扩为 2 个用例，共用 `_shot_with_formal_keyframe` 夹具链）：
+- 首次 `execute_media_node_run` 只**让出**（`ProviderTaskPendingError`），此时并**不**轮询；
+- 把该 run 的 `next_attempt_at` 置为到期后再执行一次：恰好**一次** `/agnesapi` 轮询返回 `succeeded`
+  → 下载 `v.mp4` → 建 `Artifact`（`video/mp4`、`produced_by_run_id` 为该 run）
+  → `approve_candidate(video=True)` → `set_formal_video` → `shot.formal_video_artifact_id` 落地；
+- 全程 `POST /v1/videos` 仍只有 **1 次**：完成来自轮询，不是重新创建。
+- 夹具新增：最小可识别 MP4 生成 `mp4()`（满足容器签名与测试环境的宽松元数据）、
+  `video_states` 轮询序列、下载按 `.mp4` 返回视频字节与 `video/mp4` 类型。
+
+已测（定向）：
+- `test_shot_video_production.py` **2 passed**；夹具受影响组 **20 passed**；
+  `ruff check app tests` 通过。
+
+未完成且不冒称：合成段（composite）、多镜头视频编排、I9 剪辑与分集交付；
+获授权后的批量 create；Full Gate 的 `workbench-resource` 复测。
