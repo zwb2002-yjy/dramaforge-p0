@@ -2121,3 +2121,16 @@ I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖�
 - `test_production_readiness.py` 3 passed（单集、两集、缺失阻断）；ruff通过。
 
 未完成且不冒称：跨集共享资产在镜头计划/生成中的端到端验收、三类作品完整生产编排。
+
+## I8b-01c 跨集共享资产计数（2026-11-19，EV139）
+
+- 就绪模型新增`shared_asset_count`与`cross_episode_sharing`项：统计被**两集及以上**镜头的
+  `shot_reference_bindings`共同引用的`asset_version_id`数量；单集项目视为ready，多集无共享为partial
+  （非阻断提示）。
+- 共享是项目作用域资产的自然结果：两集各自绑定同一`asset_version_id`即被计为共享，无需复制资产或假镜头。
+
+已测（定向）：
+- `test_production_readiness.py` 4 passed（单集、两集、缺失阻断、两集共享同一asset_version→
+  shared_asset_count=1且cross_episode_sharing=ready）；定向组61 passed；generated.ts 407 schema。
+
+未完成且不冒称：共享资产在镜头计划/生成中的端到端解析验收、三类作品完整生产编排。

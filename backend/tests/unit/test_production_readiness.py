@@ -113,6 +113,7 @@ async def test_single_comic_with_story_and_media_is_ready(session: AsyncSession)
         "scenes",
         "shots",
         "media_defaults",
+        "cross_episode_sharing",
         "formal_media",
     }
 
@@ -181,3 +182,84 @@ async def test_serial_comic_with_two_episodes_is_ready(session: AsyncSession) ->
     structure = next(item for item in readiness.items if item.key == "story_structure")
     assert structure.status == "ready"
     assert readiness.ready is True
+
+
+@pytest.mark.asyncio
+async def test_shared_asset_across_episodes_is_reported(session: AsyncSession) -> None:
+    from app.assets.models import Asset, AssetVersion
+    from app.production.models import ShotReferenceBinding
+
+    project, user = await _project(session, work_type="serial_comic", planned=2)
+    await _configure_media(session, project, user)
+    shots = []
+    for episode_number in (1, 2):
+        episode = Episode(
+            project_id=project.id,
+            episode_number=episode_number,
+            title=f"E{episode_number}",
+            synopsis="",
+        )
+        session.add(episode)
+        await session.flush()
+        scene = Scene(
+            episode_id=episode.id,
+            scene_number=1,
+            location_name="Studio",
+            time_of_day="day",
+            synopsis="",
+        )
+        session.add(scene)
+        await session.flush()
+        shot = Shot(
+            project_id=project.id,
+            scene_id=scene.id,
+            shot_number=1,
+            sort_order=1,
+            shot_type="wide",
+            camera_move="static",
+            status="draft",
+            visual_description="",
+            dialogue="",
+            duration_seconds=5,
+            image_prompt="",
+            video_prompt="",
+        )
+        session.add(shot)
+        shots.append(shot)
+    await session.flush()
+    asset = Asset(project_id=project.id, kind="character", name="Hero", version=1)
+    session.add(asset)
+    await session.flush()
+    version = AssetVersion(
+        project_id=project.id,
+        asset_id=asset.id,
+        version_number=1,
+        kind="character",
+        name="Hero",
+        description="",
+        metadata_json={},
+        status="candidate",
+        created_by=user.id,
+    )
+    session.add(version)
+    await session.flush()
+    for shot in shots:
+        session.add(
+            ShotReferenceBinding(
+                project_id=project.id,
+                shot_id=shot.id,
+                stage="both",
+                asset_id=asset.id,
+                asset_version_id=version.id,
+                resolution_mode="pinned_version",
+                purpose="identity",
+                label="Hero",
+                created_by=user.id,
+            )
+        )
+    await session.flush()
+    readiness = await read_production_readiness(session, project_id=project.id)
+    assert readiness.shared_asset_count == 1
+    sharing = next(item for item in readiness.items if item.key == "cross_episode_sharing")
+    assert sharing.status == "ready"
+    assert "1个资产被两集以上引用" in sharing.detail

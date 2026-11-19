@@ -8938,6 +8938,8 @@ export interface components {
             formal_video_count: number;
             /** Formal Composite Count */
             formal_composite_count: number;
+            /** Shared Asset Count */
+            shared_asset_count: number;
             /** Image Binding Configured */
             image_binding_configured: boolean;
             /** Video Binding Configured */

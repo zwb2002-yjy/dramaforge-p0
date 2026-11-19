@@ -144,6 +144,7 @@
 | EV136 | I7-03恢复信号只读端点定向证据：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径）+前端Vitest | ①`test_runtime_resume_read.py` 2 passed：待处理resume wakeup返回signal_id/reference_id/expected_revision/attempt_count；已完成wakeup→404 DIRECTOR_RESUME_NOT_PENDING。②前端`fetchPendingRuntimeResume`+`directorApiContract` 8 passed（路由与生成契约一致）。③后端定向59 passed；generated.ts 405 schema、typecheck/api:authority通过。 | 证明待恢复信号可只读暴露；**未实施**恢复按钮的工作台挂载、N08/N10核对 |
 | EV137 | I8b-01a生产就绪只读模型定向证据：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径） | ①新增`test_production_readiness.py` 2 passed：single_comic（1集+场景+镜头+图片/视频默认）→ready、blockers为空、voice未配但不阻断；无故事/无媒体→blockers含story_structure/scenes/media_defaults；serial_comic仅1集→story_structure partial并阻断。②`GET /projects/{p}/production-readiness`注册；定向组59 passed；generated.ts 407 schema。 | 证明三类作品可按类型核对生产就绪；**未实施**I8b端到端生产与两集共享/连续性验收 |
 | EV138 | I8b-01b两集就绪验证：`docker run --network none`（backend quality镜像） | `test_production_readiness.py` 3 passed：serial_comic计划2集且实际2集（各1场景1镜头）→episode/scene/shot计数均为2、story_structure=ready、ready=true；单集完整→ready；缺失故事/媒体→blocked。 | 证明多集结构可被就绪模型正确判定；**未实施**跨集共享资产的镜头计划/生成端到端 |
+| EV139 | I8b-01c跨集共享资产计数：`tmp/run-targeted.ps1 -Stage BackendTests`（等价stock targeted路径） | ①就绪模型新增shared_asset_count与cross_episode_sharing（≥2集共同引用同一asset_version_id才计数）。②`test_production_readiness.py` 4 passed：两集各一镜头绑定同一asset_version→shared_asset_count=1、cross_episode_sharing=ready；单集/两集/缺失场景仍正确。③定向组61 passed；generated.ts 407 schema。 | 证明跨集共享可被只读模型识别；**未实施**共享资产在计划/生成中的端到端解析、完整生产编排 |
 
 ## 需求与测试分层（设计映射，不是执行结果）
 

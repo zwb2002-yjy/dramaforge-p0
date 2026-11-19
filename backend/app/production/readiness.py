@@ -40,6 +40,7 @@ class ProductionReadinessRead(BaseModel):
     formal_keyframe_count: int
     formal_video_count: int
     formal_composite_count: int
+    shared_asset_count: int
     image_binding_configured: bool
     video_binding_configured: bool
     voice_binding_configured: bool
@@ -86,6 +87,22 @@ async def read_production_readiness(
         )
     ).one()
     shot_count, keyframes, videos, composites = (int(value or 0) for value in shot_rows)
+    from app.production.models import ShotReferenceBinding
+
+    shared_subquery = (
+        select(ShotReferenceBinding.asset_version_id)
+        .join(Shot, Shot.id == ShotReferenceBinding.shot_id)
+        .join(Scene, Scene.id == Shot.scene_id)
+        .join(Episode, Episode.id == Scene.episode_id)
+        .where(Episode.project_id == project_id)
+        .where(ShotReferenceBinding.asset_version_id.is_not(None))
+        .group_by(ShotReferenceBinding.asset_version_id)
+        .having(func.count(func.distinct(Episode.id)) >= 2)
+        .subquery()
+    )
+    shared_assets = int(
+        await session.scalar(select(func.count()).select_from(shared_subquery)) or 0
+    )
     profile = await ProductionModelProfileService(session).get_effective_for_project(
         project=project
     )
@@ -165,6 +182,13 @@ async def read_production_readiness(
         ),
     )
     add(
+        "cross_episode_sharing",
+        "跨集共享",
+        "ready" if (shared_assets > 0 or episode_count <= 1) else "partial",
+        f"{shared_assets}个资产被两集以上引用",
+        blocking=False,
+    )
+    add(
         "formal_media",
         "正式媒体",
         "ready" if keyframes > 0 and videos > 0 else "missing" if keyframes == 0 else "partial",
@@ -181,6 +205,7 @@ async def read_production_readiness(
         formal_keyframe_count=keyframes,
         formal_video_count=videos,
         formal_composite_count=composites,
+        shared_asset_count=shared_assets,
         image_binding_configured=image_configured,
         video_binding_configured=video_configured,
         voice_binding_configured=voice_configured,
