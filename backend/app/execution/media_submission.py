@@ -185,7 +185,11 @@ async def prepare_media_submission(
         if workbench_plan is not None
         else None
     )
-    workbench_mode = canonical_intent.mode_id if canonical_intent is not None else None
+    workbench_mode = (
+        canonical_intent.mode_id
+        if canonical_intent is not None
+        else (str(snap["mode_id"]) if snap.get("mode_id") else None)
+    )
     first_frame: Artifact | None = None
     frame_bytes: bytes | None = None
     text_video = node_type == "video" and (

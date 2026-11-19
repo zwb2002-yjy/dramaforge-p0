@@ -139,6 +139,32 @@ async def world(session: AsyncSession):
         )
     )
     await session.flush()
+    video_evidence = ProviderAvailabilityEvidence(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        connection_revision_id=revision.id,
+        credential_revision_id=credential.id,
+        remote_model_id="unit-agnes-video",
+        verifier_kind="fixture",
+        status="visible",
+        listed_model_ids_json=["unit-agnes-video"],
+        checked_at=datetime.now(UTC),
+    )
+    session.add(video_evidence)
+    await session.flush()
+    session.add(
+        ProviderModelAvailability(
+            workspace_id=workspace.id,
+            connection_id=connection.id,
+            connection_revision_id=revision.id,
+            credential_revision_id=credential.id,
+            remote_model_id="unit-agnes-video",
+            effective_status="visible",
+            positive_evidence_id=video_evidence.id,
+            latest_evidence_id=video_evidence.id,
+        )
+    )
+    await session.flush()
     entry = ModelCatalogEntry(
         provider_type="agnes",
         protocol_profile="agnes_cn_v1",
@@ -213,6 +239,13 @@ async def world(session: AsyncSession):
         model_id="unit-agnes-video",
         purpose="video",
         enabled=True,
+        documented=True,
+        contract_tested=True,
+        account_verified=True,
+        quality_gated=True,
+        remote_resource_kind="model",
+        remote_resource_id="unit-agnes-video",
+        invoke_model_value="unit-agnes-video",
         catalog_entry_id=video_entry.id,
         capability_manifest_hash=video_entry.contract_manifest_hash,
         created_by=user.id,
@@ -800,3 +833,4 @@ async def test_asset_batch_accepts_mixed_image_and_voice_items(session, world):
         )
     ).scalars().all()
     assert {run.input_snapshot.get("node_key") for run in runs} == {"image", "voice"}
+

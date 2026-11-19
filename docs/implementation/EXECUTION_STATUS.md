@@ -1837,3 +1837,18 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
 | I8a整体Full | 未跑 | 按门分级留到正式CI/I10同一候选；本轮无系统性风险触发 |
 
 结论：I8a机制主体已完成；剩余三项（prepare独立授权记录、voice_concat执行计划、视频run端到端验证）列入下一批，完成后按门分级决定是否需要一次阶段Full。
+
+## I8a-03r 资产视频快照声明mode与端到端探针（2026-11-19，EV119）
+
+- `prepare_media_submission`的`workbench_mode`在无canonical intent时回退到`snap["mode_id"]`，
+  使资产视频快照可声明`text_to_video`，不再错误要求shot keyframe lineage；shot路径仍以canonical intent为准。
+- 视频端到端探针（未提交）：fake video compiler/runtime已通过eligibility、连接修订、文本模式判定，
+  停在compiler wire选项核对（fake wire未覆盖manifest的effective options），需用真实编译器的选项映射补齐
+  fixture；不影响产品路径，属测试harness缺口。
+
+已测（定向）：
+- 定向组132 passed（asset_commands/workbench_execution/final_film/architecture）；
+  ruff/mypy 400文件通过。
+
+未完成且不冒称：视频run Worker端到端完成（需真实选项映射的fake compiler）、voice_concat执行计划、
+prepare独立授权记录。
