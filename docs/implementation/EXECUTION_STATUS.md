@@ -2515,6 +2515,18 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - **下一步（I9-02 剩余）**：真实渲染——render NodeRun 冻结 `edit_session_id/timeline_version/
   timeline_hash/来源与资格`，产出 MP4 与 SRT 并校验可解码，Export 只绑定该不可变渲染快照；
   逐集交付下载。渲染属生成动作，需按合同取得 Owner 授权。
+
+### I9-02c 已实施：渲染计划接缝（EV161）
+
+- 新增 `app/delivery/render_plan.py`：把一个**冻结**会话版本映射成有序
+  `TimelineClipInstructions`（clip id、冻结 artifact id、字幕、时长、转场），并复用既有
+  `build_timeline_subtitles` 产出**确定性 SRT 字节**与 `duration_ms`。
+- 该模块不查生产事实、不写库、不生成媒体；fail-closed：空时间线 `RENDER_PLAN_EMPTY`、
+  order 非 1..n 或存在非对象 clip `RENDER_PLAN_INVALID`、clip 无冻结 artifact
+  `RENDER_CLIP_UNBOUND`、时长 ≤0 `RENDER_CLIP_EMPTY`——**都不静默丢 clip**。
+- 现状：FFmpeg 渲染器 `app/production/timeline_renderer.render_timeline` 已存在（含 concat、
+  音乐混音、字幕），缺的是“把会话版本的渲染计划派发为 render NodeRun 并落 MP4/SRT”的接线。
+- 证据：`test_render_plan.py` **5 passed**；`ruff check app tests` 通过、`mypy app` 406 文件通过。
 - **已修（I9-02b，EV160）**：`exports.episode_id` 外键由 `ON DELETE SET NULL` 改为
   `ON DELETE RESTRICT`（迁移 `20261119_0123`，downgrade 回 SET NULL）。隔离 PG `editor_0123` 实测：
   有导出的集执行 `DELETE FROM episodes` 被 `fk_exports_episode` 拒绝、导出行仍在；`alembic check`
