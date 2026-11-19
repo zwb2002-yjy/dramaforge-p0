@@ -1,11 +1,11 @@
 # 机构版执行状态
 
-更新：2026-11-18。此文件是本长期任务唯一执行状态，产品/架构规则仍由 [CURRENT](../CURRENT.md) 导航；本目录是合同12明确要求的执行管理材料，不是第二套架构宪法。
+更新：2026-11-19。此文件是本长期任务唯一执行状态，产品/架构规则仍由 [CURRENT](../CURRENT.md) 导航；本目录是合同12明确要求的执行管理材料，不是第二套架构宪法。
 
 ## 当前阶段与批次
 
-当前：I6a-01批次已完成；I4前置切片已完成两轮（来源用途GET/PUT EV71、影响读取 EV72）。I4-01全格式处理器与受理合同（retry/reparse、事件schema2、处理器profile冻结）已实施，均有无过滤Full证据（EV73/EV74/EV75，`df-quality-i4-01-b`/`-d`）。该批次剩余 `source_extract_v1` 动态块步骤与媒体块级ASR回执；随后按依赖进入I4-02研究分析。
-已实施并通过无过滤Full（EV70）。I2b-01已完整闭环（EV68）。
+当前：I4已按机制退出（EV72–EV84；无过滤Full `df-quality-i4-03-a/b/c2/d` 连续通过）。I5-01与I5-02各切片已交付（EV85–EV92），I5阶段终点Full `df-quality-i5-03` exit0通过（2690单测、204 PG、366 schema、757 Vitest、211 E2E，清理无残留）。I5暂不宣布阶段退出：`source:"public"`已进绑定/解析/token，但Production计划编译仍只消费私有Artifact解析结果，完成该片后复跑Full再判定。
+按批次计：已完成14/26（I0-01/02、I1-01/02、I2a-01/02、I3-01/02、I2b-01、I6a-01、I4-01/02/03、I5-01）；未完成12（I5-02尾片、I8a-01/02/03、I6b-01、I7-01/02、I8b-01、I9-01/02、I10-01/02）。
 D8冻结基线D8-20261117-r1保持，目标仍为完整I0–I10。
 
 主合同：[桌面12](<C:/Users/RXZY/Desktop/新建 文本文档 (12).txt>)；次合同：[桌面11](<C:/Users/RXZY/Desktop/新建 文本文档 (11).txt>)。Owner明确12优先11。N11已澄清全部改动后续统一执行，先完整设计再工程；不重复请求普通阶段授权。真实费用、扩大真实资料外发、不可逆迁移、正式发布等仍停在硬门槛。
@@ -24,8 +24,8 @@ D8冻结基线D8-20261117-r1保持，目标仍为完整I0–I10。
 
 ## 已完成与未完成
 
-已完成：D0–D8设计收敛与冻结（D8-20261117-r1）；I0工程基线（EV50）；I1-01项目类型/目标/分集约束（EV51/EV52）；I1-02原件版本与不可变解析快照（EV53/EV54）；I2a-01 MasterRun/计划/控制回执（EV55–EV57）；I2a-02运行控制短事务与迟到写围栏（EV58/EV59）；I3-01外发策略与目的地管理面（EV60/EV61）；I3-02外发准入强制与来源用途（EV62–EV64）；I2b-01异步受理与受控文本执行（EV68，含EV66的intent/create_goal切片）；I6a-01 BusinessFlow核心与Worker驱动（EV69/EV70）。
-未完成：I6b（生产/修复动作授权受理端口、全部业务定义与真实端口接线）、I4/I5/I8a/I7/I8b/I9/I10；Flow读投影HTTP、执行/研究预览egress摘要、SourceUse跨项目owner授权计数与跨项目只读资格；所有新能力的真实作品与目标机验收。设计冻结结论见D8节；不将设计或单批通过当产品完成。
+已完成：D0–D8设计收敛与冻结（D8-20261117-r1）；I0工程基线（EV50）；I1-01项目类型/目标/分集约束（EV51/EV52）；I1-02原件版本与不可变解析快照（EV53/EV54）；I2a-01 MasterRun/计划/控制回执（EV55–EV57）；I2a-02运行控制短事务与迟到写围栏（EV58/EV59）；I3-01外发策略与目的地管理面（EV60/EV61）；I3-02外发准入强制与来源用途（EV62–EV64）；I2b-01异步受理与受控文本执行（EV68，含EV66的intent/create_goal切片）；I6a-01 BusinessFlow核心与Worker驱动（EV69/EV70）；I4-01全格式处理器与受理合同（EV73–EV75）；I4-02研究结果/修订/引文、分析预览、202受理、执行引擎与Worker扫描（EV76–EV80）；I4-03独立知识库、固定引用、检索投影、前端首版与领域事件（EV81–EV84，I4按机制退出）；I5-01公共资产库、owner_preview窄读、采用回执与公共发布同事务（EV85–EV87）。
+未完成：I5-02尾片（Production引用编译仍只消费私有Artifact解析结果，`source:"public"`已进绑定/解析/token）；I8a-01/02/03、I6b-01、I7-01/02、I8b-01、I9-01/02、I10-01/02；Flow读投影HTTP、执行/研究预览egress摘要、SourceUse跨项目owner授权计数与跨项目只读资格；I4的UI细节三件（Director研究解释、候选对照视图、共享范围预览）；所有新能力的真实作品与目标机验收。设计冻结结论见D8节；不将设计或单批通过当产品完成。
 
 ## D1阶段报告
 
@@ -1280,3 +1280,19 @@ token六列身份（I5-02剩余）；I5阶段Full待阶段终点。
 
 未完成且不冒称：公共引用的Production编译接线（编译器仍按私有Artifact路径消费解析结果）；
 I5阶段Full待阶段终点。
+- **无过滤Full `df-quality-i5-01` FAIL**：后端全绿（2690 unit/204 PG 除外一条），PG
+  `test_asset_mutation_responses_keep_tags_across_commit_pg`直接调用端点未传新`response`参数而失败；
+  根因是I5-01c回执契约变更未同步该直接调用测试。已补`Response`与真实AssetVersion夹具，定向复跑通过。
+- **无过滤Full `df-quality-i5-02` FAIL**：后端全绿；前端E2E
+  `professional-manual.spec.ts › AUTO delegates…`在负载下断言`aria-expanded`早于委派请求完成而失败
+  （单文件复跑7 passed，判定为竞态）。已改为先`expect.poll`委派请求再断言展开状态。
+- **无过滤Full `df-quality-i5-03`，exit0，清理无残留（0 容器）**：静态门/架构门/Provider权威、ruff、
+  mypy 395 文件、**2690 后端单测**（431.88s）、迁移 upgrade+check（head 20261118_0118）无漂移、
+  **204 PG 集成**（903.27s，0 跳过）、OpenAPI 366 schema 与`api:check`、前端prettier/lint/UI权威/
+  typecheck/build、90文件**757 Vitest**、**211 mock E2E**（9.4m）、媒体资源9、网关1、LiteLLM 35、
+  机构真实栈5浏览器用例。镜像 backend
+  `sha256:01c32453637c663489f34e3c3f1d5a68032a6ff050e289b770c0c56a3f9d430a`、frontend
+  `sha256:7713e716ca5b0e0af1eadeda81a5379619d20fd0a9df34fa7fedb3cfa93dc42f`。
+
+未完成且不冒称：公共引用的Production编译接线（`source:"public"`已进绑定/解析/token，但Production计划编译
+仍只消费私有Artifact解析结果）；I5按此边界暂不宣布阶段退出，下一片完成编译接线后复跑Full再判定。
