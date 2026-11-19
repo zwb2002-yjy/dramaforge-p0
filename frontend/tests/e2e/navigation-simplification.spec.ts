@@ -207,8 +207,9 @@ test("project model fields fit a narrow window without overlapping or overflowin
   await page.setViewportSize({ width: 600, height: 730 });
   await page.goto(`/settings/projects/${PROJECT_ID}`);
   // The settings drawer starts closed at this width.
+  // Three planning slots plus the three project media defaults (image/video/voice).
   const controls = page.getByTestId("model-profile-settings").getByRole("combobox");
-  await expect(controls).toHaveCount(3);
+  await expect(controls).toHaveCount(6);
   await expect(page.getByTestId("model-picker-audio.tts")).toHaveCount(0);
   const bounds = await controls.evaluateAll((elements) =>
     elements.map((element) => {

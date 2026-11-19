@@ -178,6 +178,9 @@ async function installStoryMock(page: Page) {
         failed: [],
       });
     }
+    if (path === `/api/v1/projects/${PROJECT_ID}/creative-direction` && method === "GET") {
+      return json(route, { profile_version: 1, direction: "" });
+    }
     // Unknown API calls are recorded and asserted empty by each test: a silent
     // 200 {} would let a missing mock look like a healthy response.
     unmatched.push(`${method} ${path}`);
