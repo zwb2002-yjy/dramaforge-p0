@@ -1,6 +1,6 @@
 # 机构版主执行计划
 
-状态：D8-20261117-r1设计冻结；已执行并各有未过滤Full证据：I0、I1-01/02、I2a-01/02、I3-01/02、I2b-01、I6a-01（含Worker驱动）、I4-01/02/03（EV80–EV84，`df-quality-i4-02-c/d`、`df-quality-i4-03-a/b/c2/d`），以及I4前置的SourceUse HTTP/影响读取切片（EV50–EV72）。**I4按机制验收退出**（2026-11-19）：真实付费Provider分析端到端属I10 Owner授权门，研究/知识剩余UI细节记入后续切片；退出结论见[EXECUTION_STATUS](EXECUTION_STATUS.md)。下一阶段I5。来源：主合同12、次合同11、D0 R01–R38及O1–O7，含Owner N08–N12更新。N11已明确全部改动后续统一执行；按主合同推进I0–I10，原硬门仍适用。具体业务规则以现有权威为唯一正文，本文件只编排交付、依赖和验收。退出判定见[PHASE_GATES](PHASE_GATES.md)。
+状态：D8-20261117-r1设计冻结；已执行并各有未过滤Full证据：I0、I1-01/02、I2a-01/02、I3-01/02、I2b-01、I6a-01（含Worker驱动）、I4-01/02/03（EV80–EV84，`df-quality-i4-02-c/d`、`df-quality-i4-03-a/b/c2/d`），以及I4前置的SourceUse HTTP/影响读取切片（EV50–EV72）。**I4按机制验收退出**（2026-11-19）：真实付费Provider分析端到端属I10 Owner授权门，研究/知识剩余UI细节记入后续切片；退出结论见[EXECUTION_STATUS](EXECUTION_STATUS.md)。I5已按机制验收退出（2026-11-19，EV85–EV93，Full `df-quality-i5-03`/`df-quality-i5-07`）；下一阶段I8a。来源：主合同12、次合同11、D0 R01–R38及O1–O7，含Owner N08–N12更新。N11已明确全部改动后续统一执行；按主合同推进I0–I10，原硬门仍适用。具体业务规则以现有权威为唯一正文，本文件只编排交付、依赖和验收。退出判定见[PHASE_GATES](PHASE_GATES.md)。
 
 ## 设计顺序与交付归属
 

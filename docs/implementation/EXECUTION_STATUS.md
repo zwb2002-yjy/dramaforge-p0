@@ -1326,3 +1326,24 @@ I5阶段Full待阶段终点。
   `plans[0].references`深比较未含新增`source`字段（契约变更未同步E2E期望）；重建镜像后单文件复跑1 passed，
   已补`source:"private"`。
 - 复跑无过滤Full见下条；通过后才宣布I5退出。
+- **无过滤Full `df-quality-i5-07`，exit0，清理无残留（0 容器）**：静态门/架构门/Provider权威、ruff、
+  mypy 395 文件、**2690 后端单测**（398.72s）、迁移 upgrade+check（head 20261118_0118）无漂移、
+  **204 PG 集成**（831.24s，0 跳过）、OpenAPI 366 schema 与`api:check`、前端prettier/lint/UI权威/
+  typecheck/build、90文件**757 Vitest**、**211 mock E2E**（9.7m）、媒体资源9、网关1、LiteLLM 35、
+  机构真实栈5浏览器用例。镜像 backend
+  `sha256:864e25f4a385efedd8dd0b60d2ea5603fbcecb9fff2a748882d85f16da982218`、frontend
+  `sha256:58b26c816aef6767113c515ce1297850e6edbd00546353b07bf6e49b779d948c`。
+
+## I5 阶段退出结论（2026-11-19，EV85–EV93）
+
+已交付并各有定向/Full证据：公共资产发布/成员/项目固定链接与availability投影（I5-01a）、owner_preview
+内容流（I5-01b）、from-artifact采用回执与同事务发布（I5-01c）、公共链接镜头引用（I5-02a）、promote采用
+回执与目标CAS（I5-02b）、候选版本回执与公共base链接（I5-02c）、project_use内容流（I5-02d）、Provider
+下载token六列公共身份与实时资格（I5-02e）、Production计划编译对公共引用的消费（I5-02f）。迁移0114–0118
+均有隔离库升级/`alembic check`无漂移/升降级往返；无过滤Full `df-quality-i5-03`与`df-quality-i5-07`通过，
+三次失败（PG直接调用未同步response、E2E深比较缺source、wakeup行锁竞态）均已定位根因并集中修复复跑。
+
+**外部边界（不冒称完成）**：真实付费Provider的公共引用外发/生成需Owner按合同授权（I10真实操作门）；
+本轮以mock/固定媒体与真实PostgreSQL/HTTP链路证明机制。**未完成UI细节**：公共资产库独立浏览页面
+（当前提供资产API与项目引用/预览链路，未建独立页面）；记入后续切片，不改变已验收的数据/服务/HTTP合同。
+I5按机制验收退出，允许进入I8a。
