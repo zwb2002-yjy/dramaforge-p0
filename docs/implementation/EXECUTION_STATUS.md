@@ -2591,6 +2591,20 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - **下一步**：批量渲染的并发/重试编排（current 为逐集串行派发）；随后 I9 阶段终点跑 Full
   （需空闲宿主，`workbench-resource` 预算项仍是唯一未通过项）。
 
+### I9-02i 已实施：批量交付的逐集失败隔离（2026-11-19，EV167）
+
+- `EpisodeDeliveryService.start` 改为逐集独立处理：单集在导出或渲染环节被
+  `AppError` 拒绝时，只把该集标为 `blocked` 并带上**拒绝码**
+  （`_rejection_code` 取 `details.code`，不泄露堆栈/消息），其余集继续派发——批量交付不会因
+  单集失败整体回滚。
+- 证据：新增用例中一集 clip 失去冻结 binding（`EXPORT_CLIP_UNBOUND`）、另一集无镜头
+  （`RENDER_PLAN_EMPTY`），两集都被独立评估且未中断整批；`test_episode_delivery.py`
+  **4 passed**，交付组 **24 passed**；ruff 通过、`mypy app` 409 文件通过。
+- **本轮未跑 Full 的原因（如实记录）**：宿主当前 `LoadPercentage≈71%`，占用来自浏览器与
+  非本项目进程（本项目无容器运行）。此前等负载下的实测已证明该预算项会等比放大（EV152），
+  因此本轮不重复跑一次注定失败的 Full；Full 仍需在空闲/足算力机器上执行。
+- **下一步**：并发执行与自动重试编排；I9 阶段终点 Full（空闲宿主）。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，

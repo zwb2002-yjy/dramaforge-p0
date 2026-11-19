@@ -21,8 +21,15 @@ from app.assets.models import Episode
 from app.delivery.export_service import ExportService
 from app.delivery.render_execution import create_edit_session_render
 from app.editing.models import EditSession
+from app.shared.errors import AppError
 
 DeliveryStatus = Literal["planned", "blocked", "started"]
+
+
+def _rejection_code(exc: AppError) -> str:
+    """Surface the rejection code, never a stack message, in a blocked item."""
+    code = exc.details.get("code") if isinstance(exc.details, dict) else None
+    return str(code or exc.code)
 
 
 @dataclass(frozen=True)
@@ -122,58 +129,91 @@ class EpisodeDeliveryService:
         actor_id: UUID,
         format: str = "mp4",
     ) -> list[EpisodeDeliveryItem]:
-        """Freeze one export and one render run for every ready episode."""
+        """Freeze one export and one render run for every ready episode.
+
+        A failing episode must not abort the batch: it is reported as blocked with
+        the rejection code while the remaining episodes are still started.
+        """
         exports = ExportService(self._session)
         started: list[EpisodeDeliveryItem] = []
         for item in await self.plan(project_id=project.id):
             if item.status == "blocked" or item.session_id is None:
                 started.append(item)
                 continue
-            export, _created = await exports.create_session_export(
-                project_id=project.id,
-                session_id=item.session_id,
-                requested_by=actor_id,
-                format=format,
-                # One receipt per (episode, session version): a rerun after an
-                # already-started delivery returns the same export.
-                idempotency_key=(
-                    f"episode-delivery:{item.episode_id}:{item.session_id}:{item.session_version}"
-                ),
-            )
-            if export.timeline_version != item.session_version:
+            try:
+                started.append(
+                    await self._start_one(
+                        project=project,
+                        item=item,
+                        exports=exports,
+                        actor_id=actor_id,
+                        format=format,
+                    )
+                )
+            except AppError as exc:
                 started.append(
                     EpisodeDeliveryItem(
                         episode_id=item.episode_id,
                         episode_number=item.episode_number,
                         session_id=item.session_id,
                         session_version=item.session_version,
-                        export_id=export.id,
+                        export_id=None,
                         node_run_id=None,
                         status="blocked",
-                        blockers=("DELIVERY_RECEIPT_STALE",),
+                        blockers=(_rejection_code(exc),),
                     )
                 )
-                continue
-            run = await create_edit_session_render(
-                self._session,
-                project_id=project.id,
-                session_id=item.session_id,
-                export_id=export.id,
-                actor_id=actor_id,
-            )
-            started.append(
-                EpisodeDeliveryItem(
-                    episode_id=item.episode_id,
-                    episode_number=item.episode_number,
-                    session_id=item.session_id,
-                    session_version=item.session_version,
-                    export_id=export.id,
-                    node_run_id=run.id,
-                    status="started",
-                    blockers=(),
-                )
-            )
         return started
+
+    async def _start_one(
+        self,
+        *,
+        project: Project,
+        item: EpisodeDeliveryItem,
+        exports: ExportService,
+        actor_id: UUID,
+        format: str,
+    ) -> EpisodeDeliveryItem:
+        assert item.session_id is not None
+        export, _created = await exports.create_session_export(
+            project_id=project.id,
+            session_id=item.session_id,
+            requested_by=actor_id,
+            format=format,
+            # One receipt per (episode, session version): a rerun after an
+            # already-started delivery returns the same export.
+            idempotency_key=(
+                f"episode-delivery:{item.episode_id}:{item.session_id}:{item.session_version}"
+            ),
+        )
+        if export.timeline_version != item.session_version:
+            return EpisodeDeliveryItem(
+                episode_id=item.episode_id,
+                episode_number=item.episode_number,
+                session_id=item.session_id,
+                session_version=item.session_version,
+                export_id=export.id,
+                node_run_id=None,
+                status="blocked",
+                blockers=("DELIVERY_RECEIPT_STALE",),
+            )
+        run = await create_edit_session_render(
+            self._session,
+            project_id=project.id,
+            session_id=item.session_id,
+            export_id=export.id,
+            actor_id=actor_id,
+        )
+        return EpisodeDeliveryItem(
+            episode_id=item.episode_id,
+            episode_number=item.episode_number,
+            session_id=item.session_id,
+            session_version=item.session_version,
+            export_id=export.id,
+            node_run_id=run.id,
+            status="started",
+            blockers=(),
+        )
 
 
 __all__ = ["EpisodeDeliveryItem", "EpisodeDeliveryService"]

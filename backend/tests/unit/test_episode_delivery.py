@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 import pytest
 from app.assets.models import Episode
 from app.delivery.episode_delivery import EpisodeDeliveryService
 from app.delivery.models import Export
+from app.editing.adapter import EditingAdapter
 from app.editing.timeline_builder import build_edit_session_for_project
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -95,6 +98,55 @@ async def test_start_freezes_one_export_and_render_per_episode(
     # Only the batch's own episode receipt exists; the project-wide one from the
     # fixture stays untouched and is not counted here.
     assert [row.id for row in exports if row.episode_id == first.id] == [export.id]
+
+
+@pytest.mark.asyncio
+async def test_one_failing_episode_does_not_abort_the_batch(session: AsyncSession) -> None:
+    """A rejected episode is reported; the healthy one still starts."""
+    project, user, _shot_row, _artifact, _saved, _export, _store = await _exported_session(session)
+    second = Episode(project_id=project.id, episode_number=2, title="E2", synopsis="")
+    session.add(second)
+    await session.flush()
+    episodes = list(
+        (
+            await session.scalars(
+                select(Episode)
+                .where(Episode.project_id == project.id)
+                .order_by(Episode.episode_number)
+            )
+        ).all()
+    )
+    sessions = {}
+    for episode in episodes:
+        built = await build_edit_session_for_project(
+            session, project_id=project.id, user_id=user.id, episode_id=episode.id
+        )
+        sessions[episode.episode_number] = built["session_id"]
+    await session.commit()
+
+    # Break episode 1 only: its clip loses the frozen artifact binding.
+    broken = await EditingAdapter(session).load_timeline(
+        project_id=project.id, session_id=UUID(str(sessions[1]))
+    )
+    timeline = dict(broken.timeline)
+    # Builder sessions are schema 1, so the clip's own artifact_id is its binding.
+    timeline["clips"] = [{**timeline["clips"][0], "artifact_id": None, "selection_snapshot": None}]
+    broken.timeline = timeline
+    await session.flush()
+
+    started = await EpisodeDeliveryService(session).start(
+        project=project, actor_id=user.id, format="mp4"
+    )
+    await session.commit()
+    by_episode = {item.episode_number: item for item in started}
+    assert by_episode[1].status == "blocked"
+    assert by_episode[1].blockers == ("EXPORT_CLIP_UNBOUND",)
+    assert by_episode[1].export_id is None
+    # The batch still evaluated the next episode and reported its own reason
+    # (this fixture's second episode has no shots, so it has nothing to render).
+    assert by_episode[2].status == "blocked"
+    assert by_episode[2].blockers == ("RENDER_PLAN_EMPTY",)
+    assert len(started) == 2
 
 
 @pytest.mark.asyncio
