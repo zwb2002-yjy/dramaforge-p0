@@ -2358,6 +2358,21 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - 因此本次 **frontend-quality 未执行**；为判断前端真实状态，另用同一镜像单跑了该阶段（见下条）。
 - 结论：仍**不宣布** Full 通过；修好时限后需要重跑完整 Full 才能收口。
 
+### `frontend-quality` 单阶段与 resource 项定位（2026-11-19，EV151）
+
+用同一 frontend 镜像单跑该阶段（补导出 `/contract/openapi.json` 后）：
+- **209 passed / 2 failed**；失败只有 `workbench-resource` 的 `30 Shots`、`100 Shots`
+  （p95 **339.5ms / 376.4ms**，预算 200ms）。**全部功能 E2E 通过**，包括此前疑似不稳的
+  `editing-timeline-g5:645`、`global-layout-governance:357`、`navigation-convergence` A16–A19。
+- 再单独跑该 spec（只 `chromium-resource`，先 `npm run build`）：**3 failed**（连 `1 Shots` 也超预算），
+  100 镜头 p95 364.5ms。
+- **根因线索（不是结论）**：`frontend/tests/e2e/global-setup.ts` 用 `vite.createServer` 起的是
+  **dev 服务器**，日志有 `Re-optimizing dependencies because lockfile has changed`，说明该 p95 测的是
+  dev 模式按需编译 + 宿主 CPU；同一指标在 EV78 的 Full 里是 22/82.7/87.2ms。
+- 下一步（未做）：检查该 spec 是否在路由/模块尚未预热时就开始采样（若是，加入显式预热点击，
+  该改动**不放宽 200ms 预算、不删用例**）；再把证据 JSON（`firstScreenMs`/`p95Ms`/样本数）与
+  EV78 基线对比，判断是测量口径问题还是真实渲染回退。
+
 ## I9 计划（下一阶段，未开工）
 
 依据 [DATA_MODEL](../DATA_MODEL.md) 的 timeline schema2 合同与 [MASTER_EXECUTION_PLAN](MASTER_EXECUTION_PLAN.md) 的 I9-01/02：
