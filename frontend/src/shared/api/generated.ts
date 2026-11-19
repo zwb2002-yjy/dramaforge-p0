@@ -1567,6 +1567,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/exports/{export_id}/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Export Render
+         * @description Queue the render of the export's frozen timeline version.
+         */
+        post: operations["create_export_render_api_v1_projects__project_id__exports__export_id__render_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/exports/{export_id}/content": {
         parameters: {
             query?: never;
@@ -7310,6 +7330,23 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** ExportRenderRead */
+        ExportRenderRead: {
+            /**
+             * Export Id
+             * Format: uuid
+             */
+            export_id: string;
+            /**
+             * Node Run Id
+             * Format: uuid
+             */
+            node_run_id: string;
+            /** Status */
+            status: string;
+            /** Attempt No */
+            attempt_no: number;
         };
         /** ExtractionAcceptanceRead */
         ExtractionAcceptanceRead: {
@@ -17021,6 +17058,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExportReceiptRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_export_render_api_v1_projects__project_id__exports__export_id__render_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                export_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportRenderRead"];
                 };
             };
             /** @description Validation Error */

@@ -148,6 +148,15 @@ async def execute_media_node_run(
             return await _completed_result(session, run=run, node_type=node_type)
 
     obj_store = store or get_object_store()
+    if node.node_key == "edit_session_render":
+        from app.delivery.render_execution import execute_edit_session_render
+
+        return await execute_edit_session_render(
+            session,
+            run=run,
+            node=node,
+            obj_store=obj_store,
+        )
     if node.node_key == "final_film_assembly":
         from app.production.final_film import execute_final_film_node_run
 

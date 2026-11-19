@@ -149,6 +149,14 @@ class ExportService:
         await self._session.flush()
         return export, True
 
+    async def get(self, *, project_id: UUID, export_id: UUID) -> Export:
+        export = await self._session.scalar(
+            select(Export).where(Export.id == export_id, Export.project_id == project_id)
+        )
+        if export is None:
+            raise NotFoundError("export not found")
+        return export
+
     async def items_of(self, *, export_id: UUID) -> list[ExportItem]:
         rows = await self._session.scalars(
             select(ExportItem).where(ExportItem.export_id == export_id).order_by(ExportItem.ordinal)

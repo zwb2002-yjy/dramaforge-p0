@@ -21,6 +21,7 @@ from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.delivery.export_service import ExportService
 from app.delivery.models import Export
+from app.delivery.render_execution import create_edit_session_render
 from app.director.editing_repair import (
     EditingRepairRoutingRead,
     EditingRepairRoutingRequest,
@@ -419,6 +420,50 @@ async def create_edit_session_export(
     await session.commit()
     response.status_code = 201 if created else 200
     return _export_read(export)
+
+
+class ExportRenderRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    export_id: UUID
+    node_run_id: UUID
+    status: str
+    attempt_no: int
+
+
+@router.post(
+    "/projects/{project_id}/exports/{export_id}/render",
+    response_model=ExportRenderRead,
+)
+async def create_export_render(
+    project_id: UUID,
+    export_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> ExportRenderRead:
+    """Queue the render of the export's frozen timeline version."""
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    export = await ExportService(session).get(project_id=project_id, export_id=export_id)
+    if export.edit_session_id is None:
+        raise ValidationAppError(
+            "this export is not bound to an edit session",
+            details={"code": "RENDER_SESSION_MISSING", "export_id": str(export.id)},
+        )
+    run = await create_edit_session_render(
+        session,
+        project_id=project_id,
+        session_id=export.edit_session_id,
+        export_id=export.id,
+        actor_id=user.id,
+    )
+    await session.commit()
+    return ExportRenderRead(
+        export_id=export.id,
+        node_run_id=run.id,
+        status=run.status,
+        attempt_no=run.attempt_no,
+    )
 
 
 @router.get("/projects/{project_id}/exports/{export_id}/content")
