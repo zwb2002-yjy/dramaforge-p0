@@ -2070,3 +2070,12 @@ I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖�
 - 全量前端Vitest复跑：**764 passed**（583.87s）。
 
 结论：Full仍为FAIL（仅前端resource性能阈值项），不声称阶段Full；后端/媒体/网关/litellm/机构栈与前端功能E2E均已通过。
+
+## workbench-resource性能项定位（2026-11-19，EV135）
+
+单独复跑`workbench-resource`（单worker、同一镜像）：
+- `1 Shots`：p95 **84.4ms**（通过），但`firstScreenMs=9075ms`——Vite在新建镜像里重新优化依赖（"Re-optimizing dependencies because lockfile has changed"）。
+- `30 Shots`：p95 **324.5ms**（阈值200ms，失败）；滚动p95 22ms正常。
+- `100 Shots`：此前396ms。
+同一代码在i8a-03的Full中该套件通过，说明阈值对宿主/冷启动敏感；但30/100例的每次点击成本(~300ms)高于1例(84ms)，仍需在空闲机器上对比I5提交基线，排除列表渲染回退。
+结论：Full仍FAIL（仅此项），不声称阶段Full；下一步用空闲宿主或对比基线定位是环境还是列表渲染回退。
