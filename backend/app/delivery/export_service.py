@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.delivery.models import Export, ExportItem
 from app.editing.models import EditSession
+from app.execution.models import Artifact
 from app.shared.errors import NotFoundError, ValidationAppError
 
 # Only snapshot formats that need no new media generation are allowed here.
@@ -153,6 +154,34 @@ class ExportService:
             select(ExportItem).where(ExportItem.export_id == export_id).order_by(ExportItem.ordinal)
         )
         return list(rows)
+
+    async def delivery_artifact(
+        self, *, project_id: UUID, export_id: UUID
+    ) -> tuple[Export, Artifact]:
+        """The rendered artifact an export delivers, refusing unfinished exports.
+
+        An export without a bound render is a receipt of a version, not a film;
+        saying so explicitly keeps "queued" from looking like "delivered".
+        """
+        export = await self._session.scalar(
+            select(Export).where(Export.id == export_id, Export.project_id == project_id)
+        )
+        if export is None:
+            raise NotFoundError("export not found")
+        if export.result_artifact_id is None:
+            raise ValidationAppError(
+                "this export has no rendered artifact yet",
+                details={"code": "EXPORT_NOT_DELIVERABLE", "export_id": str(export.id)},
+            )
+        artifact = await self._session.get(Artifact, export.result_artifact_id)
+        if (
+            artifact is None
+            or artifact.project_id != project_id
+            or artifact.storage_state != "available"
+            or artifact.deleted_at is not None
+        ):
+            raise NotFoundError("exported artifact not found")
+        return export, artifact
 
 
 def _clips_of(document: dict[str, Any]) -> list[dict[str, Any]]:

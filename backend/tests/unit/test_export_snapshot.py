@@ -163,6 +163,88 @@ async def test_export_route_returns_201_then_200_for_the_same_receipt(
 
 
 @pytest.mark.asyncio
+async def test_delivery_download_serves_only_rendered_exports(session: AsyncSession) -> None:
+    from app.api.v1.editing import download_export_content
+    from app.delivery.models import Export
+    from app.storage.minio_store import reset_object_store_for_tests
+
+    store = reset_object_store_for_tests()
+    project, user, _shot_row, _artifact, saved = await _saved_session(session)
+    service = ExportService(session)
+    export, _created = await service.create_session_export(
+        project_id=project.id,
+        session_id=saved.id,
+        requested_by=user.id,
+        idempotency_key=f"export-{uuid4().hex}",
+    )
+    await session.commit()
+
+    # A queued receipt is not a film: no result artifact means no delivery.
+    with pytest.raises(ValidationAppError) as pending:
+        await download_export_content(
+            project_id=project.id, export_id=export.id, user=user, session=session
+        )
+    assert pending.value.details["code"] == "EXPORT_NOT_DELIVERABLE"
+
+    stored = await store.put_bytes(
+        object_key=f"obj/{uuid4().hex}",
+        data=b"\x00\x00\x00\x18ftypmp42rendered-film",
+        mime_type="video/mp4",
+    )
+    rendered = Artifact(
+        project_id=project.id,
+        artifact_type="video",
+        storage_state="available",
+        object_key=stored.object_key,
+        content_hash=stored.content_hash,
+        mime_type="video/mp4",
+        byte_size=stored.byte_size,
+    )
+    session.add(rendered)
+    await session.flush()
+    row = await session.get(Export, export.id)
+    assert row is not None
+    row.result_artifact_id = rendered.id
+    row.status = "completed"
+    await session.commit()
+
+    response = await download_export_content(
+        project_id=project.id, export_id=export.id, user=user, session=session
+    )
+    assert response.media_type == "video/mp4"
+    assert response.body == b"\x00\x00\x00\x18ftypmp42rendered-film"
+    assert response.headers["content-length"] == str(len(response.body))
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "attachment" in response.headers["content-disposition"]
+
+
+@pytest.mark.asyncio
+async def test_delivery_download_rejects_another_projects_export(
+    session: AsyncSession,
+) -> None:
+    from app.api.v1.editing import download_export_content
+    from app.shared.errors import ForbiddenError
+
+    project, user, _shot_row, _artifact, saved = await _saved_session(session)
+    export, _created = await ExportService(session).create_session_export(
+        project_id=project.id,
+        session_id=saved.id,
+        requested_by=user.id,
+        idempotency_key=f"export-{uuid4().hex}",
+    )
+    await session.commit()
+
+    stranger = type(user)(email=f"s-{uuid4().hex}@example.com", display_name="S", password_hash="x")
+    session.add(stranger)
+    await session.flush()
+    with pytest.raises(ForbiddenError):
+        await download_export_content(
+            project_id=project.id, export_id=export.id, user=stranger, session=session
+        )
+
+
+@pytest.mark.asyncio
 async def test_render_formats_and_unbound_clips_are_refused(session: AsyncSession) -> None:
     project, user, _shot_row, _artifact, saved = await _saved_session(session)
     service = ExportService(session)

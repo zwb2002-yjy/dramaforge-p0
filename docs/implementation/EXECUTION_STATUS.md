@@ -2527,6 +2527,21 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - 现状：FFmpeg 渲染器 `app/production/timeline_renderer.render_timeline` 已存在（含 concat、
   音乐混音、字幕），缺的是“把会话版本的渲染计划派发为 render NodeRun 并落 MP4/SRT”的接线。
 - 证据：`test_render_plan.py` **5 passed**；`ruff check app tests` 通过、`mypy app` 406 文件通过。
+
+### I9-02d 已实施：逐集交付下载（EV162）
+
+- `ExportService.delivery_artifact`：导出不存在或不属于本项目 → 404；`result_artifact_id` 为空 →
+  **`EXPORT_NOT_DELIVERABLE`**（“queued ≠ delivered”，不把回执当影片）；artifact 缺失/被删/不可用 → 404。
+- 新增 `GET /projects/{p}/exports/{export_id}/content`：先 owner 校验，再按
+  `Content-Disposition: attachment` 返回字节，带 `Content-Length`、`Cache-Control: private, no-store`、
+  `X-Content-Type-Options: nosniff`、`Accept-Ranges: bytes`，文件名包含集作用域。
+- 证据：`test_export_snapshot.py` **6 passed**（未渲染导出被拒；已渲染导出返回字节并断言四个响应头；
+  他人项目的导出被 `ForbiddenError` 拒绝），导出/编辑/渲染计划合计 **21 passed**；
+  `ruff check app tests` 通过、`mypy app` 406 文件通过；`generated.ts` 重生（412 schema、
+  `api:check` up to date、`api:authority` 通过）。
+- **下一步（I9-02 剩余）**：渲染 NodeRun——把 `render_plan` 派发为渲染运行并冻结
+  `edit_session_id/timeline_version/timeline_hash`，产出 MP4 与 SRT（校验可解码），
+  Export 绑定该不可变渲染快照；Range 分段下载可随后补。渲染是生成动作，执行前需取得 Owner 授权。
 - **已修（I9-02b，EV160）**：`exports.episode_id` 外键由 `ON DELETE SET NULL` 改为
   `ON DELETE RESTRICT`（迁移 `20261119_0123`，downgrade 回 SET NULL）。隔离 PG `editor_0123` 实测：
   有导出的集执行 `DELETE FROM episodes` 被 `fk_exports_episode` 拒绝、导出行仍在；`alembic check`

@@ -421,6 +421,37 @@ async def create_edit_session_export(
     return _export_read(export)
 
 
+@router.get("/projects/{project_id}/exports/{export_id}/content")
+async def download_export_content(
+    project_id: UUID,
+    export_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> Response:
+    """Serve the rendered artifact an export delivers; refuse unfinished ones."""
+    from app.storage.minio_store import get_object_store
+
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    export, artifact = await ExportService(session).delivery_artifact(
+        project_id=project_id, export_id=export_id
+    )
+    data = await get_object_store().get_bytes(object_key=artifact.object_key)
+    suffix = artifact.mime_type.rsplit("/", 1)[-1] or "bin"
+    scope = export.episode_id or "project"
+    filename = f"episode-{scope}-{export.id}.{suffix}"
+    return Response(
+        content=data,
+        media_type=artifact.mime_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(data)),
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Accept-Ranges": "bytes",
+        },
+    )
+
+
 @router.post(
     "/projects/{project_id}/edit-sessions/{session_id}/director-suggestion",
     response_model=EditingDirectorSuggestionRead,
