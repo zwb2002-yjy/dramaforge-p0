@@ -1933,5 +1933,7 @@ I6b开工：把默认BusinessFlow注册表从单一shot流程扩为覆盖project
 
 用真实`ToolFlowActionExecutor`驱动`project_asset_audit`实例时发现：经`MasterRunService.apply_plan`
 创建的实例没有step行（`DirectorBusinessFlowStep`为空），`advance`因此返回`flow_progress_pending`。
-探针已回退，未提交代码；下一轮先核对`apply_plan`对非probe定义（scope=project、含只读step）的step生成路径
-与`flow_dispositions`要求，再补端到端验收测试。
+进一步探针：`apply_plan`确实为领域实例创建了两个step（list_assets/read_asset，均pending），
+但`advance`连续多轮后step仍为pending、实例waiting(`flow_progress_pending`)，说明`ready_steps`在该实例上
+返回空或wave执行被静默跳过；probe流程的既有测试通过。探针已回退。下一轮在`advance`内加临时断言定位
+（对比probe实例字段：supervisor_run_id/plan_id/plan_revision/scope_type与step.dependencies的读取）。
