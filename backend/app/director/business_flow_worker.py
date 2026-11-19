@@ -39,7 +39,10 @@ class ToolFlowActionExecutor:
         workspace_id: UUID,
         project_id: UUID,
     ) -> None:
-        self._executor = ToolExecutor(factory, ToolRegistry(include_model_tools=False))
+        # Flows may declare read-only model contract tools (capabilities/compile
+        # preview); they never submit a Provider operation, so the registry
+        # exposes them and the frozen definition still decides which are used.
+        self._executor = ToolExecutor(factory, ToolRegistry(include_model_tools=True))
         self._actor_id = actor_id
         self._workspace_id = workspace_id
         self._project_id = project_id

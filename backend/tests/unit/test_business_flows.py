@@ -727,3 +727,13 @@ def test_default_registry_carries_the_domain_flows() -> None:
     assert SCENE_PROMPT_REVIEW_V1.scope_type == "scene"
     assert SHOT_MODEL_CONTRACT_REVIEW_V1.scope_type == "shot"
     assert PROJECT_ASSET_AUDIT_V1.scope_type == "project"
+
+
+def test_domain_flow_tools_exist_in_the_worker_registry() -> None:
+    from app.director.agent_tools import ToolRegistry
+    from app.director.business_flows import DEFAULT_DEFINITIONS
+
+    names = {spec.name for spec in ToolRegistry(include_model_tools=True).specs()}
+    for definition in DEFAULT_DEFINITIONS.definitions():
+        for step in definition.steps:
+            assert step.tool_name in names, (definition.flow_key, step.tool_name)

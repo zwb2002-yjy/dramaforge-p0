@@ -1915,3 +1915,16 @@ I6b开工：把默认BusinessFlow注册表从单一shot流程扩为覆盖project
   定向组72 passed（flows/flows_api/architecture）；ruff/mypy 401文件通过。
 
 未完成且不冒称：I6b其余项（各BusinessFlow的实际端口接线、并行/部分失败/换计划的端到端验收）。
+
+## I6b-02 领域流程端口接线（2026-11-19，EV124）
+
+- `ToolFlowActionExecutor`的受控工具注册表改为`include_model_tools=True`：领域流程可声明只读的
+  `model_capabilities`/`model_compile_preview`（纯合同/编译预览，不提交Provider操作），
+  实际使用仍由冻结的流程定义决定。
+- 新增测试断言：`DEFAULT_DEFINITIONS`中每个step的tool_name都存在于worker注册表，防止定义与端口漂移。
+
+已测（定向）：
+- `test_business_flows.py` 15 passed（新增注册表覆盖断言）；定向组73 passed（flows/flows_api/architecture）；
+  ruff/mypy 401文件通过。
+
+未完成且不冒称：并行/部分失败/换计划的端到端验收（T06–T11用例）、流程UI入口。
