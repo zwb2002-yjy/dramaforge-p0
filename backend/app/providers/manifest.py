@@ -30,7 +30,7 @@ CatalogSource = Literal[
     "admin_approved",
     "protocol_contract",
 ]
-OperationKind = Literal["image.generate", "video.generate"]
+OperationKind = Literal["image.generate", "video.generate", "voice.generate"]
 
 
 def has_reproducible_contract_evidence(raw: dict[str, Any]) -> bool:

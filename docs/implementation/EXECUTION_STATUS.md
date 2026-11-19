@@ -1395,5 +1395,23 @@ I5按机制验收退出，允许进入I8a。
 - 新增`test_speech_http.py` 5 passed：OpenAI原始字节与b64_json、MiniMax hex与provider错误、
   Volcengine base64与坏载荷、未知协议fail-closed；ruff/mypy 396文件通过。
 
-未完成且不冒称：voice media_type/purpose/capability枚举与manifest、binding解析与`voice-options`投影、
-生产语音路径切换与Edge/espeak删除、FinalFilm prepare与逐命令授权（I8a-02剩余）。
+未完成且不冒称：`voice-options`API投影、生产语音路径切换与Edge/espeak删除、FinalFilm prepare与
+逐命令授权（I8a-02剩余）。
+
+## I8a-02b 语音能力枚举与Binding解析（2026-11-19，EV97）
+
+让语音成为Binding的正式媒体类型，并提供项目语音绑定的只读状态投影。
+
+已实施：
+- `Capability.VOICE_GENERATE="voice.generate"`；V1`OperationKind`与V2`TypedOperationKind`新增
+  `voice.generate`（仅声明，不注册Compiler/Runtime）。
+- 新增`app/providers/voice_binding.py`：`resolve_voice_binding(project)`读取项目有效profile的
+  `voice_model_binding_id`，返回`configured`（启用、media_type/purpose=voice、catalog entry存在且
+  media_kind=voice）/`unavailable`（`VOICE_BINDING_DISABLED|KIND_MISMATCH|CATALOG_MISSING|
+  NOT_FOUND`）/`missing`（`VOICE_BINDING_MISSING`），并带profile的voice_options；零网络、零fallback。
+
+已测（定向）：
+- 新增`test_voice_binding.py` 3 passed：无绑定missing、配置绑定configured含选项、停用与错配unavailable。
+- 定向组29 passed（voice_binding/speech_http/media_config/model_profiles）；ruff/mypy 397文件通过。
+
+未完成且不冒称：`voice-options`API投影、生产语音路径切换、Edge/espeak删除、FinalFilm prepare与逐命令授权。

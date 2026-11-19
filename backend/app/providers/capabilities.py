@@ -30,6 +30,8 @@ class Capability(StrEnum):
     VIDEO_FIRST_LAST_FRAME = "video.first_last_frame"
     VIDEO_REFERENCE_TO_VIDEO = "video.reference_to_video"
 
+    VOICE_GENERATE = "voice.generate"
+
 
 
 # Map a coarse V3 capability to fine-grained capability groups the A+B model

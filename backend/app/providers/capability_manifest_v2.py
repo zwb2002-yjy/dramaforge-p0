@@ -23,6 +23,7 @@ TypedOperationKind = Literal[
     "video.generate",
     "video.edit",
     "video.extend",
+    "voice.generate",
 ]
 
 
