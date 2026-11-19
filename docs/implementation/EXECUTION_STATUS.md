@@ -1318,4 +1318,8 @@ I5阶段Full待阶段终点。
   根因是`ShotReferenceIntent`新增字段改变了OpenAPI schema（366→含source/publication等），本片未同步重生
   生成类型。已重生`generated.ts`并修正受影响前端夹具（AssetReferencePicker按resolve来源映射
   source/resolution_mode；测试夹具补source），定向typecheck+49用例通过。复跑Full见下条。
+- Full `df-quality-i5-05`**FAIL**：后端单测全绿；PG `test_director_wakeup_pg`（killed-worker交付用例）
+  在负载下第二次`process_director_wakeup`返回False——根因是子进程被杀后其PG后端仍短暂持有行锁，
+  `FOR UPDATE SKIP LOCKED`跳过；单文件复跑3 passed。已把该断言改为在生产扫描窗口内有限重试（不改变
+  产品逻辑，仍要求最终True），定向通过。
 - 复跑无过滤Full见下条；通过后才宣布I5退出。

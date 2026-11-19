@@ -200,7 +200,16 @@ asyncio.run(main())
                 if child.returncode is None:
                     child.kill()
                     await child.wait()
-            assert await director_wakeup.process_director_wakeup(factory, inbox_id=inbox_id)
+            # The killed worker's PG backend may release its row lock a moment
+            # later; production workers retry on the next scan, so the test
+            # waits for the same bounded window instead of racing the lock.
+            delivered = False
+            for _attempt in range(40):
+                if await director_wakeup.process_director_wakeup(factory, inbox_id=inbox_id):
+                    delivered = True
+                    break
+                await asyncio.sleep(0.25)
+            assert delivered
 
         async with admin() as session:
             done = await session.get(DirectorWakeup, inbox_id)
