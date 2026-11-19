@@ -1928,3 +1928,10 @@ I6b开工：把默认BusinessFlow注册表从单一shot流程扩为覆盖project
   ruff/mypy 401文件通过。
 
 未完成且不冒称：并行/部分失败/换计划的端到端验收（T06–T11用例）、流程UI入口。
+
+## I6b-03 领域流程端到端探针（2026-11-19，未提交代码）
+
+用真实`ToolFlowActionExecutor`驱动`project_asset_audit`实例时发现：经`MasterRunService.apply_plan`
+创建的实例没有step行（`DirectorBusinessFlowStep`为空），`advance`因此返回`flow_progress_pending`。
+探针已回退，未提交代码；下一轮先核对`apply_plan`对非probe定义（scope=project、含只读step）的step生成路径
+与`flow_dispositions`要求，再补端到端验收测试。
