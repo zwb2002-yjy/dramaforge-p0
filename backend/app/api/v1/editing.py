@@ -12,13 +12,15 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from sqlalchemy import select
 
 from app.access.models import User
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.delivery.export_service import ExportService
+from app.delivery.models import Export
 from app.director.editing_repair import (
     EditingRepairRoutingRead,
     EditingRepairRoutingRequest,
@@ -346,6 +348,77 @@ async def switch_edit_session_episode(
     )
     await session.commit()
     return _edit_session_read(updated)
+
+
+class ExportReceiptRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    project_id: UUID
+    episode_id: UUID | None = None
+    edit_session_id: UUID | None = None
+    format: str
+    status: str
+    timeline_version: int | None = None
+    timeline_hash: str | None = None
+    manifest: dict[str, JsonValue] = Field(default_factory=dict)
+    result_artifact_id: UUID | None = None
+    created_at: datetime
+
+
+class EditSessionExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    format: str = Field(default="timeline_json", min_length=1, max_length=40)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+def _export_read(row: Export) -> ExportReceiptRead:
+    return ExportReceiptRead(
+        id=row.id,
+        project_id=row.project_id,
+        episode_id=row.episode_id,
+        edit_session_id=row.edit_session_id,
+        format=row.format,
+        status=row.status,
+        timeline_version=row.timeline_version,
+        timeline_hash=row.timeline_hash,
+        manifest=cast(dict[str, JsonValue], dict(row.manifest or {})),
+        result_artifact_id=row.result_artifact_id,
+        created_at=row.created_at,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/edit-sessions/{session_id}/exports",
+    response_model=ExportReceiptRead,
+)
+async def create_edit_session_export(
+    project_id: UUID,
+    session_id: UUID,
+    body: EditSessionExportRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    response: Response,
+    _: CsrfDep,
+) -> ExportReceiptRead:
+    """Freeze the session's current version into a durable export receipt."""
+    row = await _owned_session(
+        project_id=project_id,
+        session_id=session_id,
+        user=user,
+        session=session,
+    )
+    export, created = await ExportService(session).create_session_export(
+        project_id=project_id,
+        session_id=row.id,
+        requested_by=user.id,
+        format=body.format,
+        idempotency_key=body.idempotency_key,
+    )
+    await session.commit()
+    response.status_code = 201 if created else 200
+    return _export_read(export)
 
 
 @router.post(

@@ -1547,6 +1547,26 @@ export interface paths {
         patch: operations["switch_edit_session_episode_api_v1_projects__project_id__edit_sessions__session_id__episode_patch"];
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/edit-sessions/{session_id}/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Edit Session Export
+         * @description Freeze the session's current version into a durable export receipt.
+         */
+        post: operations["create_edit_session_export_api_v1_projects__project_id__edit_sessions__session_id__exports_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/edit-sessions/{session_id}/director-suggestion": {
         parameters: {
             query?: never;
@@ -6523,6 +6543,16 @@ export interface components {
             /** Episode Id */
             episode_id?: string | null;
         };
+        /** EditSessionExportRequest */
+        EditSessionExportRequest: {
+            /**
+             * Format
+             * @default timeline_json
+             */
+            format: string;
+            /** Idempotency Key */
+            idempotency_key?: string | null;
+        };
         /** EditSessionRead */
         EditSessionRead: {
             /**
@@ -7224,6 +7254,42 @@ export interface components {
             run_ids: string[];
             /** Job Ids */
             job_ids: string[];
+        };
+        /** ExportReceiptRead */
+        ExportReceiptRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /** Episode Id */
+            episode_id?: string | null;
+            /** Edit Session Id */
+            edit_session_id?: string | null;
+            /** Format */
+            format: string;
+            /** Status */
+            status: string;
+            /** Timeline Version */
+            timeline_version?: number | null;
+            /** Timeline Hash */
+            timeline_hash?: string | null;
+            /** Manifest */
+            manifest?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Result Artifact Id */
+            result_artifact_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** ExtractionAcceptanceRead */
         ExtractionAcceptanceRead: {
@@ -16891,6 +16957,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EditSessionRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_edit_session_export_api_v1_projects__project_id__edit_sessions__session_id__exports_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                session_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditSessionExportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportReceiptRead"];
                 };
             };
             /** @description Validation Error */

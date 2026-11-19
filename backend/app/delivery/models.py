@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -22,7 +23,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.base import Base
-from app.shared.db_types import JSON_DOCUMENT
+from app.shared.db_types import HASH_64, JSON_DOCUMENT
 
 
 class ReviewAnnotation(Base):
@@ -101,9 +102,7 @@ class HumanReviewDecision(Base):
 
     __tablename__ = "human_review_decisions"
     __table_args__ = (
-        UniqueConstraint(
-            "project_id", "request_key", name="uq_human_review_decision_request"
-        ),
+        UniqueConstraint("project_id", "request_key", name="uq_human_review_decision_request"),
         Index(
             "ix_human_review_decisions_lookup",
             "project_id",
@@ -163,6 +162,16 @@ class Export(Base):
             postgresql_where=text("idempotency_key IS NOT NULL"),
             sqlite_where=text("idempotency_key IS NOT NULL"),
         ),
+        # The frozen session must live in the same project as the export.
+        ForeignKeyConstraint(
+            ["edit_session_id", "project_id"],
+            ["edit_sessions.id", "edit_sessions.project_id"],
+            name="fk_exports_edit_session",
+            ondelete="RESTRICT",
+        ),
+        Index("ix_exports_session_timeline", "edit_session_id", "timeline_version"),
+        Index("ix_exports_render_node_run", "render_node_run_id"),
+        Index("ix_exports_project_episode_created", "project_id", "episode_id", "created_at", "id"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -172,14 +181,20 @@ class Export(Base):
     episode_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("episodes.id", ondelete="SET NULL"), nullable=True
     )
+    # Frozen edit-session snapshot this export binds; composite FK keeps the
+    # session in the same project.
+    edit_session_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    timeline_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    timeline_hash: Mapped[str | None] = mapped_column(HASH_64, nullable=True)
+    render_node_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("node_runs.id", ondelete="RESTRICT"), nullable=True
+    )
     format: Mapped[str] = mapped_column(String(40), nullable=False, default="timeline_json")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     requested_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
-    manifest: Mapped[dict[str, object]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=dict
-    )
+    manifest: Mapped[dict[str, object]] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
     result_artifact_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("artifacts.id", ondelete="RESTRICT"), nullable=True
     )

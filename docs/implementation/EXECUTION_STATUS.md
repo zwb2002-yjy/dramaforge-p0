@@ -2492,3 +2492,26 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
   `mypy app` 404 文件通过；`generated.ts` 已重生（410 schema）。
 - I9-01（剪辑数据/服务/HTTP 面）至此收口；**下一步进入 I9-02**：渲染快照与导出绑定
   （固定版本/hash、原回执优先、MP4/SRT 可解码、逐集交付）。
+
+### I9-02a 已实施：导出冻结快照与回执优先（2026-11-19，EV159）
+
+- **迁移 `20261119_0122`**：`exports` 新增 `edit_session_id` / `timeline_version` / `timeline_hash` /
+  `render_node_run_id`；复合外键 `(edit_session_id, project_id) → edit_sessions(id, project_id)`
+  （`ON DELETE RESTRICT`，复用 0121 的候选键，导出不可能指向别的项目的会话）、
+  `render_node_run_id → node_runs`；索引 `(edit_session_id, timeline_version)`、
+  `(render_node_run_id)`、`(project_id, episode_id, created_at, id)`。
+- **`app/delivery/export_service.py`**：`create_session_export` 冻结会话当前 `version` 与该文档
+  canonical JSON 的 sha256，并按 clip 逐条写 `ExportItem`（schema 2 取
+  `selection_snapshot.artifact_id`，schema 1 取 `artifact_id`）；`episode_id` 随会话作用域。
+  同一 `idempotency_key` 重放**返回原导出且不重绑**——编辑后再用同 key 仍指旧版本，新 key 才记录
+  新版本（“原回执优先”）。
+- **fail-closed**：`mp4`/`srt` 直接 `EXPORT_RENDER_REQUIRED`（没有渲染 run 就不排队，也不隐藏生成），
+  未知格式 `EXPORT_FORMAT_UNSUPPORTED`，clip 无冻结 artifact 时 `EXPORT_CLIP_UNBOUND`。
+- **HTTP**：`POST /projects/{p}/edit-sessions/{id}/exports`（新建 201 / 重放 200）。
+- 证据：`test_export_snapshot.py` **4 passed**、导出+编辑 API **14 passed**；ruff 通过、
+  `mypy app` 405 文件通过；隔离 PG `editor_0122`：upgrade head → `alembic check` 无漂移 →
+  `downgrade 0121` → `upgrade head` 全部成功（随后删库并 `compose down`）；
+  `generated.ts` 重生（**412 schema**，`api:check`/`api:authority` 通过）。
+- **下一步（I9-02 剩余）**：真实渲染——render NodeRun 冻结 `edit_session_id/timeline_version/
+  timeline_hash/来源与资格`，产出 MP4 与 SRT 并校验可解码，Export 只绑定该不可变渲染快照；
+  逐集交付下载。渲染属生成动作，需按合同取得 Owner 授权。
