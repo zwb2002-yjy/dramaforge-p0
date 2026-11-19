@@ -1680,3 +1680,20 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
   定向组64 passed；ruff/mypy 398文件通过。
 
 未完成且不冒称：Worker asset快照端到端完成（可见性fixture）、资产batch与媒体安全合同。
+
+## I8a-03i 资产run经原Worker端到端完成（2026-11-19，EV109）
+
+资产媒体生产的核心链路闭环：预览→命令入队→原Worker执行→Artifact候选。
+
+- fixture补齐`ProviderModelAvailability`（visible）与`ProviderAvailabilityEvidence`（listed_model_ids），
+  使asset run通过create admission的可见性证据检查。
+- 新增e2e测试（fake `ProviderRuntime`/`ImageCompiler`，monkeypatch
+  `ProviderRuntimeResolver.resolve_runtime_for_identity`）：`submit_asset_execution`入队后
+  `execute_media_node_run`完成run、写入`result_artifact_id`，且Worker确实按冻结identity解析runtime。
+- 未新增Runtime/GenerationTask；Provider提交仍走原`prepare_media_submission`的编译、准入与回执。
+
+已测（定向）：
+- `test_asset_commands.py` 4 passed（新增端到端完成）；`test_asset_plan.py` 4 passed；
+  `test_workbench_execution.py`全通过；定向组108 passed；ruff/mypy 398文件通过。
+
+未完成且不冒称：资产batch stage（asset_image/video/voice）与媒体安全合同扩展；I8a阶段整体收口。

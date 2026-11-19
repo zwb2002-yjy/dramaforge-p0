@@ -96,14 +96,46 @@ async def world(session: AsyncSession):
     await session.flush()
     from app.providers.models import ProviderConnectionRevision
 
+    revision = ProviderConnectionRevision(
+        connection_id=connection.id,
+        revision_no=1,
+        provider_type="agnes",
+        protocol_profile="agnes_cn_v1",
+        base_url="https://api.agnes-ai.cn",
+        credential_revision_id=credential.id,
+    )
+    session.add(revision)
+    await session.flush()
+    from datetime import UTC, datetime
+
+    from app.providers.availability_models import (
+        ProviderAvailabilityEvidence,
+        ProviderModelAvailability,
+    )
+
+    evidence = ProviderAvailabilityEvidence(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        connection_revision_id=revision.id,
+        credential_revision_id=credential.id,
+        remote_model_id="asset-image",
+        verifier_kind="fixture",
+        status="visible",
+        listed_model_ids_json=["asset-image"],
+        checked_at=datetime.now(UTC),
+    )
+    session.add(evidence)
+    await session.flush()
     session.add(
-        ProviderConnectionRevision(
+        ProviderModelAvailability(
+            workspace_id=workspace.id,
             connection_id=connection.id,
-            revision_no=1,
-            provider_type="agnes",
-            protocol_profile="agnes_cn_v1",
-            base_url="https://api.agnes-ai.cn",
+            connection_revision_id=revision.id,
             credential_revision_id=credential.id,
+            remote_model_id="asset-image",
+            effective_status="visible",
+            positive_evidence_id=evidence.id,
+            latest_evidence_id=evidence.id,
         )
     )
     await session.flush()
@@ -306,3 +338,90 @@ async def test_list_asset_executions_reads_the_original_runs(session, world):
             asset_id=uuid4(),
         )
 
+
+
+async def test_asset_run_completes_through_the_worker(session, world, monkeypatch):
+    """The queued asset run completes via the same media worker with a fake runtime."""
+    from app.execution.models import NodeRun
+    from app.execution.product_path import execute_media_node_run
+    from app.providers.runtime import (
+        CompiledImageRequest,
+        ResolvedRuntime,
+        SubmissionResult,
+    )
+    from app.storage.minio_store import reset_object_store_for_tests
+
+    class FakeCompiler:
+        reference_transport = "bytes"
+
+        async def compile(self, intent, *args, **kwargs):
+            return CompiledImageRequest(
+                provider_type="agnes",
+                protocol_profile="agnes_cn_v1",
+                model_id="asset-image",
+                operation="image.generate",
+                wire_request={
+                    "model": "asset-image",
+                    "prompt": intent.prompt,
+                    "aspect_ratio": intent.aspect_ratio,
+                },
+                request_schema_version="1",
+            )
+
+    class FakeRuntime:
+        async def submit_image(self, request):
+            return SubmissionResult(
+                status="succeeded",
+                remote_task_id="asset-task-1",
+                artifact_bytes=b"\x89PNG\r\n\x1a\nasset",
+            )
+
+    captured: dict[str, object] = {}
+
+    async def fake_resolve(self, *, identity, workspace_id, operation=None, settings=None):
+        from app.providers.catalog_models import ModelCatalogEntry
+        from app.providers.models import ProviderConnection, ProviderModelBinding
+
+        captured["identity"] = identity
+        connection = await self._session.get(ProviderConnection, identity.connection_id)
+        binding = await self._session.get(
+            ProviderModelBinding, identity.provider_model_binding_id
+        )
+        entry = await self._session.get(ModelCatalogEntry, identity.catalog_entry_id)
+        return ResolvedRuntime(
+            runtime=FakeRuntime(),
+            image_compiler=FakeCompiler(),
+            video_compiler=None,
+            connection=connection,
+            binding=binding,
+            catalog_entry=entry,
+            model_id="asset-image",
+            invoke_model_value="asset-image",
+        )
+
+    monkeypatch.setattr(
+        "app.providers.runtime.ProviderRuntimeResolver.resolve_runtime_for_identity",
+        fake_resolve,
+    )
+    plan = await build_asset_image_plan(
+        session, project=world["project"], asset_id=world["asset"].id, body=_plan_body()
+    )
+    body = AssetExecutionBody(
+        **_plan_body().model_dump(), plan_fingerprint=plan.plan_fingerprint
+    )
+    receipt = await submit_asset_execution(
+        session,
+        actor=world["user"],
+        project_id=world["project"].id,
+        asset_id=world["asset"].id,
+        body=body,
+    )
+    result = await execute_media_node_run(
+        session, node_run_id=receipt.node_run_id, store=reset_object_store_for_tests()
+    )
+    await session.commit()
+    run = await session.get(NodeRun, receipt.node_run_id)
+    assert captured, "the worker must resolve the frozen runtime"
+    assert run.status == "completed", (run.status, run.error_code, run.error_summary)
+    assert run.result_artifact_id is not None
+    assert result is not None
