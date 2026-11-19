@@ -2337,3 +2337,10 @@ I8b-01f–03a 累积后在 quality 镜像重跑后端单元全量：**2717 passe
 
 未完成且不冒称：合成段（composite）、多镜头视频编排、I9 剪辑与分集交付；
 获授权后的批量 create；Full Gate 的 `workbench-resource` 复测。
+
+### 提前跑 Full 的触发条件（2026-11-19，`df-quality-i8b-01`）
+
+I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p95 一项未通过，且当前宿主空闲——
+故提前跑一次完整 Full，用于在空闲宿主上复测该唯一未通过项并验证 EV143–EV149 累积后的整链
+（backend 单测+PG+迁移、frontend vitest+typecheck+E2E、媒体/网关/LiteLLM/机构真实栈）；结果未出前
+不宣布任何阶段 Full。
