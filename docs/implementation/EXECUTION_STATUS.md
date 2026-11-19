@@ -1802,3 +1802,15 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
   generated.ts 401 schema、api:authority通过。
 
 未完成且不冒称：分段后的voice_concat执行计划与批量受理（D5完整拼接）、视频run端到端、prepare逐命令授权、I8a收口。
+
+## I8a-03q 资产batch支持语音项（2026-11-19，EV117）
+
+- `AssetBatchItem`改为判别联合`AssetImageBatchItem|AssetVoiceBatchItem`（按item.stage），预览按类型调用
+  `build_asset_image_plan`/`build_asset_voice_plan`，派发按类型调用`submit_asset_execution`/
+  `submit_asset_voice_execution`；单批可混合image/voice，逐项原回执与拒绝原因不变。
+
+已测（定向）：
+- `test_asset_commands.py` 9 passed（新增混合image+voice batch：预览2 ready、派发2 receipt、
+  两个run的node_key分别为image/voice）；定向组75 passed；generated.ts 402 schema、api:authority通过。
+
+未完成且不冒称：voice_concat执行计划（分段→本地拼接）、视频run端到端、prepare逐命令授权、I8a收口。

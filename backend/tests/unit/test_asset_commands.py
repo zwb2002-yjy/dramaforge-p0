@@ -546,8 +546,8 @@ async def test_asset_batch_previews_and_dispatches_each_item(session, world):
     from app.execution.models import NodeRun
     from app.production.asset_batch import (
         AssetBatchDispatchBody,
-        AssetBatchItem,
         AssetBatchPreviewBody,
+        AssetImageBatchItem,
         dispatch_asset_batch,
         preview_asset_batch,
     )
@@ -556,10 +556,10 @@ async def test_asset_batch_previews_and_dispatches_each_item(session, world):
     preview_body = AssetBatchPreviewBody(
         stage="asset_image",
         items=[
-            AssetBatchItem(
+            AssetImageBatchItem(
                 item_id="a", asset_id=world["asset"].id, request=plan_body
             ),
-            AssetBatchItem(
+            AssetImageBatchItem(
                 item_id="b", asset_id=world["asset"].id, request=plan_body
             ),
         ],
@@ -752,3 +752,51 @@ async def test_voice_command_rejects_segmented_text(session, world):
             body=body,
         )
     assert segmented.value.details["code"] == "ASSET_VOICE_SEGMENTED_BATCH_REQUIRED"
+
+
+async def test_asset_batch_accepts_mixed_image_and_voice_items(session, world):
+    from app.production.asset_batch import (
+        AssetBatchDispatchBody,
+        AssetBatchPreviewBody,
+        AssetImageBatchItem,
+        AssetVoiceBatchItem,
+        dispatch_asset_batch,
+        preview_asset_batch,
+    )
+    from app.production.asset_plan import AssetVoicePlanBody
+
+    preview_body = AssetBatchPreviewBody(
+        stage="asset_image",
+        items=[
+            AssetImageBatchItem(
+                item_id="img", asset_id=world["asset"].id, request=_plan_body()
+            ),
+            AssetVoiceBatchItem(
+                item_id="voice",
+                asset_id=world["audio"].id,
+                request=AssetVoicePlanBody(expected_asset_version=1, text="短句。"),
+            ),
+        ],
+    )
+    preview = await preview_asset_batch(
+        session, project=world["project"], body=preview_body
+    )
+    assert preview.ready_count == 2 and preview.blocked_count == 0
+    dispatch_body = AssetBatchDispatchBody(
+        **preview_body.model_dump(),
+        batch_fingerprint=preview.batch_fingerprint,
+        request_key="batch:mixed",
+        max_provider_operations=2,
+    )
+    result = await dispatch_asset_batch(
+        session, project=world["project"], actor=world["user"], body=dispatch_body
+    )
+    assert len(result.accepted) == 2 and not result.rejected
+    from app.execution.models import NodeRun
+
+    runs = (
+        await session.execute(
+            select(NodeRun).where(NodeRun.project_id == world["project"].id)
+        )
+    ).scalars().all()
+    assert {run.input_snapshot.get("node_key") for run in runs} == {"image", "voice"}

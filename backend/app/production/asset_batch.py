@@ -8,7 +8,7 @@ failure reports the real per-item outcome instead of retrying unknown items.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -16,18 +16,44 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
 from app.contracts.production_commands import ExecutionReceipt
-from app.production.asset_commands import submit_asset_execution
-from app.production.asset_plan import AssetExecutionBody, AssetImagePlanBody, build_asset_image_plan
+from app.production.asset_commands import (
+    AssetVoiceExecutionBody,
+    submit_asset_execution,
+    submit_asset_voice_execution,
+)
+from app.production.asset_plan import (
+    AssetExecutionBody,
+    AssetImagePlanBody,
+    AssetVoicePlanBody,
+    build_asset_image_plan,
+    build_asset_voice_plan,
+)
 from app.production.execution_plan import fingerprint_plan
 from app.shared.errors import AppError, ConflictError, ValidationAppError
 
 
-class AssetBatchItem(BaseModel):
+class AssetImageBatchItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     item_id: str = Field(min_length=1, max_length=80)
+    stage: Literal["asset_image"] = "asset_image"
     asset_id: UUID
     request: AssetImagePlanBody
+
+
+class AssetVoiceBatchItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: str = Field(min_length=1, max_length=80)
+    stage: Literal["asset_voice"] = "asset_voice"
+    asset_id: UUID
+    request: AssetVoicePlanBody
+
+
+AssetBatchItem = Annotated[
+    AssetImageBatchItem | AssetVoiceBatchItem,
+    Field(discriminator="stage"),
+]
 
 
 class AssetBatchPreviewBody(BaseModel):
@@ -80,9 +106,20 @@ async def preview_asset_batch(
     items: list[AssetBatchPreviewItem] = []
     for item in body.items:
         try:
-            plan = await build_asset_image_plan(
-                session, project=project, asset_id=item.asset_id, body=item.request
-            )
+            if isinstance(item, AssetVoiceBatchItem):
+                voice_plan = await build_asset_voice_plan(
+                    session, project=project, asset_id=item.asset_id, body=item.request
+                )
+                plan_fingerprint = voice_plan.plan_fingerprint
+                binding_id = voice_plan.binding_id
+                model_id = voice_plan.model_id
+            else:
+                image_plan = await build_asset_image_plan(
+                    session, project=project, asset_id=item.asset_id, body=item.request
+                )
+                plan_fingerprint = image_plan.plan_fingerprint
+                binding_id = image_plan.binding_id
+                model_id = image_plan.model_id
         except AppError as error:
             items.append(
                 AssetBatchPreviewItem(
@@ -98,9 +135,9 @@ async def preview_asset_batch(
                 item_id=item.item_id,
                 asset_id=item.asset_id,
                 status="ready",
-                plan_fingerprint=plan.plan_fingerprint,
-                binding_id=plan.binding_id,
-                model_id=plan.model_id,
+                plan_fingerprint=plan_fingerprint,
+                binding_id=binding_id,
+                model_id=model_id,
             )
         )
     ready = [item for item in items if item.status == "ready"]
@@ -115,7 +152,6 @@ async def preview_asset_batch(
         max_provider_operations=len(ready),
         items=items,
     )
-
 
 async def dispatch_asset_batch(
     session: AsyncSession,
@@ -156,19 +192,33 @@ async def dispatch_asset_batch(
                 }
             )
             continue
-        command = AssetExecutionBody(
-            **item.request.model_dump(),
-            plan_fingerprint=preview_item.plan_fingerprint,
-        )
         try:
-            receipt = await submit_asset_execution(
-                session,
-                actor=actor,
-                project_id=project.id,
-                asset_id=item.asset_id,
-                body=command,
-                idempotency_key=f"{body.request_key}:{item.item_id}",
-            )
+            if isinstance(item, AssetVoiceBatchItem):
+                voice_command = AssetVoiceExecutionBody(
+                    **item.request.model_dump(),
+                    plan_fingerprint=preview_item.plan_fingerprint,
+                )
+                receipt = await submit_asset_voice_execution(
+                    session,
+                    actor=actor,
+                    project_id=project.id,
+                    asset_id=item.asset_id,
+                    body=voice_command,
+                    idempotency_key=f"{body.request_key}:{item.item_id}",
+                )
+            else:
+                command = AssetExecutionBody(
+                    **item.request.model_dump(),
+                    plan_fingerprint=preview_item.plan_fingerprint,
+                )
+                receipt = await submit_asset_execution(
+                    session,
+                    actor=actor,
+                    project_id=project.id,
+                    asset_id=item.asset_id,
+                    body=command,
+                    idempotency_key=f"{body.request_key}:{item.item_id}",
+                )
         except AppError as error:
             rejected.append({"item_id": item.item_id, "reason_code": _error_code(error)})
             continue

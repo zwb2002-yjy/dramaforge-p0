@@ -4243,24 +4243,13 @@ export interface components {
              */
             stage: "asset_image";
             /** Items */
-            items: components["schemas"]["AssetBatchItem"][];
+            items: (components["schemas"]["AssetImageBatchItem"] | components["schemas"]["AssetVoiceBatchItem"])[];
             /** Batch Fingerprint */
             batch_fingerprint: string;
             /** Request Key */
             request_key: string;
             /** Max Provider Operations */
             max_provider_operations: number;
-        };
-        /** AssetBatchItem */
-        AssetBatchItem: {
-            /** Item Id */
-            item_id: string;
-            /**
-             * Asset Id
-             * Format: uuid
-             */
-            asset_id: string;
-            request: components["schemas"]["AssetImagePlanBody"];
         };
         /** AssetBatchPreviewBody */
         AssetBatchPreviewBody: {
@@ -4270,7 +4259,7 @@ export interface components {
              */
             stage: "asset_image";
             /** Items */
-            items: components["schemas"]["AssetBatchItem"][];
+            items: (components["schemas"]["AssetImageBatchItem"] | components["schemas"]["AssetVoiceBatchItem"])[];
         };
         /** AssetBatchPreviewItem */
         AssetBatchPreviewItem: {
@@ -4555,6 +4544,22 @@ export interface components {
              */
             reference_role: string;
             public_display?: components["schemas"]["PublicDisplayBody"] | null;
+        };
+        /** AssetImageBatchItem */
+        AssetImageBatchItem: {
+            /** Item Id */
+            item_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            stage: "asset_image";
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            request: components["schemas"]["AssetImagePlanBody"];
         };
         /** AssetImageExecutionInput */
         AssetImageExecutionInput: {
@@ -4899,6 +4904,22 @@ export interface components {
             max_provider_operations: number;
             /** Notices */
             notices?: string[];
+        };
+        /** AssetVoiceBatchItem */
+        AssetVoiceBatchItem: {
+            /** Item Id */
+            item_id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            stage: "asset_voice";
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            request: components["schemas"]["AssetVoicePlanBody"];
         };
         /**
          * AssetVoiceExecutionBody
