@@ -2619,6 +2619,24 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 定向证据。**唯一未完成的阶段出口条件仍是 Full**（需空闲宿主）。下一步转入 **I10-01**：目标机
 安装/重启/备份恢复的隔离验证准备；真实作品与正式发布仍待 Owner 授权。
 
+### I10-01a 已实施：备份清单 v2 合同（2026-11-19，EV169）
+
+- 新增 `app/maintenance/backup_manifest.py`（`bundle_schema_version=2`），按
+  [DEPLOYMENT](../DEPLOYMENT.md) 的 v2 合同先固定“恢复点包含什么”：
+  - 数据库成员：主库/检查点/Proxy，按**真实身份**(server, database, schema)去重；同一身份出现
+    不同 alembic head 即 `BACKUP_DB_IDENTITY_CONFLICT`（不挑一个用）。
+  - 对象桶（purpose + endpoint + bucket）、部署镜像与 schema 版本、未决操作摘要、
+    逐对象 `size` + `sha256`。
+- **敏感值不落明文**：身份串内嵌凭据（`://user:pass@`）或超长一律拒绝；manifest 任意层级出现
+  `password/secret/token/salt/fernet/byok/credential/...` 键即拒。
+- **遗漏即失败**：空库/空桶、缺 hash、负 size 当场拒绝；`verify_manifest` 对非 v2
+  （`BACKUP_SCHEMA_UNSUPPORTED`）、对象落在未声明桶（`BACKUP_BUCKET_UNDECLARED`）、
+  缺对象/尺寸不符/hash 不符分别给出明确错误码，不跳过。
+- `manifest_hash` 只覆盖内容（排除 `created_at` 与自身），同一恢复点复制或复核时 hash 稳定。
+- 证据：`test_backup_manifest.py` **6 passed**；`ruff check app tests` 通过、`mypy app` 410 文件通过。
+- **下一步（I10-01 剩余）**：restic 快照运行、PG 一致快照与 MinIO 清单的同一静止窗口、
+  恢复目标多资源映射（`--target-config`）与恢复后验证（Alembic/角色/RLS/对象 hash/未决远端ID）。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
