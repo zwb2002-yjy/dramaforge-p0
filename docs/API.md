@@ -1294,7 +1294,11 @@ I5-02e已实施Provider下载token公共身份（迁移0118）：`artifact_refer
 publication_id/publication_item_id/public_asset_link_id/owner_user_id（四列同空或同非空+三个组合FK）；
 `issue_artifact_reference`可携带完整公共身份并校验链接/发布/成员/artifact一致；`app.artifact_reference_for_token`
 改为返回公共身份并在取字节前实时校验publication available、link未detach、源版本formal，失效统一404。
-**尚未实施**：公共引用的Production编译接线（`source:"public"`已进引用绑定与解析，编译器仍按私有Artifact路径消费解析结果）。
+I5-02f已实施Production编译接线：`ShotReferenceIntent`新增`source/publication_id/publication_item_id/
+public_asset_link_id`；`_hydrate_and_validate_references`对`resolution_mode=public_link`的绑定实时校验
+链接/发布/源版本/成员并冻结源项目真实Artifact与公共身份（不按当前项目私有查询）；runtime在
+`public_url`传输下把公共身份传给`issue_artifact_reference`，token记录六列公共身份；失效引用在计划编译
+阶段即409/`REFERENCE_NOT_RESOLVED`，不进入Provider请求。
 
 公共内容读取使用同一窄授权端口的两种受限输入：owner_preview（当前owner+固定publication/item），
 project_use（当前消费project/link/item/purpose）。owner_preview只允许可发现且可用于library_reference的安全媒体，

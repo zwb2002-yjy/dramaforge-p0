@@ -14,6 +14,10 @@ class ShotReferenceIntent(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     binding_id: UUID | None = None
+    source: str = Field(default="private", max_length=16)
+    publication_id: UUID | None = None
+    publication_item_id: UUID | None = None
+    public_asset_link_id: UUID | None = None
     purpose: str = Field(min_length=1, max_length=80)
     asset_version_id: UUID | None = None
     artifact_id: UUID | None = None

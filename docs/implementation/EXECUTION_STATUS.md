@@ -1296,3 +1296,22 @@ I5阶段Full待阶段终点。
 
 未完成且不冒称：公共引用的Production编译接线（`source:"public"`已进绑定/解析/token，但Production计划编译
 仍只消费私有Artifact解析结果）；I5按此边界暂不宣布阶段退出，下一片完成编译接线后复跑Full再判定。
+
+## I5-02f Production公共引用编译接线（2026-11-19，EV93）
+
+把公共引用真正送进生产计划：编译阶段冻结源项目真实Artifact与公共身份，runtime签发带公共身份的token。
+
+已实施：
+- `ShotReferenceIntent`新增`source`与`publication_id/publication_item_id/public_asset_link_id`。
+- `_hydrate_and_validate_references`对`resolution_mode=public_link`绑定实时校验链接未detach、publication
+  available、源版本formal、item归属，加载源项目真实Artifact并冻结公共身份（不走当前项目私有查询）。
+- `resolve_reference_for_runtime`/`issue_artifact_reference`在`public_url`传输下传递公共身份，token记录
+  六列身份；`issue_artifact_reference`可从链接派生owner，避免runtime额外查询。
+- 失效公共引用在计划编译阶段即`REFERENCE_NOT_RESOLVED`，不进入Provider请求。
+
+已测（定向，`tmp/run-targeted.ps1 -Stage BackendTests`，等价stock targeted路径）：
+- 受影响组 **15 passed**：`test_public_reference_binding.py`（含hydration冻结源Artifact与公共身份断言）、
+  `test_public_assets.py`、`test_shot_reference_binding.py`、`test_provider_references.py`。
+- ruff/mypy 395文件通过。
+
+未完成且不冒称：I5阶段终点Full待跑（本片收口后一次未过滤Full）；通过后才宣布I5退出。

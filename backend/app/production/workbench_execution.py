@@ -591,18 +591,6 @@ class WorkbenchExecutionService:
         hydrated: list[ShotReferenceIntent] = []
         expected_stage = "image" if stage == "image_keyframe" else "video"
         for reference in references:
-            if reference.artifact_id is None:
-                raise WorkbenchExecutionError(
-                    "reference is missing a concrete artifact_id",
-                    details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
-                )
-            artifact = artifacts.get(reference.artifact_id)
-            if artifact is None:
-                raise WorkbenchExecutionError(
-                    "reference artifact does not belong to the current project",
-                    details={"code": "REFERENCE_PROJECT_MISMATCH"},
-                )
-
             binding: ShotReferenceBinding | None = None
             if reference.binding_id is not None:
                 binding = bindings.get(reference.binding_id)
@@ -621,13 +609,94 @@ class WorkbenchExecutionService:
                         "reference binding is not enabled for this execution stage",
                         details={"code": "REFERENCE_STAGE_MISMATCH"},
                     )
-                if binding.asset_id is not None:
-                    asset = await self._session.get(Asset, binding.asset_id, populate_existing=True)
-                    if asset is None or asset.status == "recycled":
-                        raise WorkbenchExecutionError(
-                            "reference asset is unavailable",
-                            details={"code": "REFERENCE_NOT_RESOLVED"},
-                        )
+            if binding is not None and binding.public_asset_link_id is not None:
+                from app.assets.public_asset_models import (
+                    ProjectPublicAssetLink,
+                    PublicAssetPublication,
+                    PublicAssetPublicationItem,
+                )
+
+                link = await self._session.get(
+                    ProjectPublicAssetLink, binding.public_asset_link_id
+                )
+                item = (
+                    await self._session.get(
+                        PublicAssetPublicationItem, binding.publication_item_id
+                    )
+                    if binding.publication_item_id is not None
+                    else None
+                )
+                publication = (
+                    await self._session.get(PublicAssetPublication, link.publication_id)
+                    if link is not None
+                    else None
+                )
+                source_version = (
+                    await self._session.get(
+                        AssetVersion, publication.source_asset_version_id
+                    )
+                    if publication is not None
+                    else None
+                )
+                if (
+                    link is None
+                    or item is None
+                    or publication is None
+                    or source_version is None
+                    or link.detached_at is not None
+                    or publication.status != "available"
+                    or publication.withdrawn_at is not None
+                    or source_version.status != "formal"
+                    or item.publication_id != publication.id
+                ):
+                    raise WorkbenchExecutionError(
+                        "public reference is not available",
+                        details={"code": "REFERENCE_NOT_RESOLVED"},
+                    )
+                public_artifact = await self._session.get(Artifact, item.artifact_id)
+                if (
+                    public_artifact is None
+                    or public_artifact.deleted_at is not None
+                    or public_artifact.storage_state not in {"available", "stored"}
+                ):
+                    raise WorkbenchExecutionError(
+                        "reference media is unavailable",
+                        details={"code": "REFERENCE_NOT_RESOLVED"},
+                    )
+                hydrated.append(
+                    reference.model_copy(
+                        update={
+                            "source": "public",
+                            "publication_id": publication.id,
+                            "publication_item_id": item.id,
+                            "public_asset_link_id": link.id,
+                            "artifact_id": public_artifact.id,
+                            "asset_version_id": None,
+                            "mime_type": public_artifact.mime_type or reference.mime_type,
+                            "fingerprint": public_artifact.content_hash,
+                        }
+                    )
+                )
+                continue
+            if reference.artifact_id is None:
+                raise WorkbenchExecutionError(
+                    "reference is missing a concrete artifact_id",
+                    details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
+                )
+            artifact = artifacts.get(reference.artifact_id)
+            if artifact is None:
+                raise WorkbenchExecutionError(
+                    "reference artifact does not belong to the current project",
+                    details={"code": "REFERENCE_PROJECT_MISMATCH"},
+                )
+
+            if binding is not None and binding.asset_id is not None:
+                asset = await self._session.get(Asset, binding.asset_id, populate_existing=True)
+                if asset is None or asset.status == "recycled":
+                    raise WorkbenchExecutionError(
+                        "reference asset is unavailable",
+                        details={"code": "REFERENCE_NOT_RESOLVED"},
+                    )
             if artifact.deleted_at is not None or artifact.storage_state not in {
                 "available",
                 "stored",

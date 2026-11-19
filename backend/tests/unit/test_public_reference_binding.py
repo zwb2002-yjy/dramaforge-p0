@@ -107,23 +107,84 @@ def _seed_public_link(client, factory) -> tuple[str, str, str, str, str]:
                 local_label="公共参考",
                 request_key="public-ref-link",
             )
+            from app.contracts.shot_reference import ShotReferenceIntent
+            from app.production.models import ShotReferenceBinding
+            from app.production.workbench_execution import WorkbenchExecutionService
+
+            binding = ShotReferenceBinding(
+                project_id=project_row.id,
+                shot_id=UUID(shot_id),
+                stage="image",
+                public_asset_link_id=link.id,
+                publication_item_id=published.items[0].id,
+                resolution_mode="public_link",
+                purpose="identity",
+                label="公共参考",
+                sort_order=0,
+                created_by=owner.id,
+            )
+            session.add(binding)
+            await session.flush()
+            hydrated = await WorkbenchExecutionService(
+                session, user_id=owner.id
+            )._hydrate_and_validate_references(
+                project=project_row,
+                shot_id=UUID(shot_id),
+                stage="image_keyframe",
+                references=[
+                    ShotReferenceIntent(
+                        binding_id=binding.id, purpose="identity", source="public"
+                    )
+                ],
+            )
             await session.commit()
             return (
                 str(published.id),
                 str(published.items[0].id),
                 str(link.id),
                 shot_id,
+                str(hydrated[0].artifact_id),
+                str(hydrated[0].publication_id),
+                str(hydrated[0].publication_item_id),
+                str(hydrated[0].public_asset_link_id),
             )
 
-    publication_id, item_id, link_id, shot = asyncio.run(seed())
-    return publication_id, item_id, link_id, shot, project
+    (
+        publication_id,
+        item_id,
+        link_id,
+        shot,
+        hydrated_artifact,
+        hydrated_publication,
+        hydrated_item,
+        hydrated_link,
+    ) = asyncio.run(seed())
+    return (
+        publication_id,
+        item_id,
+        link_id,
+        shot,
+        project,
+        hydrated_artifact,
+        hydrated_publication,
+        hydrated_item,
+        hydrated_link,
+    )
 
 
 def test_public_link_binding_resolves_and_rejects_detached(api):
     client, factory = api
-    publication_id, item_id, link_id, shot_id, project = _seed_public_link(
-        client, factory
-    )
+    (
+        publication_id,
+        item_id,
+        link_id,
+        shot_id,
+        project,
+        hydrated_artifact,
+        hydrated_publication,
+        hydrated_item,
+        hydrated_link,
+    ) = _seed_public_link(client, factory)
     base = f"/api/v1/projects/{project}/shots/{shot_id}/references"
     created = client.post(
         base,
@@ -150,6 +211,12 @@ def test_public_link_binding_resolves_and_rejects_detached(api):
     assert len(references) == 1
     assert references[0]["source"] == "public_link"
     assert references[0]["purpose"] == "identity"
+    # The Production plan hydration consumes the same binding and freezes the
+    # public identity + the real source-project artifact, not a private lookup.
+    assert hydrated_publication == publication_id
+    assert hydrated_item == item_id
+    assert hydrated_link == link_id
+    assert hydrated_artifact == references[0]["artifact_id"]
     ambiguous = client.post(
         base,
         json={

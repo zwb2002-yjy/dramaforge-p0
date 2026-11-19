@@ -82,6 +82,10 @@ async def _unified_resolved_reference(
     fingerprint: str | None,
     provider_type: str,
     reference_transport: str | None = None,
+    publication_id: UUID | None = None,
+    publication_item_id: UUID | None = None,
+    public_asset_link_id: UUID | None = None,
+    owner_user_id: UUID | None = None,
 ) -> ResolvedReference:
     """Resolve one artifact reference through the provider delivery layer."""
     from app.providers.reference_delivery import resolve_reference_for_runtime
@@ -97,6 +101,10 @@ async def _unified_resolved_reference(
         fingerprint=fingerprint,
         provider_type=provider_type,
         reference_transport=reference_transport,
+        publication_id=publication_id,
+        publication_item_id=publication_item_id,
+        public_asset_link_id=public_asset_link_id,
+        owner_user_id=owner_user_id,
     )
 
 
@@ -863,6 +871,9 @@ async def prepare_media_submission(
             fingerprint=str(getattr(reference, "fingerprint", None) or artifact.content_hash),
             provider_type=provider_type,
             reference_transport=reference_transport,
+            publication_id=getattr(reference, "publication_id", None),
+            publication_item_id=getattr(reference, "publication_item_id", None),
+            public_asset_link_id=getattr(reference, "public_asset_link_id", None),
         )
 
     if node_type == "keyframe":

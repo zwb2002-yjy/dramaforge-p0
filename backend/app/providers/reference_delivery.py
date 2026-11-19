@@ -216,6 +216,15 @@ async def issue_artifact_reference(
     token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
     expires_at = datetime.now(UTC) + timedelta(seconds=cfg.reference_token_ttl_seconds)
+    if public_asset_link_id is not None and owner_user_id is None:
+        from app.assets.public_asset_models import ProjectPublicAssetLink
+
+        link_owner = await session.scalar(
+            select(ProjectPublicAssetLink.owner_user_id).where(
+                ProjectPublicAssetLink.id == public_asset_link_id
+            )
+        )
+        owner_user_id = link_owner
     public_identity = (publication_id, publication_item_id, public_asset_link_id, owner_user_id)
     if any(value is not None for value in public_identity) and not all(
         value is not None for value in public_identity
@@ -312,6 +321,10 @@ async def resolve_reference_for_runtime(
     fingerprint: str | None,
     provider_type: str,
     reference_transport: str | None = None,
+    publication_id: UUID | None = None,
+    publication_item_id: UUID | None = None,
+    public_asset_link_id: UUID | None = None,
+    owner_user_id: UUID | None = None,
 ) -> ResolvedReference:
     """Build the runtime reference using the compiler's declared transport.
 
@@ -335,6 +348,10 @@ async def resolve_reference_for_runtime(
             artifact=artifact,
             workspace_id=project.workspace_id,
             created_by_run_id=run.id,
+            publication_id=publication_id,
+            publication_item_id=publication_item_id,
+            public_asset_link_id=public_asset_link_id,
+            owner_user_id=owner_user_id,
         )
         return ResolvedReference(
             role=role,
