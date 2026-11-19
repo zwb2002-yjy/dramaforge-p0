@@ -146,6 +146,58 @@ async def world(session: AsyncSession):
         updated_by=user.id,
     )
     session.add(profile)
+    voice_entry = ModelCatalogEntry(
+        provider_type="agnes",
+        protocol_profile="openai_speech_v1",
+        model_id="asset-voice",
+        model_revision="v1",
+        display_name="Asset Voice",
+        media_kind="voice",
+        capability_manifest_json={"manifest_version": "1", "media_kind": "voice"},
+        option_schema_json={
+            "voices": [{"id": "v1", "label": "Voice", "locale": "zh-CN"}],
+            "properties": {"voice_id": {}},
+        },
+        documented_at=date(2026, 8, 10),
+        contract_manifest_hash="d" * 64,
+    )
+    session.add(voice_entry)
+    await session.flush()
+    voice_binding = ProviderModelBinding(
+        workspace_id=workspace.id,
+        connection_id=connection.id,
+        media_type="voice",
+        model_id="asset-voice",
+        purpose="voice",
+        enabled=True,
+        catalog_entry_id=voice_entry.id,
+        capability_manifest_hash=voice_entry.contract_manifest_hash,
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(voice_binding)
+    await session.flush()
+    profile.voice_model_binding_id = voice_binding.id
+    profile.voice_options = {"voice_id": "v1"}
+    await session.flush()
+    audio = Asset(project_id=project.id, kind="audio", name="Narration", version=1)
+    session.add(audio)
+    await session.flush()
+    audio_version = AssetVersion(
+        project_id=project.id,
+        asset_id=audio.id,
+        version_number=1,
+        kind="audio",
+        name="Narration",
+        description="",
+        metadata_json={},
+        status="candidate",
+        created_by=user.id,
+    )
+    session.add(audio_version)
+    await session.flush()
+    audio.current_version_id = audio_version.id
+    await session.flush()
     asset = Asset(project_id=project.id, kind="character", name="Hero", version=1)
     session.add(asset)
     await session.flush()
@@ -168,7 +220,9 @@ async def world(session: AsyncSession):
         "user": user,
         "project": project,
         "asset": asset,
+        "audio": audio,
         "binding": binding,
+        "voice_binding": voice_binding,
         "version": version,
         "profile": profile,
     }
@@ -295,12 +349,15 @@ def test_plan_endpoint_requires_auth_and_an_owned_project(client) -> None:
     from app.shared.security import CSRF_HEADER
 
     body = {
-        "expected_asset_version": 1,
-        "operation": "image_generate",
-        "mode_id": "t2i_basic",
-        "requirements": {"schema_version": 1, "summary": "x"},
-        "parameters": {},
-        "output_count": 1,
+        "stage": "asset_image",
+        "request": {
+            "expected_asset_version": 1,
+            "operation": "image_generate",
+            "mode_id": "t2i_basic",
+            "requirements": {"schema_version": 1, "summary": "x"},
+            "parameters": {},
+            "output_count": 1,
+        },
     }
     anonymous = client.post(
         f"/api/v1/projects/{_uuid4()}/assets/{_uuid4()}/execution-plan", json=body
@@ -325,3 +382,42 @@ def test_plan_endpoint_requires_auth_and_an_owned_project(client) -> None:
         headers={CSRF_HEADER: csrf},
     )
     assert missing.status_code == 404
+
+
+async def test_voice_plan_uses_the_project_voice_binding(session, world):
+    from app.production.asset_plan import AssetVoicePlanBody, build_asset_voice_plan
+
+    body = AssetVoicePlanBody(expected_asset_version=1, text="古桥始建于明代。")
+    plan = await build_asset_voice_plan(
+        session, project=world["project"], asset_id=world["audio"].id, body=body
+    )
+    assert plan.stage == "asset_voice"
+    assert plan.target.kind == "asset"
+    assert plan.binding_id == world["voice_binding"].id
+    assert plan.model_id == "asset-voice"
+    assert plan.voice_options == {"voice_id": "v1"}
+    assert len(plan.plan_fingerprint) == 64
+
+
+async def test_voice_plan_rejects_wrong_kind_and_missing_binding(session, world):
+    from app.production.asset_plan import AssetVoicePlanBody, build_asset_voice_plan
+
+    with pytest.raises(ValidationAppError) as kind:
+        await build_asset_voice_plan(
+            session,
+            project=world["project"],
+            asset_id=world["asset"].id,
+            body=AssetVoicePlanBody(expected_asset_version=1, text="x"),
+        )
+    assert kind.value.details["code"] == "ASSET_VOICE_KIND"
+
+    world["profile"].voice_model_binding_id = None
+    await session.flush()
+    with pytest.raises(ValidationAppError) as missing:
+        await build_asset_voice_plan(
+            session,
+            project=world["project"],
+            asset_id=world["audio"].id,
+            body=AssetVoicePlanBody(expected_asset_version=1, text="x"),
+        )
+    assert missing.value.details["code"] == "VOICE_BINDING_MISSING"

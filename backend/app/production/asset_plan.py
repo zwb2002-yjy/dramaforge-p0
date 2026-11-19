@@ -360,6 +360,9 @@ def plan_payload_digest(plan: AssetExecutionPlanRead) -> str:
 
 __all__ = [
     "AssetCreativeRequirements",
+    "AssetVoicePlanBody",
+    "AssetVoicePlanRead",
+    "build_asset_voice_plan",
     "AssetExecutionPlanRead",
     "AssetImagePlanBody",
     "AssetImageReference",
@@ -368,3 +371,109 @@ __all__ = [
     "build_asset_image_plan",
     "plan_payload_digest",
 ]
+
+class AssetVoicePlanBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_asset_version: int = Field(ge=1)
+    text: str = Field(min_length=1, max_length=64000)
+    requested_binding_id: UUID | None = None
+    voice_options: dict[str, JsonValue] = Field(default_factory=dict)
+    voice_options_for_binding_id: UUID | None = None
+    source_context_refs: list[dict[str, JsonValue]] = Field(default_factory=list)
+
+
+class AssetVoicePlanRead(BaseModel):
+    target: AssetPlanTarget
+    stage: Literal["asset_voice"] = "asset_voice"
+    plan_fingerprint: str
+    binding_id: UUID | None = None
+    model_id: str | None = None
+    provider_type: str | None = None
+    capability: Literal["voice.generate"] = "voice.generate"
+    text: str
+    voice_options: dict[str, JsonValue] = Field(default_factory=dict)
+    notices: list[str] = Field(default_factory=list)
+
+
+async def build_asset_voice_plan(
+    session: AsyncSession,
+    *,
+    project: Project,
+    asset_id: UUID,
+    body: AssetVoicePlanBody,
+) -> AssetVoicePlanRead:
+    """Read-only asset voice plan: binding projection plus one frozen text request."""
+    from app.providers.voice_binding import resolve_voice_binding
+
+    asset = await session.scalar(
+        select(Asset).where(Asset.id == asset_id, Asset.project_id == project.id)
+    )
+    if asset is None:
+        raise NotFoundError("Asset not found")
+    if asset.version != body.expected_asset_version:
+        raise ConflictError(
+            "asset version changed; review the current plan",
+            details={"code": "ASSET_VERSION_CONFLICT", "current": asset.version},
+        )
+    if asset.kind != "audio":
+        raise ValidationAppError(
+            "voice plans require an audio asset",
+            details={"code": "ASSET_VOICE_KIND"},
+        )
+    binding = await resolve_voice_binding(session, project=project)
+    if body.requested_binding_id is not None and binding.binding_id != body.requested_binding_id:
+        raise ValidationAppError(
+            "single-command voice binding override is not wired yet",
+            details={"code": "ASSET_VOICE_BINDING_OVERRIDE_NOT_WIRED"},
+        )
+    if binding.status != "configured":
+        raise ValidationAppError(
+            "项目语音模型不可用；不会自动切换到其他引擎。",
+            details={"code": binding.reason_code or "VOICE_BINDING_MISSING"},
+        )
+    if (
+        body.voice_options_for_binding_id is not None
+        and body.voice_options_for_binding_id != binding.binding_id
+    ):
+        raise ValidationAppError(
+            "voice options belong to a different binding",
+            details={"code": "ASSET_VOICE_OPTIONS_BINDING_MISMATCH"},
+        )
+    options: dict[str, JsonValue] = (
+        dict(body.voice_options)
+        if body.voice_options
+        else {str(key): value for key, value in binding.voice_options.items()}  # type: ignore[misc]
+    )
+    voice_id = options.get("voice_id")
+    if not isinstance(voice_id, str) or not voice_id:
+        raise ValidationAppError(
+            "请选择该语音模型支持的音色后再预览。",
+            details={"code": "VOICE_SELECTION_REQUIRED"},
+        )
+    if binding.voices and voice_id not in binding.voices:
+        raise ValidationAppError(
+            "所选音色不属于该语音模型；请显式重新选择并保存。",
+            details={"code": "VOICE_UNKNOWN_FOR_BINDING"},
+        )
+    payload = {
+        "target": {
+            "kind": "asset",
+            "asset_id": str(asset.id),
+            "asset_version": asset.version,
+        },
+        "stage": "asset_voice",
+        "binding_id": str(binding.binding_id),
+        "text": body.text,
+        "voice_options": options,
+        "source_context_refs": body.source_context_refs,
+    }
+    return AssetVoicePlanRead(
+        target=AssetPlanTarget(asset_id=asset.id, asset_version=asset.version),
+        plan_fingerprint=fingerprint_plan(payload),
+        binding_id=binding.binding_id,
+        model_id=binding.model_id,
+        provider_type=binding.provider_type,
+        text=body.text,
+        voice_options=options,
+    )

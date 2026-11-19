@@ -1713,3 +1713,18 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
   generated.ts 386 schema、api:authority通过。
 
 未完成且不冒称：媒体安全合同扩展（图像/音频参考限制）、I8a阶段整体收口。
+
+## I8a-03k 资产语音计划与计划判别联合（2026-11-19，EV111）
+
+- `POST /assets/{a}/execution-plan`改为判别联合`{stage:"asset_image"|"asset_voice",request}`。
+- 新增`AssetVoicePlanBody`/`AssetVoicePlanRead`/`build_asset_voice_plan`：要求`Asset.kind=audio`、
+  项目语音binding configured、音色在binding目录内（否则`VOICE_SELECTION_REQUIRED`/
+  `VOICE_UNKNOWN_FOR_BINDING`）、`voice_options_for_binding_id`必须与binding一致；返回文本、音色选项、
+  binding/model身份与fingerprint；零写入/零调用。`requested_binding_id`覆盖显式未接线
+  （`ASSET_VOICE_BINDING_OVERRIDE_NOT_WIRED`）。
+
+已测（定向）：
+- `test_asset_plan.py` 6 passed（新增语音计划与kind/missing binding拒绝、HTTP union body）；
+  定向组68 passed；generated.ts 390 schema、api:authority/typecheck通过。
+
+未完成且不冒称：资产语音命令提交（voice run）、资产视频计划、媒体安全合同扩展、I8a收口。

@@ -32,10 +32,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Plan Asset Image
-         * @description Read-only asset image plan: zero Graph/NodeRun/Provider side effects.
+         * Plan Asset Media
+         * @description Read-only asset plan: zero Graph/NodeRun/Provider side effects.
          */
-        post: operations["plan_asset_image_api_v1_projects__project_id__assets__asset_id__execution_plan_post"];
+        post: operations["plan_asset_media_api_v1_projects__project_id__assets__asset_id__execution_plan_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4570,6 +4570,15 @@ export interface components {
              */
             output_count: number;
         };
+        /** AssetImagePlanInput */
+        AssetImagePlanInput: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            stage: "asset_image";
+            request: components["schemas"]["AssetImagePlanBody"];
+        };
         /** AssetImageReference */
         AssetImageReference: {
             /**
@@ -4750,6 +4759,66 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** AssetVoicePlanBody */
+        AssetVoicePlanBody: {
+            /** Expected Asset Version */
+            expected_asset_version: number;
+            /** Text */
+            text: string;
+            /** Requested Binding Id */
+            requested_binding_id?: string | null;
+            /** Voice Options */
+            voice_options?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Voice Options For Binding Id */
+            voice_options_for_binding_id?: string | null;
+            /** Source Context Refs */
+            source_context_refs?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+        };
+        /** AssetVoicePlanInput */
+        AssetVoicePlanInput: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            stage: "asset_voice";
+            request: components["schemas"]["AssetVoicePlanBody"];
+        };
+        /** AssetVoicePlanRead */
+        AssetVoicePlanRead: {
+            target: components["schemas"]["AssetPlanTarget"];
+            /**
+             * Stage
+             * @default asset_voice
+             * @constant
+             */
+            stage: "asset_voice";
+            /** Plan Fingerprint */
+            plan_fingerprint: string;
+            /** Binding Id */
+            binding_id?: string | null;
+            /** Model Id */
+            model_id?: string | null;
+            /** Provider Type */
+            provider_type?: string | null;
+            /**
+             * Capability
+             * @default voice.generate
+             * @constant
+             */
+            capability: "voice.generate";
+            /** Text */
+            text: string;
+            /** Voice Options */
+            voice_options?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Notices */
+            notices?: string[];
         };
         /** BatchPreviewItemRead */
         BatchPreviewItemRead: {
@@ -12293,7 +12362,7 @@ export interface operations {
             };
         };
     };
-    plan_asset_image_api_v1_projects__project_id__assets__asset_id__execution_plan_post: {
+    plan_asset_media_api_v1_projects__project_id__assets__asset_id__execution_plan_post: {
         parameters: {
             query?: {
                 workspace_id?: string | null;
@@ -12311,7 +12380,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AssetImagePlanBody"];
+                "application/json": components["schemas"]["AssetImagePlanInput"] | components["schemas"]["AssetVoicePlanInput"];
             };
         };
         responses: {
@@ -12321,7 +12390,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AssetExecutionPlanRead"];
+                    "application/json": components["schemas"]["AssetExecutionPlanRead"] | components["schemas"]["AssetVoicePlanRead"];
                 };
             };
             /** @description Validation Error */

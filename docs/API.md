@@ -1593,7 +1593,8 @@ details.request_accepted=false仅在确实未受理时返回；已受理请求�
 
 ## 独立资产媒体生产（D8补齐，未实施）
 
-I8a-03已实施（只读预览）：`POST /projects/{p}/assets/{a}/execution-plan`（image分支）返回
+I8a-03已实施（只读预览）：`POST /projects/{p}/assets/{a}/execution-plan`接收判别联合`{stage:"asset_image",request}`或
+`{stage:"asset_voice",request}`（I8a-03k新增语音分支：audio资产、项目语音binding、音色合同与文本），返回
 `{target{kind:asset,asset_id,asset_version},stage:asset_image,plan_fingerprint,binding_id,model_id,
 provider_type,capability,prompt,parameters,output_count,references,max_provider_operations,notices}`；
 零Graph/NodeRun/Provider写入，`expected_asset_version`不符409、无图片binding 422、参数不在模型

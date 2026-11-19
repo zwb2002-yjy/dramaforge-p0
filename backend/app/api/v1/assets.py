@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Response
@@ -36,11 +36,30 @@ from app.production.asset_plan import (
     AssetExecutionBody,
     AssetExecutionPlanRead,
     AssetImagePlanBody,
+    AssetVoicePlanBody,
+    AssetVoicePlanRead,
     build_asset_image_plan,
+    build_asset_voice_plan,
 )
 from app.shared.errors import ConflictError, NotFoundError
 
 router = APIRouter(tags=["assets"], dependencies=[Depends(require_selected_workspace)])
+
+
+class AssetImagePlanInput(BaseModel):
+    stage: Literal["asset_image"]
+    request: AssetImagePlanBody
+
+
+class AssetVoicePlanInput(BaseModel):
+    stage: Literal["asset_voice"]
+    request: AssetVoicePlanBody
+
+
+AssetPlanInput = Annotated[
+    AssetImagePlanInput | AssetVoicePlanInput,
+    Field(discriminator="stage"),
+]
 
 
 class AssetCreateBody(BaseModel):
@@ -206,21 +225,25 @@ async def create_project_asset(
 
 @router.post(
     "/projects/{project_id}/assets/{asset_id}/execution-plan",
-    response_model=AssetExecutionPlanRead,
+    response_model=AssetExecutionPlanRead | AssetVoicePlanRead,
 )
-async def plan_asset_image(
+async def plan_asset_media(
     project_id: UUID,
     asset_id: UUID,
-    body: AssetImagePlanBody,
+    body: AssetPlanInput,
     user: CurrentUser,
     session: SessionDep,
-) -> AssetExecutionPlanRead:
-    """Read-only asset image plan: zero Graph/NodeRun/Provider side effects."""
+) -> AssetExecutionPlanRead | AssetVoicePlanRead:
+    """Read-only asset plan: zero Graph/NodeRun/Provider side effects."""
     project = await ProjectService(session).get_project_for_owner(
         project_id=project_id, actor=user
     )
+    if isinstance(body, AssetVoicePlanInput):
+        return await build_asset_voice_plan(
+            session, project=project, asset_id=asset_id, body=body.request
+        )
     return await build_asset_image_plan(
-        session, project=project, asset_id=asset_id, body=body
+        session, project=project, asset_id=asset_id, body=body.request
     )
 
 
