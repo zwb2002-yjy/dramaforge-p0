@@ -302,3 +302,73 @@ export async function listModels(
   const query = capability ? `?capability=${encodeURIComponent(capability)}` : "";
   return apiGetList<ModelRead>(`/api/v1/models${query}`, workspaceId, signal);
 }
+
+export type MediaConfigRead = components["schemas"]["MediaConfigRead"];
+export type MediaConfigReviewRead = components["schemas"]["MediaConfigReviewRead"];
+export type ModelBindingOptionRead = components["schemas"]["ModelBindingOptionRead"];
+
+export function listWorkspaceModelBindings(
+  workspaceId: string,
+  mediaType?: string,
+): Promise<ModelBindingOptionRead[]> {
+  const suffix = mediaType ? `?media_type=${encodeURIComponent(mediaType)}` : "";
+  return apiGetList<ModelBindingOptionRead>(
+    `/api/v1/workspaces/${workspaceId}/model-bindings${suffix}`,
+  );
+}
+
+export function getMediaConfig(workspaceId: string, profileId: string): Promise<MediaConfigRead> {
+  return apiGet<MediaConfigRead>(
+    `/api/v1/workspaces/${workspaceId}/model-profiles/${profileId}/media-config`,
+  );
+}
+
+export async function putMediaConfig(
+  workspaceId: string,
+  profileId: string,
+  body: {
+    expected_version: number;
+    image_model_binding_id: string | null;
+    video_model_binding_id: string | null;
+    voice_model_binding_id: string | null;
+    voice_options: Record<string, unknown>;
+  },
+): Promise<MediaConfigRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<MediaConfigRead>(
+    "PUT",
+    `/api/v1/workspaces/${workspaceId}/model-profiles/${profileId}/media-config`,
+    body,
+    csrf,
+  );
+}
+
+export function reviewMediaConfig(
+  workspaceId: string,
+  profileId: string,
+): Promise<MediaConfigReviewRead> {
+  return apiGet<MediaConfigReviewRead>(
+    `/api/v1/workspaces/${workspaceId}/model-profiles/${profileId}/media-config/review`,
+  );
+}
+
+export async function reconcileMediaConfig(
+  workspaceId: string,
+  profileId: string,
+  body: {
+    expected_version: number;
+    review_fingerprint: string;
+    image_model_binding_id: string | null;
+    video_model_binding_id: string | null;
+    voice_model_binding_id: string | null;
+    voice_options: Record<string, unknown>;
+  },
+): Promise<MediaConfigRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<MediaConfigRead>(
+    "POST",
+    `/api/v1/workspaces/${workspaceId}/model-profiles/${profileId}/media-config/reconcile`,
+    body,
+    csrf,
+  );
+}

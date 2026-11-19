@@ -28,6 +28,15 @@ class MediaConfig:
     voice_options: dict[str, object]
 
 
+@dataclass(frozen=True)
+class MediaConfigReview:
+    """Legacy media configuration evidence for an explicit reconciliation."""
+
+    media_config_version: int
+    review_fingerprint: str
+    conflicts: list[dict[str, object]]
+
+
 class ModelSlotBinding(BaseModel):
     """One slot→model assignment inside a profile (spec §12).
 

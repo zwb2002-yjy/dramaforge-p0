@@ -191,6 +191,11 @@ export const queryKeys = {
       ["workspace-model-profile", workspaceId, profileId] as const,
     effectiveBindings: (projectId: string) => ["model-bindings-effective", projectId] as const,
     executionPreflight: (projectId: string) => ["execution-model-preflight", projectId] as const,
+    mediaConfig: (profileId: string | null) => ["model-media-config", profileId] as const,
+    mediaConfigReview: (profileId: string | null) =>
+      ["model-media-config-review", profileId] as const,
+    workspaceBindings: (workspaceId: string | null) =>
+      ["workspace-model-bindings", workspaceId] as const,
     generationOptionsRoot: (projectId: string) => ["model-generation-options", projectId] as const,
     generationOptions: (
       projectId: string,

@@ -27,6 +27,7 @@ from app.providers.model_profiles.errors import (
 )
 from app.providers.model_profiles.models import (
     MediaConfig,
+    MediaConfigReview,
     ModelProfileSnapshot,
     ModelSlotBinding,
     ResolvedModelBinding,
@@ -238,6 +239,119 @@ class ProductionModelProfileService:
     async def media_config(self, *, profile_id: UUID) -> MediaConfig:
         profile = await self.get(profile_id=profile_id)
         return self._media_config(profile)
+
+    @staticmethod
+    def _media_slots_in_bindings(bindings: dict[str, object]) -> list[dict[str, object]]:
+        conflicts: list[dict[str, object]] = []
+        for slot_value in sorted(bindings):
+            if slot_value.startswith(("visual.", "video.")):
+                raw = bindings.get(slot_value)
+                model_id = raw.get("model_id") if isinstance(raw, dict) else None
+                conflicts.append({"slot": slot_value, "model_id": model_id})
+        return conflicts
+
+    @staticmethod
+    def _legacy_review_fingerprint(profile: ProductionModelProfile) -> str:
+        import hashlib
+        import json
+
+        canonical = json.dumps(
+            {
+                "version": profile.version,
+                "media_config_version": profile.media_config_version,
+                "bindings": profile.bindings,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    async def media_config_review(self, *, profile_id: UUID) -> MediaConfigReview:
+        profile = await self.get(profile_id=profile_id)
+        return MediaConfigReview(
+            media_config_version=profile.media_config_version,
+            review_fingerprint=self._legacy_review_fingerprint(profile),
+            conflicts=self._media_slots_in_bindings(dict(profile.bindings)),
+        )
+
+    async def reconcile_media_config(
+        self,
+        *,
+        profile_id: UUID,
+        actor_id: UUID,
+        expected_version: int,
+        review_fingerprint: str,
+        image_model_binding_id: UUID | None = None,
+        video_model_binding_id: UUID | None = None,
+        voice_model_binding_id: UUID | None = None,
+        voice_options: dict[str, object] | None = None,
+    ) -> ProductionModelProfile:
+        """Explicitly reconcile a legacy (version 1) profile into D6 media columns."""
+        profile = await self._get_for_update(profile_id=profile_id)
+        if profile.version != expected_version:
+            raise profile_version_conflict(expected_version, profile.version)
+        if profile.media_config_version != 1:
+            raise ValidationAppError(
+                "this profile already uses the D6 media configuration",
+                details={"code": "MODEL_MEDIA_ALREADY_RECONCILED"},
+            )
+        if self._legacy_review_fingerprint(profile) != review_fingerprint:
+            raise ValidationAppError(
+                "legacy media configuration changed; review it again",
+                details={"code": "MODEL_MEDIA_REVIEW_CHANGED"},
+            )
+        if profile.project_id is None:
+            raise ValidationAppError(
+                "workspace-level profiles cannot carry media defaults",
+                details={"code": "MODEL_MEDIA_WORKSPACE_SCOPE"},
+            )
+        options = dict(voice_options or {})
+        if image_model_binding_id is not None:
+            await self._media_binding(
+                profile.workspace_id,
+                image_model_binding_id,
+                media_type="image",
+                purpose="keyframe",
+            )
+        if video_model_binding_id is not None:
+            await self._media_binding(
+                profile.workspace_id,
+                video_model_binding_id,
+                media_type="video",
+                purpose="video",
+            )
+        if voice_model_binding_id is not None:
+            await self._media_binding(
+                profile.workspace_id,
+                voice_model_binding_id,
+                media_type="voice",
+                purpose="voice",
+            )
+        if voice_model_binding_id is None and options:
+            raise ValidationAppError(
+                "voice options require a voice model binding",
+                details={"code": "MODEL_VOICE_OPTIONS_WITHOUT_BINDING"},
+            )
+        remaining = {
+            key: value
+            for key, value in dict(profile.bindings).items()
+            if not key.startswith(("visual.", "video."))
+        }
+        report = self.validate_bindings(parse_bindings(remaining))
+        report.raise_if_invalid()
+        profile.bindings = remaining
+        profile.image_model_binding_id = image_model_binding_id
+        profile.video_model_binding_id = video_model_binding_id
+        profile.voice_model_binding_id = voice_model_binding_id
+        profile.voice_options = options
+        profile.media_config_version = 2
+        profile.updated_by = actor_id
+        profile.version += 1
+        profile.updated_at = _now()
+        await self._session.flush()
+        return profile
 
     def _media_config(self, profile: ProductionModelProfile) -> MediaConfig:
         return MediaConfig(

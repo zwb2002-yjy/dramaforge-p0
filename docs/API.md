@@ -1211,7 +1211,13 @@ I8a-01a已实施D6项目媒体配置：`GET/PUT /workspaces/{w}/model-profiles/{
 video/video、voice/voice），否则422 `MODEL_MEDIA_BINDING_KIND|MODEL_MEDIA_BINDING_SCOPE`；
 workspace-level profile不得携带媒体默认（422 `MODEL_MEDIA_WORKSPACE_SCOPE`）；无voice binding时voice_options
 必须为空（422 `MODEL_VOICE_OPTIONS_WITHOUT_BINDING`）；version=1旧配置经同一命令显式核对后置2。
-**未实施**：前端媒体配置组件与旧配置review_fingerprint核对入口（后续切片）。
+I8a-01b已实施旧配置核对与前端媒体组件：`GET …/media-config/review`返回
+`{media_config_version,review_fingerprint,conflicts:[{slot,model_id}]}`；`POST …/media-config/reconcile`
+提交`{expected_version,review_fingerprint,三binding,voice_options}`，服务端重算指纹（版本+bindings）不符409
+`MODEL_MEDIA_REVIEW_CHANGED`、非version=1 422 `MODEL_MEDIA_ALREADY_RECONCILED`；通过后剥离旧`visual.*`/`video.*`
+绑定、校验剩余文本绑定并在同事务置version=2。新增`GET /workspaces/{w}/model-bindings`（按media_type/purpose
+过滤，供媒体默认选择器）。前端`MediaConfigSection`嵌入项目模型设置：三默认+语音选项JSON、旧配置警示与
+「核对并迁移」按钮、保存带expected_version。
 
 ### 采用与项目变体的唯一写入口
 

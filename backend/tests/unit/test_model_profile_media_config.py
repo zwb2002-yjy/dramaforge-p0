@@ -136,3 +136,43 @@ async def test_legacy_version_is_reconciled_by_an_explicit_update(session, world
     )
     assert updated.media_config_version == 2
     assert updated.image_model_binding_id == image_id
+
+
+async def test_legacy_review_and_explicit_reconcile(session, world, service):
+    profile = await _project_profile(service, world)
+    profile.media_config_version = 1
+    await session.flush()
+    review = await service.media_config_review(profile_id=profile.id)
+    assert review.media_config_version == 1
+    slots = {conflict["slot"] for conflict in review.conflicts}
+    assert "visual.keyframe" in slots
+    image_id = await _binding_id(session, purpose="keyframe")
+    with pytest.raises(ValidationAppError) as changed:
+        await service.reconcile_media_config(
+            profile_id=profile.id,
+            actor_id=world["user"].id,
+            expected_version=profile.version,
+            review_fingerprint="0" * 64,
+        )
+    assert changed.value.details["code"] == "MODEL_MEDIA_REVIEW_CHANGED"
+    original_version = profile.version
+    updated = await service.reconcile_media_config(
+        profile_id=profile.id,
+        actor_id=world["user"].id,
+        expected_version=original_version,
+        review_fingerprint=review.review_fingerprint,
+        image_model_binding_id=image_id,
+    )
+    assert updated.media_config_version == 2
+    assert updated.image_model_binding_id == image_id
+    assert not any(
+        str(slot).startswith(("visual.", "video.")) for slot in updated.bindings
+    )
+    with pytest.raises(ValidationAppError) as done:
+        await service.reconcile_media_config(
+            profile_id=profile.id,
+            actor_id=world["user"].id,
+            expected_version=updated.version,
+            review_fingerprint=review.review_fingerprint,
+        )
+    assert done.value.details["code"] == "MODEL_MEDIA_ALREADY_RECONCILED"

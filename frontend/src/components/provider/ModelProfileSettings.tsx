@@ -16,6 +16,7 @@ import {
   type ModelSlotRead,
 } from "../../features/model-controls/api";
 import { SIMPLE_MODE_SLOT_GROUPS, simpleModeToBindings, slotLabel } from "../../lib/modelProfile";
+import { MediaConfigSection } from "./MediaConfigSection";
 
 /**
  * Project "AI 制作模型方案" (model role configuration, spec §52/§127).
@@ -266,6 +267,11 @@ export function ModelProfileSettings({ projectId, workspaceId }: ModelProfileSet
         </div>
       )}
       {profileHasChanges && <p className="muted">当前跟随默认方案；保存后仅覆盖此项目。</p>}
+      <MediaConfigSection
+        workspaceId={workspaceId}
+        profileId={projectProfile.data?.id ?? null}
+        profileVersion={projectProfile.data?.version ?? null}
+      />
     </Card>
   );
 }

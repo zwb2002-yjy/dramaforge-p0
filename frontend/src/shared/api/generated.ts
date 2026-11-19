@@ -3232,6 +3232,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/model-profiles/{profile_id}/media-config/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Media Config */
+        get: operations["review_media_config_api_v1_workspaces__workspace_id__model_profiles__profile_id__media_config_review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/model-profiles/{profile_id}/media-config/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reconcile Media Config */
+        post: operations["reconcile_media_config_api_v1_workspaces__workspace_id__model_profiles__profile_id__media_config_reconcile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/model-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Workspace Model Bindings */
+        get: operations["list_workspace_model_bindings_api_v1_workspaces__workspace_id__model_bindings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/opencut-manifest": {
         parameters: {
             query?: never;
@@ -7299,6 +7350,34 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** MediaConfigReconcileWrite */
+        MediaConfigReconcileWrite: {
+            /** Expected Version */
+            expected_version: number;
+            /** Review Fingerprint */
+            review_fingerprint: string;
+            /** Image Model Binding Id */
+            image_model_binding_id?: string | null;
+            /** Video Model Binding Id */
+            video_model_binding_id?: string | null;
+            /** Voice Model Binding Id */
+            voice_model_binding_id?: string | null;
+            /** Voice Options */
+            voice_options?: {
+                [key: string]: unknown;
+            };
+        };
+        /** MediaConfigReviewRead */
+        MediaConfigReviewRead: {
+            /** Media Config Version */
+            media_config_version: number;
+            /** Review Fingerprint */
+            review_fingerprint: string;
+            /** Conflicts */
+            conflicts: {
+                [key: string]: unknown;
+            }[];
+        };
         /** MediaConfigWrite */
         MediaConfigWrite: {
             /** Expected Version */
@@ -7347,6 +7426,22 @@ export interface components {
              * Enabled
              * @default true
              */
+            enabled: boolean;
+        };
+        /** ModelBindingOptionRead */
+        ModelBindingOptionRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Media Type */
+            media_type: string;
+            /** Purpose */
+            purpose: string;
+            /** Model Id */
+            model_id: string;
+            /** Enabled */
             enabled: boolean;
         };
         /** ModelBindingRead */
@@ -20615,6 +20710,127 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MediaConfigRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_media_config_api_v1_workspaces__workspace_id__model_profiles__profile_id__media_config_review_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                profile_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaConfigReviewRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconcile_media_config_api_v1_workspaces__workspace_id__model_profiles__profile_id__media_config_reconcile_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+                profile_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MediaConfigReconcileWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaConfigRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workspace_model_bindings_api_v1_workspaces__workspace_id__model_bindings_get: {
+        parameters: {
+            query?: {
+                media_type?: string | null;
+                purpose?: string | null;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                workspace_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelBindingOptionRead"][];
                 };
             };
             /** @description Validation Error */

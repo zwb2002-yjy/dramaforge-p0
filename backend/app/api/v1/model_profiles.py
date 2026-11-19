@@ -15,6 +15,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import (
@@ -500,3 +501,121 @@ async def update_media_config(
     )
     await session.commit()
     return _media_config_read(service._media_config(updated))
+
+
+class MediaConfigReviewRead(BaseModel):
+    media_config_version: int
+    review_fingerprint: str
+    conflicts: list[dict[str, object]]
+
+
+class MediaConfigReconcileWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=1)
+    review_fingerprint: str = Field(min_length=64, max_length=64)
+    image_model_binding_id: UUID | None = None
+    video_model_binding_id: UUID | None = None
+    voice_model_binding_id: UUID | None = None
+    voice_options: dict[str, object] = Field(default_factory=dict)
+
+
+@router.get(
+    "/workspaces/{workspace_id}/model-profiles/{profile_id}/media-config/review",
+    response_model=MediaConfigReviewRead,
+    dependencies=[Depends(require_selected_workspace)],
+)
+async def review_media_config(
+    workspace_id: UUID,
+    profile_id: UUID,
+    workspace: SelectedWorkspace,
+    session: SessionDep,
+) -> MediaConfigReviewRead:
+    _assert_selected_workspace(workspace_id, workspace)
+    service = ProductionModelProfileService(session)
+    profile = await service.get(profile_id=profile_id)
+    _assert_workspace_profile(profile, workspace_id)
+    review = await service.media_config_review(profile_id=profile_id)
+    return MediaConfigReviewRead(
+        media_config_version=review.media_config_version,
+        review_fingerprint=review.review_fingerprint,
+        conflicts=review.conflicts,
+    )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/model-profiles/{profile_id}/media-config/reconcile",
+    response_model=MediaConfigRead,
+    dependencies=[Depends(require_selected_workspace)],
+)
+async def reconcile_media_config(
+    workspace_id: UUID,
+    profile_id: UUID,
+    body: MediaConfigReconcileWrite,
+    workspace: SelectedWorkspace,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> MediaConfigRead:
+    _assert_selected_workspace(workspace_id, workspace)
+    service = ProductionModelProfileService(session)
+    profile = await service.get(profile_id=profile_id)
+    _assert_workspace_profile(profile, workspace_id)
+    updated = await service.reconcile_media_config(
+        profile_id=profile_id,
+        actor_id=user.id,
+        expected_version=body.expected_version,
+        review_fingerprint=body.review_fingerprint,
+        image_model_binding_id=body.image_model_binding_id,
+        video_model_binding_id=body.video_model_binding_id,
+        voice_model_binding_id=body.voice_model_binding_id,
+        voice_options=dict(body.voice_options),
+    )
+    await session.commit()
+    return _media_config_read(service._media_config(updated))
+
+
+class ModelBindingOptionRead(BaseModel):
+    id: UUID
+    media_type: str
+    purpose: str
+    model_id: str
+    enabled: bool
+
+
+@router.get(
+    "/workspaces/{workspace_id}/model-bindings",
+    response_model=list[ModelBindingOptionRead],
+    dependencies=[Depends(require_selected_workspace)],
+)
+async def list_workspace_model_bindings(
+    workspace_id: UUID,
+    workspace: SelectedWorkspace,
+    session: SessionDep,
+    media_type: str | None = None,
+    purpose: str | None = None,
+) -> list[ModelBindingOptionRead]:
+    _assert_selected_workspace(workspace_id, workspace)
+    from app.providers.models import ProviderModelBinding
+
+    query = select(ProviderModelBinding).where(
+        ProviderModelBinding.workspace_id == workspace_id
+    )
+    if media_type:
+        query = query.where(ProviderModelBinding.media_type == media_type)
+    if purpose:
+        query = query.where(ProviderModelBinding.purpose == purpose)
+    rows = (
+        await session.scalars(
+            query.order_by(ProviderModelBinding.media_type, ProviderModelBinding.purpose)
+        )
+    ).all()
+    return [
+        ModelBindingOptionRead(
+            id=row.id,
+            media_type=row.media_type,
+            purpose=row.purpose,
+            model_id=row.model_id,
+            enabled=row.enabled,
+        )
+        for row in rows
+    ]

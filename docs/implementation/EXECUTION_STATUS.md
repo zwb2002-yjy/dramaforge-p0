@@ -1367,5 +1367,14 @@ I5按机制验收退出，允许进入I8a。
   workspace-level拒绝、voice_options无binding拒绝、旧version=1核对后置2。
 - 隔离库0119升级+`alembic check`无漂移、0118↔0119升降级往返；ruff/mypy 395文件通过。
 
-未完成且不冒称：前端媒体配置组件与旧配置review_fingerprint核对入口、API HTTP测试与generated.ts重生；
-I8a其余切片（语音Binding/Edge退出、媒体安全与逐命令授权）待续。
+### I8a-01b 旧配置核对与前端媒体组件（EV95）
+
+- 服务：`media_config_review`（version+bindings指纹、旧媒体槽冲突清单）、`reconcile_media_config`
+  （CAS+指纹核对+剥离媒体键+校验文本绑定+置version=2；非v1 422、指纹变化409）。
+- HTTP：`GET …/media-config/review`、`POST …/media-config/reconcile`、`GET /workspaces/{w}/model-bindings`。
+- 前端：`MediaConfigSection`（三默认+语音选项JSON+旧配置警示/迁移按钮+expected_version保存），
+  嵌入`ModelProfileSettings`；queryKeys新增mediaConfig/mediaConfigReview/workspaceBindings。
+- 已测：后端`test_model_profile_media_config.py` 4 passed（含review/reconcile）；前端
+  `MediaConfigSection.test.tsx` 2 passed；受影响组94后端+48前端passed；generated.ts 368 schema。
+
+未完成且不冒称：媒体配置API的独立HTTP测试、I8a-02（语音Binding/Edge退出）、I8a-03（媒体安全/逐命令授权）。
