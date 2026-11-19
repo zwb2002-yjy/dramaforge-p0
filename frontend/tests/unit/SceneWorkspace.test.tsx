@@ -973,12 +973,12 @@ it("keeps dialogue and voice drafts and guards shot switches without generating"
     }
     if (url.endsWith("/voice-options")) {
       return json({
-        engine: "edge-tts",
-        enabled: true,
         status: "configured",
+        binding_id: "binding-voice",
+        model_id: "voice-model",
+        provider_type: "agnes",
         default_voice: "catalog-a",
-        network: true,
-        service_notice: "联网神经配音·Edge（非官方服务，无SLA）；配置未验证。",
+        notice: "联网神经配音·Edge（非官方服务，无SLA）；配置未验证。",
         voices: [
           { id: "catalog-a", label: "目录声音甲", locale: "zh-CN" },
           { id: "catalog-b", label: "目录声音乙", locale: "zh-CN" },

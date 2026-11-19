@@ -2044,3 +2044,8 @@ I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖�
 4. I10：同候选集成、目标机安装/重启/备份恢复、三作品E2E、Full Gate与实际验收（真实操作按审批）。
 
 门状态：Docker Full Gate 未在会话内重跑（按门分级留待正式CI/I10同一候选）；本地运行库仍为`20261113_0099`，无部署、无付费Provider调用。
+
+## 全量前端回归与陈旧夹具修复（2026-11-19，EV132）
+
+全量`npx vitest run`首轮763 passed/1 failed：`SceneWorkspace.test.tsx`的`/voice-options` mock仍是EV98之前的旧响应形状，`fetchVoiceOptions`按新契约判为非法、音色选择被禁用。把该mock更新为`{status,binding_id,model_id,provider_type,default_voice,notice,voices}`后全量**764 passed**（162.46s）。
+结论：定向选择会漏掉跨切片的陈旧夹具，阶段内应周期性跑一次全量前端套件（本轮已做）；Docker Full Gate仍留待正式CI/I10候选。
