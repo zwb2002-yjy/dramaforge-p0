@@ -248,3 +248,49 @@ async def test_profile_version_drift_invalidates_pending_grant(context) -> None:
             actor=actor, project_id=project.id, authorization_id=grant_id
         )
     assert exc.value.details["code"] == "PRODUCTION_AUTHORIZATION_INVALID"
+
+
+async def test_asset_grant_target_is_exclusive_and_submission_is_not_wired(context) -> None:
+    """One grant names one target; asset submission lands with the asset command path."""
+    from app.assets.models import Asset
+    from app.shared.errors import ValidationAppError
+
+    session, actor, project, shot = context
+    asset = Asset(project_id=project.id, kind="character", name=f"Hero-{uuid4().hex[:6]}")
+    session.add(asset)
+    await session.flush()
+    grants = ProductionAuthorizations(session)
+    grant_id = await grants.approve_user_action(
+        actor=actor,
+        project_id=project.id,
+        asset_id=asset.id,
+        decision_id=uuid4(),
+        body=_body(),
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    stored = await session.scalar(
+        select(ProductionCommandAuthorization).where(
+            ProductionCommandAuthorization.id == grant_id
+        )
+    )
+    assert stored is not None
+    assert stored.asset_id == asset.id
+    assert stored.shot_id is None
+
+    with pytest.raises(ValidationAppError) as both:
+        await grants.approve_user_action(
+            actor=actor,
+            project_id=project.id,
+            shot_id=shot.id,
+            asset_id=asset.id,
+            decision_id=uuid4(),
+            body=_body(),
+            expires_at=datetime.now(UTC) + timedelta(minutes=10),
+        )
+    assert both.value.details["code"] == "COMMAND_TARGET_REQUIRED"
+
+    with pytest.raises(ValidationAppError) as submit:
+        await grants.submit(
+            actor=actor, project_id=project.id, authorization_id=grant_id
+        )
+    assert submit.value.details["code"] == "ASSET_COMMAND_NOT_WIRED"

@@ -1541,3 +1541,21 @@ FinalFilm prepare与逐命令授权。
 - 全量unit **2665 passed**（644.47s，`test_edge_tts.py`随引擎删除）；ruff/mypy 396文件通过。
 
 未完成且不冒称：FinalFilm prepare逐命令授权/预览零调用（I8a-03）、I8a-02收口Full。
+
+## I8a-03a 命令授权支持asset目标（2026-11-19，EV101）
+
+资产媒体生产复用同一条单命令授权/回执/Worker路径；先把授权的目标从只支持shot扩为shot|asset。
+
+已实施：
+- `production_command_authorizations`：`shot_id`改可空、新增`asset_id`（FK assets, CASCADE）、
+  单目标CHECK`ck_command_auth_target`与索引`ix_command_auth_asset`；迁移`20261119_0120`。
+- `ProductionAuthorizations.approve_user_action`新增`asset_id`互斥参数（缺省仍为shot，旧调用不变）；
+  目标必须同项目且存在；同一decision replay按目标+hash+expiry核对。
+- `submit`对asset授权显式返回`ASSET_COMMAND_NOT_WIRED`，直到资产命令路径接入；不为asset授权伪造shot身份。
+
+已测（定向）：
+- `test_v7_authorization_semantics.py` 5 passed（新增asset目标独占、双目标422、asset提交显式未接线）。
+- 定向组65 passed（authorization/proposal/architecture）；隔离PG：`alembic upgrade head`到0120、
+  `alembic check`无漂移、0120降级/再升级往返通过。
+
+未完成且不冒称：资产执行计划/命令提交、媒体安全合同与Graph asset scope（I8a-03剩余）。
