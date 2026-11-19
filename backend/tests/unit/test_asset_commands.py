@@ -236,3 +236,44 @@ async def test_asset_command_rejects_stale_version_and_key_reuse(session, world)
             body=body,
         )
     assert stale.value.details["code"] == "ASSET_VERSION_CONFLICT"
+
+
+async def test_list_asset_executions_reads_the_original_runs(session, world):
+    from app.production.asset_commands import list_asset_executions
+
+    plan = await build_asset_image_plan(
+        session, project=world["project"], asset_id=world["asset"].id, body=_plan_body()
+    )
+    body = AssetExecutionBody(
+        **_plan_body().model_dump(), plan_fingerprint=plan.plan_fingerprint
+    )
+    receipt = await submit_asset_execution(
+        session,
+        actor=world["user"],
+        project_id=world["project"].id,
+        asset_id=world["asset"].id,
+        body=body,
+    )
+    rows = await list_asset_executions(
+        session,
+        actor=world["user"],
+        project_id=world["project"].id,
+        asset_id=world["asset"].id,
+    )
+    assert [row.node_run_id for row in rows] == [receipt.node_run_id]
+    assert rows[0].status == "queued"
+    assert rows[0].plan_fingerprint == plan.plan_fingerprint
+    assert rows[0].graph_id == receipt.graph_id
+
+    other = Asset(project_id=world["project"].id, kind="character", name="Other")
+    session.add(other)
+    await session.flush()
+    from app.shared.errors import NotFoundError
+
+    with pytest.raises(NotFoundError):
+        await list_asset_executions(
+            session,
+            actor=world["user"],
+            project_id=world["project"].id,
+            asset_id=uuid4(),
+        )

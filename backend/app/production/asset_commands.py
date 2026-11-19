@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 from uuid import UUID
 
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -240,4 +242,59 @@ async def _graph_id(session: AsyncSession, run: NodeRun) -> UUID:
     return graph_id
 
 
-__all__ = ["ASSET_IMAGE_TEMPLATE_KEY", "submit_asset_execution"]
+__all__ = [
+    "ASSET_IMAGE_TEMPLATE_KEY",
+    "AssetExecutionRead",
+    "list_asset_executions",
+    "submit_asset_execution",
+]
+
+class AssetExecutionRead(BaseModel):
+    node_run_id: UUID
+    graph_id: UUID
+    graph_version_id: UUID
+    attempt_no: int
+    status: str
+    plan_fingerprint: str | None = None
+    created_at: datetime | None = None
+
+
+async def list_asset_executions(
+    session: AsyncSession,
+    *,
+    actor: User,
+    project_id: UUID,
+    asset_id: UUID,
+) -> list[AssetExecutionRead]:
+    """Read the asset's NodeRuns; never resolves a model or calls a Provider."""
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=actor
+    )
+    asset = await session.get(Asset, asset_id)
+    if asset is None or asset.project_id != project.id:
+        raise NotFoundError("Asset not found")
+    rows = (
+        await session.execute(
+            select(NodeRun, GraphVersion.graph_id)
+            .join(GraphVersion, GraphVersion.id == NodeRun.graph_version_id)
+            .join(ProductionGraph, ProductionGraph.id == GraphVersion.graph_id)
+            .where(
+                NodeRun.project_id == project.id,
+                ProductionGraph.scope_type == "asset",
+                ProductionGraph.scope_entity_id == asset.id,
+            )
+            .order_by(NodeRun.created_at.desc())
+        )
+    ).all()
+    return [
+        AssetExecutionRead(
+            node_run_id=run.id,
+            graph_id=graph_id,
+            graph_version_id=run.graph_version_id,
+            attempt_no=run.attempt_no,
+            status=run.status,
+            plan_fingerprint=(run.input_snapshot or {}).get("plan_fingerprint"),
+            created_at=run.created_at,
+        )
+        for run, graph_id in rows
+    ]

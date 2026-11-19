@@ -27,7 +27,11 @@ from app.assets.models import (
 from app.assets.tag_service import AssetTagService
 from app.assets.version_service import AssetVersionService
 from app.contracts.production_commands import ExecutionReceipt
-from app.production.asset_commands import submit_asset_execution
+from app.production.asset_commands import (
+    AssetExecutionRead,
+    list_asset_executions,
+    submit_asset_execution,
+)
 from app.production.asset_plan import (
     AssetExecutionBody,
     AssetExecutionPlanRead,
@@ -241,6 +245,22 @@ async def submit_asset_image_execution(
         asset_id=asset_id,
         body=body,
         idempotency_key=idempotency_key,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/assets/{asset_id}/executions",
+    response_model=list[AssetExecutionRead],
+)
+async def read_asset_executions(
+    project_id: UUID,
+    asset_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> list[AssetExecutionRead]:
+    """Read the original NodeRuns for this asset; no model resolution or Provider call."""
+    return await list_asset_executions(
+        session, actor=user, project_id=project_id, asset_id=asset_id
     )
 
 

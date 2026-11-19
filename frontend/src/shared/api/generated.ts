@@ -49,7 +49,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Read Asset Executions
+         * @description Read the original NodeRuns for this asset; no model resolution or Provider call.
+         */
+        get: operations["read_asset_executions_api_v1_projects__project_id__assets__asset_id__executions_get"];
         put?: never;
         /**
          * Submit Asset Image Execution
@@ -4398,6 +4402,32 @@ export interface components {
             max_provider_operations: number;
             /** Notices */
             notices?: string[];
+        };
+        /** AssetExecutionRead */
+        AssetExecutionRead: {
+            /**
+             * Node Run Id
+             * Format: uuid
+             */
+            node_run_id: string;
+            /**
+             * Graph Id
+             * Format: uuid
+             */
+            graph_id: string;
+            /**
+             * Graph Version Id
+             * Format: uuid
+             */
+            graph_version_id: string;
+            /** Attempt No */
+            attempt_no: number;
+            /** Status */
+            status: string;
+            /** Plan Fingerprint */
+            plan_fingerprint?: string | null;
+            /** Created At */
+            created_at?: string | null;
         };
         /** AssetFromArtifactBody */
         AssetFromArtifactBody: {
@@ -12212,6 +12242,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssetExecutionPlanRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_asset_executions_api_v1_projects__project_id__assets__asset_id__executions_get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                asset_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetExecutionRead"][];
                 };
             };
             /** @description Validation Error */

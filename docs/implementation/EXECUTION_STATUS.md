@@ -1637,3 +1637,18 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
 
 未完成且不冒称：Worker对asset快照的端到端执行验证、`GET /assets/{a}/executions`读取、
 `ExecutionAccepted`事件的asset目标、资产batch与媒体安全合同。
+
+## I8a-03f 资产执行读取（2026-11-19，EV106）
+
+- 新增`list_asset_executions`与`GET /projects/{p}/assets/{a}/executions`：按asset scope读原NodeRun
+  （node_run_id/graph_id/graph_version_id/attempt_no/status/plan_fingerprint/created_at），owner校验、
+  跨项目asset 404、零模型解析/零Provider调用。
+- 资产命令fixture补齐eligibility事实（documented/contract_tested/account_verified/quality_gated、
+  remote_resource_kind/id/invoke_model_value），为Worker端到端验证准备。
+
+已测（定向）：
+- `test_asset_commands.py` 3 passed（新增list读取与未知asset 404）；定向组64 passed；
+  generated.ts 381 schema、api:authority通过。
+
+未完成且不冒称：Worker对asset快照的端到端执行（eligibility已具备，仍需图片adapter mock seam与完成/候选断言）、
+`ExecutionAccepted`事件asset目标、资产batch与媒体安全合同。
