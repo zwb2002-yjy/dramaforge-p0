@@ -2767,6 +2767,21 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
   node_run_id）；`ruff check app tests` 通过、`mypy app` 416 文件通过。
 - **下一步**：在隔离 PG 上跑同一演练；restic 快照调用与 staging 峰值内存实测。
 
+#### 在 PG 上跑演练的前置发现（本轮实读/实试结论）
+
+尝试把 EV176 的演练搬到隔离 PG 时，被真实外键挡回两次，记录下来避免下一轮重复摸索：
+
+1. `graph_nodes.graph_version_id` 的外键目标表 `graph_versions` 定义在 `app.production.models`；
+   只 import `app.execution.models` 时，ORM 元数据里没有该表（`NoReferencedTableError`）。
+2. 补上 import 后，PG **真的强制**该外键：随手生成的 `graph_version_id` 被拒
+   （`Key (graph_version_id)=… is not present in table "graph_versions"`）。而单元测试用的 SQLite
+   默认不启用外键约束，所以同样的插入在单测里能过——**这是 SQLite/PG 的行为差异，不是被测逻辑差异**。
+3. 因此 PG 版演练必须用生产路径建图（`GraphService.create_graph` + `materialize_definition`）取得真实
+   `GraphVersion`/`GraphNode`，不能手搓 id；本轮资源已清理（删库 + `compose down --volumes`），
+   未留下半成品脚本。
+
+- **下一步**：用 `GraphService` 建图后在隔离 PG 上跑 EV176 演练；restic 快照调用与 staging 峰值内存实测。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
