@@ -42,6 +42,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/assets/{asset_id}/executions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Asset Image Execution
+         * @description One explicit asset command; the original receipt is returned on replay.
+         */
+        post: operations["submit_asset_image_execution_api_v1_projects__project_id__assets__asset_id__executions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/assets/{asset_id}": {
         parameters: {
             query?: never;
@@ -4299,6 +4319,45 @@ export interface components {
             /** Proposed Changes */
             proposed_changes?: components["schemas"]["AssetCreativeRequirementChange"][];
         };
+        /**
+         * AssetExecutionBody
+         * @description One explicit asset command: the previewed plan plus its frozen fingerprint.
+         */
+        AssetExecutionBody: {
+            /** Expected Asset Version */
+            expected_asset_version: number;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "image_generate" | "image_edit";
+            /** Mode Id */
+            mode_id: string;
+            requirements: components["schemas"]["AssetCreativeRequirements"];
+            /** Prompt Override */
+            prompt_override?: string | null;
+            /** Base Asset Version Id */
+            base_asset_version_id?: string | null;
+            /** Requested Binding Id */
+            requested_binding_id?: string | null;
+            /** References */
+            references?: components["schemas"]["AssetImageReference"][];
+            /** Source Context Refs */
+            source_context_refs?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Parameters */
+            parameters?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * Output Count
+             * @default 1
+             */
+            output_count: number;
+            /** Plan Fingerprint */
+            plan_fingerprint: string;
+        };
         /** AssetExecutionPlanRead */
         AssetExecutionPlanRead: {
             target: components["schemas"]["AssetPlanTarget"];
@@ -4310,6 +4369,10 @@ export interface components {
             stage: "asset_image";
             /** Plan Fingerprint */
             plan_fingerprint: string;
+            /** Resolution */
+            resolution?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
             /**
              * Binding Id
              * Format: uuid
@@ -6457,6 +6520,28 @@ export interface components {
         ExecutionRead: {
             /** Director Turn Id */
             director_turn_id?: string | null;
+            /**
+             * Node Run Id
+             * Format: uuid
+             */
+            node_run_id: string;
+            /**
+             * Graph Id
+             * Format: uuid
+             */
+            graph_id: string;
+            /**
+             * Graph Version Id
+             * Format: uuid
+             */
+            graph_version_id: string;
+            /** Status */
+            status: string;
+            /** Plan Fingerprint */
+            plan_fingerprint: string;
+        };
+        /** ExecutionReceipt */
+        ExecutionReceipt: {
             /**
              * Node Run Id
              * Format: uuid
@@ -11722,11 +11807,10 @@ export interface components {
              * Format: uuid
              */
             project_id: string;
-            /**
-             * Shot Id
-             * Format: uuid
-             */
-            shot_id: string;
+            /** Shot Id */
+            shot_id?: string | null;
+            /** Asset Id */
+            asset_id?: string | null;
             /** Experiment Branch Id */
             experiment_branch_id?: string | null;
             /**
@@ -12128,6 +12212,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssetExecutionPlanRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_asset_image_execution_api_v1_projects__project_id__assets__asset_id__executions_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "Idempotency-Key"?: string | null;
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+                asset_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssetExecutionBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExecutionReceipt"];
                 };
             };
             /** @description Validation Error */

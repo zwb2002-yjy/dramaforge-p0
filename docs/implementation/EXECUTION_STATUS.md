@@ -1612,3 +1612,25 @@ Worker资产节点执行、资产batch与媒体安全合同（I8a-03剩余）。
 - `test_asset_plan.py` 4 passed（新增断言resolution.status=RESOLVED、binding一致）。
 
 未完成且不冒称：资产命令服务（Graph/NodeRun/回执创建）、Worker资产执行、资产batch与媒体安全合同。
+
+## I8a-03e 资产命令提交（入队一个NodeRun）（2026-11-19，EV105）
+
+资产命令进入原ProductionCommands的receipt/Worker路径：一次明确提交只入队一个NodeRun。
+
+已实施：
+- 新增`app/production/asset_commands.py`：`submit_asset_execution`做owner/外发准入/项目锁/幂等回执，
+  校验asset版本与计划fingerprint，创建或复用asset scope Graph（`asset-image-v1`，单`image`节点），
+  物化/发布后入队`NodeRun(status=queued)`；快照含`asset_id`/`target`/`plan_fingerprint`/
+  `execution_model_resolution`/参考/参数；同key重放返回原回执，不同载荷409`ASSET_COMMAND_REUSED`，
+  版本变化409`ASSET_VERSION_CONFLICT`，指纹不符422`PLAN_FINGERPRINT_MISMATCH`。
+- `POST /projects/{p}/assets/{a}/executions`（`AssetExecutionBody`+`Idempotency-Key`→`ExecutionReceipt`）。
+- 未创建第二Runtime/GenerationTask；Provider调用仍由原Worker在claim后执行。
+
+已测（定向）：
+- 新增`test_asset_commands.py` 2 passed：入队恰好一个run且快照冻结asset/plan/resolution、同key重放
+  返回同一回执与graph、陈旧版本409。
+- 定向组87 passed（asset_commands/asset_plan/authorization/graph/execution_plan/architecture）；
+  generated.ts 380 schema、api:authority通过。
+
+未完成且不冒称：Worker对asset快照的端到端执行验证、`GET /assets/{a}/executions`读取、
+`ExecutionAccepted`事件的asset目标、资产batch与媒体安全合同。

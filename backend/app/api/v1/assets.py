@@ -26,7 +26,10 @@ from app.assets.models import (
 )
 from app.assets.tag_service import AssetTagService
 from app.assets.version_service import AssetVersionService
+from app.contracts.production_commands import ExecutionReceipt
+from app.production.asset_commands import submit_asset_execution
 from app.production.asset_plan import (
+    AssetExecutionBody,
     AssetExecutionPlanRead,
     AssetImagePlanBody,
     build_asset_image_plan,
@@ -214,6 +217,30 @@ async def plan_asset_image(
     )
     return await build_asset_image_plan(
         session, project=project, asset_id=asset_id, body=body
+    )
+
+
+@router.post(
+    "/projects/{project_id}/assets/{asset_id}/executions",
+    response_model=ExecutionReceipt,
+)
+async def submit_asset_image_execution(
+    project_id: UUID,
+    asset_id: UUID,
+    body: AssetExecutionBody,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> ExecutionReceipt:
+    """One explicit asset command; the original receipt is returned on replay."""
+    return await submit_asset_execution(
+        session,
+        actor=user,
+        project_id=project_id,
+        asset_id=asset_id,
+        body=body,
+        idempotency_key=idempotency_key,
     )
 
 

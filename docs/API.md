@@ -1598,7 +1598,11 @@ I8a-03已实施（只读预览）：`POST /projects/{p}/assets/{a}/execution-pla
 provider_type,capability,prompt,parameters,output_count,references,max_provider_operations,notices}`；
 零Graph/NodeRun/Provider写入，`expected_asset_version`不符409、无图片binding 422、参数不在模型
 `output_fields`内422、参考角色不在合同内422；当前仅`image_generate`与`asset_reference`来源，
-`image_edit`/V2清单显式未接线。资产命令提交（executions/batch）仍待实施。
+`image_edit`/V2清单显式未接线。资产命令提交（I8a-03e）：`POST /projects/{p}/assets/{a}/executions`接收`AssetExecutionBody`（计划字段+
+64位`plan_fingerprint`）与`Idempotency-Key`，返回原`ExecutionReceipt`；服务在项目锁内校验asset版本与
+计划指纹，创建/复用asset scope Graph并只入队一个`NodeRun(status=queued)`，快照含`asset_id`、`target`、
+`plan_fingerprint`、`resolution`与参考；同key重放返回原回执，不同载荷409 `ASSET_COMMAND_REUSED`。
+资产batch仍待实施。
 
 实际源码：ProductionCommands/WorkbenchExecutionService及ProductionCommandAuthorization目前以shot_id为目标，
 GraphService只接受shot/episode/shot_experiment/project；assets接口是管理/候选/采用，没有独立资产图像生产入口。
