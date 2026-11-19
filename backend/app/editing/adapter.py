@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.editing.models import EditSession
 from app.editing.timeline_rules import clip_audio_volume
+from app.editing.timeline_schema import normalize_timeline_for_save
 from app.shared.errors import ConflictError, NotFoundError
 
 
@@ -109,7 +110,12 @@ class EditingAdapter:
         for clip in cast(list[object], timeline.get("clips", [])):
             if isinstance(clip, dict):
                 clip_audio_volume(clip)
-        row.timeline = dict(timeline)
+        # Schema 1 keeps its historical meaning; schema 2 sources are verified
+        # against production truth before anything is persisted.
+        document = await normalize_timeline_for_save(
+            self._session, project_id=project_id, timeline=timeline
+        )
+        row.timeline = dict(document)
         row.version += 1
         row.updated_at = datetime.now(UTC)
         await self._session.flush()

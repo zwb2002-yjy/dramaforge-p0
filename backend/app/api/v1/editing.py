@@ -69,6 +69,7 @@ class EditTimelinePayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    schema_version: int = Field(default=1, ge=1, le=2)
     clips: list[dict[str, JsonValue]] = Field(default_factory=list)
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
@@ -383,7 +384,8 @@ async def reject_editing_suggestion(
     edit = await session.scalar(
         select(EditSession)
         .where(EditSession.id == session_id, EditSession.project_id == project_id)
-        .with_for_update().execution_options(populate_existing=True)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if edit is None or proposal is None:
         raise NotFoundError("Editing suggestion not found in this session")

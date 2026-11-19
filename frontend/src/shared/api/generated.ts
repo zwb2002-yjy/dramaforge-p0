@@ -6582,6 +6582,11 @@ export interface components {
          * @description The adapter's editable timeline body, restricted to JSON-safe values.
          */
         EditTimelinePayload: {
+            /**
+             * Schema Version
+             * @default 1
+             */
+            schema_version: number;
             /** Clips */
             clips?: {
                 [key: string]: components["schemas"]["JsonValue"];

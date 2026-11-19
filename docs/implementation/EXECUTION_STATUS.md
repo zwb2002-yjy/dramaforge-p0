@@ -2406,3 +2406,18 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 4. **I9-02b 逐集交付**：`exports`/`export_items` 按集绑定，另一集 Clip 混入拒绝，删除集不把交付变成项目级。
 
 每片默认跑对应测试组；I9 阶段终点再跑 Full。真实导出生成需 Owner 授权（硬门）。
+
+### I9-01a 已实施：时间线 schema2 与 Save 期来源校验（2026-11-19，EV153）
+
+- `app/editing/timeline_schema.py`：schema 1（或缺省）保持历史语义、**不静默升级**，且不写入磁盘
+  schema 标记，历史文档字节形状不变；schema 2 要求每个 clip 带判别式 `source`
+  （`shot_formal`/`asset_version`/`public_material`，各 kind 必填字段互斥、`extra=forbid`），
+  并校验 clip id 唯一、`order` 为 1..n 无缺口、`duration_seconds ≥ 0`。
+- `EditingAdapter.save_timeline` 接入该校验（版本 CAS 契约不变）：`shot_formal` 必须是该镜头
+  **当前正式视频**且 artifact 可用（`EDIT_SOURCE_NOT_FORMAL`）；`asset_version`/`public_material`
+  在资质校验收敛前**fail-closed**（`EDIT_SOURCE_UNVERIFIED`），不把客户端 JSON 当可信证明。
+- API `EditTimelinePayload` 新增 `schema_version`（1..2）；此前 `extra="forbid"` 使客户端无法表达 v2。
+- 证据：新增 6 passed；既有编辑组 39 passed、编辑 API 10 passed；ruff/mypy（404 文件）通过；
+  `generated.ts` 重生（409 schema，`api:check`/`api:authority` 通过）。
+- **下一步（I9 剩余）**：`selection_snapshot` 服务端观测、asset/public 素材资质接线、
+  分集作用域（`edit_sessions.episode_id` + 候选键/索引/延迟 FK，I9-01b）、渲染快照与导出绑定（I9-02）。
