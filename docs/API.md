@@ -1593,6 +1593,13 @@ details.request_accepted=false仅在确实未受理时返回；已受理请求�
 
 ## 独立资产媒体生产（D8补齐，未实施）
 
+I8a-03已实施（只读预览）：`POST /projects/{p}/assets/{a}/execution-plan`（image分支）返回
+`{target{kind:asset,asset_id,asset_version},stage:asset_image,plan_fingerprint,binding_id,model_id,
+provider_type,capability,prompt,parameters,output_count,references,max_provider_operations,notices}`；
+零Graph/NodeRun/Provider写入，`expected_asset_version`不符409、无图片binding 422、参数不在模型
+`output_fields`内422、参考角色不在合同内422；当前仅`image_generate`与`asset_reference`来源，
+`image_edit`/V2清单显式未接线。资产命令提交（executions/batch）仍待实施。
+
 实际源码：ProductionCommands/WorkbenchExecutionService及ProductionCommandAuthorization目前以shot_id为目标，
 GraphService只接受shot/episode/shot_experiment/project；assets接口是管理/候选/采用，没有独立资产图像生产入口。
 不能把“已有图片模型”和“可保存Artifact为资产”等同于已可在分镜前生成资产，也不能为此创建假Scene/Shot。

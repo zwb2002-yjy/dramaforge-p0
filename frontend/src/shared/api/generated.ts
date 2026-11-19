@@ -22,6 +22,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/assets/{asset_id}/execution-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Plan Asset Image
+         * @description Read-only asset image plan: zero Graph/NodeRun/Provider side effects.
+         */
+        post: operations["plan_asset_image_api_v1_projects__project_id__assets__asset_id__execution_plan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/assets/{asset_id}": {
         parameters: {
             query?: never;
@@ -4250,6 +4270,72 @@ export interface components {
             /** Tags */
             tags?: string[];
         };
+        /** AssetCreativeRequirementChange */
+        AssetCreativeRequirementChange: {
+            /**
+             * Field
+             * @enum {string}
+             */
+            field: "appearance" | "environment" | "visual_style";
+            /** Description */
+            description: string;
+        };
+        /** AssetCreativeRequirements */
+        AssetCreativeRequirements: {
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** Summary */
+            summary: string;
+            /** Appearance */
+            appearance?: string | null;
+            /** Environment */
+            environment?: string | null;
+            /** Visual Style */
+            visual_style?: string | null;
+            /** Proposed Changes */
+            proposed_changes?: components["schemas"]["AssetCreativeRequirementChange"][];
+        };
+        /** AssetExecutionPlanRead */
+        AssetExecutionPlanRead: {
+            target: components["schemas"]["AssetPlanTarget"];
+            /**
+             * Stage
+             * @default asset_image
+             * @constant
+             */
+            stage: "asset_image";
+            /** Plan Fingerprint */
+            plan_fingerprint: string;
+            /**
+             * Binding Id
+             * Format: uuid
+             */
+            binding_id: string;
+            /** Model Id */
+            model_id: string;
+            /** Provider Type */
+            provider_type: string;
+            /** Capability */
+            capability: string;
+            /** Prompt */
+            prompt: string;
+            /** Parameters */
+            parameters: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Output Count */
+            output_count: number;
+            /** References */
+            references: components["schemas"]["AssetPlannedReference"][];
+            /** Max Provider Operations */
+            max_provider_operations: number;
+            /** Notices */
+            notices?: string[];
+        };
         /** AssetFromArtifactBody */
         AssetFromArtifactBody: {
             /** Kind */
@@ -4276,6 +4362,92 @@ export interface components {
              */
             reference_role: string;
             public_display?: components["schemas"]["PublicDisplayBody"] | null;
+        };
+        /** AssetImagePlanBody */
+        AssetImagePlanBody: {
+            /** Expected Asset Version */
+            expected_asset_version: number;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "image_generate" | "image_edit";
+            /** Mode Id */
+            mode_id: string;
+            requirements: components["schemas"]["AssetCreativeRequirements"];
+            /** Prompt Override */
+            prompt_override?: string | null;
+            /** Base Asset Version Id */
+            base_asset_version_id?: string | null;
+            /** Requested Binding Id */
+            requested_binding_id?: string | null;
+            /** References */
+            references?: components["schemas"]["AssetImageReference"][];
+            /** Source Context Refs */
+            source_context_refs?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            }[];
+            /** Parameters */
+            parameters?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /**
+             * Output Count
+             * @default 1
+             */
+            output_count: number;
+        };
+        /** AssetImageReference */
+        AssetImageReference: {
+            /**
+             * Source
+             * @default asset_reference
+             * @constant
+             */
+            source: "asset_reference";
+            /**
+             * Asset Version Reference Id
+             * Format: uuid
+             */
+            asset_version_reference_id: string;
+            /** Role */
+            role: string;
+        };
+        /** AssetPlanTarget */
+        AssetPlanTarget: {
+            /**
+             * Kind
+             * @default asset
+             * @constant
+             */
+            kind: "asset";
+            /**
+             * Asset Id
+             * Format: uuid
+             */
+            asset_id: string;
+            /** Asset Version */
+            asset_version: number;
+        };
+        /** AssetPlannedReference */
+        AssetPlannedReference: {
+            /**
+             * Asset Version Reference Id
+             * Format: uuid
+             */
+            asset_version_reference_id: string;
+            /**
+             * Asset Version Id
+             * Format: uuid
+             */
+            asset_version_id: string;
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            artifact_id: string;
+            /** Role */
+            role: string;
         };
         /** AssetRead */
         AssetRead: {
@@ -11914,6 +12086,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssetRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    plan_asset_image_api_v1_projects__project_id__assets__asset_id__execution_plan_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                asset_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssetImagePlanBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetExecutionPlanRead"];
                 };
             };
             /** @description Validation Error */

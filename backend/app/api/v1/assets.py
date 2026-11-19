@@ -26,6 +26,11 @@ from app.assets.models import (
 )
 from app.assets.tag_service import AssetTagService
 from app.assets.version_service import AssetVersionService
+from app.production.asset_plan import (
+    AssetExecutionPlanRead,
+    AssetImagePlanBody,
+    build_asset_image_plan,
+)
 from app.shared.errors import ConflictError, NotFoundError
 
 router = APIRouter(tags=["assets"], dependencies=[Depends(require_selected_workspace)])
@@ -190,6 +195,26 @@ async def create_project_asset(
     )
     await session.commit()
     return _asset_read(asset, tags=[tag.name for tag in tags])
+
+
+@router.post(
+    "/projects/{project_id}/assets/{asset_id}/execution-plan",
+    response_model=AssetExecutionPlanRead,
+)
+async def plan_asset_image(
+    project_id: UUID,
+    asset_id: UUID,
+    body: AssetImagePlanBody,
+    user: CurrentUser,
+    session: SessionDep,
+) -> AssetExecutionPlanRead:
+    """Read-only asset image plan: zero Graph/NodeRun/Provider side effects."""
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=user
+    )
+    return await build_asset_image_plan(
+        session, project=project, asset_id=asset_id, body=body
+    )
 
 
 @router.patch("/projects/{project_id}/assets/{asset_id}", response_model=AssetRead)

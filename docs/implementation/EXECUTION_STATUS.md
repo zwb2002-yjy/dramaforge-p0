@@ -1559,3 +1559,25 @@ FinalFilm prepare与逐命令授权。
   `alembic check`无漂移、0120降级/再升级往返通过。
 
 未完成且不冒称：资产执行计划/命令提交、媒体安全合同与Graph asset scope（I8a-03剩余）。
+
+## I8a-03b 资产图片执行计划（只读）（2026-11-19，EV102）
+
+资产媒体生产的第一段用户结果：为候选资产预览图片生成计划，零写入、零调用。
+
+已实施：
+- `app/production/asset_plan.py`：`AssetCreativeRequirements`/`AssetImagePlanBody`/`AssetExecutionPlanRead`；
+  `build_asset_image_plan`解析asset+版本、项目图片binding、catalog V1清单`image.generate`合同、
+  `output_options`参数校验、参考角色合同校验、requirements编译Prompt（可选override），返回
+  `plan_fingerprint`（target/stage/binding/参数/参考/来源上下文）。
+- `POST /projects/{p}/assets/{a}/execution-plan`（image分支）；`expected_asset_version`不符409、
+  无binding/停用/非图片422、未知参数422、参考角色不支持422、跨项目asset 404；`image_edit`与V2清单
+  显式`ASSET_EDIT_NOT_WIRED`/`ASSET_MANIFEST_V2_NOT_WIRED`。
+- 不创建Graph/NodeRun，不调用Provider；不伪造Scene/Shot。
+
+已测（定向）：
+- 新增`test_asset_plan.py` 4 passed：绑定与Prompt编译且零NodeRun、版本冲突/缺binding/未知参数、
+  跨项目404与参考角色拒绝、端点未认证401/403与无项目404。
+- 定向组73 passed（asset_plan/assets API/reference/authorization/architecture）；
+  generated.ts 378 schema、api:authority/typecheck通过。
+
+未完成且不冒称：资产命令提交（executions/batch）与Graph asset scope、媒体安全合同扩展（I8a-03剩余）。
