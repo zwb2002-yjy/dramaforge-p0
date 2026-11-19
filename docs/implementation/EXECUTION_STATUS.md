@@ -2691,6 +2691,21 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - **下一步（I10-01 剩余）**：真实 `pg_dump`/`restic` 适配与容量/峰值内存检查；在隔离资源上做一次
   真实恢复演练（含恢复后业务演练：队列、失去通知、Worker 重启、未知提交计数不增）。
 
+### I10-01e 已实施：备份容量契约（2026-11-19，EV173）
+
+- 新增 `app/maintenance/backup_capacity.py`：`plan_capacity` 用 manifest 对象字节数 + 各库**实测**
+  字节数 × 压缩因子求基线，再加安全边际得到 `required_bytes`，并记录 `largest_object_bytes`。
+  - 未实测的库成员 → `BACKUP_DB_SIZE_UNKNOWN`（**不猜大小**）；
+  - 单对象超限 → `BACKUP_OBJECT_TOO_LARGE`（detail 给出 bucket/key、实际字节数与限制，
+    提示改用受限 staging 流式处理，不做固定低内存承诺）；
+  - 压缩因子/安全边际越界 → `BACKUP_CAPACITY_INVALID`。
+- `require_capacity` 在 `free_bytes < required` 时 `BACKUP_CAPACITY_INSUFFICIENT`，并在 detail 同时
+  给出“需要多少 / 可用多少”——空间不足即拒绝本次备份，不截断、不跳过。
+- 证据：`test_backup_capacity.py` **5 passed**，维护组（清单/恢复验证/目标映射/运行编排/容量）
+  **28 passed**；`ruff check app tests` 通过、`mypy app` 414 文件通过。
+- **下一步（I10-01 剩余）**：真实 `pg_dump`/`restic` 适配与 staging 峰值内存实测；在隔离资源上做一次
+  真实恢复演练（含恢复后业务演练）。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
