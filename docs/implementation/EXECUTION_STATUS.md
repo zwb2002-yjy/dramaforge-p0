@@ -1977,3 +1977,19 @@ I6b机制侧（定义、端口、成功、部分失败、换计划）已覆盖�
   前端定向7 passed；typecheck/lint/prettier/UI权威通过。
 
 未完成且不冒称：面板挂载到工作台（依赖I7的MasterRun界面）。
+
+## I7 入口核对（2026-11-19，无代码变更）
+
+按主计划I7范围核对当前工作台现状：
+
+| 条目 | 现状 |
+|---|---|
+| 故事剧本 | 已存在：ScriptWorkspace + story proposal generate/apply（EV前史，非本轮新增） |
+| 三栏工作台(N08/N10) | SceneWorkspace已存在三栏式布局与工具面板；与N08/N10逐项差异未核对 |
+| 方向讨论 | **缺失**：仅设计预览页占位按钮「生成故事方向」，无后端/前端实现 |
+| 恢复 | runtime resume API存在但要求`signal_id/reference_id/expected_runtime_revision`；`DirectorTurnRead`只暴露`runtime_execution_id/runtime_revision`，UI无入口 → 需先补决策信号来源 |
+| 关键确认 | SceneWorkspace未保存阻断、Review页正式候选确认已存在 |
+| 模型配置交互收口 | ModelProfileSettings + MediaConfigSection（I8a）已存在 |
+
+下一片建议：先做「方向讨论」的最小闭环（项目级讨论→确认后写入创作方向），或先补 resume 所需 signal 暴露；
+两者都需在现有Director turn/thread契约上增量，不新建并行对话Runtime。
