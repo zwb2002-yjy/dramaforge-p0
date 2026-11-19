@@ -2751,6 +2751,22 @@ I8b 尚未到阶段终点，但自 I5 以来 Full 只剩 `workbench-resource` p9
 - 本轮未提交演练代码（草案已删除），避免留下与 schema 假设冲突的模块；下一轮按上述可达判据重写，
   并在隔离 PG 上跑一次（SQLite 的部分唯一索引行为需与 PG 对齐后再断言）。
 
+### I10-01h 已实施：恢复后业务演练（按可达判据重写）（2026-11-19，EV176）
+
+- `app/maintenance/recovery_drill.py` 只保留**可漂移**的三类判据（上一轮已证明另两类被 schema 挡死）：
+  1. `queue_idempotency`：queued 行幂等键为空白 → `DRILL_QUEUE_KEY_MISSING`
+     （`(project_id, idempotency_key)` 唯一，但空白字符串仍可写入，因此可达）。
+  2. `running_lease`：running 行**无租约时间戳** → `DRILL_ORPHANED_RUNNING`；
+     **超过 45 分钟最大租约** → `DRILL_STALE_LEASE`（并做时区归一，naive 时间戳不会误判）。
+  3. `unknown_submission_identity`：`unknown_submission` 却声称有远端 ID →
+     `DRILL_UNKNOWN_WITHOUT_REMOTE_ID`——这正是恢复后“盲信并重发”的行。
+- 明确**不再**检查“同一 attempt 两条 create”：`uq_provider_operations_node_run` 部分唯一索引
+  使其结构上不可能。
+- 证据：`test_recovery_drill.py` **4 passed**（干净状态通过并断言三类 checks；空白键阻断重入队；
+  陈旧租约与无租约并存各报一条，且把时钟回拨 59 分钟时不再报陈旧；未知提交带远端 ID 报错并给出
+  node_run_id）；`ruff check app tests` 通过、`mypy app` 416 文件通过。
+- **下一步**：在隔离 PG 上跑同一演练；restic 快照调用与 staging 峰值内存实测。
+
 ### I9-02g 已实施：媒体格式导出意图（EV165）
 
 - `create_session_export` 不再对 `mp4`/`srt` 抛 `EXPORT_RENDER_REQUIRED`：媒体格式表示**交付意图**，
