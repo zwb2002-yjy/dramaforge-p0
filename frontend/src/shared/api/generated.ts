@@ -7534,6 +7534,10 @@ export interface components {
              * Format: uuid
              */
             edit_session_id: string;
+            /** Episode Id */
+            episode_id?: string | null;
+            /** Timeline Hash */
+            timeline_hash?: string | null;
             /** Timeline Version */
             timeline_version: number;
             /**
@@ -7650,6 +7654,10 @@ export interface components {
              * Format: uuid
              */
             edit_session_id: string;
+            /** Episode Id */
+            episode_id?: string | null;
+            /** Timeline Hash */
+            timeline_hash?: string | null;
             /** Timeline Version */
             timeline_version: number;
             /**

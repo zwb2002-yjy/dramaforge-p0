@@ -361,6 +361,23 @@ async def test_episode_scoped_session_rejects_a_clip_from_another_episode(
             expected_session_version=1,
         )
     assert rejected.value.details["code"] == "EDIT_CLIP_OUT_OF_EPISODE"
+    with pytest.raises(ValidationAppError) as legacy:
+        await adapter.save_timeline(
+            project_id=project.id,
+            session_id=scoped.id,
+            timeline={
+                "clips": [
+                    {
+                        "id": "legacy",
+                        "shot_id": str(shot.id),
+                        "artifact_id": str(artifact.id),
+                        "episode_id": str(other_episode.id),
+                    }
+                ]
+            },
+            expected_session_version=1,
+        )
+    assert legacy.value.details["code"] == "EDIT_CLIP_OUT_OF_EPISODE"
     await session.rollback()
 
 
@@ -389,6 +406,15 @@ async def test_episode_scoped_session_accepts_its_own_clip_and_rejects_foreign_e
     )
     assert saved.episode_id == episode.id
     assert saved.timeline["schema_version"] == 2
+
+    with pytest.raises(ValidationAppError) as downgrade:
+        await adapter.save_timeline(
+            project_id=project.id,
+            session_id=saved.id,
+            timeline={"clips": []},
+            expected_session_version=saved.version,
+        )
+    assert downgrade.value.details["code"] == "EDIT_SCHEMA_DOWNGRADE"
 
     # An episode from a different project is not a valid scope at creation.
     _other_project, _other_user, _other_shot, _other_artifact = await _shot(session)

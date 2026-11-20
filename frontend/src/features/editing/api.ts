@@ -5,6 +5,8 @@ import type { components } from "../../shared/api/generated";
 export type EditSessionSummaryRead = components["schemas"]["EditSessionSummaryRead"];
 export type EditSessionRead = components["schemas"]["EditSessionRead"];
 export type EditTimelinePayload = components["schemas"]["EditTimelinePayload"];
+export type TimelineWrite = Pick<EditTimelinePayload, "clips" | "metadata"> &
+  Partial<Pick<EditTimelinePayload, "schema_version">>;
 export type EditExportRead = components["schemas"]["EditExportRead"];
 export type EditingDirectorSuggestionRequest =
   components["schemas"]["EditingDirectorSuggestionRequest"];
@@ -22,7 +24,7 @@ export type TimelinePreviewRead = components["schemas"]["TimelinePreviewRead"];
 export async function previewEditTimeline(
   projectId: string,
   sessionId: string,
-  timeline: Pick<EditTimelinePayload, "clips" | "metadata">,
+  timeline: TimelineWrite,
   expectedSessionVersion: number,
 ): Promise<TimelinePreviewRead> {
   const csrf = await fetchCsrf();
@@ -30,7 +32,11 @@ export async function previewEditTimeline(
     "POST",
     editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/preview-plan`),
     {
-      timeline: { clips: timeline.clips ?? [], metadata: timeline.metadata ?? {} },
+      timeline: {
+        schema_version: timeline.schema_version,
+        clips: timeline.clips ?? [],
+        metadata: timeline.metadata ?? {},
+      },
       expected_session_version: expectedSessionVersion,
     },
     csrf,
@@ -63,12 +69,13 @@ export async function fetchEditFinalFilms(
 export async function createEditSession(
   projectId: string,
   name?: string,
+  episodeId?: string,
 ): Promise<EditSessionRead> {
   const csrf = await fetchCsrf();
   return apiSend<EditSessionRead>(
     "POST",
     editSessionPath(projectId),
-    name === undefined ? {} : { name },
+    { name, episode_id: episodeId },
     csrf,
   );
 }
@@ -80,7 +87,7 @@ export function fetchEditSession(projectId: string, sessionId: string): Promise<
 export async function saveEditTimeline(
   projectId: string,
   sessionId: string,
-  timeline: Pick<EditTimelinePayload, "clips" | "metadata">,
+  timeline: TimelineWrite,
   expectedSessionVersion: number,
 ): Promise<EditSessionRead> {
   const csrf = await fetchCsrf();
@@ -88,7 +95,10 @@ export async function saveEditTimeline(
   return apiSend<EditSessionRead>(
     "PATCH",
     editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/timeline`),
-    { timeline: { clips, metadata }, expected_session_version: expectedSessionVersion },
+    {
+      timeline: { schema_version: timeline.schema_version, clips, metadata },
+      expected_session_version: expectedSessionVersion,
+    },
     csrf,
   );
 }

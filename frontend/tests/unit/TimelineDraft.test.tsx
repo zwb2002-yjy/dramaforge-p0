@@ -29,6 +29,21 @@ function mount() {
 }
 
 describe("Timeline draft lifecycle", () => {
+  it("keeps schema 2 and its typed source through draft changes and Save", () => {
+    const original = session();
+    const source = { kind: "asset_version", asset_id: "a1", asset_version_id: "av1" };
+    original.timeline = {
+      schema_version: 2,
+      clips: [{ id: "c1", source, duration_seconds: 4 }],
+      metadata: {},
+    };
+    const { result } = renderHook(() => useTimelineDraft("p1", "s1", original));
+    act(() => result.current.updateClipField(0, "subtitle", "字幕"));
+    expect(result.current.captureSave().timeline).toMatchObject({
+      schema_version: 2,
+      clips: [{ source, subtitle: "字幕" }],
+    });
+  });
   it("updates a cropped clip atomically and rejects a moved clip's stale track index", () => {
     const { result } = mount();
     const original = result.current.draft!.clips[0];

@@ -28,6 +28,7 @@ import {
   type EditableClip,
   type EditableMetadata,
 } from "./useTimelineDraft";
+import { fetchScriptWorkspace } from "../script/api";
 import { EditingSessionPicker } from "./EditingSessionPicker";
 import { EditingClipSource } from "./EditingClipSource";
 import { EditingSourceInventory } from "./EditingSourceInventory";
@@ -47,6 +48,8 @@ import {
 
 type EditingWorkspaceProps = {
   projectId: string;
+  workType?: string | null;
+  projectScopeUnavailable?: boolean;
   /** Exact persisted EditSession identity from the route search. */
   sessionId?: string;
   clipId?: string;
@@ -142,6 +145,8 @@ const EDIT_SESSION_STATUS_LABEL: Record<string, string> = {
  */
 export function EditingWorkspace({
   projectId,
+  workType,
+  projectScopeUnavailable = false,
   sessionId,
   clipId,
   onSelectedClipChange,
@@ -163,6 +168,22 @@ export function EditingWorkspace({
     queryFn: () => fetchOpenCutManifest(projectId),
     enabled: Boolean(projectId) && !hasSession,
   });
+  const [scopeChoice, setScopeChoice] = useState("");
+  const episodic = workType === "serial_comic" || workType === "single_comic";
+  const script = useQuery({
+    queryKey: queryKeys.script.workspace(projectId),
+    queryFn: () => fetchScriptWorkspace(projectId),
+    enabled: episodic && !hasSession,
+    retry: false,
+  });
+  const episodes = script.data?.episodes ?? [];
+  const episode =
+    workType === "single_comic" && episodes.length === 1
+      ? episodes[0]
+      : episodes.find((item) => item.id === scopeChoice);
+  const scopeReady =
+    !projectScopeUnavailable &&
+    (!episodic || Boolean(episode) || (workType === "serial_comic" && scopeChoice === "project"));
   const persistedSession = useQuery({
     queryKey: queryKeys.editing.session(projectId, sessionId),
     queryFn: () => fetchEditSession(projectId, sessionId!),
@@ -234,7 +255,18 @@ export function EditingWorkspace({
   });
 
   const create = useMutation({
-    mutationFn: () => createEditSession(projectId),
+    mutationFn: () => {
+      if (!scopeReady) throw new Error("请选择剪辑范围。");
+      return createEditSession(
+        projectId,
+        episode
+          ? `第 ${episode.episode_number} 集 · ${episode.title || "分集剪辑"}`
+          : workType === "serial_comic"
+            ? "整剧汇编"
+            : undefined,
+        episode?.id,
+      );
+    },
     onSuccess: (created) => {
       setFeedback(null);
       void queryClient.invalidateQueries({ queryKey: queryKeys.editing.sessions(projectId) });
@@ -335,6 +367,7 @@ export function EditingWorkspace({
             baseline && (
               <div className="editing-session-actions">
                 <span className="editing-save-status">
+                  {persistedSession.data?.episode_id ? `${persistedSession.data.name} · ` : ""}
                   {draft.clips.length} 个片段 · v{timeline.baselineVersion} ·{" "}
                   {dirty ? "未保存" : "已保存"}
                 </span>
@@ -353,7 +386,9 @@ export function EditingWorkspace({
                   tone={dirty ? "default" : "primary"}
                   data-testid="export-final-film"
                   onClick={() => void runFinalFilmExport()}
-                  disabled={dirty || finalFilmPending !== null || save.isPending}
+                  disabled={
+                    dirty || !draft.clips.length || finalFilmPending !== null || save.isPending
+                  }
                 >
                   {finalFilmPending === "prepare"
                     ? "准备素材…"
@@ -1130,13 +1165,39 @@ export function EditingWorkspace({
           项目暂无可交接的正式视频。
         </p>
       )}
+      {episodic && (
+        <Field>
+          <span>剪辑范围</span>
+          <Select
+            aria-label="剪辑范围"
+            value={episode?.id ?? scopeChoice}
+            onChange={setScopeChoice}
+            disabled={create.isPending || script.isPending}
+            options={[
+              { value: "", label: "选择分集" },
+              ...episodes.map((item) => ({
+                value: item.id,
+                label: `第 ${item.episode_number} 集 · ${item.title || "未命名"}`,
+              })),
+              ...(workType === "serial_comic" ? [{ value: "project", label: "整剧汇编" }] : []),
+            ]}
+          />
+        </Field>
+      )}
+      {episodic && script.isError && (
+        <Alert
+          type="error"
+          description="无法读取分集，请重新加载。"
+          action={<Button onClick={() => void script.refetch()}>重试</Button>}
+        />
+      )}
       {!manifest.isError && (
         <Button
           type="button"
           tone="primary"
           data-testid="create-edit-session"
           onClick={() => create.mutate()}
-          disabled={create.isPending || manifest.isLoading || !manifest.data}
+          disabled={create.isPending || manifest.isLoading || !manifest.data || !scopeReady}
         >
           {create.isPending ? "正在创建剪辑会话…" : "创建可编辑剪辑会话"}
         </Button>

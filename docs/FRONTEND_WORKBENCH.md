@@ -961,3 +961,7 @@ OpenCut manifest/adapter 交接不等于已内嵌完整 OpenCut 编辑器。
 Vitest 单测 + Playwright E2E（`playwright.config.ts`、`playwright.r7.config.ts`）；
 命令见 [DEVELOPMENT.md](DEVELOPMENT.md)。验证以 DOM、可访问性、布局与业务断言为主；
 截图作为证据。真实成片验收仅在 Owner 明确授权后执行。
+
+### 分集剪辑的工作台入口
+
+剪辑页按已确认的剧本分集创建会话。单集漫剧使用其唯一一集，连续剧用户选择具体集或整剧汇编。保存和预览沿用原时间线的来源格式。空草稿可保存，成片导出按钮在有片段后启用。

@@ -1,4 +1,7 @@
 import { createRoute, useBlocker } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
+import { fetchProject } from "../features/project/api";
+import { queryKeys } from "../lib/queryKeys";
 import { useCallback, useRef, useState } from "react";
 import { Button, Dialog } from "../components/ui";
 import { timelineCopy as copy } from "../features/editing/timelineCopy";
@@ -20,6 +23,11 @@ function EditPage() {
   const { projectId } = projectEditRoute.useParams();
   const { sessionId, clipId } = projectEditRoute.useSearch();
   const navigate = projectEditRoute.useNavigate();
+  const project = useQuery({
+    queryKey: queryKeys.project.detail(projectId),
+    queryFn: () => fetchProject(projectId),
+    retry: false,
+  });
   const [dirty, setDirty] = useState(false);
   const dirtyRef = useRef(false);
   const saveAction = useRef<HTMLButtonElement>(null);
@@ -42,6 +50,8 @@ function EditPage() {
   return (
     <>
       <LazyEditingWorkspace
+        workType={project.data?.work_type}
+        projectScopeUnavailable={!project.isSuccess}
         key={`${projectId}:${sessionId}:${discardRevision}`}
         projectId={projectId}
         sessionId={sessionId}

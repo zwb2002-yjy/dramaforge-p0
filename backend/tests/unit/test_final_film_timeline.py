@@ -484,6 +484,15 @@ async def test_worker_renders_frozen_timeline_and_persists_lineage(
 ) -> None:
     monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
     project, user, edit, shots, _videos = await _seed_renderable_final_film(session, shot_count=2)
+    from app.assets.models import Scene
+    from app.production.session_exports import timeline_hash
+
+    scene = await session.get(Scene, shots[0].scene_id)
+    assert scene is not None
+    episode_id = scene.episode_id
+    edit.episode_id = episode_id
+    await session.commit()
+    expected_hash = timeline_hash(edit.timeline)
     queued = await queue_final_film_render(
         session,
         project_id=project.id,
@@ -495,6 +504,9 @@ async def test_worker_renders_frozen_timeline_and_persists_lineage(
     )
     run = await session.get(NodeRun, queued.node_run_id)
     assert run is not None
+    assert queued.episode_id == episode_id and queued.timeline_hash == expected_hash
+    edit.episode_id = None
+    edit.version += 1
     run.status = "running"
     await session.commit()
     node = await session.get(GraphNode, run.graph_node_id)
@@ -515,6 +527,9 @@ async def test_worker_renders_frozen_timeline_and_persists_lineage(
         .scalars()
         .one()
     )
+    assert export.episode_id == episode_id and export.timeline_hash == expected_hash
+    assert export.timeline_version == 1 and export.edit_session_id == edit.id
+    assert export.render_node_run_id == run.id
     assert export.result_artifact_id == artifact.id
     items = (
         (await session.execute(select(ExportItem).where(ExportItem.export_id == export.id)))

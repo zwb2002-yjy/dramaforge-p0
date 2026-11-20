@@ -1,10 +1,19 @@
 import { useEffect, useReducer, useRef } from "react";
 import type { components } from "../../shared/api/generated";
-import type { EditSessionRead, EditTimelinePayload, EditingDirectorSuggestionRead } from "./api";
+import type {
+  EditSessionRead,
+  EditTimelinePayload,
+  TimelineWrite,
+  EditingDirectorSuggestionRead,
+} from "./api";
 
 export type EditableClip = NonNullable<EditTimelinePayload["clips"]>[number];
 export type EditableMetadata = NonNullable<EditTimelinePayload["metadata"]>;
-export type EditableTimeline = { clips: EditableClip[]; metadata: EditableMetadata };
+export type EditableTimeline = {
+  schema_version?: number;
+  clips: EditableClip[];
+  metadata: EditableMetadata;
+};
 type JsonValue = components["schemas"]["JsonValue"];
 type Operations = EditingDirectorSuggestionRead["suggestion"]["plan"]["operations"];
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
@@ -18,16 +27,21 @@ function editableTimeline(session: EditSessionRead): EditableTimeline {
     : [];
   const rawMetadata = session.timeline.metadata;
   const metadata = isJsonObject(rawMetadata) ? { ...rawMetadata } : {};
-  return { clips, metadata };
+  return {
+    ...(typeof session.timeline.schema_version === "number" && {
+      schema_version: session.timeline.schema_version,
+    }),
+    clips,
+    metadata,
+  };
 }
 
-export function timelineForSave(
-  timeline: EditableTimeline,
-): Pick<EditTimelinePayload, "clips" | "metadata"> {
+export function timelineForSave(timeline: EditableTimeline): TimelineWrite {
   // Deliberately construct the allow-listed payload. A session's readonly
   // production_lineage never enters this object, even if a caller hands the
   // component an object with extra keys at runtime.
   return {
+    ...(timeline.schema_version !== undefined && { schema_version: timeline.schema_version }),
     clips: timeline.clips.map((clip) => ({ ...clip })),
     metadata: { ...timeline.metadata },
   };
@@ -37,7 +51,7 @@ export type TimelineSaveInput = {
   projectId: string;
   sessionId: string;
   expectedVersion: number;
-  timeline: Pick<EditTimelinePayload, "clips" | "metadata">;
+  timeline: TimelineWrite;
   scopeToken: symbol;
 };
 

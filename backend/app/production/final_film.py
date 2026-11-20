@@ -34,6 +34,7 @@ from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.production.command_models import ProductionCommandAuthorization
 from app.production.models import GraphVersion, ProductionGraph
 from app.production.service import GraphService
+from app.production.session_exports import timeline_hash as saved_timeline_hash
 from app.providers.voice_config import freeze_project_voice
 from app.runtime.scheduler import NodeRunScheduler
 from app.shared.errors import (
@@ -135,6 +136,8 @@ class FinalFilmRead(BaseModel):
 
     project_id: UUID
     edit_session_id: UUID
+    episode_id: UUID | None = None
+    timeline_hash: str | None = None
     timeline_version: int
     export_id: UUID
     artifact_id: UUID
@@ -166,6 +169,8 @@ class FinalFilmJobRead(BaseModel):
 
     project_id: UUID
     edit_session_id: UUID
+    episode_id: UUID | None = None
+    timeline_hash: str | None = None
     timeline_version: int
     node_run_id: UUID
     attempt_no: int
@@ -493,7 +498,7 @@ async def preview_formal_tail(
     if not refs:
         raise ValidationAppError("empty timeline", details={"code": "EMPTY_TIMELINE"})
     shots = await _formal_shots_for_refs(session, project_id=project_id, refs=refs)
-    timeline_hash = _fingerprint(edit.timeline)
+    timeline_hash = saved_timeline_hash(edit.timeline)
     operations: list[PreparationOperation] = []
     reuse: list[ReusedPreparation] = []
     blockers: list[str] = []
@@ -1215,6 +1220,8 @@ async def _final_film_read(
         subtitle_cue_count=int(manifest.get("subtitle_cue_count", 0)),
         project_id=export.project_id,
         edit_session_id=edit_session.id,
+        episode_id=export.episode_id,
+        timeline_hash=export.timeline_hash,
         timeline_version=int(manifest.get("timeline_version") or edit_session.version),
         export_id=export.id,
         artifact_id=artifact.id,
@@ -1260,6 +1267,8 @@ async def _job_read(
     return FinalFilmJobRead(
         project_id=run.project_id,
         edit_session_id=edit_session.id,
+        episode_id=UUID(str(snapshot["episode_id"])) if snapshot.get("episode_id") else None,
+        timeline_hash=str(snapshot["timeline_hash"]) if snapshot.get("timeline_hash") else None,
         timeline_version=int(cast(Any, snapshot.get("timeline_version")) or edit_session.version),
         node_run_id=run.id,
         attempt_no=run.attempt_no,
@@ -1612,9 +1621,12 @@ async def queue_final_film_render(
     if latest is not None and latest.status in {"queued", "running"}:
         return await _job_read(session, run=latest, edit_session=edit_session)
     next_attempt = max((int(run.attempt_no) for run in runs), default=0) + 1
+    frozen_timeline_hash = saved_timeline_hash(edit_session.timeline)
     snapshot = {
         **request_payload,
         "node_key": _FINAL_FILM_GRAPH_KEY,
+        "episode_id": str(edit_session.episode_id) if edit_session.episode_id else None,
+        "timeline_hash": frozen_timeline_hash,
         "execution_path": "local-final-film-worker-v2",
         "source_commit": get_settings().source_commit,
         "idempotency_key": external_key,
@@ -1656,6 +1668,8 @@ async def queue_final_film_render(
         project_id=project_id,
         edit_session_id=edit_session.id,
         timeline_version=edit_session.version,
+        episode_id=edit_session.episode_id,
+        timeline_hash=frozen_timeline_hash,
         node_run_id=run_id,
         attempt_no=attempt_no,
         status="queued",
@@ -1694,6 +1708,12 @@ async def list_final_film_jobs(
                 FinalFilmJobRead(
                     project_id=project_id,
                     edit_session_id=edit_session_id,
+                    episode_id=UUID(str(run.input_snapshot["episode_id"]))
+                    if run.input_snapshot.get("episode_id")
+                    else None,
+                    timeline_hash=str(run.input_snapshot["timeline_hash"])
+                    if run.input_snapshot.get("timeline_hash")
+                    else None,
                     timeline_version=int(
                         str((run.input_snapshot or {}).get("timeline_version") or 1)
                     ),
@@ -2022,6 +2042,11 @@ async def _stage_final_film_delivery(
     node.latest_successful_run_id = run.id
     export = Export(
         project_id=run.project_id,
+        episode_id=UUID(str(snapshot["episode_id"])) if snapshot.get("episode_id") else None,
+        edit_session_id=edit_session_id,
+        timeline_version=snapshot.get("timeline_version"),
+        timeline_hash=snapshot.get("timeline_hash"),
+        render_node_run_id=run.id,
         format=_FINAL_FILM_FORMAT,
         status="completed",
         requested_by=run.created_by,

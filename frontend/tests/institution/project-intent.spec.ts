@@ -98,6 +98,31 @@ for (const [kind, label, episodes] of [
         await page.getByRole("button", { name: `打开第 ${episode} 集第 1 场分镜` }).click();
         await expect(page).toHaveURL(new RegExp(`/projects/${created.id}/scenes/${scene.id}`));
         await expect(page.getByTestId("scene-workspace")).toBeVisible();
+        await page.goto(`/projects/${created.id}/edit`);
+        if (kind === "serial_comic") {
+          await expect(page.getByTestId("create-edit-session")).toBeDisabled();
+          await page.getByRole("combobox", { name: "剪辑范围" }).click();
+          await page.getByRole("option", { name: "第 2 集 · 送灯" }).click();
+        }
+        const creatingEdit = page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            new URL(response.url()).pathname === `/api/v1/projects/${created.id}/edit-sessions`,
+        );
+        await page.getByTestId("create-edit-session").click();
+        const editResponse = await creatingEdit;
+        expect(editResponse.status()).toBe(201);
+        const edit = await editResponse.json();
+        expect(edit.episode_id).toBe(
+          kind === "animation_promo" ? null : saved.episodes[episode - 1].id,
+        );
+        await expect(page.getByTestId("edit-session-editor")).toBeVisible();
+        await expect(page.getByTestId("export-final-film")).toBeDisabled();
+        await page.reload();
+        await expect(page.getByTestId("editing-workspace")).toHaveAttribute(
+          "data-session-id",
+          edit.id,
+        );
       }
     }
     await page.goto("/");

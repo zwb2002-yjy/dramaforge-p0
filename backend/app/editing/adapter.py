@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.assets.models import Scene, Shot
 from app.editing.models import EditSession
 from app.editing.timeline_rules import clip_audio_volume
-from app.editing.timeline_schema import normalize_timeline_for_save
+from app.editing.timeline_schema import declared_schema_version, normalize_timeline_for_save
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 
@@ -105,6 +105,7 @@ class EditingAdapter:
                 EditSession.project_id == project_id,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if row is None:
             raise NotFoundError("edit session not found")
@@ -116,6 +117,21 @@ class EditingAdapter:
                     "actual_session_version": row.version,
                 },
             )
+        if declared_schema_version(timeline) == 1:
+            if declared_schema_version(dict(row.timeline or {})) == 2:
+                raise ValidationAppError(
+                    "a typed timeline must preserve its source schema",
+                    details={"code": "EDIT_SCHEMA_DOWNGRADE"},
+                )
+            if row.episode_id is not None:
+                offending = await self._clips_outside_episode(
+                    timeline=timeline, episode_id=row.episode_id
+                )
+                if offending:
+                    raise ValidationAppError(
+                        "the edit contains clips from another episode",
+                        details={"code": "EDIT_CLIP_OUT_OF_EPISODE", "clip_ids": offending},
+                    )
         for clip in cast(list[object], timeline.get("clips", [])):
             if isinstance(clip, dict):
                 clip_audio_volume(clip)
@@ -206,6 +222,9 @@ class EditingAdapter:
             source = raw.get("source")
             shot_value = raw.get("shot_id")
             if isinstance(source, dict):
+                if declared_schema_version(timeline) == 1:
+                    offending.append(clip_id)
+                    continue
                 if source.get("kind") != "shot_formal":
                     # Adopted asset versions and public material are not
                     # episode-bound; they stay usable in any episode.
