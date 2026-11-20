@@ -1,28 +1,26 @@
-"""Run a backup inside one quiesce window (I10-01).
-
-A recovery point is only consistent if the database dumps and the object listing
-are taken while writes are paused. This module owns that sequencing: it plans the
-commands from the manifest, pauses writes, runs every command in order, resumes
-writes in ``finally``, and refuses to report success unless every command exited
-zero.
-
-The actual tools (``pg_dump``/``restic``) are injected as a runner, so this file
-holds no subprocess call and no argument quoting of its own. A failed command
-aborts the whole backup: no manifest is emitted for a partial bundle.
-"""
+"""Capture the complete inventory in one write-pause window, then verify one snapshot."""
 
 from __future__ import annotations
 
+import asyncio
+import json
+import os
+import subprocess
+import tempfile
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
+
+from psycopg import pq
+from psycopg.conninfo import conninfo_to_dict
+
+from app.maintenance.backup_manifest import ObjectEntry
+from app.maintenance.restic_repository import ResticRepository, seal_bundle
 
 
 class BackupAborted(RuntimeError):
-    """The backup must not be reported complete."""
-
     def __init__(self, code: str, detail: str) -> None:
         super().__init__(f"{code}: {detail}")
         self.code = code
@@ -33,106 +31,147 @@ class BackupAborted(RuntimeError):
 class BackupCommand:
     stage: str
     argv: tuple[str, ...]
-    source: str
+    server_identity: str
+    database: str
 
 
-class CommandRunner(Protocol):
-    async def __call__(self, argv: tuple[str, ...]) -> int: ...
-
-
-WriteGate = Callable[[], Awaitable[None]]
-
-
-def plan_commands(
-    *,
-    manifest: dict[str, Any],
-    staging_dir: Path,
-    repository: str,
-) -> list[BackupCommand]:
-    """Plan every dump and object snapshot, one per manifest member."""
-    databases = list(manifest.get("databases", []))
-    buckets = list(manifest.get("buckets", []))
-    if not databases or not buckets:
-        raise BackupAborted("BACKUP_PLAN_EMPTY", "manifest has no database or bucket")
-
-    commands: list[BackupCommand] = []
-    for member in databases:
-        # pg_dump writes a custom-format archive per database/schema member; the
-        # schema is selected with a flag rather than by reusing a single archive.
-        argv: list[str] = [
+def plan_commands(*, manifest: dict[str, Any], staging_dir: Path) -> list[BackupCommand]:
+    if not manifest.get("databases") or not manifest.get("buckets"):
+        raise BackupAborted("BACKUP_PLAN_EMPTY", "a database and a bucket are required")
+    commands = []
+    names = set()
+    for member in manifest["databases"]:
+        role = member["role"]
+        if role not in {"primary", "checkpoint", "proxy"} or role in names:
+            raise BackupAborted("BACKUP_DB_IDENTITY_CONFLICT", "ambiguous dump role")
+        names.add(role)
+        argv = [
             "pg_dump",
             "--format=custom",
             "--no-owner",
-            f"--file={staging_dir / (member['role'] + '.dump')}",
+            f"--file={staging_dir / (role + '.dump')}",
         ]
         if member.get("schema"):
-            argv.extend(["--schema", str(member["schema"])])
+            argv.extend(["--strict-names", "--schema", _schema_pattern(member["schema"])])
+        else:
+            for other in manifest["databases"]:
+                if (
+                    other["server_identity"] == member["server_identity"]
+                    and other["database"] == member["database"]
+                    and other.get("schema")
+                ):
+                    argv.extend(["--exclude-schema", _schema_pattern(other["schema"])])
         commands.append(
             BackupCommand(
-                stage=f"dump-{member['role']}",
-                argv=tuple(argv),
-                source=f"{member['server_identity']}/{member['database']}",
-            )
-        )
-    for bucket in buckets:
-        commands.append(
-            BackupCommand(
-                stage=f"objects-{bucket['purpose']}",
-                argv=(
-                    "restic",
-                    "--repo",
-                    repository,
-                    "backup",
-                    str(staging_dir / "objects" / bucket["bucket"]),
-                    "--tag",
-                    f"bucket:{bucket['bucket']}",
-                ),
-                source=f"{bucket['endpoint_identity']}/{bucket['bucket']}",
+                f"dump-{role}", tuple(argv), member["server_identity"], member["database"]
             )
         )
     return commands
 
 
+def _schema_pattern(name: str) -> str:
+    # pg_dump takes patterns even when arguments are supplied without a shell.
+    return '"' + name.replace('"', '""') + '"'
+
+
+def dump_database(command: BackupCommand, *, source_dsn: str) -> int:
+    """The coordinator resolves this DSN for the command's verified cluster and database."""
+    if not source_dsn.startswith(("postgresql://", "postgres://")):
+        raise BackupAborted("BACKUP_DB_IDENTITY_CONFLICT", "a full PostgreSQL DSN is required")
+    options = conninfo_to_dict(source_dsn)
+    if not options.get("host") or options.get("dbname") != command.database or "service" in options:
+        raise BackupAborted("BACKUP_DB_IDENTITY_CONFLICT", "DSN differs from the database member")
+    # Use libpq's own option-to-environment mapping to preserve connection settings
+    # without exposing secrets in process arguments or falling back to host defaults.
+    names = {i.keyword.decode(): i.envvar.decode() for i in pq.Conninfo.get_defaults() if i.envvar}
+    environment = {k: v for k, v in os.environ.items() if not k.startswith("PG")}
+    for key, value in options.items():
+        if key not in names:
+            raise BackupAborted("BACKUP_DB_IDENTITY_CONFLICT", "unsupported connection setting")
+        environment[names[key]] = str(value)
+    identity = subprocess.run(
+        [
+            "psql",
+            "-X",
+            "-w",
+            "-Atqc",
+            "SELECT json_build_array(system_identifier::text, current_database()) "
+            "FROM pg_control_system()",
+        ],
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        check=False,
+    )
+    if identity.returncode or json.loads(identity.stdout) != [
+        command.server_identity,
+        command.database,
+    ]:
+        raise BackupAborted(
+            "BACKUP_DB_IDENTITY_CONFLICT", "connected database differs from inventory"
+        )
+    return subprocess.run(
+        [*command.argv, "--no-password"],
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    ).returncode
+
+
 async def run_backup(
     *,
-    commands: list[BackupCommand],
-    runner: CommandRunner,
-    pause_writes: WriteGate,
-    resume_writes: WriteGate,
-    clock: Callable[[], datetime] | None = None,
+    staging_parent: Path,
+    repository: ResticRepository,
+    inventory: Callable[[], Awaitable[dict[str, Any]]],
+    runner: Callable[[BackupCommand], Awaitable[int]],
+    stage_bucket: Callable[[dict[str, Any], Path], Awaitable[list[ObjectEntry]]],
+    pause_writes: Callable[[], Awaitable[None]],
+    resume_writes: Callable[[], Awaitable[None]],
 ) -> dict[str, Any]:
-    """Execute the plan inside one window; never claim a partial success."""
-    if not commands:
-        raise BackupAborted("BACKUP_PLAN_EMPTY", "no command to run")
-    now = clock or (lambda: datetime.now(UTC))
-    started_at = now().isoformat()
-    await pause_writes()
-    finished: list[str] = []
-    try:
-        for command in commands:
-            exit_code = await runner(command.argv)
-            if exit_code != 0:
+    """The coordinator supplies actual source identities and owns the write barrier."""
+    with tempfile.TemporaryDirectory(dir=staging_parent, prefix="backup-") as temp:
+        root = Path(temp)
+        started_at = datetime.now(UTC)
+        await pause_writes()
+        try:
+            manifest = await inventory()
+            commands = plan_commands(manifest=manifest, staging_dir=root)
+            for command in commands:
+                status = await runner(command)
+                if status != 0:
+                    raise BackupAborted("BACKUP_COMMAND_FAILED", f"{command.stage} exited {status}")
+            observed: list[dict[str, Any]] = []
+            for bucket in manifest["buckets"]:
+                members = await stage_bucket(bucket, root)
+                if any(item.bucket != bucket["bucket"] for item in members):
+                    raise BackupAborted("BACKUP_BUCKET_MISMATCH", "wrong bucket inventory")
+                observed.extend(item.as_dict() for item in members)
+            if (
+                sorted(observed, key=lambda item: (item["bucket"], item["key"]))
+                != manifest["objects"]
+            ):
                 raise BackupAborted(
-                    "BACKUP_COMMAND_FAILED",
-                    f"{command.stage} exited {exit_code}",
+                    "BACKUP_OBJECT_INVENTORY_CHANGED", "object inventory differs from the capture"
                 )
-            finished.append(command.stage)
-    finally:
-        # Writes resume on every path, including a failed or cancelled backup.
-        await resume_writes()
-    return {
-        "quiesce_started_at": started_at,
-        "finished_at": now().isoformat(),
-        "stages": finished,
-        "command_count": len(commands),
-        "completed": True,
-    }
-
-
-__all__ = [
-    "BackupAborted",
-    "BackupCommand",
-    "CommandRunner",
-    "plan_commands",
-    "run_backup",
-]
+            seal_bundle(root, manifest)
+        finally:
+            await resume_writes()
+        snapshot = asyncio.create_task(asyncio.to_thread(repository.snapshot, root))
+        try:
+            receipt = await asyncio.shield(snapshot)
+        except asyncio.CancelledError:
+            # The restic subprocess still owns this directory until the worker finishes.
+            await snapshot
+            raise
+        return {
+            **receipt,
+            "deployment": manifest["deployment"],
+            "quiesce_started_at": started_at.isoformat(),
+            "finished_at": datetime.now(UTC).isoformat(),
+            "database_count": len(commands),
+            "bucket_count": len(manifest["buckets"]),
+            "object_count": len(observed),
+            "completed": True,
+        }

@@ -17,6 +17,9 @@ class MemoryStore:
         self.objects = objects
         self.reads: list[str] = []
 
+    async def get_size(self, *, object_key: str) -> int:
+        return len(self.objects[object_key])
+
     async def iter_bytes(self, *, object_key: str):
         self.reads.append(object_key)
         data = self.objects[object_key]
@@ -91,6 +94,26 @@ async def test_total_cap_and_deterministic_order(tmp_path: Path) -> None:
             max_total_bytes=6,
         )
     assert capped.value.code == "BACKUP_CAPACITY_INSUFFICIENT"
+    assert not (tmp_path / "second" / "objects" / "media" / "b").exists()
+
+
+async def test_incomplete_stream_and_retry_do_not_replace_a_complete_object(tmp_path: Path):
+    class ShortStore(MemoryStore):
+        async def get_size(self, *, object_key: str) -> int:
+            return await super().get_size(object_key=object_key) + 1
+
+    with pytest.raises(BackupManifestError, match="BACKUP_OBJECT_SIZE_MISMATCH"):
+        await stage_object(ShortStore({"a": b"x"}), bucket="media", key="a", staging_dir=tmp_path)
+    target = tmp_path / "objects" / "media" / "a"
+    assert not target.exists()
+    await stage_object(
+        MemoryStore({"a": b"original"}), bucket="media", key="a", staging_dir=tmp_path
+    )
+    with pytest.raises(FileExistsError):
+        await stage_object(
+            MemoryStore({"a": b"replacement"}), bucket="media", key="a", staging_dir=tmp_path
+        )
+    assert target.read_bytes() == b"original"
 
 
 def test_staging_free_bytes_reports_the_filesystem(tmp_path: Path) -> None:

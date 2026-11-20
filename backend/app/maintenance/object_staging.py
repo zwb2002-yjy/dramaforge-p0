@@ -23,6 +23,8 @@ CHUNK_BYTES = 64 * 1024
 
 
 class StreamableStore(Protocol):
+    async def get_size(self, *, object_key: str) -> int: ...
+
     def iter_bytes(self, *, object_key: str) -> AsyncIterator[bytes]: ...
 
 
@@ -35,12 +37,13 @@ def _safe_target(root: Path, *, bucket: str, key: str) -> Path:
     """Keep staged paths inside the staging root, even for hostile keys."""
     if not bucket.strip() or "/" in bucket or "\\" in bucket or bucket in {".", ".."}:
         raise BackupManifestError("BACKUP_OBJECT_INVALID", f"unsafe bucket name: {bucket!r}")
-    relative = Path(key)
-    if relative.is_absolute() or ".." in relative.parts:
-        raise BackupManifestError("BACKUP_OBJECT_INVALID", f"unsafe object key: {key!r}")
-    target = (root / "objects" / bucket / relative).resolve()
-    if root.resolve() not in target.parents:
-        raise BackupManifestError("BACKUP_OBJECT_INVALID", f"object escapes staging: {key!r}")
+    components = key.split("/")
+    if "\\" in key or any(part in {"", ".", ".."} for part in components):
+        raise BackupManifestError("BACKUP_OBJECT_INVALID", "object key has no unique staging path")
+    base = root.resolve() / "objects" / bucket
+    target = base.joinpath(*components)
+    if target.resolve() != target or base not in target.parents:
+        raise BackupManifestError("BACKUP_OBJECT_INVALID", f"unsafe staging path: {key!r}")
     return target
 
 
@@ -51,30 +54,41 @@ async def stage_object(
     key: str,
     staging_dir: Path,
     max_object_bytes: int | None = None,
+    remaining_bytes: int | None = None,
 ) -> ObjectEntry:
     """Stream one object to disk, returning its measured size and hash."""
     target = _safe_target(staging_dir, bucket=bucket, key=key)
-    target.parent.mkdir(parents=True, exist_ok=True)
+    expected = await store.get_size(object_key=key)
+    if expected <= 0:
+        raise BackupManifestError("BACKUP_OBJECT_INVALID", f"{bucket}/{key} is empty or missing")
+    if max_object_bytes is not None and expected > max_object_bytes:
+        raise BackupManifestError("BACKUP_OBJECT_TOO_LARGE", f"{bucket}/{key} exceeds object limit")
+    if remaining_bytes is not None and expected > remaining_bytes:
+        raise BackupManifestError(
+            "BACKUP_CAPACITY_INSUFFICIENT", f"{bucket}/{key} exceeds remaining capacity"
+        )
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     digest = hashlib.sha256()
     size = 0
+    # Opening exclusively keeps a previous complete capture intact on retry.
+    handle = target.open("xb")
     try:
-        with target.open("wb") as handle:
+        with handle:
             async for chunk in store.iter_bytes(object_key=key):
                 size += len(chunk)
-                if max_object_bytes is not None and size > max_object_bytes:
+                if size > expected:
                     raise BackupManifestError(
-                        "BACKUP_OBJECT_TOO_LARGE",
-                        f"{bucket}/{key} exceeds {max_object_bytes} bytes while staging",
+                        "BACKUP_OBJECT_SIZE_MISMATCH", f"{bucket}/{key} grew during capture"
                     )
                 digest.update(chunk)
                 handle.write(chunk)
+        if size != expected:
+            raise BackupManifestError(
+                "BACKUP_OBJECT_SIZE_MISMATCH", f"{bucket}/{key} was truncated during capture"
+            )
     except BaseException:
-        # Never leave a truncated object behind: it would look restorable.
         target.unlink(missing_ok=True)
         raise
-    if size == 0:
-        target.unlink(missing_ok=True)
-        raise BackupManifestError("BACKUP_OBJECT_INVALID", f"{bucket}/{key} is empty")
     return ObjectEntry(bucket=bucket, key=key, size=size, sha256=digest.hexdigest())
 
 
@@ -97,13 +111,9 @@ async def stage_objects(
             key=key,
             staging_dir=staging_dir,
             max_object_bytes=max_object_bytes,
+            remaining_bytes=None if max_total_bytes is None else max_total_bytes - total,
         )
         total += entry.size
-        if max_total_bytes is not None and total > max_total_bytes:
-            raise BackupManifestError(
-                "BACKUP_CAPACITY_INSUFFICIENT",
-                f"staged {total} bytes for {bucket}, cap {max_total_bytes}",
-            )
         entries.append(entry)
     return entries
 
