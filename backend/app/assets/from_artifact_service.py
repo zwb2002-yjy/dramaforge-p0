@@ -73,9 +73,13 @@ class MediaSource:
 
 
 async def read_media_source(
-    session: AsyncSession, *, artifact_id: UUID | None = None, asset_version_id: UUID | None = None
+    session: AsyncSession,
+    *,
+    artifact_id: UUID | None = None,
+    asset_version_id: UUID | None = None,
+    media_kind: str = "video",
 ) -> MediaSource | None:
-    """Read an existing artifact or the first available video of an adopted version."""
+    """Read an existing artifact or the first available matching item of an adopted version."""
     if (artifact_id is None) == (asset_version_id is None):
         raise ValueError("supply exactly one media source identity")
     query = select(Artifact).where(Artifact.deleted_at.is_(None))
@@ -84,7 +88,7 @@ async def read_media_source(
             query.join(AssetVersionReference, AssetVersionReference.artifact_id == Artifact.id)
             .where(
                 AssetVersionReference.asset_version_id == asset_version_id,
-                Artifact.artifact_type == "video",
+                Artifact.artifact_type == media_kind,
                 Artifact.storage_state == "available",
             )
             .order_by(AssetVersionReference.sort_order, Artifact.id)
@@ -111,8 +115,13 @@ class AssetFromArtifactRequest:
 
 
 def asset_creation_request_hash(
-    *, artifact_id: UUID, kind: str, name: str, description: str,
-    reference_role: str, metadata: dict[str, object] | None,
+    *,
+    artifact_id: UUID,
+    kind: str,
+    name: str,
+    description: str,
+    reference_role: str,
+    metadata: dict[str, object] | None,
 ) -> str:
     """Canonical identity of one creation submission.
 
@@ -167,8 +176,9 @@ class AssetFromArtifactService:
             project_id=project_id, actor=actor
         )
         # Serialize same-key/name creation before the read-and-insert window.
-        await self._session.scalar(select(Project.id).where(Project.id == project_id)
-                                    .with_for_update())
+        await self._session.scalar(
+            select(Project.id).where(Project.id == project_id).with_for_update()
+        )
         request_hash = asset_creation_request_hash(
             artifact_id=request.artifact_id,
             kind=request.kind,
@@ -194,9 +204,7 @@ class AssetFromArtifactService:
                     )
                 return existing
 
-        artifact = await self._load_artifact(
-            project_id=project_id, artifact_id=request.artifact_id
-        )
+        artifact = await self._load_artifact(project_id=project_id, artifact_id=request.artifact_id)
         self._validate_kind_and_role(kind=request.kind, reference_role=request.reference_role)
         self._validate_artifact_kind(artifact=artifact, kind=request.kind)
 
@@ -271,9 +279,7 @@ class AssetFromArtifactService:
         """Create/adopt the asset and, when requested, publish it in the same transaction."""
         key = request_key.strip() if request_key else None
         existing = (
-            await self._by_request_key(project_id=project_id, request_key=key)
-            if key
-            else None
+            await self._by_request_key(project_id=project_id, request_key=key) if key else None
         )
         asset = await self.create(
             project_id=project_id,
@@ -290,9 +296,9 @@ class AssetFromArtifactService:
             raise ValidationAppError("Asset has no current version")
         publication_id: UUID | None = None
         if public_display is not None:
-            published = await PublicAssetService(
-                self._session, actor=actor
-            ).publish(version.id, display=public_display)
+            published = await PublicAssetService(self._session, actor=actor).publish(
+                version.id, display=public_display
+            )
             publication_id = published.id
         return AssetAdoptionReceipt(
             asset_id=asset.id,
@@ -301,6 +307,7 @@ class AssetFromArtifactService:
             publication_id=publication_id,
             created=existing is None,
         )
+
     async def _by_request_key(self, *, project_id: UUID, request_key: str) -> Asset | None:
         return (
             await self._session.execute(

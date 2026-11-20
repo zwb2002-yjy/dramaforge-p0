@@ -753,3 +753,47 @@ async def test_save_keeps_the_version_conflict_contract(session: AsyncSession) -
             timeline={"schema_version": 2, "clips": [_clip(shot, artifact)], "metadata": {}},
             expected_session_version=7,
         )
+
+
+async def test_typed_soundtrack_observation_uses_the_adopted_audio(session: AsyncSession) -> None:
+    from app.production.edit_render_plan import build_render_plan
+
+    project, user, shot, video = await _shot(session)
+    assert video is not None
+    asset, version, sound = await _adopted_version(session, project=project, user=user)
+    sound.artifact_type = "audio"
+    sound.mime_type = "audio/wav"
+    await session.flush()
+    editor = EditingAdapter(session)
+    edit = await editor.create_session(project_id=project.id, user_id=user.id, name="有声剪辑")
+    clip = _clip(shot, video)
+    clip.update(
+        audio_source={
+            "kind": "asset_version",
+            "asset_id": str(asset.id),
+            "asset_version_id": str(version.id),
+        },
+        audio_volume=0.25,
+        source_in_seconds=0.2,
+        source_out_seconds=0.6,
+        duration_seconds=0.4,
+        audio_selection_snapshot={"artifact_id": str(video.id)},
+    )
+    saved = await editor.save_timeline(
+        project_id=project.id,
+        session_id=edit.id,
+        timeline={"schema_version": 2, "clips": [clip]},
+        expected_session_version=1,
+    )
+    item = saved.timeline["clips"][0]
+    assert item["selection_snapshot"]["artifact_id"] == str(video.id)
+    assert item["audio_selection_snapshot"]["artifact_id"] == str(sound.id)
+    plan = build_render_plan(
+        edit_session_id=edit.id,
+        timeline_version=saved.version,
+        timeline_hash="f" * 64,
+        episode_id=None,
+        document=saved.timeline,
+    )
+    assert plan.instructions[0].audio_artifact_id == str(sound.id)
+    assert plan.instructions[0].audio_volume == 0.25

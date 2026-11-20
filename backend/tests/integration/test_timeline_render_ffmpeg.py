@@ -469,3 +469,104 @@ async def test_audio_retiming_moves_audible_interval(tmp_path: Path, duration: f
     assert rms(duration * 0.30, duration * 0.45) > 2000
     assert rms(duration * 0.05, duration * 0.15) < 100
     assert rms(duration * 0.70, duration * 0.85) < 100
+
+
+@pytest.mark.asyncio
+async def test_saved_episode_cut_delivers_playable_mp4_and_matching_srt(
+    session, tmp_path, monkeypatch
+):
+    """Exercise session export and worker binding with real, locally decoded media."""
+    from uuid import UUID
+
+    from app.assets.models import Scene
+    from app.editing.adapter import EditingAdapter
+    from app.execution.models import Artifact, GraphNode
+    from app.production.edit_session_render import (
+        create_edit_session_render,
+        execute_edit_session_render,
+    )
+    from app.production.session_exports import SessionExports
+    from app.storage.minio_store import reset_object_store_for_tests
+
+    from fixtures.final_film_seed import _seed_renderable_final_film
+
+    store = reset_object_store_for_tests()
+    project, owner, _, shots, formal = await _seed_renderable_final_film(
+        session, shot_count=2, object_store=store
+    )
+    playback = Path(__file__).resolve().parents[3] / "fixtures" / "playback"
+    for video, name in zip(formal, ["red-tone.mp4", "blue-tone.mp4"], strict=True):
+        stored = await store.put_file(
+            object_key=video.object_key, path=playback / name, mime_type="video/mp4"
+        )
+        video.byte_size, video.content_hash = stored.byte_size, stored.content_hash
+    tone = await store.put_file(
+        object_key=f"projects/{project.id}/tone.wav",
+        path=playback / "tone.wav",
+        mime_type="audio/wav",
+    )
+    audio = Artifact(
+        project_id=project.id,
+        artifact_type="audio",
+        object_key=tone.object_key,
+        content_hash=tone.content_hash,
+        byte_size=tone.byte_size,
+        mime_type=tone.mime_type,
+        storage_state="available",
+    )
+    session.add(audio)
+    scene = await session.get(Scene, shots[0].scene_id)
+    editor = EditingAdapter(session)
+    edit = await editor.create_session(
+        project_id=project.id, user_id=owner.id, name="分集交付", episode_id=scene.episode_id
+    )
+    clips = [
+        {
+            "id": str(shot.id),
+            "order": index + 1,
+            "shot_id": str(shot.id),
+            "artifact_id": str(video.id),
+            "source_in_seconds": 0.1,
+            "source_out_seconds": 0.5,
+            "duration_seconds": 0.4,
+            "subtitle": caption,
+            "audio_id": str(audio.id),
+            "muted": bool(index),
+        }
+        for index, (shot, video, caption) in enumerate(
+            zip(shots, formal, ["灯会开场", "沿河赏灯"], strict=True)
+        )
+    ]
+    saved = await editor.save_timeline(
+        project_id=project.id,
+        session_id=edit.id,
+        expected_session_version=1,
+        timeline={"clips": clips, "metadata": {}},
+    )
+    exports = SessionExports(session)
+    receipt, _ = await exports.create_session_export(
+        project_id=project.id, session_id=saved.id, requested_by=owner.id, format="mp4"
+    )
+    run = await create_edit_session_render(
+        session, project_id=project.id, session_id=saved.id, export_id=receipt.id, actor_id=owner.id
+    )
+    await session.commit()
+    settings = get_settings().model_copy(update={"app_env": "development"})
+    monkeypatch.setattr(renderer, "get_settings", lambda: settings)
+    node = await session.get(GraphNode, run.graph_node_id)
+    await execute_edit_session_render(session, run=run, node=node, obj_store=store)
+    await session.commit()
+
+    delivered, video = await exports.delivery_artifact(project_id=project.id, export_id=receipt.id)
+    assert delivered.episode_id == scene.episode_id and delivered.timeline_version == 2
+    subtitle = await session.get(Artifact, UUID(receipt.manifest["subtitle_artifact_id"]))
+    rendered = tmp_path / "episode-cut.mp4"
+    rendered.write_bytes(await store.get_bytes(object_key=video.object_key))
+    captions = tmp_path / "episode-cut.srt"
+    captions.write_bytes(await store.get_bytes(object_key=subtitle.object_key))
+    probe = await renderer._probe(rendered)
+    assert abs(float(probe["format"]["duration"]) - 0.8) < 0.12
+    assert {stream["codec_name"] for stream in probe["streams"]} == {"h264", "aac"}
+    assert await _decode_whole_file(rendered) == ""
+    assert await _mean_volume_db(rendered) > -60
+    assert "00:00:00,400 --> 00:00:00,800\n沿河赏灯" in captions.read_text(encoding="utf-8")

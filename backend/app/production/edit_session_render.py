@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import tempfile
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ from app.production.edit_render_plan import build_render_plan
 from app.production.service import GraphService
 from app.production.session_exports import timeline_hash
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
+from app.storage.minio_store import ObjectStore
 
 EDIT_RENDER_TEMPLATE = "edit-session-render-v1"
 EDIT_RENDER_NODE_KEY = "edit_session_render"
@@ -54,7 +56,8 @@ async def create_edit_session_render(
     # The render graph and attempt sequence are shared by the project's exports.
     await session.scalar(select(Project.id).where(Project.id == project_id).with_for_update())
     export = await session.scalar(
-        select(Export).where(Export.id == export_id, Export.project_id == project_id)
+        select(Export)
+        .where(Export.id == export_id, Export.project_id == project_id)
         .execution_options(populate_existing=True)
     )
     if export is None:
@@ -86,7 +89,7 @@ async def create_edit_session_render(
                 "session_version": edit_session.version,
             },
         )
-    document = dict(edit_session.timeline or {})
+    document: dict[str, Any] = dict(edit_session.timeline or {})
     if export.timeline_hash and export.timeline_hash != timeline_hash(document):
         raise ConflictError(
             "frozen timeline hash no longer matches the session",
@@ -104,6 +107,18 @@ async def create_edit_session_render(
             "the requested subtitle export contains no captions",
             details={"code": "EXPORT_SUBTITLES_EMPTY"},
         )
+    instructions = [asdict(item) for item in plan.instructions]
+    sources = await _render_sources(session, project_id, instructions)
+    for clip in document["clips"] if document.get("schema_version") == 2 else []:
+        for field in ("selection_snapshot", "audio_selection_snapshot"):
+            saved = clip.get(field)
+            if not saved or (field == "audio_selection_snapshot" and clip.get("muted")):
+                continue
+            artifact = sources.get(UUID(saved["artifact_id"]))
+            if artifact is None or artifact.content_hash != saved.get("artifact_hash"):
+                raise ConflictError(
+                    "saved media has changed", details={"code": "RENDER_INPUT_HASH_MISMATCH"}
+                )
     snapshot: dict[str, Any] = {
         "source_commit": get_settings().source_commit,
         "node_key": EDIT_RENDER_NODE_KEY,
@@ -111,18 +126,8 @@ async def create_edit_session_render(
         "export_id": str(export.id),
         "timeline_version": plan.timeline_version,
         "timeline_hash": plan.timeline_hash,
-        "instructions": [
-            {
-                "clip_id": item.clip_id,
-                "video_artifact_id": item.video_artifact_id,
-                "subtitle_text": item.subtitle_text,
-                "source_in_seconds": item.source_in_seconds,
-                "duration_seconds": item.duration_seconds,
-                "transition_kind": item.transition_kind,
-                "transition_duration_seconds": item.transition_duration_seconds,
-            }
-            for item in plan.instructions
-        ],
+        "instructions": instructions,
+        "source_hashes": {str(key): row.content_hash for key, row in sources.items()},
     }
     input_hash = _snapshot_hash(snapshot)
     graphs = GraphService(session)
@@ -201,6 +206,55 @@ async def create_edit_session_render(
     return run
 
 
+async def _render_sources(
+    session: AsyncSession, project_id: UUID, instructions: list[dict[str, Any]]
+) -> dict[UUID, Artifact]:
+    expected = [
+        (UUID(str(item[field])), kind)
+        for item in instructions
+        for field, kind in (("video_artifact_id", "video"), ("audio_artifact_id", "audio"))
+        if item.get(field)
+    ]
+    ids = {key for key, _ in expected}
+    sources = {
+        row.id: row
+        for row in await session.scalars(
+            select(Artifact).where(
+                Artifact.id.in_(ids),
+                Artifact.project_id == project_id,
+                Artifact.deleted_at.is_(None),
+                Artifact.storage_state == "available",
+            )
+        )
+    }
+    for key, kind in expected:
+        if key not in sources or sources[key].artifact_type != kind:
+            raise ValidationAppError(
+                "render source is unavailable",
+                details={"code": "RENDER_INPUT_UNAVAILABLE", "artifact_id": str(key)},
+            )
+    return sources
+
+
+async def _stage_source(
+    store: ObjectStore, artifact: Artifact, path: Path, expected_hash: str
+) -> None:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("xb") as output:
+        async for chunk in store.iter_bytes(object_key=artifact.object_key):
+            size += len(chunk)
+            if size > artifact.byte_size:
+                break
+            digest.update(chunk)
+            output.write(chunk)
+    if size != artifact.byte_size or digest.hexdigest() != expected_hash:
+        raise ValidationAppError(
+            "render source differs from the frozen bytes",
+            details={"code": "RENDER_INPUT_HASH_MISMATCH", "artifact_id": str(artifact.id)},
+        )
+
+
 async def execute_edit_session_render(
     session: AsyncSession,
     *,
@@ -234,54 +288,34 @@ async def execute_edit_session_render(
     if export is None:
         raise NotFoundError("export not found")
 
-    instruction_ids = [UUID(str(item["video_artifact_id"])) for item in raw_instructions]
-    artifacts = {
-        artifact.id: artifact
-        for artifact in (
-            await session.scalars(
-                select(Artifact).where(
-                    Artifact.id.in_(instruction_ids), Artifact.project_id == run.project_id
-                )
-            )
-        ).all()
-    }
+    artifacts = await _render_sources(session, run.project_id, raw_instructions)
+    hashes = snapshot.get("source_hashes")
+    if hashes is not None and not isinstance(hashes, dict):
+        raise ValidationAppError(
+            "render input hashes are invalid", details={"code": "RENDER_SNAPSHOT_INVALID"}
+        )
     with tempfile.TemporaryDirectory(prefix="edit-render-") as temp:
         directory = Path(temp)
-        clips: list[TimelineRenderClip] = []
-        for index, item in enumerate(raw_instructions, start=1):
-            artifact_id = UUID(str(item["video_artifact_id"]))
-            artifact = artifacts.get(artifact_id)
-            if (
-                artifact is None
-                or artifact.storage_state != "available"
-                or artifact.deleted_at is not None
-            ):
+        paths: dict[str, Path] = {}
+        for artifact in artifacts.values():
+            key = str(artifact.id)
+            path = directory / key
+            expected_hash = artifact.content_hash if hashes is None else hashes.get(key)
+            if expected_hash != artifact.content_hash:
                 raise ValidationAppError(
-                    "render input artifact is unavailable",
-                    details={"code": "RENDER_INPUT_UNAVAILABLE", "artifact_id": str(artifact_id)},
+                    "render source metadata changed",
+                    details={"code": "RENDER_INPUT_HASH_MISMATCH", "artifact_id": key},
                 )
-            data = await obj_store.get_bytes(object_key=artifact.object_key)
-            if hashlib.sha256(data).hexdigest() != artifact.content_hash:
-                raise ValidationAppError(
-                    "render input bytes do not match the frozen artifact",
-                    details={"code": "RENDER_INPUT_HASH_MISMATCH", "artifact_id": str(artifact_id)},
-                )
-            clip_path = directory / f"clip-{index}.mp4"
-            clip_path.write_bytes(data)
-            clips.append(
-                TimelineRenderClip(
-                    clip_id=str(item["clip_id"]),
-                    video_artifact_id=str(artifact_id),
-                    subtitle_text=str(item.get("subtitle_text") or ""),
-                    source_in_seconds=float(item.get("source_in_seconds") or 0.0),
-                    duration_seconds=float(item["duration_seconds"]),
-                    transition_kind=item.get("transition_kind"),
-                    transition_duration_seconds=float(
-                        item.get("transition_duration_seconds") or 0.0
-                    ),
-                    video_path=clip_path,
-                )
+            await _stage_source(obj_store, artifact, path, expected_hash)
+            paths[key] = path
+        clips = [
+            TimelineRenderClip(
+                **item,
+                video_path=paths[item["video_artifact_id"]],
+                audio_path=paths.get(item.get("audio_artifact_id", "")),
             )
+            for item in raw_instructions
+        ]
         try:
             rendered = await render_timeline(
                 clips,

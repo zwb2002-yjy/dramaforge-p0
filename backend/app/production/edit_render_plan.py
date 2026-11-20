@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from app.editing.timeline_rules import clip_audio_volume
 from app.production.timeline_subtitles import (
     TimelineClipInstructions,
     TimelineTimingError,
@@ -52,10 +53,14 @@ def _invalid(code: str, **details: object) -> ValidationAppError:
     )
 
 
-def _frozen_artifact(clip: dict[str, Any]) -> str:
+def _frozen_artifact(clip: dict[str, Any], *, typed: bool) -> str:
     snapshot = clip.get("selection_snapshot")
-    if isinstance(snapshot, dict) and isinstance(snapshot.get("artifact_id"), str):
-        return str(snapshot["artifact_id"])
+    if typed:
+        return (
+            str(snapshot["artifact_id"])
+            if isinstance(snapshot, dict) and snapshot.get("artifact_id")
+            else ""
+        )
     raw = clip.get("artifact_id")
     if isinstance(raw, str):
         return raw
@@ -101,14 +106,25 @@ def build_render_plan(
 
     instructions: list[TimelineClipInstructions] = []
     for clip in ordered:
-        artifact_id = _frozen_artifact(clip)
+        artifact_id = _frozen_artifact(clip, typed=document.get("schema_version") == 2)
         if not artifact_id:
             raise _invalid("RENDER_CLIP_UNBOUND", clip_id=str(clip.get("id") or ""))
         clip_id = str(clip.get("id") or "")
         if not clip_id:
             raise _invalid("RENDER_PLAN_INVALID")
         try:
+            artifact_id = str(UUID(artifact_id))
             duration = float(clip.get("duration_seconds", 0.0))
+            source_in = float(clip.get("source_in_seconds", clip.get("trim_start_seconds")) or 0)
+            raw_end = clip.get("source_out_seconds", clip.get("trim_end_seconds"))
+            source_out = float(raw_end) if raw_end not in (None, "") else None
+            audio_id = clip.get("audio_id")
+            if clip.get("audio_source") and not clip.get("muted"):
+                observed_audio = clip.get("audio_selection_snapshot")
+                if not isinstance(observed_audio, dict) or not observed_audio.get("artifact_id"):
+                    raise _invalid("RENDER_AUDIO_UNBOUND", clip_id=clip_id)
+                audio_id = observed_audio["artifact_id"]
+            audio_id = str(UUID(str(audio_id))) if audio_id and not clip.get("muted") else None
         except (TypeError, ValueError) as exc:
             raise _invalid("RENDER_PLAN_INVALID", clip_id=clip_id) from exc
         if duration <= 0:
@@ -120,8 +136,13 @@ def build_render_plan(
             TimelineClipInstructions(
                 clip_id=clip_id,
                 video_artifact_id=artifact_id,
-                subtitle_text=str(clip.get("subtitle") or ""),
-                source_in_seconds=0.0,
+                subtitle_text=""
+                if clip.get("subtitle_enabled") is False
+                else str(clip.get("subtitle") or ""),
+                source_in_seconds=source_in,
+                source_out_seconds=source_out,
+                audio_artifact_id=audio_id,
+                audio_volume=clip_audio_volume(clip),
                 duration_seconds=duration,
                 transition_kind=kind,
                 transition_duration_seconds=transition_seconds,

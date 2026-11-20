@@ -87,3 +87,22 @@ def test_transition_is_carried_into_the_instructions() -> None:
     plan = _plan([clip])
     assert plan.instructions[0].transition_kind == "crossfade"
     assert plan.instructions[0].transition_duration_seconds == 0.5
+
+
+def test_render_plan_preserves_clip_trim_audio_and_disabled_subtitles() -> None:
+    audio_id = str(uuid4())
+    clip = _clip(order=1, artifact=str(uuid4()), subtitle="hidden")
+    clip.update(
+        source_in_seconds=2,
+        source_out_seconds=6,
+        audio_id=audio_id,
+        audio_volume=0.5,
+        subtitle_enabled=False,
+    )
+    plan = _plan([clip])
+    item = plan.instructions[0]
+    assert (item.source_in_seconds, item.source_out_seconds) == (2, 6)
+    assert (item.audio_artifact_id, item.audio_volume) == (audio_id, 0.5)
+    assert plan.srt_bytes == b""
+    clip["muted"] = True
+    assert _plan([clip]).instructions[0].audio_artifact_id is None

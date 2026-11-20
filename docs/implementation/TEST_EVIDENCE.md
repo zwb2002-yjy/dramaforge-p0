@@ -193,6 +193,7 @@
 | EV185 | 本地真实工作台资料→研究旅程 | Chromium 通过正常上传控件送入合成资料，隔离 PG、MinIO 与 Dispatcher 完成解析，页面自动展示原文。逐段引用后新建、修正、重载，历史对照和恢复为新修订保留同一引用。异用户读取仍为 404，Mock 上游事件为空。institution baseline 1 passed（11.9s），typecheck、lint/UI、ResearchPanel 3 项通过。前序 PG 诊断 205 passed（876.09s）。 | 当前可试用资料与研究；后续故事到成片、三作品和整体验收待验证。 |
 | EV186 | 真实三作品剧本→采用→分镜；隔离故事模型 Mock | institution/project-intent 4 passed（37.1s）：三类型空项目可先保存方向，中文样例从提案到明确采用前保持正式集数不变，采用后可进入对应场次。连续剧添加第二集保留第一集完整读模型；已有两集不能转为单集。脚本/提案/生成单测 39 passed，含多集草稿只建一个原文、分集按各自范围应用，Mock 故事模型收到已保存方向且收不到内部策略字段。Ruff/mypy、前端 typecheck/lint/UI 通过。 | 本轮未触发真实付费操作；三作品的正式媒体、剪辑交付及目标机最终验收另验。 |
 | EV187 | 剪辑工作台分集范围、保存与成片回执 | Chromium+隔离真实 API/PG，project-intent 4 passed（48.1s），覆盖三类作品、分集显式选择、创建/刷新、空会话禁导出。剪辑相关后端定向组 32 passed，成片/交付相关组 37 passed（组有重叠）。成片任务入队后改变会话范围仍交付至冻结的原集/版本/hash。前端 52 passed、typecheck/lint/UI，后端 Ruff/mypy 416 文件通过。 | 实机可操作的分集剪辑入口；本组浏览器样例尚无正式视频，未宣称已完成三作品媒体交付。 |
+| EV188 | 已保存分集剪辑经实际 Worker 导出 H.264/AAC 与对应 SRT | 34 个定向用例通过。test_saved_episode_cut_delivers_playable_mp4_and_matching_srt 通过，使用合成正式视频夹具，在 2 个 0.4s 片段上验证裁切、选定音轨与静音、整文件解码、音量和两条字幕。MP4 8284 B，SHA-256 3f60a64773e81cf61de2742b82c54bc40ffa79906f859810816c23b13fa7b230；SRT 91 B，时间线 0–400–800ms。文件在 tmp/goal-voice-contract/episode-media/verified/test_saved_episode_cut_deliver0。Ruff 与 mypy 416 文件通过。 | 实际 FFmpeg 与交付字节；合成素材和隔离数据，未作为三类作品创作质量或目标机整体验收。 |
 
 
 

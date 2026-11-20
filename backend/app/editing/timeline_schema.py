@@ -5,11 +5,8 @@ about production truth.  Schema 2 makes that claim explicit and typed:
 
 * ``schema_version`` 1 (or absent) keeps the historical shot-only meaning; it is
   stored verbatim and is never silently upgraded.
-* ``schema_version`` 2 requires a typed ``source`` per clip.  Only the
-  ``shot_formal`` kind can be verified today: the source artifact must be the
-  shot's current formal video in the same project.  ``asset_version`` and
-  ``public_material`` sources need the adoption/public-material qualification
-  path, so they are refused fail-closed instead of being trusted from JSON.
+* ``schema_version`` 2 verifies formal shots, adopted asset versions and project
+  publication links, and records the media observed at Save.
 """
 
 from __future__ import annotations
@@ -36,10 +33,6 @@ TIMELINE_SCHEMA_V2 = 2
 SUPPORTED_SCHEMA_VERSIONS = frozenset({TIMELINE_SCHEMA_V1, TIMELINE_SCHEMA_V2})
 
 ClipSourceKind = Literal["shot_formal", "asset_version", "public_material"]
-# Kinds whose eligibility can be proven from data this service already owns.
-VERIFIABLE_SOURCE_KINDS: frozenset[str] = frozenset(
-    {"shot_formal", "asset_version", "public_material"}
-)
 
 
 class ClipSource(BaseModel):
@@ -63,12 +56,18 @@ class TimelineClip(BaseModel):
     id: str = Field(min_length=1, max_length=80)
     order: int = Field(ge=1)
     duration_seconds: float = Field(ge=0)
+    source_in_seconds: float = Field(default=0, ge=0)
+    source_out_seconds: float | None = Field(default=None, gt=0)
+    muted: bool = False
+    audio_volume: float = Field(default=1, ge=0, le=1)
+    subtitle_enabled: bool | None = None
     subtitle: str = ""
     transition: dict[str, Any] | None = None
     source: ClipSource
     audio_source: ClipSource | None = None
     # Server-written observation of the source at Save; never client-authoritative.
     selection_snapshot: dict[str, Any] | None = None
+    audio_selection_snapshot: dict[str, Any] | None = None
 
 
 class TimelineDocument(BaseModel):
@@ -193,6 +192,7 @@ async def _verify_asset_version(
     project_id: UUID,
     source: ClipSource,
     index: int,
+    media_kind: str,
 ) -> MediaSource:
     """An adopted asset version is usable only while its current formal media exists."""
     assert source.asset_id is not None and source.asset_version_id is not None
@@ -215,7 +215,7 @@ async def _verify_asset_version(
             "clip asset version is not the current formal version",
             details={"code": "EDIT_SOURCE_NOT_ADOPTED", "clip_index": index},
         )
-    artifact = await read_media_source(session, asset_version_id=version.id)
+    artifact = await read_media_source(session, asset_version_id=version.id, media_kind=media_kind)
     if artifact is None:
         raise ValidationAppError(
             "clip asset version has no playable media",
@@ -230,6 +230,7 @@ async def _verify_public_material(
     project_id: UUID,
     source: ClipSource,
     index: int,
+    media_kind: str,
 ) -> MediaSource:
     """A public clip resolves only through this project's own fixed link."""
     assert (
@@ -278,10 +279,10 @@ async def _verify_public_material(
     if (
         artifact is None
         or artifact.storage_state != "available"
-        or artifact.artifact_type != "video"
+        or artifact.artifact_type != media_kind
     ):
         raise ValidationAppError(
-            "clip public item has no playable video",
+            "clip public item has no playable media",
             details={"code": "EDIT_SOURCE_NO_MEDIA", "clip_index": index},
         )
     return artifact
@@ -293,10 +294,13 @@ async def _verify_source(
     project_id: UUID,
     source: ClipSource,
     index: int,
+    media_kind: str,
     episode_id: UUID | None,
 ) -> MediaSource | None:
     """Verify one clip source and return the media artifact it resolves to."""
     if source.kind == "shot_formal":
+        if media_kind != "video":
+            raise _invalid("a formal shot video cannot be used as an audio asset", clip_index=index)
         await _verify_shot_formal(
             session, project_id=project_id, source=source, index=index, episode_id=episode_id
         )
@@ -304,9 +308,11 @@ async def _verify_source(
         return await read_media_source(session, artifact_id=source.artifact_id)
     if source.kind == "asset_version":
         return await _verify_asset_version(
-            session, project_id=project_id, source=source, index=index
+            session, project_id=project_id, source=source, index=index, media_kind=media_kind
         )
-    return await _verify_public_material(session, project_id=project_id, source=source, index=index)
+    return await _verify_public_material(
+        session, project_id=project_id, source=source, index=index, media_kind=media_kind
+    )
 
 
 async def _verify_shot_formal(
@@ -408,47 +414,39 @@ async def normalize_timeline_for_save(
     previous_by_clip = _previous_snapshots(previous_timeline)
     stored: list[dict[str, Any]] = []
     for index, clip in enumerate(document.clips):
-        media: MediaSource | None = None
-        for source in (clip.source, clip.audio_source):
+        payload = clip.model_dump(mode="json", exclude_unset=True)
+        old = previous_by_clip.get(clip.id, {})
+        for source, media_kind, field in (
+            (clip.source, "video", "selection_snapshot"),
+            (clip.audio_source, "audio", "audio_selection_snapshot"),
+        ):
+            payload.pop(field, None)
             if source is None:
                 continue
-            if source.kind not in VERIFIABLE_SOURCE_KINDS:
-                raise ValidationAppError(
-                    "clip source cannot be verified yet; save is refused",
-                    details={
-                        "code": "EDIT_SOURCE_UNVERIFIED",
-                        "clip_index": index,
-                        "kind": source.kind,
-                    },
-                )
             verified = await _verify_source(
                 session,
                 project_id=project_id,
                 source=source,
                 index=index,
                 episode_id=episode_id,
+                media_kind=media_kind,
             )
-            media = media or verified
-        payload = clip.model_dump(mode="json")
-        previous = previous_by_clip.get(clip.id)
-        observed = await _observe_source(
-            session,
-            clip_id=clip.id,
-            source=clip.source,
-            session_version=session_version or 1,
-            media_artifact=media,
-        )
-        if _same_observation(previous, observed):
-            # Unchanged source: keep the original observation and its timestamp.
-            snapshot = dict(cast(dict[str, Any], previous))
-        else:
-            initial = (
-                previous.get("initial_source")
-                if isinstance(previous, dict) and previous.get("initial_source")
-                else clip.source.model_dump(mode="json", exclude_none=True)
+            previous = old.get(field)
+            observed = await _observe_source(
+                session,
+                clip_id=clip.id,
+                source=source,
+                session_version=session_version or 1,
+                media_artifact=verified,
             )
-            snapshot = {**observed, "initial_source": initial}
-        payload["selection_snapshot"] = snapshot
+            if isinstance(previous, dict) and _same_observation(previous, observed):
+                payload[field] = dict(previous)
+            else:
+                initial = previous.get("initial_source") if isinstance(previous, dict) else None
+                payload[field] = {
+                    **observed,
+                    "initial_source": initial or source.model_dump(mode="json", exclude_none=True),
+                }
         stored.append(payload)
     return {
         "schema_version": TIMELINE_SCHEMA_V2,
@@ -469,9 +467,8 @@ def _previous_snapshots(previous_timeline: dict[str, object] | None) -> dict[str
         if not isinstance(raw, dict):
             continue
         clip_id = raw.get("id")
-        snapshot = raw.get("selection_snapshot")
-        if isinstance(clip_id, str) and isinstance(snapshot, dict):
-            indexed[clip_id] = cast(dict[str, Any], snapshot)
+        if isinstance(clip_id, str):
+            indexed[clip_id] = raw
     return indexed
 
 
