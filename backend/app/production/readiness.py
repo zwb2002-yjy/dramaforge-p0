@@ -163,7 +163,7 @@ async def read_production_readiness(
         planned = project.planned_episode_count or 0
         status: Literal["ready", "partial", "missing"] = (
             "ready"
-            if episode_count > 0 and (planned == 0 or episode_count >= 2)
+            if episode_count >= 2
             else "missing"
             if episode_count == 0
             else "partial"

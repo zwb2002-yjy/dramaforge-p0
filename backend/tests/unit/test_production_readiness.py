@@ -137,6 +137,18 @@ async def test_missing_story_or_media_blocks_readiness(session: AsyncSession) ->
 
 
 @pytest.mark.asyncio
+async def test_unplanned_serial_requires_two_existing_episodes(session: AsyncSession) -> None:
+    serial, _ = await _project(session, work_type="serial_comic", planned=None)
+    await _story(session, serial)
+    readiness = await read_production_readiness(session, project_id=serial.id)
+    assert "story_structure" in readiness.blockers
+    session.add(Episode(project_id=serial.id, episode_number=2, title="E2", synopsis=""))
+    await session.flush()
+    readiness = await read_production_readiness(session, project_id=serial.id)
+    assert "story_structure" not in readiness.blockers
+
+
+@pytest.mark.asyncio
 async def test_serial_comic_with_two_episodes_is_ready(session: AsyncSession) -> None:
     project, user = await _project(session, work_type="serial_comic", planned=2)
     await _configure_media(session, project, user)
