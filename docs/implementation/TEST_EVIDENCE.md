@@ -191,6 +191,7 @@
 | EV183 | I10 隔离工具与对象 staging 实测 | 128 MiB 容器内生成 256 MiB 对象流，实测进程峰值 RSS 31296 KiB，落盘和逐流重读 SHA-256 一致。restic 0.19.1 官方发布清单签名由固定指纹校验，Linux amd64 归档与冻结 SHA-256 相符；断网临时仓库完成单次 backup、check --read-data、完整 ID 还原和字节比对。 | 对象 staging 和独立工具演练；尚未覆盖维护准入、真实多资源恢复或目标机重启。 |
 | EV184 | 隔离 PG 并发批准、受理及 Worker 重复投递贯通到计数 Mock HTTP | test_concurrent_prepare_confirmations_reuse_one_set_of_runs 通过。未确认的 prepare 被拒绝，两客户端并发确认与提交取得原授权及 NodeRun；两个独立 Worker 会话竞争同一语音任务，一个产出 WAV、一个在提交边界被拒，上游记录恰好一次，原 ProviderOperation 成功。 | 测试使用合成对白与 Mock 凭据，未调用真实模型。 |
 | EV185 | 本地真实工作台资料→研究旅程 | Chromium 通过正常上传控件送入合成资料，隔离 PG、MinIO 与 Dispatcher 完成解析，页面自动展示原文。逐段引用后新建、修正、重载，历史对照和恢复为新修订保留同一引用。异用户读取仍为 404，Mock 上游事件为空。institution baseline 1 passed（11.9s），typecheck、lint/UI、ResearchPanel 3 项通过。前序 PG 诊断 205 passed（876.09s）。 | 当前可试用资料与研究；后续故事到成片、三作品和整体验收待验证。 |
+| EV186 | 真实三作品剧本→采用→分镜；隔离故事模型 Mock | institution/project-intent 4 passed（37.1s）：三类型空项目可先保存方向，中文样例从提案到明确采用前保持正式集数不变，采用后可进入对应场次。连续剧添加第二集保留第一集完整读模型；已有两集不能转为单集。脚本/提案/生成单测 39 passed，含多集草稿只建一个原文、分集按各自范围应用，Mock 故事模型收到已保存方向且收不到内部策略字段。Ruff/mypy、前端 typecheck/lint/UI 通过。 | 本轮未触发真实付费操作；三作品的正式媒体、剪辑交付及目标机最终验收另验。 |
 
 
 

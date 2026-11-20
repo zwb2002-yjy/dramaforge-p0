@@ -335,12 +335,20 @@ def test_story_proposal_api_create_preview_and_apply(client: TestClient) -> None
 @pytest.mark.asyncio
 @pytest.mark.parametrize("changed", ["draft", "brief", "filename"])
 async def test_story_key_cannot_be_reused_for_a_different_request(
-    session: AsyncSession, changed: str,
+    session: AsyncSession,
+    changed: str,
 ) -> None:
     from app.shared.errors import ConflictError
+
     project, user = await _seed(session)
-    request = dict(project_id=project.id, actor=user, brief="first", filename="first.md",
-                   draft_text=DRAFT, idempotency_key="same-request")
+    request = dict(
+        project_id=project.id,
+        actor=user,
+        brief="first",
+        filename="first.md",
+        draft_text=DRAFT,
+        idempotency_key="same-request",
+    )
     first = await create_story_proposal(session, **request)
     replay = await create_story_proposal(session, **request)
     assert replay.proposal.id == first.proposal.id
@@ -354,12 +362,67 @@ async def test_story_key_cannot_be_reused_for_a_different_request(
 async def test_story_apply_rejects_edit_session_scope(session: AsyncSession) -> None:
     from app.api.v1.story import apply_project_story_proposal
     from app.shared.errors import NotFoundError
+
     project, user = await _seed(session)
-    result = await create_story_proposal(session, project_id=project.id, actor=user,
-        brief="test", filename="draft.md", draft_text=DRAFT, idempotency_key="scope")
+    result = await create_story_proposal(
+        session,
+        project_id=project.id,
+        actor=user,
+        brief="test",
+        filename="draft.md",
+        draft_text=DRAFT,
+        idempotency_key="scope",
+    )
     result.proposal.scope_type = "edit_session"
     await session.flush()
     with pytest.raises(NotFoundError):
-        await apply_project_story_proposal(project_id=project.id, proposal_id=result.proposal.id,
-            body=PartialApplyInput(decisions=[ProposalDecision(item_id=result.items[0].id,
-                decision="accepted")]), user=user, session=session, _csrf=None)
+        await apply_project_story_proposal(
+            project_id=project.id,
+            proposal_id=result.proposal.id,
+            body=PartialApplyInput(
+                decisions=[ProposalDecision(item_id=result.items[0].id, decision="accepted")]
+            ),
+            user=user,
+            session=session,
+            _csrf=None,
+        )
+
+
+async def test_serial_multi_episode_chinese_draft_has_one_document_and_distinct_episode_scopes(
+    session,
+):
+    project, user = await _seed(session)
+    project.work_type = "serial_comic"
+    project.planned_episode_count = 3
+    await session.flush()
+
+    def draft(number: int) -> str:
+        return (
+            f"# 第 {number} 集 — 彩灯{number}\n## 场景 1 — 河岸 / 夜间\n"
+            "### 镜头 1 — 中景\n画面：点灯\n对白：开始"
+        )
+
+    text = draft(1) + "\n" + draft(2)
+    result = await create_story_proposal(
+        session,
+        project_id=project.id,
+        actor=user,
+        brief="灯会",
+        filename="serial.md",
+        draft_text=text,
+        idempotency_key="serial-multiple",
+    )
+    assert sum(op.command == "story.set_script_document" for op in result.items) == 1
+    shots = [op.payload for op in result.items if op.command == "story.upsert_shot"]
+    assert [
+        (shot["episode_number"], shot["dialogue"], shot["visual_description"]) for shot in shots
+    ] == [(1, "开始", "点灯"), (2, "开始", "点灯")]
+    await ProposalService(session, actor=user).partial_apply(
+        project=project, proposal_id=result.proposal.id, apply_input=_accept_all(result.items)
+    )
+    episodes = list(
+        await session.scalars(
+            select(Episode).where(Episode.project_id == project.id).order_by(Episode.episode_number)
+        )
+    )
+    assert [episode.title for episode in episodes] == ["彩灯1", "彩灯2"]

@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from app.access.models import Project, User, Workspace
+from app.access.models import Project, ProjectCreativeProfile, User, Workspace
 from app.assets.models import Episode, Scene, ScriptDocument, Shot
 from app.config import Settings
 from app.director.proposal_models import DirectorProposal
@@ -190,12 +190,25 @@ async def test_brief_generates_parser_compatible_proposal_without_canonical_writ
     session: AsyncSession,
 ) -> None:
     project, user = await _seed(session)
+    direction = "以克制对白和留白表现告别"
+    session.add(
+        ProjectCreativeProfile(
+            project_id=project.id,
+            strategy_snapshot={
+                "creative_direction": direction,
+                "internal_fixture": "private-strategy-fixture",
+            },
+        )
+    )
+    await session.flush()
     calls: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
         body = json.loads(request.content)
         prompt = json.loads(body["messages"][-1]["content"])
+        assert direction in body["messages"][-1]["content"]
+        assert "private-strategy-fixture" not in body["messages"][-1]["content"]
         assert prompt["context"]["intent"]["brief"] == "雨夜车站的克制告别短剧"
         return httpx.Response(
             200,

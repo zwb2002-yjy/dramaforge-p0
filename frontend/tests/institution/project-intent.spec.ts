@@ -56,6 +56,50 @@ for (const [kind, label, episodes] of [
     expect(Number(created.planned_duration_seconds)).toBe(60);
     expect(created.planned_episode_count).toBe(episodes);
     await expect(page).toHaveURL(new RegExp(`/projects/${created.id}/script`));
+    // An empty project already has a direction; the first script remains a proposal until Apply.
+    await page.getByRole("button", { name: "展开创作方向" }).click();
+    const direction = "用祖孙两代讲述元宵灯会，只取可核对的地方习俗。";
+    await page.getByRole("textbox", { name: "创作方向", exact: true }).fill(direction);
+    await page.getByRole("button", { name: "保存创作方向" }).click();
+    await expect(page.getByText("创作方向已保存。")).toBeVisible();
+    const formal = async () => {
+      const result = await page.request.get(`/api/v1/projects/${created.id}/script`, {
+        headers: { "X-Workspace-Id": created.workspace_id },
+      });
+      expect(result.ok()).toBeTruthy();
+      return result.json();
+    };
+    let firstEpisode: unknown;
+    for (const episode of kind === "serial_comic" ? [1, 2] : [1]) {
+      const title = episode === 1 ? "点灯" : "送灯";
+      const draft = `# 第 ${episode} 集 — ${title}
+## 场景 1 — 河岸 / 夜间
+祖孙走向河岸。
+### 镜头 1 — 中景
+画面：孙女提起彩灯
+对白：这盏灯是谁做的？`;
+      await page.getByLabel("故事方向").fill("从古城灯会开始讲述。");
+      await page.getByLabel("剧本文本").fill(draft);
+      await page.getByTestId("story-proposal-create").click();
+      await expect(page.getByTestId("story-proposal-preview")).toBeVisible();
+      expect((await formal()).episodes).toHaveLength(episode - 1);
+      await page.getByTestId("story-proposal-apply-all").click();
+      await expect.poll(async () => (await formal()).episodes.length).toBe(episode);
+      await page.reload();
+      await expect(page.getByTestId("project-script-page")).toBeVisible();
+      const saved = await formal();
+      expect(saved.episodes[episode - 1].episode_number).toBe(episode);
+      const scene = saved.episodes[episode - 1].scenes[0];
+      expect(scene.shot_count).toBe(1);
+      expect(saved.episodes[0].title).toBe("点灯");
+      if (episode === 1) firstEpisode = saved.episodes[0];
+      else expect(saved.episodes[0]).toEqual(firstEpisode);
+      if (kind !== "serial_comic" || episode === 2) {
+        await page.getByRole("button", { name: `打开第 ${episode} 集第 1 场分镜` }).click();
+        await expect(page).toHaveURL(new RegExp(`/projects/${created.id}/scenes/${scene.id}`));
+        await expect(page.getByTestId("scene-workspace")).toBeVisible();
+      }
+    }
     await page.goto("/");
     const card = page.getByRole("article", { name, exact: true });
     await expect(card).toContainText(label);

@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
 from app.assets.models import Episode, Scene, ScriptDocument, Shot
-from app.assets.script_import import ParsedScript, parse_script_markdown
+from app.assets.script_import import ParsedScript, parse_script_markdown, parse_serial_draft
 from app.director.assistant_models import DirectorMessage, DirectorThread
 from app.director.proposal_creation import ProposalItemDraft, create_proposal
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
@@ -112,18 +112,13 @@ class _StorySnapshot:
         )
 
 
-async def _load_snapshot(session: AsyncSession, *, project_id: UUID) -> _StorySnapshot:
-    episodes = list(
-        (
-            await session.execute(
-                select(Episode)
-                .where(Episode.project_id == project_id)
-                .order_by(Episode.episode_number, Episode.id)
-            )
-        )
-        .scalars()
-        .all()
-    )
+async def _load_snapshot(
+    session: AsyncSession, *, project_id: UUID, episode_number: int | None
+) -> _StorySnapshot:
+    query = select(Episode).where(Episode.project_id == project_id)
+    if episode_number is not None:
+        query = query.where(Episode.episode_number == episode_number)
+    episodes = list(await session.scalars(query.order_by(Episode.episode_number, Episode.id)))
     scenes: list[Scene] = []
     if episodes:
         scenes = list(
@@ -200,6 +195,7 @@ def _shot_payload(
 def _build_operations(
     *,
     snapshot: _StorySnapshot,
+    include_document: bool,
     parsed: ParsedScript,
     document: ScriptDocument | None,
     content_hash: str,
@@ -308,7 +304,7 @@ def _build_operations(
                 )
             )
 
-    if document is None or document.content_hash != content_hash:
+    if include_document and (document is None or document.content_hash != content_hash):
         operations.append(
             ProposalItemInput(
                 command="story.set_script_document",
@@ -487,20 +483,31 @@ async def create_story_proposal(
             operations=operations,
         )
 
-    parsed = parse_script_markdown(draft_text)
-    snapshot = await _load_snapshot(session, project_id=project_id)
+    is_serial = project.work_type == "serial_comic"
+    episodes = parse_serial_draft(draft_text) if is_serial else [parse_script_markdown(draft_text)]
     document = await _latest_document(session, project_id=project_id)
     content_hash = hashlib.sha256(draft_text.encode("utf-8")).hexdigest()
-    operation_inputs = _build_operations(
-        snapshot=snapshot,
-        parsed=parsed,
-        document=document,
-        content_hash=content_hash,
-        filename=filename,
-        raw_text=draft_text,
-        brief=brief,
-        idempotency_key=idempotency_key,
-    )
+    operation_inputs: list[ProposalItemInput] = []
+    for index, episode in enumerate(episodes):
+        # Each serial draft touches only the episodes named in its text.
+        snapshot = await _load_snapshot(
+            session,
+            project_id=project_id,
+            episode_number=episode.episode_number if is_serial else None,
+        )
+        operation_inputs.extend(
+            _build_operations(
+                snapshot=snapshot,
+                parsed=episode,
+                document=document,
+                include_document=index == 0,
+                content_hash=content_hash,
+                filename=filename,
+                raw_text=draft_text,
+                brief=brief,
+                idempotency_key=idempotency_key,
+            )
+        )
     if not operation_inputs:
         raise ValidationAppError(
             "story draft matches the current canonical story",

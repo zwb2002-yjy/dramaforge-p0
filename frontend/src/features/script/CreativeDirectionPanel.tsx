@@ -23,7 +23,7 @@ type CreativeDirectionPanelProps = {
 export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProps) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [edit, setEdit] = useState<{ text: string; baseVersion: number } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [threadId, setThreadId] = useState<string | null>(null);
@@ -44,11 +44,12 @@ export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProp
     refetchInterval: awaitingReply ? 2000 : false,
   });
 
-  useEffect(() => {
-    if (direction.data && typeof direction.data.direction === "string") {
-      setDraft(direction.data.direction);
-    }
-  }, [direction.data]);
+  const draft = edit?.text ?? direction.data?.direction ?? "";
+
+  function setDirectionDraft(text: string) {
+    if (direction.data)
+      setEdit({ text, baseVersion: edit?.baseVersion ?? direction.data.profile_version });
+  }
 
   const messages = useMemo(() => thread.data?.messages ?? [], [thread.data]);
   const lastMessage = messages[messages.length - 1];
@@ -60,15 +61,17 @@ export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProp
   }, [awaitingReply, lastMessage]);
 
   const save = useMutation({
-    mutationFn: () =>
-      saveCreativeDirection(projectId, {
-        expected_profile_version: direction.data?.profile_version ?? 1,
-        direction: draft,
-      }),
+    mutationFn: () => {
+      if (!edit) throw new Error("没有待保存的修改");
+      return saveCreativeDirection(projectId, {
+        expected_profile_version: edit.baseVersion,
+        direction: edit.text,
+      });
+    },
     onSuccess: (saved) => {
       setError(null);
       setMessage("创作方向已保存。");
-      setDraft(saved.direction);
+      setEdit(null);
       queryClient.setQueryData(["creative-direction", projectId], saved);
     },
     onError: (cause) => {
@@ -125,7 +128,14 @@ export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProp
               aria-label="创作方向"
               rows={3}
               value={draft}
-              onChange={(event) => setDraft(event.target.value)}
+              disabled={!direction.data || save.isPending}
+              onChange={(event) => {
+                if (direction.data)
+                  setEdit({
+                    text: event.target.value,
+                    baseVersion: edit?.baseVersion ?? direction.data.profile_version,
+                  });
+              }}
             />
           </Field>
           {message && <p role="status">{message}</p>}
@@ -134,7 +144,7 @@ export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProp
             <Button
               type="button"
               tone="primary"
-              disabled={save.isPending || draft.trim().length === 0}
+              disabled={!edit || save.isPending || draft.trim().length === 0}
               onClick={() => save.mutate()}
             >
               保存创作方向
@@ -160,7 +170,11 @@ export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProp
                     </span>
                     <p>{item.content}</p>
                     {item.role === "assistant" && (
-                      <Button type="button" tone="ghost" onClick={() => setDraft(item.content)}>
+                      <Button
+                        type="button"
+                        tone="ghost"
+                        onClick={() => setDirectionDraft(item.content)}
+                      >
                         采用为方向
                       </Button>
                     )}

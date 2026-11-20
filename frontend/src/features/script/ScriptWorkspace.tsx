@@ -516,6 +516,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
   return (
     <div data-testid="project-script-page" className="qc-project-page">
       <PageHeader title="故事剧本" />
+      <CreativeDirectionPanel key={projectId} projectId={projectId} />
 
       {workspace.isError && (
         <Alert
@@ -532,7 +533,6 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
             title={`当前正式剧本 · ${data.document.filename}`}
             description="待确认提案不会覆盖这里；只有明确采用后才会更新"
           >
-            <CreativeDirectionPanel projectId={projectId} />
             <section className="qc-script-document" data-testid="script-document">
               <h2>{data.document.filename}</h2>
               <code className="qc-script-raw">{data.document.raw_text}</code>
@@ -553,6 +553,15 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
                         {timeOfDayLabel(scene.time_of_day)}
                       </strong>
                       <span>{scene.shot_count} 镜头</span>
+                      {onOpenScene && (
+                        <Button
+                          tone="ghost"
+                          onClick={() => onOpenScene(scene.id)}
+                          aria-label={`打开第 ${episode.episode_number} 集第 ${scene.scene_number} 场分镜`}
+                        >
+                          打开分镜
+                        </Button>
+                      )}
                       {scene.synopsis && <p className="muted">{scene.synopsis}</p>}
                     </li>
                   ))}

@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.models import Project, User
+from app.access.models import Project, ProjectCreativeProfile, User
 from app.assets.models import Episode, Scene, ScriptDocument, Shot
 from app.assets.script_import import parse_script_markdown
 from app.config import get_settings
@@ -20,6 +20,7 @@ from app.director.text_transport import (
     DirectorInvocationEvidence,
     DirectorTextRuntimeAdapter,
     StructuredDirectorTextResult,
+    content_hash,
 )
 from app.director.turn_models import DirectorTurn
 from app.providers.model_profiles.slots import ModelSlot
@@ -377,6 +378,15 @@ class StoryGenerationService:
             "scenes": {str(scene.id): scene.version for scene in scenes},
             "shots": {str(shot.id): shot.version for shot in shots},
         }
+        # Only the saved, user-facing direction belongs in the story brief.
+        direction = await self._session.scalar(
+            select(
+                ProjectCreativeProfile.strategy_snapshot["creative_direction"].as_string()
+            ).where(ProjectCreativeProfile.project_id == project.id)
+        )
+        if direction:
+            context["creative_direction"] = direction
+            versions["creative_direction_hash"] = content_hash(direction)
         return context, versions
 
     async def _record_proposal_failure(
