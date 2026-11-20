@@ -14,9 +14,13 @@ import type { ProjectRead } from "./api";
 export function StudioOverview({
   project,
   resumePath,
+  initialShot,
+  initialArtifact,
 }: {
   project: ProjectRead;
   resumePath: string | null;
+  initialShot?: string;
+  initialArtifact?: string;
 }) {
   const projectId = project.id;
   const onPreview = useContext(StudioSelection)?.show;
@@ -28,8 +32,8 @@ export function StudioOverview({
     queryKey: queryKeys.shot.review(projectId),
     queryFn: () => fetchProjectShots(projectId),
   });
-  const [shotChoice, selectShot] = useState("");
-  const shot = shots.data?.find((row) => row.id === shotChoice) ?? shots.data?.[0];
+  const [shotChoice, selectShot] = useState(initialShot ?? "");
+  const shot = shotChoice ? shots.data?.find((row) => row.id === shotChoice) : shots.data?.[0];
   const workbench = useQuery({
     queryKey: queryKeys.shot.reviewWorkbench(projectId, shot?.id),
     queryFn: () => fetchShotWorkbench(projectId, shot!.id),
@@ -38,23 +42,27 @@ export function StudioOverview({
   const candidates = parseShotCandidates(workbench.data?.candidates).filter(
     isConfirmableShotCandidate,
   );
-  const [choice, choose] = useState("");
+  const [choice, choose] = useState(initialArtifact ?? "");
   const formal = manifest.data?.tracks
     ?.flatMap((track) => track.clips)
     .find((clip) => clip.shot_id === shot?.id && clip.track_kind === "video" && clip.artifact_id);
-  const selected =
-    candidates.find((item) => item.artifactId === choice) ??
-    candidates.find((item) => item.artifactId === formal?.artifact_id) ??
-    candidates[0];
-  const id = selected?.artifactId ?? formal?.artifact_id;
+  const selected = choice
+    ? candidates.find((item) => item.artifactId === choice)
+    : (candidates.find((item) => item.artifactId === formal?.artifact_id) ?? candidates[0]);
+  const id =
+    selected?.artifactId ??
+    (choice && choice !== formal?.artifact_id ? undefined : formal?.artifact_id);
   const video = selected ? selected.stage === "video" : !!formal;
   const media = id ? artifactContentUrl(projectId, id) : null;
   useEffect(() => {
-    onPreview?.(media && id ? { id, url: media, video } : null);
+    onPreview?.(media && id && shot ? { id, shotId: shot.id, url: media, video } : null);
     return () => onPreview?.(null);
-  }, [onPreview, id, media, video]);
+  }, [onPreview, id, media, video, shot]);
   return (
     <section className="studio-overview" aria-label="项目概览">
+      {initialArtifact && choice && shots.isSuccess && (!shot || (workbench.isSuccess && !id)) && (
+        <Alert type="warning" description="原消息引用的候选已不可用。" />
+      )}
       {shots.isError || manifest.isError || workbench.isError ? (
         <Alert
           type="error"

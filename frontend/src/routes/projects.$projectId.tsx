@@ -17,11 +17,18 @@ import { rootRoute } from "./__root";
 export const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId",
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { previewShot?: string; previewArtifact?: string } => ({
+    ...(typeof search.previewShot === "string" && { previewShot: search.previewShot }),
+    ...(typeof search.previewArtifact === "string" && { previewArtifact: search.previewArtifact }),
+  }),
   component: ProjectLayout,
 });
 
 function ProjectLayout() {
   const { projectId } = projectRoute.useParams();
+  const selection = projectRoute.useSearch();
   const location = useRouterState({ select: (state) => state.location });
   const pathname = location.pathname;
   const view = workspaceViewFromPath(pathname);
@@ -102,6 +109,9 @@ function ProjectLayout() {
       ) : atRoot ? (
         projectRead ? (
           <StudioOverview
+            key={JSON.stringify([projectId, selection.previewShot, selection.previewArtifact])}
+            initialShot={selection.previewShot}
+            initialArtifact={selection.previewArtifact}
             project={projectRead}
             resumePath={
               recoveryError || lostScene

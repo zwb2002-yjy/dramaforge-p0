@@ -28,7 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, ProjectCreativeProfile, User
 from app.assets.agent_read_service import AgentReadService
-from app.assets.models import Asset, Scene, Shot
+from app.assets.from_artifact_service import read_media_shot_id, read_media_source
+from app.assets.models import Asset, Episode, Scene, Shot
 from app.contracts.agent import AgentMessage, AgentModelResponse, AgentToolCall
 from app.contracts.director_model_tools import ModelToolsPort
 from app.director.agent_audit import AgentToolAudit, public_summary
@@ -73,6 +74,76 @@ def utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
+class SelectedReference(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["artifact", "shot", "scene", "asset"]
+    id: UUID
+
+
+class AgentUIContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    episode_id: UUID | None = None
+    selected_refs: list[SelectedReference] = Field(default_factory=list, max_length=20)
+
+    async def validate_scope(
+        self,
+        session: AsyncSession,
+        *,
+        project_id: UUID,
+        reader: AgentReadService,
+        scope_type: str,
+        scope_entity_id: UUID,
+    ) -> None:
+        if self.episode_id is not None:
+            episode = await session.scalar(
+                select(Episode.id).where(
+                    Episode.id == self.episode_id, Episode.project_id == project_id
+                )
+            )
+            if episode is None:
+                raise NotFoundError("Director context not found")
+        shots = {ref.id for ref in self.selected_refs if ref.kind == "shot"}
+        scenes = {ref.id for ref in self.selected_refs if ref.kind == "scene"}
+        for ref in self.selected_refs:
+            if ref.kind == "artifact":
+                media = await read_media_source(session, artifact_id=ref.id)
+                if (
+                    media is None
+                    or media.project_id != project_id
+                    or media.storage_state != "available"
+                ):
+                    raise NotFoundError("Director context not found")
+                if shots or scenes or self.episode_id or scope_type != "project":
+                    shot_id = await read_media_shot_id(
+                        session, project_id=project_id, artifact_id=ref.id
+                    )
+                    if (
+                        not shot_id
+                        or (shots and shot_id not in shots)
+                        or (scope_type == "shot" and shot_id != scope_entity_id)
+                    ):
+                        raise NotFoundError("Director context not found")
+                    producer_shot = await reader.shot(shot_id)
+                    scene = await reader.scene(producer_shot.scene_id)
+                    if (
+                        (scenes and scene.id not in scenes)
+                        or (self.episode_id and self.episode_id != scene.episode_id)
+                        or (scope_type == "scene" and scene.id != scope_entity_id)
+                    ):
+                        raise NotFoundError("Director context not found")
+            elif ref.kind == "asset":
+                await reader.asset(ref.id)
+            else:
+                shot = await reader.shot(ref.id) if ref.kind == "shot" else None
+                scene = await reader.scene(shot.scene_id if shot else ref.id)
+                if (
+                    (self.episode_id and self.episode_id != scene.episode_id)
+                    or (scope_type == "scene" and scene.id != scope_entity_id)
+                    or (scope_type == "shot" and (not shot or shot.id != scope_entity_id))
+                ):
+                    raise NotFoundError("Director context not found")
+
+
 class AgentRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -80,6 +151,7 @@ class AgentRequest(BaseModel):
     request_key: str = Field(min_length=1, max_length=160)
     intent: Literal["conversation", "create_goal", "continue_goal"] = "conversation"
     master_run_id: UUID | None = None
+    ui_context: AgentUIContext | None = None
     expected_versions: dict[str, StrictInt] = Field(default_factory=dict, max_length=100)
     skill_ids: list[str] | None = Field(default=None, max_length=20)
     limits: AgentLimits = Field(default_factory=AgentLimits)
@@ -270,8 +342,8 @@ class DirectorAgentService:
             )
             page_offset = max(0, total - limit) if offset is None else offset
             rows = list(
-                await session.scalars(
-                    select(DirectorMessage)
+                await session.execute(
+                    select(DirectorMessage, DirectorTurn.intent_snapshot["ui_context"])
                     .outerjoin(DirectorTurn, DirectorMessage.turn_id == DirectorTurn.id)
                     .where(*filters)
                     .order_by(
@@ -295,8 +367,9 @@ class DirectorAgentService:
                         "role": row.role,
                         "content": row.content,
                         "created_at": row.created_at,
+                        **({"context": ui_context} if ui_context else {}),
                     }
-                    for row in rows
+                    for row, ui_context in rows
                 ],
                 "offset": page_offset,
                 "limit": limit,
@@ -347,7 +420,9 @@ class DirectorAgentService:
         """
         if not request.content.strip() or not request.request_key.strip():
             raise ValidationAppError("Content and request key cannot be blank")
-        input_hash = fingerprint({"thread_id": thread_id, "request": request.model_dump()})
+        input_hash = fingerprint({"thread_id": thread_id, "request": request.model_dump(
+            exclude={"ui_context"} if request.ui_context is None else set()
+        )})
         async with self._db() as session:
             project = await session.scalar(
                 select(Project)
@@ -436,6 +511,11 @@ class DirectorAgentService:
                 await reader.shot(thread.scope_entity_id)
             elif thread.scope_entity_id != self.project_id:
                 raise NotFoundError("Director scope not found")
+            if request.ui_context is not None:
+                await request.ui_context.validate_scope(
+                    session, project_id=self.project_id, reader=reader,
+                    scope_type=thread.scope_type, scope_entity_id=thread.scope_entity_id,
+                )
             creative_state = await load_agent_creative_context(
                 session,
                 project_id=self.project_id,
@@ -460,6 +540,8 @@ class DirectorAgentService:
                 "history_selection": history.audit,
                 "creative_state": creative_state,
             }
+            if request.ui_context is not None:
+                snapshot["ui_context"] = request.ui_context.model_dump(mode="json")
             turn = DirectorTurn(
                 id=turn_id,
                 created_at=admitted_at,
@@ -721,6 +803,11 @@ class DirectorAgentService:
         if history.legacy_advisory is not None:
             messages.append(history.legacy_advisory)
         messages.extend(history.messages)
+        if snapshot.get("ui_context"):
+            messages.append(AgentMessage(role="system", content=json.dumps({
+                "selected_context": snapshot["ui_context"],
+                "media_attached": False,
+            }, ensure_ascii=False)))
         messages.append(AgentMessage(role="user", content=message.content))
         return messages
 
@@ -865,7 +952,9 @@ class DirectorAgentService:
 
     async def replay(self, thread_id: UUID, request: AgentRequest) -> AgentAcceptance | None:
         """Read a durable acceptance without requiring the model or checkpoint service."""
-        input_hash = fingerprint({"thread_id": thread_id, "request": request.model_dump()})
+        input_hash = fingerprint({"thread_id": thread_id, "request": request.model_dump(
+            exclude={"ui_context"} if request.ui_context is None else set()
+        )})
         async with self._db() as session:
             await self._thread(session, thread_id)
             turn = await session.scalar(

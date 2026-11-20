@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useContext, useState } from "react";
 
+import { ApiError } from "../../lib/api";
 import { Sparkles, Send } from "lucide-react";
 import { StudioSelection } from "../../components/workstation/StudioSelection";
-import { Button, Field, Textarea } from "../../components/ui";
+import { ActionLink, Button, Field, Textarea } from "../../components/ui";
 import {
-  getDirectorTurn,
+  getDirectorAgentRequest,
   openProjectDirectorThread,
   readDirectorAgentThread,
   sendDirectorAgentMessage,
@@ -34,8 +35,12 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
   const storageKey = `df.project.director.${projectId}`;
   const [threadId, setThreadId] = useState<string | null>(() => sessionStorage.getItem(storageKey));
   const [question, setQuestion] = useState("");
-  const [pendingTurn, setPendingTurn] = useState<string | null>(null);
-  const awaitingReply = Boolean(pendingTurn);
+  const pendingKey = storageKey + ".pending-request";
+  const [pendingRequest, setPendingRequest] = useState<string | null>(() =>
+    sessionStorage.getItem(pendingKey),
+  );
+  const awaitingReply = Boolean(pendingRequest);
+  const [submitting, setSubmitting] = useState(false);
 
   const direction = useQuery({
     queryKey: ["creative-direction", projectId],
@@ -59,25 +64,28 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
   }
 
   const messages = thread.data?.messages ?? [];
-  const turn = useQuery({
-    queryKey: ["project-director-turn", projectId, pendingTurn],
-    queryFn: () => getDirectorTurn(projectId, pendingTurn!),
-    enabled: !!pendingTurn,
+  const receipt = useQuery({
+    queryKey: ["project-director-receipt", projectId, threadId, pendingRequest],
+    queryFn: ({ signal }) => getDirectorAgentRequest(projectId, threadId!, pendingRequest!, signal),
+    enabled: !!threadId && !!pendingRequest && !submitting,
     retry: false,
-    refetchInterval: pendingTurn ? 1800 : false,
+    refetchInterval: (query) =>
+      pendingRequest && query.state.data && !query.state.error ? 1800 : false,
   });
   useEffect(() => {
-    const state = turn.data?.status;
+    const state = receipt.data?.turn.status;
     if (
-      pendingTurn &&
-      (turn.isError ||
-        (state && ["failed", "cancelled", "completed", "awaiting_user", "stale"].includes(state)))
+      pendingRequest &&
+      state &&
+      ["failed", "cancelled", "completed", "awaiting_user", "stale", "rejected"].includes(state)
     ) {
-      if (turn.isError || state === "failed") setError("请查看本次对话记录或检查项目文本模型。");
-      setPendingTurn(null);
+      if (state === "failed") setError("导演任务未完成，请查看任务回执或检查项目文本模型。");
+      if (sessionStorage.getItem(pendingKey) === pendingRequest)
+        sessionStorage.removeItem(pendingKey);
+      setPendingRequest(null);
       void queryClient.invalidateQueries({ queryKey: ["direction-thread", projectId] });
     }
-  }, [pendingTurn, turn.data?.status, turn.isError, projectId, queryClient]);
+  }, [pendingRequest, pendingKey, receipt.data?.turn.status, projectId, queryClient]);
 
   const save = useMutation({
     mutationFn: () => {
@@ -104,18 +112,35 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
       const id = threadId ?? (await openProjectDirectorThread(projectId)).id;
       sessionStorage.setItem(storageKey, id);
       setThreadId(id);
+      const requestKey = `direction:${crypto.randomUUID()}`;
+      sessionStorage.setItem(pendingKey, requestKey);
+      setPendingRequest(requestKey);
       return sendDirectorAgentMessage(projectId, id, {
         content: question.trim(),
-        request_key: `direction:${crypto.randomUUID()}`,
+        request_key: requestKey,
         intent: "conversation",
+        ...(preview && {
+          ui_context: {
+            selected_refs: [
+              { kind: "shot", id: preview.shotId },
+              { kind: "artifact", id: preview.id },
+            ],
+          },
+        }),
       });
     },
-    onSuccess: (accepted) => {
+    onMutate: () => setSubmitting(true),
+    onSettled: () => setSubmitting(false),
+    onSuccess: () => {
       setQuestion("");
-      setPendingTurn(accepted.turn_id);
+      setError(null);
       void queryClient.invalidateQueries({ queryKey: ["direction-thread", projectId] });
     },
     onError: (cause) => {
+      if (cause instanceof ApiError && cause.details.request_accepted === false) {
+        sessionStorage.removeItem(pendingKey);
+        setPendingRequest(null);
+      }
       setError(cause instanceof Error ? cause.message : "发送失败");
     },
   });
@@ -181,6 +206,22 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
           <article key={item.id} data-role={item.role}>
             <strong>{item.role === "assistant" ? "导演" : "你"}</strong>
             <p>{item.content}</p>
+            {item.context?.selected_refs
+              ?.filter((ref) => ref.kind === "artifact")
+              .map((ref) => (
+                <ActionLink
+                  key={ref.id}
+                  tone="ghost"
+                  to="/projects/$projectId"
+                  params={{ projectId }}
+                  search={{
+                    previewShot: item.context?.selected_refs?.find((r) => r.kind === "shot")?.id,
+                    previewArtifact: ref.id,
+                  }}
+                >
+                  查看本条讨论的画面
+                </ActionLink>
+              ))}
             {item.role === "assistant" && (
               <Button
                 tone="ghost"
@@ -202,8 +243,19 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
             )}
           </article>
         ))}
-        {awaitingReply && <p role="status">正在等待导演回复…</p>}
+        {awaitingReply && (
+          <p role="status">
+            {receipt.isError || receipt.data === null
+              ? "暂未确认本次消息的处理状态。"
+              : "正在等待导演回复…"}
+          </p>
+        )}
       </div>
+      {pendingRequest && !submitting && (receipt.isError || receipt.data === null) && (
+        <Button tone="ghost" onClick={() => void receipt.refetch()}>
+          重新读取本次回执
+        </Button>
+      )}
       {error && <p role="alert">{error}</p>}
       <div className="studio-suggestions">
         {["我想修改…", "帮我调整…", "继续优化…"].map((label) => (

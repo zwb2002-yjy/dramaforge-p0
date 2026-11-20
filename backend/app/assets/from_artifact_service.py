@@ -19,7 +19,7 @@ from app.access.models import Project, User
 from app.access.projects import ProjectService
 from app.assets.models import Asset, AssetVersion, AssetVersionReference
 from app.assets.public_assets import PublicAssetService, PublicDisplay
-from app.execution.models import Artifact
+from app.execution.models import Artifact, NodeRun
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 # Reference roles per asset kind, using the repository's canonical vocabulary
@@ -70,6 +70,23 @@ class MediaSource:
     content_hash: str
     artifact_type: str
     storage_state: str
+
+
+async def read_media_shot_id(
+    session: AsyncSession, *, project_id: UUID, artifact_id: UUID
+) -> UUID | None:
+    """Resolve the shot recorded by this project's original media producer."""
+    raw = await session.scalar(
+        select(NodeRun.input_snapshot["shot_id"].as_string())
+        .join(Artifact, Artifact.produced_by_run_id == NodeRun.id)
+        .where(
+            Artifact.id == artifact_id,
+            Artifact.project_id == project_id,
+            NodeRun.project_id == project_id,
+            Artifact.deleted_at.is_(None),
+        )
+    )
+    return UUID(raw) if raw else None
 
 
 async def read_media_source(

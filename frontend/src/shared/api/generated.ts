@@ -4049,6 +4049,7 @@ export interface components {
             intent: "conversation" | "create_goal" | "continue_goal";
             /** Master Run Id */
             master_run_id?: string | null;
+            ui_context?: components["schemas"]["AgentUIContext"] | null;
             /** Expected Versions */
             expected_versions?: {
                 [key: string]: number;
@@ -4116,6 +4117,13 @@ export interface components {
             tool_calls: number;
             /** Version */
             version: number;
+        };
+        /** AgentUIContext */
+        AgentUIContext: {
+            /** Episode Id */
+            episode_id?: string | null;
+            /** Selected Refs */
+            selected_refs?: components["schemas"]["SelectedReference"][];
         };
         /** AnalysisAcceptanceInput */
         AnalysisAcceptanceInput: {
@@ -6046,6 +6054,7 @@ export interface components {
         };
         /** DirectorAgentMessageRead */
         DirectorAgentMessageRead: {
+            context?: components["schemas"]["AgentUIContext"] | null;
             /**
              * Id
              * Format: uuid
@@ -11346,6 +11355,19 @@ export interface components {
             document: components["schemas"]["ScriptDocumentRead"] | null;
             /** Episodes */
             episodes: components["schemas"]["EpisodeRead"][];
+        };
+        /** SelectedReference */
+        SelectedReference: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "artifact" | "shot" | "scene" | "asset";
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
         };
         /** SetClipDurationOperation */
         SetClipDurationOperation: {

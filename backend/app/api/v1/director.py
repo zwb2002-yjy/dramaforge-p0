@@ -29,6 +29,7 @@ from app.director.agent_service import (
     AgentRequestState,
     AgentThreadCreate,
     AgentTurnResult,
+    AgentUIContext,
     DirectorAgentService,
 )
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
@@ -223,6 +224,7 @@ class DirectorAgentThreadRef(BaseModel):
 
 
 class DirectorAgentMessageRead(BaseModel):
+    context: AgentUIContext | None = None
     model_config = ConfigDict(extra="forbid")
 
     id: UUID

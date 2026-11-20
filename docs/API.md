@@ -1065,7 +1065,7 @@ wire仍是`id/event/data`：id使用持久EventLog.event_id，event为上表even
 状态边、锁序、epoch、checkpoint和执行限额唯一归DIRECTOR_RUNTIME D3；数据字段归DATA_MODEL。
 本节规定对外请求/读投影，不再定义第二套状态机。**已实施**：202受理、`director.turn.accepted`
 Outbox、worker领取（epoch/lease fencing）、200原受理重放、GET受理+Turn摘要、两stop路由与
-create_goal同事务建Run。**未实施**：`ui_context`、`media_parts`与视觉合同、Flow/步骤读投影、
+create_goal同事务建Run。**尚待完整实施**：`ui_context` 的其余引用类型、`media_parts`与视觉合同、Flow/步骤读投影、
 cancel对远端任务的核对；这些不得据本节设计宣称完成。
 
 ### 消息、上下文与持续目标建立
@@ -1077,7 +1077,7 @@ cancel对远端任务的核对；这些不得据本节设计宣称完成。
 expected_versions（最多100项）、skill_ids（最多20，已选技能子集）、limits（只能收紧服务上限）；新增
 `intent:conversation|create_goal|continue_goal`（默认conversation），`master_run_id?:UUID`及`ui_context`。
 continue_goal必须带同项目/Thread可操作的MasterRun；create_goal不带已有run；conversation不创建Run。
-（intent与create_goal已实施；`ui_context`未实施。）
+（intent 与 create_goal 已实施。项目工作台已支持 ui_context 的 shot、scene、asset、artifact 引用、同项目分集校验以及历史消息的 context 回读；其余引用类型和视觉输入待接线。）
 `ui_context={episode_id?:UUID,selected_refs:ContextRef[]}`，最多20；ContextRef判别类型为
 `file_revision|source_fragment|research_revision|knowledge_reference|asset|asset_version|public_asset_link|scene|shot|artifact|proposal`，每项仅`kind,id`，
 请求不接受URL/正文替代引用、actor、owner、scope升级、授权对象或业务状态。

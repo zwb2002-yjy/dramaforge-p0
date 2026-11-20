@@ -280,3 +280,117 @@ async def test_acceptance_keeps_the_frozen_tool_contract_for_later_execution(
     saved = await _turn(world, acceptance.turn_id)
     assert saved.intent_snapshot["tools"] == frozen
     assert saved.context_hash == turn.context_hash
+
+
+async def test_selected_candidate_is_bound_to_messages_and_replay(agent_world: AgentWorld) -> None:
+    from app.director.agent_service import AgentUIContext, SelectedReference
+    from app.execution.models import Artifact
+    from app.shared.errors import NotFoundError
+
+    w = agent_world
+    thread = await w.service.open_thread(AgentThreadCreate())
+    async with w.factory() as session:
+        media = Artifact(
+            project_id=w.service.project_id,
+            artifact_type="image",
+            storage_state="available",
+            object_key="fixture/private",
+            content_hash="f" * 64,
+            mime_type="image/png",
+            byte_size=100,
+        )
+        other = Artifact(
+            project_id=w.other_project_id,
+            artifact_type="image",
+            storage_state="available",
+            object_key="fixture/foreign",
+            content_hash="e" * 64,
+            mime_type="image/png",
+            byte_size=100,
+        )
+        session.add_all([media, other])
+        await session.commit()
+    context = AgentUIContext(
+        selected_refs=[
+            SelectedReference(kind="artifact", id=media.id),
+        ]
+    )
+    request = AgentRequest(content="讨论这个候选", request_key="selection", ui_context=context)
+    model = ScriptedModel(AgentModelResponse(text="已记录候选。"))
+    with pytest.raises(NotFoundError):
+        await w.service.accept(
+            thread.id,
+            request.model_copy(
+                update={
+                    "ui_context": AgentUIContext(
+                        selected_refs=[SelectedReference(kind="artifact", id=other.id)]
+                    )
+                }
+            ),
+            model=model,
+        )
+    with pytest.raises(NotFoundError):
+        await w.service.accept(
+            thread.id,
+            request.model_copy(
+                update={
+                    "ui_context": AgentUIContext(
+                        selected_refs=[
+                            SelectedReference(kind="shot", id=w.shot_id),
+                            SelectedReference(kind="artifact", id=media.id),
+                        ]
+                    )
+                }
+            ),
+            model=model,
+        )
+    from app.execution.models import NodeRun
+    from app.production.service import GraphService
+
+    async with w.factory() as session:
+        gs = GraphService(session)
+        graph = await gs.create_graph(
+            project_id=w.service.project_id,
+            scope_type="shot",
+            scope_entity_id=w.shot_id,
+            template_key="ui-selection-test",
+            created_by=w.service.actor_id,
+            definition={
+                "nodes": [{"key": "keyframe", "type": "keyframe", "name": "Frame"}],
+                "edges": [],
+            },
+        )
+        materialized = await gs.materialize_definition(version_id=graph.current_version_id)
+        producer = NodeRun(
+            project_id=w.service.project_id,
+            graph_version_id=materialized.version.id,
+            graph_node_id=materialized.nodes["keyframe"].id,
+            attempt_no=1,
+            idempotency_key="ui-candidate",
+            input_hash="d" * 64,
+            status="completed",
+            result_artifact_id=media.id,
+            created_by=w.service.actor_id,
+            input_snapshot={"shot_id": str(w.shot_id)},
+        )
+        session.add(producer)
+        await session.flush()
+        stored = await session.get(Artifact, media.id)
+        stored.produced_by_run_id = producer.id
+        await session.commit()
+    context.selected_refs.insert(0, SelectedReference(kind="shot", id=w.shot_id))
+    accepted = await accept_turn(w, thread.id, request, model=model)
+    assert not model.calls
+    assert (await _turn(w, accepted.turn_id)).intent_snapshot["ui_context"] == context.model_dump(
+        mode="json"
+    )
+    await execute(w, accepted, model=model)
+    assert len(model.calls) == 1
+    assert str(media.id) in str(model.calls[0]["messages"])
+    assert "fixture/private" not in str(model.calls[0]["messages"])
+    page = await w.service.read_thread(thread.id, limit=20, offset=None)
+    messages = [row for row in page["messages"] if row["turn_id"] == accepted.turn_id]
+    assert {row["role"] for row in messages} == {"user", "assistant"}
+    assert all(row["context"] == context.model_dump(mode="json") for row in messages)
+    with pytest.raises(ConflictError):
+        await w.service.replay(thread.id, request.model_copy(update={"ui_context": None}))
