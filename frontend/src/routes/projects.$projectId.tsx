@@ -1,12 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-  Link,
-  Outlet,
-  createRoute,
-  useNavigate,
-  useRouter,
-  useRouterState,
-} from "@tanstack/react-router";
+import { Link, Outlet, createRoute, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 import { CreativeAutonomySwitcher } from "../features/project/CreativeAutonomySwitcher";
@@ -15,7 +8,8 @@ import { useProjectWorkspaceState, workspaceViewFromPath } from "../hooks/usePro
 import { ApiError } from "../lib/api";
 import { fetchProject } from "../features/project/api";
 import { fetchSceneWorkspace } from "../features/scenes/api";
-import { Button, ActionLink, Card, Alert } from "../components/ui";
+import { StudioOverview } from "../features/project/StudioOverview";
+import { Alert } from "../components/ui";
 import { queryKeys } from "../lib/queryKeys";
 import { getRememberedProjectPath, rememberProjectPath } from "../lib/navigationPreferences";
 import { rootRoute } from "./__root";
@@ -28,8 +22,6 @@ export const projectRoute = createRoute({
 
 function ProjectLayout() {
   const { projectId } = projectRoute.useParams();
-  const navigate = useNavigate();
-  const router = useRouter();
   const location = useRouterState({ select: (state) => state.location });
   const pathname = location.pathname;
   const view = workspaceViewFromPath(pathname);
@@ -75,53 +67,13 @@ function ProjectLayout() {
     }
   }, [view, workspaceState, projectId, location.href, project.isSuccess, sceneId, scene.isSuccess]);
 
-  // Restore the last view with an imperative replace instead of rendering a
-  // <Navigate> element, and require that the router's current pathname is still
-  // the project root. During a navigation away (for example the permanent
-  // Settings entry) the router reports the next route at the parent path while
-  // the old view is still committing; restoring there would outrun the user's
-  // own navigation and replace it.
-  useEffect(() => {
-    if (
-      !atRoot ||
-      workspaceState.isLoading ||
-      workspaceState.isFetching ||
-      recoveryError ||
-      !project.isSuccess ||
-      scene.isFetching ||
-      (sceneId && !scene.isSuccess && !lostScene) ||
-      router.state.location.pathname !== pathname
-    )
-      return;
-    const restoreTarget = workspaceState.lastView ?? "script";
-    void navigate({
-      href: (!lostScene && rememberedPath) || `/projects/${projectId}/${restoreTarget}`,
-      replace: true,
-    });
-  }, [
-    atRoot,
-    workspaceState.isLoading,
-    workspaceState.isFetching,
-    workspaceState.lastView,
-    recoveryError,
-    project.isSuccess,
-    sceneId,
-    scene.isSuccess,
-    scene.isFetching,
-    lostScene,
-    rememberedPath,
-    router,
-    navigate,
-    projectId,
-    pathname,
-  ]);
-
   const projectRead = project.data ?? undefined;
   const activeView = view ?? "overview";
 
   return (
     <ProjectWorkspaceShell
       projectId={projectId}
+      goal={projectRead?.creative_goal}
       projectName={projectRead?.name ?? "短剧项目"}
       activeView={activeView}
       creationControls={
@@ -148,25 +100,20 @@ function ProjectLayout() {
           返回我的项目
         </Link>
       ) : atRoot ? (
-        recoveryError ? (
-          <Card role="alert">
-            <p>无法读取上次位置</p>
-            <Button
-              onClick={() => {
-                void workspaceState.retry();
-                if (sceneId) void scene.refetch();
-              }}
-            >
-              重试
-            </Button>
-            <ActionLink tone="ghost" to="/projects/$projectId/script" params={{ projectId }}>
-              进入故事剧本
-            </ActionLink>
-          </Card>
+        projectRead ? (
+          <StudioOverview
+            project={projectRead}
+            resumePath={
+              recoveryError || lostScene
+                ? null
+                : (rememberedPath ??
+                  (workspaceState.lastView
+                    ? `/projects/${projectId}/${workspaceState.lastView}`
+                    : null))
+            }
+          />
         ) : (
-          <p className="muted" role="status">
-            正在恢复上次位置…
-          </p>
+          <p role="status">正在读取项目…</p>
         )
       ) : (
         <Outlet />

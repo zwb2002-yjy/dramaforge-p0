@@ -79,7 +79,7 @@ test("real project/source persistence, browser readback and owner isolation", as
   await page.getByRole("link", { name: "引用此段进行研究" }).first().click();
   await expect(page.getByLabel("待引用原文")).toHaveText(sourceText);
   const note = "灯会是当地每年举行的活动。";
-  await page.getByLabel("内容", { exact: true }).fill(note);
+  await page.getByRole("textbox", { name: "内容", exact: true }).fill(note);
   await page.getByRole("button", { name: "保存研究条目" }).click();
   await expect(page.getByRole("heading", { name: note })).toBeVisible();
   await expect(page.getByLabel("引用来源")).toContainText(sourceText);

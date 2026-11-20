@@ -23,7 +23,6 @@ import {
   type StoryProposalOperation,
   type StoryProposalRead,
 } from "./api";
-import { CreativeDirectionPanel } from "./CreativeDirectionPanel";
 import { ScriptImportPanel } from "./ScriptImportPanel";
 import { storyCreateIdempotencyKey } from "./createKey";
 import type { DirectorInvocationEvidence } from "../director/suggestion-types";
@@ -516,7 +515,6 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
   return (
     <div data-testid="project-script-page" className="qc-project-page">
       <PageHeader title="故事剧本" />
-      <CreativeDirectionPanel key={projectId} projectId={projectId} />
 
       {workspace.isError && (
         <Alert

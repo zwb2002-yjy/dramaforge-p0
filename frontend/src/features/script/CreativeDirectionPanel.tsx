@@ -1,8 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useContext, useState } from "react";
 
+import { Sparkles, Send } from "lucide-react";
+import { StudioSelection } from "../../components/workstation/StudioSelection";
 import { Button, Field, Textarea } from "../../components/ui";
 import {
+  getDirectorTurn,
   openProjectDirectorThread,
   readDirectorAgentThread,
   sendDirectorAgentMessage,
@@ -11,6 +14,7 @@ import { fetchCreativeDirection, saveCreativeDirection } from "./api";
 
 type CreativeDirectionPanelProps = {
   projectId: string;
+  goal?: string;
 };
 
 /**
@@ -20,15 +24,18 @@ type CreativeDirectionPanelProps = {
  * the existing agent thread (one per project scope) and only copies an
  * assistant message into the draft when the user explicitly adopts it.
  */
-export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProps) {
+export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPanelProps) {
+  const preview = useContext(StudioSelection)?.media;
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<{ text: string; baseVersion: number } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [threadId, setThreadId] = useState<string | null>(null);
+  const storageKey = `df.project.director.${projectId}`;
+  const [threadId, setThreadId] = useState<string | null>(() => sessionStorage.getItem(storageKey));
   const [question, setQuestion] = useState("");
-  const [awaitingReply, setAwaitingReply] = useState(false);
+  const [pendingTurn, setPendingTurn] = useState<string | null>(null);
+  const awaitingReply = Boolean(pendingTurn);
 
   const direction = useQuery({
     queryKey: ["creative-direction", projectId],
@@ -39,7 +46,7 @@ export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProp
   const thread = useQuery({
     queryKey: ["direction-thread", projectId, threadId],
     queryFn: () => readDirectorAgentThread(projectId, threadId!),
-    enabled: open && threadId !== null,
+    enabled: threadId !== null,
     retry: false,
     refetchInterval: awaitingReply ? 2000 : false,
   });
@@ -51,14 +58,26 @@ export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProp
       setEdit({ text, baseVersion: edit?.baseVersion ?? direction.data.profile_version });
   }
 
-  const messages = useMemo(() => thread.data?.messages ?? [], [thread.data]);
-  const lastMessage = messages[messages.length - 1];
-
+  const messages = thread.data?.messages ?? [];
+  const turn = useQuery({
+    queryKey: ["project-director-turn", projectId, pendingTurn],
+    queryFn: () => getDirectorTurn(projectId, pendingTurn!),
+    enabled: !!pendingTurn,
+    retry: false,
+    refetchInterval: pendingTurn ? 1800 : false,
+  });
   useEffect(() => {
-    if (awaitingReply && lastMessage?.role === "assistant") {
-      setAwaitingReply(false);
+    const state = turn.data?.status;
+    if (
+      pendingTurn &&
+      (turn.isError ||
+        (state && ["failed", "cancelled", "completed", "awaiting_user", "stale"].includes(state)))
+    ) {
+      if (turn.isError || state === "failed") setError("请查看本次对话记录或检查项目文本模型。");
+      setPendingTurn(null);
+      void queryClient.invalidateQueries({ queryKey: ["direction-thread", projectId] });
     }
-  }, [awaitingReply, lastMessage]);
+  }, [pendingTurn, turn.data?.status, turn.isError, projectId, queryClient]);
 
   const save = useMutation({
     mutationFn: () => {
@@ -80,28 +99,21 @@ export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProp
     },
   });
 
-  const openThread = useMutation({
-    mutationFn: () => openProjectDirectorThread(projectId),
-    onSuccess: (ref) => {
-      setThreadId(ref.id);
-      setError(null);
-    },
-    onError: (cause) => {
-      setError(cause instanceof Error ? cause.message : "无法开始方向讨论");
-    },
-  });
-
   const send = useMutation({
-    mutationFn: () =>
-      sendDirectorAgentMessage(projectId, threadId!, {
-        content: question,
-        request_key: `direction:${Date.now()}`,
+    mutationFn: async () => {
+      const id = threadId ?? (await openProjectDirectorThread(projectId)).id;
+      sessionStorage.setItem(storageKey, id);
+      setThreadId(id);
+      return sendDirectorAgentMessage(projectId, id, {
+        content: question.trim(),
+        request_key: `direction:${crypto.randomUUID()}`,
         intent: "conversation",
-      }),
-    onSuccess: () => {
+      });
+    },
+    onSuccess: (accepted) => {
       setQuestion("");
-      setAwaitingReply(true);
-      void thread.refetch();
+      setPendingTurn(accepted.turn_id);
+      void queryClient.invalidateQueries({ queryKey: ["direction-thread", projectId] });
     },
     onError: (cause) => {
       setError(cause instanceof Error ? cause.message : "发送失败");
@@ -109,19 +121,23 @@ export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProp
   });
 
   return (
-    <section className="qc-script-direction" data-testid="creative-direction">
-      <div className="panel-header">
-        <h3>创作方向</h3>
-      </div>
-      <p className="muted">写清题材、时代、语气与禁区；生成故事时作为 brief 的上下文。</p>
-      {!open && (
-        <Button type="button" tone="ghost" onClick={() => setOpen(true)}>
-          展开创作方向
+    <aside
+      id="project-chat-rail"
+      className="institution-director"
+      aria-label="项目导演对话"
+      data-testid="creative-direction"
+    >
+      <header>
+        <h2>
+          <Sparkles size={20} /> AI 创意助手
+        </h2>
+        <Button tone="ghost" aria-expanded={open} onClick={() => setOpen(!open)}>
+          创作方向
         </Button>
-      )}
+      </header>
+      <p className="studio-chat-intro">随时告诉我你的想法，一起修改和完善作品。</p>
       {open && (
-        <>
-          {direction.isError && <p role="alert">创作方向读取失败，请稍后重试。</p>}
+        <div className="direction-editor">
           <Field>
             <span>方向说明</span>
             <Textarea
@@ -129,80 +145,104 @@ export function CreativeDirectionPanel({ projectId }: CreativeDirectionPanelProp
               rows={3}
               value={draft}
               disabled={!direction.data || save.isPending}
-              onChange={(event) => {
-                if (direction.data)
-                  setEdit({
-                    text: event.target.value,
-                    baseVersion: edit?.baseVersion ?? direction.data.profile_version,
-                  });
-              }}
+              onChange={(event) => setDirectionDraft(event.target.value)}
             />
           </Field>
-          {message && <p role="status">{message}</p>}
-          {error && <p role="alert">{error}</p>}
-          <div className="toolbar">
-            <Button
-              type="button"
-              tone="primary"
-              disabled={!edit || save.isPending || draft.trim().length === 0}
-              onClick={() => save.mutate()}
-            >
-              保存创作方向
-            </Button>
-            {threadId === null && (
+          {direction.isError && <p role="alert">无法读取方向说明。</p>}
+          <Button disabled={!edit || save.isPending || !draft.trim()} onClick={() => save.mutate()}>
+            保存创作方向
+          </Button>
+        </div>
+      )}
+      {message && <p role="status">{message}</p>}
+      <div className="institution-conversation" aria-label="项目对话记录">
+        {thread.isError && (
+          <p role="alert">
+            读取对话失败。<Button onClick={() => void thread.refetch()}>重试</Button>
+          </p>
+        )}
+        {!messages.length && goal && (
+          <article data-role="user">
+            <strong>项目目标</strong>
+            <p>{goal}</p>
+          </article>
+        )}
+        {preview && (
+          <article className="studio-context-card">
+            <strong>当前讨论的画面</strong>
+            {preview.video ? (
+              <video controls preload="metadata" src={preview.url + "#t=0.01"} />
+            ) : (
+              <img src={preview.url} alt="当前选中的画面" />
+            )}
+          </article>
+        )}
+        {messages.map((item) => (
+          <article key={item.id} data-role={item.role}>
+            <strong>{item.role === "assistant" ? "导演" : "你"}</strong>
+            <p>{item.content}</p>
+            {item.role === "assistant" && (
               <Button
-                type="button"
                 tone="ghost"
-                disabled={openThread.isPending}
-                onClick={() => openThread.mutate()}
+                onClick={() => {
+                  setOpen(true);
+                  queryClient
+                    .fetchQuery({
+                      queryKey: ["creative-direction", projectId],
+                      queryFn: () => fetchCreativeDirection(projectId),
+                    })
+                    .then((row) =>
+                      setEdit({ text: item.content, baseVersion: row.profile_version }),
+                    )
+                    .catch(() => setError("无法读取创作方向"));
+                }}
               >
-                开始方向讨论
+                采用为方向草稿
               </Button>
             )}
-          </div>
-          {threadId !== null && (
-            <div className="direction-discussion" aria-label="方向讨论">
-              <ul className="direction-messages">
-                {messages.slice(-6).map((item) => (
-                  <li key={item.id}>
-                    <span className="status-label">
-                      {item.role === "assistant" ? "导演" : "你"}
-                    </span>
-                    <p>{item.content}</p>
-                    {item.role === "assistant" && (
-                      <Button
-                        type="button"
-                        tone="ghost"
-                        onClick={() => setDirectionDraft(item.content)}
-                      >
-                        采用为方向
-                      </Button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              {awaitingReply && <p role="status">导演正在思考…</p>}
-              <Field>
-                <span>讨论问题</span>
-                <Textarea
-                  aria-label="讨论问题"
-                  rows={2}
-                  value={question}
-                  onChange={(event) => setQuestion(event.target.value)}
-                />
-              </Field>
-              <Button
-                type="button"
-                tone="primary"
-                disabled={send.isPending || question.trim().length === 0}
-                onClick={() => send.mutate()}
-              >
-                发送讨论
-              </Button>
-            </div>
-          )}
-        </>
-      )}
-    </section>
+          </article>
+        ))}
+        {awaitingReply && <p role="status">正在等待导演回复…</p>}
+      </div>
+      {error && <p role="alert">{error}</p>}
+      <div className="studio-suggestions">
+        {["我想修改…", "帮我调整…", "继续优化…"].map((label) => (
+          <Button
+            tone="ghost"
+            key={label}
+            onClick={() => {
+              setQuestion((value) => value || label.replace("…", ""));
+              document.getElementById("project-director-message")?.focus();
+            }}
+          >
+            <Sparkles size={12} />
+            {label}
+          </Button>
+        ))}
+      </div>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (question.trim() && !send.isPending && !awaitingReply) send.mutate();
+        }}
+      >
+        <Textarea
+          id="project-director-message"
+          aria-label="给导演的想法"
+          placeholder="请输入你的需求，例如：我想修改画面风格…"
+          rows={3}
+          value={question}
+          onChange={(event) => setQuestion(event.target.value)}
+        />
+        <Button
+          aria-label="发送给导演"
+          type="submit"
+          tone="primary"
+          disabled={!question.trim() || send.isPending || awaitingReply}
+        >
+          <Send size={17} />
+        </Button>
+      </form>
+    </aside>
   );
 }

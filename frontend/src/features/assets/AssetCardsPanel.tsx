@@ -57,6 +57,7 @@ const VERSION_STATUS_LABEL: Record<string, string> = {
 };
 
 type AssetCardsPanelProps = {
+  initialKind?: string;
   projectId: string;
 };
 
@@ -73,9 +74,11 @@ function fetchAssetsFiltered(
   return apiGetList<AssetRead>(`/api/v1/projects/${projectId}/assets${query ? `?${query}` : ""}`);
 }
 
-export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
+export function AssetCardsPanel({ projectId, initialKind }: AssetCardsPanelProps) {
   const queryClient = useQueryClient();
-  const [kindFilter, setKindFilter] = useState("");
+  const [kindFilter, setKindFilter] = useState(
+    initialKind && initialKind in ASSET_KIND_LABEL ? initialKind : "",
+  );
   const [statusFilter, setStatusFilter] = useState("");
   const [nameFilter, setNameFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");

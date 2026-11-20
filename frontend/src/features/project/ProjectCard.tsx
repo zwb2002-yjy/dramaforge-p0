@@ -29,6 +29,7 @@ export function ProjectCard({
         </span>
         <div className="df-project-card-body">
           <h2 title={project.name}>{project.name}</h2>
+          {project.creative_goal && <p className="df-project-goal">{project.creative_goal}</p>}
           <span className="df-project-card-meta">
             {project.work_type ? WORK_TYPE_LABELS[project.work_type] : "作品类型待确认"} · {format}{" "}
             · {project.aspect_ratio}

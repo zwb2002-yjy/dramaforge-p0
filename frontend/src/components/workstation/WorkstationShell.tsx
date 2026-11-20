@@ -27,7 +27,8 @@ import {
 } from "../../lib/navigationPreferences";
 import { queryKeys } from "../../lib/queryKeys";
 import { ContextNavigation } from "./ContextNavigation";
-import { Button, Card, Alert } from "../ui";
+import { StudioSelection, type StudioMedia } from "./StudioSelection";
+import { Disclosure, Button, Card, Alert } from "../ui";
 import {
   ProjectNavigationContext,
   PROJECT_VIEW_LABELS,
@@ -158,9 +159,21 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   const pathname = location.pathname;
   const primary = primarySectionFromPath(pathname);
   const projectId = projectIdFromPath(pathname);
+  const [selectedMedia, setSelectedMedia] = useState<{
+    project: string | null;
+    media: StudioMedia | null;
+  } | null>(null);
+  const show = useCallback(
+    (media: StudioMedia | null) => setSelectedMedia({ project: projectId, media }),
+    [projectId],
+  );
+  const media = selectedMedia?.project === projectId ? (selectedMedia?.media ?? null) : null;
   const hasContext = primary !== "projects";
-  const [narrow, setNarrow] = useState(() => window.innerWidth < 1100);
-  const [secondaryOpen, setSecondaryOpen] = useState(() => hasContext && window.innerWidth >= 1100);
+  const drawerWidth = primary === "project" ? 800 : 1100;
+  const [narrow, setNarrow] = useState(() => window.innerWidth < drawerWidth);
+  const [secondaryOpen, setSecondaryOpen] = useState(
+    () => hasContext && window.innerWidth >= drawerWidth,
+  );
   const projectTrigger = useRef<HTMLButtonElement | null>(null);
   const restoreFocusPending = useRef(false);
   const openRef = useRef(secondaryOpen);
@@ -172,12 +185,12 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
       trigger?.isConnected &&
       router.state.status === "idle" &&
       !router.state.isLoading &&
-      !(openRef.current && window.innerWidth < 1100)
+      !(openRef.current && window.innerWidth < drawerWidth)
     ) {
       trigger.focus();
       if (document.activeElement === trigger) restoreFocusPending.current = false;
     }
-  }, [router]);
+  }, [router, drawerWidth]);
   const registerProjectTrigger = useCallback(
     (trigger: HTMLButtonElement | null) => {
       projectTrigger.current = trigger;
@@ -204,12 +217,12 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
       setSecondaryOpen(false);
     } else if (previousPrimary.current !== primary) {
       setSecondaryOpen(!narrow);
-    } else if (previousLocation.current !== location.href && window.innerWidth < 1100) {
+    } else if (previousLocation.current !== location.href && window.innerWidth < drawerWidth) {
       closeNavigation();
     }
     previousPrimary.current = primary;
     previousLocation.current = location.href;
-  }, [location.href, primary, hasContext, narrow, closeNavigation]);
+  }, [location.href, primary, hasContext, narrow, closeNavigation, drawerWidth]);
 
   useEffect(() => {
     if (!secondaryOpen || narrow) return;
@@ -228,7 +241,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
   }, [drawerOpen, location.href, routeStatus, routeLoading, restoreProjectFocus]);
   const navigationRef = useRef<HTMLElement>(null);
   useEffect(() => {
-    const wide = window.matchMedia("(min-width: 1100px)");
+    const wide = window.matchMedia(`(min-width: ${drawerWidth}px)`);
     const syncNavigation = () => {
       setNarrow(!wide.matches);
       if (!wide.matches && navigationRef.current?.contains(document.activeElement)) {
@@ -237,9 +250,10 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
         setSecondaryOpen(hasContext && wide.matches);
       }
     };
+    syncNavigation();
     wide.addEventListener("change", syncNavigation);
     return () => wide.removeEventListener("change", syncNavigation);
-  }, [hasContext, navigationRef, closeNavigation]);
+  }, [hasContext, navigationRef, closeNavigation, drawerWidth]);
   useEffect(() => {
     if (!drawerOpen) return;
     // Ant Design owns trapping/Escape. Opening an animated sidebar
@@ -349,6 +363,20 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
       data-testid="workstation-shell"
       data-primary-section={primary}
     >
+      {primary === "project" && (
+        <header className="institution-brandbar">
+          <Link to="/" search={{}}>
+            <span className="studio-brand-icon">
+              <Aperture size={17} />
+            </span>
+            <strong>DramaForge 机构版</strong>
+            <span> · 智能创意平台</span>
+          </Link>
+          <Link to="/settings/models" search={settingsSearch} aria-label="平台设置">
+            <Settings size={18} />
+          </Link>
+        </header>
+      )}
       <aside className="df-primary-sidebar">
         <Link
           to="/"
@@ -401,66 +429,102 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
             {primary === "project" && projectId && (
               <>
                 <header>
-                  <span>当前项目</span>
-                  <strong>{projectName}</strong>
+                  {media && (
+                    <div className="studio-project-thumb">
+                      {media.video ? (
+                        <video muted playsInline src={media.url + "#t=0.01"} preload="metadata" />
+                      ) : (
+                        <img alt="" src={media.url} />
+                      )}
+                    </div>
+                  )}
+                  <strong title={projectName ?? undefined}>{projectName}</strong>
                   <Link to="/" search={{ create: undefined }} className="df-project-switcher">
                     切换项目
                   </Link>
                 </header>
                 <nav aria-label="创作导航">
                   <ContextLink
-                    active={creationView === "production"}
-                    label={PROJECT_VIEW_LABELS.production}
-                    to={`/projects/${projectId}/production`}
+                    active={pathname.replace(/\/$/, "") === `/projects/${projectId}`}
+                    label="项目"
+                    to={`/projects/${projectId}`}
                     icon={Clapperboard}
                   />
                   <ContextLink
                     active={creationView === "files"}
-                    label={PROJECT_VIEW_LABELS.files}
+                    label="资料"
                     to={`/projects/${projectId}/files`}
                     icon={FolderOpen}
                   />
                   <ContextLink
                     active={creationView === "research"}
-                    label={PROJECT_VIEW_LABELS.research}
+                    label="研究"
                     to={`/projects/${projectId}/research`}
                     icon={Library}
                   />
                   <ContextLink
                     active={creationView === "script"}
-                    label={PROJECT_VIEW_LABELS.script}
-                    step="01"
+                    label="内容"
                     to={`/projects/${projectId}/script`}
                     icon={FileText}
                   />
                   <ContextLink
-                    active={creationView === "assets"}
-                    label={PROJECT_VIEW_LABELS.assets}
-                    step="02"
+                    active={creationView === "assets" && !location.searchStr.includes("kind=")}
+                    label="素材"
                     to={`/projects/${projectId}/assets`}
                     icon={Package}
                   />
                   <ContextLink
-                    active={creationView === "scenes"}
-                    label={PROJECT_VIEW_LABELS.scenes}
-                    step="03"
-                    to={`/projects/${projectId}/scenes`}
-                    icon={Film}
-                  />
-                  <ContextLink
-                    active={creationView === "review"}
-                    label={PROJECT_VIEW_LABELS.review}
-                    step="04"
-                    to={`/projects/${projectId}/review`}
-                    icon={CheckCheck}
-                  />
-                  <ContextLink
                     active={creationView === "edit"}
-                    label={PROJECT_VIEW_LABELS.edit}
-                    step="05"
+                    label="交付"
                     to={`/projects/${projectId}/edit`}
                     icon={Scissors}
                   />
+                  <div className="studio-nav-group">项目素材</div>
+                  <ContextLink
+                    active={false}
+                    label="故事内容"
+                    to={`/projects/${projectId}/script`}
+                    icon={FolderOpen}
+                  />
+                  {[
+                    ["character", "人物形象"],
+                    ["scene", "场景环境"],
+                    ["image", "图片素材"],
+                    ["video", "视频素材"],
+                  ].map(([kind, label]) => (
+                    <ContextLink
+                      key={kind}
+                      active={
+                        creationView === "assets" && location.searchStr.includes("kind=" + kind)
+                      }
+                      label={label}
+                      to={`/projects/${projectId}/assets`}
+                      search={{ kind }}
+                      icon={Package}
+                    />
+                  ))}
+                  <ContextLink active={false} label="文化知识库" to="/knowledge" icon={Library} />
+                  <Disclosure compact title="制作工具">
+                    <ContextLink
+                      active={creationView === "scenes"}
+                      label={PROJECT_VIEW_LABELS.scenes}
+                      to={`/projects/${projectId}/scenes`}
+                      icon={Film}
+                    />
+                    <ContextLink
+                      active={creationView === "review"}
+                      label={PROJECT_VIEW_LABELS.review}
+                      to={`/projects/${projectId}/review`}
+                      icon={CheckCheck}
+                    />
+                    <ContextLink
+                      active={creationView === "production"}
+                      label="制作进度"
+                      to={`/projects/${projectId}/production`}
+                      icon={Clapperboard}
+                    />
+                  </Disclosure>
                 </nav>
               </>
             )}
@@ -508,22 +572,24 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
             </Link>
           </nav>
         )}
-        <ProjectNavigationContext.Provider
-          value={
-            primary === "project"
-              ? {
-                  open: secondaryOpen,
-                  toggle: () => {
-                    restoreFocusPending.current = false;
-                    setSecondaryOpen((open) => !open);
-                  },
-                  triggerRef: registerProjectTrigger,
-                }
-              : null
-          }
-        >
-          {projectContent}
-        </ProjectNavigationContext.Provider>
+        <StudioSelection.Provider value={{ media, show }}>
+          <ProjectNavigationContext.Provider
+            value={
+              primary === "project"
+                ? {
+                    open: secondaryOpen,
+                    toggle: () => {
+                      restoreFocusPending.current = false;
+                      setSecondaryOpen((open) => !open);
+                    },
+                    triggerRef: registerProjectTrigger,
+                  }
+                : null
+            }
+          >
+            {projectContent}
+          </ProjectNavigationContext.Provider>
+        </StudioSelection.Provider>
       </div>
     </div>
   );

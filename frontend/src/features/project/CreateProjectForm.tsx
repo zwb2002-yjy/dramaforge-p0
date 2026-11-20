@@ -143,22 +143,24 @@ export function CreateProjectForm({
               </Form.Item>
             </Col>
           </Row>
-          <Field>
-            保存到工作空间
-            <Select
-              aria-label="新项目工作空间"
-              value={workspaceId ?? ""}
-              onChange={(event) => onWorkspaceChange(event || null)}
-            >
-              {workspaces.map((workspace) => (
-                <option key={workspace.id} value={workspace.id}>
-                  {workspace.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
+          {workspaces.length > 1 && (
+            <Field>
+              保存到工作空间
+              <Select
+                aria-label="新项目工作空间"
+                value={workspaceId ?? ""}
+                onChange={(event) => onWorkspaceChange(event || null)}
+              >
+                {workspaces.map((workspace) => (
+                  <option key={workspace.id} value={workspace.id}>
+                    {workspace.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
           <ProjectIntentFields />
-          <section aria-label="创作选项">
+          <Disclosure title="创作起点与模式">
             <Row gutter={["var(--df-space-4)", "var(--df-space-4)"]}>
               <Col xs={24} sm={12}>
                 <Form.Item label="创作起点" name="startType">
@@ -195,7 +197,7 @@ export function CreateProjectForm({
                 </Form.Item>
               </Col>
             </Row>
-          </section>
+          </Disclosure>
           <Disclosure title="风格与题材（可选）">
             <Row gutter={["var(--df-space-4)", "var(--df-space-4)"]}>
               <Col xs={24} sm={12}>
@@ -258,7 +260,7 @@ export function CreateProjectForm({
             type="submit"
             disabled={!hasWorkspace || !name.trim() || create.isPending}
           >
-            {create.isPending ? "正在创建…" : "创建并进入剧本"}
+            {create.isPending ? "正在创建…" : "创建并进入工作台"}
           </Button>
         </Flex>
       </Form>

@@ -45,7 +45,7 @@ for (const [kind, label, episodes] of [
         new URL(response.url()).pathname === "/api/v1/projects" &&
         response.request().method() === "POST",
     );
-    await page.getByRole("button", { name: "创建并进入剧本" }).click();
+    await page.getByRole("button", { name: "创建并进入工作台" }).click();
     const response = await creating;
     expect(response.status()).toBe(201);
     const created = await response.json();
@@ -55,13 +55,20 @@ for (const [kind, label, episodes] of [
     expect(typeof created.planned_duration_seconds).toBe("string");
     expect(Number(created.planned_duration_seconds)).toBe(60);
     expect(created.planned_episode_count).toBe(episodes);
-    await expect(page).toHaveURL(new RegExp(`/projects/${created.id}/script`));
+    await expect(page).toHaveURL(new RegExp(`/projects/${created.id}/?$`));
+    await expect(page.getByRole("region", { name: "项目概览" })).toContainText("介绍地方节庆文化");
+    await expect(page.getByRole("textbox", { name: "给导演的想法" })).toBeVisible();
     // An empty project already has a direction; the first script remains a proposal until Apply.
-    await page.getByRole("button", { name: "展开创作方向" }).click();
+    await page.getByRole("button", { name: "创作方向", exact: true }).click();
     const direction = "用祖孙两代讲述元宵灯会，只取可核对的地方习俗。";
     await page.getByRole("textbox", { name: "创作方向", exact: true }).fill(direction);
     await page.getByRole("button", { name: "保存创作方向" }).click();
     await expect(page.getByText("创作方向已保存。")).toBeVisible();
+    await page
+      .getByRole("navigation", { name: "创作导航" })
+      .getByRole("link", { name: "内容", exact: true })
+      .click();
+    await expect(page.getByRole("textbox", { name: "给导演的想法" })).toBeVisible();
     const formal = async () => {
       const result = await page.request.get(`/api/v1/projects/${created.id}/script`, {
         headers: { "X-Workspace-Id": created.workspace_id },

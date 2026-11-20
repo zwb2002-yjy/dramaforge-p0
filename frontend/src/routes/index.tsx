@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, createRoute, useNavigate, useRouterState, redirect } from "@tanstack/react-router";
+import { Link, createRoute, useNavigate, redirect } from "@tanstack/react-router";
 import { Plus, Search, Settings2 } from "lucide-react";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 
@@ -30,7 +30,6 @@ import {
   Alert,
 } from "../components/ui";
 import { CreateProjectForm } from "../features/project/CreateProjectForm";
-import { WorkspaceModelNotice } from "../features/project/WorkspaceModelNotice";
 import { ProjectCard } from "../features/project/ProjectCard";
 import { projectCopy as copy } from "../features/project/projectCopy";
 import "../features/project/project-library.css";
@@ -82,7 +81,6 @@ const PROJECT_PAGE_SIZE = 12;
 function HomePage() {
   const navigate = useNavigate();
   const search = indexRoute.useSearch();
-  const returnTo = useRouterState({ select: (state) => state.location.href });
   const queryClient = useQueryClient();
   const health = useQuery({
     queryKey: queryKeys.health(),
@@ -273,14 +271,8 @@ function HomePage() {
             <>
               <div className="auth-heading">
                 <div>
-                  <h2>{ownerInitialized ? "Owner 登录" : "初始化 Owner"}</h2>
-                  <p className="muted">
-                    {ownerInitialized
-                      ? "这是单用户实例，已关闭后续注册。"
-                      : "首次使用需要创建唯一的 Owner 账号。"}
-                  </p>
+                  <h2>{ownerInitialized ? "登录工作台" : "创建管理员账号"}</h2>
                 </div>
-                <span className="auth-mode-badge">{ownerInitialized ? "单用户" : "首次设置"}</span>
               </div>
               <form
                 className="auth-form"
@@ -315,7 +307,7 @@ function HomePage() {
                     required
                   />
                 </Field>
-                {registrationAvailable && (
+                {registrationAvailable && !ownerInitialized && (
                   <Field>
                     显示名
                     <Input
@@ -337,7 +329,7 @@ function HomePage() {
                       登录
                     </Button>
                   )}
-                  {registrationAvailable && (
+                  {registrationAvailable && !ownerInitialized && (
                     <Button
                       tone="primary"
                       type="submit"
@@ -362,7 +354,7 @@ function HomePage() {
             onWorkspaceChange={selectWorkspace}
             onCancel={() => setCreateOpen(false)}
             onCreated={(projectId) =>
-              void navigate({ to: "/projects/$projectId/script", params: { projectId } })
+              void navigate({ to: "/projects/$projectId", params: { projectId } })
             }
           />
           {!createOpen && search.panel === "workspace" && (
@@ -372,17 +364,6 @@ function HomePage() {
               </Suspense>
             </section>
           )}
-          {!createOpen &&
-            search.panel !== "workspace" &&
-            selectedWorkspaceId &&
-            workspaces.isSuccess &&
-            workspaces.data.some((workspace) => workspace.id === selectedWorkspaceId) && (
-              <WorkspaceModelNotice
-                key={selectedWorkspaceId}
-                workspaceId={selectedWorkspaceId}
-                returnTo={returnTo}
-              />
-            )}
           <section
             hidden={createOpen || search.panel === "workspace"}
             className="df-lobby-section"

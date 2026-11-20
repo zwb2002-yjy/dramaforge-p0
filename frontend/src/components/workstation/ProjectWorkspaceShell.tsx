@@ -1,7 +1,8 @@
-import { useContext, useLayoutEffect, useRef, type ReactNode } from "react";
+import { useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Menu } from "lucide-react";
 import { Button } from "../ui";
-import { ProjectStageGuide } from "./ProjectStageGuide";
+import { CreativeDirectionPanel } from "../../features/script/CreativeDirectionPanel";
+import "./institution-studio.css";
 import { ProjectNavigationContext, PROJECT_VIEW_LABELS } from "./projectNavigation";
 
 import "./project-shell.css";
@@ -25,6 +26,7 @@ type ProjectWorkspaceShellProps = {
   activeView: ProjectWorkspaceView;
   children: ReactNode;
   modeLabel?: string;
+  goal?: string;
   creationControls?: ReactNode;
 };
 
@@ -40,9 +42,11 @@ export function ProjectWorkspaceShell({
   children,
   modeLabel,
   creationControls,
+  goal,
 }: ProjectWorkspaceShellProps) {
   const displayModeLabel = modeLabel ?? VIEW_LABELS[activeView];
   const navigation = useContext(ProjectNavigationContext);
+  const [chatExpanded, setChatExpanded] = useState(false);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const barRef = useRef<HTMLElement | null>(null);
 
@@ -79,6 +83,7 @@ export function ProjectWorkspaceShell({
       className={`qc-project-shell${activeView === "scenes" ? " scene-view" : ""}`}
       data-testid="project-workspace-shell"
       data-project-id={projectId}
+      data-chat-expanded={chatExpanded}
     >
       <header ref={barRef} className="qc-project-bar">
         {navigation && (
@@ -95,13 +100,24 @@ export function ProjectWorkspaceShell({
           </Button>
         )}
         <span className="qc-project-name">{projectName}</span>
+        <Button
+          className="studio-chat-toggle"
+          id="studio-chat-toggle"
+          tone="ghost"
+          aria-expanded={chatExpanded}
+          aria-controls="project-chat-rail"
+          onClick={() => setChatExpanded(!chatExpanded)}
+        >
+          {chatExpanded ? "返回作品" : "创意助手"}
+        </Button>
         <span className="qc-project-mode">{displayModeLabel}</span>
-        <ProjectStageGuide projectId={projectId} view={activeView} />
-        {creationControls}
+
+        {activeView !== "overview" && creationControls}
       </header>
 
-      <div className="qc-content-grid no-inspector">
+      <div className="institution-stage">
         <main className="qc-main-canvas qc-project-canvas">{children}</main>
+        <CreativeDirectionPanel key={projectId} projectId={projectId} goal={goal} />
       </div>
     </div>
   );
