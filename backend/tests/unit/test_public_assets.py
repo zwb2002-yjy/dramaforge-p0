@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 from app.access.models import Project, User, Workspace
-from app.assets.models import Asset, AssetVersion, AssetVersionReference
+from app.assets.models import AssetVersionReference
 from app.assets.public_assets import (
     ProjectPublicAssetLinkService,
     PublicAssetConflictError,
@@ -16,56 +16,7 @@ from app.assets.public_assets import (
 from app.execution.models import Artifact
 from test_director_turn_api import api as api
 
-
-async def _seed_asset(session, *, project: Project, owner: User) -> tuple[AssetVersion, Artifact]:
-    artifact = Artifact(
-        project_id=project.id,
-        artifact_type="image",
-        object_key=f"tmp/{uuid4().hex}.png",
-        content_hash=uuid4().hex * 2,
-        mime_type="image/png",
-        storage_state="available",
-        byte_size=16,
-        width=1024,
-        height=768,
-    )
-    session.add(artifact)
-    await session.flush()
-    asset = Asset(
-        project_id=project.id,
-        kind="character",
-        name="古桥匠人",
-        description="",
-        status="active",
-        version=1,
-    )
-    session.add(asset)
-    await session.flush()
-    version = AssetVersion(
-        project_id=project.id,
-        asset_id=asset.id,
-        version_number=1,
-        kind="character",
-        name="古桥匠人",
-        description="",
-        status="formal",
-        created_by=owner.id,
-    )
-    session.add(version)
-    await session.flush()
-    asset.current_version_id = version.id
-    session.add(
-        AssetVersionReference(
-            project_id=project.id,
-            asset_version_id=version.id,
-            artifact_id=artifact.id,
-            reference_role="primary",
-            label="primary",
-            sort_order=0,
-        )
-    )
-    await session.commit()
-    return version, artifact
+from fixtures.public_asset_seed import _seed_asset
 
 
 @pytest.fixture
@@ -284,6 +235,12 @@ def test_public_content_preview_and_ranges(api, monkeypatch):
             version, artifact = await _seed_asset(
                 session, project=project_row, owner=owner
             )
+            from app.assets.source_use import SourceUseService
+
+            await SourceUseService(session, actor=owner, project=project_row).declare(
+                artifact_id=artifact.id, allowed_uses=["library_reference"],
+                statement="Synthetic media licensed for the library", request_key="library-use",
+            )
             await store.put_bytes(
                 object_key=artifact.object_key, data=payload, mime_type="image/png"
             )
@@ -362,6 +319,12 @@ def test_project_use_content_reads_through_the_link(api, monkeypatch):
             version, artifact = await _seed_asset(
                 session, project=project_row, owner=owner
             )
+            from app.assets.source_use import SourceUseService
+
+            await SourceUseService(session, actor=owner, project=project_row).declare(
+                artifact_id=artifact.id, allowed_uses=["library_reference"],
+                statement="Synthetic media licensed for the library", request_key="library-use",
+            )
             await store.put_bytes(
                 object_key=artifact.object_key, data=payload, mime_type="image/png"
             )
@@ -429,7 +392,6 @@ async def test_public_reference_token_records_identity_and_respects_withdrawal(w
         await world["session"].get(Artifact, published.items[0].id)
     )
     del artifact_id
-    from app.assets.models import AssetVersionReference
     from sqlalchemy import select as sql_select
 
     artifact = await world["session"].scalar(

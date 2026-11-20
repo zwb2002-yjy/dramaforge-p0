@@ -1352,6 +1352,9 @@ public_asset_link_id`；`_hydrate_and_validate_references`对`resolution_mode=pu
 公共内容读取使用同一窄授权端口的两种受限输入：owner_preview（当前owner+固定publication/item），
 project_use（当前消费project/link/item/purpose）。owner_preview只允许可发现且可用于library_reference的安全媒体，
 不能返回私有源表记录；project_use还验证消费Workspace及项目用途。两者都不把GUC切成源项目绕读私有表。
+EV204 的两个浏览器内容入口共用 `app.public_item_content`。每次 GET/HEAD 读取同一数据库快照内的发布、固定成员、素材软删除标记及来源许可。
+直接或上游来源缺少当前 `library_reference` 许可时拒绝，消费项目还需匹配当前工作区及未解除的固定链接。资格拒绝发生在对象存储访问之前。
+
 普通SQL对源Artifact/ProjectFile/Invocation的权限保持不变；函数固定search_path、REVOKE PUBLIC和字段白名单。
 内容流返回Content-Type/Length、Accept-Ranges、X-Content-Type-Options:nosniff、Cache-Control:private,no-store；
 合法范围206，无效/多Range 416，HEAD只读元数据不加载全文件。读取本身不创建AI调用或公共token。

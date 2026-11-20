@@ -12,9 +12,11 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
+from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User, Workspace
@@ -47,6 +49,69 @@ class PublicContent:
     mime_type: str
     byte_size: int
     content_hash: str
+
+
+@lru_cache(maxsize=1)
+def _sqlite_public_item_sql() -> str:
+    return (
+        (Path(__file__).with_name("sql") / "public_item_content_v1.sql")
+        .read_text(encoding="utf-8")
+        .format(
+            schema="",
+            actor=":actor",
+            workspace=":workspace",
+            active_project=":project",
+            project=":project",
+            link=":link",
+            publication=":publication",
+            item=":item",
+            permits_library=("EXISTS (SELECT 1 FROM json_each(r.allowed_uses) "
+                             "WHERE value='library_reference')"),
+        )
+    )
+
+
+async def _read_public_content(
+    session: AsyncSession,
+    actor: User,
+    item_id: UUID,
+    *,
+    publication_id: UUID | None = None,
+    project_id: UUID | None = None,
+    link_id: UUID | None = None,
+) -> PublicContent:
+    identities = {
+        "publication": publication_id,
+        "item": item_id,
+        "project": project_id,
+        "link": link_id,
+    }
+    if session.get_bind().dialect.name == "postgresql":
+        row = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT object_key, mime_type, byte_size, content_hash "
+                        "FROM app.public_item_content(:publication, :item, :project, :link)"
+                    ),
+                    identities,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+    else:
+        params = {key: value.hex if value else None for key, value in identities.items()}
+        workspace = session.info.get("selected_workspace_id")
+        params.update(actor=actor.id.hex, workspace=UUID(str(workspace)).hex if workspace else None)
+        row = (
+            (await session.execute(text(_sqlite_public_item_sql()), params))
+            .mappings()
+            .one_or_none()
+        )
+    if row is None:
+        raise NotFoundError("public asset content not found")
+    return PublicContent(**row)
 
 
 @dataclass(frozen=True)
@@ -304,29 +369,10 @@ class PublicAssetService:
 
     async def read_content(self, publication_id: UUID, item_id: UUID) -> PublicContent:
         """Narrow owner-preview read: available publication + fixed item + real artifact."""
-        publication = await self._publication(publication_id)
-        status, usable, _reasons = await self.availability(publication)
-        if not usable:
-            raise NotFoundError("public asset content not found")
-        item = await self.session.scalar(
-            select(PublicAssetPublicationItem).where(
-                PublicAssetPublicationItem.id == item_id,
-                PublicAssetPublicationItem.publication_id == publication.id,
-            )
+        return await _read_public_content(
+            self.session, self.actor, item_id, publication_id=publication_id
         )
-        if item is None:
-            raise NotFoundError("public asset content not found")
-        from app.execution.models import Artifact
 
-        artifact = await self.session.get(Artifact, item.artifact_id)
-        if artifact is None or artifact.storage_state != "available":
-            raise NotFoundError("public asset content not found")
-        return PublicContent(
-            object_key=artifact.object_key,
-            mime_type=artifact.mime_type,
-            byte_size=artifact.byte_size,
-            content_hash=artifact.content_hash,
-        )
     async def list(
         self,
         *,
@@ -528,36 +574,10 @@ class ProjectPublicAssetLinkService:
     async def read_content(self, link_id: UUID, item_id: UUID) -> PublicContent:
         """Second narrow input: the consuming project reads through its own link."""
         project = await self._project()
-        link = await self.session.scalar(
-            select(ProjectPublicAssetLink).where(
-                ProjectPublicAssetLink.id == link_id,
-                ProjectPublicAssetLink.project_id == project.id,
-            )
+        return await _read_public_content(
+            self.session, self.actor, item_id, project_id=project.id, link_id=link_id
         )
-        if link is None or link.detached_at is not None:
-            raise NotFoundError("public asset content not found")
-        publication = await self._publication(link.publication_id)
-        if await self._availability(publication) != "available":
-            raise NotFoundError("public asset content not found")
-        item = await self.session.scalar(
-            select(PublicAssetPublicationItem).where(
-                PublicAssetPublicationItem.id == item_id,
-                PublicAssetPublicationItem.publication_id == publication.id,
-            )
-        )
-        if item is None:
-            raise NotFoundError("public asset content not found")
-        from app.execution.models import Artifact
 
-        artifact = await self.session.get(Artifact, item.artifact_id)
-        if artifact is None or artifact.storage_state != "available":
-            raise NotFoundError("public asset content not found")
-        return PublicContent(
-            object_key=artifact.object_key,
-            mime_type=artifact.mime_type,
-            byte_size=artifact.byte_size,
-            content_hash=artifact.content_hash,
-        )
     async def list(
         self, *, active: bool = True, limit: int = 50, offset: int = 0
     ) -> tuple[list[ProjectPublicLinkRead], int]:
