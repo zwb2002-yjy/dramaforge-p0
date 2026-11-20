@@ -204,6 +204,7 @@
 | EV196 | 导演云模型接线前只读审查，候选 03e44220 | text_transport.py 的 _dispatch 以固定 local 且无目的地修订调用准入；EgressAdmission.local_only 对这组参数放行。agent_service.py 的 _model_step 在模型修订一致后开始 Invocation 并调用 generate，未见项目策略重验。模型解析支持工作区 LiteLLM 上游，内部 Proxy 位置不能证明模型本地运行。 | 代码证据。未发真实请求，未证明历史泄漏。Owner 已授权使用 DeepSeek，安全处置另待确认。未将任何密钥写入项目文件。 |
 | EV197 | 导演发送前实际目的地与策略核验 | 结构化导演与 Agent 每个模型步骤在提交开始前核验当前项目策略与部署身份；声明读取受管 Proxy 的已核对上游配置。本地代理指向云端不能登记为本地，只读排队时权限不能替代发送时检查。57 个定向测试，含本地/外部声明、允许清单、Key 修订漂移、仅本地拒绝时调用与 Invocation 均为 0；隔离 PG 4 项通过，应用角色发送等待未提交的策略写入后按新策略拒绝。mypy 417 文件、Ruff、架构及退役面检查通过。 | 验证使用隔离库及受控传输；未读取业务数据库。 |
 | EV198 | DeepSeek Flash 真实识图及 Agnes 账号可见性 | 通过锁定的临时 LiteLLM Proxy 和 DeepSeek 官方 OpenAI 兼容接口提交第二集 v3 第 1 秒画面，1 次 HTTP 200，输入 255、输出 515 tokens。正确描述红色圆形与两端浅黄色竖线，字幕末字“桥”读为“路”。Agnes 实际目录 HTTP 200，可见 image/video 2.5 Flash；Owner 确认 default 密钥。 | 原图、模型答复和用量在 tmp/ev196-vision。未向模型发送密钥或项目正文。此处验证真实模型识图，工作台视觉附件完整旅程仍待接线。 |
+| EV199 | Agnes default 真实关键帧和视频，经抽帧交给 DeepSeek | 两个模型分别以隔离项目的 WorkbenchExecutionService 冻结计划、单次明确提交、真实媒体 Worker 执行。图片模型 agnes-image-2.5-flash 输出 1024×1024 PNG；视频模型 agnes-video-2.5-flash 独立文生视频，按同一个远端任务 ID 完成，FFmpeg 全解码 H.264/AAC、1280×720、24 fps，申请 5 秒，容器 5.184 秒。两条 ProviderOperation 均 succeeded 各 1 个。视频第 2.5 秒抽帧经内部临时代理送入 deepseek-flash，HTTP 200，421 输入、668 输出 tokens。左前方红色网格灯笼、暖光、河面倒影与后方临水建筑经本地缩略图核对一致。 | tmp/ev196-vision/agnes-lantern.png、agnes-lantern.mp4、agnes-frame-result.json；两份原文件 SHA-256 均与 Artifact 一致。Owner 确认免费默认密钥，Provider 未回传账单金额。临时数据库、凭据介质及代理容器已释放。工作台导演视觉附件、三类足长作品及艺术质量另验。 |
 
 
 
