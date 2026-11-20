@@ -1,7 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { Alert, Badge, Button, Card, EmptyState, PageHeader, Upload } from "../../components/ui";
+import {
+  ActionLink,
+  Alert,
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  PageHeader,
+  Upload,
+} from "../../components/ui";
 import { ApiError } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import {
@@ -88,6 +97,10 @@ export function ProjectFilesPanel({ projectId }: { projectId: string }) {
   const files = useQuery({
     queryKey: queryKeys.source.files(projectId),
     queryFn: () => listProjectFiles(projectId),
+    refetchInterval: (query) =>
+      query.state.data?.some((file) => file.status === "pending" && file.source_available)
+        ? 1500
+        : false,
     retry: false,
   });
   const capabilities = useQuery({
@@ -106,15 +119,22 @@ export function ProjectFilesPanel({ projectId }: { projectId: string }) {
   const selected: ProjectFileRead | undefined =
     files.data?.find((item) => item.id === selectedId) ?? files.data?.[0];
   const revision = useQuery({
-    queryKey: queryKeys.source.revision(projectId, selected?.revision_id),
+    queryKey: [
+      ...queryKeys.source.revision(projectId, selected?.revision_id),
+      selected?.attempt,
+      selected?.status,
+      selected?.current_extraction_id,
+    ],
     queryFn: () => fetchSourceRevision(projectId, selected!.revision_id),
     enabled: Boolean(selected?.revision_id),
     retry: false,
   });
+  const [page, setPage] = useState<{ extraction: string; offset: number } | null>(null);
   const extractionId = revision.data?.extraction?.id ?? null;
+  const offset = page?.extraction === extractionId ? page.offset : 0;
   const fragments = useQuery({
-    queryKey: queryKeys.source.fragments(projectId, extractionId, 0, ""),
-    queryFn: () => listFragments(projectId, extractionId!, { limit: 200 }),
+    queryKey: queryKeys.source.fragments(projectId, extractionId, offset, ""),
+    queryFn: () => listFragments(projectId, extractionId!, { limit: 200, offset }),
     enabled: Boolean(extractionId),
     retry: false,
   });
@@ -312,6 +332,21 @@ export function ProjectFilesPanel({ projectId }: { projectId: string }) {
                   <li key={fragment.id} data-testid="source-fragment">
                     <strong>{locatorText(fragment.locator)}</strong>
                     <p>{fragment.text_content}</p>
+                    {selected.source_available && fragment.source_available && (
+                      <ActionLink
+                        tone="ghost"
+                        to="/projects/$projectId/research"
+                        params={{ projectId }}
+                        search={{
+                          revision: selected.revision_id,
+                          extraction: fragment.extraction_id,
+                          fragment: fragment.id,
+                          offset: offset || undefined,
+                        }}
+                      >
+                        引用此段进行研究
+                      </ActionLink>
+                    )}
                     <span className="muted">
                       方法 {fragment.extraction_method} · 处理器 {fragment.processor_ref}
                       {(fragment.limitations ?? []).length > 0
@@ -321,6 +356,40 @@ export function ProjectFilesPanel({ projectId }: { projectId: string }) {
                   </li>
                 ))}
               </ol>
+              {fragments.isError && (
+                <Alert
+                  type="error"
+                  description="未能读取证据片段。"
+                  action={<Button onClick={() => void fragments.refetch()}>重新读取</Button>}
+                />
+              )}
+              {extractionId &&
+                fragments.data &&
+                (offset > 0 || fragments.data.next_offset != null) && (
+                  <div aria-label="片段分页">
+                    <Button
+                      disabled={offset === 0}
+                      onClick={() =>
+                        setPage({ extraction: extractionId, offset: Math.max(0, offset - 200) })
+                      }
+                    >
+                      上一页
+                    </Button>
+                    <span>
+                      第 {offset + 1}–{offset + fragments.data.items.length} 段，共{" "}
+                      {fragments.data.total} 段
+                    </span>
+                    <Button
+                      disabled={fragments.data.next_offset == null}
+                      onClick={() => {
+                        const next = fragments.data?.next_offset;
+                        if (next != null) setPage({ extraction: extractionId, offset: next });
+                      }}
+                    >
+                      下一页
+                    </Button>
+                  </div>
+                )}
               {fragments.data && fragments.data.items.length === 0 && (
                 <p role="status">本次解析没有可定位的文字片段。</p>
               )}

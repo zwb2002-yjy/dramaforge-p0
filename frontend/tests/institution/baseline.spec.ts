@@ -37,24 +37,26 @@ test("real project/source persistence, browser readback and owner isolation", as
   const project = await projectResponse.json();
   const files = `/api/v1/projects/${project.id}/files`;
   const sourceText = "合成资料：示例古城的灯会每年举行。本段不含真实机构资料。";
-  const upload = await request.post(files, {
-    headers: { ...headers, "Content-Type": "application/octet-stream" },
-    params: { filename: "synthetic.txt", request_key: suffix },
-    data: Buffer.from(sourceText, "utf8"),
+  await page.goto("/");
+  await page.getByRole("combobox", { name: "工作空间筛选" }).click();
+  await page.getByRole("option", { name: workspace.name, exact: true }).click();
+  await expect(page.getByText(name, { exact: true })).toBeVisible();
+  await page.goto(`/projects/${project.id}/files`);
+  const accepted = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === files && response.request().method() === "POST",
+  );
+  await page.locator('input[type="file"]').setInputFiles({
+    name: "synthetic.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from(sourceText),
   });
+  const upload = await accepted;
   expect(upload.status()).toBe(201);
   const file = await upload.json();
-  await expect
-    .poll(
-      async () => {
-        const response = await request.get(files, { headers });
-        expect(response.ok()).toBeTruthy();
-        const rows = await response.json();
-        return rows.find((row: { id: string }) => row.id === file.id)?.status;
-      },
-      { timeout: 30_000, intervals: [500, 1000, 2000] },
-    )
-    .toBe("parsed");
+  await expect(page.getByTestId("source-fragment").first()).toContainText(sourceText, {
+    timeout: 45000,
+  });
   const revisionRead = await request.get(
     `/api/v1/projects/${project.id}/file-revisions/${file.revision_id}`,
     { headers },
@@ -74,12 +76,28 @@ test("real project/source persistence, browser readback and owner isolation", as
     sourceText,
   ]);
   expect(fragments.items[0].locator.paragraph_start).toBe(0);
-  await page.goto("/");
-  await page.getByRole("combobox", { name: "工作空间筛选" }).click();
-  await page.getByRole("option", { name: workspace.name, exact: true }).click();
-  await expect(page.getByText(name, { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "引用此段进行研究" }).first().click();
+  await expect(page.getByLabel("待引用原文")).toHaveText(sourceText);
+  const note = "灯会是当地每年举行的活动。";
+  await page.getByLabel("内容", { exact: true }).fill(note);
+  await page.getByRole("button", { name: "保存研究条目" }).click();
+  await expect(page.getByRole("heading", { name: note })).toBeVisible();
+  await expect(page.getByLabel("引用来源")).toContainText(sourceText);
+  const revised = "合成资料记载，古城每年都举办灯会。";
+  await page.getByLabel("修正内容").fill(revised);
+  await page.getByRole("button", { name: "保存修正为新版本" }).click();
+  await expect(page.getByRole("heading", { name: revised })).toBeVisible();
   await page.reload();
-  await expect(page.getByText(name, { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: revised })).toBeVisible();
+  await expect(page.getByLabel("引用来源")).toContainText(sourceText);
+  await expect(page.getByRole("button", { name: "分析预览" })).toBeEnabled();
+  await page.getByRole("button", { name: "查看版本 1", exact: true }).click();
+  await expect(page.getByLabel("历史版本对照")).toContainText(note);
+  await page.getByRole("button", { name: "恢复此版本为新版本" }).click();
+  await expect(page.getByRole("heading", { name: note })).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("引用来源")).toContainText(sourceText);
+  await expect(page.getByText("版本 3", { exact: false }).first()).toBeVisible();
 
   const other = await playwright.request.newContext({ baseURL: "http://127.0.0.1:4173" });
   try {

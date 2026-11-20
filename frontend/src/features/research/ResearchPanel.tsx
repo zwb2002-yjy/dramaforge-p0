@@ -17,7 +17,7 @@ import {
 } from "../../components/ui";
 import { ApiError } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
-import { listProjectFiles } from "../project-files/api";
+import { listFragments, listProjectFiles } from "../project-files/api";
 import {
   RESEARCH_KINDS,
   acceptAnalysis,
@@ -29,6 +29,7 @@ import {
   previewAnalysis,
   readAnalysis,
   readResearchRevision,
+  restoreResearchRevision,
   type AnalysisPreviewRead,
   type ResearchKind,
   type ResearchResultRead,
@@ -54,6 +55,15 @@ function bodyFromText(kind: ResearchKind, text: string): Record<string, unknown>
   }
 }
 
+function correctedBody(kind: ResearchKind, body: Record<string, unknown>, text: string) {
+  if (kind === "timeline" && Array.isArray(body.items) && body.items.length) {
+    const [first, ...rest] = body.items;
+    return { ...body, items: [{ ...first, label: text }, ...rest] };
+  }
+  if (kind === "cultural_clue") return { ...body, theme: text };
+  return { ...body, ...bodyFromText(kind, text) };
+}
+
 function modelIdOf(preview: AnalysisPreviewRead): string {
   const identity = preview.model_identity as { model_id?: string } | null | undefined;
   return identity?.model_id ?? "不可用";
@@ -73,16 +83,27 @@ function bodyText(body: Record<string, unknown> | undefined): string {
   return "";
 }
 
-export function ResearchPanel({ projectId }: { projectId: string }) {
+export function ResearchPanel({
+  projectId,
+  source,
+}: {
+  projectId: string;
+  source?: { revision?: string; extraction?: string; offset?: number; fragment?: string };
+}) {
   const queryClient = useQueryClient();
   const [kind, setKind] = useState<ResearchKind | "">("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftKind, setDraftKind] = useState<ResearchKind>("summary");
+  const [historyRevision, setHistoryRevision] = useState<{
+    resultId: string;
+    revisionId: string;
+  } | null>(null);
+  const [correction, setCorrection] = useState("");
   const [draftText, setDraftText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<AnalysisPreviewRead | null>(null);
-  const [sourceRevisionId, setSourceRevisionId] = useState<string | null>(null);
+  const [sourceRevisionId, setSourceRevisionId] = useState<string | null>(source?.revision ?? null);
 
   const results = useQuery({
     queryKey: queryKeys.research.results(projectId, kind, ""),
@@ -101,6 +122,14 @@ export function ResearchPanel({ projectId }: { projectId: string }) {
     queryKey: queryKeys.research.revisions(projectId, selected?.id),
     queryFn: () => listResearchRevisions(projectId, selected!.id),
     enabled: Boolean(selected?.id),
+    retry: false,
+  });
+  const historyId =
+    historyRevision?.resultId === selected?.id ? historyRevision?.revisionId : undefined;
+  const historical = useQuery({
+    queryKey: queryKeys.research.revision(projectId, historyId),
+    queryFn: () => readResearchRevision(projectId, historyId!),
+    enabled: Boolean(historyId),
     retry: false,
   });
   const files = useQuery({
@@ -130,6 +159,25 @@ export function ResearchPanel({ projectId }: { projectId: string }) {
   );
   const sourceFile = parsedFiles.find((item) => item.revision_id === sourceRevisionId);
 
+  const citationPage = useQuery({
+    queryKey: queryKeys.source.fragments(projectId, source?.extraction, source?.offset ?? 0, ""),
+    queryFn: () =>
+      listFragments(projectId, source!.extraction!, { limit: 200, offset: source?.offset ?? 0 }),
+    enabled: Boolean(source?.fragment && source.extraction),
+    retry: false,
+  });
+  const fragment = source?.fragment
+    ? citationPage.data?.items.find(
+        (item) =>
+          item.id === source.fragment &&
+          item.file_revision_id === source.revision &&
+          item.source_available &&
+          item.extraction_id === source.extraction &&
+          parsedFiles.some((file) => file.revision_id === source.revision),
+      )
+    : undefined;
+  const quotedText = fragment?.text_content.slice(0, 20000) ?? "";
+
   const create = useMutation({
     mutationFn: () =>
       createResearchResult(projectId, {
@@ -137,7 +185,16 @@ export function ResearchPanel({ projectId }: { projectId: string }) {
         kind: draftKind,
         body: bodyFromText(draftKind, draftText.trim()),
         verification: "unverified",
-        citations: [],
+        citations: fragment
+          ? [
+              {
+                source_fragment_id: fragment.id,
+                file_revision_id: fragment.file_revision_id,
+                claim_key: "root",
+                quoted_text: quotedText,
+              },
+            ]
+          : [],
       }),
     onSuccess: (created) => {
       setError(null);
@@ -151,22 +208,59 @@ export function ResearchPanel({ projectId }: { projectId: string }) {
 
   const correct = useMutation({
     mutationFn: () => {
-      if (!selected) throw new Error("未选择研究条目");
+      if (!selected || !currentRevision.data) throw new Error("未选择研究条目");
       return appendResearchRevision(projectId, selected.id, {
         requestKey: requestKey("research-correct"),
         expectedVersion: selected.version,
         baseRevisionId: selected.current_revision_id,
-        body: bodyFromText(selected.kind as ResearchKind, draftText.trim()),
+        body: correctedBody(
+          selected.kind as ResearchKind,
+          currentRevision.data.body,
+          correction.trim(),
+        ),
         verification: "user_asserted",
-        citations: [],
+        citations: currentRevision.data.citations.map(
+          ({ source_fragment_id, file_revision_id, claim_key, locator_override, quoted_text }) => ({
+            source_fragment_id,
+            file_revision_id,
+            claim_key,
+            locator_override,
+            quoted_text,
+          }),
+        ),
       });
     },
     onSuccess: () => {
       setError(null);
       setNotice("已保存用户修正为新版本。");
+      setCorrection("");
       refresh();
     },
     onError: (caught) => setError(caught instanceof Error ? caught.message : "修正失败"),
+  });
+
+  const restore = useMutation({
+    mutationFn: () => {
+      if (!selected || !historical.data || historical.data.result_id !== selected.id)
+        throw new Error("请选择要恢复的版本");
+      return restoreResearchRevision(projectId, selected.id, {
+        requestKey: requestKey("research-restore"),
+        expectedVersion: selected.version,
+        baseRevisionId: selected.current_revision_id,
+        restoreRevisionId: historical.data.id,
+      });
+    },
+    onSuccess: () => {
+      setHistoryRevision(null);
+      setCorrection("");
+      setError(null);
+      setNotice("已将历史内容恢复为新版本。");
+      refresh();
+    },
+    onError: (caught) => {
+      setError(caught instanceof Error ? caught.message : "恢复失败");
+      refresh();
+    },
   });
 
   const previewMutation = useMutation({
@@ -254,7 +348,7 @@ export function ResearchPanel({ projectId }: { projectId: string }) {
                   aria-pressed={selected?.id === item.id}
                   onClick={() => {
                     setSelectedId(item.id);
-                    setDraftText("");
+                    setCorrection("");
                   }}
                 >
                   <strong>{item.current?.summary || "（无摘要）"}</strong>
@@ -303,14 +397,14 @@ export function ResearchPanel({ projectId }: { projectId: string }) {
                 <span>修正内容</span>
                 <Textarea
                   id="research-correct-text"
-                  value={draftText}
-                  onChange={(event) => setDraftText(event.target.value)}
+                  value={correction}
+                  onChange={(event) => setCorrection(event.target.value)}
                   rows={3}
                   placeholder={bodyText(currentRevision.data.body) || "输入修正内容"}
                 />
               </Field>
               <Button
-                disabled={!draftText.trim() || correct.isPending}
+                disabled={!correction.trim() || correct.isPending}
                 onClick={() => correct.mutate()}
               >
                 保存修正为新版本
@@ -321,9 +415,43 @@ export function ResearchPanel({ projectId }: { projectId: string }) {
                   <li key={revision.id}>
                     <Badge>{revision.origin}</Badge> 版本 {revision.number} ·{" "}
                     {revision.summary || "（无摘要）"}
+                    {revision.id !== selected.current_revision_id && (
+                      <Button
+                        tone="ghost"
+                        onClick={() =>
+                          setHistoryRevision({ resultId: selected.id, revisionId: revision.id })
+                        }
+                      >
+                        查看版本 {revision.number}
+                      </Button>
+                    )}
                   </li>
                 ))}
               </ul>
+              {historyId && (
+                <section aria-label="历史版本对照">
+                  {historical.isError && <Alert type="error" description="无法读取历史版本。" />}
+                  {historical.data && (
+                    <>
+                      <h4>版本 {historical.data.number}</h4>
+                      <p>{bodyText(historical.data.body)}</p>
+                      <Button
+                        disabled={
+                          restore.isPending ||
+                          !!correction.trim() ||
+                          historical.data.id === selected.current_revision_id
+                        }
+                        onClick={() => restore.mutate()}
+                      >
+                        恢复此版本为新版本
+                      </Button>
+                    </>
+                  )}
+                  <Button tone="ghost" onClick={() => setHistoryRevision(null)}>
+                    关闭对照
+                  </Button>
+                </section>
+              )}
             </>
           ) : (
             <EmptyState title="选择研究条目" description="左侧选择条目后查看正文与引用。" />
@@ -348,7 +476,22 @@ export function ResearchPanel({ projectId }: { projectId: string }) {
               rows={3}
             />
           </Field>
-          <Button disabled={!draftText.trim() || create.isPending} onClick={() => create.mutate()}>
+          {source?.fragment &&
+            (fragment ? (
+              <blockquote aria-label="待引用原文">{quotedText}</blockquote>
+            ) : (
+              <p role="status">
+                {citationPage.isLoading || files.isLoading
+                  ? "正在读取引用来源…"
+                  : "原文片段不可用，请回到资料页重新选择。"}
+              </p>
+            ))}
+          <Button
+            disabled={
+              !draftText.trim() || create.isPending || Boolean(source?.fragment && !fragment)
+            }
+            onClick={() => create.mutate()}
+          >
             保存研究条目
           </Button>
           <h4>机器分析</h4>

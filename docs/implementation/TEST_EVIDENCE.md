@@ -190,6 +190,7 @@
 | EV182 | 成片候选 6bea3579 首轮无过滤 Full 与定向诊断 | 架构、Provider authority、Ruff、mypy 通过。后端单测 2800 passed、1 failed（test_documented_alembic_head_matches_single_current_head）。按 0121–0123 现有迁移修正 DATA_MODEL 的 head，原测试 1 passed。 | 首轮 Full exit 1 并已回收本次容器；后续阶段未由该轮验证，需新候选。 |
 | EV183 | I10 隔离工具与对象 staging 实测 | 128 MiB 容器内生成 256 MiB 对象流，实测进程峰值 RSS 31296 KiB，落盘和逐流重读 SHA-256 一致。restic 0.19.1 官方发布清单签名由固定指纹校验，Linux amd64 归档与冻结 SHA-256 相符；断网临时仓库完成单次 backup、check --read-data、完整 ID 还原和字节比对。 | 对象 staging 和独立工具演练；尚未覆盖维护准入、真实多资源恢复或目标机重启。 |
 | EV184 | 隔离 PG 并发批准、受理及 Worker 重复投递贯通到计数 Mock HTTP | test_concurrent_prepare_confirmations_reuse_one_set_of_runs 通过。未确认的 prepare 被拒绝，两客户端并发确认与提交取得原授权及 NodeRun；两个独立 Worker 会话竞争同一语音任务，一个产出 WAV、一个在提交边界被拒，上游记录恰好一次，原 ProviderOperation 成功。 | 测试使用合成对白与 Mock 凭据，未调用真实模型。 |
+| EV185 | 本地真实工作台资料→研究旅程 | Chromium 通过正常上传控件送入合成资料，隔离 PG、MinIO 与 Dispatcher 完成解析，页面自动展示原文。逐段引用后新建、修正、重载，历史对照和恢复为新修订保留同一引用。异用户读取仍为 404，Mock 上游事件为空。institution baseline 1 passed（11.9s），typecheck、lint/UI、ResearchPanel 3 项通过。前序 PG 诊断 205 passed（876.09s）。 | 当前可试用资料与研究；后续故事到成片、三作品和整体验收待验证。 |
 
 
 
