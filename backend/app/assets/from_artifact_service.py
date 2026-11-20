@@ -70,6 +70,9 @@ class MediaSource:
     content_hash: str
     artifact_type: str
     storage_state: str
+    object_key: str
+    byte_size: int
+    mime_type: str
 
 
 async def read_media_shot_id(
@@ -95,6 +98,7 @@ async def read_media_source(
     artifact_id: UUID | None = None,
     asset_version_id: UUID | None = None,
     media_kind: str = "video",
+    lock: bool = False,
 ) -> MediaSource | None:
     """Read an existing artifact or the first available matching item of an adopted version."""
     if (artifact_id is None) == (asset_version_id is None):
@@ -113,11 +117,14 @@ async def read_media_source(
         )
     else:
         query = query.where(Artifact.id == artifact_id)
-    row = await session.scalar(query)
+    if lock:
+        query = query.with_for_update(read=True)
+    row = await session.scalar(query.execution_options(populate_existing=True))
     if row is None:
         return None
     return MediaSource(
-        row.id, row.project_id, row.content_hash, row.artifact_type, row.storage_state
+        row.id, row.project_id, row.content_hash, row.artifact_type, row.storage_state,
+        row.object_key, int(row.byte_size), row.mime_type,
     )
 
 

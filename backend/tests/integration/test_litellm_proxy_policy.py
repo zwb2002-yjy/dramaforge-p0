@@ -65,13 +65,13 @@ def event_count(identifier: str) -> int:
     return sum(row["model"] == identifier for row in response.json())
 
 
-def _managed_payload(contract_profile: object) -> tuple[dict, dict]:
+def _managed_payload(contract_profile: object, *, scenario: str = "tools") -> tuple[dict, dict]:
     identifier, workspace, connection = (str(uuid.uuid4()) for _ in range(3))
     params = {
         # Keep the upstream model distinct from the Proxy deployment UUID so
         # assertions cannot accidentally conflate routing and model identity.
         "model": f"openai/upstream-tools-{uuid.uuid4().hex}",
-        "api_base": "http://litellm-mock-quality:9000/tools/v1",
+        "api_base": f"http://litellm-mock-quality:9000/{scenario}/v1",
         "api_key": "synthetic-upstream-tools-secret",
         "max_retries": 0,
     }
@@ -670,3 +670,71 @@ def test_legacy_patch_cannot_promote_or_collide_with_reserved_managed_identity(
     response = proxy.patch(f"/model/{identifier}/update", json={"model_name": other})
     assert response.status_code == 409
     assert event_count(identifier) == event_count(other_id) == 0
+
+
+@pytest.mark.parametrize(
+    "profile,allowed", [("chat_tools_v1", False), ("chat_tools_vision_v1", True)]
+)
+def test_frozen_profile_controls_image_delivery_through_real_proxy(proxy, profile, allowed):
+    body, frozen = _managed_payload(profile, scenario="vision")
+    assert proxy.post("/model/new", json=body).status_code == 200
+    alias = body["model_name"]
+    upstream = body["litellm_params"]["model"].removeprefix("openai/")
+    key = proxy.post("/key/generate", json={"models": [alias], "key_type": "llm_api"})
+    assert key.status_code == 200
+    content = [
+        {"type": "text", "text": "fixture"},
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": (
+                    "data:image/png;base64,"
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lE"
+                    "QVR42mP8/x8AAwMCAO+a5xkAAAAASUVORK5CYII="
+                )
+            },
+        },
+    ]
+    r = proxy.post(
+        "/v1/chat/completions",
+        json={
+            "model": alias,
+            "metadata": {"dramaforge_execution": frozen},
+            "messages": [{"role": "user", "content": content}],
+        },
+        headers={"Authorization": "Bearer " + key.json()["key"]},
+    )
+    assert r.status_code == (200 if allowed else 422), r.text
+    if allowed:
+        for rejected in (
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": "https://example.invalid/image.png"}}
+                ],
+            },
+            {"role": "tool", "content": content},
+            {"role": "user", "content": [content[1]] * 5},
+        ):
+            denied = proxy.post(
+                "/v1/chat/completions",
+                json={
+                    "model": alias,
+                    "metadata": {"dramaforge_execution": frozen},
+                    "messages": [rejected],
+                },
+                headers={"Authorization": "Bearer " + key.json()["key"]},
+            )
+            assert denied.status_code == 422
+    events = httpx.get(f"{os.environ['LITELLM_MOCK_URL']}/events", trust_env=False).json()
+    observed = [e for e in events if e["model"] == upstream]
+    assert len(observed) == int(allowed)
+    if allowed:
+        assert observed[0]["protocol"]["messages"] == [
+            {
+                "role": "user",
+                "content_hash": hashlib.sha256(
+                    json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest(),
+            }
+        ]

@@ -1052,9 +1052,9 @@ Shot的Formal指针、AssetVersion的formal状态与成片Export是不同业务�
 不能用本地静音/模拟文件代替完整音频生产验收。新增云ASR/OCR只有形成适配合同和准入后才可启用，
 本期必需路径由D4本地方案满足，不临时发任意第三方HTTP。
 
-### Vision消息扩展（目标chat_tools_vision_v1）
+### Vision消息扩展（chat_tools_vision_v1）
 
-现有AgentMessage/TextMessage只支持文字，不伪称可直接发送图片。新增明确profile
+工作台可通过项目 Artifact 显式发送静态图片或选中的 MP4 帧，Worker 在提交前复核来源用途和项目策略。采用独立的 profile
 chat_tools_vision_v1及版本化Gateway reference，保留chat_text_v1/chat_tools_v1旧身份与wire合同。
 新profile明确具备文本+图像输入及工具协议；仅目录声明不足，须协议fixture和实际账号能力分别验证。
 不自动把旧连接升级成新profile，不在不支持Vision时忽略图片继续回答。

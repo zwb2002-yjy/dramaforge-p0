@@ -143,6 +143,9 @@ class SourceUseService:
                 "state": state,
             }
         )
+        await self._session.scalar(
+            select(Project.id).where(Project.id == self._project.id).with_for_update()
+        )
         subject = await self._subject(
             file_revision_id=file_revision_id, artifact_id=artifact_id,
         )
@@ -296,6 +299,9 @@ class SourceUseService:
         input_role: str,
         source_access_kind: str = "private",
     ) -> ArtifactSourceUse:
+        await self._session.scalar(
+            select(Project.id).where(Project.id == self._project.id).with_for_update()
+        )
         row = ArtifactSourceUse(
             project_id=self._project.id,
             artifact_id=artifact_id,
@@ -312,3 +318,84 @@ class SourceUseService:
 
 
 __all__ = ["SourceUseService"]
+
+
+async def vision_source_revisions(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    artifact_ids: list[UUID],
+) -> list[str]:
+    """Freeze current declared uses of every private source of every attachment."""
+    revisions: set[str] = set()
+    for root in artifact_ids:
+        seen: set[UUID] = set()
+        frontier = {root}
+        found = False
+        for _ in range(33):
+            if not frontier:
+                break
+            seen.update(frontier)
+            if len(seen) > 1024:
+                raise _vision_denied()
+            edges = list(
+                await session.scalars(
+                    select(ArtifactSourceUse)
+                    .where(
+                        ArtifactSourceUse.project_id == project_id,
+                        ArtifactSourceUse.artifact_id.in_(frontier),
+                    )
+                    .limit(1025)
+                )
+            )
+            if len(edges) > 1024 or any(
+                row.source_project_id != project_id or row.source_access_kind != "private"
+                for row in edges
+            ):
+                raise _vision_denied()
+            required = {row.source_subject_id for row in edges}
+            subjects = list(
+                await session.scalars(
+                    select(SourceUseSubject)
+                    .where(
+                        SourceUseSubject.project_id == project_id,
+                        (SourceUseSubject.artifact_id.in_(frontier))
+                        | SourceUseSubject.id.in_(required),
+                    )
+                    .limit(1025)
+                    .execution_options(populate_existing=True)
+                )
+            )
+            if len(subjects) > 1024 or required.difference(subject.id for subject in subjects):
+                raise _vision_denied()
+            rows = list(
+                await session.scalars(
+                    select(SourceUseRevision)
+                    .join(
+                        SourceUseSubject,
+                        SourceUseSubject.current_revision_id == SourceUseRevision.id,
+                    )
+                    .where(
+                        SourceUseSubject.id.in_([subject.id for subject in subjects]),
+                        SourceUseRevision.subject_id == SourceUseSubject.id,
+                        SourceUseRevision.project_id == project_id,
+                    )
+                )
+            )
+            if len(rows) != len(subjects) or any(
+                row.state != "declared" or "external_processing" not in row.allowed_uses
+                for row in rows
+            ):
+                raise _vision_denied()
+            revisions.update(str(row.id) for row in rows)
+            found = found or bool(rows)
+            frontier = {s.artifact_id for s in subjects if s.artifact_id is not None} - seen
+        if frontier or not found:
+            raise _vision_denied()
+    return sorted(revisions)
+
+
+def _vision_denied() -> ValidationAppError:
+    return ValidationAppError(
+        "请先核对该画面及其来源的外部处理许可", details={"code": "SOURCE_USE_BLOCKED"}
+    )

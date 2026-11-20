@@ -1751,6 +1751,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/artifacts/{artifact_id}/vision-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Director Frame
+         * @description Preview exactly the bytes the project studio can attach, with no model call.
+         */
+        get: operations["preview_director_frame_api_v1_projects__project_id__artifacts__artifact_id__vision_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/artifacts/{artifact_id}/video-frames/{role}": {
         parameters: {
             query?: never;
@@ -4050,6 +4070,8 @@ export interface components {
             /** Master Run Id */
             master_run_id?: string | null;
             ui_context?: components["schemas"]["AgentUIContext"] | null;
+            /** Media Parts */
+            media_parts?: components["schemas"]["ArtifactVisionInput"][];
             /** Expected Versions */
             expected_versions?: {
                 [key: string]: number;
@@ -4411,6 +4433,22 @@ export interface components {
             byte_size: number;
             /** Storage State */
             storage_state: string;
+        };
+        /** ArtifactVisionInput */
+        ArtifactVisionInput: {
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "artifact";
+            /**
+             * Artifact Id
+             * Format: uuid
+             */
+            artifact_id: string;
+            /** Expected Content Hash */
+            expected_content_hash: string;
+            transform?: components["schemas"]["VisionTransform"];
         };
         /** AssetAdoptionReceiptRead */
         AssetAdoptionReceiptRead: {
@@ -6055,6 +6093,8 @@ export interface components {
         /** DirectorAgentMessageRead */
         DirectorAgentMessageRead: {
             context?: components["schemas"]["AgentUIContext"] | null;
+            /** Media Parts */
+            media_parts?: components["schemas"]["ArtifactVisionInput"][];
             /**
              * Id
              * Format: uuid
@@ -7866,7 +7906,7 @@ export interface components {
              * Contract Profile
              * @enum {string}
              */
-            contract_profile: "chat_text_v1" | "chat_tools_v1";
+            contract_profile: "chat_text_v1" | "chat_tools_v1" | "chat_tools_vision_v1";
         };
         /** GatewayKeyWrite */
         GatewayKeyWrite: {
@@ -7904,7 +7944,7 @@ export interface components {
              * @default chat_text_v1
              * @enum {string}
              */
-            contract_profile: "chat_text_v1" | "chat_tools_v1";
+            contract_profile: "chat_text_v1" | "chat_tools_v1" | "chat_tools_vision_v1";
         };
         /** GatewayReference */
         GatewayReference: {
@@ -7957,7 +7997,7 @@ export interface components {
              * @default chat_text_v1
              * @enum {string}
              */
-            contract_profile: "chat_text_v1" | "chat_tools_v1";
+            contract_profile: "chat_text_v1" | "chat_tools_v1" | "chat_tools_vision_v1";
             /** Error Code */
             error_code?: string | null;
         };
@@ -12712,6 +12752,23 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** VisionTransform */
+        VisionTransform: {
+            /** Crop */
+            crop?: [
+                number,
+                number,
+                number,
+                number
+            ] | null;
+            /** Frame Time Ms */
+            frame_time_ms?: number | null;
+            /**
+             * Max Edge
+             * @default 1024
+             */
+            max_edge: number;
         };
         /** VoiceOptionRead */
         VoiceOptionRead: {
@@ -17624,6 +17681,46 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_director_frame_api_v1_projects__project_id__artifacts__artifact_id__vision_preview_get: {
+        parameters: {
+            query: {
+                expected_content_hash: string;
+                frame_time_ms?: number | null;
+                max_edge?: number;
+                crop?: number[] | null;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                artifact_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

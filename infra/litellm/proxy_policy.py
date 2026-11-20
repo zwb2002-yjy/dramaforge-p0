@@ -1,6 +1,8 @@
 """Policy loaded in the pinned Proxy, not in the DramaForge application process."""
 
 import asyncio
+import base64
+import binascii
 import hashlib
 import json
 from uuid import UUID
@@ -27,6 +29,39 @@ def reject_transport_overrides(body):
     extra_body = body.get("extra_body")
     if isinstance(extra_body, dict) and (RESERVED | {"model"}).intersection(extra_body):
         raise HTTPException(400, "Request body cannot replace deployment identity")
+
+
+def _check_visual_parts(messages, info):
+    count = total = 0
+    limit = 4 * 1024 * 1024
+    prefix = "data:image/png;base64,"
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        for part in content:
+            if not isinstance(part, dict) or part.get("type") == "text":
+                continue
+            if (part.get("type") != "image_url" or message.get("role") != "user"
+                    or not info.get("df_managed")
+                    or info.get("df_contract_profile") != "chat_tools_vision_v1"):
+                raise HTTPException(422, "Deployment does not accept this message part")
+            image = part.get("image_url")
+            url = image.get("url") if isinstance(image, dict) else None
+            count += 1
+            if (count > 4 or not isinstance(url, str) or not url.startswith(prefix)
+                    or len(url) - len(prefix) > 4 * ((limit - total + 2) // 3)):
+                raise HTTPException(422, "Expected bounded inline PNG input")
+            try:
+                data = base64.b64decode(url[len(prefix):], validate=True)
+            except (ValueError, binascii.Error):
+                raise HTTPException(422, "Invalid inline PNG encoding") from None
+            total += len(data)
+            if (total > limit or not data.startswith(b"\x89PNG\r\n\x1a\n")
+                    or data[12:16] != b"IHDR"
+                    or not 1 <= int.from_bytes(data[16:20], "big") <= 1024
+                    or not 1 <= int.from_bytes(data[20:24], "big") <= 1024):
+                raise HTTPException(422, "Invalid inline PNG dimensions or size")
 
 
 def _physical_hash(params):
@@ -60,7 +95,7 @@ def _validate_managed_create(body):
         valid = (body.get("model_name") == f"df-{identifier.hex}"
                  and info.get("df_managed") is True
                  and info.get("df_key_revision") == 1
-                 and info.get("df_contract_profile") in {"chat_text_v1", "chat_tools_v1"}
+                 and info.get("df_contract_profile") in {"chat_text_v1", "chat_tools_v1", "chat_tools_vision_v1"}
                  and info.get("df_config_hash") == _physical_hash(params)
                  and params["model"].startswith("openai/")
                  and not set(params).difference({"model", "api_base", "api_key", "max_retries"}))
@@ -91,6 +126,7 @@ def _install_creation_boundary():
         async with model_lock(identifier):
             entry = _deployment(identifier)
             info = entry.get("model_info", {})
+            _check_visual_parts(body.get("messages", []), info)
             if not info.get("df_managed"):
                 import hmac
                 import os

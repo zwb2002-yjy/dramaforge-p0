@@ -227,11 +227,17 @@ export function GatewayModelEditor({
           value={contractValue}
           disabled={busy || uncertain}
           onChange={(value) => {
-            if (value === "chat_text_v1" || value === "chat_tools_v1") setContractProfile(value);
+            if (
+              value === "chat_text_v1" ||
+              value === "chat_tools_v1" ||
+              value === "chat_tools_vision_v1"
+            )
+              setContractProfile(value);
           }}
           options={[
             { value: "chat_text_v1", label: "文本对话" },
             { value: "chat_tools_v1", label: "工具协作" },
+            { value: "chat_tools_vision_v1", label: "图片理解与工具协作" },
           ]}
         />
       </Field>

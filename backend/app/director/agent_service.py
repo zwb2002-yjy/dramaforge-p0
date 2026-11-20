@@ -30,6 +30,8 @@ from app.access.models import Project, ProjectCreativeProfile, User
 from app.assets.agent_read_service import AgentReadService
 from app.assets.from_artifact_service import read_media_shot_id, read_media_source
 from app.assets.models import Asset, Episode, Scene, Shot
+from app.assets.source_use import vision_source_revisions
+from app.assets.vision_media import VisionFrame, prepare_vision_frame, resolve_visual_artifact
 from app.contracts.agent import AgentMessage, AgentModelResponse, AgentToolCall
 from app.contracts.director_model_tools import ModelToolsPort
 from app.director.agent_audit import AgentToolAudit, public_summary
@@ -58,6 +60,8 @@ from app.director.turn_models import DirectorTurn
 from app.director.turn_service import TERMINAL_TURN_STATUSES
 from app.events.service import EventService
 from app.shared.errors import AppError, ConflictError, NotFoundError, ValidationAppError
+from app.shared.vision import MAX_VISION_BYTES, MAX_VISION_PARTS, ArtifactVisionInput
+from app.storage.minio_store import get_object_store
 
 ACCEPTED_EVENT_TOPIC = "director.turn.accepted"
 
@@ -156,9 +160,21 @@ class AgentRequest(BaseModel):
     intent: Literal["conversation", "create_goal", "continue_goal"] = "conversation"
     master_run_id: UUID | None = None
     ui_context: AgentUIContext | None = None
+    media_parts: list[ArtifactVisionInput] = Field(
+        default_factory=list, max_length=MAX_VISION_PARTS
+    )
     expected_versions: dict[str, StrictInt] = Field(default_factory=dict, max_length=100)
     skill_ids: list[str] | None = Field(default=None, max_length=20)
     limits: AgentLimits = Field(default_factory=AgentLimits)
+
+    def hash_input(self) -> dict[str, Any]:
+        # Preserve old text-only request hashes across upgrades.
+        omit = set()
+        if self.ui_context is None:
+            omit.add("ui_context")
+        if not self.media_parts:
+            omit.add("media_parts")
+        return self.model_dump(exclude=omit)
 
     @field_validator("expected_versions")
     @classmethod
@@ -347,7 +363,8 @@ class DirectorAgentService:
             page_offset = max(0, total - limit) if offset is None else offset
             rows = list(
                 await session.execute(
-                    select(DirectorMessage, DirectorTurn.intent_snapshot["ui_context"])
+                    select(DirectorMessage, DirectorTurn.intent_snapshot["ui_context"],
+                           DirectorTurn.intent_snapshot["vision"]["parts"])
                     .outerjoin(DirectorTurn, DirectorMessage.turn_id == DirectorTurn.id)
                     .where(*filters)
                     .order_by(
@@ -372,8 +389,9 @@ class DirectorAgentService:
                         "content": row.content,
                         "created_at": row.created_at,
                         **({"context": ui_context} if ui_context else {}),
+                        **({"media_parts": parts} if parts else {}),
                     }
-                    for row, ui_context in rows
+                    for row, ui_context, parts in rows
                 ],
                 "offset": page_offset,
                 "limit": limit,
@@ -424,9 +442,7 @@ class DirectorAgentService:
         """
         if not request.content.strip() or not request.request_key.strip():
             raise ValidationAppError("Content and request key cannot be blank")
-        input_hash = fingerprint({"thread_id": thread_id, "request": request.model_dump(
-            exclude={"ui_context"} if request.ui_context is None else set()
-        )})
+        input_hash = fingerprint({"thread_id": thread_id, "request": request.hash_input()})
         async with self._db() as session:
             project = await session.scalar(
                 select(Project)
@@ -546,6 +562,52 @@ class DirectorAgentService:
             }
             if request.ui_context is not None:
                 snapshot["ui_context"] = request.ui_context.model_dump(mode="json")
+            if request.media_parts:
+                try:
+                    caps = model.resolution.get("text_capabilities")
+                    if not isinstance(caps, dict) or caps.get("image_input") is not True:
+                        raise ValidationAppError(
+                            "所选导演模型不支持图片输入，请选择视觉模型",
+                            details={"code": "VISION_MODEL_UNSUPPORTED"},
+                        )
+                    ui = request.ui_context or AgentUIContext()
+                    related = [r for r in ui.selected_refs if r.kind != "artifact"]
+                    for part in request.media_parts:
+                        await resolve_visual_artifact(session, self.project_id, part)
+                        scoped = AgentUIContext(
+                            episode_id=ui.episode_id,
+                            selected_refs=[
+                                *related,
+                                SelectedReference(kind="artifact", id=part.artifact_id),
+                            ],
+                        )
+                        await scoped.validate_scope(
+                            session,
+                            project_id=self.project_id,
+                            reader=reader,
+                            scope_type=thread.scope_type,
+                            scope_entity_id=thread.scope_entity_id,
+                        )
+                    admission = await director_egress_decision(
+                        session, project=project, resolution=model.resolution, vision=True
+                    )
+                    if not admission.allowed:
+                        raise ValidationAppError(
+                            "项目策略禁止将画面发送到所选模型",
+                            details={"code": admission.reason_code},
+                        )
+                    snapshot["vision"] = {
+                        "parts": [part.model_dump(mode="json") for part in request.media_parts],
+                        "egress": admission.evidence(),
+                        "source_revisions": await vision_source_revisions(
+                            session,
+                            project_id=self.project_id,
+                            artifact_ids=[part.artifact_id for part in request.media_parts],
+                        ),
+                    }
+                except AppError as exc:
+                    exc.details = {**exc.details, "request_accepted": False}
+                    raise
             turn = DirectorTurn(
                 id=turn_id,
                 created_at=admitted_at,
@@ -700,6 +762,7 @@ class DirectorAgentService:
                 )
                 return self.result(turn)
             tools = self.registry.openai_tools(context)
+            vision = turn.intent_snapshot.get("vision")
         assert model is not None
         harness: DirectorAgentHarness
 
@@ -707,7 +770,37 @@ class DirectorAgentService:
             async with self._db() as session:
                 await self._guard(session, turn_id, token)
 
+        prepared: list[tuple[ArtifactVisionInput, VisionFrame]] = []
+
         async def call_model(values: list[AgentMessage], step: int) -> AgentModelResponse:
+            if isinstance(vision, dict) and not prepared:
+                try:
+                    parts = [ArtifactVisionInput.model_validate(v) for v in vision["parts"]]
+                    async with self._db() as session:
+                        turn = await self._guard(session, turn_id, token)
+                        project = await self._reader(session).project()
+                        decision = await director_egress_decision(
+                            session,
+                            project=project,
+                            resolution=dict(turn.model_resolution),
+                            vision=True,
+                        )
+                        await self._check_vision(session, parts, vision, decision.evidence())
+                        sources = [
+                            await resolve_visual_artifact(session, self.project_id, part)
+                            for part in parts
+                        ]
+                    total = 0
+                    for source, part in zip(sources, parts, strict=True):
+                        frame = await prepare_vision_frame(source, part, get_object_store())
+                        total += len(frame.png)
+                        if total > MAX_VISION_BYTES:
+                            raise AgentHalt("VISION_SIZE_LIMIT")
+                        prepared.append((part, frame))
+                except AppError as exc:
+                    raise AgentHalt(
+                        str(exc.details.get("code", "VISION_ATTACHMENT_UNAVAILABLE"))
+                    ) from exc
             return await self._model_step(
                 turn_id,
                 token,
@@ -716,6 +809,7 @@ class DirectorAgentService:
                 tools,
                 step,
                 context_evidence=harness.last_context,
+                prepared=prepared,
             )
 
         async def call_tool(call: AgentToolCall, step: int) -> dict[str, Any]:
@@ -810,7 +904,7 @@ class DirectorAgentService:
         if snapshot.get("ui_context"):
             messages.append(AgentMessage(role="system", content=json.dumps({
                 "selected_context": snapshot["ui_context"],
-                "media_attached": False,
+                "media_attached": bool(snapshot.get("vision")),
             }, ensure_ascii=False)))
         messages.append(AgentMessage(role="user", content=message.content))
         return messages
@@ -956,9 +1050,7 @@ class DirectorAgentService:
 
     async def replay(self, thread_id: UUID, request: AgentRequest) -> AgentAcceptance | None:
         """Read a durable acceptance without requiring the model or checkpoint service."""
-        input_hash = fingerprint({"thread_id": thread_id, "request": request.model_dump(
-            exclude={"ui_context"} if request.ui_context is None else set()
-        )})
+        input_hash = fingerprint({"thread_id": thread_id, "request": request.hash_input()})
         async with self._db() as session:
             await self._thread(session, thread_id)
             turn = await session.scalar(
@@ -1009,6 +1101,18 @@ class DirectorAgentService:
                 "tools": [public_summary(row) for row in rows],
             }
 
+    async def _check_vision(
+        self, session: AsyncSession, parts: list[ArtifactVisionInput],
+        frozen: dict[str, Any], egress: dict[str, object],
+    ) -> None:
+        if egress != frozen["egress"] or egress["decision"] != "allowed":
+            raise AgentHalt("VISION_PERMISSION_CHANGED")
+        revisions = await vision_source_revisions(
+            session, project_id=self.project_id, artifact_ids=[p.artifact_id for p in parts]
+        )
+        if revisions != frozen["source_revisions"]:
+            raise AgentHalt("VISION_PERMISSION_CHANGED")
+
     async def _model_step(
         self,
         turn_id: UUID,
@@ -1019,6 +1123,7 @@ class DirectorAgentService:
         step: int,
         *,
         context_evidence: AgentContext | None = None,
+        prepared: list[tuple[ArtifactVisionInput, VisionFrame]] | None = None,
     ) -> AgentModelResponse:
         async with self._db() as session:
             turn = await self._guard(session, turn_id, token)
@@ -1033,10 +1138,27 @@ class DirectorAgentService:
                     await model.validate_current(session, project=project)
                 except (ConflictError, ValidationAppError) as exc:
                     raise AgentHalt("context_stale") from exc
+            attachment_evidence: dict[str, object] = {}
             try:
                 admission = await director_egress_decision(
-                    session, project=project, resolution=dict(turn.model_resolution),
+                    session,
+                    project=project,
+                    resolution=dict(turn.model_resolution),
+                    vision=bool(prepared),
                 )
+                if prepared:
+                    for part, _frame in prepared:
+                        await resolve_visual_artifact(session, self.project_id, part, lock=True)
+                    frozen = turn.intent_snapshot.get("vision")
+                    if not isinstance(frozen, dict):
+                        raise AgentHalt("VISION_PERMISSION_CHANGED")
+                    await self._check_vision(
+                        session, [part for part, _ in prepared], frozen, admission.evidence()
+                    )
+                    attachment_evidence = {
+                        "media_parts": [frame.evidence(part) for part, frame in prepared],
+                        "source_revisions": frozen["source_revisions"],
+                    }
             except ValidationAppError as exc:
                 raise AgentHalt("context_stale") from exc
             if not admission.allowed:
@@ -1060,6 +1182,7 @@ class DirectorAgentService:
                     "tools": tools,
                     "context_projection": context_summary,
                     "egress_admission": admission.evidence(),
+                    **attachment_evidence,
                 },
                 output_schema=AgentModelResponse.model_json_schema(),
                 intent_version=turn.context_hash,
@@ -1089,6 +1212,7 @@ class DirectorAgentService:
                 actor_id=self.actor_id,
                 turn_id=turn_id,
                 invocation_id=invocation_id,
+                **({"images": tuple(frame.png for _, frame in prepared)} if prepared else {}),
             )
         except (Exception, asyncio.CancelledError) as exc:
             code = exc.details.get("code") if isinstance(exc, ValidationAppError) else None

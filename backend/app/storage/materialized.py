@@ -10,6 +10,9 @@ from pathlib import Path
 
 from anyio import CancelScope
 
+MAX_MEDIA_INPUT_BYTES = 512 * 1024 * 1024
+MAX_IMAGE_INPUT_BYTES = 20 * 1024 * 1024
+
 
 class MediaTransferError(ValueError):
     pass

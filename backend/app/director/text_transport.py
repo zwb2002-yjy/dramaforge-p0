@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, SecretBytes, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +35,7 @@ from app.shared.errors import ConflictError, ValidationAppError
 
 async def director_egress_decision(
     session: AsyncSession, *, project: Project, resolution: dict[str, object],
+    vision: bool = False,
 ) -> AdmissionDecision:
     """Order the durable submission marker against policy writes, including the first one."""
     await session.scalar(
@@ -43,8 +44,15 @@ async def director_egress_decision(
     target = await resolve_text_destination(
         session, workspace_id=project.workspace_id, resolution=resolution
     )
+    if vision and (
+        target is None or target.processing_location not in {"local", "external"}
+        or not {"director_text", "vision_input"}.issubset(target.purposes)
+    ):
+        raise ValidationAppError("此模型尚未登记可处理图片的目的地",
+                                 details={"code": "VISION_DESTINATION_REQUIRED"})
     return await EgressAdmission(session).decide(
         project, purpose="director_text", destination_id=target.id if target else None,
+        required_purposes=["director_text", "vision_input"] if vision else None,
         processing_location=target.processing_location if target else "unknown",
     )
 
@@ -70,6 +78,7 @@ class ResolvedAgentTextModel:
         self, *, messages: list[AgentMessage], tools: list[dict[str, object]],
         project_id: UUID, workspace_id: UUID, actor_id: UUID,
         turn_id: UUID, invocation_id: UUID,
+        images: tuple[bytes, ...] = (),
     ) -> AgentModelResponse:
         wire = []
         for message in messages:
@@ -80,6 +89,11 @@ class ResolvedAgentTextModel:
                     "function": {"name": call.name, "arguments": canonical_json(call.arguments)},
                 } for call in message.tool_calls]
             wire.append(TextMessage.model_validate(value))
+        if images:
+            current = next((m for m in reversed(wire) if m.role == "user"), None)
+            if current is None:
+                raise ValidationAppError("缺少本轮用户消息")
+            current.media_parts = [SecretBytes(png) for png in images]
         result = await self.text_model.generate(
             request=TextGenerateRequest(
                 messages=wire, tools=tools, tool_choice="auto", parallel_tool_calls=False,

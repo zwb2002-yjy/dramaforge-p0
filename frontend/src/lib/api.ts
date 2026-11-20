@@ -183,6 +183,23 @@ export function artifactContentUrl(projectId: string, artifactId: string): strin
   return workspaceScopedUrl(`/api/v1/projects/${projectId}/artifacts/${artifactId}/content`);
 }
 
+export function artifactVisionPreviewUrl(
+  projectId: string,
+  artifactId: string,
+  hash: string,
+  time: number | null,
+  maxEdge?: number,
+  crop?: number[] | null,
+): string {
+  const query = new URLSearchParams({ expected_content_hash: hash });
+  if (maxEdge !== undefined) query.set("max_edge", String(maxEdge));
+  crop?.forEach((coord) => query.append("crop", String(coord)));
+  if (time !== null) query.set("frame_time_ms", String(time));
+  return workspaceScopedUrl(
+    `/api/v1/projects/${projectId}/artifacts/${artifactId}/vision-preview?${query}`,
+  );
+}
+
 export function artifactVideoFrameUrl(
   projectId: string,
   artifactId: string,

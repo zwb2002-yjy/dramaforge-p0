@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useContext, useState } from "react";
 
-import { ApiError } from "../../lib/api";
+import { ApiError, artifactVisionPreviewUrl } from "../../lib/api";
 import { Sparkles, Send } from "lucide-react";
 import { StudioSelection } from "../../components/workstation/StudioSelection";
 import { ActionLink, Button, Field, Textarea } from "../../components/ui";
@@ -35,6 +35,29 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
   const storageKey = `df.project.director.${projectId}`;
   const [threadId, setThreadId] = useState<string | null>(() => sessionStorage.getItem(storageKey));
   const [question, setQuestion] = useState("");
+  const [attachment, setAttachment] = useState<{
+    id: string;
+    hash: string;
+    time: number | null;
+  } | null>(null);
+  const [loadedPreview, setLoadedPreview] = useState("");
+  const attached =
+    attachment?.id === preview?.id && attachment?.hash === preview?.contentHash ? attachment : null;
+  const previewUrl = attached
+    ? artifactVisionPreviewUrl(projectId, attached.id, attached.hash, attached.time)
+    : "";
+  useEffect(() => {
+    setAttachment(null);
+    setLoadedPreview("");
+  }, [projectId, preview?.id, preview?.contentHash]);
+  const attachSelected = () => {
+    if (!preview?.contentHash) return;
+    const time = preview.video
+      ? Math.floor((preview.player.current?.currentTime ?? 0) * 1000)
+      : null;
+    setLoadedPreview("");
+    setAttachment({ id: preview.id, hash: preview.contentHash, time });
+  };
   const pendingKey = storageKey + ".pending-request";
   const [pendingRequest, setPendingRequest] = useState<string | null>(() =>
     sessionStorage.getItem(pendingKey),
@@ -119,6 +142,16 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
         content: question.trim(),
         request_key: requestKey,
         intent: "conversation",
+        ...(attached && {
+          media_parts: [
+            {
+              kind: "artifact",
+              artifact_id: attached.id,
+              expected_content_hash: attached.hash,
+              transform: { max_edge: 1024, frame_time_ms: attached.time },
+            },
+          ],
+        }),
         ...(preview && {
           ui_context: {
             selected_refs: [
@@ -133,6 +166,7 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
     onSettled: () => setSubmitting(false),
     onSuccess: () => {
       setQuestion("");
+      setAttachment(null);
       setError(null);
       void queryClient.invalidateQueries({ queryKey: ["direction-thread", projectId] });
     },
@@ -195,10 +229,42 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
         {preview && (
           <article className="studio-context-card">
             <strong>当前讨论的画面</strong>
-            {preview.video ? (
-              <video controls preload="metadata" src={preview.url + "#t=0.01"} />
+            {!attached &&
+              (preview.video ? (
+                <video
+                  key={preview.id}
+                  controls
+                  preload="metadata"
+                  src={preview.url}
+                  onPlay={(event) => {
+                    preview.player.current = event.currentTarget;
+                  }}
+                  onSeeking={(event) => {
+                    preview.player.current = event.currentTarget;
+                  }}
+                />
+              ) : (
+                <img src={preview.url} alt="当前选中的画面" />
+              ))}
+            {attached ? (
+              <>
+                <img
+                  key={previewUrl}
+                  src={previewUrl}
+                  alt="将随消息发送的画面"
+                  onLoad={() => setLoadedPreview(previewUrl)}
+                  onError={() => setError("无法准备这张画面，请重新选择。")}
+                />
+                <Button tone="ghost" onClick={() => setAttachment(null)}>
+                  移除附件
+                </Button>
+              </>
             ) : (
-              <img src={preview.url} alt="当前选中的画面" />
+              preview.contentHash && (
+                <Button tone="ghost" onClick={attachSelected}>
+                  {preview.video ? "附上当前视频帧" : "附上这张图片"}
+                </Button>
+              )
             )}
           </article>
         )}
@@ -206,6 +272,22 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
           <article key={item.id} data-role={item.role}>
             <strong>{item.role === "assistant" ? "导演" : "你"}</strong>
             <p>{item.content}</p>
+            {item.role === "user" &&
+              item.media_parts?.map((part, index) => (
+                <img
+                  key={index}
+                  alt="发送给导演的画面"
+                  loading="lazy"
+                  src={artifactVisionPreviewUrl(
+                    projectId,
+                    part.artifact_id,
+                    part.expected_content_hash,
+                    part.transform?.frame_time_ms ?? null,
+                    part.transform?.max_edge,
+                    part.transform?.crop,
+                  )}
+                />
+              ))}
             {item.context?.selected_refs
               ?.filter((ref) => ref.kind === "artifact")
               .map((ref) => (
@@ -275,7 +357,13 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (question.trim() && !send.isPending && !awaitingReply) send.mutate();
+          if (
+            question.trim() &&
+            (!attached || loadedPreview === previewUrl) &&
+            !send.isPending &&
+            !awaitingReply
+          )
+            send.mutate();
         }}
       >
         <Textarea
@@ -290,7 +378,12 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
           aria-label="发送给导演"
           type="submit"
           tone="primary"
-          disabled={!question.trim() || send.isPending || awaitingReply}
+          disabled={
+            (!!attached && loadedPreview !== previewUrl) ||
+            !question.trim() ||
+            send.isPending ||
+            awaitingReply
+          }
         >
           <Send size={17} />
         </Button>

@@ -232,33 +232,40 @@ async def test_director_submission_cannot_overtake_uncommitted_local_policy():
 
     from app.director.text_transport import director_egress_decision
 
-    async with egress_database() as (_, __, factory):
-        async with factory() as writer, factory() as reader:
-            owner = User(email=f"{uuid4()}@example.com", display_name="Owner", password_hash="x")
-            writer.add(owner)
-            await writer.flush()
-            workspace = Workspace(name="fixture", owner_user_id=owner.id)
-            writer.add(workspace)
-            await writer.flush()
-            project = Project(workspace_id=workspace.id, name="灯会", aspect_ratio="16:9",
-                              budget_limit=0, work_type="single_comic")
-            writer.add(project)
+    async with egress_database() as (_, __, factory), factory() as writer, factory() as reader:
+        owner = User(email=f"{uuid4()}@example.com", display_name="Owner", password_hash="x")
+        writer.add(owner)
+        await writer.flush()
+        workspace = Workspace(name="fixture", owner_user_id=owner.id)
+        writer.add(workspace)
+        await writer.flush()
+        project = Project(
+            workspace_id=workspace.id,
+            name="灯会",
+            aspect_ratio="16:9",
+            budget_limit=0,
+            work_type="single_comic",
+        )
+        writer.add(project)
+        await writer.commit()
+        await ProjectDataPolicy(writer, actor=owner, project=project).put(
+            expected_revision=0,
+            mode="local_only",
+            allowed_destination_revision_ids=[],
+            allowed_purposes=[],
+        )
+        await reader.execute(text("SET LOCAL ROLE dramaforge_app"))
+        await set_rls_context(
+            reader, user_id=owner.id, workspace_id=workspace.id, project_id=project.id
+        )
+        visible = await reader.get(Project, project.id)
+        assert visible is not None
+        task = asyncio.create_task(director_egress_decision(reader, project=visible, resolution={}))
+        try:
+            done, _pending = await asyncio.wait({task}, timeout=0.2)
+            assert not done
+        finally:
             await writer.commit()
-            await ProjectDataPolicy(writer, actor=owner, project=project).put(
-                expected_revision=0, mode="local_only",
-                allowed_destination_revision_ids=[], allowed_purposes=[],
-            )
-            await reader.execute(text("SET LOCAL ROLE dramaforge_app"))
-            await set_rls_context(reader, user_id=owner.id, workspace_id=workspace.id,
-                                  project_id=project.id)
-            visible = await reader.get(Project, project.id)
-            assert visible is not None
-            task = asyncio.create_task(director_egress_decision(reader, project=visible, resolution={}))
-            try:
-                done, _pending = await asyncio.wait({task}, timeout=0.2)
-                assert not done
-            finally:
-                await writer.commit()
-                decision = await asyncio.wait_for(task, timeout=5)
-            assert not decision.allowed and decision.reason_code == "EGRESS_LOCAL_ONLY"
-            assert decision.policy_revision == 1
+            decision = await asyncio.wait_for(task, timeout=5)
+        assert not decision.allowed and decision.reason_code == "EGRESS_LOCAL_ONLY"
+        assert decision.policy_revision == 1

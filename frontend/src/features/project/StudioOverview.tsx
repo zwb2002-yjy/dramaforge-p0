@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useContext, useEffect, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { StudioSelection } from "../../components/workstation/StudioSelection";
 import { ActionLink, Alert, Button, Field, Select, Disclosure } from "../../components/ui";
 import { artifactContentUrl } from "../../lib/api";
@@ -23,6 +23,7 @@ export function StudioOverview({
   initialArtifact?: string;
 }) {
   const projectId = project.id;
+  const player = useRef<HTMLVideoElement | null>(null);
   const onPreview = useContext(StudioSelection)?.show;
   const manifest = useQuery({
     queryKey: queryKeys.production.opencutManifest(projectId),
@@ -55,9 +56,13 @@ export function StudioOverview({
   const video = selected ? selected.stage === "video" : !!formal;
   const media = id ? artifactContentUrl(projectId, id) : null;
   useEffect(() => {
-    onPreview?.(media && id && shot ? { id, shotId: shot.id, url: media, video } : null);
+    onPreview?.(
+      media && id && shot
+        ? { id, shotId: shot.id, url: media, video, player, contentHash: selected?.contentHash }
+        : null,
+    );
     return () => onPreview?.(null);
-  }, [onPreview, id, media, video, shot]);
+  }, [onPreview, id, media, video, shot, selected?.contentHash]);
   return (
     <section className="studio-overview" aria-label="项目概览">
       {initialArtifact && choice && shots.isSuccess && (!shot || (workbench.isSuccess && !id)) && (
@@ -101,7 +106,20 @@ export function StudioOverview({
       <div className="studio-preview">
         {media ? (
           video ? (
-            <video key={id} controls preload="metadata" src={media} aria-label="作品预览" />
+            <video
+              key={id}
+              ref={player}
+              controls
+              preload="metadata"
+              src={media}
+              aria-label="作品预览"
+              onPlay={(event) => {
+                player.current = event.currentTarget;
+              }}
+              onSeeking={(event) => {
+                player.current = event.currentTarget;
+              }}
+            />
           ) : (
             <img src={media} alt="当前关键帧候选" />
           )

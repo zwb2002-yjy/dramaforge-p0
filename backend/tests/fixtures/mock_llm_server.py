@@ -86,7 +86,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
         event = {"model": body.get("model"), "path": self.path, "port": self.server.server_port}
-        if "/tools/" in self.path:
+        if "/tools/" in self.path or "/vision/" in self.path:
             event["protocol"] = protocol_summary(body)
         with LOCK:
             EVENTS.append(event)

@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretBytes, field_validator, model_validator
+
+from app.shared.vision import MAX_VISION_PARTS
 
 
 class TextToolFunction(BaseModel):
@@ -47,12 +49,18 @@ class TextMessage(BaseModel):
 
     role: Literal["system", "user", "assistant", "tool"]
     content: str | None = ""
+    # Transient server-prepared PNGs. Invocation history stores their hashes and identities.
+    media_parts: list[SecretBytes] = Field(
+        default_factory=list, max_length=MAX_VISION_PARTS, exclude=True, repr=False
+    )
     tool_calls: list[TextToolCall] = Field(default_factory=list, max_length=12)
     tool_call_id: str | None = Field(default=None, min_length=1, max_length=200, pattern=r"\S")
     name: str | None = Field(default=None, min_length=1, max_length=160, pattern=r"\S")
 
     @model_validator(mode="after")
     def validate_role(self) -> Self:
+        if self.media_parts and self.role != "user":
+            raise ValueError("only user input may contain images")
         if self.role == "tool":
             if not self.tool_call_id:
                 raise ValueError("tool messages require tool_call_id")

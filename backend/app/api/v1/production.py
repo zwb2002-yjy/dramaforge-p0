@@ -193,6 +193,45 @@ async def get_artifact_content(
     )
 
 
+@router.get(
+    "/projects/{project_id}/artifacts/{artifact_id}/vision-preview", response_class=Response
+)
+async def preview_director_frame(
+    project_id: UUID,
+    artifact_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    expected_content_hash: Annotated[str, Query(pattern=r"^[0-9a-f]{64}$")],
+    frame_time_ms: Annotated[int | None, Query(ge=0)] = None,
+    max_edge: Annotated[int, Query(ge=1, le=1024)] = 1024,
+    crop: Annotated[list[float] | None, Query(min_length=4, max_length=4)] = None,
+) -> Response:
+    """Preview exactly the bytes the project studio can attach, with no model call."""
+    from app.assets.vision_media import prepare_vision_frame, resolve_visual_artifact
+    from app.shared.vision import ArtifactVisionInput, VisionTransform
+    from app.storage.minio_store import get_object_store
+
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    try:
+        transform = VisionTransform.model_validate(
+            {"frame_time_ms": frame_time_ms, "crop": crop, "max_edge": max_edge}
+        )
+    except ValueError as exc:
+        raise ValidationAppError("取景范围无效") from exc
+    part = ArtifactVisionInput(
+        kind="artifact",
+        artifact_id=artifact_id,
+        expected_content_hash=expected_content_hash,
+        transform=transform,
+    )
+    source = await resolve_visual_artifact(session, project_id, part)
+    await session.commit()
+    frame = await prepare_vision_frame(source, part, get_object_store())
+    return Response(
+        content=frame.png, media_type="image/png", headers={"Cache-Control": "private, no-store"}
+    )
+
+
 @router.get("/projects/{project_id}/artifacts/{artifact_id}/video-frames/{role}")
 async def get_artifact_video_frame(
     project_id: UUID,

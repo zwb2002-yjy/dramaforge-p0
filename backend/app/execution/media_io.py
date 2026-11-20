@@ -26,11 +26,17 @@ from app.execution.models import Artifact
 from app.shared.errors import (
     ValidationAppError,
 )
-from app.storage.materialized import MaterializedFile, MediaTransferError, materialize_stream
+from app.storage.materialized import (
+    MAX_IMAGE_INPUT_BYTES,
+    MAX_MEDIA_INPUT_BYTES,
+    MaterializedFile,
+    MediaTransferError,
+    materialize_stream,
+)
 
 logger = logging.getLogger(__name__)
 
-_MAX_PROVIDER_MEDIA_BYTES = 512 * 1024 * 1024
+_MAX_PROVIDER_MEDIA_BYTES = MAX_MEDIA_INPUT_BYTES
 
 # One dropped connection must not discard an already-paid generation, so a
 # failed fetch is retried a bounded number of times before it becomes terminal.
@@ -38,7 +44,7 @@ _MEDIA_DOWNLOAD_ATTEMPTS = 3
 _MEDIA_DOWNLOAD_RETRY_DELAYS: tuple[float, ...] = (1.0, 3.0)
 
 
-_MAX_PROVIDER_IMAGE_BYTES = 20 * 1024 * 1024
+_MAX_PROVIDER_IMAGE_BYTES = MAX_IMAGE_INPUT_BYTES
 
 
 def _is_public_ip(address: str) -> bool:

@@ -95,13 +95,21 @@ def inspect_manifest(
         "parallel_calls": "unsupported" if media else "unknown",
         "structured_output": "unsupported" if media else "unknown",
     }
-    if not media and manifest.metadata.get("contract_profile") == "chat_tools_v1":
+    if not media and manifest.metadata.get("contract_profile") in {
+        "chat_tools_v1",
+        "chat_tools_vision_v1",
+    }:
         controls.update({
             "tool_calling": "native",
             "tool_results": "native",
             "parallel_calls": "unsupported",
             "structured_output": "native",
         })
+    if not media:
+        controls["image_input"] = (
+            "native" if manifest.metadata.get("contract_profile") == "chat_tools_vision_v1"
+            else "unsupported"
+        )
     limitations = ["Contract inspection does not verify account access or generation quality."]
     if catalog is not None:
         limitations.append(
@@ -117,7 +125,7 @@ def inspect_manifest(
             limitations.append(
                 "Logical gateway aliases do not identify an immutable upstream deployment."
             )
-        if manifest.metadata.get("contract_profile") == "chat_tools_v1":
+        if manifest.metadata.get("contract_profile") in {"chat_tools_v1", "chat_tools_vision_v1"}:
             limitations.append(
                 "Tool support is an explicitly selected protocol contract, not a generation probe."
             )

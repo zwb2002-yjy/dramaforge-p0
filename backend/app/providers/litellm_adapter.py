@@ -18,6 +18,8 @@ talks to it over HTTP.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 from typing import Any
 
@@ -42,6 +44,7 @@ from app.providers.translation import (
     TranslationReport,
     TranslationResult,
 )
+from app.shared.vision import MAX_VISION_BYTES, MAX_VISION_PARTS
 
 
 class LiteLLMModelAdapter:
@@ -103,7 +106,7 @@ class LiteLLMModelAdapter:
         request: Any,
         resolved_references: list[ResolvedReference],
     ) -> TranslationResult:
-        payload, _ = self._build_payload(capability, request)
+        payload, _ = self._build_payload(capability, request, preview=True)
         requested_options: dict[str, Any] = {}
         if isinstance(request, TextGenerateRequest):
             requested_options = request.model_dump(exclude={"messages", "native_options"})
@@ -259,7 +262,9 @@ class LiteLLMModelAdapter:
     # payload building
     # ------------------------------------------------------------------
 
-    def _build_payload(self, capability: Capability, request: Any) -> tuple[dict[str, Any], str]:
+    def _build_payload(
+        self, capability: Capability, request: Any, *, preview: bool = False
+    ) -> tuple[dict[str, Any], str]:
         if capability is not Capability.TEXT_GENERATE:
             from app.providers.errors import UnsupportedCapabilityError
 
@@ -269,8 +274,42 @@ class LiteLLMModelAdapter:
 
             raise InvalidOptionCombinationError("text.generate requires a TextGenerateRequest")
         messages: list[dict[str, Any]] = []
+        image_bytes = image_count = 0
         for message in request.messages:
             item: dict[str, Any] = {"role": message.role, "content": message.content}
+            if message.media_parts:
+                from app.providers.errors import InvalidOptionCombinationError
+
+                if (
+                    self.manifest.metadata.get("contract_profile") != "chat_tools_vision_v1"
+                    or message.role != "user"
+                ):
+                    raise InvalidOptionCombinationError(
+                        "the selected contract cannot receive images"
+                    )
+                parts: list[dict[str, object]] = [{"type": "text", "text": message.content or ""}]
+                for part in message.media_parts:
+                    png = part.get_secret_value()
+                    image_count += 1
+                    image_bytes += len(png)
+                    if (
+                        image_count > MAX_VISION_PARTS
+                        or image_bytes > MAX_VISION_BYTES
+                        or not png.startswith(b"\x89PNG\r\n\x1a\n")
+                    ):
+                        raise InvalidOptionCombinationError("invalid or oversized image input")
+                    if preview:
+                        parts.append(
+                            {
+                                "type": "image",
+                                "sha256": hashlib.sha256(png).hexdigest(),
+                                "byte_size": len(png),
+                            }
+                        )
+                    else:
+                        url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+                        parts.append({"type": "image_url", "image_url": {"url": url}})
+                item["content"] = parts
             if message.tool_calls:
                 item["tool_calls"] = [call.model_dump(mode="json") for call in message.tool_calls]
             if message.tool_call_id is not None:

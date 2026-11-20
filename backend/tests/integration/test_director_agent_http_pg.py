@@ -998,3 +998,138 @@ async def test_real_auth_csrf_and_selected_workspace_block_agent_before_transpor
     )
     assert wrong_workspace.status_code in {403, 404}, wrong_workspace.text
     assert agent.chat.requests == []
+
+
+@pytest.mark.parametrize("http_agent", ["chat_tools_vision_v1"], indirect=True)
+async def test_project_vision_preview_and_worker_use_identical_pixels(http_agent, monkeypatch):
+    import base64
+    import hashlib
+    import io
+
+    from app.execution.models import Artifact
+    from app.storage.minio_store import reset_object_store_for_tests
+    from PIL import Image
+
+    agent = http_agent
+    store = reset_object_store_for_tests()
+    buf = io.BytesIO()
+    Image.new("RGB", (1200, 600), "#d93443").save(buf, format="PNG")
+    stored = await store.put_bytes(
+        object_key=f"fixture/{uuid4()}", data=buf.getvalue(), mime_type="image/png"
+    )
+    with Session(agent.database.engine) as db:
+        media = Artifact(
+            project_id=agent.project_id,
+            artifact_type="image",
+            storage_state="available",
+            object_key=stored.object_key,
+            content_hash=stored.content_hash,
+            mime_type="image/png",
+            byte_size=stored.byte_size,
+        )
+        db.add(media)
+        db.flush()
+        media_id = str(media.id)
+        connection = db.scalar(
+            select(ProviderConnection).where(ProviderConnection.workspace_id == agent.workspace_id)
+        )
+        ref = GatewayReference.model_validate(connection.gateway_ref)
+        db.commit()
+
+    # The fixture's manager already holds the exact synthetic upstream configuration.
+    async def checked_config(_self, *, workspace_id, actor, connection_id):
+        from app.providers.litellm_gateway.management import GatewayConfigurationRead
+
+        assert workspace_id == agent.workspace_id and ref.connection_id == connection_id
+        return GatewayConfigurationRead(
+            base_url=model().base_url,
+            model_id=ref.remote_model_id,
+            deployment_id=ref.deployment_id,
+            key_revision=ref.key_revision,
+            contract_profile=ref.contract_profile,
+        )
+
+    monkeypatch.setattr(GatewayModelService, "configuration", checked_config)
+    model_id = f"litellm/{ref.connection_id}/{ref.alias}"
+    route = await agent.client.post(
+        f"/api/v1/workspaces/{agent.workspace_id}/provider-destinations",
+        headers=agent.headers,
+        json={
+            "binding_ref": model_id,
+            "expected_revision": 0,
+            "expected_configuration_hash": hashlib.sha256(
+                json.dumps(
+                    ref.execution_reference(), sort_keys=True, separators=(",", ":")
+                ).encode()
+            ).hexdigest(),
+            "processing_location": "external",
+            "purposes": ["director_text", "vision_input"],
+        },
+    )
+    assert route.status_code == 201, route.text
+    thread = await agent.client.post(
+        agent.threads_path,
+        headers=agent.headers,
+        json={"scope_type": "project", "scope_entity_id": str(agent.project_id)},
+    )
+    assert thread.status_code == 201, thread.text
+    tid = thread.json()["id"]
+    artifact = f"/api/v1/projects/{agent.project_id}/artifacts/{media_id}"
+    preview = await agent.client.get(
+        artifact + "/vision-preview", params={"expected_content_hash": stored.content_hash}
+    )
+    assert preview.status_code == 200, preview.text[:180] if preview.status_code != 200 else ""
+    assert Image.open(io.BytesIO(preview.content)).size == (1024, 512)
+    body = {
+        "content": "Inspect this picture",
+        "request_key": "vision-one",
+        "media_parts": [
+            {
+                "kind": "artifact",
+                "artifact_id": media_id,
+                "expected_content_hash": stored.content_hash,
+            }
+        ],
+    }
+    refused = await agent.client.post(
+        f"{agent.threads_path}/{tid}/messages", headers=agent.headers, json=body
+    )
+    assert refused.status_code == 422 and refused.json()["details"]["code"] == "SOURCE_USE_BLOCKED"
+    grant = await agent.client.put(
+        artifact + "/source-use",
+        headers=agent.headers,
+        json={
+            "expected_version": 0,
+            "state": "declared",
+            "allowed_uses": ["external_processing"],
+            "statement": "合成测试图",
+            "request_key": "use-once",
+        },
+    )
+    assert grant.status_code in (200, 201), grant.text
+    accepted = await _accept(agent, tid, body)
+    assert not agent.chat.requests
+    result = await _execute(agent, accepted["turn_id"])
+    assert result["status"] == "completed", result
+    assert len(agent.chat.requests) == 2
+    for call in agent.chat.requests:
+        user = next(m for m in reversed(call["messages"]) if m["role"] == "user")
+        assert (
+            base64.b64decode(user["content"][1]["image_url"]["url"].split(",")[1], validate=True)
+            == preview.content
+        )
+    repeated = await _accept(agent, tid, body, expected_status=200)
+    assert repeated == accepted and len(agent.chat.requests) == 2
+    with Session(agent.database.engine) as db:
+        entries = db.scalars(
+            select(DirectorInvocation).where(
+                DirectorInvocation.turn_id == UUID(accepted["turn_id"])
+            )
+        ).all()
+        assert len(entries) == 2
+        for entry in entries:
+            assert (
+                entry.request_snapshot["media_parts"][0]["content_hash"]
+                == hashlib.sha256(preview.content).hexdigest()
+            )
+            assert "data:image" not in json.dumps(entry.request_snapshot)

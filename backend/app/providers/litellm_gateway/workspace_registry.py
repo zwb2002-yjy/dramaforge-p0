@@ -96,13 +96,15 @@ async def workspace_model_registry(
                     "new_create_blocker": None if settings else "GATEWAY_DATA_PLANE_CHANGED",
                 }
             )
-            if reference.contract_profile == "chat_tools_v1":
+            if reference.contract_profile in {"chat_tools_v1", "chat_tools_vision_v1"}:
                 manifest.metadata["text_capabilities"] = {
                     "structured_json": True,
                     "tool_calling": True,
                     "tool_results": True,
                     "parallel_calls": False,
                 }
+            if reference.contract_profile == "chat_tools_vision_v1":
+                manifest.metadata["text_capabilities"]["image_input"] = True
             if registry.get_or_none(manifest.id) is None:
                 registry.register(
                     manifest,
