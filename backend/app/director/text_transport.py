@@ -11,9 +11,10 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.egress_admission import EgressAdmission
+from app.access.egress_admission import AdmissionDecision, EgressAdmission
 from app.access.models import Project, User
 from app.contracts.agent import AgentMessage, AgentModelResponse
 from app.director.context_builder import DirectorContextBuilder
@@ -25,11 +26,27 @@ from app.director.turn_service import ACTIVE_TURN_STATUSES, DirectorTurnService
 from app.providers.capabilities import Capability
 from app.providers.contracts.common import ExecutionContext, GenerationStatus, ProviderCreateResult
 from app.providers.contracts.text import TextGenerateRequest, TextMessage
-from app.providers.model_profiles.resolver import ModelBindingResolver
+from app.providers.model_profiles.resolver import ModelBindingResolver, resolve_text_destination
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.registry import ModelRegistry
 from app.shared.db import set_rls_context
 from app.shared.errors import ConflictError, ValidationAppError
+
+
+async def director_egress_decision(
+    session: AsyncSession, *, project: Project, resolution: dict[str, object],
+) -> AdmissionDecision:
+    """Order the durable submission marker against policy writes, including the first one."""
+    await session.scalar(
+        select(Project.id).where(Project.id == project.id).with_for_update(read=True)
+    )
+    target = await resolve_text_destination(
+        session, workspace_id=project.workspace_id, resolution=resolution
+    )
+    return await EgressAdmission(session).decide(
+        project, purpose="director_text", destination_id=target.id if target else None,
+        processing_location=target.processing_location if target else "unknown",
+    )
 
 
 @dataclass(frozen=True)
@@ -751,10 +768,8 @@ class DirectorTextRuntimeAdapter:
     ) -> ProviderCreateResult:
         # Admission happens before any journal start or provider call: a refused
         # policy must produce zero outbound requests, not a compensated failure.
-        decision = await EgressAdmission(self._session).decide(
-            project,
-            purpose="director_text",
-            processing_location="local",
+        decision = await director_egress_decision(
+            self._session, project=project, resolution=dict(turn.model_resolution),
         )
         if not decision.allowed:
             raise ValidationAppError(

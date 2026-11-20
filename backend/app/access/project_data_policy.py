@@ -180,6 +180,9 @@ class ProjectDataPolicy:
             "allowed_destination_revision_ids": destinations,
             "allowed_purposes": purposes,
         }
+        await self._session.scalar(
+            select(Project.id).where(Project.id == self._project.id).with_for_update()
+        )
         head = await self.head()
         if head is None:
             if expected_revision != 0:

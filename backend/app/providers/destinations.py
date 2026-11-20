@@ -26,6 +26,7 @@ from app.access.egress_models import (
     ProviderDestinationRevision,
 )
 from app.access.models import User, Workspace
+from app.providers.litellm_gateway.management import GatewayReference
 from app.providers.models import ProviderConnection, ProviderModelBinding
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
@@ -50,7 +51,8 @@ def _origin_of(url: str) -> str:
             details={"code": "DESTINATION_CONFIG_INVALID"},
         )
     port = parts.port or (443 if parts.scheme == "https" else 80)
-    return f"{parts.scheme}://{parts.hostname}:{port}"
+    host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
+    return f"{parts.scheme}://{host}:{port}"
 
 
 def destination_configuration_hash(
@@ -179,9 +181,46 @@ class DestinationService:
         if len(extra) > _MAX_ORIGINS:
             raise ValidationAppError("额外结果来源过多")
         origins = sorted({_registered_origin(value) for value in extra})
-        binding, connection = await self._binding(binding_ref)
-        origin = _origin_of(connection.base_url)
-        configuration_hash = destination_configuration_hash(binding, connection)
+        if binding_ref.startswith("litellm/"):
+            from app.providers.litellm_gateway.management_service import GatewayModelService
+
+            parts = binding_ref.split("/")
+            try:
+                connection_id = UUID(parts[1])
+            except ValueError as exc:
+                raise ValidationAppError("invalid managed text model reference") from exc
+            connection = await self._session.scalar(
+                select(ProviderConnection).where(
+                    ProviderConnection.id == connection_id,
+                    ProviderConnection.workspace_id == self._workspace.id,
+                    ProviderConnection.provider_type == "litellm",
+                    ProviderConnection.protocol_profile == "openai_chat_v1",
+                    ProviderConnection.enabled.is_(True),
+                    ProviderConnection.verification_status == "gateway_registered",
+                ).execution_options(populate_existing=True)
+            )
+            if connection is None or not connection.gateway_ref:
+                raise NotFoundError("managed text connection not found")
+            reference = GatewayReference.model_validate(connection.gateway_ref)
+            if (reference.state != "ready"
+                    or binding_ref != f"litellm/{connection.id}/{reference.alias}"):
+                raise ConflictError("managed text deployment changed")
+            remote = await GatewayModelService(self._session).configuration(
+                workspace_id=self._workspace.id, actor=self._actor, connection_id=connection.id,
+            )
+            if (remote.deployment_id != reference.deployment_id
+                    or remote.key_revision != reference.key_revision):
+                raise ConflictError("managed text deployment changed")
+            origin = _origin_of(remote.base_url)
+            model_id, purpose = remote.model_id, "director_text"
+            gateway = reference.execution_reference()
+            configuration_hash = _hash(gateway)
+        else:
+            binding, connection = await self._binding(binding_ref)
+            origin = _origin_of(connection.base_url)
+            configuration_hash = destination_configuration_hash(binding, connection)
+            model_id, purpose = binding.model_id, binding.purpose
+            gateway = {}
         if expected_configuration_hash != configuration_hash:
             raise ConflictError(
                 "提供方配置已变化，请重新读取目的地声明",
@@ -202,10 +241,12 @@ class DestinationService:
             "schema_version": 1,
             "primary_origin": origin,
             "additional_result_origins": origins,
-            "model_id": binding.model_id,
-            "purpose": binding.purpose,
+            "model_id": model_id,
+            "purpose": purpose,
             "protocol": connection.protocol_profile,
         }
+        if gateway:
+            route_manifest["gateway_reference"] = gateway
         declaration = {
             "binding_ref": binding_ref,
             "processing_location": processing_location,

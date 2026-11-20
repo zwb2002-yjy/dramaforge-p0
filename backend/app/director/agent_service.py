@@ -49,7 +49,11 @@ from app.director.creative_capabilities.agent_skills import build_agent_skill_co
 from app.director.invocation_models import DirectorInvocation
 from app.director.invocations import InvocationService
 from app.director.master_runs import MasterRunService
-from app.director.text_transport import ResolvedAgentTextModel, resolve_agent_text_model
+from app.director.text_transport import (
+    ResolvedAgentTextModel,
+    director_egress_decision,
+    resolve_agent_text_model,
+)
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import TERMINAL_TURN_STATUSES
 from app.events.service import EventService
@@ -1023,12 +1027,20 @@ class DirectorAgentService:
                 tools=tools,
                 max_bytes=AgentLimits.model_validate(turn.request_summary["limits"]).context_bytes,
             )
+            project = await self._reader(session).project()
             if isinstance(model, ResolvedAgentTextModel):
-                project = await self._reader(session).project()
                 try:
                     await model.validate_current(session, project=project)
                 except (ConflictError, ValidationAppError) as exc:
                     raise AgentHalt("context_stale") from exc
+            try:
+                admission = await director_egress_decision(
+                    session, project=project, resolution=dict(turn.model_resolution),
+                )
+            except ValidationAppError as exc:
+                raise AgentHalt("context_stale") from exc
+            if not admission.allowed:
+                raise AgentHalt(admission.reason_code)
             context_summary = {
                 "request_bytes": projected.request_bytes,
                 "context_hash": projected.context_hash,
@@ -1047,6 +1059,7 @@ class DirectorAgentService:
                     "messages": [m.model_dump(mode="json") for m in messages],
                     "tools": tools,
                     "context_projection": context_summary,
+                    "egress_admission": admission.evidence(),
                 },
                 output_schema=AgentModelResponse.model_json_schema(),
                 intent_version=turn.context_hash,

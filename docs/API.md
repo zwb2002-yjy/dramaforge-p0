@@ -1449,6 +1449,7 @@ PUT只是策略许可，不授权新模型操作；扩大真实资料外发仍�
 `POST …/provider-destinations`为管理操作：`{binding_ref,expected_revision:int>=0,
 expected_configuration_hash,processing_location:local|external|unknown,additional_result_origins:origin[]}`。
 binding_ref只接受已登记具体Binding或受管Gateway修订引用，服务器从真实配置生成route_manifest，
+受管文本使用工作区模型引用 `litellm/{connection_id}/{alias}`；服务端向 Proxy 核对实际上游及部署、配置和密钥修订，旧声明不适用于新身份。
 不接受任意URL作为已验证目的地。额外结果/CDN origins要显式登记并过网络守卫；无通配符/query/凭据。
 返回`DestinationRead={id,binding_ref,revision,configuration_hash,processing_location,route_manifest,
 purposes:EgressPurpose[],declaration_hash,location_evidence,created_at}`。

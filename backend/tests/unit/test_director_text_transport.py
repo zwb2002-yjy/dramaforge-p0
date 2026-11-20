@@ -944,7 +944,10 @@ async def test_unknown_schema_repair_keeps_exact_invocation_and_never_replays(se
 
 
 @pytest.mark.asyncio
-async def test_egress_policy_refusal_sends_zero_requests(session: AsyncSession) -> None:
+@pytest.mark.parametrize("mode,code", [
+    ("allowlisted", "EGRESS_DESTINATION_REQUIRED"), ("local_only", "EGRESS_LOCAL_ONLY"),
+])
+async def test_egress_policy_refusal_sends_zero_requests(session: AsyncSession, mode, code) -> None:
     user, project, scene, shot, _second = await _seed(session)
     calls: list[httpx.Request] = []
 
@@ -970,9 +973,9 @@ async def test_egress_policy_refusal_sends_zero_requests(session: AsyncSession) 
     await session.flush()
     await ProjectDataPolicy(session, actor=user, project=project).put(
         expected_revision=0,
-        mode="allowlisted",
-        allowed_destination_revision_ids=[str(destination.id)],
-        allowed_purposes=["director_text"],
+        mode=mode,
+        allowed_destination_revision_ids=[str(destination.id)] if mode == "allowlisted" else [],
+        allowed_purposes=["director_text"] if mode == "allowlisted" else [],
     )
     service = ShotDirectorSuggestionService(
         session, text_transport=DirectorTextRuntimeAdapter(session, registry=_registry(handler)),
@@ -983,6 +986,6 @@ async def test_egress_policy_refusal_sends_zero_requests(session: AsyncSession) 
             actor=user,
             request=_request(scene, shot, key="shot-turn:egress"),
         )
-    assert refused.value.details["code"] == "EGRESS_DESTINATION_REQUIRED"
+    assert refused.value.details["code"] == code
     assert calls == []
     assert await session.scalar(select(func.count()).select_from(DirectorInvocation)) == 0

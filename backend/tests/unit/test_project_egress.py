@@ -262,3 +262,95 @@ async def test_destination_declaration_derives_configuration_and_fences_local(se
             expected_configuration_hash=local_hash,
             processing_location="external", purposes=["video_generation"],
         )
+
+
+@pytest.mark.parametrize("location", ["local", "external"])
+async def test_managed_director_destination_uses_upstream_not_proxy(session, monkeypatch, location):
+    from app.director.text_transport import director_egress_decision
+    from app.providers.litellm_gateway.management import GatewayConfigurationRead, GatewayReference
+    from app.providers.litellm_gateway.management_service import GatewayModelService
+
+    user, workspace, project = await _seed(session)
+    previous = (await session.scalars(select(ProviderConnection))).first()
+    deployment, conn_id = uuid4(), uuid4()
+    ref = GatewayReference(
+        deployment_id=deployment,
+        workspace_id=workspace.id,
+        connection_id=conn_id,
+        alias=f"df-{deployment.hex}",
+        remote_model_id="fixture",
+        config_hash="a" * 64,
+        request_id=uuid4(),
+        request_fingerprint="b" * 64,
+        state="ready",
+    )
+    connection = ProviderConnection(
+        id=conn_id,
+        workspace_id=workspace.id,
+        provider_type="litellm",
+        protocol_profile="openai_chat_v1",
+        display_name="Fixture Proxy",
+        base_url="http://proxy:4000",
+        credential_id=previous.credential_id,
+        enabled=True,
+        verification_status="gateway_registered",
+        gateway_ref=ref.model_dump(mode="json"),
+        created_by=user.id,
+        updated_by=user.id,
+    )
+    session.add(connection)
+    await session.flush()
+
+    async def configuration(_, **kwargs):
+        assert kwargs["workspace_id"] == workspace.id and kwargs["connection_id"] == conn_id
+        return GatewayConfigurationRead(
+            base_url="http://192.168.1.10/v1"
+            if location == "local"
+            else "https://cloud.example/v1",
+            model_id="fixture",
+            deployment_id=deployment,
+            key_revision=1,
+            contract_profile="chat_tools_v1",
+        )
+
+    monkeypatch.setattr(GatewayModelService, "configuration", configuration)
+    service = DestinationService(session, actor=user, workspace=workspace)
+    model_id = f"litellm/{conn_id}/{ref.alias}"
+    resolution = {"model_id": model_id, "gateway_reference": ref.execution_reference()}
+    policy = ProjectDataPolicy(session, actor=user, project=project)
+    await policy.put(
+        expected_revision=0,
+        mode="local_only",
+        allowed_destination_revision_ids=[],
+        allowed_purposes=[],
+    )
+    before = await director_egress_decision(session, project=project, resolution=resolution)
+    assert not before.allowed
+    args = dict(
+        binding_ref=model_id,
+        expected_revision=0,
+        expected_configuration_hash=_declaration_hash(**ref.execution_reference()),
+        purposes=["director_text"],
+    )
+    if location == "external":
+        with pytest.raises(ValidationAppError) as wrong:
+            await service.declare(**args, processing_location="local")
+        assert wrong.value.details["code"] == "DESTINATION_LOCAL_UNPROVEN"
+    dest = await service.declare(**args, processing_location=location)
+    assert "proxy" not in dest.upstream_origin
+    local = await director_egress_decision(session, project=project, resolution=resolution)
+    assert local.allowed == (location == "local")
+    assert local.destination_revision_id == dest.id
+    await policy.put(
+        expected_revision=1,
+        mode="allowlisted",
+        allowed_destination_revision_ids=[str(dest.id)],
+        allowed_purposes=["director_text"],
+    )
+    allowed = await director_egress_decision(session, project=project, resolution=resolution)
+    assert allowed.allowed and allowed.processing_location == location
+    connection.gateway_ref = ref.model_copy(update={"key_revision": 2}).model_dump(mode="json")
+    await session.flush()
+    with pytest.raises(ValidationAppError) as stale:
+        await director_egress_decision(session, project=project, resolution=resolution)
+    assert stale.value.details["code"] == "DIRECTOR_AGENT_MODEL_STALE"

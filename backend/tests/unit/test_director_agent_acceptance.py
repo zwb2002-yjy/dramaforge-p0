@@ -35,6 +35,31 @@ async def _turn(world: AgentWorld, turn_id: UUID) -> DirectorTurn:
         return turn
 
 
+async def test_policy_changed_after_acceptance_blocks_agent_before_submission(agent_world):
+    from app.access.models import Project, User
+    from app.access.project_data_policy import ProjectDataPolicy
+    from app.director.invocation_models import DirectorInvocation
+
+    world = agent_world
+    thread = await world.service.open_thread(AgentThreadCreate())
+    model = ScriptedModel()
+    receipt = await accept_turn(
+        world, thread.id, AgentRequest(content="灯笼", request_key="local-only"), model=model
+    )
+    async with world.factory() as session:
+        actor = await session.get(User, world.service.actor_id)
+        project = await session.get(Project, world.service.project_id)
+        await ProjectDataPolicy(session, actor=actor, project=project).put(
+            expected_revision=0, mode="local_only",
+            allowed_destination_revision_ids=[], allowed_purposes=[],
+        )
+        await session.commit()
+    result = await execute(world, receipt, model=model)
+    assert result.stop_reason == "EGRESS_LOCAL_ONLY" and not model.calls
+    async with world.factory() as session:
+        assert await session.scalar(select(func.count(DirectorInvocation.id))) == 0
+
+
 async def test_acceptance_persists_queued_turn_message_and_outbox_without_model_call(
     agent_world: AgentWorld,
 ) -> None:

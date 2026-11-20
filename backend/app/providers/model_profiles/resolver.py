@@ -13,9 +13,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access.egress_models import ProviderDestinationRevision
 from app.providers.capabilities import Capability
+from app.providers.litellm_gateway.management import GatewayReference
 from app.providers.model_profiles.errors import (
     profile_capability_mismatch,
     profile_no_available_model,
@@ -27,6 +30,7 @@ from app.providers.model_profiles.models import (
 from app.providers.model_profiles.orm import ProductionModelProfile
 from app.providers.model_profiles.service import parse_bindings
 from app.providers.model_profiles.slots import ModelSlot
+from app.providers.models import ProviderConnection
 from app.providers.registry import ModelRegistry, RegisteredModel
 from app.providers.selector import DefaultModelSelector
 from app.shared.errors import ValidationAppError
@@ -243,3 +247,48 @@ class ModelBindingResolver:
             return
         if fail_on_mismatch:
             raise profile_capability_mismatch(str(slot), model_id, capability=str(capability))
+
+
+async def resolve_text_destination(
+    session: AsyncSession, *, workspace_id: UUID, resolution: dict[str, object],
+) -> ProviderDestinationRevision | None:
+    """Resolve the declared upstream of this frozen managed deployment."""
+    target = None
+    frozen = resolution.get("gateway_reference")
+    model_id = resolution.get("model_id")
+    if isinstance(frozen, dict) and frozen and isinstance(model_id, str):
+        try:
+            connection_id = UUID(str(frozen.get("connection_id")))
+        except ValueError as exc:
+            raise ValidationAppError("Invalid frozen text connection") from exc
+        connection = await session.scalar(
+            select(ProviderConnection).where(
+                ProviderConnection.id == connection_id,
+                ProviderConnection.workspace_id == workspace_id,
+                ProviderConnection.provider_type == "litellm",
+                ProviderConnection.protocol_profile == "openai_chat_v1",
+                ProviderConnection.verification_status == "gateway_registered",
+            ).with_for_update(read=True).execution_options(populate_existing=True)
+        )
+        if not connection or not connection.gateway_ref or not connection.enabled:
+            raise ValidationAppError(
+                "Text connection unavailable", details={"code": "DIRECTOR_AGENT_MODEL_STALE"}
+            )
+        reference = GatewayReference.model_validate(connection.gateway_ref)
+        if (reference.state != "ready" or reference.execution_reference() != frozen
+                or reference.workspace_id != workspace_id
+                or model_id != f"litellm/{connection_id}/{reference.alias}"):
+            raise ValidationAppError(
+                "Text destination changed", details={"code": "DIRECTOR_AGENT_MODEL_STALE"}
+            )
+        target = await session.scalar(
+            select(ProviderDestinationRevision).where(
+                ProviderDestinationRevision.workspace_id == workspace_id,
+                ProviderDestinationRevision.binding_ref == model_id,
+            ).order_by(ProviderDestinationRevision.revision.desc()).limit(1)
+        )
+        if target and (target.route_manifest.get("gateway_reference") != frozen):
+            raise ValidationAppError(
+                "Text destination changed", details={"code": "DESTINATION_CONFIGURATION_CHANGED"}
+            )
+    return target
