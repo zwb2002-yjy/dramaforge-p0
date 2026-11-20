@@ -388,6 +388,37 @@ async def resolve_reference_for_runtime(
     )
 
 
+_SQLITE_REFERENCE_USE_DENIED = """
+WITH RECURSIVE media(id, depth) AS (
+        SELECT :artifact, 0
+        UNION
+        SELECT s.artifact_id, m.depth + 1
+        FROM media m
+        JOIN artifact_source_uses u ON u.artifact_id = m.id
+        JOIN source_use_subjects s ON s.id = u.source_subject_id
+        WHERE s.artifact_id IS NOT NULL AND m.depth < 33
+    ), bounded AS (SELECT id, depth FROM media LIMIT 1025),
+    required(id) AS (
+        SELECT s.id FROM bounded m JOIN source_use_subjects s ON s.artifact_id = m.id
+        UNION
+        SELECT u.source_subject_id FROM bounded m
+          JOIN artifact_source_uses u ON u.artifact_id = m.id
+          LIMIT 1025
+    )
+    SELECT 1 FROM required q
+    LEFT JOIN source_use_subjects s ON s.id = q.id
+    LEFT JOIN source_use_revisions r ON r.id = s.current_revision_id AND r.subject_id = s.id
+    WHERE (r.state IS NULL OR r.state != 'declared')
+       OR NOT EXISTS (SELECT 1 FROM json_each(r.allowed_uses) WHERE value = 'external_processing')
+       OR (:is_public AND NOT EXISTS (SELECT 1 FROM json_each(r.allowed_uses)
+                                    WHERE value = 'library_reference'))
+    UNION ALL SELECT 1 WHERE :is_public AND NOT EXISTS (SELECT 1 FROM required)
+    UNION ALL SELECT 1 FROM bounded WHERE depth > 32
+    UNION ALL SELECT 1 WHERE (SELECT count(*) FROM bounded) > 1024
+    UNION ALL SELECT 1 WHERE (SELECT count(*) FROM required) > 1024 LIMIT 1
+"""
+
+
 async def resolve_public_reference(
     session: AsyncSession,
     *,
@@ -440,6 +471,11 @@ async def resolve_public_reference(
         or artifact.storage_state != "available"
         or artifact.deleted_at is not None
     ):
+        raise NotFoundError("reference not found")
+    blocked = await session.scalar(text(_SQLITE_REFERENCE_USE_DENIED), {
+        "artifact": artifact.id.hex, "is_public": record.publication_id is not None,
+    })
+    if blocked:
         raise NotFoundError("reference not found")
     if record.publication_id is not None:
         from app.assets.public_asset_models import (

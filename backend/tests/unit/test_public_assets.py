@@ -454,6 +454,18 @@ async def test_public_reference_token_records_identity_and_respects_withdrawal(w
         owner_user_id=world["owner"].id,
     )
     token = grant.url.rsplit("/", 1)[-1]
+    from app.assets.source_use import SourceUseService
+
+    with pytest.raises(NotFoundError):
+        await resolve_public_reference(world["session"], token=token)
+    uses = SourceUseService(world["session"], actor=world["owner"], project=world["project"])
+    await uses.declare(
+        artifact_id=artifact.artifact_id,
+        allowed_uses=["external_processing", "library_reference"],
+        statement="合成样例许可",
+        expected_version=0,
+        request_key="public-token-use",
+    )
     resolved = await resolve_public_reference(world["session"], token=token)
     assert resolved.publication_id == published.id
     assert resolved.publication_item_id == item_id
