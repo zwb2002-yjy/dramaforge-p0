@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.access.models import Project
+from app.access.models import Project, ProjectCreativeProfile
 from app.assets.models import Shot
 from app.config import get_settings
 from app.delivery.models import Export, ExportItem
@@ -31,11 +31,17 @@ from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.branches import branch_priority
 from app.execution.experiment_nodes import queue_branch_nodes
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
+from app.production.command_models import ProductionCommandAuthorization
 from app.production.models import GraphVersion, ProductionGraph
 from app.production.service import GraphService
 from app.providers.voice_config import freeze_project_voice
 from app.runtime.scheduler import NodeRunScheduler
-from app.shared.errors import NotFoundError, ProviderTaskPendingError, ValidationAppError
+from app.shared.errors import (
+    ConflictError,
+    NotFoundError,
+    ProviderTaskPendingError,
+    ValidationAppError,
+)
 from app.storage.materialized import MaterializedFile, MediaTransferError, materialize_stream
 from app.storage.minio_store import ObjectStore
 from app.storage.scratch import OwnedMediaDirectory
@@ -85,26 +91,43 @@ class FinalFilmPrepareRead(BaseModel):
     status: str = "queued"
 
 
-
-class FinalFilmPreparePreviewItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class PreparationOperation(BaseModel):
+    operation_key: str
     shot_id: UUID
-    speech_required: bool
-    refresh_tail: bool
-    voice_execution: dict[str, object]
-    planned_nodes: list[str] = Field(default_factory=lambda: ["voice", "composite"])
+    shot_number: int
+    dialogue: str | None = None
+    kind: str
+    plan_fingerprint: str
+    requires_provider: bool
+    model_identity: dict[str, object] | None
+    reason_code: str
+
+
+class ReusedPreparation(BaseModel):
+    shot_id: UUID
+    kind: str
+    node_run_id: UUID
+    artifact_id: UUID | None
 
 
 class FinalFilmPreparePreviewRead(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     project_id: UUID
     edit_session_id: UUID
+    episode_id: UUID | None
     timeline_version: int
-    items: list[FinalFilmPreparePreviewItem]
-    preview_fingerprint: str = Field(min_length=64, max_length=64)
-    status: str = "preview"
+    timeline_hash: str
+    preparation_fingerprint: str
+    operations: list[PreparationOperation]
+    reuse: list[ReusedPreparation]
+    blockers: list[str]
+    max_provider_operations: int
+    max_external_model_operations: int
+
+
+def _fingerprint(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 class FinalFilmRead(BaseModel):
@@ -454,138 +477,6 @@ async def _current_formal_tail_runs(
     return selected
 
 
-async def _desired_tail_state(
-    session: AsyncSession,
-    *,
-    project_id: UUID,
-    shot: Shot,
-    refs: list[Any],
-) -> tuple[bool, dict[str, object], bool]:
-    """Per-shot tail plan shared by prepare and its read-only preview."""
-    speech_required = any(
-        ref.shot_id == shot.id and not bool(ref.raw_clip.get("muted")) and not ref.audio_id
-        for ref in refs
-    )
-    desired_voice = (
-        await freeze_project_voice(
-            session,
-            project_id=project_id,
-            director_state=dict(shot.director_state or {}),
-            silent=not speech_required or not shot.dialogue.strip(),
-        )
-    ).model_dump(mode="json")
-    prior_tail = await _current_formal_tail_runs(
-        session, project_id=project_id, shot_id=shot.id
-    )
-    prior_voice = prior_tail.get("voice")
-    prior_snapshot = (prior_voice.input_snapshot or {}) if prior_voice else {}
-    refresh_tail = (
-        prior_snapshot.get("voice_execution") != desired_voice
-        or prior_snapshot.get("dialogue") != shot.dialogue.strip()
-    )
-    if shot.formal_composite_artifact_id is not None:
-        composite_artifact = await session.get(Artifact, shot.formal_composite_artifact_id)
-        composite_run = (
-            await session.get(NodeRun, composite_artifact.produced_by_run_id)
-            if composite_artifact is not None
-            and composite_artifact.produced_by_run_id is not None
-            else None
-        )
-        media_inputs = (
-            (composite_run.input_snapshot or {}).get("media_inputs") if composite_run else None
-        )
-        video_input = media_inputs.get("video") if isinstance(media_inputs, dict) else None
-        refresh_tail = refresh_tail or not (
-            isinstance(video_input, dict)
-            and str(video_input.get("artifact_id")) == str(shot.formal_video_artifact_id)
-        )
-    return speech_required, desired_voice, refresh_tail
-
-async def prepare_formal_tail(
-    session: AsyncSession,
-    *,
-    project_id: UUID,
-    edit_session_id: UUID,
-    expected_timeline_version: int | None,
-    actor_id: UUID,
-) -> FinalFilmPrepareRead:
-    await _project_or_404(session, project_id)
-    # Serialize prepares for one EditSession: two concurrent requests must not
-    # each force a tail refresh and duplicate the same local runs.
-    locked = await session.scalar(
-        select(EditSession)
-        .where(EditSession.id == edit_session_id, EditSession.project_id == project_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    if locked is None:
-        raise NotFoundError("edit session not found")
-    edit_session, refs = await _load_timeline_refs(
-        session,
-        project_id=project_id,
-        edit_session_id=edit_session_id,
-        expected_timeline_version=expected_timeline_version,
-    )
-    if not refs:
-        raise ValidationAppError(
-            "edit session timeline has no clips", details={"code": "EMPTY_TIMELINE"}
-        )
-    shots = await _formal_shots_for_refs(session, project_id=project_id, refs=refs)
-    all_run_ids: list[UUID] = []
-    prepared_sources: list[dict[str, object]] = []
-    for shot in shots:
-        speech_required, desired_voice, refresh_tail = await _desired_tail_state(
-            session, project_id=project_id, shot=shot, refs=refs
-        )
-        run_ids = await queue_branch_nodes(
-            session,
-            project_id=project_id,
-            shot_id=shot.id,
-            user_id=actor_id,
-            node_keys=list(_TAIL_NODE_KEYS),
-            include_missing_dependencies=True,
-            force=refresh_tail,
-            voice_silent=not speech_required,
-            formal_video_artifact_id=shot.formal_video_artifact_id,
-        )
-        all_run_ids.extend(run_ids)
-        current_tail = await _current_formal_tail_runs(
-            session, project_id=project_id, shot_id=shot.id
-        )
-        prepared_sources.append(
-            {
-                "shot_id": str(shot.id),
-                "formal_video": str(shot.formal_video_artifact_id),
-                "voice_execution": desired_voice,
-                "tail_runs": {key: str(run.id) for key, run in sorted(current_tail.items())},
-            }
-        )
-        await _authorize_prepared_runs(
-            session,
-            project_id=project_id,
-            actor_id=actor_id,
-            shot_id=shot.id,
-            run_ids=run_ids,
-            preparation_fingerprint=hashlib.sha256(
-                json.dumps(
-                    prepared_sources[-1], sort_keys=True, separators=(",", ":")
-                ).encode()
-            ).hexdigest(),
-        )
-    await session.commit()
-    return FinalFilmPrepareRead(
-        project_id=project_id,
-        edit_session_id=edit_session.id,
-        timeline_version=edit_session.version,
-        shot_ids=[ref.shot_id for ref in refs],
-        node_run_ids=all_run_ids,
-        preparation_fingerprint=hashlib.sha256(
-            json.dumps(prepared_sources, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest(),
-        status="queued",
-    )
-
-
 async def preview_formal_tail(
     session: AsyncSession,
     *,
@@ -593,101 +484,355 @@ async def preview_formal_tail(
     edit_session_id: UUID,
     expected_timeline_version: int | None,
 ) -> FinalFilmPreparePreviewRead:
-    """Read-only prepare preview: what would be refreshed, with zero writes."""
-    await _project_or_404(session, project_id)
-    edit_session, refs = await _load_timeline_refs(
+    edit, refs = await _load_timeline_refs(
         session,
         project_id=project_id,
         edit_session_id=edit_session_id,
         expected_timeline_version=expected_timeline_version,
     )
     if not refs:
-        raise ValidationAppError(
-            "edit session timeline has no clips", details={"code": "EMPTY_TIMELINE"}
-        )
+        raise ValidationAppError("empty timeline", details={"code": "EMPTY_TIMELINE"})
     shots = await _formal_shots_for_refs(session, project_id=project_id, refs=refs)
-    items: list[FinalFilmPreparePreviewItem] = []
+    timeline_hash = _fingerprint(edit.timeline)
+    operations: list[PreparationOperation] = []
+    reuse: list[ReusedPreparation] = []
+    blockers: list[str] = []
     for shot in shots:
-        speech_required, desired_voice, refresh_tail = await _desired_tail_state(
-            session, project_id=project_id, shot=shot, refs=refs
+        speech_required = bool(shot.dialogue.strip()) and any(
+            ref.shot_id == shot.id and not ref.raw_clip.get("muted") and not ref.audio_id
+            for ref in refs
         )
-        items.append(
-            FinalFilmPreparePreviewItem(
-                shot_id=shot.id,
-                speech_required=speech_required,
-                refresh_tail=refresh_tail,
-                voice_execution=desired_voice,
+        voice = (
+            await freeze_project_voice(
+                session,
+                project_id=project_id,
+                director_state=dict(shot.director_state or {}),
+                silent=not speech_required,
             )
+        ).model_dump(mode="json")
+        runs = await _current_formal_tail_runs(session, project_id=project_id, shot_id=shot.id)
+        prior = runs.get("voice")
+        voice_changed = prior is None or (
+            (prior.input_snapshot or {}).get("voice_execution") != voice
+            or (prior.input_snapshot or {}).get("dialogue") != shot.dialogue.strip()
         )
-    fingerprint = hashlib.sha256(
-        json.dumps(
-            [item.model_dump(mode="json") for item in items],
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
+        if prior is not None and voice_changed and prior.status in _PENDING:
+            blockers.append("VOICE_PREVIOUS_RUN_PENDING")
+        if prior is not None:
+            uncertain = await session.scalar(
+                select(ProviderOperation.id)
+                .where(
+                    ProviderOperation.node_run_id == prior.id,
+                    ProviderOperation.status.in_(
+                        ["submission_started", "unknown_submission", "submitted", "running"]
+                    ),
+                )
+                .limit(1)
+            )
+            if uncertain is not None:
+                blockers.append("VOICE_SUBMISSION_PENDING")
+        for kind in _TAIL_NODE_KEYS:
+            previous = runs.get(kind)
+            new = previous is None or previous.status not in (_PENDING | _DONE)
+            if kind in {"voice", "subtitle", "composite", "continuity_review"}:
+                new = new or voice_changed
+            if kind == "composite" and previous is not None:
+                new = new or (previous.input_snapshot or {}).get("formal_video_artifact_id") != str(
+                    shot.formal_video_artifact_id
+                )
+            if not new and previous is not None:
+                reuse.append(
+                    ReusedPreparation(
+                        shot_id=shot.id,
+                        kind=kind,
+                        node_run_id=previous.id,
+                        artifact_id=previous.result_artifact_id,
+                    )
+                )
+                continue
+            plan = _fingerprint(
+                [
+                    str(project_id),
+                    str(edit.id),
+                    edit.version,
+                    timeline_hash,
+                    str(shot.id),
+                    str(shot.formal_video_artifact_id),
+                    kind,
+                    voice,
+                    shot.dialogue.strip(),
+                    str(previous.id) if previous else None,
+                ]
+            )
+            external = kind == "voice" and voice.get("engine") == "voice_model"
+            operations.append(
+                PreparationOperation(
+                    operation_key=f"final-film-prepare:{plan}",
+                    shot_id=shot.id,
+                    kind=kind,
+                    shot_number=shot.shot_number,
+                    dialogue=shot.dialogue.strip() if external else None,
+                    plan_fingerprint=plan,
+                    requires_provider=external,
+                    model_identity=voice if kind == "voice" else None,
+                    reason_code="PREPARATION_REQUIRED",
+                )
+            )
+    fingerprint = _fingerprint(
+        [
+            str(edit.id),
+            edit.version,
+            timeline_hash,
+            [item.operation_key for item in operations],
+            [str(item.node_run_id) for item in reuse],
+            blockers,
+        ]
+    )
+    for operation in operations:
+        operation.operation_key = (
+            f"final-film-prepare:{_fingerprint([fingerprint, operation.plan_fingerprint])}"
+        )
     return FinalFilmPreparePreviewRead(
         project_id=project_id,
-        edit_session_id=edit_session.id,
-        timeline_version=edit_session.version,
-        items=items,
-        preview_fingerprint=fingerprint,
+        edit_session_id=edit.id,
+        episode_id=edit.episode_id,
+        timeline_version=edit.version,
+        timeline_hash=timeline_hash,
+        preparation_fingerprint=fingerprint,
+        operations=operations,
+        reuse=reuse,
+        blockers=sorted(set(blockers)),
+        max_provider_operations=sum(item.kind == "voice" for item in operations),
+        max_external_model_operations=sum(item.requires_provider for item in operations),
     )
 
-async def _authorize_prepared_runs(
+
+async def _locked_preparation(session: AsyncSession, project_id: UUID, session_id: UUID) -> None:
+    await session.scalar(select(Project.id).where(Project.id == project_id).with_for_update())
+    edit = await session.scalar(
+        select(EditSession)
+        .where(EditSession.id == session_id, EditSession.project_id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if edit is None:
+        raise NotFoundError("edit session not found")
+
+
+async def approve_preparation(
     session: AsyncSession,
     *,
     project_id: UUID,
+    edit_session_id: UUID,
+    expected_timeline_version: int,
     actor_id: UUID,
-    shot_id: UUID,
-    run_ids: list[UUID],
     preparation_fingerprint: str,
-) -> None:
-    """Persist one accepted grant per command created by prepare (I8a-03u)."""
-    from app.access.models import ProjectCreativeProfile
-    from app.production.command_models import ProductionCommandAuthorization
-
+    operation_keys: list[str],
+) -> list[UUID]:
+    """Called by the authenticated confirmation endpoint after the user selects operations."""
+    await _locked_preparation(session, project_id, edit_session_id)
+    if not operation_keys or len(set(operation_keys)) != len(operation_keys):
+        raise ValidationAppError("confirmation must select distinct preview operations")
+    existing = {
+        g.command_key: g
+        for g in await session.scalars(
+            select(ProductionCommandAuthorization)
+            .where(
+                ProductionCommandAuthorization.project_id == project_id,
+                ProductionCommandAuthorization.command_key.in_(operation_keys),
+            )
+            .execution_options(populate_existing=True)
+        )
+    }
+    if len(existing) == len(operation_keys) and all(
+        g.status == "accepted"
+        and g.actor_id == actor_id
+        and g.body.get("edit_session_id") == str(edit_session_id)
+        and g.body.get("timeline_version") == expected_timeline_version
+        and g.body.get("preparation_fingerprint") == preparation_fingerprint
+        for g in existing.values()
+    ):
+        return [existing[key].id for key in operation_keys]
+    preview = await preview_formal_tail(
+        session,
+        project_id=project_id,
+        edit_session_id=edit_session_id,
+        expected_timeline_version=expected_timeline_version,
+    )
+    if preview.blockers or preview.preparation_fingerprint != preparation_fingerprint:
+        raise ConflictError("preparation changed; review the preview again")
+    offered = {op.operation_key: op for op in preview.operations}
+    if (
+        not operation_keys
+        or len(set(operation_keys)) != len(operation_keys)
+        or set(operation_keys) - offered.keys()
+    ):
+        raise ValidationAppError("confirmation must select distinct preview operations")
     profile = await session.scalar(
-        select(ProjectCreativeProfile).where(
+        select(ProjectCreativeProfile).where(ProjectCreativeProfile.project_id == project_id)
+    )
+    if profile is None:
+        raise ValidationAppError("project profile missing")
+    ids = []
+    for key in operation_keys:
+        operation = offered[key]
+        body = {
+            "edit_session_id": str(edit_session_id),
+            "timeline_version": expected_timeline_version,
+            "preparation_fingerprint": preparation_fingerprint,
+            "operation": operation.model_dump(mode="json"),
+            "reuse": [item.model_dump(mode="json") for item in preview.reuse],
+        }
+        grant = existing.get(key)
+        if grant is None:
+            grant = ProductionCommandAuthorization(
+                project_id=project_id,
+                actor_id=actor_id,
+                shot_id=operation.shot_id,
+                command_key=key,
+                request_hash=_fingerprint(body),
+                body=body,
+                profile_version=profile.version,
+                status="approved",
+                expires_at=datetime.now(UTC) + timedelta(hours=1),
+            )
+            session.add(grant)
+            await session.flush()
+        elif (
+            grant.actor_id != actor_id
+            or grant.request_hash != _fingerprint(body)
+            or grant.status != "approved"
+        ):
+            raise ConflictError("the confirmed operation changed or is no longer available")
+        ids.append(grant.id)
+    await session.commit()
+    return ids
+
+
+async def prepare_formal_tail(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    edit_session_id: UUID,
+    expected_timeline_version: int,
+    actor_id: UUID,
+    preparation_fingerprint: str,
+    command_authorization_ids: list[UUID],
+) -> FinalFilmPrepareRead:
+    await _locked_preparation(session, project_id, edit_session_id)
+    grants = list(
+        await session.scalars(
+            select(ProductionCommandAuthorization)
+            .where(
+                ProductionCommandAuthorization.id.in_(command_authorization_ids),
+                ProductionCommandAuthorization.project_id == project_id,
+                ProductionCommandAuthorization.actor_id == actor_id,
+            )
+            .order_by(ProductionCommandAuthorization.command_key)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    )
+    if len(grants) != len(command_authorization_ids) or any(
+        grant.body.get("preparation_fingerprint") != preparation_fingerprint
+        or grant.body.get("edit_session_id") != str(edit_session_id)
+        or grant.body.get("timeline_version") != expected_timeline_version
+        for grant in grants
+    ):
+        raise ConflictError("invalid preparation authorizations")
+
+    def receipt(reuse: list[ReusedPreparation]) -> FinalFilmPrepareRead:
+        run_ids = [g.node_run_id for g in grants if g.node_run_id]
+        material_fingerprint = _fingerprint(
+            [
+                str(edit_session_id),
+                expected_timeline_version,
+                sorted(
+                    [str(run_id) for run_id in run_ids] + [str(item.node_run_id) for item in reuse]
+                ),
+            ]
+        )
+        return FinalFilmPrepareRead(
+            project_id=project_id,
+            edit_session_id=edit_session_id,
+            timeline_version=expected_timeline_version,
+            shot_ids=list(
+                dict.fromkeys(
+                    [g.shot_id for g in grants if g.shot_id] + [item.shot_id for item in reuse]
+                )
+            ),
+            node_run_ids=run_ids,
+            preparation_fingerprint=material_fingerprint,
+        )
+
+    if grants and all(g.status == "accepted" for g in grants):
+        original_reuse = grants[0].body.get("reuse")
+        return receipt(
+            [ReusedPreparation.model_validate(item) for item in original_reuse]
+            if isinstance(original_reuse, list)
+            else []
+        )
+    preview = await preview_formal_tail(
+        session,
+        project_id=project_id,
+        edit_session_id=edit_session_id,
+        expected_timeline_version=expected_timeline_version,
+    )
+    required = {op.operation_key: op for op in preview.operations}
+    if (
+        preview.blockers
+        or preview.preparation_fingerprint != preparation_fingerprint
+        or required.keys() != {g.command_key for g in grants}
+    ):
+        raise ConflictError(
+            "review and confirm the current preparation",
+            details={"code": "PREPARATION_CONFIRMATION_REQUIRED"},
+        )
+    profile_version = await session.scalar(
+        select(ProjectCreativeProfile.version).where(
             ProjectCreativeProfile.project_id == project_id
         )
     )
-    if profile is None:
-        raise ValidationAppError(
-            "Project has no creative profile", details={"code": "PROFILE_MISSING"}
+    for grant in grants:
+        if (
+            grant.status != "approved"
+            or grant.expires_at.replace(tzinfo=UTC) <= datetime.now(UTC)
+            or grant.profile_version != profile_version
+            or grant.request_hash != _fingerprint(grant.body)
+            or grant.body.get("operation") != required[grant.command_key].model_dump(mode="json")
+        ):
+            raise ConflictError("expired, revoked or mismatched preparation authorization")
+    by_key = {grant.command_key: grant for grant in grants}
+    for op in preview.operations:
+        shot = await session.get(Shot, op.shot_id)
+        assert shot is not None
+        runs = await queue_branch_nodes(
+            session,
+            project_id=project_id,
+            shot_id=op.shot_id,
+            user_id=actor_id,
+            node_keys=[op.kind],
+            force=True,
+            include_missing_dependencies=False,
+            voice_silent=bool(
+                op.model_identity and op.model_identity.get("engine") == "pcm-silence"
+            ),
+            formal_video_artifact_id=shot.formal_video_artifact_id,
         )
-    expires_at = datetime.now(UTC) + timedelta(hours=1)
-    for run_id in run_ids:
-        request_hash = hashlib.sha256(
-            json.dumps(
-                {
-                    "kind": "final_film_prepare",
-                    "preparation_fingerprint": preparation_fingerprint,
-                    "node_run_id": str(run_id),
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode()
-        ).hexdigest()
-        session.add(
-            ProductionCommandAuthorization(
-                project_id=project_id,
-                actor_id=actor_id,
-                shot_id=shot_id,
-                command_key=f"final-film-prepare:{run_id}",
-                request_hash=request_hash,
-                body={
-                    "kind": "final_film_prepare",
-                    "preparation_fingerprint": preparation_fingerprint,
-                    "node_run_id": str(run_id),
-                },
-                profile_version=profile.version,
-                expires_at=expires_at,
-                status="accepted",
-                node_run_id=run_id,
-            )
-        )
-    await session.flush()
+        if len(runs) != 1:
+            raise ConflictError("preparation did not produce the approved command")
+        run = await session.get(NodeRun, runs[0])
+        if op.kind == "voice" and (
+            run is None or (run.input_snapshot or {}).get("voice_execution") != op.model_identity
+        ):
+            raise ConflictError("voice configuration changed during confirmation")
+        grant = by_key[op.operation_key]
+        grant.node_run_id = runs[0]
+        grant.status = "accepted"
+    result = receipt(preview.reuse)
+    await session.commit()
+    return result
+
 
 async def _ensure_final_graph(
     session: AsyncSession,

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, status
@@ -14,6 +13,7 @@ from app.production.final_film import (
     FinalFilmJobRead,
     FinalFilmPreparePreviewRead,
     FinalFilmPrepareRead,
+    approve_preparation,
     get_final_film_status,
     list_final_film_jobs,
     prepare_formal_tail,
@@ -24,12 +24,21 @@ from app.production.final_film import (
 router = APIRouter(tags=["final-film"], dependencies=[Depends(require_selected_workspace)])
 
 
-class FinalFilmPrepareBody(BaseModel):
+class FinalFilmPreviewBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     edit_session_id: UUID
     expected_timeline_version: int = Field(ge=1)
-    mode: Literal["prepare"] = "prepare"
+
+
+class FinalFilmApproveBody(FinalFilmPreviewBody):
+    preparation_fingerprint: str = Field(min_length=64, max_length=64)
+    operation_keys: list[str] = Field(min_length=1)
+
+
+class FinalFilmPrepareBody(FinalFilmPreviewBody):
+    preparation_fingerprint: str = Field(min_length=64, max_length=64)
+    command_authorization_ids: list[UUID]
 
 
 class FinalFilmRenderBody(BaseModel):
@@ -38,6 +47,16 @@ class FinalFilmRenderBody(BaseModel):
     edit_session_id: UUID
     expected_timeline_version: int = Field(ge=1)
     name: str = Field(default="V1 Final Film", min_length=1, max_length=200)
+
+
+@router.post("/projects/{project_id}/final-film/prepare-authorizations", response_model=list[UUID])
+async def confirm_final_film_operations(
+    project_id: UUID, body: FinalFilmApproveBody, user: CurrentUser, session: SessionDep, _: CsrfDep
+) -> list[UUID]:
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    return await approve_preparation(
+        session, project_id=project_id, actor_id=user.id, **body.model_dump()
+    )
 
 
 @router.post(
@@ -59,6 +78,8 @@ async def prepare_final_film(
         edit_session_id=body.edit_session_id,
         expected_timeline_version=body.expected_timeline_version,
         actor_id=user.id,
+        preparation_fingerprint=body.preparation_fingerprint,
+        command_authorization_ids=body.command_authorization_ids,
     )
 
 
@@ -68,14 +89,12 @@ async def prepare_final_film(
 )
 async def preview_final_film(
     project_id: UUID,
-    body: FinalFilmPrepareBody,
+    body: FinalFilmPreviewBody,
     user: CurrentUser,
     session: SessionDep,
 ) -> FinalFilmPreparePreviewRead:
     """Read-only prepare preview: zero NodeRun, zero Provider call."""
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
-    )
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
     return await preview_formal_tail(
         session,
         project_id=project.id,

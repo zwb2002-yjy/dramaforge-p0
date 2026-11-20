@@ -136,7 +136,12 @@ def test_final_film_routes_fail_closed_for_stale_timeline_and_non_owner(
     asyncio.run(bump())
     stale = client.post(
         f"/api/v1/projects/{project_id}/final-film/prepare",
-        json={"edit_session_id": edit_session_id, "expected_timeline_version": 1},
+        json={
+            "preparation_fingerprint": "a" * 64,
+            "command_authorization_ids": [],
+            "edit_session_id": edit_session_id,
+            "expected_timeline_version": 1,
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert stale.status_code == 422, stale.text
@@ -159,7 +164,12 @@ def test_final_film_routes_fail_closed_for_stale_timeline_and_non_owner(
     csrf = _csrf(client)
     non_owner_prepare = client.post(
         f"/api/v1/projects/{project_id}/final-film/prepare",
-        json={"edit_session_id": edit_session_id, "expected_timeline_version": 2},
+        json={
+            "preparation_fingerprint": "a" * 64,
+            "command_authorization_ids": [],
+            "edit_session_id": edit_session_id,
+            "expected_timeline_version": 2,
+        },
         headers={CSRF_HEADER: csrf},
     )
     non_owner_render = client.post(

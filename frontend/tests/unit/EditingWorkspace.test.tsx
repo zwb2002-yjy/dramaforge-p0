@@ -905,6 +905,26 @@ describe("EditingWorkspace", () => {
         return json(persistedSession());
       }
       if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-final" });
+      if (url.endsWith("/final-film/prepare-preview"))
+        return json({
+          project_id: PROJECT_ID,
+          edit_session_id: SESSION_ID,
+          timeline_version: 1,
+          preparation_fingerprint: "a".repeat(64),
+          blockers: [],
+          reuse: [],
+          max_external_model_operations: 1,
+          operations: [
+            {
+              operation_key: "voice-1",
+              kind: "voice",
+              shot_id: "shot-1",
+              requires_provider: true,
+              model_identity: { model_id: "fixture-voice" },
+            },
+          ],
+        });
+      if (url.endsWith("/final-film/prepare-authorizations")) return json(["grant-1"]);
       if (url.endsWith("/final-film/prepare")) {
         return json({
           project_id: PROJECT_ID,
@@ -941,6 +961,11 @@ describe("EditingWorkspace", () => {
     await screen.findByTestId("edit-session-editor");
     fireEvent.click(screen.getByTestId("export-final-film"));
 
+    const confirm = await screen.findByRole("button", { name: "确认所选操作并导出" });
+    expect(confirm).toBeDisabled();
+    expect(calls.some((call) => call.url.endsWith("/final-film/prepare"))).toBe(false);
+    fireEvent.click(screen.getByRole("checkbox", { name: /fixture-voice/ }));
+    fireEvent.click(confirm);
     const result = await screen.findByTestId("final-film-result");
     expect(result).toHaveTextContent("artifact-final-1");
     expect(result).toHaveTextContent("15.233");

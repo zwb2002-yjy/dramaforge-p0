@@ -189,6 +189,9 @@ export function EditingWorkspace({
     filmHistory,
     displayedFilm,
     selectHistoryRun,
+    preparationPreview,
+    selectedKeys,
+    setSelectedKeys,
     exportFilm: runFinalFilmExport,
     pending: finalFilmPending,
     error: finalFilmError,
@@ -364,6 +367,60 @@ export function EditingWorkspace({
             )
           }
         />
+        {preparationPreview && (
+          <Card>
+            <SectionHeader title="成片素材确认" />
+            <p>
+              复用 {preparationPreview.reuse.length} 项素材或任务，最多发送{" "}
+              {preparationPreview.max_external_model_operations} 次外部模型请求。
+            </p>
+            {preparationPreview.blockers.map((code) => (
+              <Alert key={code} type="warning" description={`已有配音任务待核对（${code}）`} />
+            ))}
+            {preparationPreview.operations.map((op) => (
+              <Field key={op.operation_key}>
+                <Checkbox
+                  checked={selectedKeys.includes(op.operation_key)}
+                  disabled={Boolean(finalFilmPending)}
+                  onChange={(event) =>
+                    setSelectedKeys((keys) =>
+                      event.target.checked
+                        ? [...keys, op.operation_key]
+                        : keys.filter((key) => key !== op.operation_key),
+                    )
+                  }
+                />
+                {
+                  (
+                    {
+                      voice: "配音",
+                      subtitle: "字幕",
+                      composite: "合成",
+                      video_drift_review: "视频检查",
+                      continuity_review: "连续性检查",
+                    } as Record<string, string>
+                  )[op.kind]
+                }{" "}
+                · 镜头 {op.shot_number}
+                {op.requires_provider
+                  ? ` · 外部模型 ${String(op.model_identity?.model_id ?? "")}`
+                  : " · 本地处理"}
+                {op.dialogue && <span>「{op.dialogue}」</span>}
+              </Field>
+            ))}
+            <Button
+              type="button"
+              disabled={
+                Boolean(finalFilmPending) ||
+                preparationPreview.blockers.length > 0 ||
+                selectedKeys.length !== preparationPreview.operations.length
+              }
+              onClick={() => void runFinalFilmExport(true)}
+            >
+              确认所选操作并导出
+            </Button>
+          </Card>
+        )}
         <Disclosure title="切换已有剪辑">
           <EditingSessionPicker
             projectId={projectId}

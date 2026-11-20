@@ -37,8 +37,18 @@ test("Final Film export prepares and renders the exact persisted timeline", asyn
   expect(finalFilmWrites).toEqual([
     {
       method: "POST",
-      path: `/api/v1/projects/${PROJECT_ID}/final-film/prepare`,
+      path: `/api/v1/projects/${PROJECT_ID}/final-film/prepare-preview`,
       body: { edit_session_id: EDIT_SESSION_ID, expected_timeline_version: 1 },
+    },
+    {
+      method: "POST",
+      path: `/api/v1/projects/${PROJECT_ID}/final-film/prepare`,
+      body: {
+        edit_session_id: EDIT_SESSION_ID,
+        expected_timeline_version: 1,
+        preparation_fingerprint: "a".repeat(64),
+        command_authorization_ids: [],
+      },
     },
     {
       method: "POST",

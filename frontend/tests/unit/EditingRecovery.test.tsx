@@ -199,6 +199,17 @@ it("does not show a late Final Film error in a different session", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = String(input);
     if (url.endsWith("/auth/csrf")) return json({ csrf_token: "fixture" });
+    if (url.endsWith("/final-film/prepare-preview"))
+      return json({
+        project_id: "p1",
+        edit_session_id: "cut-1",
+        timeline_version: 2,
+        preparation_fingerprint: "a".repeat(64),
+        blockers: [],
+        reuse: [],
+        operations: [],
+        max_external_model_operations: 0,
+      });
     if (url.endsWith("/final-film/prepare"))
       return json({
         project_id: "p1",

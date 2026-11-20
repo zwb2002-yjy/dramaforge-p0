@@ -1625,10 +1625,9 @@ provider_type,capability,prompt,parameters,output_count,references,max_provider_
 64位`plan_fingerprint`）与`Idempotency-Key`，返回原`ExecutionReceipt`；服务在项目锁内校验asset版本与
 计划指纹，创建/复用asset scope Graph并只入队一个`NodeRun(status=queued)`，快照含`asset_id`、`target`、
 `plan_fingerprint`、`resolution`与参考；同key重放返回原回执，不同载荷409 `ASSET_COMMAND_REUSED`。
-最终合成准备预览（I8a-03o）：`POST /projects/{p}/final-film/prepare-preview`接收同一
-`{edit_session_id,expected_timeline_version}`，纯读返回逐镜头`{speech_required,refresh_tail,
-voice_execution,planned_nodes}`与`preview_fingerprint`，零NodeRun/零Provider调用；`prepare`仍负责实际入队，并为每个新建命令写入一条accepted的
-`ProductionCommandAuthorization`（`final-film-prepare:{node_run_id}`，含preparation指纹、actor、profile版本）。
+当前成片准备从只读 `POST /projects/{p}/final-film/prepare-preview` 取得已保存版本的指纹、复用任务、待执行项和外部请求上限。工作台逐项展示镜头、配音文本及模型。
+用户勾选后调用 `POST /projects/{p}/final-film/prepare-authorizations`，提交预览指纹和 operation_keys，返回现有生产授权表中的批准 ID。
+`prepare` 校验指纹、授权人、项目、会话、版本、有效期与完整操作集合，并在同一事务中绑定任务与授权回执。重复受理读取原回执。
 
 资产语音/视频命令（I8a-03l/m）：`POST /assets/{a}/executions`接受判别联合
 `{stage:"asset_image"|"asset_voice"|"asset_video",request}`；语音分支按句界分段（每段≤500字）并在预览返回`segments/requires_concat/max_provider_operations`；

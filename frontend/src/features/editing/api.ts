@@ -167,11 +167,42 @@ export async function routeEditingDirectorRepair(
   );
 }
 
+export type PreparationPreview = components["schemas"]["FinalFilmPreparePreviewRead"];
+
+export async function previewFinalFilm(projectId: string, sessionId: string, version: number) {
+  return apiSend<PreparationPreview>(
+    "POST",
+    `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/prepare-preview`,
+    { edit_session_id: sessionId, expected_timeline_version: version },
+    await fetchCsrf(),
+  );
+}
+
+export async function approveFinalFilm(
+  projectId: string,
+  preview: PreparationPreview,
+  keys: string[],
+) {
+  return apiSend<string[]>(
+    "POST",
+    `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/prepare-authorizations`,
+    {
+      edit_session_id: preview.edit_session_id,
+      expected_timeline_version: preview.timeline_version,
+      preparation_fingerprint: preview.preparation_fingerprint,
+      operation_keys: keys,
+    },
+    await fetchCsrf(),
+  );
+}
+
 /** Prepare the Formal shot tail required by an EditSession Timeline version. */
 export async function prepareFinalFilm(
   projectId: string,
   sessionId: string,
   expectedTimelineVersion: number,
+  preparationFingerprint: string,
+  authorizationIds: string[],
 ): Promise<FinalFilmPrepareRead> {
   const csrf = await fetchCsrf();
   return apiSend<FinalFilmPrepareRead>(
@@ -180,6 +211,8 @@ export async function prepareFinalFilm(
     {
       edit_session_id: sessionId,
       expected_timeline_version: expectedTimelineVersion,
+      preparation_fingerprint: preparationFingerprint,
+      command_authorization_ids: authorizationIds,
     },
     csrf,
   );

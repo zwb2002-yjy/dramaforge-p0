@@ -3603,6 +3603,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/final-film/prepare-authorizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Final Film Operations */
+        post: operations["confirm_final_film_operations_api_v1_projects__project_id__final_film_prepare_authorizations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/final-film/prepare": {
         parameters: {
             query?: never;
@@ -7491,6 +7508,20 @@ export interface components {
              */
             completed_at: string;
         };
+        /** FinalFilmApproveBody */
+        FinalFilmApproveBody: {
+            /**
+             * Edit Session Id
+             * Format: uuid
+             */
+            edit_session_id: string;
+            /** Expected Timeline Version */
+            expected_timeline_version: number;
+            /** Preparation Fingerprint */
+            preparation_fingerprint: string;
+            /** Operation Keys */
+            operation_keys: string[];
+        };
         /** FinalFilmJobRead */
         FinalFilmJobRead: {
             /**
@@ -7535,30 +7566,10 @@ export interface components {
             edit_session_id: string;
             /** Expected Timeline Version */
             expected_timeline_version: number;
-            /**
-             * Mode
-             * @default prepare
-             * @constant
-             */
-            mode: "prepare";
-        };
-        /** FinalFilmPreparePreviewItem */
-        FinalFilmPreparePreviewItem: {
-            /**
-             * Shot Id
-             * Format: uuid
-             */
-            shot_id: string;
-            /** Speech Required */
-            speech_required: boolean;
-            /** Refresh Tail */
-            refresh_tail: boolean;
-            /** Voice Execution */
-            voice_execution: {
-                [key: string]: unknown;
-            };
-            /** Planned Nodes */
-            planned_nodes?: string[];
+            /** Preparation Fingerprint */
+            preparation_fingerprint: string;
+            /** Command Authorization Ids */
+            command_authorization_ids: string[];
         };
         /** FinalFilmPreparePreviewRead */
         FinalFilmPreparePreviewRead: {
@@ -7572,17 +7583,24 @@ export interface components {
              * Format: uuid
              */
             edit_session_id: string;
+            /** Episode Id */
+            episode_id: string | null;
             /** Timeline Version */
             timeline_version: number;
-            /** Items */
-            items: components["schemas"]["FinalFilmPreparePreviewItem"][];
-            /** Preview Fingerprint */
-            preview_fingerprint: string;
-            /**
-             * Status
-             * @default preview
-             */
-            status: string;
+            /** Timeline Hash */
+            timeline_hash: string;
+            /** Preparation Fingerprint */
+            preparation_fingerprint: string;
+            /** Operations */
+            operations: components["schemas"]["PreparationOperation"][];
+            /** Reuse */
+            reuse: components["schemas"]["ReusedPreparation"][];
+            /** Blockers */
+            blockers: string[];
+            /** Max Provider Operations */
+            max_provider_operations: number;
+            /** Max External Model Operations */
+            max_external_model_operations: number;
         };
         /** FinalFilmPrepareRead */
         FinalFilmPrepareRead: {
@@ -7609,6 +7627,16 @@ export interface components {
              * @default queued
              */
             status: string;
+        };
+        /** FinalFilmPreviewBody */
+        FinalFilmPreviewBody: {
+            /**
+             * Edit Session Id
+             * Format: uuid
+             */
+            edit_session_id: string;
+            /** Expected Timeline Version */
+            expected_timeline_version: number;
         };
         /** FinalFilmRead */
         FinalFilmRead: {
@@ -9072,6 +9100,32 @@ export interface components {
             delivery: "exact" | "approximate" | "unsupported";
             /** Reason */
             reason?: string | null;
+        };
+        /** PreparationOperation */
+        PreparationOperation: {
+            /** Operation Key */
+            operation_key: string;
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /** Shot Number */
+            shot_number: number;
+            /** Dialogue */
+            dialogue?: string | null;
+            /** Kind */
+            kind: string;
+            /** Plan Fingerprint */
+            plan_fingerprint: string;
+            /** Requires Provider */
+            requires_provider: boolean;
+            /** Model Identity */
+            model_identity: {
+                [key: string]: unknown;
+            } | null;
+            /** Reason Code */
+            reason_code: string;
         };
         /** PreviewReference */
         PreviewReference: {
@@ -10721,6 +10775,23 @@ export interface components {
             mime_type: string;
             /** Fingerprint */
             fingerprint: string;
+        };
+        /** ReusedPreparation */
+        ReusedPreparation: {
+            /**
+             * Shot Id
+             * Format: uuid
+             */
+            shot_id: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Node Run Id
+             * Format: uuid
+             */
+            node_run_id: string;
+            /** Artifact Id */
+            artifact_id: string | null;
         };
         /**
          * ReviewDecisionBody
@@ -22843,6 +22914,49 @@ export interface operations {
             };
         };
     };
+    confirm_final_film_operations_api_v1_projects__project_id__final_film_prepare_authorizations_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FinalFilmApproveBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     prepare_final_film_api_v1_projects__project_id__final_film_prepare_post: {
         parameters: {
             query?: {
@@ -22903,7 +23017,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["FinalFilmPrepareBody"];
+                "application/json": components["schemas"]["FinalFilmPreviewBody"];
             };
         };
         responses: {

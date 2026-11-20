@@ -842,7 +842,6 @@ async def test_subtitle_store_failure_does_not_publish_half_an_export(session, m
 async def test_prepare_voice_change_refreshes_tail_not_video_and_changes_export_identity(
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from app.production.final_film import prepare_formal_tail
     from app.providers.voice_config import freeze_project_voice
 
     project, user, edit, shots, videos = await _seed_renderable_final_film(
@@ -852,7 +851,7 @@ async def test_prepare_voice_change_refreshes_tail_not_video_and_changes_export_
     await _canonicalize_tail_fixture(session, project, user)
     await session.flush()
     monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", _fake_enqueue)
-    first = await prepare_formal_tail(
+    first = await _confirm_and_prepare(
         session,
         project_id=project.id,
         edit_session_id=edit.id,
@@ -876,7 +875,7 @@ async def test_prepare_voice_change_refreshes_tail_not_video_and_changes_export_
         )
     ).model_dump(mode="json")
     assert voice.input_snapshot["voice_execution"] == expected_voice
-    repeated = await prepare_formal_tail(
+    repeated = await _confirm_and_prepare(
         session,
         project_id=project.id,
         edit_session_id=edit.id,
@@ -887,7 +886,20 @@ async def test_prepare_voice_change_refreshes_tail_not_video_and_changes_export_
     assert repeated.preparation_fingerprint == first.preparation_fingerprint
     shot.director_state = {"voice": {"voice_id": "v2", "rate_percent": -10}}
     await session.flush()
-    changed = await prepare_formal_tail(
+    # A changed voice selection cannot supersede an unfinished, possibly submitted run.
+    from app.shared.errors import ConflictError
+
+    with pytest.raises(ConflictError):
+        await _confirm_and_prepare(
+            session,
+            project_id=project.id,
+            edit_session_id=edit.id,
+            expected_timeline_version=edit.version,
+            actor_id=user.id,
+        )
+    voice.status = "cancelled"  # Explicit cancellation before the first submission.
+    await session.flush()
+    changed = await _confirm_and_prepare(
         session,
         project_id=project.id,
         edit_session_id=edit.id,
@@ -910,7 +922,6 @@ async def test_prepare_voice_change_refreshes_tail_not_video_and_changes_export_
 async def test_muted_clip_preparation_freezes_local_silence_not_remote_tts(
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from app.production.final_film import prepare_formal_tail
 
     project, user, edit, _shots, _videos = await _seed_renderable_final_film(
         session, canonical_graph=True
@@ -919,7 +930,7 @@ async def test_muted_clip_preparation_freezes_local_silence_not_remote_tts(
     edit.timeline = {**edit.timeline, "clips": [{**edit.timeline["clips"][0], "muted": True}]}
     await session.flush()
     monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", _fake_enqueue)
-    prepared = await prepare_formal_tail(
+    prepared = await _confirm_and_prepare(
         session,
         project_id=project.id,
         edit_session_id=edit.id,
@@ -987,7 +998,6 @@ async def test_voice_worker_records_frozen_identity_and_rejects_invalid_audio(
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch, valid_wav: bool
 ) -> None:
     from app.execution.voice_path import execute_voice_node_run
-    from app.production.final_film import prepare_formal_tail
     from app.providers.voice_config import freeze_project_voice
     from app.providers.voice_runtime import SilentVoiceAdapter
 
@@ -996,7 +1006,7 @@ async def test_voice_worker_records_frozen_identity_and_rejects_invalid_audio(
     )
     await _canonicalize_tail_fixture(session, project, user)
     monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", _fake_enqueue)
-    prepared = await prepare_formal_tail(
+    prepared = await _confirm_and_prepare(
         session,
         project_id=project.id,
         edit_session_id=edit.id,
@@ -1074,14 +1084,13 @@ async def test_voice_worker_records_frozen_identity_and_rejects_invalid_audio(
 async def test_prepare_replaces_unpinned_composite_without_repeating_voice_or_video(
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from app.production.final_film import prepare_formal_tail
 
     project, user, edit, shots, videos = await _seed_renderable_final_film(
         session, canonical_graph=True
     )
     await _canonicalize_tail_fixture(session, project, user)
     monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", _fake_enqueue)
-    first = await prepare_formal_tail(
+    first = await _confirm_and_prepare(
         session,
         project_id=project.id,
         edit_session_id=edit.id,
@@ -1101,7 +1110,7 @@ async def test_prepare_replaces_unpinned_composite_without_repeating_voice_or_vi
     stale.result_artifact_id = videos[0].id
     shots[0].formal_composite_artifact_id = None
     await session.flush()
-    prepared = await prepare_formal_tail(
+    prepared = await _confirm_and_prepare(
         session,
         project_id=project.id,
         edit_session_id=edit.id,
@@ -1140,23 +1149,23 @@ async def test_prepare_preview_is_read_only_and_stable(session: AsyncSession) ->
         select(func.count()).select_from(NodeRun).where(NodeRun.project_id == project.id)
     )
     assert before == after
-    assert first.items
-    assert {item.shot_id for item in first.items} == {shot.id for shot in shots}
-    assert all(item.voice_execution for item in first.items)
+    assert first.operations
+    assert {item.shot_id for item in first.operations} == {shot.id for shot in shots}
+    assert all(item.model_identity for item in first.operations if item.kind == "voice")
     second = await preview_formal_tail(
         session,
         project_id=project.id,
         edit_session_id=edit.id,
         expected_timeline_version=edit.version,
     )
-    assert second.preview_fingerprint == first.preview_fingerprint
+    assert second.preparation_fingerprint == first.preparation_fingerprint
 
 
 async def test_prepare_authorizes_each_command_and_preview_does_not(
     session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from app.production.command_models import ProductionCommandAuthorization
-    from app.production.final_film import prepare_formal_tail, preview_formal_tail
+    from app.production.final_film import preview_formal_tail
     from sqlalchemy import func
 
     project, user, edit, _shots, _videos = await _seed_renderable_final_film(
@@ -1171,9 +1180,7 @@ async def test_prepare_authorizes_each_command_and_preview_does_not(
             (
                 await session.execute(
                     select(ProductionCommandAuthorization).where(
-                        ProductionCommandAuthorization.command_key.like(
-                            "final-film-prepare:%"
-                        )
+                        ProductionCommandAuthorization.command_key.like("final-film-prepare:%")
                     )
                 )
             ).scalars()
@@ -1188,7 +1195,7 @@ async def test_prepare_authorizes_each_command_and_preview_does_not(
     )
     assert await _grants() == []
 
-    prepared = await prepare_formal_tail(
+    prepared = await _confirm_and_prepare(
         session,
         project_id=project.id,
         edit_session_id=edit.id,
@@ -1202,3 +1209,41 @@ async def test_prepare_authorizes_each_command_and_preview_does_not(
     assert await session.scalar(
         select(func.count()).select_from(ProductionCommandAuthorization)
     ) == len(prepared.node_run_ids)
+
+
+async def _confirm_and_prepare(
+    session, *, project_id, edit_session_id, expected_timeline_version, actor_id
+):
+    from app.production.final_film import (
+        approve_preparation,
+        prepare_formal_tail,
+        preview_formal_tail,
+    )
+
+    scope = dict(
+        project_id=project_id,
+        edit_session_id=edit_session_id,
+        expected_timeline_version=expected_timeline_version,
+    )
+    preview = await preview_formal_tail(session, **scope)
+    keys = [item.operation_key for item in preview.operations]
+    ids = (
+        (
+            await approve_preparation(
+                session,
+                **scope,
+                actor_id=actor_id,
+                preparation_fingerprint=preview.preparation_fingerprint,
+                operation_keys=keys,
+            )
+        )
+        if keys
+        else []
+    )
+    return await prepare_formal_tail(
+        session,
+        **scope,
+        actor_id=actor_id,
+        preparation_fingerprint=preview.preparation_fingerprint,
+        command_authorization_ids=ids,
+    )

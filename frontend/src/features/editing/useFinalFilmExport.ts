@@ -8,6 +8,9 @@ import {
   fetchEditFinalFilms,
   fetchFinalFilmStatus,
   prepareFinalFilm,
+  approveFinalFilm,
+  previewFinalFilm,
+  type PreparationPreview,
   renderFinalFilm,
   type FinalFilmRead,
   type FinalFilmJobRead,
@@ -81,6 +84,8 @@ export function useFinalFilmExport({
   const [result, setResult] = useState<FinalFilmRead | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<"prepare" | "tail" | "render" | null>(null);
+  const [preview, setPreview] = useState<PreparationPreview | null>(null);
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [selectedHistory, setSelectedHistory] = useState<string | null>(null);
   const observation = useRef<AbortController | null>(null);
   const scope = useRef({ projectId, sessionId });
@@ -90,6 +95,8 @@ export function useFinalFilmExport({
     setError(null);
     setPending(null);
     setSelectedHistory(null);
+    setSelectedKeys([]);
+    setPreview(null);
     return () => {
       observation.current?.abort();
       observation.current = null;
@@ -119,7 +126,7 @@ export function useFinalFilmExport({
     setResult(null);
   };
 
-  async function exportFilm() {
+  async function exportFilm(confirmed = false) {
     if (dirty) {
       setError("时间线有未保存修改，请先保存后再导出成片。");
       return;
@@ -143,10 +150,44 @@ export function useFinalFilmExport({
       setError(null);
       setPending("prepare");
       // Writes are not cancelled/retried: their receipt may already be durable.
-      const prepared = await prepareFinalFilm(projectId, sessionId, exactVersion);
+      const plan = confirmed ? preview : await previewFinalFilm(projectId, sessionId, exactVersion);
+      if (
+        !current() ||
+        !plan ||
+        plan.project_id !== projectId ||
+        plan.edit_session_id !== sessionId ||
+        plan.timeline_version !== exactVersion
+      )
+        return;
+      if (!confirmed) {
+        setSelectedKeys([]);
+        setPreview(plan);
+        if (plan.operations.length || plan.blockers.length) return;
+      }
+      if (
+        plan.blockers.length ||
+        (confirmed && !plan.operations.every((op) => selectedKeys.includes(op.operation_key)))
+      )
+        return;
+      const grants = plan.operations.length
+        ? await approveFinalFilm(projectId, plan, selectedKeys)
+        : [];
+      if (!current()) return;
+      const prepared = await prepareFinalFilm(
+        projectId,
+        sessionId,
+        exactVersion,
+        plan.preparation_fingerprint,
+        grants,
+      );
+      setPreview(null);
       if (!current()) return;
       setPending("tail");
-      await waitForTail(projectId, prepared.node_run_ids, signal);
+      await waitForTail(
+        projectId,
+        [...new Set([...prepared.node_run_ids, ...plan.reuse.map((item) => item.node_run_id)])],
+        signal,
+      );
       if (!current()) return;
       if (!/^[a-f0-9]{64}$/.test(prepared.preparation_fingerprint)) {
         throw new Error("成片准备回执缺少素材版本，请确认前后端版本一致；不要重复生成。");
@@ -172,5 +213,21 @@ export function useFinalFilmExport({
       void client.invalidateQueries({ queryKey: historyKey });
     }
   }
-  return { filmHistory, displayedFilm, selectHistoryRun, exportFilm, pending, error };
+  return {
+    preparationPreview:
+      preview?.edit_session_id === sessionId &&
+      preview?.project_id === projectId &&
+      preview?.timeline_version === version &&
+      !dirty
+        ? preview
+        : null,
+    selectedKeys,
+    setSelectedKeys,
+    filmHistory,
+    displayedFilm,
+    selectHistoryRun,
+    exportFilm,
+    pending,
+    error,
+  };
 }

@@ -1018,12 +1018,29 @@ export async function installProfessionalMock(page: Page): Promise<ProfessionalM
       return json(route, []);
     }
 
+    if (
+      path === "/api/v1/projects/" + PROJECT_ID + "/final-film/prepare-preview" &&
+      method === "POST"
+    ) {
+      return json(route, {
+        project_id: PROJECT_ID,
+        edit_session_id: EDIT_SESSION_ID,
+        timeline_version: state.editing.session.version,
+        preparation_fingerprint: "a".repeat(64),
+        blockers: [],
+        reuse: [],
+        operations: [],
+        max_external_model_operations: 0,
+      });
+    }
     if (path === "/api/v1/projects/" + PROJECT_ID + "/final-film/prepare" && method === "POST") {
       assertExactJson(
         body,
         {
           edit_session_id: EDIT_SESSION_ID,
           expected_timeline_version: state.editing.session.version,
+          preparation_fingerprint: "a".repeat(64),
+          command_authorization_ids: [],
         },
         "Final Film prepare body",
       );

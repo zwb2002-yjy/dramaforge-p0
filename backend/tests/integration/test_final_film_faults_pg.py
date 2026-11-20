@@ -290,3 +290,65 @@ async def test_two_process_scoped_export_requests_share_one_run_and_completed_ar
     )
     artifact = await session.get(Artifact, completed.artifact_id)
     assert await store.get_size(object_key=artifact.object_key) == artifact.byte_size
+
+
+async def test_concurrent_prepare_confirmations_reuse_one_set_of_runs(pg_session):
+    from app.production.command_models import ProductionCommandAuthorization
+    from app.production.final_film import (
+        approve_preparation,
+        prepare_formal_tail,
+        preview_formal_tail,
+    )
+    from app.shared.errors import ConflictError
+
+    project, actor, edit, _, _ = await _seed_renderable_final_film(pg_session, canonical_graph=True)
+    await pg_session.commit()
+    scope = dict(
+        project_id=project.id, edit_session_id=edit.id, expected_timeline_version=edit.version
+    )
+    preview = await preview_formal_tail(pg_session, **scope)
+    keys = [op.operation_key for op in preview.operations]
+    assert keys
+    confirmation = dict(
+        **scope, actor_id=actor.id, preparation_fingerprint=preview.preparation_fingerprint
+    )
+    before = await pg_session.scalar(
+        select(func.count(NodeRun.id)).where(NodeRun.project_id == project.id)
+    )
+    with pytest.raises(ConflictError):
+        await prepare_formal_tail(pg_session, **confirmation, command_authorization_ids=[])
+    await pg_session.rollback()
+    factory = async_sessionmaker(pg_session.bind, expire_on_commit=False)
+
+    async def confirm():
+        async with factory() as session:
+            return await approve_preparation(session, **confirmation, operation_keys=keys)
+
+    ids, duplicate = await asyncio.gather(confirm(), confirm())
+    assert ids == duplicate
+
+    async def submit():
+        async with factory() as session:
+            return await prepare_formal_tail(session, **confirmation, command_authorization_ids=ids)
+
+    first, duplicate_receipt = await asyncio.gather(submit(), submit())
+    assert await confirm() == ids
+    assert first.node_run_ids == duplicate_receipt.node_run_ids
+    assert len(set(first.node_run_ids)) == len(keys)
+    assert await pg_session.scalar(
+        select(func.count(NodeRun.id)).where(NodeRun.project_id == scope["project_id"])
+    ) == before + len(keys)
+    assert await pg_session.scalar(
+        select(func.count(ProductionCommandAuthorization.id)).where(
+            ProductionCommandAuthorization.id.in_(ids),
+            ProductionCommandAuthorization.status == "accepted",
+        )
+    ) == len(keys)
+    assert (
+        await pg_session.scalar(
+            select(func.count(ProviderOperation.id)).where(
+                ProviderOperation.node_run_id.in_(first.node_run_ids)
+            )
+        )
+        == 0
+    )

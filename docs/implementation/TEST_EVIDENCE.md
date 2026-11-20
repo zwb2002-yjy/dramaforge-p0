@@ -186,6 +186,7 @@
 | EV178 | 编辑交付定向验证：质量镜像运行 test_editing_timeline_schema、test_render_plan、test_edit_session_render、test_export_snapshot、test_episode_delivery | 39 passed。SRT 导出绑定字幕产物，MP4 绑定视频，原渲染回执可跨时间线版本重放，正式调度所需 source_commit 已冻结。canonical、架构增量门、后端 Ruff 和 mypy（416 文件）通过。 | 本批为隔离验证。正式界面的语音授权风险按主合同 §8 登记，三类作品、目标机和完整 Full 仍待验收。 |
 | EV179 | 11 月 20 日本地业务历史只读核查，原卷只读挂载，两份临时 PostgreSQL 15 副本仅 Unix socket、network none、事务只读 on | 主库 head 20261113_0099。users、projects、provider_model_bindings、encrypted_provider_credentials、provider_connections、provider_connection_revisions、edit_sessions、exports、node_runs、provider_operations、production_command_authorizations 均 0。代理库 ProxyModelTable、CredentialsTable、SpendLogs、AuditLog 均 0。审计容器已移除。 | 未查询供应商账单或已清理环境。静态核查发现 Worker 端使用可变连接地址和凭据并直接送出语音，未绑定此次确认的目的地修订及项目发送资格，按 Owner 新风险暂停指令报告。未触发生成。 |
 | EV180 | 语音连接修订、目的地和发送前准入定向验证 | test_speech_runtime、test_voice_binding、test_project_egress、test_asset_commands、test_final_film_timeline、test_voice_config 合计 58 passed。正常 Mock 1 请求，连接地址漂移、策略改为 local_only、目的地新增修订、缺少连接修订均 0 请求。架构增量门、后端 Ruff、mypy 416 文件通过。 | 只验证隔离发送边界；逐命令用户确认、并发受理、完整 Full 和实际试用尚待验证。 |
+| EV181 | 成片预览→用户逐项确认→授权→受理与渲染 | 后端 test_final_film_timeline、test_final_film_api 28 passed。PG 双独立会话并发批准和受理得到同组 ID、同组 NodeRun，未传授权拒绝，重复确认回原 ID，新增任务数与预览一致，受理阶段 ProviderOperation 为 0。EditingWorkspace、EditingRecovery 共 44 passed；Chromium professional-edit 成片导出用例通过；后端 Ruff/mypy 与前端 typecheck/lint/UI 通过。 | Mock 发送端见 EV180。完整 Full 与 Windows 作品验收另行记录。 |
 
 
 
