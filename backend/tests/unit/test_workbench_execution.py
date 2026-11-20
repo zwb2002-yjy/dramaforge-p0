@@ -1333,6 +1333,31 @@ async def test_regenerated_candidate_gets_its_own_review_run(session: AsyncSessi
     assert newest.input_snapshot["upstream_node_run_id"] == str(second_media.id)
     assert newest.parent_run_id == first_review.id
 
+    # Complete both producers before the review worker reads its input.
+    from app.execution.artifact_inputs import _bind_review_input_artifacts
+
+    for media in (first_media, second_media):
+        result = Artifact(
+            project_id=project.id,
+            artifact_type="image",
+            storage_state="available",
+            object_key=f"fixture/{media.id}.png",
+            content_hash=media.id.hex * 2,
+            mime_type="image/png",
+            byte_size=128,
+            produced_by_run_id=media.id,
+        )
+        session.add(result)
+        await session.flush()
+        media.result_artifact_id = result.id
+        media.status = "completed"
+    await session.flush()
+    review_node = await session.get(GraphNode, first_review.graph_node_id)
+    assert review_node is not None
+    bound = await _bind_review_input_artifacts(session, run=first_review, node=review_node)
+    assert bound["upstream_node_run_id"] == str(first_media.id)
+    assert bound["upstream_artifact_id"] == str(first_media.result_artifact_id)
+
 
 @pytest.mark.asyncio
 async def test_ensure_stage_review_run_serves_a_candidate_without_evidence(
@@ -1633,6 +1658,30 @@ async def test_keyframe_dispatch_queues_the_review_that_the_formal_gate_requires
     assert review_run.status == "queued"
     assert review_run.input_snapshot["node_key"] == "identity_review"
     assert review_run.input_snapshot["shot_id"] == str(shot.id)
+
+    # The review waits for this producer even though an older image is available.
+    from app.execution.artifact_inputs import _bind_review_input_artifacts
+
+    with pytest.raises(ValidationAppError) as pending:
+        await _bind_review_input_artifacts(
+            session, run=review_run, node=materialized.nodes["identity_review"]
+        )
+    assert pending.value.details["code"] == "UPSTREAM_RUN_MISSING"
+    keyframe = Artifact(
+        project_id=project.id,
+        artifact_type="image",
+        storage_state="available",
+        object_key=f"fixture/{media_run.id}.png",
+        content_hash=media_run.id.hex * 2,
+        mime_type="image/png",
+        byte_size=128,
+        produced_by_run_id=media_run.id,
+    )
+    session.add(keyframe)
+    await session.flush()
+    media_run.result_artifact_id = keyframe.id
+    media_run.status = "completed"
+    await session.commit()
 
     # The Worker's own execution path completes the review and stores evidence.
     await execute_media_node_run(

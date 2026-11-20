@@ -194,6 +194,7 @@
 | EV186 | 真实三作品剧本→采用→分镜；隔离故事模型 Mock | institution/project-intent 4 passed（37.1s）：三类型空项目可先保存方向，中文样例从提案到明确采用前保持正式集数不变，采用后可进入对应场次。连续剧添加第二集保留第一集完整读模型；已有两集不能转为单集。脚本/提案/生成单测 39 passed，含多集草稿只建一个原文、分集按各自范围应用，Mock 故事模型收到已保存方向且收不到内部策略字段。Ruff/mypy、前端 typecheck/lint/UI 通过。 | 本轮未触发真实付费操作；三作品的正式媒体、剪辑交付及目标机最终验收另验。 |
 | EV187 | 剪辑工作台分集范围、保存与成片回执 | Chromium+隔离真实 API/PG，project-intent 4 passed（48.1s），覆盖三类作品、分集显式选择、创建/刷新、空会话禁导出。剪辑相关后端定向组 32 passed，成片/交付相关组 37 passed（组有重叠）。成片任务入队后改变会话范围仍交付至冻结的原集/版本/hash。前端 52 passed、typecheck/lint/UI，后端 Ruff/mypy 416 文件通过。 | 实机可操作的分集剪辑入口；本组浏览器样例尚无正式视频，未宣称已完成三作品媒体交付。 |
 | EV188 | 已保存分集剪辑经实际 Worker 导出 H.264/AAC 与对应 SRT | 34 个定向用例通过。test_saved_episode_cut_delivers_playable_mp4_and_matching_srt 通过，使用合成正式视频夹具，在 2 个 0.4s 片段上验证裁切、选定音轨与静音、整文件解码、音量和两条字幕。MP4 8284 B，SHA-256 3f60a64773e81cf61de2742b82c54bc40ffa79906f859810816c23b13fa7b230；SRT 91 B，时间线 0–400–800ms。文件在 tmp/goal-voice-contract/episode-media/verified/test_saved_episode_cut_deliver0。Ruff 与 mypy 416 文件通过。 | 实际 FFmpeg 与交付字节；合成素材和隔离数据，未作为三类作品创作质量或目标机整体验收。 |
+| EV189 | 单集合成候选：审片→正式选择→剪辑→两个可下载版本 | 76 个后端定向用例、Ruff/mypy、前端 typecheck/lint、3 个审片浏览器用例通过。真实试用栈中先选旧红色视频再选蓝色，候选对应的 Worker 检查后经界面明确通过与正式采用；替换到草稿前后原持久时间线保持，第二次显式 Save 得 v3。两个 Export 同集，回读历史后重新下载 v2/v3 均与各自哈希一致。FFmpeg 完整解码 H.264/AAC，两份 MP4 为 2914/2915 B（0.834s），SRT 为 0–800ms。第二次准备仅需本地合成，外部模型上限为 0。 | 样例位于 tmp/goal-voice-contract/reviewed-cut 与 revised-cut 的 MP4/SRT；试用项目为 de8d1ff6-e5ae-4990-bf38-2f87486bff3a。合成媒体有意预置于隔离实例，不代表真实作品质量、三作品或最终 Full 通过。 |
 
 
 

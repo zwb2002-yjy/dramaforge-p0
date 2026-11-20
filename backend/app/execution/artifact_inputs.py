@@ -61,20 +61,23 @@ async def _bind_review_input_artifacts(
             details={"code": "UPSTREAM_RUN_MISSING"},
         )
     shot_id = str((run.input_snapshot or {}).get("shot_id") or "")
-    candidates = list(
-        (
-            await session.execute(
-                select(NodeRun).where(
-                    NodeRun.project_id == run.project_id,
-                    NodeRun.graph_version_id == run.graph_version_id,
-                    NodeRun.graph_node_id == upstream_node.id,
-                    NodeRun.status.in_({"completed", "cached"}),
-                )
-            )
-        )
-        .scalars()
-        .all()
+    snapshot = dict(run.input_snapshot or {})
+    query = select(NodeRun).where(
+        NodeRun.project_id == run.project_id,
+        NodeRun.graph_version_id == run.graph_version_id,
+        NodeRun.graph_node_id == upstream_node.id,
+        NodeRun.status.in_({"completed", "cached", "completed_after_cancel"}),
     )
+    pinned_run_id = snapshot.get("upstream_node_run_id")
+    if pinned_run_id is not None:
+        try:
+            producer_id = UUID(str(pinned_run_id))
+        except ValueError as exc:
+            raise ValidationAppError(
+                "invalid review producer", details={"code": "UPSTREAM_RUN_MISSING"}
+            ) from exc
+        query = query.where(NodeRun.id == producer_id)
+    candidates = list(await session.scalars(query))
     source = next(
         (
             candidate
@@ -107,6 +110,12 @@ async def _bind_review_input_artifacts(
         raise ValidationAppError(
             f"successful {upstream_key} Artifact is missing",
             details={"code": "UPSTREAM_ARTIFACT_MISSING"},
+        )
+    pinned_artifact = snapshot.get("upstream_artifact_id")
+    if pinned_artifact is not None and str(artifact.id) != str(pinned_artifact):
+        raise ValidationAppError(
+            "review artifact differs from its frozen input",
+            details={"code": "UPSTREAM_ARTIFACT_MISMATCH"},
         )
     snapshot = {
         **(run.input_snapshot or {}),

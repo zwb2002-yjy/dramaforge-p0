@@ -1,7 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button, Field, Input, Alert } from "../../components/ui";
+import { fetchRunStatuses } from "../production/api";
+import { nodeRunStatusKind } from "../../lib/runLabels";
 import { queryKeys } from "../../lib/queryKeys";
 import { reviewBlockerLabel, reviewMachineStatusLabel } from "./reviewLabels";
 import {
@@ -164,11 +166,21 @@ function ReviewDecisionSession({
           queryKey: queryKeys.shot.reviewWorkbench(projectId, shotId),
         }),
         queryClient.invalidateQueries({ queryKey: queryKeys.shot.list(projectId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.shot.workbench(projectId, shotId) }),
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.production.opencutManifest(projectId),
+        }),
         queryClient.invalidateQueries({ queryKey: queryKeys.scene.summaries(projectId) }),
       ]);
       await onChanged?.();
     },
     onError: (error: unknown) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.review.summary(projectId, shotId, artifactId, reviewKind, stage),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.shot.reviewWorkbench(projectId, shotId),
+      });
       setFeedback(
         `通过并设为正式失败：${error instanceof Error ? error.message : String(error)}。请重新读取状态后再操作，避免重复提交。`,
       );
@@ -178,7 +190,12 @@ function ReviewDecisionSession({
   // A candidate can exist before its review does; without evidence no judgement
   // can be recorded, so the page offers the zero-cost review of this candidate.
   const requestEvidence = useMutation({
-    mutationFn: () => createReviewEvidence(projectId, shotId, { artifact_id: artifactId, stage }),
+    mutationFn: (force: boolean) =>
+      createReviewEvidence(projectId, shotId, {
+        artifact_id: artifactId,
+        stage,
+        ...(force && { force: true }),
+      }),
     onSuccess: async () => {
       setFeedback("已提交本候选的审查证据生成，完成后即可判断。");
       await queryClient.invalidateQueries({
@@ -190,6 +207,38 @@ function ReviewDecisionSession({
       setFeedback(`生成审查证据失败：${error instanceof Error ? error.message : String(error)}`);
     },
   });
+
+  const evidenceId = requestEvidence.data?.review_node_run_id;
+  const awaitingEvidence = Boolean(evidenceId && !summary.data?.review_artifact_id);
+  const observation = useQuery({
+    queryKey: ["review-evidence-run", projectId, evidenceId],
+    queryFn: async ({ signal }) => (await fetchRunStatuses(projectId, [evidenceId!], signal))[0],
+    enabled: awaitingEvidence,
+    retry: false,
+    refetchInterval: (query) =>
+      !query.state.error && nodeRunStatusKind(query.state.data?.status) === "active" ? 1500 : false,
+  });
+  const observedStatus = nodeRunStatusKind(observation.data?.status);
+  const evidenceRunning =
+    awaitingEvidence &&
+    !observation.isError &&
+    (observation.isPending || observedStatus === "active");
+  useEffect(() => {
+    if (awaitingEvidence && observedStatus === "succeeded") {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.review.summary(projectId, shotId, artifactId, reviewKind, stage),
+      });
+    }
+  }, [
+    awaitingEvidence,
+    observedStatus,
+    queryClient,
+    projectId,
+    shotId,
+    artifactId,
+    reviewKind,
+    stage,
+  ]);
 
   const data: ReviewSummaryRead | undefined = summary.data;
   const blocker = reviewBlockerLabel(data?.blocked_reason ?? null);
@@ -305,10 +354,21 @@ function ReviewDecisionSession({
             <Button
               type="button"
               data-testid={`review-request-evidence-${reviewKind}`}
-              onClick={() => requestEvidence.mutate()}
-              disabled={requestEvidence.isPending}
+              onClick={() => {
+                if (observation.isError) void observation.refetch();
+                else requestEvidence.mutate(awaitingEvidence && observedStatus === "failed");
+              }}
+              disabled={requestEvidence.isPending || evidenceRunning}
             >
-              {requestEvidence.isPending ? "正在提交…" : "生成本候选的审查证据"}
+              {requestEvidence.isPending
+                ? "正在提交…"
+                : evidenceRunning
+                  ? "正在检查素材…"
+                  : observation.isError
+                    ? "重新读取检查进度"
+                    : observedStatus === "failed"
+                      ? "重新检查本候选"
+                      : "生成本候选的审查证据"}
             </Button>
           </div>
         </>

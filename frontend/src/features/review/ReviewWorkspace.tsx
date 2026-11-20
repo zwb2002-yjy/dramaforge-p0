@@ -139,13 +139,20 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
     enabled: Boolean(target?.repairRequestId),
   });
   const candidateStage = target?.stage === "formal_keyframe" ? "image_keyframe" : "video";
+  const candidates = parseShotCandidates(workbench.data?.candidates).filter(
+    isConfirmableShotCandidate,
+  );
+  const alternatives = candidates.filter(
+    (item) =>
+      item.artifactId !==
+      (item.stage === "image_keyframe"
+        ? shot?.formal_keyframe_artifact_id
+        : shot?.formal_video_artifact_id),
+  );
   const matchesCandidate =
     target &&
-    parseShotCandidates(workbench.data?.candidates).some(
-      (item) =>
-        item.artifactId === target.artifactId &&
-        item.stage === candidateStage &&
-        isConfirmableShotCandidate(item),
+    candidates.some(
+      (item) => item.artifactId === target.artifactId && item.stage === candidateStage,
     );
   const matchesFormal =
     target &&
@@ -270,6 +277,27 @@ function ReviewWorkspaceSession({ projectId, targetSearch = {} }: ReviewWorkspac
         <p>当前没有可审查的镜头。</p>
       ) : (
         <>
+          {!explicitTarget && alternatives.length > 0 && (
+            <section aria-label="可选择的审片候选">
+              <h2>候选素材</h2>
+              {alternatives.map((candidate, index) => (
+                <ActionLink
+                  key={candidate.artifactId}
+                  tone="default"
+                  to="/projects/$projectId/review"
+                  params={{ projectId }}
+                  search={{
+                    shotId: shot.id,
+                    artifactId: candidate.artifactId,
+                    stage: candidate.stage === "video" ? "formal_video" : "formal_keyframe",
+                    reviewKind: candidate.stage === "video" ? "video_drift" : "identity",
+                  }}
+                >
+                  审查{candidate.stage === "video" ? "视频" : "关键帧"}候选 {index + 1}
+                </ActionLink>
+              ))}
+            </section>
+          )}
           <Field>
             批注说明
             <Input

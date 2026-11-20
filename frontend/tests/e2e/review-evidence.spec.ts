@@ -19,6 +19,7 @@ async function installMock(
   state: { evidencePosts: number; summaryCalls: number; unmatched?: string[] },
 ) {
   state.unmatched = [];
+  let statusReads = 0;
   await page.addInitScript((workspaceId) => {
     sessionStorage.setItem("dramaforge.selected-workspace-id", workspaceId);
   }, WORKSPACE_ID);
@@ -68,9 +69,18 @@ async function installMock(
         201,
       );
     }
+    if (path.endsWith("/node-runs/status")) {
+      statusReads++;
+      return json(route, [
+        {
+          id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          status: statusReads < 2 ? "running" : "completed",
+        },
+      ]);
+    }
     if (path.endsWith("/review-summary") && method === "GET") {
       state.summaryCalls += 1;
-      const hasEvidence = state.evidencePosts > 0;
+      const hasEvidence = state.evidencePosts > 0 && statusReads >= 2;
       return json(route, {
         shot_id: SHOT_ID,
         artifact_id: ARTIFACT_ID,
@@ -146,9 +156,9 @@ async function installMock(
 test("a candidate without review evidence can obtain the review it needs", async ({ page }) => {
   const state = { evidencePosts: 0, summaryCalls: 0, unmatched: [] as string[] };
   await installMock(page, state);
-  await page.goto(
-    `/projects/${PROJECT_ID}/review?shotId=${SHOT_ID}&artifactId=${ARTIFACT_ID}&stage=formal_keyframe&reviewKind=identity`,
-  );
+  await page.goto(`/projects/${PROJECT_ID}/review`);
+  await page.getByRole("link", { name: "审查关键帧候选 1" }).click();
+  await expect(page).toHaveURL(new RegExp(ARTIFACT_ID));
 
   // Without evidence no judgement is possible, and the page says so.
   await expect(page.getByTestId("review-evidence-missing")).toBeVisible();

@@ -280,7 +280,8 @@ async def _queue_stage_review_run(
         # The pure review nodes validate the frozen identity evidence policy
         # before they run; a review run without it would fail closed.
         "identity_evidence_policy": identity_evidence_policy_snapshot(),
-        "upstream_artifact_id": None,
+        "upstream_artifact_id": str(run.result_artifact_id) if run.result_artifact_id else None,
+        "experiment_id": (run.input_snapshot or {}).get("experiment_id"),
         "upstream_node_run_id": str(run.id),
         "professional_unified": True,
         "execution_path": "unified-v1",
