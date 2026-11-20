@@ -58,7 +58,7 @@ from app.director.suggestion import (
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
 from app.shared.errors import AppError, ConflictError, NotFoundError, ValidationAppError
-from app.shared.vision import ArtifactVisionInput
+from app.shared.vision import SourceMediaInput
 
 router = APIRouter(tags=["director"], dependencies=[Depends(require_selected_workspace)])
 
@@ -226,7 +226,7 @@ class DirectorAgentThreadRef(BaseModel):
 
 class DirectorAgentMessageRead(BaseModel):
     context: AgentUIContext | None = None
-    media_parts: list[ArtifactVisionInput] = Field(default_factory=list)
+    media_parts: list[SourceMediaInput] = Field(default_factory=list)
     model_config = ConfigDict(extra="forbid")
 
     id: UUID

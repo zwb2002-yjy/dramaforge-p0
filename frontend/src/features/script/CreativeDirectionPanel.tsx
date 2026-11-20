@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useContext, useState } from "react";
 
-import { ApiError, artifactVisionPreviewUrl } from "../../lib/api";
+import { ApiError, artifactVisionPreviewUrl, fileVisionPreviewUrl } from "../../lib/api";
 import { Sparkles, Send } from "lucide-react";
 import { StudioSelection } from "../../components/workstation/StudioSelection";
 import { ActionLink, Button, Field, Textarea } from "../../components/ui";
@@ -26,7 +26,9 @@ type CreativeDirectionPanelProps = {
  * assistant message into the draft when the user explicitly adopts it.
  */
 export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPanelProps) {
-  const preview = useContext(StudioSelection)?.media;
+  const studio = useContext(StudioSelection);
+  const file = studio?.file;
+  const preview = file ? null : studio?.media;
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<{ text: string; baseVersion: number } | null>(null);
@@ -43,9 +45,11 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
   const [loadedPreview, setLoadedPreview] = useState("");
   const attached =
     attachment?.id === preview?.id && attachment?.hash === preview?.contentHash ? attachment : null;
-  const previewUrl = attached
-    ? artifactVisionPreviewUrl(projectId, attached.id, attached.hash, attached.time)
-    : "";
+  const previewUrl = file
+    ? fileVisionPreviewUrl(projectId, file.revisionId, file.fragmentId, file.hash)
+    : attached
+      ? artifactVisionPreviewUrl(projectId, attached.id, attached.hash, attached.time)
+      : "";
   useEffect(() => {
     setAttachment(null);
     setLoadedPreview("");
@@ -142,6 +146,16 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
         content: question.trim(),
         request_key: requestKey,
         intent: "conversation",
+        ...(file && {
+          media_parts: [
+            {
+              kind: "file" as const,
+              file_revision_id: file.revisionId,
+              source_fragment_id: file.fragmentId,
+              expected_content_hash: file.hash,
+            },
+          ],
+        }),
         ...(attached && {
           media_parts: [
             {
@@ -166,6 +180,7 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
     onSettled: () => setSubmitting(false),
     onSuccess: () => {
       setQuestion("");
+      studio?.showFile(null);
       setAttachment(null);
       setError(null);
       void queryClient.invalidateQueries({ queryKey: ["direction-thread", projectId] });
@@ -226,6 +241,21 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
             <p>{goal}</p>
           </article>
         )}
+        {file && (
+          <article className="studio-context-card">
+            <strong>{file.label}</strong>
+            <img
+              key={previewUrl}
+              src={previewUrl}
+              alt="将随消息发送的资料片段"
+              onLoad={() => setLoadedPreview(previewUrl)}
+              onError={() => setError("资料已变更或无法预览，请重新选择片段。")}
+            />
+            <Button tone="ghost" onClick={() => studio?.showFile(null)}>
+              移除附件
+            </Button>
+          </article>
+        )}
         {preview && (
           <article className="studio-context-card">
             <strong>当前讨论的画面</strong>
@@ -278,14 +308,24 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
                   key={index}
                   alt="发送给导演的画面"
                   loading="lazy"
-                  src={artifactVisionPreviewUrl(
-                    projectId,
-                    part.artifact_id,
-                    part.expected_content_hash,
-                    part.transform?.frame_time_ms ?? null,
-                    part.transform?.max_edge,
-                    part.transform?.crop,
-                  )}
+                  src={
+                    part.kind === "file"
+                      ? fileVisionPreviewUrl(
+                          projectId,
+                          part.file_revision_id,
+                          part.source_fragment_id,
+                          part.expected_content_hash,
+                          part.transform,
+                        )
+                      : artifactVisionPreviewUrl(
+                          projectId,
+                          part.artifact_id,
+                          part.expected_content_hash,
+                          part.transform?.frame_time_ms ?? null,
+                          part.transform?.max_edge,
+                          part.transform?.crop,
+                        )
+                  }
                 />
               ))}
             {item.context?.selected_refs
@@ -359,7 +399,7 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
           event.preventDefault();
           if (
             question.trim() &&
-            (!attached || loadedPreview === previewUrl) &&
+            (!previewUrl || loadedPreview === previewUrl) &&
             !send.isPending &&
             !awaitingReply
           )
@@ -379,7 +419,7 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
           type="submit"
           tone="primary"
           disabled={
-            (!!attached && loadedPreview !== previewUrl) ||
+            (!!previewUrl && loadedPreview !== previewUrl) ||
             !question.trim() ||
             send.isPending ||
             awaitingReply

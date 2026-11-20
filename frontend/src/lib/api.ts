@@ -183,6 +183,22 @@ export function artifactContentUrl(projectId: string, artifactId: string): strin
   return workspaceScopedUrl(`/api/v1/projects/${projectId}/artifacts/${artifactId}/content`);
 }
 
+export function fileVisionPreviewUrl(
+  projectId: string,
+  revisionId: string,
+  fragmentId: string,
+  hash: string,
+  transform?: { max_edge?: number; frame_time_ms?: number | null; crop?: number[] | null },
+): string {
+  const query = new URLSearchParams({ expected_content_hash: hash });
+  if (transform?.max_edge) query.set("max_edge", String(transform.max_edge));
+  if (transform?.frame_time_ms != null) query.set("frame_time_ms", String(transform.frame_time_ms));
+  transform?.crop?.forEach((n) => query.append("crop", String(n)));
+  return workspaceScopedUrl(
+    `/api/v1/projects/${projectId}/file-revisions/${revisionId}/fragments/${fragmentId}/vision-preview?${query}`,
+  );
+}
+
 export function artifactVisionPreviewUrl(
   projectId: string,
   artifactId: string,

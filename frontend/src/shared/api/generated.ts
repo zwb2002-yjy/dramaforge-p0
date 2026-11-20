@@ -1758,11 +1758,25 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Preview Director Frame
-         * @description Preview exactly the bytes the project studio can attach, with no model call.
-         */
+        /** Preview Director Frame */
         get: operations["preview_director_frame_api_v1_projects__project_id__artifacts__artifact_id__vision_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/file-revisions/{file_revision_id}/fragments/{source_fragment_id}/vision-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview File Fragment */
+        get: operations["preview_file_fragment_api_v1_projects__project_id__file_revisions__file_revision_id__fragments__source_fragment_id__vision_preview_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4071,7 +4085,7 @@ export interface components {
             master_run_id?: string | null;
             ui_context?: components["schemas"]["AgentUIContext"] | null;
             /** Media Parts */
-            media_parts?: components["schemas"]["ArtifactVisionInput"][];
+            media_parts?: (components["schemas"]["ArtifactVisionInput"] | components["schemas"]["FileVisionInput"])[];
             /** Expected Versions */
             expected_versions?: {
                 [key: string]: number;
@@ -4436,9 +4450,12 @@ export interface components {
         };
         /** ArtifactVisionInput */
         ArtifactVisionInput: {
+            /** Expected Content Hash */
+            expected_content_hash: string;
+            transform?: components["schemas"]["VisionTransform"];
             /**
-             * Kind
-             * @constant
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
              */
             kind: "artifact";
             /**
@@ -4446,9 +4463,6 @@ export interface components {
              * Format: uuid
              */
             artifact_id: string;
-            /** Expected Content Hash */
-            expected_content_hash: string;
-            transform?: components["schemas"]["VisionTransform"];
         };
         /** AssetAdoptionReceiptRead */
         AssetAdoptionReceiptRead: {
@@ -6094,7 +6108,7 @@ export interface components {
         DirectorAgentMessageRead: {
             context?: components["schemas"]["AgentUIContext"] | null;
             /** Media Parts */
-            media_parts?: components["schemas"]["ArtifactVisionInput"][];
+            media_parts?: (components["schemas"]["ArtifactVisionInput"] | components["schemas"]["FileVisionInput"])[];
             /**
              * Id
              * Format: uuid
@@ -7556,6 +7570,27 @@ export interface components {
              * Format: date-time
              */
             completed_at: string;
+        };
+        /** FileVisionInput */
+        FileVisionInput: {
+            /** Expected Content Hash */
+            expected_content_hash: string;
+            transform?: components["schemas"]["VisionTransform"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "file";
+            /**
+             * File Revision Id
+             * Format: uuid
+             */
+            file_revision_id: string;
+            /**
+             * Source Fragment Id
+             * Format: uuid
+             */
+            source_fragment_id: string;
         };
         /** FinalFilmApproveBody */
         FinalFilmApproveBody: {
@@ -17697,10 +17732,10 @@ export interface operations {
         parameters: {
             query: {
                 expected_content_hash: string;
+                workspace_id?: string | null;
                 frame_time_ms?: number | null;
                 max_edge?: number;
                 crop?: number[] | null;
-                workspace_id?: string | null;
             };
             header?: {
                 "X-Workspace-Id"?: string | null;
@@ -17708,6 +17743,47 @@ export interface operations {
             path: {
                 project_id: string;
                 artifact_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_file_fragment_api_v1_projects__project_id__file_revisions__file_revision_id__fragments__source_fragment_id__vision_preview_get: {
+        parameters: {
+            query: {
+                expected_content_hash: string;
+                workspace_id?: string | null;
+                frame_time_ms?: number | null;
+                max_edge?: number;
+                crop?: number[] | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                file_revision_id: string;
+                source_fragment_id: string;
             };
             cookie?: {
                 dramaforge_session?: string | null;

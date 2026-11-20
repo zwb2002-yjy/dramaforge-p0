@@ -25,9 +25,21 @@ class VisionTransform(BaseModel):
         return self
 
 
-class ArtifactVisionInput(BaseModel):
+class _VisionInput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    kind: Literal["artifact"]
-    artifact_id: UUID
     expected_content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     transform: VisionTransform = Field(default_factory=VisionTransform)
+
+
+class ArtifactVisionInput(_VisionInput):
+    kind: Literal["artifact"]
+    artifact_id: UUID
+
+
+class FileVisionInput(_VisionInput):
+    kind: Literal["file"]
+    file_revision_id: UUID
+    source_fragment_id: UUID
+
+
+SourceMediaInput = Annotated[ArtifactVisionInput | FileVisionInput, Field(discriminator="kind")]

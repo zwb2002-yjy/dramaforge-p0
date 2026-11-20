@@ -1077,7 +1077,7 @@ cancel对远端任务的核对；这些不得据本节设计宣称完成。
 expected_versions（最多100项）、skill_ids（最多20，已选技能子集）、limits（只能收紧服务上限）；新增
 `intent:conversation|create_goal|continue_goal`（默认conversation），`master_run_id?:UUID`及`ui_context`。
 continue_goal必须带同项目/Thread可操作的MasterRun；create_goal不带已有run；conversation不创建Run。
-（intent 与 create_goal 已实施。项目工作台已支持 ui_context 的 shot、scene、asset、artifact 引用、同项目分集校验以及历史消息的 context 回读；工作台已接入项目私有 Artifact 的图片及 MP4 抽帧；文件片段与公共发布项待接线。）
+（intent 与 create_goal 已实施。项目工作台已支持 ui_context 的 shot、scene、asset、artifact 引用、同项目分集校验以及历史消息的 context 回读；工作台已接入项目私有 Artifact 的图片及 MP4 抽帧；文件修订的视觉片段已接入；公共发布项待接线。）
 `ui_context={episode_id?:UUID,selected_refs:ContextRef[]}`，最多20；ContextRef判别类型为
 `file_revision|source_fragment|research_revision|knowledge_reference|asset|asset_version|public_asset_link|scene|shot|artifact|proposal`，每项仅`kind,id`，
 请求不接受URL/正文替代引用、actor、owner、scope升级、授权对象或业务状态。
@@ -1095,6 +1095,9 @@ transform仅`{crop?:[x0,y0,x1,y1],frame_time_ms?:int>=0,max_edge?:int[1..1024]}`
 工作台当前以 `GET /projects/{p}/artifacts/{a}/vision-preview?expected_content_hash=…` 预览本次处理的 PNG。
 视频传 `frame_time_ms`；可选 `max_edge` 与四次 `crop` 查询项采用同一变换合同。接口核对项目归属、原件哈希及解码结果，
 不创建 Turn 或模型请求。项目对话历史按 Turn 返回 `media_parts` 中的源标识和变换，调用回执保存实际发送 PNG 的哈希及字节数。
+资料片段预览为 `GET /projects/{p}/file-revisions/{r}/fragments/{f}/vision-preview`，查询参数与项目画面预览相同。
+`expected_content_hash` 校验原件字节。服务端限定当前关联、当前修订与解析 attempt、不可变片段 ID，使用解析记录中的 PDF 页、图像帧或视频取样时间。
+OCR 只渲染指定行的像素区域；用户裁切在此区域内继续进行。资料页「来源与使用许可」通过现有 GET/PUT source-use 明确保存用途与依据。
 原始视频只能按已支持的本地采样步骤选固定帧，不将任意视频流塞入图像profile。原件不修改；精确证据入Invocation快照，
 公开Message只回安全媒体引用和处理摘要，不在日志/SSE重复base64。
 

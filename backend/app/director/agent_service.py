@@ -19,6 +19,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictInt,
+    TypeAdapter,
     ValidationError,
     field_validator,
     model_validator,
@@ -31,7 +32,7 @@ from app.assets.agent_read_service import AgentReadService
 from app.assets.from_artifact_service import read_media_shot_id, read_media_source
 from app.assets.models import Asset, Episode, Scene, Shot
 from app.assets.source_use import vision_source_revisions
-from app.assets.vision_media import VisionFrame, prepare_vision_frame, resolve_visual_artifact
+from app.assets.vision_media import VisionFrame, prepare_vision_frame, resolve_visual_source
 from app.contracts.agent import AgentMessage, AgentModelResponse, AgentToolCall
 from app.contracts.director_model_tools import ModelToolsPort
 from app.director.agent_audit import AgentToolAudit, public_summary
@@ -60,7 +61,7 @@ from app.director.turn_models import DirectorTurn
 from app.director.turn_service import TERMINAL_TURN_STATUSES
 from app.events.service import EventService
 from app.shared.errors import AppError, ConflictError, NotFoundError, ValidationAppError
-from app.shared.vision import MAX_VISION_BYTES, MAX_VISION_PARTS, ArtifactVisionInput
+from app.shared.vision import MAX_VISION_BYTES, MAX_VISION_PARTS, FileVisionInput, SourceMediaInput
 from app.storage.minio_store import get_object_store
 
 ACCEPTED_EVENT_TOPIC = "director.turn.accepted"
@@ -160,7 +161,7 @@ class AgentRequest(BaseModel):
     intent: Literal["conversation", "create_goal", "continue_goal"] = "conversation"
     master_run_id: UUID | None = None
     ui_context: AgentUIContext | None = None
-    media_parts: list[ArtifactVisionInput] = Field(
+    media_parts: list[SourceMediaInput] = Field(
         default_factory=list, max_length=MAX_VISION_PARTS
     )
     expected_versions: dict[str, StrictInt] = Field(default_factory=dict, max_length=100)
@@ -573,7 +574,9 @@ class DirectorAgentService:
                     ui = request.ui_context or AgentUIContext()
                     related = [r for r in ui.selected_refs if r.kind != "artifact"]
                     for part in request.media_parts:
-                        await resolve_visual_artifact(session, self.project_id, part)
+                        await resolve_visual_source(session, self.project_id, part)
+                        if isinstance(part, FileVisionInput):
+                            continue
                         scoped = AgentUIContext(
                             episode_id=ui.episode_id,
                             selected_refs=[
@@ -602,7 +605,12 @@ class DirectorAgentService:
                         "source_revisions": await vision_source_revisions(
                             session,
                             project_id=self.project_id,
-                            artifact_ids=[part.artifact_id for part in request.media_parts],
+                            artifact_ids=[
+                                p.artifact_id for p in request.media_parts if p.kind == "artifact"
+                            ],
+                            file_revision_ids=tuple(
+                                p.file_revision_id for p in request.media_parts if p.kind == "file"
+                            ),
                         ),
                     }
                 except AppError as exc:
@@ -770,12 +778,14 @@ class DirectorAgentService:
             async with self._db() as session:
                 await self._guard(session, turn_id, token)
 
-        prepared: list[tuple[ArtifactVisionInput, VisionFrame]] = []
+        prepared: list[tuple[SourceMediaInput, VisionFrame]] = []
 
         async def call_model(values: list[AgentMessage], step: int) -> AgentModelResponse:
             if isinstance(vision, dict) and not prepared:
                 try:
-                    parts = [ArtifactVisionInput.model_validate(v) for v in vision["parts"]]
+                    parts: list[SourceMediaInput] = TypeAdapter(
+                        list[SourceMediaInput]
+                    ).validate_python(vision["parts"])
                     async with self._db() as session:
                         turn = await self._guard(session, turn_id, token)
                         project = await self._reader(session).project()
@@ -787,7 +797,7 @@ class DirectorAgentService:
                         )
                         await self._check_vision(session, parts, vision, decision.evidence())
                         sources = [
-                            await resolve_visual_artifact(session, self.project_id, part)
+                            await resolve_visual_source(session, self.project_id, part)
                             for part in parts
                         ]
                     total = 0
@@ -1102,13 +1112,19 @@ class DirectorAgentService:
             }
 
     async def _check_vision(
-        self, session: AsyncSession, parts: list[ArtifactVisionInput],
-        frozen: dict[str, Any], egress: dict[str, object],
+        self,
+        session: AsyncSession,
+        parts: list[SourceMediaInput],
+        frozen: dict[str, Any],
+        egress: dict[str, object],
     ) -> None:
         if egress != frozen["egress"] or egress["decision"] != "allowed":
             raise AgentHalt("VISION_PERMISSION_CHANGED")
         revisions = await vision_source_revisions(
-            session, project_id=self.project_id, artifact_ids=[p.artifact_id for p in parts]
+            session,
+            project_id=self.project_id,
+            artifact_ids=[p.artifact_id for p in parts if p.kind == "artifact"],
+            file_revision_ids=tuple(p.file_revision_id for p in parts if p.kind == "file"),
         )
         if revisions != frozen["source_revisions"]:
             raise AgentHalt("VISION_PERMISSION_CHANGED")
@@ -1123,7 +1139,7 @@ class DirectorAgentService:
         step: int,
         *,
         context_evidence: AgentContext | None = None,
-        prepared: list[tuple[ArtifactVisionInput, VisionFrame]] | None = None,
+        prepared: list[tuple[SourceMediaInput, VisionFrame]] | None = None,
     ) -> AgentModelResponse:
         async with self._db() as session:
             turn = await self._guard(session, turn_id, token)
@@ -1148,7 +1164,7 @@ class DirectorAgentService:
                 )
                 if prepared:
                     for part, _frame in prepared:
-                        await resolve_visual_artifact(session, self.project_id, part, lock=True)
+                        await resolve_visual_source(session, self.project_id, part, lock=True)
                     frozen = turn.intent_snapshot.get("vision")
                     if not isinstance(frozen, dict):
                         raise AgentHalt("VISION_PERMISSION_CHANGED")

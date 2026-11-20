@@ -127,3 +127,23 @@ export async function unlinkSource(
 export function sourceOriginalUrl(projectId: string, revisionId: string): string {
   return `/api/v1/projects/${projectId}/file-revisions/${revisionId}/original`;
 }
+export type SourceUseRead = components["schemas"]["SourceUseRead"];
+export type SourceUseWrite = components["schemas"]["SourceUseWrite"];
+export type SourceUseReceipt = components["schemas"]["SourceUseReceipt"];
+
+export function readFileUse(projectId: string, revisionId: string): Promise<SourceUseRead> {
+  return apiGet(`/api/v1/projects/${projectId}/file-revisions/${revisionId}/source-use`);
+}
+
+export async function saveFileUse(
+  projectId: string,
+  revisionId: string,
+  body: SourceUseWrite,
+): Promise<SourceUseReceipt> {
+  return apiSend(
+    "PUT",
+    `/api/v1/projects/${projectId}/file-revisions/${revisionId}/source-use`,
+    body,
+    await fetchCsrf(),
+  );
+}

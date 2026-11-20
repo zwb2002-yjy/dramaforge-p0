@@ -27,7 +27,7 @@ import {
 } from "../../lib/navigationPreferences";
 import { queryKeys } from "../../lib/queryKeys";
 import { ContextNavigation } from "./ContextNavigation";
-import { StudioSelection, type StudioMedia } from "./StudioSelection";
+import { StudioSelection, type StudioFile, type StudioMedia } from "./StudioSelection";
 import { Disclosure, Button, Card, Alert } from "../ui";
 import {
   ProjectNavigationContext,
@@ -168,6 +168,15 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
     [projectId],
   );
   const media = selectedMedia?.project === projectId ? (selectedMedia?.media ?? null) : null;
+  const [selectedFile, setSelectedFile] = useState<{
+    project: string | null;
+    file: StudioFile | null;
+  } | null>(null);
+  const showFile = useCallback(
+    (file: StudioFile | null) => setSelectedFile({ project: projectId, file }),
+    [projectId],
+  );
+  const file = selectedFile?.project === projectId ? selectedFile.file : null;
   const hasContext = primary !== "projects";
   const drawerWidth = primary === "project" ? 800 : 1100;
   const [narrow, setNarrow] = useState(() => window.innerWidth < drawerWidth);
@@ -572,7 +581,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
             </Link>
           </nav>
         )}
-        <StudioSelection.Provider value={{ media, show }}>
+        <StudioSelection.Provider value={{ media, show, file, showFile }}>
           <ProjectNavigationContext.Provider
             value={
               primary === "project"

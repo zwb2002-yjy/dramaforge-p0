@@ -1001,7 +1001,10 @@ async def test_real_auth_csrf_and_selected_workspace_block_agent_before_transpor
 
 
 @pytest.mark.parametrize("http_agent", ["chat_tools_vision_v1"], indirect=True)
-async def test_project_vision_preview_and_worker_use_identical_pixels(http_agent, monkeypatch):
+@pytest.mark.parametrize("case", ["artifact", "file", "reparsed", "withdrawn"])
+async def test_project_vision_preview_and_worker_use_identical_pixels(
+    http_agent, monkeypatch, case
+):
     import base64
     import hashlib
     import io
@@ -1075,22 +1078,56 @@ async def test_project_vision_preview_and_worker_use_identical_pixels(http_agent
     assert thread.status_code == 201, thread.text
     tid = thread.json()["id"]
     artifact = f"/api/v1/projects/{agent.project_id}/artifacts/{media_id}"
+    part = {
+        "kind": "artifact",
+        "artifact_id": media_id,
+        "expected_content_hash": stored.content_hash,
+    }
+    preview_path = artifact + "/vision-preview"
+    if case != "artifact":
+        from app.assets.project_files import ProjectFileService
+        from app.shared.db import set_rls_context
+
+        uploaded = await agent.client.post(
+            f"/api/v1/projects/{agent.project_id}/files",
+            params={"filename": "灯会.png", "request_key": "image-fixture"},
+            headers={**agent.headers, "Content-Type": "image/png"},
+            content=buf.getvalue(),
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        rev = UUID(uploaded.json()["revision_id"])
+        with Session(agent.database.engine) as db:
+            owner_id = db.get(Workspace, agent.workspace_id).owner_user_id
+        async with agent.factory() as session:
+            await set_rls_context(
+                session,
+                user_id=owner_id,
+                workspace_id=agent.workspace_id,
+                project_id=agent.project_id,
+            )
+            session.info["selected_workspace_id"] = agent.workspace_id
+            actor = await session.get(User, owner_id)
+            files = ProjectFileService(
+                session, actor=actor, project_id=agent.project_id, store=store
+            )
+            parsed = await files.extract(rev)
+            frags, _ = await files.list_fragments(parsed.current_extraction_id)
+            fragment = next(f for f in frags if f.extraction_method == "visual_input")
+            await session.commit()
+        artifact = f"/api/v1/projects/{agent.project_id}/file-revisions/{rev}"
+        preview_path = artifact + f"/fragments/{fragment.id}/vision-preview"
+        part = {
+            "kind": "file",
+            "file_revision_id": str(rev),
+            "source_fragment_id": str(fragment.id),
+            "expected_content_hash": stored.content_hash,
+        }
     preview = await agent.client.get(
-        artifact + "/vision-preview", params={"expected_content_hash": stored.content_hash}
+        preview_path, params={"expected_content_hash": stored.content_hash}
     )
     assert preview.status_code == 200, preview.text[:180] if preview.status_code != 200 else ""
     assert Image.open(io.BytesIO(preview.content)).size == (1024, 512)
-    body = {
-        "content": "Inspect this picture",
-        "request_key": "vision-one",
-        "media_parts": [
-            {
-                "kind": "artifact",
-                "artifact_id": media_id,
-                "expected_content_hash": stored.content_hash,
-            }
-        ],
-    }
+    body = {"content": "Inspect this picture", "request_key": "vision-one", "media_parts": [part]}
     refused = await agent.client.post(
         f"{agent.threads_path}/{tid}/messages", headers=agent.headers, json=body
     )
@@ -1109,7 +1146,62 @@ async def test_project_vision_preview_and_worker_use_identical_pixels(http_agent
     assert grant.status_code in (200, 201), grant.text
     accepted = await _accept(agent, tid, body)
     assert not agent.chat.requests
+    if case == "reparsed":
+        from app.assets.project_files import current_processor_profile
+
+        async with agent.factory() as session:
+            await set_rls_context(
+                session,
+                user_id=owner_id,
+                workspace_id=agent.workspace_id,
+                project_id=agent.project_id,
+            )
+            session.info["selected_workspace_id"] = agent.workspace_id
+            actor = await session.get(User, owner_id)
+            files = ProjectFileService(
+                session, actor=actor, project_id=agent.project_id, store=store
+            )
+            item, revision = await files.read_revision(rev)
+            await files.accept_extraction(
+                rev,
+                action="reparse",
+                request_key="reparse-vision",
+                expected_file_version=item.version,
+                expected_attempt=revision.attempt,
+                expected_extraction_id=revision.current_extraction_id,
+                processor_profile_revision=current_processor_profile(),
+            )
+            await session.commit()
+        assert (
+            await agent.client.get(
+                preview_path, params={"expected_content_hash": stored.content_hash}
+            )
+        ).status_code == 404
+    if case == "withdrawn":
+        withdrawn = await agent.client.put(
+            artifact + "/source-use",
+            headers=agent.headers,
+            json={
+                "expected_version": grant.json()["result_version"],
+                "state": "revoked",
+                "allowed_uses": [],
+                "request_key": "withdraw",
+            },
+        )
+        assert withdrawn.status_code == 200, withdrawn.text
     result = await _execute(agent, accepted["turn_id"])
+    if case in {"withdrawn", "reparsed"}:
+        assert result["status"] == "failed" and not agent.chat.requests
+        with Session(agent.database.engine) as db:
+            assert (
+                db.scalar(
+                    select(func.count(DirectorInvocation.id)).where(
+                        DirectorInvocation.turn_id == UUID(accepted["turn_id"])
+                    )
+                )
+                == 0
+            )
+        return
     assert result["status"] == "completed", result
     assert len(agent.chat.requests) == 2
     for call in agent.chat.requests:

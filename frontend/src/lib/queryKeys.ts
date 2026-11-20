@@ -33,6 +33,8 @@ export const queryKeys = {
   source: {
     root: (projectId: string) => ["project-sources", projectId] as const,
     files: (projectId: string) => ["project-sources", projectId, "files"] as const,
+    use: (projectId: string, revisionId: string) =>
+      ["project-sources", projectId, "use", revisionId] as const,
     capabilities: (projectId: string) => ["project-sources", projectId, "capabilities"] as const,
     revision: (projectId: string, revisionId: string | null | undefined) =>
       ["project-sources", projectId, "revision", revisionId] as const,

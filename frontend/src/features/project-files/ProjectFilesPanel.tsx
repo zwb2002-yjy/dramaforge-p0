@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useContext, useEffect, useState } from "react";
 
 import {
   ActionLink,
@@ -11,6 +11,8 @@ import {
   PageHeader,
   Upload,
 } from "../../components/ui";
+import { FileUseEditor } from "./FileUseEditor";
+import { StudioSelection } from "../../components/workstation/StudioSelection";
 import { ApiError } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import {
@@ -131,6 +133,8 @@ export function ProjectFilesPanel({ projectId }: { projectId: string }) {
   });
   const [page, setPage] = useState<{ extraction: string; offset: number } | null>(null);
   const extractionId = revision.data?.extraction?.id ?? null;
+  const showFile = useContext(StudioSelection)?.showFile;
+  useEffect(() => () => showFile?.(null), [showFile, selected?.revision_id, extractionId]);
   const offset = page?.extraction === extractionId ? page.offset : 0;
   const fragments = useQuery({
     queryKey: queryKeys.source.fragments(projectId, extractionId, offset, ""),
@@ -307,6 +311,13 @@ export function ProjectFilesPanel({ projectId }: { projectId: string }) {
       {selected && (
         <Card aria-label="解析结果">
           <h3>{selected.filename} 的解析结果</h3>
+          {selected.source_available && (
+            <FileUseEditor
+              key={selected.revision_id}
+              projectId={projectId}
+              revisionId={selected.revision_id}
+            />
+          )}
           {revision.isLoading && <p role="status">正在读取解析状态…</p>}
           {revision.isError && (
             <Alert role="alert" type="error" showIcon description="无法读取解析结果，请重试。" />
@@ -347,6 +358,29 @@ export function ProjectFilesPanel({ projectId }: { projectId: string }) {
                         引用此段进行研究
                       </ActionLink>
                     )}
+                    {showFile &&
+                      selected.source_available &&
+                      fragment.source_available &&
+                      (fragment.locator_kind === "page_region" ||
+                        fragment.locator_kind === "image_region") && (
+                        <Button
+                          tone="ghost"
+                          onClick={() => {
+                            showFile({
+                              revisionId: selected.revision_id,
+                              fragmentId: fragment.id,
+                              hash: selected.content_hash,
+                              label: selected.filename + " · " + locatorText(fragment.locator),
+                            });
+                            const input = document.getElementById("project-director-message");
+                            if (!input?.getClientRects().length)
+                              document.getElementById("studio-chat-toggle")?.click();
+                            requestAnimationFrame(() => input?.focus());
+                          }}
+                        >
+                          附到导演对话
+                        </Button>
+                      )}
                     <span className="muted">
                       方法 {fragment.extraction_method} · 处理器 {fragment.processor_ref}
                       {(fragment.limitations ?? []).length > 0

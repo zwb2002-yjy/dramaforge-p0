@@ -36,6 +36,12 @@ from app.production.readiness import (
 from app.production.run_control import ProductionRunControl
 from app.production.workbench_execution import PlanStage
 from app.shared.errors import NotFoundError, ValidationAppError
+from app.shared.vision import (
+    ArtifactVisionInput,
+    FileVisionInput,
+    SourceMediaInput,
+    VisionTransform,
+)
 
 router = APIRouter(tags=["production"], dependencies=[Depends(require_selected_workspace)])
 
@@ -193,6 +199,34 @@ async def get_artifact_content(
     )
 
 
+def _vision_transform(
+    frame_time_ms: Annotated[int | None, Query(ge=0)] = None,
+    max_edge: Annotated[int, Query(ge=1, le=1024)] = 1024,
+    crop: Annotated[list[float] | None, Query(min_length=4, max_length=4)] = None,
+) -> VisionTransform:
+    try:
+        return VisionTransform.model_validate(
+            {"frame_time_ms": frame_time_ms, "crop": crop, "max_edge": max_edge}
+        )
+    except ValueError as exc:
+        raise ValidationAppError("取景范围无效") from exc
+
+
+async def _preview_visual(
+    project_id: UUID, user: CurrentUser, session: SessionDep, part: SourceMediaInput
+) -> Response:
+    from app.assets.vision_media import prepare_vision_frame, resolve_visual_source
+    from app.storage.minio_store import get_object_store
+
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    source = await resolve_visual_source(session, project_id, part)
+    await session.commit()
+    frame = await prepare_vision_frame(source, part, get_object_store())
+    return Response(
+        content=frame.png, media_type="image/png", headers={"Cache-Control": "private, no-store"}
+    )
+
+
 @router.get(
     "/projects/{project_id}/artifacts/{artifact_id}/vision-preview", response_class=Response
 )
@@ -202,33 +236,45 @@ async def preview_director_frame(
     user: CurrentUser,
     session: SessionDep,
     expected_content_hash: Annotated[str, Query(pattern=r"^[0-9a-f]{64}$")],
-    frame_time_ms: Annotated[int | None, Query(ge=0)] = None,
-    max_edge: Annotated[int, Query(ge=1, le=1024)] = 1024,
-    crop: Annotated[list[float] | None, Query(min_length=4, max_length=4)] = None,
+    transform: Annotated[VisionTransform, Depends(_vision_transform)],
 ) -> Response:
-    """Preview exactly the bytes the project studio can attach, with no model call."""
-    from app.assets.vision_media import prepare_vision_frame, resolve_visual_artifact
-    from app.shared.vision import ArtifactVisionInput, VisionTransform
-    from app.storage.minio_store import get_object_store
-
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    try:
-        transform = VisionTransform.model_validate(
-            {"frame_time_ms": frame_time_ms, "crop": crop, "max_edge": max_edge}
-        )
-    except ValueError as exc:
-        raise ValidationAppError("取景范围无效") from exc
-    part = ArtifactVisionInput(
-        kind="artifact",
-        artifact_id=artifact_id,
-        expected_content_hash=expected_content_hash,
-        transform=transform,
+    return await _preview_visual(
+        project_id,
+        user,
+        session,
+        ArtifactVisionInput(
+            kind="artifact",
+            artifact_id=artifact_id,
+            expected_content_hash=expected_content_hash,
+            transform=transform,
+        ),
     )
-    source = await resolve_visual_artifact(session, project_id, part)
-    await session.commit()
-    frame = await prepare_vision_frame(source, part, get_object_store())
-    return Response(
-        content=frame.png, media_type="image/png", headers={"Cache-Control": "private, no-store"}
+
+
+@router.get(
+    "/projects/{project_id}/file-revisions/{file_revision_id}/fragments/{source_fragment_id}/vision-preview",
+    response_class=Response,
+)
+async def preview_file_fragment(
+    project_id: UUID,
+    file_revision_id: UUID,
+    source_fragment_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    expected_content_hash: Annotated[str, Query(pattern=r"^[0-9a-f]{64}$")],
+    transform: Annotated[VisionTransform, Depends(_vision_transform)],
+) -> Response:
+    return await _preview_visual(
+        project_id,
+        user,
+        session,
+        FileVisionInput(
+            kind="file",
+            file_revision_id=file_revision_id,
+            source_fragment_id=source_fragment_id,
+            expected_content_hash=expected_content_hash,
+            transform=transform,
+        ),
     )
 
 

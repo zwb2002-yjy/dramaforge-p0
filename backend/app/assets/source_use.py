@@ -325,9 +325,30 @@ async def vision_source_revisions(
     *,
     project_id: UUID,
     artifact_ids: list[UUID],
+    file_revision_ids: tuple[UUID, ...] = (),
 ) -> list[str]:
     """Freeze current declared uses of every private source of every attachment."""
     revisions: set[str] = set()
+    if file_revision_ids:
+        rows = (
+            await session.execute(
+                select(SourceUseSubject.file_revision_id, SourceUseRevision)
+                .join(
+                    SourceUseRevision, SourceUseRevision.id == SourceUseSubject.current_revision_id
+                )
+                .where(
+                    SourceUseSubject.project_id == project_id,
+                    SourceUseRevision.project_id == project_id,
+                    SourceUseRevision.subject_id == SourceUseSubject.id,
+                    SourceUseSubject.file_revision_id.in_(file_revision_ids),
+                )
+            )
+        ).all()
+        if {file_id for file_id, _ in rows} != set(file_revision_ids) or any(
+            r.state != "declared" or "external_processing" not in r.allowed_uses for _, r in rows
+        ):
+            raise _vision_denied()
+        revisions.update(str(r.id) for _, r in rows)
     for root in artifact_ids:
         seen: set[UUID] = set()
         frontier = {root}
