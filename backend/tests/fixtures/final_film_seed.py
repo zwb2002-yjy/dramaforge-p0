@@ -64,7 +64,11 @@ async def _seed_voice_binding(session: AsyncSession, project: Project, user: Use
 
     from app.providers.catalog_models import ModelCatalogEntry
     from app.providers.model_profiles.orm import ProductionModelProfile
-    from app.providers.models import ProviderConnection, ProviderModelBinding
+    from app.providers.models import (
+        ProviderConnection,
+        ProviderConnectionRevision,
+        ProviderModelBinding,
+    )
     from app.security.models import EncryptedProviderCredential
 
     credential = EncryptedProviderCredential(
@@ -90,6 +94,12 @@ async def _seed_voice_binding(session: AsyncSession, project: Project, user: Use
         updated_by=user.id,
     )
     session.add(connection)
+    await session.flush()
+    session.add(ProviderConnectionRevision(
+        connection_id=connection.id, revision_no=1, provider_type=connection.provider_type,
+        base_url=connection.base_url, protocol_profile=connection.protocol_profile,
+        credential_revision_id=credential.id,
+    ))
     await session.flush()
     # Catalog entries are global and unique per revision; PG integration tests
     # share one database, so reuse the row when another test already seeded it.

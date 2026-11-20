@@ -71,7 +71,7 @@ class EgressAdmission:
         self, project: Project,
     ) -> tuple[ProjectEgressPolicyRevision | None, int]:
         head = await self._session.scalar(
-            select(ProjectEgressPolicyHead).where(
+            select(ProjectEgressPolicyHead).execution_options(populate_existing=True).where(
                 ProjectEgressPolicyHead.project_id == project.id
             )
         )

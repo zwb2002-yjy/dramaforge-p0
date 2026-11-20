@@ -28,6 +28,9 @@ class VoiceExecutionSpec(BaseModel):
     model_id: str | None = None
     protocol_profile: str | None = None
     manifest_hash: str | None = None
+    connection_revision_id: UUID | None = None
+    destination_revision_id: UUID | None = None
+    policy_revision_id: UUID | None = None
 
 
 class VoiceOptionRead(BaseModel):

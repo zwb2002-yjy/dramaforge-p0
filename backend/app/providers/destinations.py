@@ -53,6 +53,18 @@ def _origin_of(url: str) -> str:
     return f"{parts.scheme}://{parts.hostname}:{port}"
 
 
+def destination_configuration_hash(
+    binding: ProviderModelBinding, connection: ProviderConnection
+) -> str:
+    return _hash({
+        "connection_id": str(connection.id),
+        "protocol": connection.protocol_profile,
+        "origin": _origin_of(connection.base_url),
+        "model_id": binding.model_id,
+        "purpose": binding.purpose,
+    })
+
+
 def _host_is_private(origin: str) -> bool:
     host = urlsplit(origin).hostname or ""
     try:
@@ -169,14 +181,7 @@ class DestinationService:
         origins = sorted({_registered_origin(value) for value in extra})
         binding, connection = await self._binding(binding_ref)
         origin = _origin_of(connection.base_url)
-        configuration = {
-            "connection_id": str(connection.id),
-            "protocol": connection.protocol_profile,
-            "origin": origin,
-            "model_id": binding.model_id,
-            "purpose": binding.purpose,
-        }
-        configuration_hash = _hash(configuration)
+        configuration_hash = destination_configuration_hash(binding, connection)
         if expected_configuration_hash != configuration_hash:
             raise ConflictError(
                 "提供方配置已变化，请重新读取目的地声明",

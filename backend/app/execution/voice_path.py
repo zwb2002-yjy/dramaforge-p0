@@ -23,7 +23,7 @@ from app.execution.models import GraphNode, NodeRun, ProviderOperation
 from app.providers.voice_config import voice_identity
 from app.providers.voice_runtime import get_voice_adapter
 from app.shared.db import set_node_run_rls_context
-from app.shared.errors import ProviderTaskCancelledError, ValidationAppError
+from app.shared.errors import AppError, ProviderTaskCancelledError, ValidationAppError
 from app.storage.minio_store import ObjectStore
 
 if TYPE_CHECKING:
@@ -50,7 +50,7 @@ async def execute_voice_node_run(
         )
     spec = VoiceExecutionSpec.model_validate(raw_spec)
     provider, model, path_version = voice_identity(spec)
-    adapter = await get_voice_adapter(spec, session=session)
+    await session.scalar(select(NodeRun.id).where(NodeRun.id == run.id).with_for_update())
     operation = await session.scalar(
         select(ProviderOperation)
         .where(ProviderOperation.node_run_id == run.id)
@@ -74,10 +74,13 @@ async def execute_voice_node_run(
         raise ValidationAppError(
             "VOICE_IDENTITY_MISMATCH: 已有配音请求与冻结身份不一致，拒绝重试。"
         )
+    if operation is not None and spec.engine == "voice_model":
+        raise ValidationAppError("VOICE_OPERATION_ALREADY_SUBMITTED")
     if operation is None:
         operation = ProviderOperation(
             node_run_id=run.id,
             attempt_no=run.attempt_no,
+            provider_connection_revision_id=spec.connection_revision_id,
             purpose="primary",
             operation_kind="voice.generate",
             actual_provider=provider,
@@ -119,6 +122,17 @@ async def execute_voice_node_run(
         await session.commit()
         raise ProviderTaskCancelledError()
 
+    try:
+        adapter = await get_voice_adapter(spec, session=session, project_id=run.project_id)
+    except AppError as exc:
+        operation.status = "rejected"
+        operation.error_code = exc.code
+        operation.completed_at = datetime.now(UTC)
+        operation.submitted_at = None
+        await _commit_terminal_failure(
+            session, run=run, error_code=exc.code, error_summary=exc.message
+        )
+        raise
     created = await adapter.create({"prompt": prompt, "kind": "voice"})
     remote = str(created.get("remote_task_id") or "")
     if str(created.get("status") or "failed") not in {"succeeded", "completed", "success"}:

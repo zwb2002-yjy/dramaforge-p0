@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import wave
 from typing import Any, Protocol
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,61 +44,75 @@ class SilentVoiceAdapter:
 async def get_voice_adapter(
     spec: VoiceExecutionSpec,
     *,
+    project_id: UUID | None = None,
     session: AsyncSession | None = None,
     transport: Any = None,
 ) -> VoiceAdapter:
     if spec.engine == "pcm-silence":
         return SilentVoiceAdapter()
     if spec.engine == "voice_model":
-        return await _voice_model_adapter(spec, session=session, transport=transport)
-    raise ProviderNotConfiguredError(
-        "历史配音引擎已停用；不会自动切换到其他引擎。"
-    )
+        return await _voice_model_adapter(
+            spec, project_id=project_id, session=session, transport=transport
+        )
+    raise ProviderNotConfiguredError("历史配音引擎已停用；不会自动切换到其他引擎。")
 
 
 async def _voice_model_adapter(
     spec: VoiceExecutionSpec,
     *,
+    project_id: UUID | None,
     session: AsyncSession | None,
     transport: Any,
 ) -> VoiceAdapter:
-    from app.providers.catalog_models import ModelCatalogEntry
-    from app.providers.connection_service import _resolve_plugin  # noqa: F401
-    from app.providers.models import ProviderConnection, ProviderModelBinding
+    from app.access.models import Project
+    from app.providers.models import ProviderConnectionRevision
     from app.providers.speech_runtime import build_voice_model_adapter
+    from app.providers.voice_binding import resolve_voice_binding
     from app.providers.workspace_credentials import configured_byok_keyring
     from app.security.credentials import read_credential_by_id
 
     if session is None or spec.binding_id is None:
-        raise ProviderNotConfiguredError(
-            "语音模型身份缺少绑定；不会自动切换到其他引擎。"
-        )
-    binding = await session.get(ProviderModelBinding, spec.binding_id)
-    if binding is None or not binding.enabled:
-        raise ProviderNotConfiguredError("语音模型绑定不可用。")
-    connection = await session.get(ProviderConnection, binding.connection_id)
-    if connection is None:
-        raise ProviderNotConfiguredError("语音模型连接不可用。")
-    entry = (
-        await session.get(ModelCatalogEntry, binding.catalog_entry_id)
-        if binding.catalog_entry_id is not None
-        else None
-    )
-    if entry is None or entry.media_kind != "voice":
-        raise ProviderNotConfiguredError("语音模型目录不可用。")
-    if connection.credential_id is None:
-        raise ProviderNotConfiguredError("语音模型凭据不可用。")
+        raise ProviderNotConfiguredError("语音模型身份缺少绑定；不会自动切换到其他引擎。")
+    if project_id is None or spec.connection_revision_id is None:
+        raise ProviderNotConfiguredError("语音任务缺少冻结的项目或连接修订，请重新确认。")
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise ProviderNotConfiguredError("语音项目不可用。")
+    current = await resolve_voice_binding(session, project=project)
+    if current.status != "configured" or (
+        current.binding_id,
+        current.connection_revision_id,
+        current.destination_revision_id,
+        current.policy_revision_id,
+        current.model_id,
+        current.provider_type,
+        current.manifest_hash,
+        current.protocol_profile,
+    ) != (
+        spec.binding_id,
+        spec.connection_revision_id,
+        spec.destination_revision_id,
+        spec.policy_revision_id,
+        spec.model_id,
+        spec.provider_type,
+        spec.manifest_hash,
+        spec.protocol_profile,
+    ):
+        raise ProviderNotConfiguredError(current.reason_code or "VOICE_DESTINATION_CHANGED")
+    revision = await session.get(ProviderConnectionRevision, spec.connection_revision_id)
+    if revision is None or revision.credential_revision_id is None:
+        raise ProviderNotConfiguredError("语音连接修订或凭据不可用。")
     api_key = await read_credential_by_id(
         session,
-        workspace_id=binding.workspace_id,
-        credential_id=connection.credential_id,
+        workspace_id=project.workspace_id,
+        credential_id=revision.credential_revision_id,
         keyring=configured_byok_keyring(),
     )
     if not api_key:
         raise ProviderNotConfiguredError("语音模型凭据不可用。")
     return build_voice_model_adapter(
         spec,
-        base_url=connection.base_url,
+        base_url=revision.base_url,
         api_key=api_key,
         transport=transport,
     )

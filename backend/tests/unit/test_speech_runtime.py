@@ -145,3 +145,67 @@ async def test_adapter_decodes_json_audio_and_rejects_http_errors():
     )
     with pytest.raises(SpeechProtocolError):
         await malformed.create({"text": "hello"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["unchanged", "connection", "policy", "destination", "unbound"])
+async def test_send_uses_confirmed_destination_and_current_policy(session, monkeypatch, change):
+    from app.access.models import Workspace
+    from app.access.project_data_policy import ProjectDataPolicy
+    from app.providers.destinations import DestinationService, destination_configuration_hash
+    from app.providers.models import ProviderConnection, ProviderModelBinding
+    from app.providers.voice_config import freeze_project_voice
+    from app.providers.voice_runtime import get_voice_adapter
+    from tests.fixtures.final_film_seed import _seed_renderable_final_film
+
+    project, user, *_ = await _seed_renderable_final_film(session)
+    spec = await freeze_project_voice(session, project_id=project.id, director_state={})
+    assert spec.connection_revision_id is not None
+    binding = await session.get(ProviderModelBinding, spec.binding_id)
+    connection = await session.get(ProviderConnection, binding.connection_id)
+    if change == "connection":
+        connection.base_url = "https://changed.invalid"
+    elif change == "policy":
+        await ProjectDataPolicy(session, actor=user, project=project).put(
+            expected_revision=0,
+            mode="local_only",
+            allowed_destination_revision_ids=[],
+            allowed_purposes=[],
+        )
+    elif change == "destination":
+        workspace = await session.get(Workspace, project.workspace_id)
+        await DestinationService(session, actor=user, workspace=workspace).declare(
+            binding_ref=str(binding.id),
+            expected_revision=0,
+            expected_configuration_hash=destination_configuration_hash(binding, connection),
+            processing_location="external",
+            purposes=["voice_generation"],
+        )
+    elif change == "unbound":
+        spec = spec.model_copy(update={"connection_revision_id": None})
+    await session.commit()
+    seen = []
+
+    async def credential(*args, **kwargs):
+        return "mock-key"
+
+    def upstream(request):
+        seen.append(request.url.host)
+        return httpx.Response(200, content=WAV, headers={"content-type": "audio/wav"})
+
+    monkeypatch.setattr("app.security.credentials.read_credential_by_id", credential)
+    monkeypatch.setattr("app.providers.workspace_credentials.configured_byok_keyring", lambda: {})
+
+    async def send():
+        adapter = await get_voice_adapter(
+            spec, project_id=project.id, session=session, transport=httpx.MockTransport(upstream)
+        )
+        await adapter.create({"text": "fixture"})
+
+    if change == "unchanged":
+        await send()
+        assert seen == ["speech.example"]
+    else:
+        with pytest.raises(ProviderNotConfiguredError):
+            await send()
+        assert seen == []
