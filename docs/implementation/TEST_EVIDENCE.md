@@ -189,6 +189,7 @@
 | EV181 | 成片预览→用户逐项确认→授权→受理与渲染 | 后端 test_final_film_timeline、test_final_film_api 28 passed。PG 双独立会话并发批准和受理得到同组 ID、同组 NodeRun，未传授权拒绝，重复确认回原 ID，新增任务数与预览一致，受理阶段 ProviderOperation 为 0。EditingWorkspace、EditingRecovery 共 44 passed；Chromium professional-edit 成片导出用例通过；后端 Ruff/mypy 与前端 typecheck/lint/UI 通过。 | Mock 发送端见 EV180。完整 Full 与 Windows 作品验收另行记录。 |
 | EV182 | 成片候选 6bea3579 首轮无过滤 Full 与定向诊断 | 架构、Provider authority、Ruff、mypy 通过。后端单测 2800 passed、1 failed（test_documented_alembic_head_matches_single_current_head）。按 0121–0123 现有迁移修正 DATA_MODEL 的 head，原测试 1 passed。 | 首轮 Full exit 1 并已回收本次容器；后续阶段未由该轮验证，需新候选。 |
 | EV183 | I10 隔离工具与对象 staging 实测 | 128 MiB 容器内生成 256 MiB 对象流，实测进程峰值 RSS 31296 KiB，落盘和逐流重读 SHA-256 一致。restic 0.19.1 官方发布清单签名由固定指纹校验，Linux amd64 归档与冻结 SHA-256 相符；断网临时仓库完成单次 backup、check --read-data、完整 ID 还原和字节比对。 | 对象 staging 和独立工具演练；尚未覆盖维护准入、真实多资源恢复或目标机重启。 |
+| EV184 | 隔离 PG 并发批准、受理及 Worker 重复投递贯通到计数 Mock HTTP | test_concurrent_prepare_confirmations_reuse_one_set_of_runs 通过。未确认的 prepare 被拒绝，两客户端并发确认与提交取得原授权及 NodeRun；两个独立 Worker 会话竞争同一语音任务，一个产出 WAV、一个在提交边界被拒，上游记录恰好一次，原 ProviderOperation 成功。 | 测试使用合成对白与 Mock 凭据，未调用真实模型。 |
 
 
 

@@ -292,7 +292,7 @@ async def test_two_process_scoped_export_requests_share_one_run_and_completed_ar
     assert await store.get_size(object_key=artifact.object_key) == artifact.byte_size
 
 
-async def test_concurrent_prepare_confirmations_reuse_one_set_of_runs(pg_session):
+async def test_concurrent_prepare_confirmations_reuse_one_set_of_runs(pg_session, monkeypatch):
     from app.production.command_models import ProductionCommandAuthorization
     from app.production.final_film import (
         approve_preparation,
@@ -352,3 +352,67 @@ async def test_concurrent_prepare_confirmations_reuse_one_set_of_runs(pg_session
         )
         == 0
     )
+
+    # Duplicate Worker deliveries must not turn the one accepted voice command
+    # into a second upstream request, including the window before its result commits.
+    import io
+    import wave
+
+    import httpx
+    from app.execution.voice_path import execute_voice_node_run
+    from app.providers.voice_runtime import get_voice_adapter
+    from app.shared.errors import ValidationAppError
+    from app.storage.minio_store import reset_object_store_for_tests
+
+    wav = io.BytesIO()
+    with wave.open(wav, "wb") as stream:
+        stream.setparams((1, 2, 24000, 0, "NONE", ""))
+        stream.writeframes(bytes(12000))
+    requests = []
+
+    def upstream(request):
+        requests.append(request)
+        return httpx.Response(200, content=wav.getvalue(), headers={"content-type": "audio/wav"})
+
+    async def fixture_key(*args, **kwargs):
+        return "fixture-key"
+
+    async def isolated_adapter(spec, **kwargs):
+        return await get_voice_adapter(spec, **kwargs, transport=httpx.MockTransport(upstream))
+
+    monkeypatch.setattr("app.providers.workspace_credentials.configured_byok_keyring", lambda: {})
+    monkeypatch.setattr("app.security.credentials.read_credential_by_id", fixture_key)
+    monkeypatch.setattr("app.execution.voice_path.get_voice_adapter", isolated_adapter)
+    voice_id = await pg_session.scalar(
+        select(NodeRun.id).where(
+            NodeRun.id.in_(first.node_run_ids),
+            NodeRun.input_snapshot["node_key"].as_string() == "voice",
+        )
+    )
+    assert voice_id is not None
+    store = reset_object_store_for_tests()
+
+    async def deliver():
+        async with factory() as session:
+            run = await session.get(NodeRun, voice_id)
+            node = await session.get(GraphNode, run.graph_node_id)
+            result = await execute_voice_node_run(
+                session,
+                run=run,
+                node=node,
+                snapshot=run.input_snapshot,
+                store=store,
+                prompt=run.input_snapshot["dialogue"],
+            )
+            await session.commit()
+            return result
+
+    outcomes = await asyncio.gather(deliver(), deliver(), return_exceptions=True)
+    rejected = [result for result in outcomes if isinstance(result, BaseException)]
+    assert len(rejected) == 1 and isinstance(rejected[0], ValidationAppError), outcomes
+    assert "VOICE_OPERATION_ALREADY_SUBMITTED" in str(rejected[0])
+    assert len(requests) == 1
+    original = await pg_session.scalar(
+        select(ProviderOperation).where(ProviderOperation.node_run_id == voice_id)
+    )
+    assert original.status == "succeeded"
