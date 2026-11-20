@@ -19,10 +19,7 @@ from sqlalchemy import select
 from app.access.models import User
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
-from app.delivery.episode_delivery import EpisodeDeliveryItem, EpisodeDeliveryService
-from app.delivery.export_service import ExportService
 from app.delivery.models import Export
-from app.delivery.render_execution import create_edit_session_render
 from app.director.editing_repair import (
     EditingRepairRoutingRead,
     EditingRepairRoutingRequest,
@@ -41,7 +38,10 @@ from app.director.turn_service import DirectorTurnService
 from app.editing.adapter import EditingAdapter
 from app.editing.models import EditSession
 from app.editing.timeline_builder import build_edit_session_for_project
+from app.production.edit_session_render import create_edit_session_render
+from app.production.episode_delivery import EpisodeDeliveryItem, EpisodeDeliveryService
 from app.production.final_film import TimelinePreviewRead, preview_timeline
+from app.production.session_exports import SessionExports
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["editing"], dependencies=[Depends(require_selected_workspace)])
@@ -411,7 +411,7 @@ async def create_edit_session_export(
         user=user,
         session=session,
     )
-    export, created = await ExportService(session).create_session_export(
+    export, created = await SessionExports(session).create_session_export(
         project_id=project_id,
         session_id=row.id,
         requested_by=user.id,
@@ -445,7 +445,7 @@ async def create_export_render(
 ) -> ExportRenderRead:
     """Queue the render of the export's frozen timeline version."""
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    export = await ExportService(session).get(project_id=project_id, export_id=export_id)
+    export = await SessionExports(session).get(project_id=project_id, export_id=export_id)
     if export.edit_session_id is None:
         raise ValidationAppError(
             "this export is not bound to an edit session",
@@ -479,10 +479,14 @@ async def download_export_content(
     from app.api.content_streaming import content_response
 
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    export, artifact = await ExportService(session).delivery_artifact(
+    export, artifact = await SessionExports(session).delivery_artifact(
         project_id=project_id, export_id=export_id
     )
-    suffix = artifact.mime_type.rsplit("/", 1)[-1] or "bin"
+    suffix = (
+        "srt"
+        if artifact.mime_type == "application/x-subrip"
+        else artifact.mime_type.rsplit("/", 1)[-1] or "bin"
+    )
     scope = export.episode_id or "project"
     filename = f"episode-{scope}-{export.id}.{suffix}"
     return await content_response(

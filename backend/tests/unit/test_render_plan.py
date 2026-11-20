@@ -5,7 +5,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-from app.delivery.render_plan import build_render_plan
+from app.production.edit_render_plan import build_render_plan
 from app.shared.errors import ValidationAppError
 
 

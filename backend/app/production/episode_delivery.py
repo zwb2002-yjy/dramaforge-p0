@@ -18,9 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
 from app.assets.models import Episode
-from app.delivery.export_service import ExportService
-from app.delivery.render_execution import create_edit_session_render
 from app.editing.models import EditSession
+from app.production.edit_session_render import create_edit_session_render
+from app.production.session_exports import SessionExports
 from app.shared.errors import AppError
 
 DeliveryStatus = Literal["planned", "blocked", "started"]
@@ -134,7 +134,7 @@ class EpisodeDeliveryService:
         A failing episode must not abort the batch: it is reported as blocked with
         the rejection code while the remaining episodes are still started.
         """
-        exports = ExportService(self._session)
+        exports = SessionExports(self._session)
         started: list[EpisodeDeliveryItem] = []
         for item in await self.plan(project_id=project.id):
             if item.status == "blocked" or item.session_id is None:
@@ -170,7 +170,7 @@ class EpisodeDeliveryService:
         *,
         project: Project,
         item: EpisodeDeliveryItem,
-        exports: ExportService,
+        exports: SessionExports,
         actor_id: UUID,
         format: str,
     ) -> EpisodeDeliveryItem:

@@ -64,6 +64,43 @@ _USABLE_STORAGE_STATES = frozenset({"available", "stored"})
 
 
 @dataclass(frozen=True)
+class MediaSource:
+    id: UUID
+    project_id: UUID
+    content_hash: str
+    artifact_type: str
+    storage_state: str
+
+
+async def read_media_source(
+    session: AsyncSession, *, artifact_id: UUID | None = None, asset_version_id: UUID | None = None
+) -> MediaSource | None:
+    """Read an existing artifact or the first available video of an adopted version."""
+    if (artifact_id is None) == (asset_version_id is None):
+        raise ValueError("supply exactly one media source identity")
+    query = select(Artifact).where(Artifact.deleted_at.is_(None))
+    if asset_version_id is not None:
+        query = (
+            query.join(AssetVersionReference, AssetVersionReference.artifact_id == Artifact.id)
+            .where(
+                AssetVersionReference.asset_version_id == asset_version_id,
+                Artifact.artifact_type == "video",
+                Artifact.storage_state == "available",
+            )
+            .order_by(AssetVersionReference.sort_order, Artifact.id)
+            .limit(1)
+        )
+    else:
+        query = query.where(Artifact.id == artifact_id)
+    row = await session.scalar(query)
+    if row is None:
+        return None
+    return MediaSource(
+        row.id, row.project_id, row.content_hash, row.artifact_type, row.storage_state
+    )
+
+
+@dataclass(frozen=True)
 class AssetFromArtifactRequest:
     kind: str
     name: str

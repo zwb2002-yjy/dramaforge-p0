@@ -5,9 +5,7 @@ exact document, then binds one item per clip to the frozen media artifact. A
 later edit never changes an existing export: it is a receipt of one version, and
 a repeated idempotency key returns the original export instead of re-binding it.
 
-Rendering MP4/SRT is deliberately not implemented here: that step needs a real
-render run and is gated by the contract's generation rules, so an export asking
-for it is refused rather than silently queued without a render.
+The render worker binds its completed media to the version receipt.
 """
 
 from __future__ import annotations
@@ -47,7 +45,7 @@ def _clip_source_artifact(clip: dict[str, Any]) -> UUID | None:
     return UUID(str(raw)) if isinstance(raw, str) else None
 
 
-class ExportService:
+class SessionExports:
     """Caller establishes project ownership first; commit stays with the caller."""
 
     def __init__(self, session: AsyncSession) -> None:
@@ -178,12 +176,19 @@ class ExportService:
                 "this export has no rendered artifact yet",
                 details={"code": "EXPORT_NOT_DELIVERABLE", "export_id": str(export.id)},
             )
-        artifact = await self._session.get(Artifact, export.result_artifact_id)
+        artifact_id = export.result_artifact_id
+        if export.format == "srt":
+            # Earlier receipts bound the video as primary and recorded its SRT here.
+            subtitle_id = (export.manifest or {}).get("subtitle_artifact_id")
+            if subtitle_id:
+                artifact_id = UUID(str(subtitle_id))
+        artifact = await self._session.get(Artifact, artifact_id)
         if (
             artifact is None
             or artifact.project_id != project_id
             or artifact.storage_state != "available"
             or artifact.deleted_at is not None
+            or (export.format == "srt" and artifact.mime_type != "application/x-subrip")
         ):
             raise NotFoundError("exported artifact not found")
         return export, artifact
@@ -199,6 +204,6 @@ def _clips_of(document: dict[str, Any]) -> list[dict[str, Any]]:
 __all__ = [
     "RENDER_FORMATS",
     "SNAPSHOT_FORMATS",
-    "ExportService",
+    "SessionExports",
     "timeline_hash",
 ]

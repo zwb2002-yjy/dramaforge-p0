@@ -6,10 +6,10 @@ from uuid import UUID
 
 import pytest
 from app.assets.models import Episode
-from app.delivery.episode_delivery import EpisodeDeliveryService
 from app.delivery.models import Export
 from app.editing.adapter import EditingAdapter
 from app.editing.timeline_builder import build_edit_session_for_project
+from app.production.episode_delivery import EpisodeDeliveryService
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.unit.test_edit_session_render import _exported_session

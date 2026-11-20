@@ -20,13 +20,15 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.delivery.export_service import timeline_hash
+from app.access.models import Project
+from app.config import get_settings
 from app.delivery.models import Export
-from app.delivery.render_plan import build_render_plan
 from app.editing.models import EditSession
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.execution.run_state import ExecuteNodeResult
+from app.production.edit_render_plan import build_render_plan
 from app.production.service import GraphService
+from app.production.session_exports import timeline_hash
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 EDIT_RENDER_TEMPLATE = "edit-session-render-v1"
@@ -49,8 +51,11 @@ async def create_edit_session_render(
     """Queue one render run for the export's frozen timeline version."""
     from app.production.models import ProductionGraph
 
+    # The render graph and attempt sequence are shared by the project's exports.
+    await session.scalar(select(Project.id).where(Project.id == project_id).with_for_update())
     export = await session.scalar(
         select(Export).where(Export.id == export_id, Export.project_id == project_id)
+        .execution_options(populate_existing=True)
     )
     if export is None:
         raise NotFoundError("export not found")
@@ -59,6 +64,11 @@ async def create_edit_session_render(
             "export does not belong to this edit session",
             details={"code": "RENDER_EXPORT_MISMATCH"},
         )
+    if export.render_node_run_id is not None:
+        prior = await session.get(NodeRun, export.render_node_run_id)
+        if prior is None or prior.project_id != project_id:
+            raise ConflictError("bound render run is unavailable")
+        return prior
     edit_session = await session.scalar(
         select(EditSession).where(
             EditSession.id == session_id, EditSession.project_id == project_id
@@ -89,7 +99,13 @@ async def create_edit_session_render(
         episode_id=edit_session.episode_id,
         document=document,
     )
+    if export.format == "srt" and not plan.srt_bytes:
+        raise ValidationAppError(
+            "the requested subtitle export contains no captions",
+            details={"code": "EXPORT_SUBTITLES_EMPTY"},
+        )
     snapshot: dict[str, Any] = {
+        "source_commit": get_settings().source_commit,
         "node_key": EDIT_RENDER_NODE_KEY,
         "edit_session_id": str(edit_session.id),
         "export_id": str(export.id),
@@ -305,6 +321,7 @@ async def execute_edit_session_render(
     )
     session.add(mp4)
     await session.flush()
+    deliverable = mp4
     subtitle_artifact_id: str | None = None
     if subtitle_stored is not None:
         subtitle = Artifact(
@@ -320,8 +337,15 @@ async def execute_edit_session_render(
         session.add(subtitle)
         await session.flush()
         subtitle_artifact_id = str(subtitle.id)
+        if export.format == "srt":
+            deliverable = subtitle
+    elif export.format == "srt":
+        raise ValidationAppError(
+            "the renderer produced no subtitles",
+            details={"code": "EXPORT_SUBTITLES_EMPTY"},
+        )
 
-    export.result_artifact_id = mp4.id
+    export.result_artifact_id = deliverable.id
     export.render_node_run_id = run.id
     export.status = "completed"
     export.completed_at = datetime.now(UTC)

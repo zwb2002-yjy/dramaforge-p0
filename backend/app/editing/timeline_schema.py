@@ -22,13 +22,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.assets.models import Asset, AssetVersion, AssetVersionReference, Scene, Shot
+from app.assets.from_artifact_service import MediaSource, read_media_source
+from app.assets.models import Asset, AssetVersion, Scene, Shot
 from app.assets.public_asset_models import (
     ProjectPublicAssetLink,
     PublicAssetPublication,
     PublicAssetPublicationItem,
 )
-from app.execution.models import Artifact
 from app.shared.errors import ValidationAppError
 
 TIMELINE_SCHEMA_V1 = 1
@@ -193,7 +193,7 @@ async def _verify_asset_version(
     project_id: UUID,
     source: ClipSource,
     index: int,
-) -> Artifact:
+) -> MediaSource:
     """An adopted asset version is usable only while its current formal media exists."""
     assert source.asset_id is not None and source.asset_version_id is not None
     version = await session.get(AssetVersion, source.asset_version_id)
@@ -215,18 +215,7 @@ async def _verify_asset_version(
             "clip asset version is not the current formal version",
             details={"code": "EDIT_SOURCE_NOT_ADOPTED", "clip_index": index},
         )
-    artifact = await session.scalar(
-        select(Artifact)
-        .join(AssetVersionReference, AssetVersionReference.artifact_id == Artifact.id)
-        .where(
-            AssetVersionReference.asset_version_id == version.id,
-            Artifact.artifact_type == "video",
-            Artifact.storage_state == "available",
-            Artifact.deleted_at.is_(None),
-        )
-        .order_by(AssetVersionReference.sort_order, Artifact.id)
-        .limit(1)
-    )
+    artifact = await read_media_source(session, asset_version_id=version.id)
     if artifact is None:
         raise ValidationAppError(
             "clip asset version has no playable media",
@@ -241,7 +230,7 @@ async def _verify_public_material(
     project_id: UUID,
     source: ClipSource,
     index: int,
-) -> Artifact:
+) -> MediaSource:
     """A public clip resolves only through this project's own fixed link."""
     assert (
         source.publication_id is not None
@@ -285,11 +274,10 @@ async def _verify_public_material(
             "clip public item does not belong to that publication",
             details={"code": "EDIT_SOURCE_NOT_ADOPTED", "clip_index": index},
         )
-    artifact = await session.get(Artifact, item.artifact_id)
+    artifact = await read_media_source(session, artifact_id=item.artifact_id)
     if (
         artifact is None
         or artifact.storage_state != "available"
-        or artifact.deleted_at is not None
         or artifact.artifact_type != "video"
     ):
         raise ValidationAppError(
@@ -306,13 +294,14 @@ async def _verify_source(
     source: ClipSource,
     index: int,
     episode_id: UUID | None,
-) -> Artifact | None:
+) -> MediaSource | None:
     """Verify one clip source and return the media artifact it resolves to."""
     if source.kind == "shot_formal":
         await _verify_shot_formal(
             session, project_id=project_id, source=source, index=index, episode_id=episode_id
         )
-        return await session.get(Artifact, source.artifact_id) if source.artifact_id else None
+        assert source.artifact_id is not None
+        return await read_media_source(session, artifact_id=source.artifact_id)
     if source.kind == "asset_version":
         return await _verify_asset_version(
             session, project_id=project_id, source=source, index=index
@@ -350,8 +339,8 @@ async def _verify_shot_formal(
             "clip source is not the shot's current formal video",
             details={"code": "EDIT_SOURCE_NOT_FORMAL", "clip_index": index},
         )
-    artifact = await session.get(Artifact, source.artifact_id)
-    if artifact is None or artifact.project_id != project_id or artifact.deleted_at is not None:
+    artifact = await read_media_source(session, artifact_id=source.artifact_id)
+    if artifact is None or artifact.project_id != project_id:
         raise ValidationAppError(
             "clip source artifact is unavailable",
             details={"code": "EDIT_SOURCE_NOT_FORMAL", "clip_index": index},
@@ -364,7 +353,7 @@ async def _observe_source(
     clip_id: str,
     source: ClipSource,
     session_version: int,
-    media_artifact: Artifact | None,
+    media_artifact: MediaSource | None,
 ) -> dict[str, Any]:
     """Server-side observation of what this clip actually points at now.
 
@@ -419,7 +408,7 @@ async def normalize_timeline_for_save(
     previous_by_clip = _previous_snapshots(previous_timeline)
     stored: list[dict[str, Any]] = []
     for index, clip in enumerate(document.clips):
-        media: Artifact | None = None
+        media: MediaSource | None = None
         for source in (clip.source, clip.audio_source):
             if source is None:
                 continue

@@ -5,9 +5,9 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-from app.delivery.export_service import ExportService, timeline_hash
 from app.editing.adapter import EditingAdapter
 from app.execution.models import Artifact
+from app.production.session_exports import SessionExports, timeline_hash
 from app.shared.errors import ValidationAppError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
@@ -39,7 +39,7 @@ async def test_export_freezes_the_timeline_version_and_clip_artifacts(
     session: AsyncSession,
 ) -> None:
     project, user, _shot_row, artifact, saved = await _saved_session(session)
-    service = ExportService(session)
+    service = SessionExports(session)
     export, created = await service.create_session_export(
         project_id=project.id,
         session_id=saved.id,
@@ -68,7 +68,7 @@ async def test_repeated_key_returns_the_original_export_after_an_edit(
     """Receipt priority: a later edit never rewrites an existing export."""
     project, user, _shot_row, artifact, saved = await _saved_session(session)
     key = f"export-{uuid4().hex}"
-    service = ExportService(session)
+    service = SessionExports(session)
     first, created = await service.create_session_export(
         project_id=project.id,
         session_id=saved.id,
@@ -176,7 +176,7 @@ async def test_delivery_download_serves_only_rendered_exports(session: AsyncSess
 
     store = reset_object_store_for_tests()
     project, user, _shot_row, _artifact, saved = await _saved_session(session)
-    service = ExportService(session)
+    service = SessionExports(session)
     export, _created = await service.create_session_export(
         project_id=project.id,
         session_id=saved.id,
@@ -264,7 +264,7 @@ async def test_delivery_download_rejects_another_projects_export(
     from app.shared.errors import ForbiddenError
 
     project, user, _shot_row, _artifact, saved = await _saved_session(session)
-    export, _created = await ExportService(session).create_session_export(
+    export, _created = await SessionExports(session).create_session_export(
         project_id=project.id,
         session_id=saved.id,
         requested_by=user.id,
@@ -292,7 +292,7 @@ async def test_media_format_export_stays_undeliverable_until_rendered(
     from app.api.v1.editing import download_export_content
 
     project, user, _shot_row, _artifact, saved = await _saved_session(session)
-    service = ExportService(session)
+    service = SessionExports(session)
     export, created = await service.create_session_export(
         project_id=project.id,
         session_id=saved.id,
@@ -330,7 +330,7 @@ async def test_unsupported_formats_and_unbound_clips_are_refused(
     session: AsyncSession,
 ) -> None:
     project, user, _shot_row, _artifact, saved = await _saved_session(session)
-    service = ExportService(session)
+    service = SessionExports(session)
 
     with pytest.raises(ValidationAppError) as unsupported:
         await service.create_session_export(

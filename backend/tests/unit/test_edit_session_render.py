@@ -5,15 +5,16 @@ from __future__ import annotations
 from uuid import UUID, uuid4
 
 import pytest
-from app.delivery.export_service import ExportService
+from app.config import get_settings
 from app.delivery.models import Export
-from app.delivery.render_execution import (
+from app.editing.adapter import EditingAdapter
+from app.execution.models import Artifact, NodeRun
+from app.production.edit_session_render import (
     create_edit_session_render,
     execute_edit_session_render,
 )
-from app.editing.adapter import EditingAdapter
-from app.execution.models import Artifact, NodeRun
 from app.production.service import GraphService
+from app.production.session_exports import SessionExports
 from app.shared.errors import ConflictError
 from app.storage.minio_store import reset_object_store_for_tests
 from sqlalchemy import select
@@ -23,7 +24,9 @@ from tests.unit.test_editing_timeline_schema import _clip, _shot
 MP4 = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isomclip-payload"
 
 
-async def _exported_session(session: AsyncSession, *, clips: int = 1):
+async def _exported_session(
+    session: AsyncSession, *, clips: int = 1, export_format: str = "timeline_json"
+):
     project, user, shot, artifact = await _shot(session)
     assert artifact is not None
     store = reset_object_store_for_tests()
@@ -45,10 +48,11 @@ async def _exported_session(session: AsyncSession, *, clips: int = 1):
         expected_session_version=1,
     )
     await session.commit()
-    export, _created = await ExportService(session).create_session_export(
+    export, _created = await SessionExports(session).create_session_export(
         project_id=project.id,
         session_id=saved.id,
         requested_by=user.id,
+        format=export_format,
         idempotency_key=f"export-{uuid4().hex}",
     )
     await session.commit()
@@ -56,10 +60,14 @@ async def _exported_session(session: AsyncSession, *, clips: int = 1):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("export_format", ["mp4", "srt"])
 async def test_render_freezes_the_version_and_delivers_mp4_and_srt(
     session: AsyncSession,
+    export_format: str,
 ) -> None:
-    project, user, _shot_row, _artifact, saved, export, store = await _exported_session(session)
+    project, user, _shot_row, _artifact, saved, export, store = await _exported_session(
+        session, export_format=export_format
+    )
     run = await create_edit_session_render(
         session,
         project_id=project.id,
@@ -69,6 +77,7 @@ async def test_render_freezes_the_version_and_delivers_mp4_and_srt(
     )
     await session.commit()
     snapshot = run.input_snapshot
+    assert snapshot["source_commit"] == get_settings().source_commit
     assert snapshot["timeline_version"] == saved.version
     assert snapshot["timeline_hash"] == export.timeline_hash
     assert snapshot["export_id"] == str(export.id)
@@ -91,13 +100,18 @@ async def test_render_freezes_the_version_and_delivers_mp4_and_srt(
 
     refreshed = await session.get(Export, export.id)
     assert refreshed is not None
-    assert refreshed.result_artifact_id == rendered.id
     assert refreshed.status == "completed"
     assert refreshed.render_node_run_id == run.id
     subtitle_id = refreshed.manifest["subtitle_artifact_id"]
     assert subtitle_id is not None
     subtitle = await session.get(Artifact, UUID(str(subtitle_id)))
     assert subtitle is not None and subtitle.mime_type == "application/x-subrip"
+    expected_id = subtitle.id if export_format == "srt" else rendered.id
+    assert refreshed.result_artifact_id == expected_id
+    _, delivered = await SessionExports(session).delivery_artifact(
+        project_id=project.id, export_id=export.id
+    )
+    assert delivered.id == expected_id
     srt = (await store.get_bytes(object_key=subtitle.object_key)).decode("utf-8")
     assert "1\n00:00:00,000 --> 00:00:05,000" in srt
 
@@ -108,6 +122,8 @@ async def test_dispatch_is_idempotent_per_frozen_snapshot(session: AsyncSession)
     first = await create_edit_session_render(
         session, project_id=project.id, session_id=saved.id, export_id=export.id, actor_id=user.id
     )
+    await session.commit()
+    saved.version += 1
     await session.commit()
     again = await create_edit_session_render(
         session, project_id=project.id, session_id=saved.id, export_id=export.id, actor_id=user.id

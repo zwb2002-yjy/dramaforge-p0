@@ -149,7 +149,7 @@ async def execute_media_node_run(
 
     obj_store = store or get_object_store()
     if node.node_key == "edit_session_render":
-        from app.delivery.render_execution import execute_edit_session_render
+        from app.production.edit_session_render import execute_edit_session_render
 
         return await execute_edit_session_render(
             session,
