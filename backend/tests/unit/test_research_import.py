@@ -9,6 +9,7 @@ import pytest
 from app.access.models import Project, User, Workspace
 from app.api.v1 import research as research_api
 from app.assets.project_files import ProjectFileService
+from app.assets.research_analysis import ResearchAnalysisService
 from app.assets.source_use import SourceUseService
 from app.director.research_import import ResearchImportService, ResearchRequest
 from app.director.turn_models import DirectorTurn
@@ -42,7 +43,22 @@ async def import_world(session):
     )
     await files.extract(revision.id)
     fragments, _total = await files.list_fragments(revision.current_extraction_id, limit=10)
+    await SourceUseService(session, actor=actor, project=project).declare(
+        file_revision_id=revision.id,
+        allowed_uses=["research", "external_processing"],
+        statement="合成资料",
+        request_key="declare",
+    )
+    preview = await ResearchAnalysisService(session, actor=actor, project_id=project.id).preview(
+        revision.id,
+        source_extraction_id=revision.current_extraction_id,
+        expected_file_version=1,
+        category_set=["summary", "person"],
+        target_results=[],
+        model_identity={"model_id": "text-model-1"},
+    )
     return {
+        "fingerprint": preview.preview_fingerprint,
         "session": session,
         "actor": actor,
         "project": project,
@@ -53,14 +69,14 @@ async def import_world(session):
     }
 
 
-def _request(world, *, key: str = "accept-1", fingerprint: str = "a" * 64) -> ResearchRequest:
+def _request(world, *, key: str = "accept-1", fingerprint: str | None = None) -> ResearchRequest:
     return ResearchRequest(
         file_revision_id=world["revision"].id,
         source_extraction_id=world["extraction_id"],
         categories=["summary", "person"],
         targets=[],
         model_identity={"model_id": "text-model-1"},
-        preview_fingerprint=fingerprint,
+        preview_fingerprint=fingerprint or world["fingerprint"],
         request_key=key,
     )
 
@@ -70,13 +86,13 @@ async def test_accept_creates_one_queued_research_turn(import_world):
     acceptance = await world["service"].accept(
         project=world["project"], actor=world["actor"], request=_request(world)
     )
-    assert acceptance.created is True and acceptance.accepted_revision == "a" * 64
+    assert acceptance.created is True and acceptance.accepted_revision == world["fingerprint"]
     session = world["session"]
     turn = await session.get(DirectorTurn, acceptance.turn_id)
     assert turn is not None
     assert turn.scope_type == "research_analysis"
     assert turn.status == "queued"
-    assert turn.input_versions["preview_fingerprint"] == "a" * 64
+    assert turn.input_versions["preview_fingerprint"] == world["fingerprint"]
     assert turn.input_versions["categories"] == ["summary", "person"]
     assert turn.input_versions["fragment_ids"] == [
         str(fragment.id) for fragment in world["fragments"]

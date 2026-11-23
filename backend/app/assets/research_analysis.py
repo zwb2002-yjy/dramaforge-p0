@@ -39,7 +39,7 @@ from app.assets.source_models import SourceExtraction, SourceFragment
 from app.assets.source_use import SourceUseService
 from app.shared.errors import AppError, NotFoundError, ValidationAppError
 
-PREVIEW_SCHEMA_VERSION = 1
+PREVIEW_SCHEMA_VERSION = 2
 PREVIEW_TTL = timedelta(minutes=15)
 # One structured call returns every requested category; the cap is not client-driven.
 MAX_MODEL_CALLS = 1
@@ -142,7 +142,7 @@ class ResearchAnalysisService:
         category_set: list[str],
         target_results: list[TargetResult],
         model_identity: dict[str, object] | None,
-        model_blocker: str | None,
+        model_blocker: str | None = None,
         requested_text_model_id: str | None = None,
     ) -> AnalysisPreview:
         project = await self._project()
@@ -173,6 +173,7 @@ class ResearchAnalysisService:
             extraction = await self.session.scalar(
                 select(SourceExtraction).where(
                     SourceExtraction.id == source_extraction_id,
+                    SourceExtraction.file_revision_id == revision.id,
                     SourceExtraction.project_id == self.project_id,
                 )
             )
@@ -208,7 +209,12 @@ class ResearchAnalysisService:
             project,
             purpose=ANALYSIS_EGRESS_PURPOSE,
             required_purposes=[ANALYSIS_EGRESS_PURPOSE],
-            processing_location="external",
+            destination_id=(
+                UUID(str(model_identity["destination_revision_id"]))
+                if model_identity and model_identity.get("destination_revision_id")
+                else None
+            ),
+            processing_location=str((model_identity or {}).get("processing_location") or "unknown"),
             source_use=source_use,
         )
         if not decision.allowed:
@@ -231,16 +237,7 @@ class ResearchAnalysisService:
             "target_results": targets,
             "model": model_identity,
             "source_use": source_use,
-            "egress": {
-                "allowed": decision.allowed,
-                "mode": decision.mode,
-                "reason_code": decision.reason_code,
-                "policy_revision_id": (
-                    str(decision.policy_revision_id)
-                    if decision.policy_revision_id is not None
-                    else None
-                ),
-            },
+            "egress": {"allowed": decision.allowed, **decision.evidence()},
         }
         fingerprint = hashlib.sha256(
             _canonical(
@@ -265,6 +262,51 @@ class ResearchAnalysisService:
             blockers=blockers,
             expires_at=datetime.now(UTC) + PREVIEW_TTL,
         )
+
+    async def recheck_send(
+        self,
+        *,
+        revision_id: UUID,
+        extraction_id: UUID,
+        categories: list[str],
+        targets: list[dict[str, object]],
+        model_identity: dict[str, object],
+        fingerprint: str,
+    ) -> dict[str, object]:
+        # All permission writers serialise on the project. Unlink and re-extraction
+        # additionally take the file or revision row. Hold these until the durable decision.
+        project = await self.session.scalar(
+            select(Project.id)
+            .where(Project.id == self.project_id, Project.deleted_at.is_(None))
+            .with_for_update()
+        )
+        if project is None:
+            raise NotFoundError("research project unavailable")
+        item, _ = await self._locked_revision(revision_id)
+        preview = await self.preview(
+            revision_id,
+            source_extraction_id=extraction_id,
+            expected_file_version=item.version,
+            category_set=categories,
+            target_results=[
+                TargetResult(
+                    result_id=UUID(str(row["result_id"])),
+                    base_revision_id=UUID(str(row["base_revision_id"]))
+                    if row.get("base_revision_id")
+                    else None,
+                )
+                for row in targets
+            ],
+            model_identity=model_identity,
+        )
+        if preview.blockers or preview.preview_fingerprint != fingerprint:
+            raise ValidationAppError(
+                "研究来源、用途或发送目标已改变，请重新预览",
+                details={"code": "RESEARCH_SEND_BASIS_CHANGED"},
+            )
+        evidence = preview.input_versions["egress"]
+        assert isinstance(evidence, dict)  # Constructed by AdmissionDecision.evidence().
+        return evidence
 
     async def _validated_targets(
         self, targets: list[TargetResult], categories: list[str]

@@ -70,6 +70,16 @@ async def execution(session):
 async def test_execute_publishes_typed_findings_and_candidates(execution, monkeypatch):
     world = execution
     session = world["session"]
+    preview = await ResearchAnalysisService(
+        session, actor=world["actor"], project_id=world["project"].id
+    ).preview(
+        world["revision"].id,
+        source_extraction_id=world["extraction_id"],
+        expected_file_version=1,
+        category_set=["summary", "person"],
+        target_results=[],
+        model_identity={"model_id": "text-model-1"},
+    )
     acceptance = await world["service"].accept(
         project=world["project"],
         actor=world["actor"],
@@ -79,7 +89,7 @@ async def test_execute_publishes_typed_findings_and_candidates(execution, monkey
             categories=["summary", "person"],
             targets=[],
             model_identity={"model_id": "text-model-1"},
-            preview_fingerprint="a" * 64,
+            preview_fingerprint=preview.preview_fingerprint,
             request_key="exec-accept-1",
         ),
     )

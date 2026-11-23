@@ -910,8 +910,8 @@ I4-02c已实施受理：`POST /projects/{p}/file-revisions/{r}/analyses`
 服务端按完整preview重算输入身份：指纹不符409 `RESEARCH_PREVIEW_DRIFT`；存在blockers 409
 `RESEARCH_BLOCKED`（details.blockers）；通过后把冻结输入写入一个`scope_type=research_analysis`的
 Director Turn（`input_versions`含extraction/类别/目标/模型身份/指纹/片段ID，`status=queued`），
-同request_key+同上下文回原Turn，异上下文拒绝。受理本身零模型调用；真实模型执行（固定
-`research_import_v1`、Invocation与六类输出解析）仍未实施。
+同一项目内的同一 request_key 和原决定摘要返回原 Turn，许可变化后也能重读原回执；更改输入或复用其他作用域的键返回 409。旧回执缺少可核对的决定摘要时拒绝复用。
+受理本身零模型调用。Worker 重读片段前按冻结指纹复核；正式发送前把原件关联、当前提取、来源许可修订、`research_text` 项目策略、实际模型和目的地与同一指纹核对。提交标记和准入判断同事务持锁提交。撤权先提交时模型请求为零；已按原许可提交的调用可完成，保留原回执。每个研究决定最多发起一次模型调用，格式无效直接失败，未知提交保留未知状态。成功的分析清单与 Turn 完成状态同事务保存。
 
 `POST /projects/{p}/file-revisions/{r}/analysis-preview`：
 `{source_extraction_id:UUID,expected_file_version:int>=1,category_set:ResearchKind[],target_results:[{result_id,base_revision_id}],

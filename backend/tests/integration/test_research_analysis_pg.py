@@ -208,10 +208,28 @@ async def test_research_turn_scan_returns_only_queued_research_work():
             await session.commit()
             parsed = await files.extract(revision.id)
             await session.commit()
+            from app.assets.research_analysis import ResearchAnalysisService
+            from app.assets.source_use import SourceUseService
             from app.director.research_import import ResearchImportService, ResearchRequest
 
             project_row = await session.get(Project, project_id)
             assert project_row is not None
+            await SourceUseService(session, actor=owner, project=project_row).declare(
+                file_revision_id=parsed.id,
+                allowed_uses=["research", "external_processing"],
+                statement="合成扫描验收",
+                request_key="rscan-source",
+            )
+            preview = await ResearchAnalysisService(
+                session, actor=owner, project_id=project_id
+            ).preview(
+                parsed.id,
+                source_extraction_id=parsed.current_extraction_id,
+                expected_file_version=1,
+                category_set=["summary"],
+                target_results=[],
+                model_identity={"model_id": "text-model-1"},
+            )
             acceptance = await ResearchImportService(session).accept(
                 project=project_row,
                 actor=owner,
@@ -221,7 +239,7 @@ async def test_research_turn_scan_returns_only_queued_research_work():
                     categories=["summary"],
                     targets=[],
                     model_identity={"model_id": "text-model-1"},
-                    preview_fingerprint="f" * 64,
+                    preview_fingerprint=preview.preview_fingerprint,
                     request_key="rscan-accept",
                 ),
             )

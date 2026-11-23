@@ -20,13 +20,18 @@ from app.contracts.agent import AgentMessage, AgentModelResponse
 from app.director.context_builder import DirectorContextBuilder
 from app.director.invocation_models import DirectorInvocation
 from app.director.invocations import InvocationService
+from app.director.research_request import RESEARCH_SCOPE, ResearchRequest
 from app.director.text_model import CapabilityTextModel, TextModelPort
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import ACTIVE_TURN_STATUSES, DirectorTurnService
 from app.providers.capabilities import Capability
 from app.providers.contracts.common import ExecutionContext, GenerationStatus, ProviderCreateResult
 from app.providers.contracts.text import TextGenerateRequest, TextMessage
-from app.providers.model_profiles.resolver import ModelBindingResolver, resolve_text_destination
+from app.providers.model_profiles.resolver import (
+    ModelBindingResolver,
+    lock_text_profile,
+    resolve_text_destination,
+)
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.registry import ModelRegistry
 from app.shared.db import set_rls_context
@@ -162,6 +167,36 @@ async def resolve_agent_text_model(
         model_id=resolved.model_id, resolution=resolution,
         text_model=CapabilityTextModel(registry), native_options=dict(resolved.native_options),
     )
+
+
+async def research_model_identity(
+    session: AsyncSession,
+    workspace_id: UUID,
+    resolution: dict[str, object],
+) -> dict[str, object]:
+    """Fingerprint the resolved route without putting provider configuration in the public DTO."""
+    destination = await resolve_text_destination(
+        session, workspace_id=workspace_id, resolution=resolution
+    )
+    identity = {
+        key: resolution.get(key)
+        for key in (
+            "model_id",
+            "profile_id",
+            "profile_version",
+            "manifest_version",
+            "connection_revision_id",
+            "credential_revision_id",
+        )
+    }
+    return {
+        **identity,
+        "destination_revision_id": str(destination.id) if destination else None,
+        "processing_location": destination.processing_location if destination else "unknown",
+        "execution_hash": content_hash(
+            [resolution.get("gateway_reference") or {}, resolution.get("native_options") or {}]
+        ),
+    }
 
 
 class DirectorInvocationEvidence(BaseModel):
@@ -345,6 +380,7 @@ class DirectorTextRuntimeAdapter:
         context_payload: dict[str, object],
         output_type: type[OutputT],
         allow_rejected_context_retry: bool = False,
+        claimed_research_turn_id: UUID | None = None,
     ) -> StructuredDirectorTextResult[OutputT]:
         context_snapshot = DirectorContextBuilder.build(
             workspace_id=project.workspace_id,
@@ -369,7 +405,18 @@ class DirectorTextRuntimeAdapter:
             allow_rejected_context_retry=allow_rejected_context_retry,
         )
         context_fingerprint = turn.context_hash
-        if not created:
+        first_worker_dispatch = (
+            claimed_research_turn_id == turn.id
+            and turn.scope_type == RESEARCH_SCOPE
+            and turn.status == "thinking"
+            and turn.transport_status == "created"
+            and turn.wait_reason == "director_analysis"
+            and turn.step_count == 1
+            and not await InvocationService(self._session).list_for_turn(
+                project_id=project.id, turn_id=turn.id
+            )
+        )
+        if not created and not first_worker_dispatch:
             restored = await self._restore_existing(
                 turn=turn,
                 context_hash=context_fingerprint,
@@ -377,7 +424,7 @@ class DirectorTextRuntimeAdapter:
             )
             if restored is not None:
                 return restored
-        else:
+        elif created:
             await self._turns.claim(
                 project_id=project.id,
                 turn_id=turn.id,
@@ -414,6 +461,12 @@ class DirectorTextRuntimeAdapter:
                 "profile_id": str(resolved.profile_id) if resolved.profile_id else None,
                 "profile_version": resolved.profile_version,
                 "model_binding_ref": binding_ref,
+                "connection_revision_id": registered.manifest.metadata.get(
+                    "connection_revision_id"
+                ),
+                "credential_revision_id": registered.manifest.metadata.get(
+                    "credential_revision_id"
+                ),
                 "provider_id": registered.adapter.provider_id,
                 "manifest_version": registered.manifest.manifest_version,
                 "backend": _safe_json(backend) if isinstance(backend, dict) else {},
@@ -518,6 +571,11 @@ class DirectorTextRuntimeAdapter:
             try:
                 value = _parse_output(first_text, output_type)
             except (json.JSONDecodeError, ValidationError, TypeError, ValueError) as first_error:
+                if turn.scope_type == RESEARCH_SCOPE:
+                    raise ValidationAppError(
+                        "研究分析已用完本次预览的一次调用",
+                        details={"code": "INVALID_DIRECTOR_TEXT_OUTPUT"},
+                    ) from first_error
                 schema_repair_count = 1
                 repair_request = TextGenerateRequest(
                     messages=[
@@ -782,18 +840,45 @@ class DirectorTextRuntimeAdapter:
     ) -> ProviderCreateResult:
         # Admission happens before any journal start or provider call: a refused
         # policy must produce zero outbound requests, not a compensated failure.
-        decision = await director_egress_decision(
-            self._session, project=project, resolution=dict(turn.model_resolution),
-        )
-        if not decision.allowed:
-            raise ValidationAppError(
-                "项目外发策略不允许本次文本外发",
-                details={"code": decision.reason_code},
+        if turn.scope_type == RESEARCH_SCOPE:
+            research = ResearchRequest.from_turn(turn)
+            # Use the actual resolved sender, never a purpose or route supplied by the client.
+            await self._session.scalar(
+                select(Project.id).where(Project.id == project.id).with_for_update()
             )
+            if profile_id := research.model_identity.get("profile_id"):
+                await lock_text_profile(
+                    self._session,
+                    workspace_id=project.workspace_id,
+                    profile_id=UUID(str(profile_id)),
+                )
+            actual = await research_model_identity(
+                self._session, project.workspace_id, dict(turn.model_resolution)
+            )
+            current = await resolve_agent_text_model(self._session, project=project)
+            selected = await research_model_identity(
+                self._session, project.workspace_id, current.resolution
+            )
+            if selected != actual or actual != research.model_identity or purpose != "primary":
+                raise ValidationAppError(
+                    "研究模型或调用范围已改变", details={"code": "RESEARCH_SEND_BASIS_CHANGED"}
+                )
+            admission = await research.authorize(self._session, project, actor)
+        else:
+            decision = await director_egress_decision(
+                self._session,
+                project=project,
+                resolution=dict(turn.model_resolution),
+            )
+            if not decision.allowed:
+                raise ValidationAppError(
+                    "项目外发策略不允许本次文本外发", details={"code": decision.reason_code}
+                )
+            admission = decision.evidence()
         journal = InvocationService(self._session)
         snapshot = {
             **request.model_dump(mode="json"),
-            "egress_admission": decision.evidence(),
+            "egress_admission": admission,
         }
         invocation = await journal.prepare(
             project_id=project.id,

@@ -249,8 +249,28 @@ class ModelBindingResolver:
             raise profile_capability_mismatch(str(slot), model_id, capability=str(capability))
 
 
+async def lock_text_profile(session: AsyncSession, *, workspace_id: UUID, profile_id: UUID) -> None:
+    """Keep the accepted profile stable through admission and the submission marker."""
+    profile = await session.scalar(
+        select(ProductionModelProfile)
+        .where(
+            ProductionModelProfile.id == profile_id,
+            ProductionModelProfile.workspace_id == workspace_id,
+        )
+        .with_for_update(read=True)
+        .execution_options(populate_existing=True)
+    )
+    if profile is None:
+        raise ValidationAppError(
+            "所选文本模型配置已改变", details={"code": "DIRECTOR_AGENT_MODEL_STALE"}
+        )
+
+
 async def resolve_text_destination(
-    session: AsyncSession, *, workspace_id: UUID, resolution: dict[str, object],
+    session: AsyncSession,
+    *,
+    workspace_id: UUID,
+    resolution: dict[str, object],
 ) -> ProviderDestinationRevision | None:
     """Resolve the declared upstream of this frozen managed deployment."""
     target = None

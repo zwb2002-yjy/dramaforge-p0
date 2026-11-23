@@ -27,42 +27,21 @@ from app.assets.research_models import RESEARCH_KINDS
 from app.assets.source_models import SourceFragment
 from app.director.context_builder import DirectorContextBuilder
 from app.director.invocation_models import DirectorInvocation
+from app.director.research_request import RESEARCH_SCOPE, RESEARCH_TASK, ResearchRequest
 from app.director.text_transport import DirectorTextRuntimeAdapter
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
 from app.providers.model_profiles.slots import ModelSlot
+from app.shared.errors import ConflictError
 
-RESEARCH_SCOPE = "research_analysis"
-RESEARCH_TASK = "research_import_v1"
 MAX_CONTEXT_FRAGMENTS = 200
 MAX_FRAGMENT_CHARS = 2_000
-
-
-def _as_dict(value: object) -> dict[str, object]:
-    return dict(value) if isinstance(value, dict) else {}
 
 
 def _as_dict_list(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
     return [dict(item) for item in value if isinstance(item, dict)]
-
-
-def _as_str_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value]
-@dataclass(frozen=True)
-class ResearchRequest:
-    """The frozen facts of one accepted analysis (no live model call here)."""
-
-    file_revision_id: UUID
-    source_extraction_id: UUID
-    categories: list[str]
-    targets: list[dict[str, object]]
-    model_identity: dict[str, object]
-    preview_fingerprint: str
-    request_key: str
 
 
 @dataclass(frozen=True)
@@ -89,6 +68,7 @@ async def build_request_payload(
             .where(
                 SourceFragment.project_id == project.id,
                 SourceFragment.extraction_id == request.source_extraction_id,
+                SourceFragment.file_revision_id == request.file_revision_id,
             )
             .order_by(SourceFragment.ordinal)
             .limit(MAX_CONTEXT_FRAGMENTS)
@@ -112,6 +92,7 @@ async def build_request_payload(
         "targets": request.targets,
         "model": request.model_identity,
         "preview_fingerprint": request.preview_fingerprint,
+        **({"decision_hash": request.decision_hash} if request.decision_hash else {}),
         "fragment_ids": [str(fragment.id) for fragment in fragments],
     }
     intent_snapshot: dict[str, object] = {
@@ -154,9 +135,36 @@ class ResearchImportService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def receipt_for_decision(
+        self,
+        *,
+        project_id: UUID,
+        revision_id: UUID,
+        request_key: str,
+        decision_hash: str,
+    ) -> ResearchAcceptance | None:
+        row = await self._session.scalar(
+            select(DirectorTurn).where(
+                DirectorTurn.project_id == project_id,
+                DirectorTurn.request_key == request_key,
+            )
+        )
+        if row is None:
+            return None
+        if (
+            row.scope_type != RESEARCH_SCOPE
+            or row.scope_entity_id != revision_id
+            or row.input_versions.get("decision_hash") != decision_hash
+        ):
+            raise ConflictError(
+                "研究请求键已用于另一项决定", details={"code": "DIRECTOR_REQUEST_KEY_REUSED"}
+            )
+        return ResearchAcceptance(row.id, str(row.input_versions["preview_fingerprint"]), False)
+
     async def accept(
         self, *, project: Project, actor: User, request: ResearchRequest
     ) -> ResearchAcceptance:
+        await request.authorize(self._session, project, actor)
         payload = await build_request_payload(
             self._session, project=project, request=request
         )
@@ -182,20 +190,10 @@ class ResearchImportService:
         self, *, project: Project, actor: User, turn: DirectorTurn
     ) -> AnalysisPublication:
         """Run one claimed research Turn through the single text transport, then publish."""
-        frozen = dict(turn.input_versions)
-        revision_id = UUID(str(frozen.get("file_revision_id")))
-        extraction_id = UUID(str(frozen.get("source_extraction_id")))
-        categories = _as_str_list(frozen.get("categories"))
-        targets = _as_dict_list(frozen.get("targets"))
-        request = ResearchRequest(
-            file_revision_id=revision_id,
-            source_extraction_id=extraction_id,
-            categories=categories,
-            targets=targets,
-            model_identity=_as_dict(frozen.get("model")),
-            preview_fingerprint=str(frozen.get("preview_fingerprint") or ""),
-            request_key=turn.request_key,
-        )
+        request = ResearchRequest.from_turn(turn)
+        revision_id, extraction_id = request.file_revision_id, request.source_extraction_id
+        targets, categories = request.targets, request.categories
+        await request.authorize(self._session, project, actor)
         payload = await build_request_payload(
             self._session, project=project, request=request
         )
@@ -212,6 +210,7 @@ class ResearchImportService:
             intent_snapshot=payload.intent_snapshot,
             context_payload=payload.context_payload,
             output_type=ResearchAnalysisOutput,
+            claimed_research_turn_id=turn.id,
         )
         output = result.value
         fragment_revisions = {

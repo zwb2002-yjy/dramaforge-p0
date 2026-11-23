@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
@@ -23,12 +24,13 @@ from app.assets.research_analysis import (
     TargetResult,
 )
 from app.assets.research_analysis_models import ResearchAnalysis, ResearchAnalysisResult
-from app.assets.research_bodies import summary_text
+from app.assets.research_bodies import content_hash, summary_text
 from app.assets.research_models import (
     ResearchResult,
     ResearchResultRevision,
 )
-from app.director.text_transport import resolve_agent_text_model
+from app.director.research_import import ResearchAcceptance
+from app.director.text_transport import research_model_identity, resolve_agent_text_model
 from app.shared.errors import AppError
 
 router = APIRouter(tags=["research"], dependencies=[Depends(require_selected_workspace)])
@@ -466,19 +468,11 @@ async def _model_identity(
     """Read-only model identity for the preview; never a model call."""
     try:
         resolved = await resolve_agent_text_model(session, project=project)
+        return await research_model_identity(
+            session, project.workspace_id, resolved.resolution
+        ), None
     except AppError:
         return None, "text_model_unavailable"
-    resolution = resolved.resolution
-    return (
-        {
-            "model_id": resolved.model_id,
-            "profile_id": resolution.get("profile_id"),
-            "profile_version": resolution.get("profile_version"),
-            "manifest_version": resolution.get("manifest_version"),
-            "connection_revision_id": resolution.get("connection_revision_id"),
-        },
-        None,
-    )
 
 
 @router.post(
@@ -681,9 +675,28 @@ async def accept_research_analysis(
     """Accept one frozen analysis request as a queued Director Turn (no model call)."""
     from app.director.research_import import ResearchImportService, ResearchRequest
 
-    project = await ProjectService(session).get_project_for_owner(
-        project_id=project_id, actor=user
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    await session.scalar(select(Project.id).where(Project.id == project.id).with_for_update())
+    request_key = body.request_key.strip()
+    if not request_key:
+        raise AppError(
+            code="DIRECTOR_REQUEST_KEY_INVALID", message="研究请求键不能为空", status_code=422
+        )
+    decision_hash = content_hash(
+        {
+            "revision_id": str(revision_id),
+            **body.model_dump(mode="json", exclude={"request_key"}),
+        }
     )
+    importer = ResearchImportService(session)
+    existing = await importer.receipt_for_decision(
+        project_id=project_id,
+        revision_id=revision_id,
+        request_key=request_key,
+        decision_hash=decision_hash,
+    )
+    if existing is not None:
+        return _acceptance_read(project_id, revision_id, existing)
     identity, blocker = await _model_identity(session, project)
     service = ResearchAnalysisService(session, actor=user, project_id=project_id)
     preview = await service.preview(
@@ -716,7 +729,7 @@ async def accept_research_analysis(
     targets = [
         dict(value) for value in _frozen_list(preview, "target_results") if isinstance(value, dict)
     ]
-    acceptance = await ResearchImportService(session).accept(
+    acceptance = await importer.accept(
         project=project,
         actor=user,
         request=ResearchRequest(
@@ -726,10 +739,17 @@ async def accept_research_analysis(
             targets=targets,
             model_identity=preview.model_identity or {},
             preview_fingerprint=preview.preview_fingerprint,
-            request_key=body.request_key,
+            decision_hash=decision_hash,
+            request_key=request_key,
         ),
     )
     await session.commit()
+    return _acceptance_read(project_id, revision_id, acceptance)
+
+
+def _acceptance_read(
+    project_id: UUID, revision_id: UUID, acceptance: ResearchAcceptance
+) -> ResearchAcceptanceRead:
     return ResearchAcceptanceRead(
         master_run_id=None,
         flow_instance_id=None,

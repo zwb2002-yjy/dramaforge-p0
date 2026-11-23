@@ -55,7 +55,10 @@ class SourceUseService:
             query = query.where(SourceUseSubject.artifact_id == artifact_id)
         else:
             raise ValidationAppError("来源必须指定原件修订或既有素材")
-        return cast(SourceUseSubject | None, await self._session.scalar(query))
+        return cast(
+            SourceUseSubject | None,
+            await self._session.scalar(query.execution_options(populate_existing=True)),
+        )
 
     async def find_subject(
         self, *, file_revision_id: UUID | None = None, artifact_id: UUID | None = None,
@@ -233,6 +236,7 @@ class SourceUseService:
         required = sorted({str(value) for value in required_uses})
         blocked: list[dict[str, object]] = []
         allowed_subjects: list[UUID] = []
+        allowed_revisions: list[UUID] = []
         for revision_id in file_revision_ids:
             subject = await self._subject(file_revision_id=revision_id, artifact_id=None)
             if subject is None or subject.current_revision_id is None:
@@ -249,10 +253,12 @@ class SourceUseService:
                 )
                 continue
             allowed_subjects.append(subject.id)
+            allowed_revisions.append(revision.id)
         return {
             "allowed": not blocked,
             "blocked": blocked,
             "allowed_subject_ids": [str(value) for value in allowed_subjects],
+            "allowed_revision_ids": [str(value) for value in allowed_revisions],
         }
 
     async def impact(

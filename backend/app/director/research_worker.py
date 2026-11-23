@@ -59,9 +59,21 @@ async def execute_research_analysis(
             await session.rollback()
             return {"status": "not_claimable", "code": exc.code}
         await session.commit()
+        await set_rls_context(
+            session,
+            user_id=scope.user_id,
+            workspace_id=scope.workspace_id,
+            project_id=scope.project_id,
+        )
         try:
             publication = await ResearchImportService(session).execute(
                 project=project, actor=actor, turn=claimed
+            )
+            await DirectorTurnService(session).compare_and_set(
+                turn=claimed,
+                expected_statuses=("thinking",),
+                target_status="completed",
+                updates={"wait_reason": None},
             )
             await session.commit()
             return {"status": "published", "analysis_id": str(publication.analysis_id)}
