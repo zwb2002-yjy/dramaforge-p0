@@ -7,6 +7,7 @@ import { ContentFields } from "../research/ResearchContent";
 import {
   appendKnowledgeRevision,
   createKnowledgeEntry,
+  knowledgeUses,
   type KnowledgeContent,
   type ResearchKind,
 } from "../research/api";
@@ -16,14 +17,6 @@ export type PublicationSnapshot = KnowledgeContent & {
   kind: ResearchKind;
   entry?: { id: string; version: number };
   sourceLabel?: string;
-};
-
-const purposes: Record<string, string> = {
-  research: "项目研究",
-  creation: "作品创作",
-  library_reference: "素材库引用",
-  external_processing: "外部模型处理",
-  export: "导出交付",
 };
 
 export function KnowledgePublicationDialog({
@@ -116,7 +109,7 @@ export function KnowledgePublicationDialog({
       ) : null}
       <fieldset>
         <legend>允许项目用于</legend>
-        {Object.entries(purposes).map(([id, label]) => (
+        {Object.entries(knowledgeUses).map(([id, label]) => (
           <Field key={id}>
             <Checkbox
               checked={uses.includes(id)}

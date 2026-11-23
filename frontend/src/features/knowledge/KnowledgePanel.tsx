@@ -10,6 +10,7 @@ import {
   Card,
   EmptyState,
   Field,
+  Input,
   MetadataList,
   PageHeader,
   Select,
@@ -46,6 +47,9 @@ export function KnowledgePanel() {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState("published");
   const [kind, setKind] = useState<ResearchKind | "">("");
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const [offset, setOffset] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draftKind, setDraftKind] = useState<ResearchKind>("summary");
   const [draftTitle, setDraftTitle] = useState("");
@@ -56,8 +60,9 @@ export function KnowledgePanel() {
   const [error, setError] = useState<string | null>(null);
 
   const entries = useQuery({
-    queryKey: queryKeys.knowledge.entries(status, kind, ""),
-    queryFn: () => listKnowledgeEntries({ status, kind: kind || undefined }),
+    queryKey: [...queryKeys.knowledge.entries(status, kind, query), offset],
+    queryFn: () =>
+      listKnowledgeEntries({ status, kind: kind || undefined, q: query, offset, limit: 20 }),
     retry: false,
   });
   const selected: KnowledgeEntryRead | undefined =
@@ -101,6 +106,10 @@ export function KnowledgePanel() {
       setDraftTitle("");
       setDraftText("");
       setStatus("draft");
+      setOffset(0);
+      setQuery("");
+      setSearch("");
+      setKind("");
       setSelectedId(created.entry_id);
       refresh();
     },
@@ -171,12 +180,28 @@ export function KnowledgePanel() {
       {error && <Alert type="error" description={error} />}
       <div className="df-research-grid">
         <Card aria-label="知识条目">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setOffset(0);
+              setQuery(search.trim());
+            }}
+          >
+            <Field>
+              <span>知识关键词</span>
+              <Input maxLength={200} value={search} onChange={(e) => setSearch(e.target.value)} />
+            </Field>
+            <Button type="submit">检索知识</Button>
+          </form>
           <Field>
             <span>状态</span>
             <Select
               id="knowledge-status"
               value={status}
-              onChange={(value) => setStatus(value)}
+              onChange={(value) => {
+                setOffset(0);
+                setStatus(value);
+              }}
               options={[
                 { value: "published", label: "已发布" },
                 { value: "draft", label: "草稿" },
@@ -189,7 +214,10 @@ export function KnowledgePanel() {
             <Select
               id="knowledge-kind"
               value={kind}
-              onChange={(value) => setKind(value as ResearchKind | "")}
+              onChange={(value) => {
+                setOffset(0);
+                setKind(value as ResearchKind | "");
+              }}
               options={[
                 { value: "", label: "全部类别" },
                 ...RESEARCH_KINDS.map((item) => ({ value: item.value, label: item.label })),
@@ -197,8 +225,12 @@ export function KnowledgePanel() {
             />
           </Field>
           {entries.isLoading && <p role="status">正在读取知识条目…</p>}
+          {entries.isError && <Alert type="error" description="知识条目读取失败。" />}
           {entries.data && entries.data.items.length === 0 && (
-            <EmptyState title="还没有知识条目" description="可在右侧新建草稿或直接发布。" />
+            <EmptyState
+              title={query ? "未找到匹配的知识" : "还没有知识条目"}
+              description={query ? "可修改关键词或筛选条件。" : "可在右侧新建草稿或直接发布。"}
+            />
           )}
           <ul aria-label="知识条目列表">
             {entries.data?.items.map((item) => (
@@ -219,6 +251,19 @@ export function KnowledgePanel() {
               </li>
             ))}
           </ul>
+          {entries.data && (offset > 0 || entries.data.next_offset != null) && (
+            <nav aria-label="知识条目分页">
+              <Button disabled={!offset} onClick={() => setOffset(Math.max(0, offset - 20))}>
+                上一页
+              </Button>
+              <Button
+                disabled={entries.data.next_offset == null}
+                onClick={() => setOffset(entries.data!.next_offset!)}
+              >
+                下一页
+              </Button>
+            </nav>
+          )}
         </Card>
         <Card aria-label="知识详情">
           {selected ? (
@@ -345,6 +390,9 @@ export function KnowledgePanel() {
             setRevisionEdit(null);
             setSelectedId(id);
             setStatus("published");
+            setOffset(0);
+            setQuery("");
+            setSearch("");
             setKind("");
             setNotice("知识已发布。");
             setError(null);

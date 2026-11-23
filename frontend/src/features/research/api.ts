@@ -17,6 +17,14 @@ export type KnowledgeEntryPage = components["schemas"]["KnowledgeEntryPage"];
 export type KnowledgeRevisionRead = components["schemas"]["KnowledgeRevisionRead"];
 export type KnowledgeRevisionPage = components["schemas"]["KnowledgeRevisionPage"];
 export type ReferencePage = components["schemas"]["ReferencePage"];
+export type KnowledgeReference = components["schemas"]["ReferenceReadModel"];
+export const knowledgeUses: Record<string, string> = {
+  research: "项目研究",
+  creation: "作品创作",
+  library_reference: "素材库引用",
+  external_processing: "外部模型处理",
+  export: "导出交付",
+};
 
 export type ResearchKind = "summary" | "person" | "place" | "event" | "timeline" | "cultural_clue";
 
@@ -186,12 +194,14 @@ export function readAnalysis(projectId: string, analysisId: string): Promise<Ana
 }
 
 export function listKnowledgeEntries(
-  options: { status?: string; kind?: string; q?: string } = {},
+  options: { status?: string; kind?: string; q?: string; offset?: number; limit?: number } = {},
 ): Promise<KnowledgeEntryPage> {
   const params = new URLSearchParams();
   params.set("status", options.status ?? "published");
   if (options.kind) params.set("kind", options.kind);
   if (options.q) params.set("q", options.q);
+  if (options.offset) params.set("offset", String(options.offset));
+  if (options.limit) params.set("limit", String(options.limit));
   return apiGet<KnowledgeEntryPage>(`/api/v1/knowledge/entries?${params.toString()}`);
 }
 
@@ -283,6 +293,53 @@ export function withdrawKnowledgeEntry(
   });
 }
 
-export function listProjectKnowledgeReferences(projectId: string): Promise<ReferencePage> {
-  return apiGet<ReferencePage>(`/api/v1/projects/${projectId}/knowledge-references`);
+export async function readFixedKnowledge(entryId: string, revisionId: string, signal: AbortSignal) {
+  let offset: number | null = 0;
+  while (offset !== null) {
+    const page: KnowledgeRevisionPage = await apiGet(
+      `/api/v1/knowledge/entries/${entryId}/revisions?limit=100&offset=${offset}`,
+      undefined,
+      signal,
+    );
+    const revision = page.items.find((row) => row.id === revisionId);
+    if (revision) return revision;
+    offset = page.next_offset;
+  }
+  throw new Error("无法读取该固定版本。");
+}
+
+export function listProjectKnowledgeReferences(
+  projectId: string,
+  offset = 0,
+): Promise<ReferencePage> {
+  return apiGet<ReferencePage>(
+    `/api/v1/projects/${projectId}/knowledge-references?active=false&limit=10&offset=${offset}`,
+  );
+}
+
+export function createKnowledgeReference(
+  projectId: string,
+  body: components["schemas"]["ReferenceWrite"],
+  workspaceId: string,
+) {
+  return send<KnowledgeReference>(
+    "POST",
+    `/api/v1/projects/${projectId}/knowledge-references`,
+    body,
+    workspaceId,
+  );
+}
+
+export function setKnowledgeReferenceAttached(
+  projectId: string,
+  reference: KnowledgeReference,
+  attached: boolean,
+  workspaceId: string,
+) {
+  return send<KnowledgeReference>(
+    "PATCH",
+    `/api/v1/projects/${projectId}/knowledge-references/${reference.id}`,
+    { attached, expected_version: reference.version },
+    workspaceId,
+  );
 }

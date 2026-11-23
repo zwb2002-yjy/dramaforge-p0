@@ -40,6 +40,7 @@ import { bodyFromText, correctedBody, bodyText } from "./body";
 
 import { RevisionDetails } from "./ResearchContent";
 import { getSelectedWorkspaceId } from "../../lib/navigationPreferences";
+import { ProjectKnowledgeReferences } from "../knowledge/ProjectKnowledgeReferences";
 import {
   KnowledgePublicationDialog,
   type PublicationSnapshot,
@@ -303,6 +304,7 @@ export function ResearchPanel({
       />
       {notice && <p role="status">{notice}</p>}
       {error && <Alert type="error" description={error} />}
+      <ProjectKnowledgeReferences projectId={projectId} />
       <div className="df-research-grid">
         <Card aria-label="研究条目">
           <Field>
