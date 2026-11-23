@@ -2,6 +2,14 @@ import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
 
 import type { components } from "../../shared/api/generated";
 
+export function fetchEpisodeDeliveries(projectId: string, signal?: AbortSignal) {
+  return apiGet<components["schemas"]["EpisodeDeliveryRead"]>(
+    `/api/v1/projects/${projectId}/deliveries/episodes`,
+    undefined,
+    signal,
+  );
+}
+
 export type EditSessionSummaryRead = components["schemas"]["EditSessionSummaryRead"];
 export type EditSessionRead = components["schemas"]["EditSessionRead"];
 export type EditTimelinePayload = components["schemas"]["EditTimelinePayload"];

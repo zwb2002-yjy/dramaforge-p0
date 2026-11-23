@@ -34,14 +34,13 @@ from app.editing.timeline_schema import (
 )
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.execution.run_state import ExecuteNodeResult
+from app.production.delivery_graph import EDIT_RENDER_NODE, delivery_graph
 from app.production.edit_render_plan import build_render_plan
-from app.production.service import GraphService
 from app.production.session_exports import timeline_hash
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 from app.storage.minio_store import ObjectStore
 
-EDIT_RENDER_TEMPLATE = "edit-session-render-v1"
-EDIT_RENDER_NODE_KEY = "edit_session_render"
+EDIT_RENDER_NODE_KEY = EDIT_RENDER_NODE
 
 
 def _snapshot_hash(snapshot: dict[str, Any]) -> str:
@@ -58,8 +57,6 @@ async def create_edit_session_render(
     actor_id: UUID,
 ) -> NodeRun:
     """Queue one render run for the export's frozen timeline version."""
-    from app.production.models import ProductionGraph
-
     # The render graph and attempt sequence are shared by the project's exports.
     await session.scalar(select(Project.id).where(Project.id == project_id).with_for_update())
     export = await session.scalar(
@@ -140,37 +137,7 @@ async def create_edit_session_render(
         "source_hashes": {str(key): row.content_hash for key, row in sources.items()},
     }
     input_hash = _snapshot_hash(snapshot)
-    graphs = GraphService(session)
-    graph = await session.scalar(
-        select(ProductionGraph).where(
-            ProductionGraph.project_id == project_id,
-            ProductionGraph.scope_type == "project",
-            ProductionGraph.scope_entity_id == project_id,
-            ProductionGraph.template_key == EDIT_RENDER_TEMPLATE,
-        )
-    )
-    if graph is None or graph.current_version_id is None:
-        graph = await graphs.create_graph(
-            project_id=project_id,
-            scope_type="project",
-            scope_entity_id=project_id,
-            template_key=EDIT_RENDER_TEMPLATE,
-            created_by=actor_id,
-            definition={
-                "nodes": [
-                    {
-                        "key": EDIT_RENDER_NODE_KEY,
-                        "type": "export",
-                        "display_name": "Edit Session Timeline Render",
-                    }
-                ],
-                "edges": [],
-            },
-        )
-    assert graph.current_version_id is not None
-    materialized = await graphs.materialize_definition(version_id=graph.current_version_id)
-    if materialized.version.status == "draft":
-        await graphs.publish(version_id=materialized.version.id, published_by=actor_id)
+    _, materialized = await delivery_graph(session, project_id=project_id, actor_id=actor_id)
     node = materialized.nodes[EDIT_RENDER_NODE_KEY]
 
     existing = await session.scalar(
@@ -456,7 +423,6 @@ async def execute_edit_session_render(
 
 __all__ = [
     "EDIT_RENDER_NODE_KEY",
-    "EDIT_RENDER_TEMPLATE",
     "create_edit_session_render",
     "execute_edit_session_render",
 ]

@@ -1580,6 +1580,11 @@ status沿Export实际状态，当前成功为completed；不得用ProviderOperat
 validation_summary仅投影实际ffprobe/字幕/质量证据，未验证标unknown，列表中不放临时签名URL。
 下载仍走已授权Artifact下载路由，核对当前用途；跨集/跨项目错配404/409，不能通过ExportItem跳过源归属。
 连续剧交付摘要明确每集及缺失项，整剧完成只按D3 predicate核对全部必需集，不从一条成功导出推导。
+现有 `GET /projects/{p}/deliveries/episodes` 在连续剧上同时返回只读 `summary`。
+页面按每集最近保存的剪辑、版本和时间线哈希核对完整导出片段、已完成渲染及可用 MP4/SRT。
+计划集数未知、缺集、当前版本缺成片或字幕不可用时显示待补齐。缺集以起止集号返回，旧版本的交付回执可从历史另行查看。
+此技术摘要供工作台使用；MasterRun 的计划输出槽、独立验收及人工结论另行核对。
+
 
 事件：`project.edit_session.changed`（session_id,version,episode_id|null,scope_confirmed）和
 `project.delivery.completed`（export_id,render_node_run_id,edit_session_id,timeline_version,episode_id|null）；

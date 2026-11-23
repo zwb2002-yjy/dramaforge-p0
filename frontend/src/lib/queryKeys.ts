@@ -173,6 +173,7 @@ export const queryKeys = {
   },
 
   editing: {
+    episodeDeliveries: (projectId: string) => ["episode-deliveries", projectId] as const,
     audioLibraryRoot: (projectId: string) => ["editing-audio-library", projectId] as const,
     audioLibrary: (projectId: string, cursor: string | null) =>
       ["editing-audio-library", projectId, cursor] as const,

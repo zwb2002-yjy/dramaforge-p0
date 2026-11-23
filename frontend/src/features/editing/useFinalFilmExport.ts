@@ -204,6 +204,7 @@ export function useFinalFilmExport({
       void client.invalidateQueries({ queryKey: historyKey });
       if (!current()) return;
       const film = await waitForFilm(projectId, queued, signal);
+      void client.invalidateQueries({ queryKey: queryKeys.editing.episodeDeliveries(projectId) });
       if (current()) setResult(film);
     } catch (cause) {
       if (current()) setError("成片导出失败：" + deliveryGateMessage(cause));

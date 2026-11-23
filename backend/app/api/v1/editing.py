@@ -41,6 +41,7 @@ from app.editing.timeline_builder import build_edit_session_for_project
 from app.production.edit_session_render import create_edit_session_render
 from app.production.episode_delivery import EpisodeDeliveryItem, EpisodeDeliveryService
 from app.production.final_film import TimelinePreviewRead, preview_timeline
+from app.production.series_delivery import SeriesDeliverySummary, series_delivery_summary
 from app.production.session_exports import SessionExports
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
@@ -516,6 +517,7 @@ class EpisodeDeliveryRead(BaseModel):
 
     project_id: UUID
     items: list[EpisodeDeliveryItemRead] = Field(default_factory=list)
+    summary: SeriesDeliverySummary | None = None
 
 
 def _delivery_read(project_id: UUID, items: list[EpisodeDeliveryItem]) -> EpisodeDeliveryRead:
@@ -535,7 +537,18 @@ async def plan_episode_deliveries(
     session: SessionDep,
 ) -> EpisodeDeliveryRead:
     """Report per-episode deliverability; writes nothing."""
-    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    if project.work_type == "serial_comic":
+        summary = await series_delivery_summary(session, project)
+        return EpisodeDeliveryRead(
+            project_id=project_id, summary=summary,
+            items=[EpisodeDeliveryItemRead(
+                episode_id=p.episode_id, episode_number=p.episode_number,
+                session_id=p.edit_session_id, session_version=p.timeline_version,
+                status="planned" if p.edit_session_id else "blocked",
+                blockers=[] if p.edit_session_id else ["DELIVERY_SESSION_MISSING"],
+            ) for p in summary.episodes],
+        )
     items = await EpisodeDeliveryService(session).plan(project_id=project_id)
     return _delivery_read(project_id, items)
 

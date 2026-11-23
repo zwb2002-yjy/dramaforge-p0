@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, ProjectCreativeProfile
@@ -32,8 +32,8 @@ from app.execution.branches import branch_priority
 from app.execution.experiment_nodes import queue_branch_nodes
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.production.command_models import ProductionCommandAuthorization
+from app.production.delivery_graph import FINAL_FILM_FORMAT, FINAL_FILM_NODE, delivery_graph
 from app.production.models import GraphVersion, ProductionGraph
-from app.production.service import GraphService
 from app.production.session_exports import timeline_hash as saved_timeline_hash
 from app.providers.voice_config import freeze_project_voice
 from app.runtime.scheduler import NodeRunScheduler
@@ -61,8 +61,8 @@ _TAIL_NODE_KEYS = [
 ]
 _DONE = frozenset({"completed", "cached", "completed_after_cancel"})
 _PENDING = frozenset({"queued", "running", "cancel_requested"})
-_FINAL_FILM_GRAPH_KEY = "final_film_assembly"
-_FINAL_FILM_FORMAT = "dramaforge-final-film-v1"
+_FINAL_FILM_GRAPH_KEY = FINAL_FILM_NODE
+_FINAL_FILM_FORMAT = FINAL_FILM_FORMAT
 logger = logging.getLogger(__name__)
 _MAX_FINAL_FILM_INPUT_BYTES = 8 * 1024 * 1024 * 1024
 _MAX_INPUT_MEDIA_BYTES = 512 * 1024 * 1024
@@ -845,46 +845,9 @@ async def _ensure_final_graph(
     project_id: UUID,
     actor_id: UUID,
 ) -> tuple[ProductionGraph, GraphNode, int]:
-    graphs = GraphService(session)
-    existing = await session.scalar(
-        select(ProductionGraph).where(
-            ProductionGraph.project_id == project_id,
-            ProductionGraph.scope_type == "project",
-            ProductionGraph.scope_entity_id == project_id,
-            ProductionGraph.template_key == "final-film-v1",
-        )
-    )
-    if existing is not None and existing.current_version_id is not None:
-        materialized = await graphs.materialize_definition(version_id=existing.current_version_id)
-        return (
-            existing,
-            materialized.nodes[_FINAL_FILM_GRAPH_KEY],
-            materialized.version.version_number,
-        )
-    graph = await graphs.create_graph(
-        project_id=project_id,
-        scope_type="project",
-        scope_entity_id=project_id,
-        template_key="final-film-v1",
-        created_by=actor_id,
-        definition={
-            "nodes": [
-                {
-                    "key": _FINAL_FILM_GRAPH_KEY,
-                    "type": "export",
-                    "display_name": "Final Film Timeline Render",
-                }
-            ],
-            "edges": [],
-        },
-    )
-    assert graph.current_version_id is not None
-    materialized = await graphs.materialize_definition(version_id=graph.current_version_id)
-    node = materialized.nodes[_FINAL_FILM_GRAPH_KEY]
-    if materialized.version.status == "draft":
-        published = await graphs.publish(version_id=materialized.version.id, published_by=actor_id)
-        return graph, node, published.version_number
-    return graph, node, materialized.version.version_number
+    graph, current = await delivery_graph(session, project_id=project_id, actor_id=actor_id)
+    return graph, current.nodes[FINAL_FILM_NODE], current.version.version_number
+
 
 
 async def _latest_formal_composite(
@@ -1563,7 +1526,7 @@ async def queue_final_film_render(
             text("SELECT pg_advisory_xact_lock(:lock_value)"),
             {"lock_value": int(lock_seed[:15], 16)},
         )
-    graph, node, _version = await _ensure_final_graph(
+    _graph, node, _version = await _ensure_final_graph(
         session, project_id=project_id, actor_id=actor_id
     )
     existing_exports = list(
@@ -1593,22 +1556,16 @@ async def queue_final_film_render(
                 details={"code": "FINAL_FILM_LINEAGE_MISSING"},
             )
         return await _job_read(session, run=run, edit_session=edit_session)
-    runs = list(
-        (
-            await session.execute(
-                select(NodeRun)
-                .where(NodeRun.project_id == project_id, NodeRun.graph_node_id == node.id)
-                .order_by(NodeRun.attempt_no.desc(), NodeRun.created_at.desc())
-            )
+    # The key belongs to the project, including runs frozen on a prior graph version.
+    matching = list(await session.scalars(
+        select(NodeRun)
+        .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+        .where(
+            NodeRun.project_id == project_id, GraphNode.node_key == FINAL_FILM_NODE,
+            NodeRun.input_snapshot["idempotency_key"].as_string() == external_key,
         )
-        .scalars()
-        .all()
-    )
-    matching = [
-        run
-        for run in runs
-        if str((run.input_snapshot or {}).get("idempotency_key") or "") == external_key
-    ]
+        .order_by(NodeRun.created_at.desc(), NodeRun.attempt_no.desc())
+    ))
     if any(
         str((run.input_snapshot or {}).get("request_fingerprint") or "") != request_fingerprint
         for run in matching
@@ -1620,7 +1577,10 @@ async def queue_final_film_render(
     latest = matching[0] if matching else None
     if latest is not None and latest.status in {"queued", "running"}:
         return await _job_read(session, run=latest, edit_session=edit_session)
-    next_attempt = max((int(run.attempt_no) for run in runs), default=0) + 1
+    current_attempt = await session.scalar(
+        select(func.max(NodeRun.attempt_no)).where(NodeRun.graph_node_id == node.id)
+    )
+    next_attempt = max(current_attempt or 0, max((r.attempt_no for r in matching), default=0)) + 1
     frozen_timeline_hash = saved_timeline_hash(edit_session.timeline)
     snapshot = {
         **request_payload,

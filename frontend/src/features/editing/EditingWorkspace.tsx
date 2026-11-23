@@ -16,6 +16,7 @@ import {
 import { EditingPreviewWorkspace } from "./EditingPreviewWorkspace";
 import { AudioArtifactPicker } from "./AudioArtifactPicker";
 import { EditingDeliverables } from "./EditingDeliverables";
+import { SeriesDeliveryPanel } from "./SeriesDeliveryPanel";
 import "./editing-recovery.css";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type RefObject } from "react";
@@ -281,6 +282,9 @@ export function EditingWorkspace({
     mutationFn: (input: TimelineSaveInput) =>
       saveEditTimeline(input.projectId, input.sessionId, input.timeline, input.expectedVersion),
     onSuccess: (saved, input) => {
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.editing.episodeDeliveries(projectId),
+      });
       if (!timeline.acceptSaved(saved, input)) return;
       setFeedback("时间线已保存。");
       setExported(null);
@@ -1087,6 +1091,7 @@ export function EditingWorkspace({
                 </Disclosure>
               </div>
             </div>
+            {workType === "serial_comic" && <SeriesDeliveryPanel projectId={projectId} />}
             <EditingDeliverables
               projectId={projectId}
               history={filmHistory.data ?? []}
@@ -1147,6 +1152,7 @@ export function EditingWorkspace({
         <span data-testid="editing-read-only">{copy.readOnlySource}</span>
       </PageHeader>
       <EditingSessionPicker projectId={projectId} onSelect={onSessionSelected} />
+      {workType === "serial_comic" && <SeriesDeliveryPanel projectId={projectId} />}
       {manifest.isLoading && (
         <p className="muted" data-testid="editing-loading">
           正在读取正式剪辑时间线…

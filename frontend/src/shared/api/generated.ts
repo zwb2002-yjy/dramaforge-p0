@@ -7020,6 +7020,33 @@ export interface components {
             project_id: string;
             /** Items */
             items?: components["schemas"]["EpisodeDeliveryItemRead"][];
+            summary?: components["schemas"]["SeriesDeliverySummary"] | null;
+        };
+        /** EpisodePackage */
+        EpisodePackage: {
+            /**
+             * Episode Id
+             * Format: uuid
+             */
+            episode_id: string;
+            /** Episode Number */
+            episode_number: number;
+            /** Edit Session Id */
+            edit_session_id?: string | null;
+            /** Timeline Version */
+            timeline_version?: number | null;
+            /** Timeline Hash */
+            timeline_hash?: string | null;
+            /** Export Id */
+            export_id?: string | null;
+            /** Render Node Run Id */
+            render_node_run_id?: string | null;
+            /** Mp4 Artifact Id */
+            mp4_artifact_id?: string | null;
+            /** Srt Artifact Id */
+            srt_artifact_id?: string | null;
+            /** Blockers */
+            blockers: string[];
         };
         /** EpisodeRead */
         EpisodeRead: {
@@ -11481,6 +11508,22 @@ export interface components {
              * Format: uuid
              */
             id: string;
+        };
+        /** SeriesDeliverySummary */
+        SeriesDeliverySummary: {
+            /** Planned Episodes */
+            planned_episodes: number | null;
+            /** Ready Episodes */
+            ready_episodes: number;
+            /** Missing Episode Ranges */
+            missing_episode_ranges: [
+                number,
+                number
+            ][];
+            /** Ready */
+            ready: boolean;
+            /** Episodes */
+            episodes: components["schemas"]["EpisodePackage"][];
         };
         /** SetClipDurationOperation */
         SetClipDurationOperation: {
