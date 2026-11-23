@@ -49,7 +49,13 @@ async def test_tool_only_response_then_tool_result_round_trip():
                             "message": {
                                 "role": "assistant",
                                 "content": None,
-                                "tool_calls": [_call()],
+                                "tool_calls": [
+                                    {
+                                        **_call(),
+                                        "index": 0,
+                                        "provider_specific_fields": {"opaque": "ignored"},
+                                    }
+                                ],
                             },
                             "finish_reason": "tool_calls",
                         }

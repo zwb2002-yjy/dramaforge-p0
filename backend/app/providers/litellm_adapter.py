@@ -21,6 +21,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 from typing import Any
 
 from app.config import Settings, get_settings
@@ -217,7 +218,24 @@ class LiteLLMModelAdapter:
         }
         try:
             metadata.update(_normalize_completion(response.data))
-        except ValueError:
+        except ValueError as exc:
+            # Log the response shape, without vendor text, reasoning or tool arguments.
+            choices = response.data.get("choices")
+            first = (
+                choices[0]
+                if isinstance(choices, list) and choices and isinstance(choices[0], dict)
+                else {}
+            )
+            msg = first.get("message")
+            msg = msg if isinstance(msg, dict) else {}
+            reason = first.get("finish_reason")
+            logging.getLogger(__name__).warning(
+                "text_completion_invalid error_type=%s finish=%s content_chars=%d tool_calls=%d",
+                type(exc).__name__,
+                reason if reason in ("length", "stop", "tool_calls", "content_filter") else "other",
+                len(msg["content"]) if isinstance(msg.get("content"), str) else 0,
+                len(msg["tool_calls"]) if isinstance(msg.get("tool_calls"), list) else 0,
+            )
             # A received but malformed response must not become text by repr(),
             # or trigger another potentially billed request in this adapter.
             return ProviderCreateResult(
@@ -406,7 +424,15 @@ def _normalize_completion(data: Any) -> dict[str, Any]:
     for raw_call in raw_calls:
         if not isinstance(raw_call, dict) or raw_call.get("type") != "function":
             raise ValueError("unsupported tool call")
-        call = TextToolCall.model_validate(raw_call)
+        function = raw_call.get("function")
+        if not isinstance(function, dict):
+            raise ValueError("missing tool function")
+        # Vendors may attach an index or tracing metadata. Only the protocol
+        # identity and JSON function arguments enter a local tool request.
+        call = TextToolCall.model_validate({
+            "id":raw_call.get("id"), "type":raw_call["type"],
+            "function":{"name":function.get("name"),"arguments":function.get("arguments")},
+        })
         if call.id in call_ids:
             raise ValueError("duplicate tool call ID")
         call_ids.add(call.id)

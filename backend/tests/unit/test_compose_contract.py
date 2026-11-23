@@ -367,17 +367,19 @@ def test_proxy_owns_a_restricted_network_namespace_and_persistent_salt() -> None
         assert "LITELLM_SALT_KEY" not in services[name]["environment"]
 
 
-def test_provider_forbidden_processes_disable_canonical_text_gateway() -> None:
+def test_text_dispatchers_get_the_internal_data_plane_and_quality_tests_stay_offline() -> None:
     runtime = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]
     quality = yaml.safe_load(
         (REPO_ROOT / "docker-compose.quality.yml").read_text(encoding="utf-8")
     )["services"]
-    for service in (runtime["worker-director"], quality["backend-quality"]):
-        env = service["environment"]
-        assert env["AGNES_ENABLED"] == "false"
-        assert env["LITELLM_GATEWAY_URL"] == ""
-        assert env["LITELLM_API_KEY"] == ""
-    for name in ("api", "worker-default", "worker-heavy"):
+    offline = quality["backend-quality"]["environment"]
+    assert offline["AGNES_ENABLED"] == "false"
+    assert offline["LITELLM_GATEWAY_URL"] == "" and offline["LITELLM_API_KEY"] == ""
+    director = runtime["worker-director"]["environment"]
+    assert director["AGNES_ENABLED"] == "false" and "LITELLM_MODEL_ADMIN_KEY" not in director
+    for key in ("BYOK_FERNET_KEY", "BYOK_KEYRING", "BYOK_PRIMARY_KEY_VERSION"):
+        assert director[key] == runtime["api"]["environment"][key]
+    for name in ("api", "worker-default", "worker-heavy", "worker-director"):
         env = runtime[name]["environment"]
         assert env["LITELLM_GATEWAY_URL"] == "${LITELLM_GATEWAY_URL:-http://litellm:4000}"
         assert env["LITELLM_API_KEY"] == "${LITELLM_API_KEY:-}"
