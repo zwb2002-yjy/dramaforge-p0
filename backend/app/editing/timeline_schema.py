@@ -21,11 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assets.from_artifact_service import MediaSource, read_media_source
 from app.assets.models import Asset, AssetVersion, Scene, Shot
-from app.assets.public_asset_models import (
-    ProjectPublicAssetLink,
-    PublicAssetPublication,
-    PublicAssetPublicationItem,
-)
+from app.assets.public_edit_media import read_public_edit_media
 from app.shared.errors import ValidationAppError
 
 TIMELINE_SCHEMA_V1 = 1
@@ -231,61 +227,84 @@ async def _verify_public_material(
     source: ClipSource,
     index: int,
     media_kind: str,
+    purpose: Literal["creation", "export"] = "creation",
 ) -> MediaSource:
     """A public clip resolves only through this project's own fixed link."""
-    assert (
-        source.publication_id is not None
-        and source.publication_item_id is not None
-        and source.public_asset_link_id is not None
-    )
-    link = await session.scalar(
-        select(ProjectPublicAssetLink).where(
-            ProjectPublicAssetLink.id == source.public_asset_link_id,
-            ProjectPublicAssetLink.project_id == project_id,
-        )
-    )
-    if link is None or link.detached_at is not None:
-        raise ValidationAppError(
-            "clip public link is not available in this project",
-            details={"code": "EDIT_SOURCE_NOT_ADOPTED", "clip_index": index},
-        )
-    if link.publication_id != source.publication_id:
-        raise ValidationAppError(
-            "clip public link does not own that publication",
-            details={"code": "EDIT_SOURCE_NOT_ADOPTED", "clip_index": index},
-        )
-    publication = await session.get(PublicAssetPublication, source.publication_id)
     if (
-        publication is None
-        or publication.status != "available"
-        or publication.withdrawn_at is not None
+        source.kind != "public_material" or source.publication_id is None
+        or source.publication_item_id is None or source.public_asset_link_id is None
     ):
-        raise ValidationAppError(
-            "clip public publication is withdrawn or unavailable",
-            details={"code": "EDIT_SOURCE_NOT_ADOPTED", "clip_index": index},
-        )
-    item = await session.scalar(
-        select(PublicAssetPublicationItem).where(
-            PublicAssetPublicationItem.id == source.publication_item_id,
-            PublicAssetPublicationItem.publication_id == publication.id,
-        )
+        raise _invalid("incomplete public media identity", clip_index=index)
+    artifact = await read_public_edit_media(
+        session, project_id=project_id, link_id=source.public_asset_link_id,
+        publication_id=source.publication_id, item_id=source.publication_item_id, purpose=purpose,
     )
-    if item is None:
+    if artifact is None:
         raise ValidationAppError(
-            "clip public item does not belong to that publication",
+            "public media is unavailable for this use",
             details={"code": "EDIT_SOURCE_NOT_ADOPTED", "clip_index": index},
         )
-    artifact = await read_media_source(session, artifact_id=item.artifact_id)
-    if (
-        artifact is None
-        or artifact.storage_state != "available"
-        or artifact.artifact_type != media_kind
-    ):
+    if artifact.artifact_type != media_kind:
         raise ValidationAppError(
-            "clip public item has no playable media",
+            "public media kind does not match the clip",
             details={"code": "EDIT_SOURCE_NO_MEDIA", "clip_index": index},
         )
     return artifact
+
+
+class PublicRenderInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    source: ClipSource
+    clip_index: int = Field(ge=0)
+    media_kind: Literal["video", "audio"]
+    artifact_id: UUID
+    artifact_hash: str
+
+
+def public_render_inputs(
+    document: dict[str, Any], *, include_muted: bool = False,
+) -> list[PublicRenderInput]:
+    inputs: list[PublicRenderInput] = []
+    for index, clip in enumerate(document.get("clips", [])):
+        if not isinstance(clip, dict):
+            continue
+        for source_field, snapshot_field, kind in (
+            ("source", "selection_snapshot", "video"),
+            ("audio_source", "audio_selection_snapshot", "audio"),
+        ):
+            raw = clip.get(source_field)
+            if not isinstance(raw, dict) or raw.get("kind") != "public_material":
+                continue
+            if kind == "audio" and clip.get("muted") and not include_muted:
+                continue
+            saved = clip.get(snapshot_field) or {}
+            if not isinstance(saved, dict):
+                raise _invalid("invalid saved public media", clip_index=index)
+            try:
+                inputs.append(PublicRenderInput.model_validate({
+                    "source": raw, "clip_index": index, "media_kind": kind,
+                    "artifact_id": saved.get("artifact_id"),
+                    "artifact_hash": saved.get("artifact_hash"),
+                }))
+            except ValidationError as exc:
+                raise _invalid("invalid saved public media", clip_index=index) from exc
+    return inputs
+
+
+async def resolve_public_render_inputs(
+    session: AsyncSession, project_id: UUID, inputs: list[PublicRenderInput],
+) -> dict[UUID, MediaSource]:
+    media: dict[UUID, MediaSource] = {}
+    for item in inputs:
+        source = await _verify_public_material(
+            session, project_id=project_id, source=item.source, index=item.clip_index,
+            media_kind=item.media_kind, purpose="export",
+        )
+        if source.id != item.artifact_id or source.content_hash != item.artifact_hash:
+            raise _invalid("saved public media changed", clip_index=item.clip_index)
+        media[source.id] = source
+    return media
 
 
 async def _verify_source(

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.delivery.models import Export, ExportItem
 from app.editing.models import EditSession
+from app.editing.timeline_schema import public_render_inputs, resolve_public_render_inputs
 from app.execution.models import Artifact
 from app.shared.errors import NotFoundError, ValidationAppError
 
@@ -86,6 +87,10 @@ class SessionExports:
         if edit_session is None:
             raise NotFoundError("edit session not found")
         document = dict(edit_session.timeline or {})
+        await resolve_public_render_inputs(
+            self._session, project_id,
+            public_render_inputs(document, include_muted=format in SNAPSHOT_FORMATS),
+        )
         clips = _clips_of(document)
         items: list[tuple[int, UUID, str, dict[str, Any]]] = []
         for ordinal, clip in enumerate(clips, start=1):

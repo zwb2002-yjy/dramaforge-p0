@@ -17,7 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.assets.models import Scene, Shot
 from app.editing.models import EditSession
 from app.editing.timeline_rules import clip_audio_volume
-from app.editing.timeline_schema import declared_schema_version, normalize_timeline_for_save
+from app.editing.timeline_schema import (
+    declared_schema_version,
+    normalize_timeline_for_save,
+    public_render_inputs,
+    resolve_public_render_inputs,
+)
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 
@@ -250,6 +255,10 @@ class EditingAdapter:
     async def export(self, *, project_id: UUID, session_id: UUID) -> dict[str, object]:
         """Export a render/playback manifest. Production lineage untouched."""
         row = await self.load_timeline(project_id=project_id, session_id=session_id)
+        await resolve_public_render_inputs(
+            self._session, project_id,
+            public_render_inputs(dict(row.timeline or {}), include_muted=True),
+        )
         raw_clips = cast(list[object], (row.timeline or {}).get("clips", []))
         clips = [clip for clip in raw_clips if isinstance(clip, dict)]
         total = sum(float(clip.get("duration_seconds", 0)) for clip in clips)

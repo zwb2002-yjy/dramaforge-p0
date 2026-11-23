@@ -745,8 +745,7 @@ async def export_edit_session(
     user: CurrentUser,
     session: SessionDep,
 ) -> EditExportRead:
-    # Ownership is checked before the adapter export. The adapter export is a
-    # read-only manifest operation and does not load Artifact/Provider rows.
+    # Public media in the read-only manifest still requires current export permission.
     await _owned_session(
         project_id=project_id,
         session_id=session_id,

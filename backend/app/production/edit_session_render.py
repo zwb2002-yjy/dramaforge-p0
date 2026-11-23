@@ -18,13 +18,20 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
+from app.assets.from_artifact_service import MediaSource
 from app.config import get_settings
 from app.delivery.models import Export
 from app.editing.models import EditSession
+from app.editing.timeline_schema import (
+    PublicRenderInput,
+    public_render_inputs,
+    resolve_public_render_inputs,
+)
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.execution.run_state import ExecuteNodeResult
 from app.production.edit_render_plan import build_render_plan
@@ -108,7 +115,9 @@ async def create_edit_session_render(
             details={"code": "EXPORT_SUBTITLES_EMPTY"},
         )
     instructions = [asdict(item) for item in plan.instructions]
-    sources = await _render_sources(session, project_id, instructions)
+    public_inputs = public_render_inputs(document)
+    public_media = await resolve_public_render_inputs(session, project_id, public_inputs)
+    sources = await _render_sources(session, project_id, instructions, public_media)
     for clip in document["clips"] if document.get("schema_version") == 2 else []:
         for field in ("selection_snapshot", "audio_selection_snapshot"):
             saved = clip.get(field)
@@ -127,6 +136,7 @@ async def create_edit_session_render(
         "timeline_version": plan.timeline_version,
         "timeline_hash": plan.timeline_hash,
         "instructions": instructions,
+        "public_inputs": [item.model_dump(mode="json") for item in public_inputs],
         "source_hashes": {str(key): row.content_hash for key, row in sources.items()},
     }
     input_hash = _snapshot_hash(snapshot)
@@ -207,8 +217,9 @@ async def create_edit_session_render(
 
 
 async def _render_sources(
-    session: AsyncSession, project_id: UUID, instructions: list[dict[str, Any]]
-) -> dict[UUID, Artifact]:
+    session: AsyncSession, project_id: UUID, instructions: list[dict[str, Any]],
+    public_media: dict[UUID, MediaSource],
+) -> dict[UUID, Artifact | MediaSource]:
     expected = [
         (UUID(str(item[field])), kind)
         for item in instructions
@@ -216,17 +227,18 @@ async def _render_sources(
         if item.get(field)
     ]
     ids = {key for key, _ in expected}
-    sources = {
+    sources: dict[UUID, Artifact | MediaSource] = {
         row.id: row
         for row in await session.scalars(
             select(Artifact).where(
-                Artifact.id.in_(ids),
+                Artifact.id.in_(ids - public_media.keys()),
                 Artifact.project_id == project_id,
                 Artifact.deleted_at.is_(None),
                 Artifact.storage_state == "available",
             )
         )
     }
+    sources.update(public_media)
     for key, kind in expected:
         if key not in sources or sources[key].artifact_type != kind:
             raise ValidationAppError(
@@ -237,7 +249,7 @@ async def _render_sources(
 
 
 async def _stage_source(
-    store: ObjectStore, artifact: Artifact, path: Path, expected_hash: str
+    store: ObjectStore, artifact: Artifact | MediaSource, path: Path, expected_hash: str
 ) -> None:
     digest = hashlib.sha256()
     size = 0
@@ -270,6 +282,10 @@ async def execute_edit_session_render(
     )
 
     snapshot = dict(run.input_snapshot or {})
+    if _snapshot_hash(snapshot) != run.input_hash:
+        raise ValidationAppError(
+            "render snapshot changed", details={"code": "RENDER_SNAPSHOT_INVALID"},
+        )
     raw_instructions = snapshot.get("instructions")
     if not isinstance(raw_instructions, list) or not raw_instructions:
         raise ValidationAppError(
@@ -288,7 +304,35 @@ async def execute_edit_session_render(
     if export is None:
         raise NotFoundError("export not found")
 
-    artifacts = await _render_sources(session, run.project_id, raw_instructions)
+    if "public_inputs" in snapshot:
+        raw_public = snapshot["public_inputs"]
+        if not isinstance(raw_public, list):
+            raise ValidationAppError(
+                "invalid frozen public inputs", details={"code": "RENDER_SNAPSHOT_INVALID"},
+            )
+        try:
+            public_inputs = [PublicRenderInput.model_validate(raw) for raw in raw_public]
+        except ValidationError as exc:
+            raise ValidationAppError(
+                "invalid frozen public inputs", details={"code": "RENDER_SNAPSHOT_INVALID"},
+            ) from exc
+    else:
+        # Older runs lack link identities. Only the exact saved document can
+        # establish which inputs were public when the user requested the render.
+        frozen = await session.get(EditSession, export.edit_session_id)
+        if frozen is None or frozen.project_id != run.project_id or (
+            timeline_hash(dict(frozen.timeline or {})) != snapshot.get("timeline_hash")
+        ):
+            raise ValidationAppError(
+                "render source provenance is unavailable",
+                details={"code": "RENDER_SNAPSHOT_INVALID"},
+            )
+        public_inputs = public_render_inputs(dict(frozen.timeline or {}))
+    public_media = await resolve_public_render_inputs(session, run.project_id, public_inputs)
+    artifacts = await _render_sources(session, run.project_id, raw_instructions, public_media)
+    grants_by_artifact: dict[UUID, list[PublicRenderInput]] = {}
+    for item in public_inputs:
+        grants_by_artifact.setdefault(item.artifact_id, []).append(item)
     hashes = snapshot.get("source_hashes")
     if hashes is not None and not isinstance(hashes, dict):
         raise ValidationAppError(
@@ -298,6 +342,10 @@ async def execute_edit_session_render(
         directory = Path(temp)
         paths: dict[str, Path] = {}
         for artifact in artifacts.values():
+            # Permissions can change while an earlier clip is streaming.
+            if grants := grants_by_artifact.get(artifact.id):
+                refreshed = await resolve_public_render_inputs(session, run.project_id, grants)
+                artifact = refreshed[artifact.id]
             key = str(artifact.id)
             path = directory / key
             expected_hash = artifact.content_hash if hashes is None else hashes.get(key)

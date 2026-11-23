@@ -527,6 +527,12 @@ async def _published_material(session: AsyncSession, *, project: Project, user: 
     )
 
     _asset, version, media = await _adopted_version(session, project=project, user=user)
+    from app.assets.source_use import SourceUseService
+
+    await SourceUseService(session, actor=user, project=project).declare(
+        artifact_id=media.id, allowed_uses=["library_reference", "creation", "export"],
+        statement="Licensed synthetic media", request_key="edit-material-license",
+    )
     publication = await PublicAssetService(session, actor=user).publish(
         version.id,
         display=PublicDisplay(name="Hero take", description="", style_labels=[]),
