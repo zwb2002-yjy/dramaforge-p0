@@ -90,6 +90,9 @@ export const queryKeys = {
   },
 
   asset: {
+    publicLibrary: (projectId: string, q: string, status: string, offset: number) =>
+      ["public-library", projectId, q, status, offset] as const,
+    publicLinks: (projectId: string) => ["public-links", projectId] as const,
     /** Bare prefix; matches every filtered variant for invalidation. */
     root: (projectId: string) => ["project-assets", projectId] as const,
     list: (

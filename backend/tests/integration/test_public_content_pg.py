@@ -6,7 +6,6 @@ from uuid import uuid4
 import pytest
 from app.access.models import Project, User, Workspace
 from app.assets.public_assets import (
-    ProjectPublicAssetLinkService,
     PublicAssetService,
     PublicDisplay,
 )
@@ -66,17 +65,33 @@ async def test_public_content_rechecks_before_storage(http_agent, monkeypatch, c
             publication = await PublicAssetService(db, actor=owner).publish(
                 version.id, display=PublicDisplay(name="Fixture", description="", style_labels=[])
             )
-            db.info["selected_workspace_id"] = dest.workspace_id
-            link, _ = await ProjectPublicAssetLinkService(
-                db, actor=owner, project_id=dest.id
-            ).create(publication_id=publication.id, local_label="Fixture", request_key="attach")
             await db.commit()
         item = publication.items[0].id
         paths = [
             f"/api/v1/public-assets/{publication.id}/items/{item}/content",
-            f"/api/v1/projects/{dest.id}/public-asset-links/{link.id}/items/{item}/content",
         ]
         headers = {"X-Workspace-Id": str(dest.workspace_id)}
+
+        link_path = f"/api/v1/projects/{dest.id}/public-asset-links"
+        intent = {
+            "publication_id": str(publication.id),
+            "request_key": "attach", "local_label": "Fixture",
+        }
+        write_headers = {**headers, **agent.headers}
+
+        async def listing(status):
+            response = await agent.client.get("/api/v1/public-assets", headers=headers, params={
+                "status": status, "q": "Fixture", "limit": 1,
+            })
+            assert response.status_code == 200, response.text
+            return response.json()
+
+        restricted = await listing("restricted")
+        assert restricted["total"] == 1
+        assert not restricted["items"][0]["items"][0]["preview_available"]
+        assert (await listing("available"))["total"] == 0
+        blocked = await agent.client.post(link_path, headers=write_headers, json=intent)
+        assert blocked.status_code == 409
 
         async def denied(url):
             before = list(accesses)
@@ -128,6 +143,17 @@ async def test_public_content_rechecks_before_storage(http_agent, monkeypatch, c
                     )
                     child = upstream
             await db.commit()
+        allowed = await listing("available")
+        assert allowed["total"] == 1
+        summary = allowed["items"][0]["items"][0]
+        assert summary["media_kind"] == "image" and summary["width"] == 1024
+        assert summary["preview_available"] and summary["role"] == "primary"
+        created = await agent.client.post(link_path, headers=write_headers, json=intent)
+        assert created.status_code == 201, created.text
+        link_id = created.json()["id"]
+        replay = await agent.client.post(link_path, headers=write_headers, json=intent)
+        assert replay.status_code == 200 and replay.json()["id"] == link_id
+        paths.append(f"{link_path}/{link_id}/items/{item}/content")
         if change == "soft_delete":
             async with factory() as db:
                 archived = await db.get(Project, source.id)
@@ -148,7 +174,7 @@ async def test_public_content_rechecks_before_storage(http_agent, monkeypatch, c
             assert partial.status_code == 206 and partial.content == payload[1:4]
         assert accesses == ["get_bytes", "get_range"] * 2
         await denied(paths[0].replace(str(item), str(uuid4())))
-        await denied(paths[1].replace(str(link.id), str(uuid4())))
+        await denied(paths[1].replace(link_id, str(uuid4())))
         if change == "direct_revocation":
             import httpx
 
@@ -186,6 +212,10 @@ async def test_public_content_rechecks_before_storage(http_agent, monkeypatch, c
                     request_key="revoke",
                 )
             await db.commit()
+        assert (await listing("available"))["total"] == 0
+        assert (await listing("restricted"))["total"] == 1
+        links = await agent.client.get(link_path, headers=headers)
+        assert links.json()["items"][0]["availability"] == "restricted"
         for url in paths:
             await denied(url)
     finally:

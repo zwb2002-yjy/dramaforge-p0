@@ -478,7 +478,11 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
                     icon={FileText}
                   />
                   <ContextLink
-                    active={creationView === "assets" && !location.searchStr.includes("kind=")}
+                    active={
+                      creationView === "assets" &&
+                      !location.searchStr.includes("kind=") &&
+                      !location.searchStr.includes("scope=public")
+                    }
                     label="素材"
                     to={`/projects/${projectId}/assets`}
                     icon={Package}
@@ -513,6 +517,15 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
                       icon={Package}
                     />
                   ))}
+                  <ContextLink
+                    active={
+                      creationView === "assets" && location.searchStr.includes("scope=public")
+                    }
+                    label="公共资产"
+                    to={`/projects/${projectId}/assets`}
+                    search={{ scope: "public" }}
+                    icon={Library}
+                  />
                   <ContextLink active={false} label="文化知识库" to="/knowledge" icon={Library} />
                   <Disclosure compact title="制作工具">
                     <ContextLink

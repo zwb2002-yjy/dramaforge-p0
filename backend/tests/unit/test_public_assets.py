@@ -19,6 +19,15 @@ from test_director_turn_api import api as api
 from fixtures.public_asset_seed import _seed_asset
 
 
+async def _license(session, owner, project, artifact):
+    from app.assets.source_use import SourceUseService
+
+    return await SourceUseService(session, actor=owner, project=project).declare(
+        artifact_id=artifact.id, allowed_uses=["library_reference"],
+        statement="Synthetic library license", request_key="library-read",
+    )
+
+
 @pytest.fixture
 async def world(session):
     owner = User(email=f"pub-{uuid4()}@example.com", display_name="P", password_hash="x")
@@ -31,13 +40,15 @@ async def world(session):
     session.add(project)
     await session.commit()
     session.info["selected_workspace_id"] = workspace.id
-    version, _artifact = await _seed_asset(session, project=project, owner=owner)
+    version, artifact = await _seed_asset(session, project=project, owner=owner)
+    grant = await _license(session, owner, project, artifact)
     return {
         "session": session,
         "owner": owner,
         "workspace": workspace,
         "project": project,
         "version": version,
+        "grant": grant,
         "service": PublicAssetService(session, actor=owner),
     }
 
@@ -135,7 +146,8 @@ def test_public_asset_http_reads_and_links(api):
             )
             project_row = await session.get(ProjectModel, UUID(project))
             assert project_row is not None
-            version, _artifact = await _seed_asset(session, project=project_row, owner=owner)
+            version, artifact = await _seed_asset(session, project=project_row, owner=owner)
+            await _license(session, owner, project_row, artifact)
             from app.assets.public_assets import PublicAssetService, PublicDisplay
 
             published = await PublicAssetService(session, actor=owner).publish(
@@ -425,7 +437,7 @@ async def test_public_reference_token_records_identity_and_respects_withdrawal(w
         artifact_id=artifact.artifact_id,
         allowed_uses=["external_processing", "library_reference"],
         statement="合成样例许可",
-        expected_version=0,
+        expected_version=world["grant"].result_version,
         request_key="public-token-use",
     )
     resolved = await resolve_public_reference(world["session"], token=token)

@@ -85,6 +85,11 @@ async def test_edit_public_material_rechecks_at_each_entry(http_agent, monkeypat
                     source_project_id=source.id, source_revision_id=basis.id,
                     consumer_node_run_id=uuid4(), input_role="audio",
                 )
+            else:
+                basis = await SourceUseService(db, actor=owner, project=source).declare(
+                    artifact_id=media.id, allowed_uses=["library_reference"],
+                    statement="Synthetic library license", request_key="base",
+                )
             publication = await PublicAssetService(db, actor=owner).publish(
                 version.id, display=PublicDisplay(name="Clip", description="", style_labels=[]),
             )
@@ -131,7 +136,7 @@ async def test_edit_public_material_rechecks_at_each_entry(http_agent, monkeypat
         receipt = {"format": "mp4", "idempotency_key": "cut"}
         patch = agent.client.patch
         post = agent.client.post
-        ver = basis.result_version if kind == "audio" else await permit(["library_reference"], 0)
+        ver = basis.result_version
         denied = await patch(path + "/timeline", headers=agent.headers, json=save)
         assert denied.status_code == 422 and "EDIT_SOURCE_NOT_ADOPTED" in denied.text
         ver = await permit(["library_reference", "creation"], ver)

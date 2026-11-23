@@ -183,6 +183,10 @@ export function artifactContentUrl(projectId: string, artifactId: string): strin
   return workspaceScopedUrl(`/api/v1/projects/${projectId}/artifacts/${artifactId}/content`);
 }
 
+export function publicItemContentUrl(publicationId: string, itemId: string): string {
+  return workspaceScopedUrl(`/api/v1/public-assets/${publicationId}/items/${itemId}/content`);
+}
+
 export function fileVisionPreviewUrl(
   projectId: string,
   revisionId: string,

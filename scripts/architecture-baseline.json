@@ -23,11 +23,6 @@
       "reason": "ARCHITECTURE_MAPPING §4.6: Project creation validates, compiles and freezes its initial creative profile. Remove after application orchestration injects validated inputs while preserving atomic project/profile creation, ownership and versions."
     },
     {
-      "from": "app.assets.public_assets",
-      "to": "app.execution.models",
-      "reason": "ARCHITECTURE_MAPPING §4.13: A public publication validates its real media references and reads observed artifact facts (type/mime/size) without exposing the private source project. Remove through the same production-facts boundary as asset creation."
-    },
-    {
       "from": "app.assets.from_artifact_service",
       "to": "app.execution.models",
       "reason": "ARCHITECTURE_MAPPING §4.13: Asset creation validates an existing Artifact before atomic Asset/Version/Reference creation. Remove through an explicit production-facts boundary preserving ownership, storage/type checks and idempotency."

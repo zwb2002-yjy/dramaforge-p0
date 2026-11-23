@@ -16,7 +16,7 @@ from functools import lru_cache
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import func, select, text
+from sqlalchemy import ColumnElement, TextClause, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User, Workspace
@@ -51,23 +51,38 @@ class PublicContent:
     content_hash: str
 
 
-@lru_cache(maxsize=1)
-def _sqlite_public_item_sql() -> str:
+@lru_cache(maxsize=2)
+def _sqlite_public_item_sql(
+    publication: str = ":publication", item: str = ":item", workspace: str = ":workspace",
+) -> str:
     return (
         (Path(__file__).with_name("sql") / "public_item_content_v1.sql")
         .read_text(encoding="utf-8")
         .format(
             schema="",
             actor=":actor",
-            workspace=":workspace",
+            workspace=workspace,
             active_project=":project",
             project=":project",
             link=":link",
-            publication=":publication",
-            item=":item",
+            publication=publication,
+            item=item,
             permits_library=("EXISTS (SELECT 1 FROM json_each(r.allowed_uses) "
                              "WHERE value='library_reference')"),
         )
+    )
+
+
+@lru_cache(maxsize=4)
+def _summary_query(dialect: str, publication: str) -> str:
+    if dialect == "postgresql":
+        return f"SELECT * FROM app.public_item_summaries({publication})"
+    workspace = "coalesce(:workspace, pub.workspace_id)"
+    content = _sqlite_public_item_sql("pub.id", "member.id", workspace)
+    template = Path(__file__).with_name("sql") / "public_item_summaries_v1.sql"
+    return template.read_text(encoding="utf-8").format(
+        content_query=content, schema="", publication=publication,
+        actor=":actor", workspace=workspace,
     )
 
 
@@ -297,59 +312,45 @@ class PublicAssetService:
             raise NotFoundError("public asset not found")
         return publication
 
-    async def availability(
-        self, publication: PublicAssetPublication
-    ) -> tuple[str, bool, list[str]]:
-        if publication.status == "withdrawn" or publication.withdrawn_at is not None:
-            return "withdrawn", False, ["withdrawn"]
-        version = await self.session.get(AssetVersion, publication.source_asset_version_id)
-        if version is None or version.status != "formal":
-            return "restricted", False, ["source_version_unavailable"]
-        return "available", True, []
+    def _summary_params(self) -> dict[str, object]:
+        if self.session.get_bind().dialect.name == "postgresql":
+            return {}
+        workspace = self.session.info.get("selected_workspace_id")
+        return {
+            "actor": self.actor.id.hex,
+            "workspace": UUID(str(workspace)).hex if workspace else None,
+            "project": None, "link": None,
+        }
 
     async def _items(self, publication: PublicAssetPublication) -> list[PublicItemSummary]:
-        rows = list(
-            await self.session.scalars(
-                select(PublicAssetPublicationItem)
-                .where(PublicAssetPublicationItem.publication_id == publication.id)
-                .order_by(PublicAssetPublicationItem.created_at, PublicAssetPublicationItem.id)
+        dialect = self.session.get_bind().dialect.name
+        params = self._summary_params()
+        params["publication"] = publication.id if dialect == "postgresql" else publication.id.hex
+        rows = await self.session.execute(text(_summary_query(dialect, ":publication")), params)
+        return [
+            PublicItemSummary(
+                id=UUID(str(row.id)), media_kind=row.media_kind, role=row.role,
+                mime_type=row.mime_type, width=row.width, height=row.height,
+                duration_ms=(
+                    int(row.duration_seconds * 1000) if row.duration_seconds is not None else None
+                ),
+                preview_available=bool(row.preview_available),
             )
-        )
-        from app.execution.models import Artifact
+            for row in rows
+        ]
 
-        references = {
-            reference.id: reference
-            for reference in await self.session.scalars(
-                select(AssetVersionReference).where(
-                    AssetVersionReference.id.in_(
-                        [row.source_reference_id for row in rows]
-                    )
-                )
-            )
-        }
-        summaries: list[PublicItemSummary] = []
-        for row in rows:
-            artifact = await self.session.get(Artifact, row.artifact_id)
-            reference = references.get(row.source_reference_id)
-            duration = getattr(artifact, "duration_seconds", None)
-            summaries.append(
-                PublicItemSummary(
-                    id=row.id,
-                    media_kind=str(getattr(artifact, "artifact_type", "") or ""),
-                    role=str(reference.reference_role if reference is not None else ""),
-                    mime_type=(
-                        str(getattr(artifact, "mime_type", "") or "") or None
-                    ),
-                    width=getattr(artifact, "width", None),
-                    height=getattr(artifact, "height", None),
-                    duration_ms=int(duration * 1000) if duration is not None else None,
-                    preview_available=artifact is not None,
-                )
-            )
-        return summaries
     async def read(self, publication_id: UUID) -> PublicAssetRead:
         publication = await self._publication(publication_id)
-        status, usable, reasons = await self.availability(publication)
+        return await self._read(publication)
+
+    async def _read(self, publication: PublicAssetPublication) -> PublicAssetRead:
+        items = await self._items(publication)
+        if publication.status == "withdrawn" or publication.withdrawn_at is not None:
+            status, usable, reasons = "withdrawn", False, ["withdrawn"]
+        elif items and all(item.preview_available for item in items):
+            status, usable, reasons = "available", True, []
+        else:
+            status, usable, reasons = "restricted", False, ["public_media_unavailable"]
         labels = publication.safe_metadata.get("style_labels")
         style_labels = [str(value) for value in labels] if isinstance(labels, list) else []
         return PublicAssetRead(
@@ -363,7 +364,7 @@ class PublicAssetService:
             status=status,
             usable=usable,
             reason_codes=reasons,
-            items=await self._items(publication),
+            items=items,
             created_at=publication.created_at,
         )
 
@@ -384,11 +385,22 @@ class PublicAssetService:
     ) -> tuple[list[PublicAssetRead], int]:
         if not 1 <= limit <= 100 or offset < 0:
             raise ValidationAppError("Invalid public asset page")
-        condition = [PublicAssetPublication.owner_user_id == self.actor.id]
+        condition: list[ColumnElement[bool] | TextClause] = [
+            PublicAssetPublication.owner_user_id == self.actor.id
+        ]
         if kind:
             condition.append(PublicAssetPublication.kind == kind)
         if status:
-            condition.append(PublicAssetPublication.status == status)
+            dialect = self.session.get_bind().dialect.name
+            summaries = _summary_query(dialect, "public_asset_publications.id")
+            # Apply the same effective status before counting or slicing a page.
+            status_filter = text(
+                "CASE WHEN public_asset_publications.status='withdrawn' THEN 'withdrawn' "
+                "WHEN (SELECT count(*) > 0 AND count(*) = "
+                f"count(CASE WHEN preview_available THEN 1 END) FROM ({summaries}) AS members) "
+                "THEN 'available' ELSE 'restricted' END = :wanted"
+            ).bindparams(wanted=status, **self._summary_params())
+            condition.append(status_filter)
         if query:
             if len(query) > 200:
                 raise ValidationAppError("Public asset query is too long")
@@ -413,7 +425,7 @@ class PublicAssetService:
                 .limit(limit)
             )
         )
-        return [await self.read(row.id) for row in rows], total
+        return [await self._read(row) for row in rows], total
 
     async def set_withdrawn(
         self, publication_id: UUID, *, expected_revision: int, withdrawn: bool
@@ -489,12 +501,8 @@ class ProjectPublicAssetLinkService:
         return publication
 
     async def _availability(self, publication: PublicAssetPublication) -> str:
-        if publication.status == "withdrawn" or publication.withdrawn_at is not None:
-            return "withdrawn"
-        version = await self.session.get(AssetVersion, publication.source_asset_version_id)
-        if version is None or version.status != "formal":
-            return "restricted"
-        return "available"
+        asset = await PublicAssetService(self.session, actor=self.actor).read(publication.id)
+        return asset.status
 
     async def _read(self, link: ProjectPublicAssetLink) -> ProjectPublicLinkRead:
         publication = await self._publication(link.publication_id)

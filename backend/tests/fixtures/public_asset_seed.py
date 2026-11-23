@@ -5,6 +5,7 @@ from uuid import uuid4
 from app.access.models import Project, User
 from app.assets.models import Asset, AssetVersion, AssetVersionReference
 from app.execution.models import Artifact
+from app.shared.db import set_rls_context
 
 
 async def _seed_asset(session, *, project: Project, owner: User) -> tuple[AssetVersion, Artifact]:
@@ -55,4 +56,7 @@ async def _seed_asset(session, *, project: Project, owner: User) -> tuple[AssetV
         )
     )
     await session.commit()
+    await set_rls_context(
+        session, user_id=owner.id, workspace_id=project.workspace_id, project_id=project.id,
+    )
     return version, artifact

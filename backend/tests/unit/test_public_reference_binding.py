@@ -94,6 +94,12 @@ def _seed_public_link(client, factory) -> tuple[str, str, str, str, str]:
                 )
             )
             await session.flush()
+            from app.assets.source_use import SourceUseService
+
+            await SourceUseService(session, actor=owner, project=project_row).declare(
+                artifact_id=artifact.id, allowed_uses=["library_reference"],
+                statement="Synthetic library license", request_key="library-read",
+            )
             published = await PublicAssetService(session, actor=owner).publish(
                 version.id,
                 display=PublicDisplay(name="古桥匠人", description="", style_labels=[]),

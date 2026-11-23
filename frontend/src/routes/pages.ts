@@ -18,6 +18,11 @@ export const LazyAssetCardsPanel = lazyRouteComponent(
   "AssetCardsPanel",
 );
 
+export const LazyPublicAssetLibrary = lazyRouteComponent(
+  () => import("../features/assets/PublicAssetLibrary"),
+  "PublicAssetLibrary",
+);
+
 export const LazySceneStoryboardWall = lazyRouteComponent(
   () => import("../features/scenes/SceneStoryboardWall"),
   "SceneStoryboardWall",

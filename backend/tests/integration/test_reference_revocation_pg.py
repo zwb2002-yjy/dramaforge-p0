@@ -8,6 +8,7 @@ from app.assets.source_use import SourceUseService
 from app.config import Settings
 from app.execution.models import Artifact, NodeRun
 from app.providers.reference_delivery import issue_artifact_reference
+from app.shared.db import set_rls_context
 from app.shared.errors import NotFoundError
 from app.storage.minio_store import get_object_store
 from sqlalchemy import select, text
@@ -96,6 +97,9 @@ async def test_token_rechecks_source_lineage_before_object_io(pg_session, monkey
         )
         await db.flush()
         db.info["selected_workspace_id"] = project.workspace_id
+        await set_rls_context(
+            db, user_id=owner.id, workspace_id=project.workspace_id, project_id=project.id,
+        )
         publication = await PublicAssetService(db, actor=owner).publish(
             version.id, display=PublicDisplay(name="Fixture", description="", style_labels=[])
         )
