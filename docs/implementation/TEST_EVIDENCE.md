@@ -210,6 +210,7 @@
 | EV202 | 文件修订与片段的视觉附件 | 71 个定向后端用例通过。使用多页 TIFF、扫描 PDF、原生 PDF、MP4 的真实编解码；OCR 坐标使用受控识别结果，选定页/帧的行区域为 24×12，继续裁切后为 12×12。验证跨项目、解除关联、原件错哈希与错误视频时间均拒绝。隔离 PostgreSQL 下 4 个 HTTP/Worker 用例通过；预览与两步受控传输的 PNG 相同；重解析/撤销后传输与 Invocation 均为 0。真实 Chromium、API、PG、MinIO 和 Worker 的资料上传、显式保存许可、附帧及无模型时拒绝 1 passed。mypy 420 文件、Ruff、架构/退役面、前端类型与 lint/UI 通过。 | 临时栈、卷、网络及验证镜像已回收。本批未调用真实外部模型或部署到常驻试用栈，Full 待最终候选。 |
 | EV203 | 公共库浏览器内容入口的撤销复核，代码审查 | PublicAssetService.read_content 及 ProjectPublicAssetLinkService.read_content 返回对象位置的条件包含发布、版本、关联及存储状态；缺少当前来源 library_reference 资格及软删除时间判断。两处 GET/HEAD 使用这些结果，未复用 EV192 的 Provider 令牌下载校验。 | 仅代码证据，不能据此认定发生过他人数据访问或历史泄漏。按 Owner 暂停规则报告。 |
 | EV204 | 经批准的 EV203 公共预览／项目固定链接读取修复，隔离 PostgreSQL 15 | 真实认证 HTTP 和 dramaforge_app 受限角色；在消费工作区直接查询源私有 Artifact 得不到该行，而经明确库许可，两入口全文 200、Range 206、HEAD 200。已提交的直接撤销、两层来源中最上游撤销、存储状态仍 available 的软删除，分别使两个入口的 GET/Range GET/HEAD 返回 404；存储读取增量均为 0。无声明、错误成员/链接与其他 Owner 同样拒绝。源项目归档本身保留有效读取。3 个浏览器内容场景与 2 个既有 Provider 令牌回归通过，另 12 个定向单测通过；0124→0125→0124→0125、alembic check、Ruff、mypy 420 文件、架构与退役面通过。 | 初始夹具导入路径、样例唯一键冲突及未先迁移默认回归库已修正，再按最终候选验证。tmp/ev204-content/postgres.log 与 migrations.log 留存；仅合成对象，未变更常驻试用库或业务数据。列表投影和导演公共附件另验，最终 Full 未运行。 |
+| EV205 | 剪辑公共素材及新导出，代码审查 | timeline_schema._verify_public_material 在保存时核对项目链接、发布状态、成员及媒体类型，read_media_source 检查软删除，但两者未核对来源用途。SessionExports.create_session_export 与 build_render_plan 读取冻结素材 ID。现有剪辑用例覆盖发布撤回和解除链接，未覆盖独立撤销来源许可。 | 已请求 Owner 处置。未运行撤销复现或导出，未观察到历史越权事实。 |
 
 
 
