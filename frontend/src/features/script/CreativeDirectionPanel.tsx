@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useContext, useState } from "react";
+import { useEffect, useContext, useRef, useState } from "react";
 
 import {
   ApiError,
@@ -9,15 +9,19 @@ import {
 } from "../../lib/api";
 import { Sparkles, Send } from "lucide-react";
 import { StudioSelection } from "../../components/workstation/StudioSelection";
-import { ActionLink, Button, Checkbox, Field, Textarea } from "../../components/ui";
+import { ActionLink, Button, Checkbox, ExternalLink, Field, Textarea } from "../../components/ui";
+import { ContentFields } from "../research/ResearchContent";
 import { DeliveryGoals } from "../director/DeliveryGoals";
 import { queryKeys } from "../../lib/queryKeys";
 import {
+  findProjectDirectorThread,
   getDirectorAgentRequest,
+  getDirectorTurn,
   openProjectDirectorThread,
   readDirectorAgentThread,
   sendDirectorAgentMessage,
 } from "../director/api";
+import { getSelectedWorkspaceId } from "../../lib/navigationPreferences";
 import { fetchCreativeDirection, saveCreativeDirection } from "./api";
 
 type CreativeDirectionPanelProps = {
@@ -35,7 +39,8 @@ type CreativeDirectionPanelProps = {
 export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPanelProps) {
   const studio = useContext(StudioSelection);
   const selection = studio?.attachment;
-  const selectedPart = selection?.part;
+  const selectedPart = selection && "part" in selection ? selection.part : null;
+  const research = selection && "research_ref" in selection ? selection : null;
   const preview = selection ? null : studio?.media;
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -43,8 +48,47 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const storageKey = `df.project.director.${projectId}`;
-  const [threadId, setThreadId] = useState<string | null>(() => sessionStorage.getItem(storageKey));
-  const [question, setQuestion] = useState("");
+  const [openedThread, setOpenedThread] = useState<string | null>(null);
+  const discovery = useQuery({
+    queryKey: ["project-director-thread", projectId],
+    queryFn: ({ signal }) => findProjectDirectorThread(projectId, signal),
+    retry: false,
+  });
+  const existingThread =
+    discovery.data?.scope_type === "project" && discovery.data.scope_entity_id === projectId
+      ? discovery.data.id
+      : null;
+  const threadId = existingThread ?? openedThread;
+  const userId = queryClient.getQueryData<{ id: string }>(queryKeys.auth.currentUser())?.id;
+  const workspaceId = getSelectedWorkspaceId();
+  const draftKey = userId && workspaceId ? `${storageKey}.${userId}.${workspaceId}.draft` : null;
+  const [question, setQuestion] = useState(() =>
+    draftKey ? (sessionStorage.getItem(draftKey) ?? "") : "",
+  );
+  useEffect(() => {
+    if (!draftKey) return;
+    if (question) sessionStorage.setItem(draftKey, question);
+    else sessionStorage.removeItem(draftKey);
+  }, [draftKey, question]);
+  const lastSuggestedQuestion = useRef<string | null>(null);
+  useEffect(() => {
+    if (!research) return;
+    const prior = lastSuggestedQuestion.current;
+    setQuestion((value) => (!value.trim() || value === prior ? research.prompt : value));
+    lastSuggestedQuestion.current = research.prompt;
+  }, [research]);
+  const submitLock = useRef(false);
+  const sentText = useRef<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const transcript = useRef<HTMLDivElement>(null);
+  const followLatest = useRef(true);
+  const [modelSetup, setModelSetup] = useState(false);
   const [goalsOpen, setGoalsOpen] = useState(false);
   const [createGoal, setCreateGoal] = useState(false);
   const [attachment, setAttachment] = useState<{
@@ -84,7 +128,6 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
   const [pendingRequest, setPendingRequest] = useState<string | null>(() =>
     sessionStorage.getItem(pendingKey),
   );
-  const awaitingReply = Boolean(pendingRequest);
   const [submitting, setSubmitting] = useState(false);
 
   const direction = useQuery({
@@ -98,7 +141,7 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
     queryFn: () => readDirectorAgentThread(projectId, threadId!),
     enabled: threadId !== null,
     retry: false,
-    refetchInterval: awaitingReply ? 2000 : false,
+    refetchInterval: pendingRequest ? 2000 : false,
   });
 
   const draft = edit?.text ?? direction.data?.direction ?? "";
@@ -109,13 +152,39 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
   }
 
   const messages = thread.data?.messages ?? [];
+  const last = messages.at(-1);
+  const lastMessageId = last?.id;
+  const lastTurnId = last?.role === "user" ? last.turn_id : null;
+  const previous = useQuery({
+    queryKey: ["project-conversation-last-turn", projectId, threadId, lastTurnId],
+    queryFn: () => getDirectorTurn(projectId, lastTurnId!),
+    enabled: !!lastTurnId && !pendingRequest,
+    retry: false,
+    refetchInterval: (q) =>
+      q.state.data && ["queued", "thinking", "awaiting_execution"].includes(q.state.data.status)
+        ? 1800
+        : false,
+  });
+  const observed = previous.data?.thread_id === threadId ? previous.data : null;
+  const awaitingReply = Boolean(
+    pendingRequest ||
+    (observed && ["queued", "thinking", "awaiting_execution"].includes(observed.status)),
+  );
+  useEffect(() => {
+    if (observed && ["completed", "awaiting_user"].includes(observed.status)) {
+      void queryClient.invalidateQueries({ queryKey: ["direction-thread", projectId] });
+    }
+  }, [observed, projectId, queryClient]);
+  useEffect(() => {
+    const list = transcript.current;
+    if (list && followLatest.current) list.scrollTop = list.scrollHeight;
+  }, [lastMessageId, awaitingReply]);
   const receipt = useQuery({
     queryKey: ["project-director-receipt", projectId, threadId, pendingRequest],
     queryFn: ({ signal }) => getDirectorAgentRequest(projectId, threadId!, pendingRequest!, signal),
     enabled: !!threadId && !!pendingRequest && !submitting,
     retry: false,
-    refetchInterval: (query) =>
-      pendingRequest && query.state.data && !query.state.error ? 1800 : false,
+    refetchInterval: (query) => (pendingRequest && !query.state.error ? 1800 : false),
   });
   useEffect(() => {
     const state = receipt.data?.turn.status;
@@ -124,14 +193,32 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
       state &&
       ["failed", "cancelled", "completed", "awaiting_user", "stale", "rejected"].includes(state)
     ) {
-      if (state === "failed") setError("导演任务未完成，请查看任务回执或检查项目文本模型。");
+      if (receipt.data?.turn.transport_status === "unknown_submission") {
+        setError("模型提交结果未知。请核对原任务的回执后再决定下一步。");
+      } else if (state === "completed" || state === "awaiting_user") {
+        const original =
+          sentText.current ??
+          thread.data?.messages.find(
+            (item) => item.id === receipt.data?.acceptance?.user_message_id,
+          )?.content;
+        if (original) setQuestion((current) => (current.trim() === original.trim() ? "" : current));
+      } else if (state === "failed") {
+        setError(`导演未能完成本轮：${receipt.data?.turn.stop_reason || "请检查文本模型连接"}。`);
+      } else if (state === "stale" || state === "cancelled" || state === "rejected") {
+        setError(
+          state === "stale"
+            ? "本轮依据已变化，请重新选择讨论内容。"
+            : "本轮已结束，未产生新的回复。",
+        );
+      }
+      sentText.current = null;
       if (sessionStorage.getItem(pendingKey) === pendingRequest)
         sessionStorage.removeItem(pendingKey);
       setPendingRequest(null);
       void queryClient.invalidateQueries({ queryKey: ["direction-thread", projectId] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.director.goals(projectId) });
     }
-  }, [pendingRequest, pendingKey, receipt.data?.turn.status, projectId, queryClient]);
+  }, [pendingRequest, pendingKey, receipt.data, thread.data, projectId, queryClient]);
 
   const save = useMutation({
     mutationFn: () => {
@@ -154,17 +241,29 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
   });
 
   const send = useMutation({
-    mutationFn: async () => {
-      const id = threadId ?? (await openProjectDirectorThread(projectId)).id;
-      sessionStorage.setItem(storageKey, id);
-      setThreadId(id);
-      const requestKey = `direction:${crypto.randomUUID()}`;
+    retry: false,
+    mutationFn: async ({ content, reuseKey }: { content: string; reuseKey?: string }) => {
+      const opened = threadId ? null : await openProjectDirectorThread(projectId);
+      if (opened && (opened.scope_type !== "project" || opened.scope_entity_id !== projectId))
+        throw new Error("无法核对当前项目会话，请重新打开项目。");
+      if (!mounted.current) throw new Error("已离开当前项目。");
+      const id = opened?.id ?? threadId!;
+      setOpenedThread(id);
+      if (opened) queryClient.setQueryData(["project-director-thread", projectId], opened);
+      // getRandomValues is available on LAN HTTP as well as HTTPS.
+      const requestKey =
+        reuseKey ??
+        `direction:${Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
+          b.toString(16).padStart(2, "0"),
+        ).join("")}`;
+      sentText.current = content;
       sessionStorage.setItem(pendingKey, requestKey);
       setPendingRequest(requestKey);
       return sendDirectorAgentMessage(projectId, id, {
-        content: question.trim(),
+        content: content.trim(),
         request_key: requestKey,
-        intent: goalsOpen && createGoal ? "create_goal" : "conversation",
+        intent: !research && goalsOpen && createGoal ? "create_goal" : "conversation",
+        ...(research && { research_ref: research.research_ref }),
         ...(selectedPart && { media_parts: [selectedPart] }),
         ...(attached && {
           media_parts: [
@@ -187,10 +286,12 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
       });
     },
     onMutate: () => setSubmitting(true),
-    onSettled: () => setSubmitting(false),
+    onSettled: () => {
+      submitLock.current = false;
+      setSubmitting(false);
+    },
     onSuccess: () => {
       setCreateGoal(false);
-      setQuestion("");
       studio?.showAttachment(null);
       setAttachment(null);
       setError(null);
@@ -201,9 +302,35 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
         sessionStorage.removeItem(pendingKey);
         setPendingRequest(null);
       }
-      setError(cause instanceof Error ? cause.message : "发送失败");
+      const code = cause instanceof ApiError ? String(cause.details.code ?? cause.code) : "";
+      const needsModel = /MODEL_PROFILE|MODEL_UNAVAILABLE|TOOLS_UNAVAILABLE|MODEL_BINDING/.test(
+        code,
+      );
+      setModelSetup(needsModel);
+      setError(
+        needsModel
+          ? "当前项目没有可用的导演文本模型。请选择支持工具对话的文本连接，再发送这条消息。"
+          : cause instanceof Error
+            ? cause.message
+            : "发送失败",
+      );
     },
   });
+
+  function submitMessage(reuseKey?: string) {
+    if (
+      submitLock.current ||
+      !question.trim() ||
+      (previewUrl && loadedPreview !== previewUrl) ||
+      (awaitingReply && (!reuseKey || reuseKey !== pendingRequest))
+    )
+      return;
+    submitLock.current = true;
+    followLatest.current = true;
+    setModelSetup(false);
+    setError(null);
+    send.mutate({ content: question, reuseKey });
+  }
 
   return (
     <aside
@@ -251,7 +378,21 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
         </div>
       )}
       {message && <p role="status">{message}</p>}
-      <div className="institution-conversation" aria-label="项目对话记录">
+      <div
+        className="institution-conversation"
+        aria-label="项目对话记录"
+        ref={transcript}
+        onScroll={(event) => {
+          const el = event.currentTarget;
+          followLatest.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+        }}
+      >
+        {discovery.isError && !threadId && (
+          <p role="alert">
+            项目对话读取失败。
+            <Button onClick={() => void discovery.refetch()}>重新读取项目对话</Button>
+          </p>
+        )}
         {thread.isError && (
           <p role="alert">
             读取对话失败。<Button onClick={() => void thread.refetch()}>重试</Button>
@@ -263,7 +404,16 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
             <p>{goal}</p>
           </article>
         )}
-        {selection && (
+        {research && (
+          <article className="studio-context-card" aria-label="将随消息发送的研究正文">
+            <strong>{research.label}</strong>
+            <ContentFields value={research.body} />
+            <Button tone="ghost" onClick={() => studio?.showAttachment(null)}>
+              移除研究附件
+            </Button>
+          </article>
+        )}
+        {selection && selectedPart && (
           <article className="studio-context-card">
             <strong>{selection.label}</strong>
             <img
@@ -331,6 +481,9 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
           <article key={item.id} data-role={item.role}>
             <strong>{item.role === "assistant" ? "导演" : "你"}</strong>
             <p>{item.content}</p>
+            {item.role === "user" && "research_ref" in item && !!item.research_ref && (
+              <small>已引用固定研究版本</small>
+            )}
             {item.role === "user" &&
               item.media_parts?.map((part, index) => (
                 <img
@@ -396,11 +549,20 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
             )}
           </article>
         ))}
+        {!pendingRequest && !error && observed?.status === "failed" && (
+          <p role="alert">
+            {observed.transport_status === "unknown_submission"
+              ? "上次模型提交结果未知，请核对原任务回执。"
+              : `上次对话未完成：${observed.last_error || "请检查项目文本模型"}。`}
+          </p>
+        )}
         {awaitingReply && (
           <p role="status">
-            {receipt.isError || receipt.data === null
-              ? "暂未确认本次消息的处理状态。"
-              : "正在等待导演回复…"}
+            {receipt.data === null
+              ? "服务器暂未找到这条消息。可重新核对，也可使用原请求键再次发送。"
+              : receipt.isError
+                ? "暂未确认本次消息的处理状态。"
+                : "正在等待导演回复…"}
           </p>
         )}
       </div>
@@ -409,7 +571,28 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
           重新读取本次回执
         </Button>
       )}
-      {error && <p role="alert">{error}</p>}
+      {pendingRequest && receipt.data === null && !receipt.isFetching && !submitting && (
+        <Button
+          tone="ghost"
+          disabled={!question.trim() || (!!previewUrl && loadedPreview !== previewUrl)}
+          onClick={() => submitMessage(pendingRequest)}
+        >
+          按原请求键发送当前内容
+        </Button>
+      )}
+      {error && (
+        <p role="alert">
+          {error}
+          {modelSetup && (
+            <ExternalLink
+              type="link"
+              href={`/settings/projects/${encodeURIComponent(projectId)}?returnTo=${encodeURIComponent(`/projects/${projectId}`)}`}
+            >
+              配置项目模型
+            </ExternalLink>
+          )}
+        </p>
+      )}
       <div className="studio-suggestions">
         {["我想修改…", "帮我调整…", "继续优化…"].map((label) => (
           <Button
@@ -428,24 +611,30 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (
-            question.trim() &&
-            (!previewUrl || loadedPreview === previewUrl) &&
-            !send.isPending &&
-            !awaitingReply
-          )
-            send.mutate();
+          submitMessage();
         }}
       >
         <Textarea
           id="project-director-message"
           aria-label="给导演的想法"
-          placeholder="请输入你的需求，例如：我想修改画面风格…"
+          placeholder="给导演留言，Enter 发送，Shift+Enter 换行"
+          onKeyDown={(event) => {
+            if (
+              event.key !== "Enter" ||
+              event.shiftKey ||
+              event.nativeEvent.isComposing ||
+              event.nativeEvent.keyCode === 229
+            )
+              return;
+            event.preventDefault();
+            if (!event.repeat) submitMessage();
+          }}
           rows={3}
+          maxLength={16000}
           value={question}
           onChange={(event) => setQuestion(event.target.value)}
         />
-        {goalsOpen && (
+        {goalsOpen && !research && (
           <Checkbox checked={createGoal} onChange={(e) => setCreateGoal(e.target.checked)}>
             将本条消息建立为持续目标
           </Checkbox>

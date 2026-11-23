@@ -8,17 +8,15 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.access.models import Project, User, Workspace
 from app.assets.knowledge_models import KnowledgeRevision, KnowledgeSourceLink
-from app.assets.models import ProjectFile, ProjectFileRevision
-from app.assets.research_analysis_models import ResearchAnalysis, ResearchAnalysisResult
-from app.assets.research_models import ResearchCitation, ResearchResultRevision
-from app.assets.source_use_models import SourceUseRevision, SourceUseSubject
+from app.assets.research_models import ResearchResultRevision
+from app.assets.research_source_access import research_source_permissions
 from app.shared.db import set_rls_context
 from app.shared.errors import ValidationAppError
 
@@ -102,75 +100,6 @@ class KnowledgeSources:
                         result[knowledge].add(SourceLinkInput(project, research))
         return result
 
-    async def _permitted(
-        self, project: UUID, research: set[UUID], uses: set[str], *, lock: bool
-    ) -> bool:
-        revision = ResearchResultRevision
-        # A restore/accept copies a specific snapshot. A user correction descends from
-        # its base, including any machine-source provenance that has no verbatim quote.
-        origins = (
-            select(revision.id.label("id"))
-            .where(revision.project_id == project, revision.id.in_(research))
-            .cte(recursive=True)
-        )
-        parent = func.coalesce(
-            revision.restores_revision_id, revision.accepts_revision_id, revision.base_revision_id
-        )
-        origins = origins.union(
-            select(parent)
-            .join(origins, revision.id == origins.c.id)
-            .where(revision.project_id == project, parent.is_not(None))
-        )
-        files = (
-            select(ResearchCitation.file_revision_id)
-            .where(
-                ResearchCitation.project_id == project,
-                ResearchCitation.research_revision_id.in_(select(origins.c.id)),
-            )
-            .union(
-                select(ResearchAnalysis.file_revision_id)
-                .join(
-                    ResearchAnalysisResult,
-                    ResearchAnalysis.id == ResearchAnalysisResult.analysis_id,
-                )
-                .where(
-                    ResearchAnalysis.project_id == project,
-                    ResearchAnalysisResult.project_id == project,
-                    ResearchAnalysisResult.research_revision_id.in_(select(origins.c.id)),
-                )
-            )
-        )
-        ids = set(await self.session.scalars(files))
-        if not ids:
-            return True
-        q = (
-            select(
-                ProjectFileRevision.id,
-                ProjectFile.detached_at,
-                SourceUseRevision.state,
-                SourceUseRevision.allowed_uses,
-            )
-            .join(ProjectFile, ProjectFile.id == ProjectFileRevision.file_id)
-            .join(SourceUseSubject, SourceUseSubject.file_revision_id == ProjectFileRevision.id)
-            .join(SourceUseRevision, SourceUseRevision.id == SourceUseSubject.current_revision_id)
-            .where(
-                ProjectFileRevision.project_id == project,
-                ProjectFile.project_id == project,
-                SourceUseSubject.project_id == project,
-                SourceUseRevision.project_id == project,
-                SourceUseRevision.subject_id == SourceUseSubject.id,
-                ProjectFileRevision.id.in_(ids),
-            )
-            .order_by(ProjectFile.id)
-        )
-        if lock:
-            q = q.with_for_update(read=True, of=ProjectFile)
-        rows = (await self.session.execute(q)).all()
-        return {r[0] for r in rows} == ids and all(
-            detached is None and state == "declared" and uses.issubset(allowed)
-            for _, detached, state, allowed in rows
-        )
-
     async def resolve(
         self,
         links: Iterable[SourceLinkInput],
@@ -214,7 +143,9 @@ class KnowledgeSources:
                     raise ValidationAppError(
                         "研究来源不可用", details={"code": "KNOWLEDGE_SOURCE_UNKNOWN"}
                     )
-                if uses is not None and not await self._permitted(project, ids, uses, lock=lock):
+                if (uses is not None and await research_source_permissions(
+                    self.session, project, ids, uses, lock=lock
+                ) is None):
                     raise ValidationAppError(
                         "研究来源未允许本次用途",
                         details={"code": "KNOWLEDGE_SOURCE_USE_RESTRICTED"},

@@ -8,10 +8,18 @@ export type StudioMedia = {
   contentHash?: string | null;
   player: MutableRefObject<HTMLVideoElement | null>;
 };
-export type StudioAttachment = {
+export type ResearchAttachment = {
   label: string;
-  part: components["schemas"]["FileVisionInput"] | components["schemas"]["PublicVisionInput"];
+  research_ref: { result_id: string; revision_id: string; content_hash: string };
+  body: Record<string, unknown>;
+  prompt: string;
 };
+export type StudioAttachment =
+  | ResearchAttachment
+  | {
+      label: string;
+      part: components["schemas"]["FileVisionInput"] | components["schemas"]["PublicVisionInput"];
+    };
 export const StudioSelection = createContext<{
   media: StudioMedia | null;
   attachment: StudioAttachment | null;

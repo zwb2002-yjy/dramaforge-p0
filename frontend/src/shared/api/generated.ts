@@ -1286,7 +1286,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Find Director Thread */
+        get: operations["find_director_thread_api_v1_projects__project_id__director_threads_get"];
         put?: never;
         /** Open Director Thread */
         post: operations["open_director_thread_api_v1_projects__project_id__director_threads_post"];
@@ -4238,6 +4239,7 @@ export interface components {
             /** Master Run Id */
             master_run_id?: string | null;
             ui_context?: components["schemas"]["AgentUIContext"] | null;
+            research_ref?: components["schemas"]["ResearchDiscussionRef"] | null;
             /** Media Parts */
             media_parts?: (components["schemas"]["ArtifactVisionInput"] | components["schemas"]["FileVisionInput"] | components["schemas"]["PublicVisionInput"])[];
             /** Expected Versions */
@@ -6401,6 +6403,7 @@ export interface components {
         };
         /** DirectorAgentMessageRead */
         DirectorAgentMessageRead: {
+            research_ref?: components["schemas"]["ResearchDiscussionRef"] | null;
             context?: components["schemas"]["AgentUIContext"] | null;
             /** Media Parts */
             media_parts?: (components["schemas"]["ArtifactVisionInput"] | components["schemas"]["FileVisionInput"] | components["schemas"]["PublicVisionInput"])[];
@@ -11162,6 +11165,21 @@ export interface components {
             verification: string;
             /** Citations */
             citations?: components["schemas"]["CitationWrite"][];
+        };
+        /** ResearchDiscussionRef */
+        ResearchDiscussionRef: {
+            /**
+             * Result Id
+             * Format: uuid
+             */
+            result_id: string;
+            /**
+             * Revision Id
+             * Format: uuid
+             */
+            revision_id: string;
+            /** Content Hash */
+            content_hash: string;
         };
         /** ResearchReceiptRead */
         ResearchReceiptRead: {
@@ -17143,6 +17161,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PartialApplyResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    find_director_thread_api_v1_projects__project_id__director_threads_get: {
+        parameters: {
+            query: {
+                scope_type: "project" | "scene" | "shot";
+                scope_entity_id: string;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DirectorAgentThreadRef"] | null;
                 };
             };
             /** @description Validation Error */

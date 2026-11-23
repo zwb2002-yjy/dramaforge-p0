@@ -53,6 +53,11 @@ from app.director.creative_capabilities.agent_skills import build_agent_skill_co
 from app.director.invocation_models import DirectorInvocation
 from app.director.invocations import InvocationService
 from app.director.master_runs import MasterRunService
+from app.director.research_discussion import (
+    ResearchDiscussionRef,
+    discussion_messages,
+    read_research_discussion,
+)
 from app.director.text_transport import (
     ResolvedAgentTextModel,
     director_egress_decision,
@@ -167,6 +172,7 @@ class AgentRequest(BaseModel):
     intent: Literal["conversation", "create_goal", "continue_goal"] = "conversation"
     master_run_id: UUID | None = None
     ui_context: AgentUIContext | None = None
+    research_ref: ResearchDiscussionRef | None = None
     media_parts: list[SourceMediaInput] = Field(
         default_factory=list, max_length=MAX_VISION_PARTS
     )
@@ -179,6 +185,8 @@ class AgentRequest(BaseModel):
         omit = set()
         if self.ui_context is None:
             omit.add("ui_context")
+        if self.research_ref is None:
+            omit.add("research_ref")
         if not self.media_parts:
             omit.add("media_parts")
         return self.model_dump(exclude=omit)
@@ -195,6 +203,8 @@ class AgentRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_intent_binding(self) -> Self:
+        if self.research_ref is not None and (self.intent != "conversation" or self.media_parts):
+            raise ValueError("Research discussion requires a standalone conversation input")
         if self.intent == "continue_goal" and self.master_run_id is None:
             raise ValueError("continue_goal requires master_run_id")
         if self.intent != "continue_goal" and self.master_run_id is not None:
@@ -303,35 +313,42 @@ class DirectorAgentService:
             yield session
             await session.commit()
 
+    async def _find_scope_thread(
+        self, session: AsyncSession, body: AgentThreadCreate
+    ) -> DirectorThread | None:
+        scope_id = body.scope_entity_id or self.project_id
+        reader = self._reader(session)
+        if body.scope_type == "project" and scope_id != self.project_id:
+            raise NotFoundError("project scope not found")
+        if body.scope_type == "scene":
+            await reader.scene(scope_id)
+        if body.scope_type == "shot":
+            await reader.shot(scope_id)
+        thread: DirectorThread | None = await session.scalar(
+            select(DirectorThread).where(
+                DirectorThread.project_id == self.project_id,
+                DirectorThread.scope_type == body.scope_type,
+                DirectorThread.scope_entity_id == scope_id,
+            )
+        )
+
+        return thread
+
+    async def find_thread(self, body: AgentThreadCreate) -> DirectorThread | None:
+        async with self._db() as session:
+            return await self._find_scope_thread(session, body)
+
     async def open_thread(self, body: AgentThreadCreate) -> DirectorThread:
         async with self._db() as session:
             await session.scalar(
-                select(Project)
-                .where(
-                    Project.id == self.project_id,
-                )
-                .with_for_update()
+                select(Project.id).where(Project.id == self.project_id).with_for_update()
             )
-            scope_id = body.scope_entity_id or self.project_id
-            reader = self._reader(session)
-            if body.scope_type == "project" and scope_id != self.project_id:
-                raise NotFoundError("project scope not found")
-            if body.scope_type == "scene":
-                await reader.scene(scope_id)
-            if body.scope_type == "shot":
-                await reader.shot(scope_id)
-            thread = await session.scalar(
-                select(DirectorThread).where(
-                    DirectorThread.project_id == self.project_id,
-                    DirectorThread.scope_type == body.scope_type,
-                    DirectorThread.scope_entity_id == scope_id,
-                )
-            )
+            thread = await self._find_scope_thread(session, body)
             if thread is None:
                 thread = DirectorThread(
                     project_id=self.project_id,
                     scope_type=body.scope_type,
-                    scope_entity_id=scope_id,
+                    scope_entity_id=body.scope_entity_id or self.project_id,
                     created_by=self.actor_id,
                     title="Director",
                 )
@@ -371,7 +388,8 @@ class DirectorAgentService:
             rows = list(
                 await session.execute(
                     select(DirectorMessage, DirectorTurn.intent_snapshot["ui_context"],
-                           DirectorTurn.intent_snapshot["vision"]["parts"])
+                           DirectorTurn.intent_snapshot["vision"]["parts"],
+                           DirectorTurn.intent_snapshot["research"]["ref"])
                     .outerjoin(DirectorTurn, DirectorMessage.turn_id == DirectorTurn.id)
                     .where(*filters)
                     .order_by(
@@ -395,10 +413,11 @@ class DirectorAgentService:
                         "role": row.role,
                         "content": row.content,
                         "created_at": row.created_at,
+                        **({"research_ref": research_ref} if research_ref else {}),
                         **({"context": ui_context} if ui_context else {}),
                         **({"media_parts": parts} if parts else {}),
                     }
-                    for row, ui_context, parts in rows
+                    for row, ui_context, parts, research_ref in rows
                 ],
                 "offset": page_offset,
                 "limit": limit,
@@ -570,6 +589,18 @@ class DirectorAgentService:
             }
             if request.ui_context is not None:
                 snapshot["ui_context"] = request.ui_context.model_dump(mode="json")
+            if request.research_ref is not None:
+                try:
+                    if thread.scope_type != "project":
+                        raise ValidationAppError("请在当前项目对话中附上研究")
+                    basis, _, _ = await read_research_discussion(
+                        session, project, request.research_ref, model.resolution,
+                    )
+                    snapshot["research"] = basis
+                    snapshot["tools"] = []
+                except AppError as exc:
+                    exc.details = {**exc.details, "request_accepted": False}
+                    raise
             if request.media_parts:
                 try:
                     caps = model.resolution.get("text_capabilities")
@@ -769,7 +800,8 @@ class DirectorAgentService:
                     reason="runtime_failed",
                 )
                 return self.result(turn)
-            tools = self.registry.openai_tools(context)
+            discussion = turn.intent_snapshot.get("research")
+            tools = [] if discussion is not None else self.registry.openai_tools(context)
             vision = turn.intent_snapshot.get("vision")
         assert model is not None
         harness: DirectorAgentHarness
@@ -823,6 +855,8 @@ class DirectorAgentService:
             )
 
         async def call_tool(call: AgentToolCall, step: int) -> dict[str, Any]:
+            if discussion is not None:
+                raise AgentHalt("research_discussion_read_only")
             return await self._tool_step(context, token, call, step)
 
         harness = DirectorAgentHarness(
@@ -912,12 +946,12 @@ class DirectorAgentService:
             messages.append(history.history_notice)
         if history.legacy_advisory is not None:
             messages.append(history.legacy_advisory)
-        messages.extend(history.messages)
         if snapshot.get("ui_context"):
             messages.append(AgentMessage(role="system", content=json.dumps({
                 "selected_context": snapshot["ui_context"],
                 "media_attached": bool(snapshot.get("vision")),
             }, ensure_ascii=False)))
+        messages.extend(history.messages)
         messages.append(AgentMessage(role="user", content=message.content))
         return messages
 
@@ -1167,12 +1201,34 @@ class DirectorAgentService:
                     raise AgentHalt("context_stale") from exc
             attachment_evidence: dict[str, object] = {}
             try:
-                admission = await director_egress_decision(
-                    session,
-                    project=project,
-                    resolution=dict(turn.model_resolution),
-                    vision=bool(prepared),
-                )
+                frozen_research = turn.intent_snapshot.get("research")
+                if isinstance(frozen_research, dict):
+                    ref = ResearchDiscussionRef.model_validate(frozen_research["ref"])
+                    _, admission, evidence = await read_research_discussion(
+                        session,
+                        project,
+                        ref,
+                        dict(turn.model_resolution),
+                        expected=frozen_research,
+                    )
+                    if not evidence:
+                        raise AgentHalt("research_permission_changed")
+                    projected = fit_agent_context(
+                        messages=[*messages, *discussion_messages(turn.id, ref, evidence)],
+                        tools=tools,
+                        max_bytes=AgentLimits.model_validate(
+                            turn.request_summary["limits"]
+                        ).context_bytes,
+                    )
+                    messages = list(projected.messages)
+                    attachment_evidence["research_ref"] = ref.model_dump(mode="json")
+                else:
+                    admission = await director_egress_decision(
+                        session,
+                        project=project,
+                        resolution=dict(turn.model_resolution),
+                        vision=bool(prepared),
+                    )
                 if prepared:
                     for part, _frame in prepared:
                         await resolve_visual_source(session, self.project_id, part, lock=True)

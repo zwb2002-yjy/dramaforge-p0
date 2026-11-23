@@ -1,7 +1,7 @@
 /** Project cultural research: typed findings, corrections and analysis acceptance. */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useContext, useEffect } from "react";
 
 import {
   Alert,
@@ -15,6 +15,7 @@ import {
   Select,
   Textarea,
 } from "../../components/ui";
+import { StudioSelection } from "../../components/workstation/StudioSelection";
 import { ApiError } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import { listFragments, listProjectFiles } from "../project-files/api";
@@ -92,6 +93,32 @@ export function ResearchPanel({
     enabled: Boolean(selected?.current_revision_id),
     retry: false,
   });
+  const showAttachment = useContext(StudioSelection)?.showAttachment;
+  useEffect(
+    () => () => showAttachment?.(null),
+    [showAttachment, selected?.current_revision_id, selected?.archived_at],
+  );
+  function attachForDiscussion(prompt: string) {
+    const rev = currentRevision.data;
+    if (
+      !showAttachment ||
+      !selected ||
+      selected.archived_at ||
+      !rev?.content_hash ||
+      rev.id !== selected.current_revision_id ||
+      rev.result_id !== selected.id
+    )
+      return;
+    showAttachment({
+      label: `研究版本 ${rev.number} · ${selected.current?.summary || "文化研究"}`,
+      research_ref: { result_id: selected.id, revision_id: rev.id, content_hash: rev.content_hash },
+      body: rev.body,
+      prompt,
+    });
+    const input = document.getElementById("project-director-message");
+    if (!input?.getClientRects().length) document.getElementById("studio-chat-toggle")?.click();
+    requestAnimationFrame(() => input?.focus());
+  }
   const revisions = useQuery({
     queryKey: queryKeys.research.revisions(projectId, selected?.id),
     queryFn: () => listResearchRevisions(projectId, selected!.id),
@@ -364,6 +391,25 @@ export function ResearchPanel({
                 ]}
               />
               <RevisionDetails revision={currentRevision.data} />
+              {showAttachment &&
+                selected.current_revision_id === currentRevision.data.id &&
+                currentRevision.data.content_hash &&
+                !selected.archived_at && (
+                  <div className="df-actions">
+                    <Button onClick={() => attachForDiscussion("请解释这条研究的含义与依据。")}>
+                      请导演解释
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        attachForDiscussion(
+                          "请建议这条研究还可以补充哪些内容，并指出需要核实的地方。",
+                        )
+                      }
+                    >
+                      请导演建议补充
+                    </Button>
+                  </div>
+                )}
               <Button
                 onClick={() => {
                   const workspaceId = getSelectedWorkspaceId();

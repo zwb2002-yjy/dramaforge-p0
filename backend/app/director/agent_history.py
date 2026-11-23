@@ -102,6 +102,9 @@ async def load_agent_history(
         DirectorTurn.thread_id == thread_id,
         DirectorTurn.turn_kind == "agent",
         DirectorTurn.status == "completed",
+        # Research-derived replies are readable in the private thread. Sending a
+        # later question never implicitly authorizes re-exporting their contents.
+        DirectorTurn.intent_snapshot["research"]["ref"]["revision_id"].as_string().is_(None),
     )
     linked = (
         DirectorMessage.project_id == project_id,

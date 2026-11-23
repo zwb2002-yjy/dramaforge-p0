@@ -192,6 +192,15 @@ export type AgentProposalRead = components["schemas"]["DirectorAgentProposalRead
 export type AgentActivityRead =
   paths["/api/v1/projects/{project_id}/director/turns/{turn_id}/tools"]["get"]["responses"][200]["content"]["application/json"];
 
+export function findProjectDirectorThread(projectId: string, signal?: AbortSignal) {
+  const query = new URLSearchParams({ scope_type: "project", scope_entity_id: projectId });
+  return apiGet<components["schemas"]["DirectorAgentThreadRef"] | null>(
+    `${directorPath(projectId, "agentThreads")}?${query}`,
+    undefined,
+    signal,
+  );
+}
+
 export async function openProjectDirectorThread(projectId: string) {
   const csrf = await fetchCsrf();
   return apiSend<components["schemas"]["DirectorAgentThreadRef"]>(

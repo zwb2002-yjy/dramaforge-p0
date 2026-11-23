@@ -16,33 +16,18 @@ import { StudioSelection } from "../../components/workstation/StudioSelection";
 import { assetKindLabel } from "../../lib/assetLabels";
 import { queryKeys } from "../../lib/queryKeys";
 import type { components } from "../../shared/api/generated";
+import { loadPublicLinks } from "./publicLinks";
 import "./asset-gallery.css";
 
 type Publication = components["schemas"]["PublicAssetReadModel"];
 type Link = components["schemas"]["PublicLinkReadModel"];
 type AssetPage = components["schemas"]["PublicAssetPage"];
-type LinkPage = components["schemas"]["PublicLinkPage"];
 const pageSize = 24;
 const statusLabels: Record<string, string> = {
   available: "可引用",
   restricted: "使用受限",
   withdrawn: "已撤回",
 };
-
-async function loadLinks(projectId: string, signal: AbortSignal) {
-  const links = new Map<string, Link>();
-  let offset: number | null = 0;
-  while (offset !== null) {
-    const page: LinkPage = await apiGet(
-      `/api/v1/projects/${projectId}/public-asset-links?active=false&limit=100&offset=${offset}`,
-      undefined,
-      signal,
-    );
-    for (const link of page.items) links.set(link.publication_id, link);
-    offset = page.next_offset;
-  }
-  return links;
-}
 
 function MediaPreview({
   publication,
@@ -159,7 +144,7 @@ export function PublicAssetLibrary({ projectId }: { projectId: string }) {
   });
   const links = useQuery({
     queryKey: linksKey,
-    queryFn: ({ signal }) => loadLinks(projectId, signal),
+    queryFn: ({ signal }) => loadPublicLinks(projectId, signal),
   });
   const change = useMutation({
     mutationFn: async ({ asset, link }: { asset: Publication; link: Link | undefined }) => {

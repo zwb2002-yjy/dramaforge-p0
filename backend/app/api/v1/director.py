@@ -39,6 +39,7 @@ from app.director.recommendation import (
     DirectorRecommendationRequest,
     DirectorRecommendationService,
 )
+from app.director.research_discussion import ResearchDiscussionRef
 from app.director.runtime.capabilities import (
     DirectorCapabilitiesRead,
     build_director_capabilities,
@@ -225,6 +226,7 @@ class DirectorAgentThreadRef(BaseModel):
 
 
 class DirectorAgentMessageRead(BaseModel):
+    research_ref: ResearchDiscussionRef | None = None
     context: AgentUIContext | None = None
     media_parts: list[SourceMediaInput] = Field(default_factory=list)
     model_config = ConfigDict(extra="forbid")
@@ -348,6 +350,24 @@ async def _agent_service(
     # the inbound auth/project read transaction before any model network call.
     await session.commit()
     return service
+
+
+@router.get(
+    "/projects/{project_id}/director/threads",
+    response_model=DirectorAgentThreadRef | None,
+)
+async def find_director_thread(
+    project_id: UUID,
+    scope_type: Literal["project", "scene", "shot"],
+    scope_entity_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> DirectorAgentThreadRef | None:
+    service = await _agent_service(project_id, user, session)
+    thread = await service.find_thread(
+        AgentThreadCreate(scope_type=scope_type, scope_entity_id=scope_entity_id)
+    )
+    return DirectorAgentThreadRef.model_validate(thread) if thread else None
 
 
 @router.post(
