@@ -39,6 +39,7 @@ from app.shared.errors import NotFoundError, ValidationAppError
 from app.shared.vision import (
     ArtifactVisionInput,
     FileVisionInput,
+    PublicVisionInput,
     SourceMediaInput,
     VisionTransform,
 )
@@ -219,7 +220,7 @@ async def _preview_visual(
     from app.storage.minio_store import get_object_store
 
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    source = await resolve_visual_source(session, project_id, part)
+    source = await resolve_visual_source(session, project_id, part, preview=True)
     await session.commit()
     frame = await prepare_vision_frame(source, part, get_object_store())
     return Response(
@@ -247,6 +248,28 @@ async def preview_director_frame(
             artifact_id=artifact_id,
             expected_content_hash=expected_content_hash,
             transform=transform,
+        ),
+    )
+
+
+@router.get(
+    "/projects/{project_id}/public-asset-links/{link_id}/items/{item_id}/vision-preview",
+    response_class=Response,
+)
+async def preview_public_frame(
+    project_id: UUID,
+    link_id: UUID,
+    item_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    expected_content_hash: Annotated[str, Query(pattern=r"^[0-9a-f]{64}$")],
+    transform: Annotated[VisionTransform, Depends(_vision_transform)],
+) -> Response:
+    return await _preview_visual(
+        project_id, user, session,
+        PublicVisionInput(
+            kind="public_asset", public_asset_link_id=link_id, publication_item_id=item_id,
+            expected_content_hash=expected_content_hash, transform=transform,
         ),
     )
 

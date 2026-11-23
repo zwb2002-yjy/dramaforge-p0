@@ -20,11 +20,13 @@ from app.assets.source_processors.contracts import MAX_IMAGE_PIXELS, MAX_SOURCE_
 from app.assets.source_processors.media import FRAME_MAX_WIDTH
 from app.assets.source_processors.pdf import RASTER_DPI
 from app.assets.vision_files import FileVisualSource, resolve_file_visual
+from app.assets.vision_public import public_visual_source
 from app.shared.errors import NotFoundError, ValidationAppError
 from app.shared.vision import (
     MAX_VISION_BYTES,
     ArtifactVisionInput,
     FileVisionInput,
+    PublicVisionInput,
     SourceMediaInput,
     VisionTransform,
 )
@@ -53,6 +55,12 @@ async def resolve_visual_artifact(
     source = await read_media_source(session, artifact_id=part.artifact_id, lock=lock)
     if not source or source.project_id != project_id or source.storage_state != "available":
         raise NotFoundError("画面不可用")
+    return _validate_media(source, part)
+
+
+def _validate_media(
+    source: MediaSource, part: ArtifactVisionInput | PublicVisionInput,
+) -> MediaSource:
     if source.content_hash != part.expected_content_hash:
         raise _invalid("画面版本已改变，请重新选择")
     if source.artifact_type == "video" and source.mime_type == "video/mp4":
@@ -71,9 +79,15 @@ async def resolve_visual_source(
     part: SourceMediaInput,
     *,
     lock: bool = False,
+    preview: bool = False,
 ) -> MediaSource | FileVisualSource:
     if isinstance(part, FileVisionInput):
         return await resolve_file_visual(session, project_id, part, lock=lock)
+    if isinstance(part, PublicVisionInput):
+        source, _ = await public_visual_source(
+            session, project_id, part, lock=lock, preview=preview,
+        )
+        return _validate_media(source, part)
     return await resolve_visual_artifact(session, project_id, part, lock=lock)
 
 

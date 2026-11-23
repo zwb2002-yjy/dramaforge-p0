@@ -334,4 +334,6 @@ async def head_project_public_content(
     content = await ProjectPublicAssetLinkService(
         session, actor=user, project_id=project_id
     ).read_content(link_id, item_id)
-    return Response(status_code=200, headers=_content_headers(content))
+    headers = _content_headers(content)
+    headers["ETag"] = f'"{content.content_hash}"'
+    return Response(status_code=200, headers=headers)

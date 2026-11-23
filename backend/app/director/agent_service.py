@@ -33,6 +33,7 @@ from app.assets.from_artifact_service import read_media_shot_id, read_media_sour
 from app.assets.models import Asset, Episode, Scene, Shot
 from app.assets.source_use import vision_source_revisions
 from app.assets.vision_media import VisionFrame, prepare_vision_frame, resolve_visual_source
+from app.assets.vision_public import public_visual_source
 from app.contracts.agent import AgentMessage, AgentModelResponse, AgentToolCall
 from app.contracts.director_model_tools import ModelToolsPort
 from app.director.agent_audit import AgentToolAudit, public_summary
@@ -61,7 +62,12 @@ from app.director.turn_models import DirectorTurn
 from app.director.turn_service import TERMINAL_TURN_STATUSES
 from app.events.service import EventService
 from app.shared.errors import AppError, ConflictError, NotFoundError, ValidationAppError
-from app.shared.vision import MAX_VISION_BYTES, MAX_VISION_PARTS, FileVisionInput, SourceMediaInput
+from app.shared.vision import (
+    MAX_VISION_BYTES,
+    MAX_VISION_PARTS,
+    ArtifactVisionInput,
+    SourceMediaInput,
+)
 from app.storage.minio_store import get_object_store
 
 ACCEPTED_EVENT_TOPIC = "director.turn.accepted"
@@ -575,7 +581,7 @@ class DirectorAgentService:
                     related = [r for r in ui.selected_refs if r.kind != "artifact"]
                     for part in request.media_parts:
                         await resolve_visual_source(session, self.project_id, part)
-                        if isinstance(part, FileVisionInput):
+                        if not isinstance(part, ArtifactVisionInput):
                             continue
                         scoped = AgentUIContext(
                             episode_id=ui.episode_id,
@@ -602,15 +608,8 @@ class DirectorAgentService:
                     snapshot["vision"] = {
                         "parts": [part.model_dump(mode="json") for part in request.media_parts],
                         "egress": admission.evidence(),
-                        "source_revisions": await vision_source_revisions(
-                            session,
-                            project_id=self.project_id,
-                            artifact_ids=[
-                                p.artifact_id for p in request.media_parts if p.kind == "artifact"
-                            ],
-                            file_revision_ids=tuple(
-                                p.file_revision_id for p in request.media_parts if p.kind == "file"
-                            ),
+                        "source_revisions": await self._vision_revisions(
+                            session, request.media_parts,
                         ),
                     }
                 except AppError as exc:
@@ -1111,6 +1110,20 @@ class DirectorAgentService:
                 "tools": [public_summary(row) for row in rows],
             }
 
+    async def _vision_revisions(
+        self, session: AsyncSession, parts: list[SourceMediaInput],
+    ) -> list[str]:
+        revisions = await vision_source_revisions(
+            session, project_id=self.project_id,
+            artifact_ids=[p.artifact_id for p in parts if p.kind == "artifact"],
+            file_revision_ids=tuple(p.file_revision_id for p in parts if p.kind == "file"),
+        )
+        for part in parts:
+            if part.kind == "public_asset":
+                _, stamp = await public_visual_source(session, self.project_id, part)
+                revisions.append(stamp)
+        return sorted(revisions)
+
     async def _check_vision(
         self,
         session: AsyncSession,
@@ -1120,12 +1133,7 @@ class DirectorAgentService:
     ) -> None:
         if egress != frozen["egress"] or egress["decision"] != "allowed":
             raise AgentHalt("VISION_PERMISSION_CHANGED")
-        revisions = await vision_source_revisions(
-            session,
-            project_id=self.project_id,
-            artifact_ids=[p.artifact_id for p in parts if p.kind == "artifact"],
-            file_revision_ids=tuple(p.file_revision_id for p in parts if p.kind == "file"),
-        )
+        revisions = await self._vision_revisions(session, parts)
         if revisions != frozen["source_revisions"]:
             raise AgentHalt("VISION_PERMISSION_CHANGED")
 

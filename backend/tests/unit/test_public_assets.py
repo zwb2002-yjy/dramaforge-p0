@@ -53,6 +53,35 @@ async def world(session):
     }
 
 
+async def test_public_visual_requires_both_uses_for_send(world):
+    from app.assets.source_use import SourceUseService
+    from app.assets.vision_media import resolve_visual_source
+    from app.shared.errors import ValidationAppError
+    from app.shared.vision import PublicVisionInput
+
+    db, owner, project = world["session"], world["owner"], world["project"]
+    pub = await world["service"].publish(
+        world["version"].id, display=PublicDisplay("Frame", "", []),
+    )
+    link, _ = await ProjectPublicAssetLinkService(db, actor=owner, project_id=project.id).create(
+        publication_id=pub.id, local_label="Frame", request_key="use-frame",
+    )
+    content = await world["service"].read_content(pub.id, pub.items[0].id)
+    part = PublicVisionInput(
+        kind="public_asset", public_asset_link_id=link.id, publication_item_id=pub.items[0].id,
+        expected_content_hash=content.content_hash,
+    )
+    media = await resolve_visual_source(db, project.id, part, preview=True)
+    with pytest.raises(ValidationAppError, match="外部处理许可"):
+        await resolve_visual_source(db, project.id, part)
+    await SourceUseService(db, actor=owner, project=project).declare(
+        artifact_id=media.id, allowed_uses=["library_reference", "external_processing"],
+        statement="Synthetic vision", request_key="vision",
+        expected_version=world["grant"].result_version,
+    )
+    assert await resolve_visual_source(db, project.id, part) == media
+
+
 async def test_publish_read_withdraw_and_links(world):
     service = world["service"]
     published = await service.publish(

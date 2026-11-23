@@ -1768,6 +1768,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/public-asset-links/{link_id}/items/{item_id}/vision-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Preview Public Frame */
+        get: operations["preview_public_frame_api_v1_projects__project_id__public_asset_links__link_id__items__item_id__vision_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/file-revisions/{file_revision_id}/fragments/{source_fragment_id}/vision-preview": {
         parameters: {
             query?: never;
@@ -4085,7 +4102,7 @@ export interface components {
             master_run_id?: string | null;
             ui_context?: components["schemas"]["AgentUIContext"] | null;
             /** Media Parts */
-            media_parts?: (components["schemas"]["ArtifactVisionInput"] | components["schemas"]["FileVisionInput"])[];
+            media_parts?: (components["schemas"]["ArtifactVisionInput"] | components["schemas"]["FileVisionInput"] | components["schemas"]["PublicVisionInput"])[];
             /** Expected Versions */
             expected_versions?: {
                 [key: string]: number;
@@ -6108,7 +6125,7 @@ export interface components {
         DirectorAgentMessageRead: {
             context?: components["schemas"]["AgentUIContext"] | null;
             /** Media Parts */
-            media_parts?: (components["schemas"]["ArtifactVisionInput"] | components["schemas"]["FileVisionInput"])[];
+            media_parts?: (components["schemas"]["ArtifactVisionInput"] | components["schemas"]["FileVisionInput"] | components["schemas"]["PublicVisionInput"])[];
             /**
              * Id
              * Format: uuid
@@ -10230,6 +10247,27 @@ export interface components {
             detached_at: string | null;
             /** Availability */
             availability: string;
+        };
+        /** PublicVisionInput */
+        PublicVisionInput: {
+            /** Expected Content Hash */
+            expected_content_hash: string;
+            transform?: components["schemas"]["VisionTransform"];
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "public_asset";
+            /**
+             * Public Asset Link Id
+             * Format: uuid
+             */
+            public_asset_link_id: string;
+            /**
+             * Publication Item Id
+             * Format: uuid
+             */
+            publication_item_id: string;
         };
         /** QualityEvidenceRead */
         QualityEvidenceRead: {
@@ -17743,6 +17781,47 @@ export interface operations {
             path: {
                 project_id: string;
                 artifact_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_public_frame_api_v1_projects__project_id__public_asset_links__link_id__items__item_id__vision_preview_get: {
+        parameters: {
+            query: {
+                expected_content_hash: string;
+                workspace_id?: string | null;
+                frame_time_ms?: number | null;
+                max_edge?: number;
+                crop?: number[] | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+                link_id: string;
+                item_id: string;
             };
             cookie?: {
                 dramaforge_session?: string | null;

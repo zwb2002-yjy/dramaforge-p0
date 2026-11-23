@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 
 import {
   Alert,
@@ -11,7 +11,8 @@ import {
   PageHeader,
   Select,
 } from "../../components/ui";
-import { apiGet, apiSend, fetchCsrf, publicItemContentUrl } from "../../lib/api";
+import { apiGet, apiSend, fetchCsrf, publicItemContentUrl, publicItemHash } from "../../lib/api";
+import { StudioSelection } from "../../components/workstation/StudioSelection";
 import { assetKindLabel } from "../../lib/assetLabels";
 import { queryKeys } from "../../lib/queryKeys";
 import type { components } from "../../shared/api/generated";
@@ -43,59 +44,105 @@ async function loadLinks(projectId: string, signal: AbortSignal) {
   return links;
 }
 
-function MediaPreview({ publication }: { publication: Publication }) {
-  const [failed, setFailed] = useState<string[]>([]);
-  return publication.items
-    .filter((item) => item.preview_available)
-    .map((item) => {
-      const url = publicItemContentUrl(publication.id, item.id);
-      const onError = () => setFailed((ids) => [...ids, item.id]);
-      if (failed.includes(item.id))
-        return (
-          <p key={item.id} role="status">
-            此项素材当前无法预览
-          </p>
-        );
-      if (item.media_kind === "image")
-        return (
-          <img
-            className="qc-public-preview"
-            key={item.id}
-            src={url}
-            alt={publication.safe_name}
-            onError={onError}
-          />
-        );
-      if (item.media_kind === "video")
-        return (
-          <video
-            className="qc-public-preview"
-            key={item.id}
-            src={url}
-            controls
-            preload="metadata"
-            aria-label={publication.safe_name}
-            onError={onError}
-          />
-        );
-      if (item.media_kind === "audio")
-        return (
-          <audio
-            className="qc-public-preview"
-            key={item.id}
-            src={url}
-            controls
-            preload="metadata"
-            aria-label={publication.safe_name}
-            onError={onError}
-          />
-        );
-      return <p key={item.id}>此格式没有内嵌预览</p>;
+function MediaPreview({
+  publication,
+  item,
+  projectId,
+  link,
+}: {
+  publication: Publication;
+  item: Publication["items"][number];
+  projectId: string;
+  link?: Link;
+}) {
+  const showAttachment = useContext(StudioSelection)?.showAttachment;
+  const player = useRef<HTMLVideoElement>(null);
+  const [failed, setFailed] = useState(false);
+  const [ready, setReady] = useState(false);
+  const url = publicItemContentUrl(publication.id, item.id);
+  const image = item.media_kind === "image";
+  const video = item.media_kind === "video";
+  const visual = image
+    ? ["image/jpeg", "image/png", "image/webp"].includes(item.mime_type ?? "")
+    : video && item.mime_type === "video/mp4";
+  const linked = Boolean(link && !link.detached_at && link.availability === "available");
+  const hash = useQuery({
+    queryKey: queryKeys.asset.publicItemHash(
+      projectId,
+      link?.id ?? "",
+      item.id,
+      link?.version ?? 0,
+    ),
+    queryFn: ({ signal }) => publicItemHash(projectId, link!.id, item.id, signal),
+    enabled: linked && visual,
+    retry: false,
+  });
+  function attach() {
+    if (!link || !showAttachment || !hash.data || !ready || !linked) return;
+    const time = video ? Math.floor((player.current?.currentTime ?? 0) * 1000) : null;
+    showAttachment({
+      label: publication.safe_name,
+      part: {
+        kind: "public_asset",
+        public_asset_link_id: link.id,
+        publication_item_id: item.id,
+        expected_content_hash: hash.data,
+        transform: { max_edge: 1024, frame_time_ms: time },
+      },
     });
+    const input = document.getElementById("project-director-message");
+    if (!input?.getClientRects().length) document.getElementById("studio-chat-toggle")?.click();
+    input?.focus();
+  }
+  if (failed) return <p role="status">此项素材当前无法预览</p>;
+  const onError = () => setFailed(true);
+  return (
+    <>
+      {image ? (
+        <img
+          className="qc-public-preview"
+          src={url}
+          alt={publication.safe_name}
+          onLoad={() => setReady(true)}
+          onError={onError}
+        />
+      ) : video ? (
+        <video
+          ref={player}
+          className="qc-public-preview"
+          src={url}
+          controls
+          preload="metadata"
+          aria-label={publication.safe_name}
+          onLoadedData={() => setReady(true)}
+          onError={onError}
+        />
+      ) : item.media_kind === "audio" ? (
+        <audio
+          className="qc-public-preview"
+          src={url}
+          controls
+          preload="metadata"
+          aria-label={publication.safe_name}
+          onError={onError}
+        />
+      ) : (
+        <p>此格式没有内嵌预览</p>
+      )}
+      {linked && visual && (
+        <Button tone="ghost" disabled={!ready || !hash.data || hash.isError} onClick={attach}>
+          {video ? "将当前帧附给导演" : "将图片附给导演"}
+        </Button>
+      )}
+      {linked && hash.isError && <p role="status">无法确认项目引用的素材版本</p>}
+    </>
+  );
 }
 
 export function PublicAssetLibrary({ projectId }: { projectId: string }) {
   const client = useQueryClient();
+  const showAttachment = useContext(StudioSelection)?.showAttachment;
+  useEffect(() => () => showAttachment?.(null), [showAttachment]);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
   const [offset, setOffset] = useState(0);
@@ -207,7 +254,19 @@ export function PublicAssetLibrary({ projectId }: { projectId: string }) {
                     {opened === asset.id ? "收起预览" : "预览素材"}
                   </Button>
                 )}
-                {asset.usable && opened === asset.id && <MediaPreview publication={asset} />}
+                {asset.usable &&
+                  opened === asset.id &&
+                  asset.items
+                    .filter((item) => item.preview_available)
+                    .map((item) => (
+                      <MediaPreview
+                        key={item.id}
+                        publication={asset}
+                        item={item}
+                        projectId={projectId}
+                        link={link}
+                      />
+                    ))}
                 <Button
                   disabled={!links.isSuccess || change.isPending || (!attached && !asset.usable)}
                   onClick={() => change.mutate({ asset, link })}

@@ -133,8 +133,11 @@ export function ProjectFilesPanel({ projectId }: { projectId: string }) {
   });
   const [page, setPage] = useState<{ extraction: string; offset: number } | null>(null);
   const extractionId = revision.data?.extraction?.id ?? null;
-  const showFile = useContext(StudioSelection)?.showFile;
-  useEffect(() => () => showFile?.(null), [showFile, selected?.revision_id, extractionId]);
+  const showAttachment = useContext(StudioSelection)?.showAttachment;
+  useEffect(
+    () => () => showAttachment?.(null),
+    [showAttachment, selected?.revision_id, extractionId],
+  );
   const offset = page?.extraction === extractionId ? page.offset : 0;
   const fragments = useQuery({
     queryKey: queryKeys.source.fragments(projectId, extractionId, offset, ""),
@@ -358,7 +361,7 @@ export function ProjectFilesPanel({ projectId }: { projectId: string }) {
                         引用此段进行研究
                       </ActionLink>
                     )}
-                    {showFile &&
+                    {showAttachment &&
                       selected.source_available &&
                       fragment.source_available &&
                       (fragment.locator_kind === "page_region" ||
@@ -366,10 +369,13 @@ export function ProjectFilesPanel({ projectId }: { projectId: string }) {
                         <Button
                           tone="ghost"
                           onClick={() => {
-                            showFile({
-                              revisionId: selected.revision_id,
-                              fragmentId: fragment.id,
-                              hash: selected.content_hash,
+                            showAttachment({
+                              part: {
+                                kind: "file",
+                                file_revision_id: selected.revision_id,
+                                source_fragment_id: fragment.id,
+                                expected_content_hash: selected.content_hash,
+                              },
                               label: selected.filename + " · " + locatorText(fragment.locator),
                             });
                             const input = document.getElementById("project-director-message");

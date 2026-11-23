@@ -27,7 +27,7 @@ import {
 } from "../../lib/navigationPreferences";
 import { queryKeys } from "../../lib/queryKeys";
 import { ContextNavigation } from "./ContextNavigation";
-import { StudioSelection, type StudioFile, type StudioMedia } from "./StudioSelection";
+import { StudioSelection, type StudioAttachment, type StudioMedia } from "./StudioSelection";
 import { Disclosure, Button, Card, Alert } from "../ui";
 import {
   ProjectNavigationContext,
@@ -168,15 +168,17 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
     [projectId],
   );
   const media = selectedMedia?.project === projectId ? (selectedMedia?.media ?? null) : null;
-  const [selectedFile, setSelectedFile] = useState<{
+  const [selectedAttachment, setSelectedAttachment] = useState<{
     project: string | null;
-    file: StudioFile | null;
+    attachment: StudioAttachment | null;
   } | null>(null);
-  const showFile = useCallback(
-    (file: StudioFile | null) => setSelectedFile({ project: projectId, file }),
+  const showAttachment = useCallback(
+    (attachment: StudioAttachment | null) =>
+      setSelectedAttachment({ project: projectId, attachment }),
     [projectId],
   );
-  const file = selectedFile?.project === projectId ? selectedFile.file : null;
+  const attachment =
+    selectedAttachment?.project === projectId ? selectedAttachment.attachment : null;
   const hasContext = primary !== "projects";
   const drawerWidth = primary === "project" ? 800 : 1100;
   const [narrow, setNarrow] = useState(() => window.innerWidth < drawerWidth);
@@ -594,7 +596,7 @@ export function WorkstationShell({ children }: WorkstationShellProps) {
             </Link>
           </nav>
         )}
-        <StudioSelection.Provider value={{ media, show, file, showFile }}>
+        <StudioSelection.Provider value={{ media, show, attachment, showAttachment }}>
           <ProjectNavigationContext.Provider
             value={
               primary === "project"

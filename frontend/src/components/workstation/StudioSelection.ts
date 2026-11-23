@@ -1,4 +1,5 @@
 import { createContext, type MutableRefObject } from "react";
+import type { components } from "../../shared/api/generated";
 export type StudioMedia = {
   id: string;
   shotId: string;
@@ -7,10 +8,13 @@ export type StudioMedia = {
   contentHash?: string | null;
   player: MutableRefObject<HTMLVideoElement | null>;
 };
-export type StudioFile = { revisionId: string; fragmentId: string; hash: string; label: string };
+export type StudioAttachment = {
+  label: string;
+  part: components["schemas"]["FileVisionInput"] | components["schemas"]["PublicVisionInput"];
+};
 export const StudioSelection = createContext<{
   media: StudioMedia | null;
-  file: StudioFile | null;
-  showFile: (value: StudioFile | null) => void;
+  attachment: StudioAttachment | null;
+  showAttachment: (value: StudioAttachment | null) => void;
   show: (value: StudioMedia | null) => void;
 } | null>(null);

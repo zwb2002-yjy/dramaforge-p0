@@ -42,4 +42,12 @@ class FileVisionInput(_VisionInput):
     source_fragment_id: UUID
 
 
-SourceMediaInput = Annotated[ArtifactVisionInput | FileVisionInput, Field(discriminator="kind")]
+class PublicVisionInput(_VisionInput):
+    kind: Literal["public_asset"]
+    public_asset_link_id: UUID
+    publication_item_id: UUID
+
+
+SourceMediaInput = Annotated[
+    ArtifactVisionInput | FileVisionInput | PublicVisionInput, Field(discriminator="kind"),
+]

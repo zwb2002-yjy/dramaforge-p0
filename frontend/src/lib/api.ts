@@ -187,6 +187,39 @@ export function publicItemContentUrl(publicationId: string, itemId: string): str
   return workspaceScopedUrl(`/api/v1/public-assets/${publicationId}/items/${itemId}/content`);
 }
 
+function projectPublicItemPath(projectId: string, linkId: string, itemId: string) {
+  return `/api/v1/projects/${projectId}/public-asset-links/${linkId}/items/${itemId}`;
+}
+
+export async function publicItemHash(
+  projectId: string,
+  linkId: string,
+  itemId: string,
+  signal: AbortSignal,
+) {
+  const response = await fetch(
+    workspaceScopedUrl(projectPublicItemPath(projectId, linkId, itemId) + "/content"),
+    { method: "HEAD", credentials: "include", signal, cache: "no-store" },
+  );
+  const hash = /^"([a-f0-9]{64})"$/.exec(response.headers.get("ETag") ?? "")?.[1];
+  if (!response.ok || !hash) throw new Error("当前项目无法读取此版本的画面");
+  return hash;
+}
+
+export function publicVisionPreviewUrl(
+  projectId: string,
+  part: components["schemas"]["PublicVisionInput"],
+) {
+  const params = new URLSearchParams({ expected_content_hash: part.expected_content_hash });
+  if (part.transform?.frame_time_ms != null)
+    params.set("frame_time_ms", String(part.transform.frame_time_ms));
+  if (part.transform?.max_edge) params.set("max_edge", String(part.transform.max_edge));
+  part.transform?.crop?.forEach((value) => params.append("crop", String(value)));
+  return workspaceScopedUrl(
+    `${projectPublicItemPath(projectId, part.public_asset_link_id, part.publication_item_id)}/vision-preview?${params}`,
+  );
+}
+
 export function fileVisionPreviewUrl(
   projectId: string,
   revisionId: string,

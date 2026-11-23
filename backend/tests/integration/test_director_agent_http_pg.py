@@ -1000,10 +1000,96 @@ async def test_real_auth_csrf_and_selected_workspace_block_agent_before_transpor
     assert agent.chat.requests == []
 
 
+async def _public_vision_fixture(agent, store, png, case, tmp_path):
+    import subprocess
+
+    from app.assets.public_assets import PublicAssetService, PublicDisplay
+    from app.assets.source_use import SourceUseService
+    from app.execution.models import Artifact
+
+    from fixtures.public_asset_seed import _seed_asset
+
+    admin = create_async_engine(_async_url(agent.database.name))
+    try:
+        async with async_sessionmaker(admin, expire_on_commit=False)() as db:
+            ws = await db.get(Workspace, agent.other_workspace_id)
+            owner = await db.get(User, ws.owner_user_id)
+            src = Project(workspace_id=ws.id, name="Library source",
+                          aspect_ratio="16:9", budget_limit=0)
+            db.add(src)
+            await db.flush()
+            version, media = await _seed_asset(db, project=src, owner=owner)
+            if case == "public_video":
+                output = tmp_path / "source.mp4"
+                subprocess.run([
+                    "ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i",
+                    "testsrc2=size=320x180:rate=4:duration=2", "-threads", "1", str(output),
+                ], check=True, timeout=20)
+                stored = await store.put_bytes(
+                    object_key=media.object_key, data=output.read_bytes(), mime_type="video/mp4",
+                )
+                media.artifact_type = "video"
+            else:
+                stored = await store.put_bytes(
+                    object_key=media.object_key, data=png, mime_type="image/png",
+                )
+            media.content_hash, media.byte_size = stored.content_hash, stored.byte_size
+            media.mime_type = "video/mp4" if case == "public_video" else "image/png"
+            uses = SourceUseService(db, actor=owner, project=src)
+            subject = media
+            if case == "public_revoked":
+                await uses.declare(artifact_id=media.id,
+                                   allowed_uses=["library_reference", "external_processing"],
+                                   statement="Synthetic derivative", request_key="derived")
+                subject = Artifact(project_id=src.id, artifact_type="image",
+                                   storage_state="available", object_key=f"fixture/{uuid4()}",
+                                   content_hash="a" * 64, mime_type="image/png", byte_size=4)
+                db.add(subject)
+                await db.flush()
+            revision = await uses.declare(
+                artifact_id=subject.id, allowed_uses=["library_reference"],
+                statement="Synthetic library use", request_key="library",
+            )
+            if case == "public_revoked":
+                await uses.record_artifact_source_use(
+                    artifact_id=media.id, source_subject_id=revision.subject_id,
+                    source_project_id=src.id, source_revision_id=revision.id,
+                    consumer_node_run_id=uuid4(), input_role="visual",
+                )
+            use_version = revision.result_version
+            publication = await PublicAssetService(db, actor=owner).publish(
+                version.id,
+                display=PublicDisplay(name="Public frame", description="", style_labels=[]),
+            )
+            await db.commit()
+    finally:
+        await admin.dispose()
+    links = f"/api/v1/projects/{agent.project_id}/public-asset-links"
+    link = await agent.client.post(links, headers=agent.headers, json={
+        "request_key": "library", "publication_id": str(publication.id),
+    })
+    assert link.status_code == 201, link.text
+    link_id, item_id = link.json()["id"], str(publication.items[0].id)
+    item_path = f"{links}/{link_id}/items/{item_id}"
+    head = await agent.client.head(item_path + "/content")
+    assert head.status_code == 200 and head.headers["ETag"] == f'"{stored.content_hash}"'
+    artifact = f"/api/v1/projects/{src.id}/artifacts/{subject.id}"
+    use_headers = {**agent.headers, "X-Workspace-Id": str(ws.id)}
+    part = {"kind": "public_asset", "public_asset_link_id": link_id,
+            "publication_item_id": item_id, "expected_content_hash": stored.content_hash}
+    if case == "public_video":
+        part["transform"] = {"frame_time_ms": 750}
+    return artifact, use_headers, use_version, part, item_path, link_id
+
+
 @pytest.mark.parametrize("http_agent", ["chat_tools_vision_v1"], indirect=True)
-@pytest.mark.parametrize("case", ["artifact", "file", "reparsed", "withdrawn"])
+@pytest.mark.parametrize("case", [
+    "artifact", "file", "reparsed", "withdrawn",
+    "public_image", "public_video", "public_revoked", "public_changed", "public_detached",
+    "public_after_decode",
+])
 async def test_project_vision_preview_and_worker_use_identical_pixels(
-    http_agent, monkeypatch, case
+    http_agent, monkeypatch, case, tmp_path
 ):
     import base64
     import hashlib
@@ -1084,7 +1170,17 @@ async def test_project_vision_preview_and_worker_use_identical_pixels(
         "expected_content_hash": stored.content_hash,
     }
     preview_path = artifact + "/vision-preview"
-    if case != "artifact":
+    use_headers = agent.headers
+    use_version = 0
+    allowed_uses = ["external_processing"]
+    public = case.startswith("public_")
+    if public:
+        artifact, use_headers, use_version, part, item_path, link_id = await _public_vision_fixture(
+            agent, store, buf.getvalue(), case, tmp_path,
+        )
+        preview_path = item_path + "/vision-preview"
+        allowed_uses.append("library_reference")
+    elif case != "artifact":
         from app.assets.project_files import ProjectFileService
         from app.shared.db import set_rls_context
 
@@ -1123,10 +1219,14 @@ async def test_project_vision_preview_and_worker_use_identical_pixels(
             "expected_content_hash": stored.content_hash,
         }
     preview = await agent.client.get(
-        preview_path, params={"expected_content_hash": stored.content_hash}
+        preview_path,
+        params={
+            "expected_content_hash": part["expected_content_hash"], **part.get("transform", {}),
+        },
     )
     assert preview.status_code == 200, preview.text[:180] if preview.status_code != 200 else ""
-    assert Image.open(io.BytesIO(preview.content)).size == (1024, 512)
+    size = (320, 180) if case == "public_video" else (1024, 512)
+    assert Image.open(io.BytesIO(preview.content)).size == size
     body = {"content": "Inspect this picture", "request_key": "vision-one", "media_parts": [part]}
     refused = await agent.client.post(
         f"{agent.threads_path}/{tid}/messages", headers=agent.headers, json=body
@@ -1134,11 +1234,11 @@ async def test_project_vision_preview_and_worker_use_identical_pixels(
     assert refused.status_code == 422 and refused.json()["details"]["code"] == "SOURCE_USE_BLOCKED"
     grant = await agent.client.put(
         artifact + "/source-use",
-        headers=agent.headers,
+        headers=use_headers,
         json={
-            "expected_version": 0,
+            "expected_version": use_version,
             "state": "declared",
-            "allowed_uses": ["external_processing"],
+            "allowed_uses": allowed_uses,
             "statement": "合成测试图",
             "request_key": "use-once",
         },
@@ -1177,10 +1277,22 @@ async def test_project_vision_preview_and_worker_use_identical_pixels(
                 preview_path, params={"expected_content_hash": stored.content_hash}
             )
         ).status_code == 404
-    if case == "withdrawn":
+    if case == "public_detached":
+        detached = await agent.client.patch(
+            f"/api/v1/projects/{agent.project_id}/public-asset-links/{link_id}",
+            headers=agent.headers, json={"expected_version": 1, "attached": False},
+        )
+        assert detached.status_code == 200
+    if case == "public_changed":
+        changed = await agent.client.put(artifact + "/source-use", headers=use_headers, json={
+            "expected_version": grant.json()["result_version"], "allowed_uses": allowed_uses,
+            "state": "declared", "statement": "Changed license statement", "request_key": "changed",
+        })
+        assert changed.status_code == 200, changed.text
+    if case in {"withdrawn", "public_revoked"}:
         withdrawn = await agent.client.put(
             artifact + "/source-use",
-            headers=agent.headers,
+            headers=use_headers,
             json={
                 "expected_version": grant.json()["result_version"],
                 "state": "revoked",
@@ -1189,9 +1301,29 @@ async def test_project_vision_preview_and_worker_use_identical_pixels(
             },
         )
         assert withdrawn.status_code == 200, withdrawn.text
+    if case == "public_after_decode":
+        from app.director import agent_service
+
+        prepare = agent_service.prepare_vision_frame
+
+        async def change_after_decode(source, media_part, store):
+            frame = await prepare(source, media_part, store)
+            changed = await agent.client.put(artifact + "/source-use", headers=use_headers, json={
+                "expected_version": grant.json()["result_version"], "state": "declared",
+                "allowed_uses": ["library_reference"], "statement": "Library only",
+                "request_key": "after-decode",
+            })
+            assert changed.status_code == 200, changed.text
+            return frame
+
+        monkeypatch.setattr(agent_service, "prepare_vision_frame", change_after_decode)
     result = await _execute(agent, accepted["turn_id"])
-    if case in {"withdrawn", "reparsed"}:
-        assert result["status"] == "failed" and not agent.chat.requests
+    if case in {
+        "withdrawn", "reparsed", "public_revoked", "public_changed", "public_detached",
+        "public_after_decode",
+    }:
+        expected_status = "stale" if case == "public_after_decode" else "failed"
+        assert result["status"] == expected_status and not agent.chat.requests
         with Session(agent.database.engine) as db:
             assert (
                 db.scalar(

@@ -1,7 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useContext, useState } from "react";
 
-import { ApiError, artifactVisionPreviewUrl, fileVisionPreviewUrl } from "../../lib/api";
+import {
+  ApiError,
+  artifactVisionPreviewUrl,
+  fileVisionPreviewUrl,
+  publicVisionPreviewUrl,
+} from "../../lib/api";
 import { Sparkles, Send } from "lucide-react";
 import { StudioSelection } from "../../components/workstation/StudioSelection";
 import { ActionLink, Button, Field, Textarea } from "../../components/ui";
@@ -27,8 +32,9 @@ type CreativeDirectionPanelProps = {
  */
 export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPanelProps) {
   const studio = useContext(StudioSelection);
-  const file = studio?.file;
-  const preview = file ? null : studio?.media;
+  const selection = studio?.attachment;
+  const selectedPart = selection?.part;
+  const preview = selection ? null : studio?.media;
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<{ text: string; baseVersion: number } | null>(null);
@@ -45,11 +51,19 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
   const [loadedPreview, setLoadedPreview] = useState("");
   const attached =
     attachment?.id === preview?.id && attachment?.hash === preview?.contentHash ? attachment : null;
-  const previewUrl = file
-    ? fileVisionPreviewUrl(projectId, file.revisionId, file.fragmentId, file.hash)
-    : attached
-      ? artifactVisionPreviewUrl(projectId, attached.id, attached.hash, attached.time)
-      : "";
+  const previewUrl =
+    selectedPart?.kind === "public_asset"
+      ? publicVisionPreviewUrl(projectId, selectedPart)
+      : selectedPart
+        ? fileVisionPreviewUrl(
+            projectId,
+            selectedPart.file_revision_id,
+            selectedPart.source_fragment_id,
+            selectedPart.expected_content_hash,
+          )
+        : attached
+          ? artifactVisionPreviewUrl(projectId, attached.id, attached.hash, attached.time)
+          : "";
   useEffect(() => {
     setAttachment(null);
     setLoadedPreview("");
@@ -146,16 +160,7 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
         content: question.trim(),
         request_key: requestKey,
         intent: "conversation",
-        ...(file && {
-          media_parts: [
-            {
-              kind: "file" as const,
-              file_revision_id: file.revisionId,
-              source_fragment_id: file.fragmentId,
-              expected_content_hash: file.hash,
-            },
-          ],
-        }),
+        ...(selectedPart && { media_parts: [selectedPart] }),
         ...(attached && {
           media_parts: [
             {
@@ -180,7 +185,7 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
     onSettled: () => setSubmitting(false),
     onSuccess: () => {
       setQuestion("");
-      studio?.showFile(null);
+      studio?.showAttachment(null);
       setAttachment(null);
       setError(null);
       void queryClient.invalidateQueries({ queryKey: ["direction-thread", projectId] });
@@ -241,17 +246,24 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
             <p>{goal}</p>
           </article>
         )}
-        {file && (
+        {selection && (
           <article className="studio-context-card">
-            <strong>{file.label}</strong>
+            <strong>{selection.label}</strong>
             <img
               key={previewUrl}
               src={previewUrl}
-              alt="将随消息发送的资料片段"
+              alt={
+                selectedPart?.kind === "public_asset"
+                  ? "将随消息发送的公共画面"
+                  : "将随消息发送的资料片段"
+              }
               onLoad={() => setLoadedPreview(previewUrl)}
-              onError={() => setError("资料已变更或无法预览，请重新选择片段。")}
+              onError={() => {
+                setLoadedPreview("");
+                setError("素材已变更或无法预览，请重新选择。");
+              }}
             />
-            <Button tone="ghost" onClick={() => studio?.showFile(null)}>
+            <Button tone="ghost" onClick={() => studio?.showAttachment(null)}>
               移除附件
             </Button>
           </article>
@@ -309,22 +321,24 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
                   alt="发送给导演的画面"
                   loading="lazy"
                   src={
-                    part.kind === "file"
-                      ? fileVisionPreviewUrl(
-                          projectId,
-                          part.file_revision_id,
-                          part.source_fragment_id,
-                          part.expected_content_hash,
-                          part.transform,
-                        )
-                      : artifactVisionPreviewUrl(
-                          projectId,
-                          part.artifact_id,
-                          part.expected_content_hash,
-                          part.transform?.frame_time_ms ?? null,
-                          part.transform?.max_edge,
-                          part.transform?.crop,
-                        )
+                    part.kind === "public_asset"
+                      ? publicVisionPreviewUrl(projectId, part)
+                      : part.kind === "file"
+                        ? fileVisionPreviewUrl(
+                            projectId,
+                            part.file_revision_id,
+                            part.source_fragment_id,
+                            part.expected_content_hash,
+                            part.transform,
+                          )
+                        : artifactVisionPreviewUrl(
+                            projectId,
+                            part.artifact_id,
+                            part.expected_content_hash,
+                            part.transform?.frame_time_ms ?? null,
+                            part.transform?.max_edge,
+                            part.transform?.crop,
+                          )
                   }
                 />
               ))}
