@@ -8645,6 +8645,11 @@ export interface components {
         /** KnowledgeEntryRead */
         KnowledgeEntryRead: {
             /**
+             * Shared Content State
+             * @enum {string}
+             */
+            shared_content_state: "complete" | "filtered" | "unavailable";
+            /**
              * Id
              * Format: uuid
              */
@@ -8749,6 +8754,11 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Shared Content State
+             * @enum {string}
+             */
+            shared_content_state: "complete" | "filtered" | "unavailable";
         };
         /** KnowledgeWithdraw */
         KnowledgeWithdraw: {

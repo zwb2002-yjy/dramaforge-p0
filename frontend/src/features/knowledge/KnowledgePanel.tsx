@@ -226,6 +226,13 @@ export function KnowledgePanel() {
                   { label: "允许用途", value: selected.allowed_uses.join("、") || "无" },
                 ]}
               />
+              {(selected.shared_content_state === "filtered" ||
+                selected.shared_content_state === "unavailable") && (
+                <Alert
+                  type="warning"
+                  description="此版本仅展示通过共享校验的内容，项目引用受限。"
+                />
+              )}
               <p>{selected.summary}</p>
               <h4>历史版本</h4>
               <ul aria-label="知识历史版本">
@@ -233,6 +240,8 @@ export function KnowledgePanel() {
                   <li key={revision.id}>
                     <Badge>{revision.operation}</Badge> 版本 {revision.number} ·{" "}
                     {revision.publication_status} · {revision.title}
+                    {revision.shared_content_state === "filtered" && " · 部分内容已隐藏"}
+                    {revision.shared_content_state === "unavailable" && " · 内容待核对"}
                   </li>
                 ))}
               </ul>

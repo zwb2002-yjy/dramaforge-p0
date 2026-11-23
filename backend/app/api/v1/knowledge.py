@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -15,7 +16,8 @@ from app.assets.knowledge import (
     PublicSourceNote,
     SourceLinkInput,
 )
-from app.assets.knowledge_models import KnowledgeEntry, KnowledgeRevision
+from app.assets.knowledge_models import KnowledgeEntry
+from app.assets.knowledge_public import KnowledgeRevisionRead
 from app.assets.knowledge_references import KnowledgeReferenceService, ReferenceRead
 from app.assets.research_bodies import summary_text
 
@@ -75,6 +77,7 @@ class KnowledgeReceiptRead(BaseModel):
 
 
 class KnowledgeEntryRead(BaseModel):
+    shared_content_state: Literal["complete", "filtered", "unavailable"]
     id: UUID
     kind: str
     version: int
@@ -84,21 +87,6 @@ class KnowledgeEntryRead(BaseModel):
     summary: str | None
     allowed_uses: list[str]
     updated_at: datetime | None
-
-
-class KnowledgeRevisionRead(BaseModel):
-    id: UUID
-    entry_id: UUID
-    number: int
-    title: str
-    body: dict[str, object]
-    allowed_uses: list[str]
-    public_source_notes: list[dict[str, object]]
-    content_hash: str
-    operation: str
-    publication_status: str
-    result_entry_version: int
-    created_at: datetime
 
 
 class KnowledgeEntryPage(BaseModel):
@@ -123,10 +111,9 @@ def _receipt(receipt: KnowledgeMutationReceipt) -> KnowledgeReceiptRead:
     )
 
 
-def _entry_read(
-    entry: KnowledgeEntry, current: KnowledgeRevision | None
-) -> KnowledgeEntryRead:
+def _entry_read(entry: KnowledgeEntry, current: KnowledgeRevisionRead | None) -> KnowledgeEntryRead:
     return KnowledgeEntryRead(
+        shared_content_state=current.shared_content_state if current else "unavailable",
         id=entry.id,
         kind=entry.kind,
         version=entry.version,
@@ -136,27 +123,6 @@ def _entry_read(
         summary=summary_text(entry.kind, current.body) if current is not None else None,
         allowed_uses=[str(value) for value in current.allowed_uses] if current is not None else [],
         updated_at=current.created_at if current is not None else None,
-    )
-
-
-def _revision_read(revision: KnowledgeRevision) -> KnowledgeRevisionRead:
-    return KnowledgeRevisionRead(
-        id=revision.id,
-        entry_id=revision.entry_id,
-        number=revision.number,
-        title=revision.title,
-        body=revision.body,
-        allowed_uses=[str(value) for value in revision.allowed_uses],
-        public_source_notes=[
-            dict(value)
-            for value in revision.public_source_notes
-            if isinstance(value, dict)
-        ],
-        content_hash=revision.content_hash,
-        operation=revision.operation,
-        publication_status=revision.publication_status,
-        result_entry_version=revision.result_entry_version,
-        created_at=revision.created_at,
     )
 
 
@@ -181,7 +147,7 @@ def _links(values: list[SourceLinkWrite]) -> list[SourceLinkInput]:
 
 async def _current(
     service: KnowledgeService, entry: KnowledgeEntry
-) -> KnowledgeRevision | None:
+) -> KnowledgeRevisionRead | None:
     if entry.current_revision_id is None:
         return None
     return await service.read_revision(entry.current_revision_id)
@@ -243,9 +209,7 @@ async def read_knowledge_entry(
     return _entry_read(entry, await _current(service, entry))
 
 
-@router.get(
-    "/knowledge/entries/{entry_id}/revisions", response_model=KnowledgeRevisionPage
-)
+@router.get("/knowledge/entries/{entry_id}/revisions", response_model=KnowledgeRevisionPage)
 async def list_knowledge_revisions(
     entry_id: UUID,
     user: CurrentUser,
@@ -256,7 +220,7 @@ async def list_knowledge_revisions(
     service = KnowledgeService(session, actor=user)
     rows, total = await service.list_revisions(entry_id, limit=limit, offset=offset)
     return KnowledgeRevisionPage(
-        items=[_revision_read(row) for row in rows],
+        items=rows,
         total=total,
         next_offset=offset + limit if offset + limit < total else None,
     )
@@ -353,9 +317,7 @@ def _reference_read(reference: ReferenceRead) -> ReferenceReadModel:
     )
 
 
-@router.get(
-    "/projects/{project_id}/knowledge-references", response_model=ReferencePage
-)
+@router.get("/projects/{project_id}/knowledge-references", response_model=ReferencePage)
 async def list_knowledge_references(
     project_id: UUID,
     user: CurrentUser,

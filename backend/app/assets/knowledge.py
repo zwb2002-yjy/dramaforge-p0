@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -26,7 +27,15 @@ from app.assets.knowledge_models import (
     KnowledgeRevision,
     KnowledgeSourceLink,
 )
-from app.assets.research_bodies import content_hash, summary_text, validate_body
+from app.assets.knowledge_public import (
+    KnowledgeRevisionRead,
+    canonical_body,
+    canonical_note,
+    lock_write_scope,
+    public_text,
+    shared_revisions,
+)
+from app.assets.research_bodies import content_hash, summary_text
 from app.assets.source_use_models import USE_PURPOSES
 from app.shared.errors import AppError, NotFoundError, ValidationAppError
 
@@ -66,6 +75,14 @@ def _hash(payload: object) -> str:
     ).hexdigest()
 
 
+def _request_body(kind: str, canonical: dict[str, object]) -> dict[str, object]:
+    # Existing event receipts hashed the empty research relationship defaults.
+    # Preserve replay identity; these fields never enter a knowledge revision.
+    if kind == "event":
+        return {**canonical, "related_person_ids": [], "related_place_ids": []}
+    return canonical
+
+
 def _validate_uses(values: list[str]) -> list[str]:
     uses = sorted({str(value) for value in values})
     if any(value not in USE_PURPOSES for value in uses):
@@ -78,29 +95,7 @@ def _validate_uses(values: list[str]) -> list[str]:
 def _validate_notes(values: list[PublicSourceNote]) -> list[dict[str, object]]:
     if len(values) > 20:
         raise ValidationAppError("Too many public source notes")
-    payload: list[dict[str, object]] = []
-    for note in values:
-        if not 1 <= len(note.label) <= 240:
-            raise ValidationAppError(
-                "Source note label is invalid", details={"code": "KNOWLEDGE_NOTE_INVALID"}
-            )
-        if note.public_url is not None and not note.public_url.startswith(
-            ("https://", "http://")
-        ):
-            raise ValidationAppError(
-                "Source note URL must be an http(s) URL",
-                details={"code": "KNOWLEDGE_NOTE_URL_INVALID"},
-            )
-        if note.locator_note is not None and len(note.locator_note) > 1_000:
-            raise ValidationAppError("Source note locator is too long")
-        payload.append(
-            {
-                "label": note.label,
-                "public_url": note.public_url,
-                "locator_note": note.locator_note,
-            }
-        )
-    return payload
+    return [canonical_note(asdict(note)) for note in values]
 
 
 class KnowledgeService:
@@ -248,22 +243,31 @@ class KnowledgeService:
             raise ValidationAppError("Unknown knowledge kind")
         if operation not in {"save_draft", "publish"}:
             raise ValidationAppError("Invalid knowledge operation")
-        if not 1 <= len(title) <= 240:
+        if not 1 <= len(title) <= 240 or not public_text(title):
             raise ValidationAppError("Knowledge title is invalid")
         if not 1 <= len(request_key) <= 160:
             raise ValidationAppError("Invalid knowledge request key")
         await self._workspace(workspace_id)
-        canonical = validate_body(kind, body)
+        canonical = canonical_body(kind, body)
         uses = _validate_uses(allowed_uses)
         notes = _validate_notes(public_source_notes)
         request_hash = _hash(
-            ["create", kind, title, canonical, uses, notes, operation,
-             [(str(link.project_id), str(link.research_revision_id)) for link in source_links]]
+            [
+                "create",
+                kind,
+                title,
+                _request_body(kind, canonical),
+                uses,
+                notes,
+                operation,
+                [(str(link.project_id), str(link.research_revision_id)) for link in source_links],
+            ]
         )
         replay = await self._replay(request_key, request_hash)
         if replay is not None:
             entry = await self._entry(replay.entry_id)
             return self._receipt(entry, replay)
+        await lock_write_scope(self.session, self.actor.id, canonical)
         links = await self._source_links(source_links)
         entry = KnowledgeEntry(
             owner_user_id=self.actor.id,
@@ -317,17 +321,29 @@ class KnowledgeService:
     ) -> KnowledgeMutationReceipt:
         if operation not in {"save_draft", "publish"}:
             raise ValidationAppError("Invalid knowledge operation")
-        if not 1 <= len(title) <= 240 or not 1 <= len(request_key) <= 160:
+        if not 1 <= len(title) <= 240 or not 1 <= len(request_key) <= 160 or not public_text(title):
             raise ValidationAppError("Knowledge title or request key is invalid")
-        entry = await self._entry(entry_id, lock=True)
-        canonical = validate_body(entry.kind, body)
+        entry = await self._entry(entry_id)
+        canonical = canonical_body(entry.kind, body)
         uses = _validate_uses(allowed_uses)
         notes = _validate_notes(public_source_notes)
         request_hash = _hash(
-            ["append", str(entry_id), expected_version, title, canonical, uses, notes,
-             operation,
-             [(str(link.project_id), str(link.research_revision_id)) for link in source_links]]
+            [
+                "append",
+                str(entry_id),
+                expected_version,
+                title,
+                _request_body(entry.kind, canonical),
+                uses,
+                notes,
+                operation,
+                [(str(link.project_id), str(link.research_revision_id)) for link in source_links],
+            ]
         )
+        replay = await self._replay(request_key, request_hash)
+        if replay is not None:
+            return self._receipt(entry, replay)
+        await lock_write_scope(self.session, self.actor.id, canonical, entry_id)
         replay = await self._replay(request_key, request_hash)
         if replay is not None:
             return self._receipt(entry, replay)
@@ -391,15 +407,16 @@ class KnowledgeService:
             raise KnowledgeConflictError(
                 "KNOWLEDGE_ALREADY_WITHDRAWN", "The entry is already withdrawn"
             )
+        shared = (await shared_revisions(self.session, self.actor.id, entry.kind, [current]))[0]
         revision = KnowledgeRevision(
             owner_user_id=self.actor.id,
             entry_id=entry.id,
             number=await self._next_number(entry.id),
-            title=current.title,
-            body=current.body,
-            content_hash=current.content_hash,
-            allowed_uses=current.allowed_uses,
-            public_source_notes=current.public_source_notes,
+            title=shared.title,
+            body=shared.body,
+            content_hash=content_hash(shared.body),
+            allowed_uses=shared.allowed_uses,
+            public_source_notes=shared.public_source_notes,
             operation="withdraw",
             publication_status="withdrawn",
             expected_entry_version=entry.version,
@@ -475,15 +492,15 @@ class KnowledgeService:
         return KnowledgeMutationReceipt(
             entry_id=entry.id,
             revision_id=revision.id,
-            result_entry_version=entry.version,
-            publication_status=entry.publication_status,
+            result_entry_version=revision.result_entry_version,
+            publication_status=revision.publication_status,
             content_hash=revision.content_hash,
         )
 
     async def read_entry(self, entry_id: UUID) -> KnowledgeEntry:
         return await self._entry(entry_id)
 
-    async def read_revision(self, revision_id: UUID) -> KnowledgeRevision:
+    async def read_revision(self, revision_id: UUID) -> KnowledgeRevisionRead:
         revision = await self.session.scalar(
             select(KnowledgeRevision).where(
                 KnowledgeRevision.id == revision_id,
@@ -492,12 +509,13 @@ class KnowledgeService:
         )
         if revision is None:
             raise NotFoundError("knowledge revision not found")
-        return revision
+        entry = await self._entry(revision.entry_id)
+        return (await shared_revisions(self.session, self.actor.id, entry.kind, [revision]))[0]
 
     async def list_revisions(
         self, entry_id: UUID, *, limit: int = 50, offset: int = 0
-    ) -> tuple[list[KnowledgeRevision], int]:
-        await self._entry(entry_id)
+    ) -> tuple[list[KnowledgeRevisionRead], int]:
+        entry = await self._entry(entry_id)
         if not 1 <= limit <= 100 or offset < 0:
             raise ValidationAppError("Invalid knowledge revision page")
         condition = [
@@ -519,7 +537,7 @@ class KnowledgeService:
                 .limit(limit)
             )
         )
-        return rows, total
+        return await shared_revisions(self.session, self.actor.id, entry.kind, rows), total
 
     async def list_entries(
         self,
@@ -547,17 +565,38 @@ class KnowledgeService:
                 raise ValidationAppError("Knowledge query is too long")
             escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             pattern = f"%{escaped}%"
-            condition.append(
-                KnowledgeEntry.current_revision_id.is_not(None),
+            candidates = (
+                select(KnowledgeEntry, KnowledgeRevision)
+                .join(KnowledgeRevision, KnowledgeRevision.id == KnowledgeEntry.current_revision_id)
+                .where(*condition, KnowledgeRevision.owner_user_id == self.actor.id)
+                .order_by(KnowledgeEntry.created_at.desc(), KnowledgeEntry.id)
             )
-            condition.append(
-                KnowledgeEntry.id.in_(
-                    select(KnowledgeRevision.entry_id).where(
-                        KnowledgeRevision.owner_user_id == self.actor.id,
-                        cast(KnowledgeRevision.search_text, Text).ilike(pattern, escape="\\"),
-                    )
+            if self.session.get_bind().dialect.name == "postgresql":
+                candidates = candidates.where(
+                    cast(KnowledgeRevision.search_text, Text).ilike(pattern, escape="\\"),
                 )
-            )
+            # Legacy indexes may contain private text. Only visible projected
+            # matches count, including those before or after the requested page.
+            rows: list[KnowledgeEntry] = []
+            count = 0
+            stream = await self.session.stream(candidates.execution_options(yield_per=64))
+            async for batch in stream.partitions(64):
+                grouped: dict[str, list[KnowledgeRevision]] = defaultdict(list)
+                for entry, revision in batch:
+                    grouped[entry.kind].append(revision)
+                matched: set[UUID] = set()
+                for entry_kind, revisions in grouped.items():
+                    for shared in await shared_revisions(
+                        self.session, self.actor.id, entry_kind, revisions
+                    ):
+                        if shared.matches(query):
+                            matched.add(shared.entry_id)
+                for entry, _ in batch:
+                    if entry.id in matched:
+                        if offset <= count < offset + limit:
+                            rows.append(entry)
+                        count += 1
+            return rows, count
         total = int(
             await self.session.scalar(
                 select(func.count()).select_from(KnowledgeEntry).where(*condition)

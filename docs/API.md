@@ -983,9 +983,14 @@ owner操作内跨源项目处理采用受限领域装配：逐项通过真实Pro
 不能以共享知识可见推导源项目可见，不能取消RLS或用请求提供的owner直接设置GUC；所有源权限失败整项发布回滚。
 
 `KnowledgeEntryRead={id,kind,version,publication_status:draft|published|withdrawn,current_revision_id,title,summary,
-allowed_uses,updated_at}`；updated_at由当前修订时间投影（不假设Entry已有该列）。
+allowed_uses,updated_at,shared_content_state}`；updated_at由当前修订时间投影（不假设Entry已有该列）。
 `KnowledgeRevisionRead={id,entry_id,number,title,body,allowed_uses,public_source_notes,content_hash,operation,
-publication_status,result_entry_version,created_at}`，明确不含私有source_links、workspace项目路径、原件地址。
+publication_status,result_entry_version,created_at,shared_content_state}`。两个读模型均使用同一共享校验。
+`complete` 表示版本可完整展示；`filtered` 表示已省略私有或已撤回的关联、无效来源等字段；
+`unavailable` 表示标题或正文未能通过校验，不安全的部分不展示。历史记录保留，content_hash 标识原固定版本。
+公开来源 URL 只作显示，接受公开 HTTPS 文献地址及书目参数（如 page、isbn、year），拒绝签名参数和私有资源路径。
+搜索条数和分页只计入可见正文或标题的匹配。新建或重新关联项目引用时，固定版本和当前版本都必须完整、已发布且允许该用途；
+已有受限引用可解除。撤回时复制可共享内容，私有溯源映射仍按原项目隔离。
 
 I4-03a已实施知识条目与发布（迁移0113）：`POST /knowledge/entries`（201 KnowledgeMutationReceipt）、
 `GET /knowledge/entries`（kind/status/q/limit/offset，按认证owner跨Workspace）、`GET /knowledge/entries/{e}`、

@@ -23,6 +23,7 @@ from app.assets.knowledge_models import (
     KnowledgeRevision,
     ProjectKnowledgeReference,
 )
+from app.assets.knowledge_public import shared_revisions
 from app.assets.source_use_models import USE_PURPOSES
 from app.shared.errors import AppError, NotFoundError, ValidationAppError
 
@@ -85,6 +86,21 @@ class KnowledgeReferenceService:
             return None
         return await self.session.get(KnowledgeRevision, entry.current_revision_id)
 
+    async def _usable(
+        self, entry: KnowledgeEntry, pinned: KnowledgeRevision, allowed_use: str
+    ) -> bool:
+        current = await self._current(entry)
+        if current is None or entry.publication_status != "published":
+            return False
+        rows = [pinned] if pinned.id == current.id else [pinned, current]
+        if any(
+            row.publication_status != "published" or allowed_use not in row.allowed_uses
+            for row in rows
+        ):
+            return False
+        views = await shared_revisions(self.session, self.actor.id, entry.kind, rows)
+        return all(view.shared_content_state == "complete" for view in views)
+
     async def availability(self, reference: ProjectKnowledgeReference) -> str:
         entry = await self.session.scalar(
             select(KnowledgeEntry).where(
@@ -96,12 +112,14 @@ class KnowledgeReferenceService:
             return "unavailable"
         if entry.publication_status == "withdrawn":
             return "withdrawn"
-        current = await self._current(entry)
-        if current is None:
+        if entry.current_revision_id is None:
             return "unavailable"
-        if reference.allowed_use not in {str(value) for value in current.allowed_uses}:
-            return "restricted"
-        return "published"
+        pinned = await self._revision(entry.id, reference.knowledge_revision_id)
+        return (
+            "published"
+            if await self._usable(entry, pinned, reference.allowed_use)
+            else "restricted"
+        )
 
     async def _read(self, reference: ProjectKnowledgeReference) -> ReferenceRead:
         return ReferenceRead(
@@ -139,13 +157,13 @@ class KnowledgeReferenceService:
         if existing is not None:
             # A detached natural key stays detached; reattaching is an explicit PATCH.
             return await self._read(existing), False
-        if entry.publication_status != "published":
+        if entry.publication_status != "published" or revision.publication_status != "published":
             raise KnowledgeReferenceConflictError(
                 "KNOWLEDGE_NOT_PUBLISHED", "Only published knowledge can be referenced"
             )
-        if allowed_use not in {str(value) for value in revision.allowed_uses}:
+        if not await self._usable(entry, revision, allowed_use):
             raise KnowledgeReferenceConflictError(
-                "KNOWLEDGE_USE_NOT_ALLOWED", "This revision does not allow that use"
+                "KNOWLEDGE_USE_NOT_ALLOWED", "This knowledge revision is restricted for that use"
             )
         row = ProjectKnowledgeReference(
             project_id=project.id,
@@ -180,9 +198,7 @@ class KnowledgeReferenceService:
             await self.session.scalars(
                 select(ProjectKnowledgeReference)
                 .where(*condition)
-                .order_by(
-                    ProjectKnowledgeReference.created_at, ProjectKnowledgeReference.id
-                )
+                .order_by(ProjectKnowledgeReference.created_at, ProjectKnowledgeReference.id)
                 .offset(offset)
                 .limit(limit)
             )
@@ -233,14 +249,15 @@ class KnowledgeReferenceService:
             )
         if attached:
             entry = await self._entry(reference.knowledge_entry_id)
-            current = await self._current(entry)
-            if entry.publication_status != "published" or current is None:
+            if entry.publication_status != "published" or entry.current_revision_id is None:
                 raise KnowledgeReferenceConflictError(
                     "KNOWLEDGE_NOT_PUBLISHED", "Only published knowledge can be referenced"
                 )
-            if reference.allowed_use not in {str(value) for value in current.allowed_uses}:
+            pinned = await self._revision(entry.id, reference.knowledge_revision_id)
+            if not await self._usable(entry, pinned, reference.allowed_use):
                 raise KnowledgeReferenceConflictError(
-                    "KNOWLEDGE_USE_NOT_ALLOWED", "This knowledge no longer allows that use"
+                    "KNOWLEDGE_USE_NOT_ALLOWED",
+                    "This knowledge revision is restricted for that use",
                 )
             reference.detached_at = None
         else:

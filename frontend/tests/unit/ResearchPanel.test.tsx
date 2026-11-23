@@ -115,6 +115,7 @@ describe("KnowledgePanel", () => {
                 kind: "person",
                 version: 2,
                 publication_status: "published",
+                shared_content_state: "filtered",
                 current_revision_id: REVISION_ID,
                 title: "古桥匠人",
                 summary: "张某",
@@ -140,6 +141,7 @@ describe("KnowledgePanel", () => {
                 content_hash: "a".repeat(64),
                 operation: "publish",
                 publication_status: "published",
+                shared_content_state: "filtered",
                 result_entry_version: 2,
                 created_at: "2026-11-19T00:00:00Z",
               },
@@ -154,6 +156,7 @@ describe("KnowledgePanel", () => {
             kind: "person",
             version: 2,
             publication_status: "published",
+            shared_content_state: "filtered",
             current_revision_id: REVISION_ID,
             title: "古桥匠人",
             summary: "张某",
@@ -167,6 +170,8 @@ describe("KnowledgePanel", () => {
     renderWithClient(<KnowledgePanel />);
     expect((await screen.findAllByText("古桥匠人")).length).toBeGreaterThan(0);
     expect((await screen.findAllByText("已发布")).length).toBeGreaterThan(0);
+    expect(await screen.findByText(/项目引用受限/)).toBeTruthy();
+    expect(await screen.findByText(/部分内容已隐藏/)).toBeTruthy();
     const draft = screen.getByRole("button", { name: "保存草稿" });
     expect(draft.hasAttribute("disabled")).toBe(true);
     fireEvent.change(screen.getByLabelText("标题"), { target: { value: "新知识" } });
