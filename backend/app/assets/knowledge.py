@@ -35,6 +35,7 @@ from app.assets.knowledge_public import (
     public_text,
     shared_revisions,
 )
+from app.assets.knowledge_sources import KnowledgeSources, SourceLinkInput
 from app.assets.research_bodies import content_hash, summary_text
 from app.assets.source_use_models import USE_PURPOSES
 from app.shared.errors import AppError, NotFoundError, ValidationAppError
@@ -45,12 +46,6 @@ MAX_SOURCE_LINKS = 20
 class KnowledgeConflictError(AppError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(code=code, message=message, status_code=409)
-
-
-@dataclass(frozen=True)
-class SourceLinkInput:
-    project_id: UUID
-    research_revision_id: UUID
 
 
 @dataclass(frozen=True)
@@ -104,6 +99,7 @@ class KnowledgeService:
     def __init__(self, session: AsyncSession, *, actor: User) -> None:
         self.session = session
         self.actor = actor
+        self.sources = KnowledgeSources(session, actor)
 
     async def _entry(self, entry_id: UUID, *, lock: bool = False) -> KnowledgeEntry:
         query = select(KnowledgeEntry).where(
@@ -152,79 +148,30 @@ class KnowledgeService:
             raise NotFoundError("workspace not found")
         return workspace
 
-    async def _source_links(
+    async def _publication_sources(
         self,
-        links: list[SourceLinkInput],
-        *,
-        knowledge_revision: KnowledgeRevision | None = None,
-    ) -> list[dict[str, object]]:
+        inputs: list[SourceLinkInput],
+        uses: list[str],
+        operation: str,
+        previous: UUID | None = None,
+    ) -> tuple[set[SourceLinkInput], dict[UUID, UUID]]:
+        links = set(inputs)
+        if len(links) != len(inputs):
+            raise ValidationAppError(
+                "Duplicate source link", details={"code": "KNOWLEDGE_SOURCE_DUPLICATE"}
+            )
+        if previous is not None:
+            inherited = await self.sources.stored({previous})
+            links.update(inherited.get(previous, set()))
         if len(links) > MAX_SOURCE_LINKS:
             raise ValidationAppError("Too many source links")
-        seen: set[tuple[UUID, UUID]] = set()
-        payload: list[dict[str, object]] = []
-        for link in links:
-            key = (link.project_id, link.research_revision_id)
-            if key in seen:
-                raise ValidationAppError(
-                    "Duplicate source link", details={"code": "KNOWLEDGE_SOURCE_DUPLICATE"}
-                )
-            seen.add(key)
-            project = await self.session.scalar(
-                select(Project).where(
-                    Project.id == link.project_id,
-                    Project.deleted_at.is_(None),
-                )
-            )
-            if project is None:
-                raise ValidationAppError(
-                    "Source project not found", details={"code": "KNOWLEDGE_SOURCE_UNKNOWN"}
-                )
-            workspace = await self.session.scalar(
-                select(Workspace).where(
-                    Workspace.id == project.workspace_id,
-                    Workspace.owner_user_id == self.actor.id,
-                )
-            )
-            if workspace is None:
-                raise ValidationAppError(
-                    "Source project belongs to another owner",
-                    details={"code": "KNOWLEDGE_SOURCE_FORBIDDEN"},
-                )
-            from app.assets.research_models import ResearchResultRevision
-
-            revision = await self.session.scalar(
-                select(ResearchResultRevision).where(
-                    ResearchResultRevision.id == link.research_revision_id,
-                    ResearchResultRevision.project_id == project.id,
-                )
-            )
-            if revision is None:
-                raise ValidationAppError(
-                    "Source research revision not found in its project",
-                    details={"code": "KNOWLEDGE_SOURCE_UNKNOWN"},
-                )
-            payload.append(
-                {
-                    "project_id": project.id,
-                    "workspace_id": workspace.id,
-                    "research_revision_id": revision.id,
-                }
-            )
-        return payload
-
-    def _persist_source_links(
-        self, revision: KnowledgeRevision, links: list[dict[str, object]]
-    ) -> None:
-        for link in links:
-            self.session.add(
-                KnowledgeSourceLink(
-                    project_id=link["project_id"],
-                    workspace_id=link["workspace_id"],
-                    owner_user_id=self.actor.id,
-                    research_revision_id=link["research_revision_id"],
-                    knowledge_revision_id=revision.id,
-                )
-            )
+        scopes = await self.sources.resolve(
+            links,
+            uses=set(uses) if operation == "publish" else None,
+            lock=True,
+            explicit=inputs,
+        )
+        return links, scopes
 
     async def create_entry(
         self,
@@ -267,8 +214,8 @@ class KnowledgeService:
         if replay is not None:
             entry = await self._entry(replay.entry_id)
             return self._receipt(entry, replay)
+        links, scopes = await self._publication_sources(source_links, uses, operation)
         await lock_write_scope(self.session, self.actor.id, canonical)
-        links = await self._source_links(source_links)
         entry = KnowledgeEntry(
             owner_user_id=self.actor.id,
             workspace_id=workspace_id,
@@ -297,7 +244,7 @@ class KnowledgeService:
         )
         self.session.add(revision)
         await self.session.flush()
-        self._persist_source_links(revision, links)
+        await self.sources.persist(revision.id, links, scopes)
         entry.current_revision_id = revision.id
         entry.version = 2
         entry.publication_status = status
@@ -343,6 +290,10 @@ class KnowledgeService:
         replay = await self._replay(request_key, request_hash)
         if replay is not None:
             return self._receipt(entry, replay)
+        self._require_decision(entry, expected_version=expected_version)
+        links, scopes = await self._publication_sources(
+            source_links, uses, operation, entry.current_revision_id
+        )
         await lock_write_scope(self.session, self.actor.id, canonical, entry_id)
         replay = await self._replay(request_key, request_hash)
         if replay is not None:
@@ -353,7 +304,6 @@ class KnowledgeService:
                 "KNOWLEDGE_PUBLISHED_REQUIRES_PUBLISH",
                 "A published entry only changes through an explicit publish decision",
             )
-        links = await self._source_links(source_links)
         status = "published" if operation == "publish" else "draft"
         revision = KnowledgeRevision(
             owner_user_id=self.actor.id,
@@ -373,7 +323,7 @@ class KnowledgeService:
         )
         self.session.add(revision)
         await self.session.flush()
-        self._persist_source_links(revision, links)
+        await self.sources.persist(revision.id, links, scopes)
         entry.current_revision_id = revision.id
         entry.version = revision.result_entry_version
         entry.publication_status = status
@@ -426,25 +376,10 @@ class KnowledgeService:
         )
         self.session.add(revision)
         await self.session.flush()
-        # The withdrawn snapshot keeps the private provenance of the content it copies.
-        links = list(
-            await self.session.scalars(
-                select(KnowledgeSourceLink).where(
-                    KnowledgeSourceLink.owner_user_id == self.actor.id,
-                    KnowledgeSourceLink.knowledge_revision_id == current.id,
-                )
-            )
-        )
-        for link in links:
-            self.session.add(
-                KnowledgeSourceLink(
-                    project_id=link.project_id,
-                    workspace_id=link.workspace_id,
-                    owner_user_id=self.actor.id,
-                    research_revision_id=link.research_revision_id,
-                    knowledge_revision_id=revision.id,
-                )
-            )
+        # Withdrawal remains possible after permission loss and retains private provenance.
+        inherited = (await self.sources.stored({current.id})).get(current.id, set())
+        scopes = await self.sources.resolve(inherited, uses=None, lock=False)
+        await self.sources.persist(revision.id, inherited, scopes)
         entry.current_revision_id = revision.id
         entry.version = revision.result_entry_version
         entry.publication_status = "withdrawn"

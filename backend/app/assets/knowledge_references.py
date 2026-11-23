@@ -24,6 +24,7 @@ from app.assets.knowledge_models import (
     ProjectKnowledgeReference,
 )
 from app.assets.knowledge_public import shared_revisions
+from app.assets.knowledge_sources import KnowledgeSources, SourceLinkInput
 from app.assets.source_use_models import USE_PURPOSES
 from app.shared.errors import AppError, NotFoundError, ValidationAppError
 
@@ -52,6 +53,7 @@ class KnowledgeReferenceService:
         self.session = session
         self.actor = actor
         self.project_id = project_id
+        self.sources = KnowledgeSources(session, actor, consumer=project_id)
 
     async def _project(self) -> Project:
         return await ProjectService(self.session).get_project_for_owner(
@@ -87,7 +89,13 @@ class KnowledgeReferenceService:
         return await self.session.get(KnowledgeRevision, entry.current_revision_id)
 
     async def _usable(
-        self, entry: KnowledgeEntry, pinned: KnowledgeRevision, allowed_use: str
+        self,
+        entry: KnowledgeEntry,
+        pinned: KnowledgeRevision,
+        allowed_use: str,
+        *,
+        lock: bool = False,
+        known: dict[UUID, set[SourceLinkInput]] | None = None,
     ) -> bool:
         current = await self._current(entry)
         if current is None or entry.publication_status != "published":
@@ -99,9 +107,32 @@ class KnowledgeReferenceService:
         ):
             return False
         views = await shared_revisions(self.session, self.actor.id, entry.kind, rows)
-        return all(view.shared_content_state == "complete" for view in views)
+        if any(view.shared_content_state != "complete" for view in views):
+            return False
+        revision_ids = {row.id for row in rows}
+        if known is None or not revision_ids <= known.keys():
+            known = await self.sources.stored(revision_ids)
+        links = {link for row in rows for link in known.get(row.id, set())}
+        try:
+            await self.sources.resolve(links, uses={allowed_use}, lock=lock)
+        except ValidationAppError:
+            return False
+        if lock:
+            # Take the entry lock after source locks, matching publication order.
+            head = await self.session.execute(
+                select(KnowledgeEntry.current_revision_id, KnowledgeEntry.publication_status)
+                .where(KnowledgeEntry.id == entry.id, KnowledgeEntry.owner_user_id == self.actor.id)
+                .with_for_update(read=True)
+            )
+            return head.one_or_none() == (current.id, "published")
+        return True
 
-    async def availability(self, reference: ProjectKnowledgeReference) -> str:
+    async def availability(
+        self,
+        reference: ProjectKnowledgeReference,
+        *,
+        known: dict[UUID, set[SourceLinkInput]] | None = None,
+    ) -> str:
         entry = await self.session.scalar(
             select(KnowledgeEntry).where(
                 KnowledgeEntry.id == reference.knowledge_entry_id,
@@ -117,11 +148,16 @@ class KnowledgeReferenceService:
         pinned = await self._revision(entry.id, reference.knowledge_revision_id)
         return (
             "published"
-            if await self._usable(entry, pinned, reference.allowed_use)
+            if await self._usable(entry, pinned, reference.allowed_use, known=known)
             else "restricted"
         )
 
-    async def _read(self, reference: ProjectKnowledgeReference) -> ReferenceRead:
+    async def _read(
+        self,
+        reference: ProjectKnowledgeReference,
+        *,
+        known: dict[UUID, set[SourceLinkInput]] | None = None,
+    ) -> ReferenceRead:
         return ReferenceRead(
             id=reference.id,
             project_id=reference.project_id,
@@ -130,7 +166,7 @@ class KnowledgeReferenceService:
             allowed_use=reference.allowed_use,
             version=reference.version,
             detached_at=reference.detached_at,
-            availability=await self.availability(reference),
+            availability=await self.availability(reference, known=known),
         )
 
     async def create(
@@ -161,7 +197,7 @@ class KnowledgeReferenceService:
             raise KnowledgeReferenceConflictError(
                 "KNOWLEDGE_NOT_PUBLISHED", "Only published knowledge can be referenced"
             )
-        if not await self._usable(entry, revision, allowed_use):
+        if not await self._usable(entry, revision, allowed_use, lock=True):
             raise KnowledgeReferenceConflictError(
                 "KNOWLEDGE_USE_NOT_ALLOWED", "This knowledge revision is restricted for that use"
             )
@@ -203,7 +239,16 @@ class KnowledgeReferenceService:
                 .limit(limit)
             )
         )
-        return [await self._read(row) for row in rows], total
+        revisions = {row.knowledge_revision_id for row in rows}
+        heads = await self.session.scalars(
+            select(KnowledgeEntry.current_revision_id).where(
+                KnowledgeEntry.id.in_({row.knowledge_entry_id for row in rows}),
+                KnowledgeEntry.owner_user_id == self.actor.id,
+            )
+        )
+        revisions.update(head for head in heads if head is not None)
+        known = await self.sources.stored(revisions)
+        return [await self._read(row, known=known) for row in rows], total
 
     async def _emit(
         self,
@@ -254,7 +299,7 @@ class KnowledgeReferenceService:
                     "KNOWLEDGE_NOT_PUBLISHED", "Only published knowledge can be referenced"
                 )
             pinned = await self._revision(entry.id, reference.knowledge_revision_id)
-            if not await self._usable(entry, pinned, reference.allowed_use):
+            if not await self._usable(entry, pinned, reference.allowed_use, lock=True):
                 raise KnowledgeReferenceConflictError(
                     "KNOWLEDGE_USE_NOT_ALLOWED",
                     "This knowledge revision is restricted for that use",

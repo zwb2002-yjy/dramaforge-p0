@@ -974,7 +974,8 @@ applied_result_version,citations:CitationRead[]}`。CitationRead增加source_ava
 `KnowledgeBody`使用D2安全形状：只允许KnowledgeEntry关联，不能序列化私有ResearchResult/Fragment ID。
 `PublicSourceNote={label:string<=240,public_url?:https-url,locator_note?:string<=1000}`；只显示，不能触发服务器抓取。
 `allowed_uses`仅取research/creation/library_reference/external_processing/export，空集合不表示无限允许；
-发布时服务端校验来源限制；未列用途拒绝，不允许客户端扩充字符串枚举绕过许可。
+发布带研究来源的知识时，声明的每项用途须在每份关联资料当前许可内。服务按研究修订、引文和分析清单查找文件；采纳或恢复取被复制的修订，基于原研究的修正保留其来源。缺声明、已撤权、原件已解除关联或用途不足时返回 422 `KNOWLEDGE_SOURCE_USE_RESTRICTED`。
+保存草稿可保留尚未获准发布的来源。知识追加与撤回保留已有的私有溯源；旧版本漏复制映射时，服务从该条目截至所查版本的已记录映射复核。独立录入继续支持无来源。
 `KnowledgeRevisionInput={title:string[1..240],body:KnowledgeBody,allowed_uses:string[],public_source_notes:PublicSourceNote[],
 source_links?:[{project_id:UUID,research_revision_id:UUID}]}`，source_links最多20，写入前逐项目授权；
 它仅用于私有溯源关系，不出现在公共读响应/事件。源项目锁按UUID排序取得，再核对来源与Entry，避免逆锁序。
@@ -990,7 +991,7 @@ publication_status,result_entry_version,created_at,shared_content_state}`。两�
 `unavailable` 表示标题或正文未能通过校验，不安全的部分不展示。历史记录保留，content_hash 标识原固定版本。
 公开来源 URL 只作显示，接受公开 HTTPS 文献地址及书目参数（如 page、isbn、year），拒绝签名参数和私有资源路径。
 搜索条数和分页只计入可见正文或标题的匹配。新建或重新关联项目引用时，固定版本和当前版本都必须完整、已发布且允许该用途；
-已有受限引用可解除。撤回时复制可共享内容，私有溯源映射仍按原项目隔离。
+项目引用在新建、读取可用性与重连时按实际选定的用途复核固定版本与当前版本的来源。已有受限引用可解除。撤回时复制可共享内容，私有溯源映射仍按原项目隔离。
 
 I4-03a已实施知识条目与发布（迁移0113）：`POST /knowledge/entries`（201 KnowledgeMutationReceipt）、
 `GET /knowledge/entries`（kind/status/q/limit/offset，按认证owner跨Workspace）、`GET /knowledge/entries/{e}`、
