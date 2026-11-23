@@ -20,7 +20,7 @@ from app.shared.model_registry import load_all_models
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from test_business_flows import _flow, _plan, _specs
-from test_master_runs import _decision, _seed, _turn
+from test_master_runs import _plan_proposal, _seed, _turn
 
 
 async def _run_project_asset_audit(
@@ -57,15 +57,16 @@ async def _run_project_asset_audit(
             )
             turn = await _turn(session, project, user, thread)
             run = await service.create_for_origin_turn(turn_id=turn.id, goal="audit")
-            item = await _decision(session, project, user, thread)
+            proposal = await _plan_proposal(session, project, user, thread)
             plan = await service.append_plan(
                 run_id=run.id,
-                decision_ref=item.id,
+                proposal_id=proposal.id,
                 plan_data=_plan(run, flows=flows),
                 created_by_turn_id=turn.id,
             )
             await session.refresh(run)
             await service.apply_plan(
+                decision_ref=plan.decision_ref, expected_plan_hash=plan.plan_hash,
                 run_id=run.id,
                 plan_id=plan.id,
                 expected_revision=run.revision,
@@ -142,15 +143,16 @@ async def test_domain_flow_replans_after_a_failed_instance() -> None:
             )
             turn = await _turn(session, project, user, thread)
             run = await service.create_for_origin_turn(turn_id=turn.id, goal="audit")
-            item = await _decision(session, project, user, thread)
+            proposal = await _plan_proposal(session, project, user, thread)
             first_plan = await service.append_plan(
                 run_id=run.id,
-                decision_ref=item.id,
+                proposal_id=proposal.id,
                 plan_data=_plan(run, flows=flows),
                 created_by_turn_id=turn.id,
             )
             await session.refresh(run)
             await service.apply_plan(
+                decision_ref=first_plan.decision_ref, expected_plan_hash=first_plan.plan_hash,
                 run_id=run.id,
                 plan_id=first_plan.id,
                 expected_revision=run.revision,
@@ -173,13 +175,13 @@ async def test_domain_flow_replans_after_a_failed_instance() -> None:
             project = await session.get(type(project), project.id)
             user = await session.get(type(user), user.id)
             run = await session.get(type(run), run.id)
-            item = await _decision(session, project, user, thread)
+            proposal = await _plan_proposal(session, project, user, thread)
             service = MasterRunService(
                 session, actor=user, project=project, flow_registry=DEFAULT_DEFINITIONS
             )
             replanned = await service.append_plan(
                 run_id=run.id,
-                decision_ref=item.id,
+                proposal_id=proposal.id,
                 plan_data=_plan(
                     run,
                     flows=_specs(
@@ -198,6 +200,7 @@ async def test_domain_flow_replans_after_a_failed_instance() -> None:
             )
             await session.refresh(run)
             await service.apply_plan(
+                decision_ref=replanned.decision_ref, expected_plan_hash=replanned.plan_hash,
                 run_id=run.id,
                 plan_id=replanned.id,
                 expected_revision=run.revision,

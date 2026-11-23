@@ -17,7 +17,7 @@ from app.director.master_run_models import (
     DirectorMasterRunControlReceipt,
 )
 from app.director.master_runs import MasterRunService
-from app.director.proposal_models import DirectorProposal, DirectorProposalItem
+from app.director.proposal_models import DirectorProposal
 from app.director.turn_models import DirectorTurn
 from app.shared.db import set_rls_context
 from app.shared.errors import NotFoundError
@@ -99,13 +99,9 @@ async def _seed(session, *, kind: str = "agent"):
     )
     session.add(proposal)
     await session.flush()
-    item = DirectorProposalItem(
-        proposal_id=proposal.id, project_id=project.id,
-        command="director.master_run_plan_apply", payload={}, status="pending",
+    return (
+        owner, other, workspace, foreign_workspace, project, other_project, thread, turn, proposal,
     )
-    session.add(item)
-    await session.flush()
-    return owner, other, workspace, foreign_workspace, project, other_project, thread, turn, item
 
 
 def _plan(run, **overrides):
@@ -132,7 +128,7 @@ async def test_run_scope_append_only_evidence_and_real_cas_under_app_role():
         async with factory() as session:
             (
                 owner, other, workspace, foreign_workspace, project, other_project,
-                thread, turn, item,
+                thread, turn, proposal,
             ) = await _seed(session)
             session.info["selected_workspace_id"] = workspace.id
             run = await MasterRunService(
@@ -142,7 +138,7 @@ async def test_run_scope_append_only_evidence_and_real_cas_under_app_role():
             )
             plan = await MasterRunService(
                 session, actor=owner, project=project,
-            ).append_plan(run_id=run.id, decision_ref=item.id, plan_data=_plan(run))
+            ).append_plan(run_id=run.id, proposal_id=proposal.id, plan_data=_plan(run))
             await session.commit()
             ids = {
                 "owner": owner.id, "workspace": workspace.id, "project": project.id,
@@ -214,7 +210,7 @@ async def test_origin_binding_rejects_workflow_turns_and_keeps_terminal_invarian
         async with factory() as session:
             (
                 owner, other, workspace, foreign_workspace, project, other_project,
-                thread, turn, item,
+                thread, turn, proposal,
             ) = await _seed(session, kind="workflow")
             session.info["selected_workspace_id"] = workspace.id
             # A workflow turn can never own a continuous goal (composite FK/kind).
@@ -231,7 +227,7 @@ async def test_origin_binding_rejects_workflow_turns_and_keeps_terminal_invarian
         async with factory() as session:
             (
                 owner, other, workspace, foreign_workspace, project, other_project,
-                thread, turn, item,
+                thread, turn, proposal,
             ) = await _seed(session)
             session.info["selected_workspace_id"] = workspace.id
             run = await MasterRunService(
@@ -276,7 +272,7 @@ async def test_populated_master_run_history_blocks_downgrade():
         async with factory() as session:
             (
                 owner, other, workspace, foreign_workspace, project, other_project,
-                thread, turn, item,
+                thread, turn, proposal,
             ) = await _seed(session)
             session.info["selected_workspace_id"] = workspace.id
             await MasterRunService(session, actor=owner, project=project).create_for_origin_turn(

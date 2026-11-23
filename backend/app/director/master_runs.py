@@ -11,8 +11,9 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from typing import Any, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,7 +34,7 @@ from app.director.master_run_models import (
     DirectorMasterRunPlan,
 )
 from app.director.master_run_notices import append_master_run_notice
-from app.director.proposal_models import DirectorProposalItem
+from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.turn_models import DirectorTurn
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
@@ -59,6 +60,16 @@ ALLOWED_EDGES: dict[str, frozenset[str]] = {
 }
 
 CONTROL_OPERATIONS = frozenset({"pause", "resume", "cancel", "verify"})
+
+
+class PlanConfirmation(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    master_run_id: UUID
+    plan_id: UUID
+    plan_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_run_revision: int = Field(strict=True, ge=1)
+    expected_control_epoch: int = Field(strict=True, ge=0)
 
 
 def _canonical(value: object) -> str:
@@ -302,7 +313,13 @@ class MasterRunService:
             "expected_run_revision", "expected_control_epoch",
             "current_plan_id", "current_plan_revision",
         }
-        if set(basis) != required:
+        if (
+            set(basis) != required
+            or type(basis.get("expected_run_revision")) is not int
+            or type(basis.get("expected_control_epoch")) is not int
+            or (basis.get("current_plan_revision") is not None
+                and type(basis["current_plan_revision"]) is not int)
+        ):
             raise ValidationAppError(
                 "decision_basis 字段不正确", details={"code": "MASTER_RUN_PLAN_BASIS"},
             )
@@ -329,7 +346,7 @@ class MasterRunService:
         self,
         *,
         run_id: UUID,
-        decision_ref: UUID,
+        proposal_id: UUID,
         plan_data: dict[str, object],
         created_by_turn_id: UUID | None = None,
         schema_version: str = PLAN_SCHEMA_VERSION,
@@ -348,16 +365,16 @@ class MasterRunService:
                 run_revision=run.revision,
                 control_epoch=run.control_epoch,
             )
-        item = await self._session.scalar(
-            select(DirectorProposalItem).where(
-                DirectorProposalItem.id == decision_ref,
-                DirectorProposalItem.project_id == self._project.id,
-                DirectorProposalItem.command == PLAN_COMMAND,
-            )
+        proposal = await self._session.scalar(
+            select(DirectorProposal).where(
+                DirectorProposal.id == proposal_id,
+                DirectorProposal.project_id == self._project.id,
+                DirectorProposal.thread_id == run.source_thread_id,
+            ).with_for_update().execution_options(populate_existing=True)
         )
-        if item is None:
+        if proposal is None:
             raise ValidationAppError(
-                "计划必须绑定本项目的一个 typed 计划确认项",
+                "计划提案不属于当前目标的项目对话",
                 details={"code": "MASTER_RUN_PLAN_DECISION"},
             )
         digest = plan_hash(schema_version, plan_data)
@@ -367,8 +384,17 @@ class MasterRunService:
                 DirectorMasterRunPlan.plan_hash == digest,
             )
         )
-        if existing is not None:
+        occupied = await self._session.scalar(
+            select(DirectorProposalItem.id).where(
+                DirectorProposalItem.proposal_id == proposal.id,
+            ).limit(1)
+        )
+        if existing is not None and (occupied is None or existing.decision_ref == occupied):
             return existing
+        if occupied is not None or proposal.status != "pending":
+            raise ValidationAppError(
+                "新计划需要独立的待确认提案", details={"code": "MASTER_RUN_PLAN_DECISION"},
+            )
         next_revision = int(
             await self._session.scalar(
                 select(func.coalesce(func.max(DirectorMasterRunPlan.revision), 0)).where(
@@ -377,18 +403,27 @@ class MasterRunService:
             )
             or 0
         ) + 1
+        plan_id = uuid4()
+        item = DirectorProposalItem(
+            id=uuid4(), proposal_id=proposal.id, project_id=run.project_id, command=PLAN_COMMAND,
+            status="pending", payload=PlanConfirmation(
+                master_run_id=run.id, plan_id=plan_id, plan_hash=digest,
+                expected_run_revision=run.revision, expected_control_epoch=run.control_epoch,
+            ).model_dump(mode="json"),
+        )
         plan = DirectorMasterRunPlan(
+            id=plan_id,
             project_id=self._project.id,
             master_run_id=run.id,
             revision=next_revision,
             schema_version=schema_version,
             plan_hash=digest,
             plan_data=plan_data,
-            decision_ref=decision_ref,
+            decision_ref=item.id,
             created_by_turn_id=created_by_turn_id,
             created_by_actor_id=self._actor.id,
         )
-        self._session.add(plan)
+        self._session.add_all([item, plan])
         await self._session.flush()
         if created_by_turn_id is not None:
             turn = await self._session.scalar(
@@ -403,14 +438,14 @@ class MasterRunService:
             self._session, project_id=self._project.id, actor_id=self._actor.id,
             notice=MasterRunPlanProposed(
                 run_id=run.id, plan_id=plan.id, plan_revision=plan.revision,
-                decision_ref=decision_ref,
+                decision_ref=item.id,
             ),
         )
         return plan
 
     async def apply_plan(
         self, *, run_id: UUID, plan_id: UUID, expected_revision: int,
-        expected_control_epoch: int,
+        expected_control_epoch: int, decision_ref: UUID, expected_plan_hash: str,
     ) -> DirectorMasterRunPlan:
         """Persist the accepted plan: current pointer, epoch and revision advance."""
         run = await self._locked(run_id)
@@ -435,12 +470,27 @@ class MasterRunService:
         )
         if plan is None:
             raise NotFoundError("master run plan not found")
+        if (
+            plan.decision_ref != decision_ref or plan.plan_hash != expected_plan_hash
+            or plan_hash(plan.schema_version, plan.plan_data) != expected_plan_hash
+        ):
+            raise _state_conflict("MASTER_RUN_PLAN_DECISION", "点选的确认项与计划内容不一致")
         current = await self.current_plan(run)
         if current is not None and plan.revision < current.revision:
             raise _state_conflict(
                 "MASTER_RUN_PLAN_SUPERSEDED", "不能把目标退回到更早的计划快照",
                 current_plan_revision=current.revision,
             )
+        basis = plan.plan_data.get("decision_basis")
+        if not isinstance(basis, dict) or not await self._basis_matches(run, basis):
+            raise _state_conflict("MASTER_RUN_PLAN_STALE", "计划的原始确认依据已变化，请重新预览")
+        # A command rejection is returned per item. Roll back all changes made by
+        # this item even when validation of a later flow fails after a flush.
+        async with self._session.begin_nested():
+            await self._activate_plan(run, plan)
+        return plan
+
+    async def _activate_plan(self, run: DirectorMasterRun, plan: DirectorMasterRunPlan) -> None:
         run.current_plan_id = plan.id
         run.control_epoch += 1
         run.revision += 1
@@ -472,7 +522,6 @@ class MasterRunService:
                 applied_run_revision=run.revision, control_epoch=run.control_epoch,
             ),
         )
-        return plan
 
     # ----- control ---------------------------------------------------------
     async def _receipt(

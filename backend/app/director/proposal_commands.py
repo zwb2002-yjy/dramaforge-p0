@@ -900,17 +900,19 @@ async def _apply_master_run_plan(
     project_id: UUID,
     payload: dict[str, Any],
     actor_id: UUID,
+    selected_item_id: UUID | None,
 ) -> None:
     """Confirm one accepted plan under the frozen MasterRun CAS basis."""
-    from app.director.master_runs import MasterRunService
+    from app.director.master_runs import MasterRunService, PlanConfirmation
     from app.shared.errors import NotFoundError
 
+    if selected_item_id is None:
+        raise ProposalCommandError(
+            "计划需要用户明确点选确认项", details={"code": "MASTER_RUN_PLAN_DECISION"},
+        )
     try:
-        run_id = UUID(str(payload["master_run_id"]))
-        plan_id = UUID(str(payload["plan_id"]))
-        expected_revision = int(payload["expected_run_revision"])
-        expected_epoch = int(payload["expected_control_epoch"])
-    except (KeyError, TypeError, ValueError) as exc:
+        confirmation = PlanConfirmation.model_validate(payload)
+    except ValidationError as exc:
         raise ProposalCommandError(
             "计划确认参数不完整", details={"code": "MASTER_RUN_PLAN_APPLY_INPUT"},
         ) from exc
@@ -923,15 +925,18 @@ async def _apply_master_run_plan(
     service = MasterRunService(session, actor=actor, project=project)
     try:
         await service.apply_plan(
-            run_id=run_id, plan_id=plan_id,
-            expected_revision=expected_revision, expected_control_epoch=expected_epoch,
+            run_id=confirmation.master_run_id, plan_id=confirmation.plan_id,
+            expected_revision=confirmation.expected_run_revision,
+            expected_control_epoch=confirmation.expected_control_epoch,
+            expected_plan_hash=confirmation.plan_hash, decision_ref=selected_item_id,
         )
     except NotFoundError as exc:
         raise ProposalCommandError(
             str(exc), details={"code": "MASTER_RUN_PLAN_NOT_FOUND"},
         ) from exc
     except AppError as exc:
-        raise ProposalCommandError(str(exc), details={"code": exc.code}) from exc
+        code = exc.details.get("code", exc.code)
+        raise ProposalCommandError(str(exc), details={"code": code}) from exc
 
 
 class ProposalCommandRegistry:
@@ -952,6 +957,7 @@ class ProposalCommandRegistry:
         payload: dict[str, Any],
         expected_target_version: int | None = None,
         command_key: str | None = None,
+        selected_item_id: UUID | None = None,
     ) -> None:
         if not self.is_known(command):
             raise ProposalCommandError(
@@ -1076,6 +1082,7 @@ class ProposalCommandRegistry:
                 project_id=project_id,
                 payload=payload,
                 actor_id=self._actor_id,
+                selected_item_id=selected_item_id,
             )
         else:  # pragma: no cover - registry covers all whitelisted commands
             raise ProposalCommandError(f"command not implemented: {command}")

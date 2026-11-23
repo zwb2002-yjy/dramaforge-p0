@@ -25,7 +25,7 @@ from app.shared.errors import ConflictError, ValidationAppError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from test_master_runs import _decision, _seed, _turn
+from test_master_runs import _plan_proposal, _seed, _turn
 
 PROBE = BusinessFlowDefinition(
     flow_key="probe_flow",
@@ -161,15 +161,16 @@ async def _run_with_plan(
     service = MasterRunService(session, actor=user, project=project, flow_registry=registry)
     turn = await _turn(session, project, user, thread)
     run = await service.create_for_origin_turn(turn_id=turn.id, goal="整理古城资料")
-    item = await _decision(session, project, user, thread)
+    proposal = await _plan_proposal(session, project, user, thread)
     plan = await service.append_plan(
         run_id=run.id,
-        decision_ref=item.id,
+        proposal_id=proposal.id,
         plan_data=_plan(run, flows=specs),
         created_by_turn_id=turn.id,
     )
     await session.refresh(run)
     await service.apply_plan(
+        decision_ref=plan.decision_ref, expected_plan_hash=plan.plan_hash,
         run_id=run.id,
         plan_id=plan.id,
         expected_revision=run.revision,
@@ -438,10 +439,10 @@ async def test_new_plan_requires_dispositions_and_retains_only_identical_flows(
     instance = await session.scalar(select(DirectorBusinessFlowInstance))
     assert instance is not None
     await session.refresh(run)
-    item = await _decision(session, project, user, thread)
+    proposal = await _plan_proposal(session, project, user, thread)
     missing = await service.append_plan(
         run_id=run.id,
-        decision_ref=item.id,
+        proposal_id=proposal.id,
         plan_data=_plan(
             run,
             flows=_specs(project, [_flow()]),
@@ -450,6 +451,7 @@ async def test_new_plan_requires_dispositions_and_retains_only_identical_flows(
     )
     with pytest.raises(ConflictError) as required:
         await service.apply_plan(
+            decision_ref=missing.decision_ref, expected_plan_hash=missing.plan_hash,
             run_id=run.id,
             plan_id=missing.id,
             expected_revision=run.revision,
@@ -463,10 +465,10 @@ async def test_new_plan_requires_dispositions_and_retains_only_identical_flows(
     instance = await session.scalar(select(DirectorBusinessFlowInstance))
     assert instance is not None
     await session.refresh(run)
-    item = await _decision(session, project, user, thread)
+    proposal = await _plan_proposal(session, project, user, thread)
     retained = await service.append_plan(
         run_id=run.id,
-        decision_ref=item.id,
+        proposal_id=proposal.id,
         plan_data=_plan(
             run,
             flows=_specs(project, [_flow()]),
@@ -476,6 +478,7 @@ async def test_new_plan_requires_dispositions_and_retains_only_identical_flows(
     )
     await session.refresh(run)
     await service.apply_plan(
+        decision_ref=retained.decision_ref, expected_plan_hash=retained.plan_hash,
         run_id=run.id,
         plan_id=retained.id,
         expected_revision=run.revision,
@@ -485,10 +488,10 @@ async def test_new_plan_requires_dispositions_and_retains_only_identical_flows(
     assert instance.status == "pending"
     # Retain is refused once the frozen input changed.
     await session.refresh(run)
-    item = await _decision(session, project, user, thread)
+    proposal = await _plan_proposal(session, project, user, thread)
     changed = await service.append_plan(
         run_id=run.id,
-        decision_ref=item.id,
+        proposal_id=proposal.id,
         plan_data=_plan(
             run,
             flows=_specs(project, [_flow(input_data={"mark": "changed"})]),
@@ -499,6 +502,7 @@ async def test_new_plan_requires_dispositions_and_retains_only_identical_flows(
     await session.refresh(run)
     with pytest.raises(ConflictError) as ineligible:
         await service.apply_plan(
+            decision_ref=changed.decision_ref, expected_plan_hash=changed.plan_hash,
             run_id=run.id,
             plan_id=changed.id,
             expected_revision=run.revision,

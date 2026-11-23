@@ -24,7 +24,7 @@ from app.director.business_flows import (
     FlowStepSpec,
 )
 from app.director.master_runs import MasterRunService
-from app.director.proposal_models import DirectorProposal, DirectorProposalItem
+from app.director.proposal_models import DirectorProposal
 from app.director.turn_models import DirectorTurn
 from app.shared.db import set_rls_context
 from app.shared.errors import ConflictError
@@ -133,13 +133,7 @@ async def _seed(session):
     )
     session.add(proposal)
     await session.flush()
-    item = DirectorProposalItem(
-        proposal_id=proposal.id, project_id=project.id,
-        command="director.master_run_plan_apply", payload={}, status="pending",
-    )
-    session.add(item)
-    await session.flush()
-    return owner, workspace, project, other_project, thread, turn, item
+    return owner, workspace, project, other_project, thread, turn, proposal
 
 
 def _flow_spec(project_id: UUID, *, mark: str = "keep") -> dict[str, object]:
@@ -175,7 +169,7 @@ def _plan(run, *, flows, current_plan=None, dispositions=None):
 
 async def _apply_first_plan(factory, *, mark: str = "keep"):
     async with factory() as session:
-        owner, workspace, project, other_project, thread, turn, item = await _seed(session)
+        owner, workspace, project, other_project, thread, turn, proposal = await _seed(session)
         session.info["selected_workspace_id"] = workspace.id
         service = MasterRunService(
             session, actor=owner, project=project, flow_registry=REGISTRY,
@@ -183,11 +177,12 @@ async def _apply_first_plan(factory, *, mark: str = "keep"):
         run = await service.create_for_origin_turn(turn_id=turn.id, goal="整理古城灯会资料")
         plan = await service.append_plan(
             run_id=run.id,
-            decision_ref=item.id,
+            proposal_id=proposal.id,
             plan_data=_plan(run, flows=[_flow_spec(project.id, mark=mark)]),
         )
         await session.refresh(run)
         await service.apply_plan(
+            decision_ref=plan.decision_ref, expected_plan_hash=plan.plan_hash,
             run_id=run.id,
             plan_id=plan.id,
             expected_revision=run.revision,
@@ -393,16 +388,10 @@ async def test_plan_change_requires_dispositions_and_unknown_keeps_its_slot():
             )
             session.add(proposal)
             await session.flush()
-            item = DirectorProposalItem(
-                proposal_id=proposal.id, project_id=project.id,
-                command="director.master_run_plan_apply", payload={}, status="pending",
-            )
-            session.add(item)
-            await session.flush()
             first_plan = await service.get_plan(run.id, ids["plan_id"])
             missing = await service.append_plan(
                 run_id=run.id,
-                decision_ref=item.id,
+                proposal_id=proposal.id,
                 plan_data=_plan(
                     run,
                     flows=[_flow_spec(project.id)],
@@ -411,6 +400,7 @@ async def test_plan_change_requires_dispositions_and_unknown_keeps_its_slot():
             )
             with pytest.raises(ConflictError) as required:
                 await service.apply_plan(
+                    decision_ref=missing.decision_ref, expected_plan_hash=missing.plan_hash,
                     run_id=run.id,
                     plan_id=missing.id,
                     expected_revision=run.revision,
@@ -442,16 +432,10 @@ async def test_plan_change_requires_dispositions_and_unknown_keeps_its_slot():
             )
             session.add(proposal)
             await session.flush()
-            item = DirectorProposalItem(
-                proposal_id=proposal.id, project_id=project.id,
-                command="director.master_run_plan_apply", payload={}, status="pending",
-            )
-            session.add(item)
-            await session.flush()
             first_plan = await service.get_plan(run.id, ids["plan_id"])
             retained = await service.append_plan(
                 run_id=run.id,
-                decision_ref=item.id,
+                proposal_id=proposal.id,
                 plan_data=_plan(
                     run,
                     flows=[_flow_spec(project.id)],
@@ -463,6 +447,7 @@ async def test_plan_change_requires_dispositions_and_unknown_keeps_its_slot():
             )
             await session.refresh(run)
             await service.apply_plan(
+                decision_ref=retained.decision_ref, expected_plan_hash=retained.plan_hash,
                 run_id=run.id,
                 plan_id=retained.id,
                 expected_revision=run.revision,
@@ -540,7 +525,7 @@ WORKER_REGISTRY = BusinessFlowDefinitionRegistry((WORKER_FLOW,))
 async def test_worker_advances_flow_through_real_tool_registry():
     async with flow_database() as (name, _engine, factory):
         async with factory() as session:
-            owner, workspace, project, _other, thread, turn, item = await _seed(session)
+            owner, workspace, project, _other, thread, turn, proposal = await _seed(session)
             session.info["selected_workspace_id"] = workspace.id
             service = MasterRunService(
                 session, actor=owner, project=project, flow_registry=WORKER_REGISTRY,
@@ -550,7 +535,7 @@ async def test_worker_advances_flow_through_real_tool_registry():
             )
             plan = await service.append_plan(
                 run_id=run.id,
-                decision_ref=item.id,
+                proposal_id=proposal.id,
                 plan_data=_plan(
                     run,
                     flows=[
@@ -568,6 +553,7 @@ async def test_worker_advances_flow_through_real_tool_registry():
             )
             await session.refresh(run)
             await service.apply_plan(
+                decision_ref=plan.decision_ref, expected_plan_hash=plan.plan_hash,
                 run_id=run.id,
                 plan_id=plan.id,
                 expected_revision=run.revision,

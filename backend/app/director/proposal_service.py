@@ -70,8 +70,9 @@ class ProposalService:
         items = (
             await self._session.execute(
                 select(DirectorProposalItem).where(
-                    DirectorProposalItem.proposal_id == proposal.id
-                ).execution_options(populate_existing=True)
+                    DirectorProposalItem.proposal_id == proposal.id,
+                    DirectorProposalItem.project_id == project.id,
+                ).with_for_update().execution_options(populate_existing=True)
             )
         ).scalars().all()
         by_id = {item.id: item for item in items}
@@ -114,14 +115,16 @@ class ProposalService:
                     payload=item.payload,
                     expected_target_version=item.expected_target_version,
                     command_key=f"proposal-item-{item.id}",
+                    selected_item_id=item.id,
                 )
             except ProposalCommandError as exc:
                 if exc.details.get("code") == "PROPOSAL_STALE":
                     item.status = "stale"
                     item.decided_at = datetime.now(UTC)
-                result.failed.append(
-                    {"item_id": str(item.id), "error": str(exc)}
-                )
+                failure: dict[str, object] = {"item_id": str(item.id), "error": str(exc)}
+                if exc.details.get("code"):
+                    failure["code"] = exc.details["code"]
+                result.failed.append(failure)
                 continue
             item.status = "accepted"
             item.decided_at = datetime.now(UTC)

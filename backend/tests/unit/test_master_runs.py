@@ -15,7 +15,7 @@ from app.director.master_run_models import (
     DirectorMasterRunControlReceipt,
     DirectorMasterRunPlan,
 )
-from app.director.master_runs import PLAN_COMMAND, MasterRunService, plan_hash
+from app.director.master_runs import MasterRunService, plan_hash
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.turn_models import DirectorTurn
 from app.events.models import EventLog
@@ -71,20 +71,16 @@ async def _turn(
     return turn
 
 
-async def _decision(session: AsyncSession, project: Project, user: User, thread: DirectorThread):
+async def _plan_proposal(
+    session: AsyncSession, project: Project, user: User, thread: DirectorThread,
+):
     proposal = DirectorProposal(
         project_id=project.id, thread_id=thread.id, scope_type="project",
         scope_entity_id=project.id, created_by=user.id,
     )
     session.add(proposal)
     await session.flush()
-    item = DirectorProposalItem(
-        proposal_id=proposal.id, project_id=project.id, command=PLAN_COMMAND,
-        payload={}, status="pending",
-    )
-    session.add(item)
-    await session.flush()
-    return item
+    return proposal
 
 
 def _plan(run: DirectorMasterRun, **overrides) -> dict[str, object]:
@@ -147,10 +143,10 @@ async def test_plan_candidates_are_immutable_hash_deduplicated_and_do_not_advanc
     service = MasterRunService(session, actor=user, project=project)
     turn = await _turn(session, project, user, thread)
     run = await service.create_for_origin_turn(turn_id=turn.id, goal="拍一支灯会宣传片")
-    item = await _decision(session, project, user, thread)
+    proposal = await _plan_proposal(session, project, user, thread)
     basis = _plan(run)
     plan = await service.append_plan(
-        run_id=run.id, decision_ref=item.id, plan_data=basis, created_by_turn_id=turn.id,
+        run_id=run.id, proposal_id=proposal.id, plan_data=basis, created_by_turn_id=turn.id,
     )
     assert plan.revision == 1
     assert plan.plan_hash == plan_hash(plan.schema_version, basis)
@@ -163,26 +159,29 @@ async def test_plan_candidates_are_immutable_hash_deduplicated_and_do_not_advanc
     assert (await session.get(DirectorTurn, turn.id)).plan_revision == 1
     # The same content returns the original row instead of a second revision.
     assert (await service.append_plan(
-        run_id=run.id, decision_ref=item.id, plan_data=basis,
+        run_id=run.id, proposal_id=proposal.id, plan_data=basis,
     )).id == plan.id
     # A stale basis (a different revision isn't observed state) is refused.
     stale = _plan(refreshed)
     stale["decision_basis"]["expected_run_revision"] = 99
     with pytest.raises(ConflictError) as refused:
-        await service.append_plan(run_id=run.id, decision_ref=item.id, plan_data=stale)
+        await service.append_plan(run_id=run.id, proposal_id=proposal.id, plan_data=stale)
     assert refused.value.details["code"] == "MASTER_RUN_PLAN_STALE"
     # Unknown top-level fields are rejected instead of silently stored.
     broken = _plan(refreshed)
     broken["freeform_sql"] = "select 1"
     with pytest.raises(ValidationAppError):
-        await service.append_plan(run_id=run.id, decision_ref=item.id, plan_data=broken)
+        await service.append_plan(run_id=run.id, proposal_id=proposal.id, plan_data=broken)
     # The decision reference must be this project's typed plan item.
-    other_item = await _decision(session, project, user, thread)
-    other_item.command = "story.upsert_episode"
+    other_proposal = await _plan_proposal(session, project, user, thread)
+    session.add(DirectorProposalItem(
+        proposal_id=other_proposal.id, project_id=project.id,
+        command="story.upsert_episode", status="pending", payload={},
+    ))
     await session.flush()
     with pytest.raises(ValidationAppError):
         await service.append_plan(
-            run_id=run.id, decision_ref=other_item.id, plan_data=_plan(refreshed),
+            run_id=run.id, proposal_id=other_proposal.id, plan_data=_plan(refreshed),
         )
     events = list(await session.scalars(select(EventLog)))
     assert any(
@@ -198,10 +197,11 @@ async def test_plan_apply_advances_pointer_epoch_and_revision_with_cas(session: 
     service = MasterRunService(session, actor=user, project=project)
     turn = await _turn(session, project, user, thread)
     run = await service.create_for_origin_turn(turn_id=turn.id, goal="拍一支灯会宣传片")
-    item = await _decision(session, project, user, thread)
-    plan = await service.append_plan(run_id=run.id, decision_ref=item.id, plan_data=_plan(run))
+    proposal = await _plan_proposal(session, project, user, thread)
+    plan = await service.append_plan(run_id=run.id, proposal_id=proposal.id, plan_data=_plan(run))
     await session.refresh(run)
     assert await service.apply_plan(
+        decision_ref=plan.decision_ref, expected_plan_hash=plan.plan_hash,
         run_id=run.id, plan_id=plan.id, expected_revision=1, expected_control_epoch=0,
     )
     await session.refresh(run)
@@ -216,26 +216,48 @@ async def test_plan_apply_advances_pointer_epoch_and_revision_with_cas(session: 
     assert MasterRunPlanApplied.model_fields["kind"].default == "master_run_plan_applied"
     with pytest.raises(ConflictError) as stale_epoch:
         await service.apply_plan(
+            decision_ref=plan.decision_ref, expected_plan_hash=plan.plan_hash,
             run_id=run.id, plan_id=plan.id, expected_revision=2, expected_control_epoch=0,
         )
     assert stale_epoch.value.details["code"] == "MASTER_RUN_EPOCH_CONFLICT"
     # A later accepted plan may replace the pointer, but never move it backwards.
     # Each candidate plan owns exactly one typed decision item (UNIQUE decision_ref).
-    second_item = await _decision(session, project, user, thread)
+    second_proposal = await _plan_proposal(session, project, user, thread)
     second = await service.append_plan(
-        run_id=run.id, decision_ref=second_item.id, plan_data=_plan(run, current_plan=plan),
+        run_id=run.id, proposal_id=second_proposal.id, plan_data=_plan(run, current_plan=plan),
     )
     assert second.revision == 2
     await service.apply_plan(
+        decision_ref=second.decision_ref, expected_plan_hash=second.plan_hash,
         run_id=run.id, plan_id=second.id, expected_revision=2, expected_control_epoch=1,
     )
     await session.refresh(run)
     with pytest.raises(ConflictError) as backwards:
         await service.apply_plan(
+            decision_ref=plan.decision_ref, expected_plan_hash=plan.plan_hash,
             run_id=run.id, plan_id=plan.id,
             expected_revision=run.revision, expected_control_epoch=run.control_epoch,
         )
     assert backwards.value.details["code"] == "MASTER_RUN_PLAN_SUPERSEDED"
+
+
+async def test_confirmation_rechecks_content_when_both_hash_fields_agree(session: AsyncSession):
+    project, user, thread = await _seed(session)
+    service = MasterRunService(session, actor=user, project=project)
+    turn = await _turn(session, project, user, thread)
+    run = await service.create_for_origin_turn(turn_id=turn.id, goal="核对保存的候选")
+    proposal = await _plan_proposal(session, project, user, thread)
+    plan = await service.append_plan(run_id=run.id, proposal_id=proposal.id, plan_data=_plan(run))
+    # Simulate an inconsistent saved snapshot in the isolated SQLite fixture.
+    plan.plan_data = {**plan.plan_data, "limits": {"max_steps": 99}}
+    await session.flush()
+    with pytest.raises(ConflictError) as refused:
+        await service.apply_plan(
+            run_id=run.id, plan_id=plan.id, decision_ref=plan.decision_ref,
+            expected_plan_hash=plan.plan_hash, expected_revision=1, expected_control_epoch=0,
+        )
+    assert refused.value.details["code"] == "MASTER_RUN_PLAN_DECISION"
+    assert (run.current_plan_id, run.revision, run.control_epoch) == (None, 1, 0)
 
 
 async def test_control_receipts_are_idempotent_and_state_machine_stays_closed(
@@ -309,10 +331,11 @@ async def test_verify_records_evidence_without_declaring_success(session: AsyncS
     with pytest.raises(ConflictError) as not_waiting:
         await service.control(run_id=run.id, operation="verify", expected_revision=1)
     assert not_waiting.value.details["code"] == "MASTER_RUN_STATE_CONFLICT"
-    item = await _decision(session, project, user, thread)
-    plan = await service.append_plan(run_id=run.id, decision_ref=item.id, plan_data=_plan(run))
+    proposal = await _plan_proposal(session, project, user, thread)
+    plan = await service.append_plan(run_id=run.id, proposal_id=proposal.id, plan_data=_plan(run))
     await session.refresh(run)
     await service.apply_plan(
+        decision_ref=plan.decision_ref, expected_plan_hash=plan.plan_hash,
         run_id=run.id, plan_id=plan.id, expected_revision=run.revision,
         expected_control_epoch=run.control_epoch,
     )
