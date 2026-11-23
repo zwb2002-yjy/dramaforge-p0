@@ -13,11 +13,19 @@ from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
+from app.assets.models import Episode
+from app.contracts.delivery_verification import (
+    COMPLETION_RULES,
+    DeliveryVerifier,
+    EpisodeDeliveryGoal,
+    FlowCompletionGoal,
+    ProjectDeliveryGoal,
+)
 from app.contracts.domain_events import (
     MasterRunChanged,
     MasterRunPlanApplied,
@@ -26,6 +34,7 @@ from app.contracts.domain_events import (
 from app.director.business_flows import (
     BusinessFlowDefinitionRegistry,
     BusinessFlowService,
+    normalize_dispositions,
     validate_plan_flows,
 )
 from app.director.master_run_models import (
@@ -299,12 +308,89 @@ class MasterRunService:
         return run
 
     # ----- plans -----------------------------------------------------------
+    async def propose_delivery_check(
+        self, turn: DirectorTurn
+    ) -> tuple[DirectorMasterRunPlan, UUID]:
+        """Build a technical delivery goal from project facts, without starting production."""
+        if turn.master_run_id is None or turn.thread_id is None or turn.scope_type != "project":
+            raise ValidationAppError("当前对话未绑定项目级持续目标")
+        run = await self._locked(turn.master_run_id)
+        if (
+            run.actor_id != self._actor.id
+            or run.source_thread_id != turn.thread_id
+            or run.origin_turn_id != turn.id
+            or run.current_plan_id is not None
+            or run.status != "planning"
+            or run.desired_state != "run"
+        ):
+            raise ConflictError("只有当前目标的首次规划轮次可以提出初始交付计划")
+        work_type = self._project.work_type
+        if work_type == "animation_promo":
+            targets: list[dict[str, object]] = [{"episode_id": None}]
+        else:
+            episodes = list(
+                await self._session.scalars(
+                    select(Episode)
+                    .where(
+                        Episode.project_id == self._project.id,
+                    )
+                    .order_by(Episode.episode_number)
+                    .with_for_update(read=True)
+                )
+            )
+            if work_type == "serial_comic" and self._project.planned_episode_count is not None and (
+                len(episodes) != self._project.planned_episode_count
+                or any(e.episode_number != index for index, e in enumerate(episodes, start=1))
+            ):
+                raise ValidationAppError("请先建立计划中的每一集，再确认整剧交付范围")
+            targets = [
+                {"episode_id": str(episode.id), "episode_number": episode.episode_number}
+                for episode in episodes
+            ]
+        data: dict[str, object] = {
+            "goal": run.goal,
+            "flows": [],
+            "dependencies": [],
+            "completion": [
+                {"rule_id": "project_delivery_ready_v1", "work_type": work_type, "targets": targets}
+            ],
+            "input_versions": dict(turn.input_versions),
+            "limits": {"max_model_calls": 0, "max_tool_calls": 0, "max_provider_calls": 0},
+            "decision_basis": {
+                "expected_run_revision": run.revision,
+                "expected_control_epoch": run.control_epoch,
+                "current_plan_id": None,
+                "current_plan_revision": None,
+            },
+        }
+        proposal = DirectorProposal(
+            project_id=run.project_id,
+            thread_id=turn.thread_id,
+            scope_type="project",
+            scope_entity_id=run.project_id,
+            created_by=self._actor.id,
+        )
+        self._session.add(proposal)
+        await self._session.flush()
+        plan = await self.append_plan(
+            run_id=run.id,
+            proposal_id=proposal.id,
+            plan_data=data,
+            created_by_turn_id=turn.id,
+        )
+        item = await self._session.get(DirectorProposalItem, plan.decision_ref)
+        assert item is not None
+        if item.proposal_id != proposal.id:
+            await self._session.delete(proposal)
+        return plan, item.proposal_id
+
     @staticmethod
     def validate_plan_data(plan_data: dict[str, object]) -> None:
         keys = set(plan_data)
         if PLAN_TOP_LEVEL_KEYS - keys or keys - PLAN_TOP_LEVEL_KEYS - PLAN_OPTIONAL_KEYS:
             raise ValidationAppError(
-                "计划字段不完整或包含未知字段", details={"code": "MASTER_RUN_PLAN_SHAPE"},
+                "计划字段不完整或包含未知字段",
+                details={"code": "MASTER_RUN_PLAN_SHAPE"},
             )
         basis = plan_data.get("decision_basis")
         if not isinstance(basis, dict):
@@ -328,6 +414,12 @@ class MasterRunService:
                 "current_plan_id 与 current_plan_revision 必须同时为空或同时存在",
                 details={"code": "MASTER_RUN_PLAN_BASIS"},
             )
+        try:
+            COMPLETION_RULES.validate_python(plan_data.get("completion"))
+        except ValidationError as exc:
+            raise ValidationAppError(
+                "完成条件必须是已注册的目标声明", details={"code": "MASTER_RUN_COMPLETION_SHAPE"},
+            ) from exc
         # Validate the flow list early so a bad plan never reaches Apply.
         validate_plan_flows(plan_data.get("flows"), allow_empty=True)
 
@@ -506,7 +598,7 @@ class MasterRunService:
         dispositions = await flows.apply_dispositions(
             run=run,
             plan=plan,
-            dispositions=_normalize_dispositions(plan.plan_data.get("flow_dispositions")),
+            dispositions=normalize_dispositions(plan.plan_data.get("flow_dispositions")),
         )
         retained = dispositions.get("retained_flow_keys")
         await flows.create_from_plan(
@@ -540,6 +632,7 @@ class MasterRunService:
 
     async def control(
         self, *, run_id: UUID, operation: str, expected_revision: int, reason: str = "",
+        delivery_verifier: DeliveryVerifier | None = None,
     ) -> dict[str, object]:
         if operation not in CONTROL_OPERATIONS:
             raise ValidationAppError("不支持的控制操作")
@@ -561,7 +654,9 @@ class MasterRunService:
                 "MASTER_RUN_VERSION_CONFLICT", "目标已变化，请刷新后重新确认",
                 current_revision=run.revision,
             )
-        result = await self._apply_control(run, operation=operation, reason=reason)
+        result = await self._apply_control(
+            run, operation=operation, reason=reason, delivery_verifier=delivery_verifier,
+        )
         run.revision += 1
         run.updated_at = datetime.now(UTC)
         receipt = DirectorMasterRunControlReceipt(
@@ -587,6 +682,7 @@ class MasterRunService:
 
     async def _apply_control(
         self, run: DirectorMasterRun, *, operation: str, reason: str,
+        delivery_verifier: DeliveryVerifier | None,
     ) -> dict[str, object]:
         if operation == "pause":
             self._require_edge(run, "paused")
@@ -621,7 +717,13 @@ class MasterRunService:
             plan = await self.current_plan(run)
             assert plan is not None
             flows = self._flows()
-            verification = await flows.completion(run=run, plan=plan)
+            flow_result = await flows.completion(run=run, plan=plan)
+            verification = await self._verify_plan(plan, flow_result, delivery_verifier)
+            if verification["satisfied"] and verification.get("delivery_checked"):
+                self._require_edge(run, "succeeded")
+                run.status = "succeeded"
+                run.wait_reason = None
+                run.finished_at = datetime.now(UTC)
             progress = await flows.progress(run.id)
             return {
                 "master_run_id": str(run.id),
@@ -645,6 +747,166 @@ class MasterRunService:
             "unresolved_external_count": None,
             "reason": reason or None,
         }
+
+    async def _verify_plan(
+        self,
+        plan: DirectorMasterRunPlan,
+        flow_result: dict[str, object],
+        reader: DeliveryVerifier | None,
+    ) -> dict[str, object]:
+        try:
+            goals = COMPLETION_RULES.validate_python(plan.plan_data.get("completion"))
+        except ValidationError:
+            return {
+                "satisfied": False,
+                "checks": [
+                    {
+                        "rule_id": "plan_completion",
+                        "satisfied": False,
+                        "reason_code": "MASTER_RUN_COMPLETION_SHAPE",
+                    }
+                ],
+            }
+        deliveries = [goal for goal in goals if not isinstance(goal, FlowCompletionGoal)]
+        if not deliveries:
+            return flow_result
+        flow_checks = cast(list[dict[str, object]], flow_result["checks"])
+        has_flows = bool(plan.plan_data.get("flows"))
+        declared_rules = {goal.rule_id for goal in goals}
+        checks = [
+            check
+            for check in flow_checks
+            if has_flows
+            or check["rule_id"] in declared_rules
+            or check["rule_id"] == "no_unresolved_external"
+        ]
+        decision = await self._session.scalar(
+            select(DirectorProposalItem)
+            .where(
+                DirectorProposalItem.id == plan.decision_ref,
+                DirectorProposalItem.project_id == self._project.id,
+            )
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        confirmed = bool(
+            decision
+            and decision.status == "accepted"
+            and decision.command == PLAN_COMMAND
+            and decision.payload.get("plan_id") == str(plan.id)
+            and decision.payload.get("master_run_id") == str(plan.master_run_id)
+            and decision.payload.get("plan_hash") == plan.plan_hash
+            and plan_hash(plan.schema_version, plan.plan_data) == plan.plan_hash
+        )
+        checks.append(
+            {
+                "rule_id": "confirmed_plan",
+                "satisfied": confirmed,
+                "reason_code": None if confirmed else "PLAN_CONFIRMATION_UNAVAILABLE",
+            }
+        )
+        observed = plan.plan_data.get("input_versions")
+        if observed != {}:
+            current_inputs = await self._delivery_inputs_match(observed)
+            checks.append(
+                {
+                    "rule_id": "input_versions",
+                    "satisfied": current_inputs,
+                    "reason_code": None if current_inputs else "PLAN_INPUT_CHANGED",
+                }
+            )
+        for goal in deliveries:
+            targets = goal.targets if isinstance(goal, ProjectDeliveryGoal) else [goal.target]
+            reasons: list[str] = []
+            evidence: list[dict[str, Any]] = []
+            if isinstance(goal, ProjectDeliveryGoal):
+                if goal.work_type != self._project.work_type:
+                    reasons.append("DELIVERY_WORK_TYPE_CHANGED")
+                if (
+                    goal.work_type == "serial_comic"
+                    and self._project.planned_episode_count
+                    and len(targets) != self._project.planned_episode_count
+                ):
+                    reasons.append("DELIVERY_EPISODE_COUNT_MISMATCH")
+            if reader is None:
+                reasons.append("DELIVERY_VERIFIER_UNAVAILABLE")
+            else:
+                for target in targets:
+                    package = await reader(
+                        project_id=self._project.id,
+                        episode_id=target.episode_id,
+                        edit_session_id=target.edit_session_id,
+                        timeline_version=target.timeline_version,
+                        export_id=target.export_id,
+                    )
+                    if (
+                        package.episode_number is not None
+                        and target.episode_number is not None
+                        and package.episode_number != target.episode_number
+                    ):
+                        reasons.append("DELIVERY_EPISODE_CHANGED")
+                    evidence.append(package.model_dump(mode="json"))
+                    reasons.extend(package.blockers)
+            checks.append(
+                {
+                    "rule_id": goal.rule_id,
+                    "scope_ref": str(
+                        goal.target.episode_id
+                        if isinstance(goal, EpisodeDeliveryGoal)
+                        else self._project.id
+                    ),
+                    "satisfied": not reasons,
+                    "reason_code": reasons[0] if reasons else None,
+                    "evidence_refs": evidence,
+                }
+            )
+        return {
+            "satisfied": all(check["satisfied"] is True for check in checks),
+            "checks": checks,
+            "delivery_checked": True,
+            "plan_id": str(plan.id),
+            "plan_revision": plan.revision,
+            "plan_hash": plan.plan_hash,
+        }
+
+    async def _delivery_inputs_match(self, observed: object) -> bool:
+        from app.assets.models import Asset, Scene, Shot
+        from app.editing.models import EditSession
+
+        if not isinstance(observed, dict):
+            return False
+        for key, version in observed.items():
+            kind, separator, raw_id = str(key).partition(":")
+            if not separator or type(version) is not int:
+                return False
+            try:
+                entity_id = UUID(raw_id)
+            except ValueError:
+                return False
+            if kind == "project":
+                if entity_id != self._project.id or version != self._project.version:
+                    return False
+                continue
+            if kind == "scene":
+                found = await self._session.scalar(select(Scene.version).join(
+                    Episode, Episode.id == Scene.episode_id,
+                ).where(Scene.id == entity_id, Episode.project_id == self._project.id)
+                    .with_for_update(read=True))
+                if found != version:
+                    return False
+                continue
+            models: dict[str, type[Episode] | type[EditSession] | type[Shot] | type[Asset]] = {
+                "episode": Episode, "edit_session": EditSession, "shot": Shot, "asset": Asset,
+            }
+            model = models.get(kind)
+            if model is None:
+                return False
+            found = await self._session.scalar(select(model.version).where(
+                model.id == entity_id, model.project_id == self._project.id,
+            ).with_for_update(read=True))
+            if found != version:
+                return False
+        return True
 
     @staticmethod
     def _require_edge(run: DirectorMasterRun, target: str) -> None:
@@ -688,6 +950,17 @@ class MasterRunService:
         )
         return run
 
+    async def last_verification(self, run: DirectorMasterRun) -> dict[str, object] | None:
+        data = await self._session.scalar(select(DirectorMasterRunControlReceipt.result_data).where(
+            DirectorMasterRunControlReceipt.master_run_id == run.id,
+            DirectorMasterRunControlReceipt.project_id == self._project.id,
+            DirectorMasterRunControlReceipt.operation == "verify",
+        ).order_by(DirectorMasterRunControlReceipt.result_revision.desc()).limit(1))
+        result = data.get("verification") if isinstance(data, dict) else None
+        if isinstance(result, dict) and result.get("plan_id") == str(run.current_plan_id):
+            return result
+        return None
+
     async def summary(self, run: DirectorMasterRun) -> dict[str, Any]:
         """Counters come from original Flow/Step/Attempt facts, never a cache."""
         progress = await self._flows().progress(run.id)
@@ -702,28 +975,6 @@ class MasterRunService:
             "unresolved_external_count": progress["unresolved_external_count"],
             "read_blockers": [],
         }
-
-
-def _normalize_dispositions(value: object) -> dict[str, str] | None:
-    """Accept the frozen plan shape: ``[{instance_id, disposition}]`` or a mapping."""
-    if value is None:
-        return None
-    if isinstance(value, dict):
-        return {str(key): str(item) for key, item in value.items()}
-    if isinstance(value, list):
-        result: dict[str, str] = {}
-        for item in value:
-            if not isinstance(item, dict) or set(item) != {"instance_id", "disposition"}:
-                raise ValidationAppError(
-                    "flow_dispositions 项必须只含 instance_id 与 disposition",
-                    details={"code": "BUSINESS_FLOW_DISPOSITION_SHAPE"},
-                )
-            result[str(item["instance_id"])] = str(item["disposition"])
-        return result
-    raise ValidationAppError(
-        "flow_dispositions 必须是列表或对象",
-        details={"code": "BUSINESS_FLOW_DISPOSITION_SHAPE"},
-    )
 
 
 __all__ = [

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
 from app.assets.models import Episode
+from app.contracts.delivery_verification import DeliveryPackage
 from app.delivery.models import Export, ExportItem
 from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun
@@ -17,17 +18,9 @@ from app.production.delivery_graph import EDIT_RENDER_NODE, FINAL_FILM_FORMAT, F
 from app.production.session_exports import timeline_hash
 
 
-class EpisodePackage(BaseModel):
+class EpisodePackage(DeliveryPackage):
     episode_id: UUID
     episode_number: int
-    edit_session_id: UUID | None = None
-    timeline_version: int | None = None
-    timeline_hash: str | None = None
-    export_id: UUID | None = None
-    render_node_run_id: UUID | None = None
-    mp4_artifact_id: UUID | None = None
-    srt_artifact_id: UUID | None = None
-    blockers: list[str]
 
 
 class SeriesDeliverySummary(BaseModel):
@@ -51,14 +44,14 @@ def _available(media: Artifact | None, project: UUID, kind: str, mime: str) -> b
     )
 
 
-def _check_receipt(
-    package: EpisodePackage,
+def _check_receipt[Package: DeliveryPackage](
+    package: Package,
     edit: EditSession,
     export: Export,
     run: NodeRun,
     items: list[ExportItem],
     media: dict[str, Artifact],
-) -> EpisodePackage:
+) -> Package:
     snapshot = run.input_snapshot or {}
     manifest = export.manifest or {}
     raw_clips = (edit.timeline or {}).get("clips", [])
@@ -71,7 +64,11 @@ def _check_receipt(
         or snapshot.get("timeline_version") != edit.version
         or snapshot.get("timeline_hash") != package.timeline_hash
         or snapshot.get("node_key") != (FINAL_FILM_NODE if final else EDIT_RENDER_NODE)
-        or (final and snapshot.get("episode_id") != str(package.episode_id))
+        or (
+            final
+            and snapshot.get("episode_id")
+            != (str(package.episode_id) if package.episode_id else None)
+        )
         or (not final and snapshot.get("export_id") != str(export.id))
     ):
         blockers.append("DELIVERY_RENDER_MISMATCH")
@@ -149,8 +146,145 @@ def _check_receipt(
             "blockers": blockers,
             "mp4_artifact_id": video.id if video else None,
             "srt_artifact_id": subtitle.id if subtitle else None,
+            "srt_content_hash": subtitle.content_hash if subtitle else None,
+            "mp4_content_hash": video.content_hash if video else None,
         }
     )
+
+
+async def _receipt_facts(
+    session: AsyncSession,
+    project_id: UUID,
+    edit_ids: list[UUID],
+    *,
+    lock: bool = False,
+    export_id: UUID | None = None,
+) -> tuple[
+    dict[UUID, list[tuple[Export, NodeRun]]], dict[str, Artifact], dict[UUID, list[ExportItem]]
+]:
+    query = (
+        select(Export, NodeRun)
+        .join(NodeRun, NodeRun.id == Export.render_node_run_id)
+        .join(
+            EditSession,
+            EditSession.id == Export.edit_session_id,
+        )
+        .where(
+            Export.project_id == project_id,
+            NodeRun.project_id == project_id,
+            EditSession.project_id == project_id,
+            EditSession.id.in_(edit_ids),
+            Export.episode_id.is_not_distinct_from(EditSession.episode_id),
+            Export.timeline_version == EditSession.version,
+            Export.status == "completed",
+            Export.result_artifact_id.is_not(None),
+            Export.format.in_((FINAL_FILM_FORMAT, "mp4", "srt")),
+        )
+        .order_by(Export.completed_at.desc(), Export.id.desc())
+    )
+    if export_id is not None:
+        query = query.where(Export.id == export_id)
+    if lock:
+        query = query.with_for_update(read=True, of=(Export, NodeRun))
+    receipts = (await session.execute(query.execution_options(populate_existing=True))).all()
+    by_edit: dict[UUID, list[tuple[Export, NodeRun]]] = defaultdict(list)
+    artifact_ids: set[UUID] = set()
+    for export, run in receipts:
+        by_edit[export.edit_session_id].append((export, run))
+        if run.result_artifact_id:
+            artifact_ids.add(run.result_artifact_id)
+        with suppress(ValueError):
+            artifact_ids.add(UUID(str((export.manifest or {}).get("subtitle_artifact_id"))))
+    media_query = (
+        select(Artifact)
+        .where(
+            Artifact.id.in_(artifact_ids),
+            Artifact.project_id == project_id,
+        )
+        .order_by(Artifact.id)
+    )
+    item_query = (
+        select(ExportItem)
+        .where(
+            ExportItem.export_id.in_([e.id for e, _ in receipts]),
+        )
+        .order_by(ExportItem.export_id, ExportItem.ordinal)
+    )
+    if lock:
+        media_query = media_query.with_for_update(read=True)
+        item_query = item_query.with_for_update(read=True)
+    media = {
+        str(a.id): a
+        for a in await session.scalars(media_query.execution_options(populate_existing=True))
+    }
+    items: dict[UUID, list[ExportItem]] = defaultdict(list)
+    for item in await session.scalars(item_query.execution_options(populate_existing=True)):
+        items[item.export_id].append(item)
+    return by_edit, media, items
+
+
+async def verify_delivery_target(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    episode_id: UUID | None,
+    edit_session_id: UUID | None,
+    timeline_version: int | None,
+    export_id: UUID | None,
+) -> DeliveryPackage:
+    """The caller holds the project lock until it persists the verification receipt."""
+    package = DeliveryPackage(episode_id=episode_id, blockers=[])
+    if episode_id is not None:
+        number = await session.scalar(
+            select(Episode.episode_number)
+            .where(
+                Episode.id == episode_id,
+                Episode.project_id == project_id,
+            )
+            .with_for_update(read=True)
+        )
+        if number is None:
+            package.blockers.append("DELIVERY_EPISODE_MISSING")
+            return package
+        package.episode_number = number
+    query = select(EditSession).where(
+        EditSession.project_id == project_id,
+        EditSession.episode_id == episode_id,
+    )
+    if edit_session_id is not None:
+        query = query.where(EditSession.id == edit_session_id)
+    edit = await session.scalar(
+        query.order_by(EditSession.updated_at.desc(), EditSession.id.desc())
+        .limit(1)
+        .with_for_update(read=True)
+        .execution_options(populate_existing=True)
+    )
+    if edit is None:
+        package.blockers.append("DELIVERY_SESSION_MISSING")
+        return package
+    package.edit_session_id = edit.id
+    package.timeline_version = edit.version
+    package.timeline_hash = timeline_hash(edit.timeline)
+    if timeline_version is not None and timeline_version != edit.version:
+        package.blockers.append("DELIVERY_TIMELINE_CHANGED")
+        return package
+    receipts, media, items = await _receipt_facts(
+        session,
+        project_id,
+        [edit.id],
+        lock=True,
+        export_id=export_id,
+    )
+    package.blockers.append("DELIVERY_CURRENT_EXPORT_MISSING")
+    for export, run in receipts[edit.id]:
+        if export.timeline_hash != package.timeline_hash:
+            continue
+        checked = _check_receipt(package, edit, export, run, items[export.id], media)
+        if not checked.blockers:
+            return checked
+        if package.export_id is None:
+            package = checked
+    return package
 
 
 async def series_delivery_summary(session: AsyncSession, project: Project) -> SeriesDeliverySummary:
@@ -172,55 +306,9 @@ async def series_delivery_summary(session: AsyncSession, project: Project) -> Se
     ).all()
     episodes = [episode for episode, _ in current]
     edits = {episode.id: edit for episode, edit in current if edit is not None}
-    receipts = (
-        await session.execute(
-            select(Export, NodeRun)
-            .join(
-                NodeRun,
-                NodeRun.id == Export.render_node_run_id,
-            )
-            .join(EditSession, EditSession.id == Export.edit_session_id)
-            .where(
-                Export.project_id == project.id,
-                NodeRun.project_id == project.id,
-                EditSession.id.in_([e.id for e in edits.values()]),
-                Export.episode_id == EditSession.episode_id,
-                Export.timeline_version == EditSession.version,
-                Export.status == "completed",
-                Export.result_artifact_id.is_not(None),
-                Export.format.in_((FINAL_FILM_FORMAT, "mp4", "srt")),
-            )
-            .order_by(Export.completed_at.desc(), Export.id.desc())
-        )
-    ).all()
-    by_edit: dict[UUID, list[tuple[Export, NodeRun]]] = defaultdict(list)
-    artifact_ids: set[UUID] = set()
-    for export, run in receipts:
-        by_edit[export.edit_session_id].append((export, run))
-        if run.result_artifact_id:
-            artifact_ids.add(run.result_artifact_id)
-        # Missing or malformed stored pointers are reported as unavailable below.
-        with suppress(ValueError):
-            artifact_ids.add(UUID(str((export.manifest or {}).get("subtitle_artifact_id"))))
-    media = {
-        str(a.id): a
-        for a in await session.scalars(
-            select(Artifact).where(
-                Artifact.id.in_(artifact_ids),
-                Artifact.project_id == project.id,
-            )
-        )
-    }
-    items: dict[UUID, list[ExportItem]] = defaultdict(list)
-    for item in await session.scalars(
-        select(ExportItem)
-        .where(
-            ExportItem.export_id.in_([e.id for e, _ in receipts]),
-        )
-        .order_by(ExportItem.export_id, ExportItem.ordinal)
-    ):
-        items[item.export_id].append(item)
-
+    by_edit, media, items = await _receipt_facts(
+        session, project.id, [e.id for e in edits.values()]
+    )
     packages: list[EpisodePackage] = []
     for episode in episodes:
         edit = edits.get(episode.id)

@@ -47,6 +47,15 @@ class AgentProposalRead(BaseModel):
     observed_versions: dict[str, int]
 
 
+class DeliveryPlanProposalRead(BaseModel):
+    proposal_ids: list[UUID]
+    master_run_id: UUID
+    plan_id: UUID
+    status: Literal["pending"] = "pending"
+    requires_apply: Literal[True] = True
+    observed_versions: dict[str, int]
+
+
 async def create_agent_shot_proposal(
     session: AsyncSession,
     *,

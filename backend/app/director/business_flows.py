@@ -402,6 +402,28 @@ class PlanFlowSpec:
     input: dict[str, object]
 
 
+def normalize_dispositions(value: object) -> dict[str, str] | None:
+    """Accept the frozen plan shape: ``[{instance_id, disposition}]`` or a mapping."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return {str(key): str(item) for key, item in value.items()}
+    if isinstance(value, list):
+        result: dict[str, str] = {}
+        for item in value:
+            if not isinstance(item, dict) or set(item) != {"instance_id", "disposition"}:
+                raise ValidationAppError(
+                    "flow_dispositions 项必须只含 instance_id 与 disposition",
+                    details={"code": "BUSINESS_FLOW_DISPOSITION_SHAPE"},
+                )
+            result[str(item["instance_id"])] = str(item["disposition"])
+        return result
+    raise ValidationAppError(
+        "flow_dispositions 必须是列表或对象",
+        details={"code": "BUSINESS_FLOW_DISPOSITION_SHAPE"},
+    )
+
+
 def validate_plan_flows(value: object, *, allow_empty: bool = False) -> list[PlanFlowSpec]:
     """Validate the plan's ``flows`` array before any instance is created."""
     if not isinstance(value, list):
@@ -712,6 +734,8 @@ class BusinessFlowService:
                     spec is None
                     or spec.definition_key != instance.definition_key
                     or spec.definition_version != instance.definition_version
+                    or spec.scope_type != instance.scope_type
+                    or spec.scope_entity_id != instance.scope_entity_id
                     or content_hash(spec.input) != instance.input_hash
                 ):
                     raise ConflictError(
@@ -1063,24 +1087,22 @@ class BusinessFlowService:
     ) -> list[DirectorBusinessFlowInstance]:
         """Plan flows plus instances retained from an earlier plan (same identity)."""
         instances = await self.list_for_run(run.id)
-        current = {
-            instance.flow_key: instance
-            for instance in instances
-            if instance.plan_id == plan.id
-        }
+        dispositions = normalize_dispositions(plan.plan_data.get("flow_dispositions")) or {}
         effective: list[DirectorBusinessFlowInstance] = []
         for spec in validate_plan_flows(plan.plan_data.get("flows"), allow_empty=True):
-            instance = current.get(spec.flow_key)
-            if instance is None:
-                retained = [
-                    item
-                    for item in instances
-                    if item.flow_key == spec.flow_key
-                    and item.status not in INSTANCE_TERMINAL
-                ]
-                instance = retained[-1] if retained else None
-            if instance is not None and instance not in effective:
-                effective.append(instance)
+            definition = self._registry.get_versioned(spec.definition_key, spec.definition_version)
+            matches = [
+                item for item in instances
+                if (item.plan_id == plan.id or dispositions.get(str(item.id)) == "retain")
+                and item.flow_key == spec.flow_key and item.definition_key == spec.definition_key
+                and item.definition_version == spec.definition_version
+                and definition is not None and item.contract_hash == definition.contract_hash
+                and item.scope_type == spec.scope_type
+                and item.scope_entity_id == spec.scope_entity_id
+                and item.input_hash == content_hash(spec.input)
+            ]
+            if len(matches) == 1:
+                effective.append(matches[0])
         return effective
 
     async def progress(self, run_id: UUID) -> dict[str, int]:
@@ -1137,10 +1159,22 @@ class BusinessFlowService:
             )
             or 0
         )
-        all_succeeded = bool(required) and all(
-            step.status == "succeeded" for step in required
+        specs = validate_plan_flows(plan.plan_data.get("flows"), allow_empty=True)
+        complete_scope = bool(instances) and len(instances) == len(specs)
+        required_keys = {
+            (instance.id, spec.step_key)
+            for instance in instances
+            for spec in self._registry.require(
+                instance.definition_key, instance.definition_version,
+            ).steps
+            if spec.required
+        }
+        all_succeeded = (
+            complete_scope and bool(required)
+            and {(step.instance_id, step.step_key) for step in required} == required_keys
+            and all(step.status == "succeeded" for step in required)
         )
-        flows_completed = bool(instances) and all(
+        flows_completed = complete_scope and all(
             instance.status == "succeeded" for instance in instances
         )
         checks = [

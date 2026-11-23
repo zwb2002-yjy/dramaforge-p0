@@ -17,6 +17,7 @@ from app.api.v1 import (
     generations,
     knowledge,
     maintenance,
+    master_runs,
     model_candidates,
     model_inspection,
     model_profiles,
@@ -46,6 +47,7 @@ api_router.include_router(assets.router)
 api_router.include_router(auth.router)
 api_router.include_router(batch_production.router)
 api_router.include_router(business_flows.router)
+api_router.include_router(master_runs.router)
 api_router.include_router(projects.router)
 api_router.include_router(project_egress.router)
 api_router.include_router(project_files.router)

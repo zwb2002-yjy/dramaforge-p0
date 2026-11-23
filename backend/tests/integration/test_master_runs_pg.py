@@ -109,7 +109,7 @@ def _plan(run, **overrides):
         "goal": run.goal,
         "flows": [],
         "dependencies": [],
-        "completion": [],
+        "completion": [{"rule_id": "all_required_steps_succeeded"}],
         "input_versions": {},
         "limits": {"max_steps": 3},
         "decision_basis": {

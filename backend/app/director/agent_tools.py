@@ -28,7 +28,11 @@ from app.contracts.director_model_tools import (
     ModelToolScope,
     ModelToolsPort,
 )
-from app.director.agent_proposals import AgentProposalRead, ShotPromptProposalInput
+from app.director.agent_proposals import (
+    AgentProposalRead,
+    DeliveryPlanProposalRead,
+    ShotPromptProposalInput,
+)
 from app.shared.errors import AppError
 
 
@@ -57,6 +61,7 @@ class ToolContext(_Strict):
     scope_entity_id: UUID
     expected_versions: dict[str, int] = Field(default_factory=dict)
     deadline: AwareDatetime | None = None
+    goal_planning: bool = Field(default=False, exclude_if=lambda enabled: not enabled)
 
 
 class ToolError(_Strict):
@@ -239,6 +244,13 @@ _DEFINITIONS = (
     ),
 )
 
+_DELIVERY_PLAN = _Definition(
+    "project_delivery_plan_propose",
+    "Propose an MP4 and subtitle delivery check for this explicit project goal. "
+    "Uses the project's current work type and episode identities. Requires the owner's Apply.",
+    EmptyInput, DeliveryPlanProposalRead, ("project",), risk="PROPOSE",
+)
+
 _MODEL_DEFINITIONS = (
     _Definition(
         "model_capabilities",
@@ -266,9 +278,14 @@ class ToolRegistry:
     def specs(self, context: ToolContext | None = None) -> tuple[ToolSpec, ...]:
         return tuple(
             item.spec()
-            for item in self._definitions
+            for item in self._available(context)
             if context is None or context.scope_type in item.scopes
         )
+
+    def _available(self, context: ToolContext | None) -> tuple[_Definition, ...]:
+        if context is not None and context.goal_planning:
+            return (*self._definitions, _DELIVERY_PLAN)
+        return self._definitions
 
     def fingerprint(self, context: ToolContext | None = None) -> str:
         return _hash([item.model_dump(mode="json") for item in self.specs(context)])
@@ -290,7 +307,7 @@ class ToolRegistry:
         return next(
             (
                 item
-                for item in self._definitions
+                for item in self._available(context)
                 if item.name == name and context.scope_type in item.scopes
             ),
             None,
@@ -482,6 +499,7 @@ class ToolExecutor:
                 context.model_dump(
                     exclude={
                         "turn_id",
+                        "goal_planning",
                         "thread_id",
                         "deadline",
                     }

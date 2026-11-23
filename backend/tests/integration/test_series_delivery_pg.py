@@ -1,8 +1,13 @@
 """Both render writers contribute exact episode receipts to the read-only series summary."""
 
 from datetime import UTC, datetime
+from functools import partial
 
+import pytest
 from app.assets.models import Asset, AssetVersion, AssetVersionReference, Episode
+from app.director.assistant_models import DirectorThread
+from app.director.master_runs import MasterRunService
+from app.director.proposal_service import PartialApplyInput, ProposalService
 from app.editing.adapter import EditingAdapter
 from app.execution.models import Artifact, GraphNode, NodeRun
 from app.production.edit_session_render import (
@@ -10,7 +15,7 @@ from app.production.edit_session_render import (
     execute_edit_session_render,
 )
 from app.production.final_film import execute_final_film_node_run, queue_final_film_render
-from app.production.series_delivery import series_delivery_summary
+from app.production.series_delivery import series_delivery_summary, verify_delivery_target
 from app.production.service import GraphService
 from app.production.session_exports import SessionExports
 from app.runtime.scheduler import NodeRunScheduler
@@ -19,6 +24,7 @@ from app.storage.minio_store import get_object_store
 from sqlalchemy import select, text
 from test_phase5_restart_recovery_pg import pg_session as pg_session
 from test_phase5_restart_recovery_pg import pytestmark as pytestmark
+from tests.unit.test_master_runs import _plan, _plan_proposal, _turn
 
 from fixtures.final_film_seed import _fake_enqueue, _seed_renderable_final_film
 
@@ -84,10 +90,10 @@ async def test_current_series_needs_two_complete_matching_packages(pg_session, m
         db, run=run, node=await db.get(GraphNode, run.graph_node_id), obj_store=store
     )
     await db.commit()
-    partial = await series_delivery_summary(db, project)
-    assert not partial.ready and partial.ready_episodes == 1, partial
-    assert partial.missing_episode_ranges == [(2, 2)]
-    first_package = partial.episodes[0]
+    first_summary = await series_delivery_summary(db, project)
+    assert not first_summary.ready and first_summary.ready_episodes == 1, first_summary
+    assert first_summary.missing_episode_ranges == [(2, 2)]
+    first_package = first_summary.episodes[0]
     assert (await queue_first()).node_run_id == queued.node_run_id
 
     second = Episode(project_id=project.id, episode_number=2, title="Second")
@@ -160,6 +166,74 @@ async def test_current_series_needs_two_complete_matching_packages(pg_session, m
         actor_id=user.id,
     )
     assert not (await series_delivery_summary(db, project)).ready
+    thread = DirectorThread(
+        project_id=project.id,
+        scope_type="project",
+        scope_entity_id=project.id,
+        title="Delivery",
+        created_by=user.id,
+    )
+    db.add(thread)
+    await db.flush()
+    service = MasterRunService(db, project=project, actor=user)
+    verifier = partial(verify_delivery_target, db)
+
+    async def goal_for(targets):
+        turn = await _turn(db, project, user, thread)
+        goal = await service.create_for_origin_turn(turn_id=turn.id, goal="交付两集 MP4 和字幕")
+        proposal = await _plan_proposal(db, project, user, thread)
+        plan = await service.append_plan(
+            run_id=goal.id,
+            proposal_id=proposal.id,
+            created_by_turn_id=turn.id,
+            plan_data=_plan(
+                goal,
+                input_versions={f"project:{project.id}": project.version},
+                completion=[
+                    {
+                        "rule_id": "project_delivery_ready_v1",
+                        "work_type": "serial_comic",
+                        "targets": targets,
+                    }
+                ],
+            ),
+        )
+        result = await ProposalService(db, actor=user).partial_apply(
+            project=project,
+            proposal_id=proposal.id,
+            apply_input=PartialApplyInput.model_validate(
+                {
+                    "decisions": [
+                        {
+                            "item_id": str(plan.decision_ref),
+                            "decision": "accepted",
+                        }
+                    ]
+                }
+            ),
+        )
+        assert result.accepted == [plan.decision_ref]
+        return goal
+
+    good = [
+        {"episode_id": str(first.id)},
+        {
+            "episode_id": str(second.id),
+            "edit_session_id": str(saved.id),
+            "timeline_version": saved.version,
+        },
+    ]
+    goal = await goal_for(good)
+    incomplete_receipt = await service.control(
+        run_id=goal.id,
+        operation="verify",
+        expected_revision=goal.revision,
+        delivery_verifier=verifier,
+    )
+    assert incomplete_receipt["status"] == "waiting"
+    evidence = incomplete_receipt["verification"]["checks"][-1]["evidence_refs"]
+    assert evidence[0]["export_id"] == str(first_package.export_id)
+    assert evidence[1]["blockers"] == ["DELIVERY_CURRENT_EXPORT_MISSING"]
     await execute_edit_session_render(
         db,
         run=task,
@@ -175,6 +249,24 @@ async def test_current_series_needs_two_complete_matching_packages(pg_session, m
     assert complete.ready and complete.ready_episodes == 2, complete
     assert complete.episodes[0] == first_package
     episode_two = complete.episodes[1]
+    revision = goal.revision
+    success = await service.control(
+        run_id=goal.id, operation="verify", expected_revision=revision, delivery_verifier=verifier
+    )
+    assert success["status"] == "succeeded" and success["verification"]["satisfied"]
+    assert {p["export_id"] for p in success["verification"]["checks"][-1]["evidence_refs"]} == {
+        str(first_package.export_id),
+        str(receipt.id),
+    }
+    stale_goal = await goal_for(good)
+    wrong_scope = await goal_for([good[0], {**good[1], "export_id": str(first_package.export_id)}])
+    denied = await service.control(
+        run_id=wrong_scope.id,
+        operation="verify",
+        expected_revision=wrong_scope.revision,
+        delivery_verifier=verifier,
+    )
+    assert denied["status"] == "waiting"
     subtitle = await db.get(Artifact, episode_two.srt_artifact_id)
     assert await store.get_bytes(object_key=subtitle.object_key)
     subtitle.deleted_at = datetime.now(UTC)
@@ -191,3 +283,97 @@ async def test_current_series_needs_two_complete_matching_packages(pg_session, m
     revised = await series_delivery_summary(db, project)
     assert not revised.ready and revised.episodes[0] == first_package
     assert revised.episodes[1].blockers == ["DELIVERY_CURRENT_EXPORT_MISSING"]
+    outdated = await service.control(
+        run_id=stale_goal.id,
+        operation="verify",
+        expected_revision=stale_goal.revision,
+        delivery_verifier=verifier,
+    )
+    assert outdated["status"] == "waiting"
+    assert outdated["verification"]["checks"][-1]["reason_code"] == "DELIVERY_TIMELINE_CHANGED"
+    assert (
+        await service.control(
+            run_id=goal.id,
+            operation="verify",
+            expected_revision=revision,
+            delivery_verifier=verifier,
+        )
+        == success
+    )
+
+
+@pytest.mark.parametrize("work_type", ["animation_promo", "single_comic"])
+async def test_goal_checks_the_exact_work_scope_and_saved_inputs(
+    pg_session, monkeypatch, work_type
+):
+    db = pg_session
+    monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
+    project, owner, edit, _, _ = await _seed_renderable_final_film(db)
+    project.work_type = work_type
+    episode = await db.scalar(select(Episode).where(Episode.project_id == project.id))
+    scoped = episode.id if work_type == "single_comic" else None
+    edit.episode_id = scoped
+    edit.timeline = {
+        **edit.timeline,
+        "clips": [
+            {**clip, "subtitle": "Closing", "subtitle_enabled": True}
+            for clip in edit.timeline["clips"]
+        ],
+    }
+    await db.commit()
+    job = await queue_final_film_render(
+        db,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=owner.id,
+        idempotency_key="work-scope",
+        name="Closing",
+    )
+    render = await db.get(NodeRun, job.node_run_id)
+    render.status = "running"
+    await db.commit()
+    await execute_final_film_node_run(
+        db,
+        run=render,
+        node=await db.get(GraphNode, render.graph_node_id),
+        obj_store=get_object_store(),
+    )
+    thread = DirectorThread(
+        project_id=project.id,
+        scope_type="project",
+        scope_entity_id=project.id,
+        title="Work",
+        created_by=owner.id,
+    )
+    db.add(thread)
+    await db.flush()
+    turn = await _turn(db, project, owner, thread)
+    service = MasterRunService(db, project=project, actor=owner)
+    goal = await service.create_for_origin_turn(turn_id=turn.id, goal="技术交付")
+    plan, proposal_id = await service.propose_delivery_check(turn)
+    await ProposalService(db, actor=owner).partial_apply(
+        project=project,
+        proposal_id=proposal_id,
+        apply_input=PartialApplyInput.model_validate(
+            {
+                "decisions": [
+                    {
+                        "item_id": str(plan.decision_ref),
+                        "decision": "accepted",
+                    }
+                ]
+            }
+        ),
+    )
+    outcome = await service.control(
+        run_id=goal.id,
+        operation="verify",
+        expected_revision=goal.revision,
+        delivery_verifier=partial(verify_delivery_target, db),
+    )
+    assert outcome["status"] == "succeeded", outcome
+    ref = outcome["verification"]["checks"][-1]["evidence_refs"][0]
+    assert ref["episode_id"] == (str(scoped) if scoped else None)
+    assert ref["edit_session_id"] == str(edit.id) and ref["render_node_run_id"] == str(render.id)
+    assert len(ref["srt_content_hash"]) == len(ref["mp4_content_hash"]) == 64

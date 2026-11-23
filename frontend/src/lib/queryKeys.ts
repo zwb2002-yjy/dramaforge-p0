@@ -142,6 +142,7 @@ export const queryKeys = {
   },
 
   director: {
+    goals: (projectId: string) => ["director-goals", projectId] as const,
     turns: (projectId: string, scopeType: string, scopeEntityId: string | null | undefined) =>
       ["director-turns", projectId, scopeType, scopeEntityId] as const,
     capabilities: (projectId: string) => ["director-capabilities", projectId] as const,

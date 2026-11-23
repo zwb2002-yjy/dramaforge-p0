@@ -9,7 +9,9 @@ import {
 } from "../../lib/api";
 import { Sparkles, Send } from "lucide-react";
 import { StudioSelection } from "../../components/workstation/StudioSelection";
-import { ActionLink, Button, Field, Textarea } from "../../components/ui";
+import { ActionLink, Button, Checkbox, Field, Textarea } from "../../components/ui";
+import { DeliveryGoals } from "../director/DeliveryGoals";
+import { queryKeys } from "../../lib/queryKeys";
 import {
   getDirectorAgentRequest,
   openProjectDirectorThread,
@@ -43,6 +45,8 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
   const storageKey = `df.project.director.${projectId}`;
   const [threadId, setThreadId] = useState<string | null>(() => sessionStorage.getItem(storageKey));
   const [question, setQuestion] = useState("");
+  const [goalsOpen, setGoalsOpen] = useState(false);
+  const [createGoal, setCreateGoal] = useState(false);
   const [attachment, setAttachment] = useState<{
     id: string;
     hash: string;
@@ -125,6 +129,7 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
         sessionStorage.removeItem(pendingKey);
       setPendingRequest(null);
       void queryClient.invalidateQueries({ queryKey: ["direction-thread", projectId] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.director.goals(projectId) });
     }
   }, [pendingRequest, pendingKey, receipt.data?.turn.status, projectId, queryClient]);
 
@@ -159,7 +164,7 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
       return sendDirectorAgentMessage(projectId, id, {
         content: question.trim(),
         request_key: requestKey,
-        intent: "conversation",
+        intent: goalsOpen && createGoal ? "create_goal" : "conversation",
         ...(selectedPart && { media_parts: [selectedPart] }),
         ...(attached && {
           media_parts: [
@@ -184,6 +189,7 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
     onMutate: () => setSubmitting(true),
     onSettled: () => setSubmitting(false),
     onSuccess: () => {
+      setCreateGoal(false);
       setQuestion("");
       studio?.showAttachment(null);
       setAttachment(null);
@@ -210,10 +216,21 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
         <h2>
           <Sparkles size={20} /> AI 创意助手
         </h2>
+        <Button
+          tone="ghost"
+          aria-expanded={goalsOpen}
+          onClick={() => {
+            setGoalsOpen(!goalsOpen);
+            setCreateGoal(false);
+          }}
+        >
+          持续目标
+        </Button>
         <Button tone="ghost" aria-expanded={open} onClick={() => setOpen(!open)}>
           创作方向
         </Button>
       </header>
+      {goalsOpen && <DeliveryGoals key={projectId} projectId={projectId} />}
       <p className="studio-chat-intro">随时告诉我你的想法，一起修改和完善作品。</p>
       {open && (
         <div className="direction-editor">
@@ -428,6 +445,11 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
           value={question}
           onChange={(event) => setQuestion(event.target.value)}
         />
+        {goalsOpen && (
+          <Checkbox checked={createGoal} onChange={(e) => setCreateGoal(e.target.checked)}>
+            将本条消息建立为持续目标
+          </Checkbox>
+        )}
         <Button
           aria-label="发送给导演"
           type="submit"

@@ -1140,9 +1140,9 @@ I2a-01已实施：`director_master_runs`/`_plans`/`_control_receipts`三表与Tu
 控制提供pause/resume/cancel/verify与归档CAS，回执按`(run,expected_revision,operation)`幂等、
 异载荷409。**已实施（服务层）**：计划Apply同事务处置旧流程并创建新流程实例；
 `progress`与`unresolved_external_count`由原Flow/Step/Attempt事实计算；`verify`用注册完成规则
-返回`satisfied`与逐条`checks`；`cancel`取消未完成流程并保留成功事实。**未实施**：目标/计划/
-流程的HTTP读投影（D7设计，尚无路由），因此这些计数目前只经服务读取。202受理侧的
-create_goal在同事务建立来源Run（普通问答不建Run）。cancel对远端任务的核对仍未实施。
+返回 `satisfied` 与逐条 `checks`。目标、计划、流程、步骤、尝试已有项目内只读 HTTP 入口。
+显式 pause/resume/cancel/verify 和终态归档已接 HTTP；cancel 的远端处置核对仍待完成。
+create_goal 在 202 受理事务内建立来源 Run，普通问答保持原有行为。
 
 没有独立可任意提交origin_turn_id的Run创建端点；建立只沿上面的create_goal或固定用户操作受理。
 服务不能把普通问答自动升级为持续目标。计划生成先形成typed Proposal；确认计划不授权之后所有正式门。
@@ -1187,6 +1187,17 @@ decision_basis严格取DATA_MODEL的真实观察版本并入hash；创建候选�
 PartialApplyResult继续accepted/rejected/failed，但failed目标收敛为`{item_id,code,message,current_versions?}`，
 不让任意dict/异常正文流出。失败项不写目标事实，成功项的实际回执可单独重读；整体HTTP成功不等于每项采用成功。
 查看/展开/选择候选、Director聊天中的“看起来不错”不触发此正式Apply。
+
+**已接入的交付核验**。项目对话显式选择 `create_goal` 后，导演可用 `project_delivery_plan_propose`
+为初始技术交付目标生成待确认计划。服务从项目读取作品类型及分集身份，每个候选独立走既有 Proposal Apply。
+直接目标规则使用 `episode_export_ready_v1` 的 `target` 或 `project_delivery_ready_v1` 的
+`work_type,targets`。每项冻结 episode_id（项目级宣传片为 null），可指定 episode_number、
+edit_session_id、timeline_version 和 export_id。仅同范围内有效的已保存剪辑及完整的 MP4/SRT 交付可满足。
+verify 在同一事务内核验确认项、计划哈希、已声明的输入版本、当前有效 Flow 和未解决操作，再锁定交付依据；
+成功回执包含计划、剪辑版本及哈希、导出、渲染、视频和字幕 ID 与文件哈希。缺项保持等待，
+控制回执按原键重放。目标详情返回当前计划最近一次交付核验结果。项目目标列表使用 limit/offset
+并返回 items、next_offset；计划列表使用 limit/offset，详情按 plan_id 定位。未实现的谓词不会作为成功依据。
+未来由正式步骤产出范围的输出槽及人工作品质量判定仍待接线。
 
 ### Flow、步骤与尝试的读投影
 

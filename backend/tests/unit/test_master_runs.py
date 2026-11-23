@@ -103,6 +103,27 @@ def _plan(run: DirectorMasterRun, **overrides) -> dict[str, object]:
     return data
 
 
+@pytest.mark.parametrize("completion", [
+    [],
+    [{"rule_id": "project_delivery_ready_v1", "work_type": "serial_comic", "targets": []}],
+    [{"rule_id": "episode_export_ready_v1", "target": {"episode_id": None}}],
+    [{"rule_id": "episode_export_ready_v1", "target": {"episode_id": str(uuid4()),
+                                                       "timeline_version": 1}}],
+    [{"rule_id": "all_required_steps_succeeded", "satisfied": True}],
+    [{"rule_id": "project_delivery_ready_v1", "work_type": "single_comic",
+      "targets": [{"episode_id": str(uuid4()), "predicate_results": []}]}],
+])
+def test_plan_completion_accepts_only_declared_targets(completion):
+    basis = {"expected_run_revision": 1, "expected_control_epoch": 0,
+             "current_plan_id": None, "current_plan_revision": None}
+    with pytest.raises(ValidationAppError) as refused:
+        MasterRunService.validate_plan_data({
+            "goal":"Film", "flows":[], "dependencies":[], "completion":completion,
+            "input_versions":{}, "limits":{}, "decision_basis":basis,
+        })
+    assert refused.value.details["code"] == "MASTER_RUN_COMPLETION_SHAPE"
+
+
 async def test_only_a_thread_bound_agent_turn_can_originate_one_goal(session: AsyncSession):
     project, user, thread = await _seed(session)
     service = MasterRunService(session, actor=user, project=project)

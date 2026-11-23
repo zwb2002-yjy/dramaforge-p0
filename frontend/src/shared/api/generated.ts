@@ -503,6 +503,143 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/director/master-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Goals */
+        get: operations["list_goals_api_v1_projects__project_id__director_master_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/master-runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Goal */
+        get: operations["read_goal_api_v1_projects__project_id__director_master_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Archive */
+        patch: operations["archive_api_v1_projects__project_id__director_master_runs__run_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/master-runs/{run_id}/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Plans */
+        get: operations["list_plans_api_v1_projects__project_id__director_master_runs__run_id__plans_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/master-runs/{run_id}/plans/{plan_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read Plan */
+        get: operations["read_plan_api_v1_projects__project_id__director_master_runs__run_id__plans__plan_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/master-runs/{run_id}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Verify */
+        post: operations["verify_api_v1_projects__project_id__director_master_runs__run_id__verify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/master-runs/{run_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause */
+        post: operations["pause_api_v1_projects__project_id__director_master_runs__run_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/master-runs/{run_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume */
+        post: operations["resume_api_v1_projects__project_id__director_master_runs__run_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/director/master-runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel */
+        post: operations["cancel_api_v1_projects__project_id__director_master_runs__run_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/voice-options": {
         parameters: {
             query?: never;
@@ -4421,6 +4558,13 @@ export interface components {
             /** Resolved At */
             resolved_at: string | null;
         };
+        /** ArchiveRequest */
+        ArchiveRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /** Archived */
+            archived: boolean;
+        };
         /** ArtifactRead */
         ArtifactRead: {
             /**
@@ -5860,6 +6004,19 @@ export interface components {
             /** Warnings */
             warnings?: string[];
         };
+        /** CompletionCheck */
+        CompletionCheck: {
+            /** Rule Id */
+            rule_id: string;
+            /** Satisfied */
+            satisfied: boolean;
+            /** Reason Code */
+            reason_code?: string | null;
+            /** Evidence Refs */
+            evidence_refs?: components["schemas"]["DeliveryPackage"][];
+        } & {
+            [key: string]: unknown;
+        };
         /**
          * ConditionalConstraint
          * @description When ``when`` matches, ``require`` must be present, ``forbid`` must be
@@ -6001,6 +6158,41 @@ export interface components {
             /** Conditional */
             conditional?: components["schemas"]["ConditionalConstraint"][];
         };
+        /** ControlReceipt */
+        ControlReceipt: {
+            /**
+             * Master Run Id
+             * Format: uuid
+             */
+            master_run_id: string;
+            /** Operation */
+            operation: string;
+            /** Expected Revision */
+            expected_revision: number;
+            /** Result Revision */
+            result_revision: number;
+            /** Status */
+            status: string;
+            /** Desired State */
+            desired_state: string;
+            /** Control Epoch */
+            control_epoch: number;
+            /** Unresolved External Count */
+            unresolved_external_count: number | null;
+            verification?: components["schemas"]["VerificationRead"] | null;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** ControlRequest */
+        ControlRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /**
+             * Reason
+             * @default
+             */
+            reason: string;
+        };
         /**
          * ControlTranslation
          * @description One semantic control → ModelManifest option translation.
@@ -6069,6 +6261,46 @@ export interface components {
         CsrfRead: {
             /** Csrf Token */
             csrf_token: string;
+        };
+        /** DeliveryPackage */
+        DeliveryPackage: {
+            /** Episode Id */
+            episode_id: string | null;
+            /** Episode Number */
+            episode_number?: number | null;
+            /** Edit Session Id */
+            edit_session_id?: string | null;
+            /** Timeline Version */
+            timeline_version?: number | null;
+            /** Timeline Hash */
+            timeline_hash?: string | null;
+            /** Export Id */
+            export_id?: string | null;
+            /** Render Node Run Id */
+            render_node_run_id?: string | null;
+            /** Mp4 Artifact Id */
+            mp4_artifact_id?: string | null;
+            /** Srt Artifact Id */
+            srt_artifact_id?: string | null;
+            /** Mp4 Content Hash */
+            mp4_content_hash?: string | null;
+            /** Srt Content Hash */
+            srt_content_hash?: string | null;
+            /** Blockers */
+            blockers: string[];
+        };
+        /** DeliveryTarget */
+        DeliveryTarget: {
+            /** Episode Id */
+            episode_id: string | null;
+            /** Episode Number */
+            episode_number?: number | null;
+            /** Edit Session Id */
+            edit_session_id?: string | null;
+            /** Timeline Version */
+            timeline_version?: number | null;
+            /** Export Id */
+            export_id?: string | null;
         };
         /** DestinationRead */
         DestinationRead: {
@@ -7045,6 +7277,10 @@ export interface components {
             mp4_artifact_id?: string | null;
             /** Srt Artifact Id */
             srt_artifact_id?: string | null;
+            /** Mp4 Content Hash */
+            mp4_content_hash?: string | null;
+            /** Srt Content Hash */
+            srt_content_hash?: string | null;
             /** Blockers */
             blockers: string[];
         };
@@ -9196,6 +9432,47 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** PlanRead */
+        PlanRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Master Run Id
+             * Format: uuid
+             */
+            master_run_id: string;
+            /** Revision */
+            revision: number;
+            /** Schema Version */
+            schema_version: string;
+            /** Plan Hash */
+            plan_hash: string;
+            /**
+             * Decision Ref
+             * Format: uuid
+             */
+            decision_ref: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Plan Data */
+            plan_data: {
+                [key: string]: unknown;
+            };
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
+            proposal_id: string;
+            /** Decision Status */
+            decision_status: string;
+            delivery_check?: components["schemas"]["ProjectDeliveryGoal"] | null;
+        };
         /**
          * PlannedReference
          * @description One shot reference planned for a model execution.
@@ -9845,6 +10122,21 @@ export interface components {
             };
             /** Version */
             version: number;
+        };
+        /** ProjectDeliveryGoal */
+        ProjectDeliveryGoal: {
+            /**
+             * Rule Id
+             * @constant
+             */
+            rule_id: "project_delivery_ready_v1";
+            /**
+             * Work Type
+             * @enum {string}
+             */
+            work_type: "serial_comic" | "single_comic" | "animation_promo";
+            /** Targets */
+            targets: components["schemas"]["DeliveryTarget"][];
         };
         /** ProjectFileRead */
         ProjectFileRead: {
@@ -11170,6 +11462,67 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** RunPage */
+        RunPage: {
+            /** Items */
+            items: components["schemas"]["RunRead"][];
+            /** Next Offset */
+            next_offset: number | null;
+        };
+        /** RunRead */
+        RunRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Project Id
+             * Format: uuid
+             */
+            project_id: string;
+            /**
+             * Source Thread Id
+             * Format: uuid
+             */
+            source_thread_id: string;
+            /**
+             * Origin Turn Id
+             * Format: uuid
+             */
+            origin_turn_id: string;
+            /** Goal */
+            goal: string;
+            /** Status */
+            status: string;
+            /** Desired State */
+            desired_state: string;
+            /** Revision */
+            revision: number;
+            /** Control Epoch */
+            control_epoch: number;
+            /** Current Plan Id */
+            current_plan_id: string | null;
+            /** Current Plan Revision */
+            current_plan_revision: number | null;
+            /** Wait Reason */
+            wait_reason: string | null;
+            /** Deadline At */
+            deadline_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Archived At */
+            archived_at: string | null;
+            /** Progress */
+            progress: {
+                [key: string]: number;
+            };
+            /** Unresolved External Count */
+            unresolved_external_count: number;
+            /** Available Actions */
+            available_actions: string[];
+            last_verification?: components["schemas"]["VerificationRead"] | null;
         };
         /** RuntimeResumeRead */
         RuntimeResumeRead: {
@@ -12868,6 +13221,15 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** VerificationRead */
+        VerificationRead: {
+            /** Satisfied */
+            satisfied: boolean;
+            /** Checks */
+            checks: components["schemas"]["CompletionCheck"][];
+        } & {
+            [key: string]: unknown;
         };
         /** VisionTransform */
         VisionTransform: {
@@ -14585,6 +14947,384 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StepAttemptRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_goals_api_v1_projects__project_id__director_master_runs_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                include_archived?: boolean;
+                limit?: number;
+                offset?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_goal_api_v1_projects__project_id__director_master_runs__run_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_api_v1_projects__project_id__director_master_runs__run_id__patch: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                run_id: string;
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArchiveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_plans_api_v1_projects__project_id__director_master_runs__run_id__plans_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_plan_api_v1_projects__project_id__director_master_runs__run_id__plans__plan_id__get: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+            };
+            path: {
+                run_id: string;
+                plan_id: string;
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_api_v1_projects__project_id__director_master_runs__run_id__verify_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                run_id: string;
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControlRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlReceipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_api_v1_projects__project_id__director_master_runs__run_id__pause_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                run_id: string;
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControlRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlReceipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_api_v1_projects__project_id__director_master_runs__run_id__resume_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                run_id: string;
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControlRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlReceipt"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_api_v1_projects__project_id__director_master_runs__run_id__cancel_post: {
+        parameters: {
+            query?: {
+                workspace_id?: string | null;
+            };
+            header?: {
+                "X-Workspace-Id"?: string | null;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                run_id: string;
+                project_id: string;
+            };
+            cookie?: {
+                dramaforge_session?: string | null;
+                dramaforge_csrf?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControlRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlReceipt"];
                 };
             };
             /** @description Validation Error */

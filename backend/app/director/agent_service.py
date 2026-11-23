@@ -528,6 +528,7 @@ class DirectorAgentService:
                     "scope_type": thread.scope_type,
                     "scope_entity_id": thread.scope_entity_id,
                     "expected_versions": request.expected_versions,
+                    "goal_planning": request.intent == "create_goal",
                     "deadline": deadline,
                 }
             )
@@ -851,6 +852,7 @@ class DirectorAgentService:
 
     def _execution_context(self, turn: DirectorTurn) -> ToolContext:
         assert turn.thread_id is not None
+        scope = turn.intent_snapshot.get("scope")
         return ToolContext.model_validate(
             {
                 "actor_id": self.actor_id,
@@ -861,6 +863,7 @@ class DirectorAgentService:
                 "scope_type": turn.scope_type,
                 "scope_entity_id": turn.scope_entity_id,
                 "expected_versions": dict(turn.input_versions),
+                "goal_planning": isinstance(scope, dict) and scope.get("goal_planning") is True,
                 "deadline": utc(turn.deadline) if turn.deadline is not None else None,
             }
         )
@@ -1334,16 +1337,37 @@ class DirectorAgentService:
             if not admission.should_execute:
                 assert admission.result is not None
                 return dict(admission.result)
-            if call.name == "shot_prompt_propose":
-                from app.director.agent_proposals import create_agent_shot_proposal
+            if spec is not None and call.name in {
+                "shot_prompt_propose", "project_delivery_plan_propose",
+            }:
+                from app.director.agent_proposals import (
+                    AgentProposalRead,
+                    DeliveryPlanProposalRead,
+                    create_agent_shot_proposal,
+                )
+                from app.director.agent_tools import EmptyInput
 
                 try:
-                    proposal = await create_agent_shot_proposal(
-                        session,
-                        context=context,
-                        arguments=dict(call.arguments),
-                        call_id=call.call_id,
-                    )
+                    proposal: AgentProposalRead | DeliveryPlanProposalRead
+                    if call.name == "project_delivery_plan_propose":
+                        EmptyInput.model_validate(call.arguments)
+                        project = await self._reader(session).project()
+                        owner = await session.get(User, self.actor_id)
+                        if owner is None:
+                            raise NotFoundError("Director goal owner not found")
+                        async with session.begin_nested():
+                            plan, proposal_id = await MasterRunService(
+                                session, actor=owner, project=project,
+                            ).propose_delivery_check(turn)
+                        proposal = DeliveryPlanProposalRead(
+                            proposal_ids=[proposal_id], master_run_id=plan.master_run_id,
+                            plan_id=plan.id, observed_versions=dict(context.expected_versions),
+                        )
+                    else:
+                        proposal = await create_agent_shot_proposal(
+                            session, context=context, arguments=dict(call.arguments),
+                            call_id=call.call_id,
+                        )
                     result = ToolResult(
                         call_id=call.call_id,
                         ok=True,
