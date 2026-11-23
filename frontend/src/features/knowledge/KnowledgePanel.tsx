@@ -19,7 +19,6 @@ import { getSelectedWorkspaceId } from "../../lib/navigationPreferences";
 import { queryKeys } from "../../lib/queryKeys";
 import {
   RESEARCH_KINDS,
-  appendKnowledgeRevision,
   createKnowledgeEntry,
   listKnowledgeEntries,
   listKnowledgeRevisions,
@@ -29,24 +28,12 @@ import {
   type ResearchKind,
 } from "../research/api";
 
+import { bodyFromText, correctedBody, bodyText } from "../research/body";
+
+import { KnowledgePublicationDialog, type PublicationSnapshot } from "./KnowledgePublicationDialog";
+
 function requestKey(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
-}
-
-function bodyFromText(kind: ResearchKind, text: string): Record<string, unknown> {
-  switch (kind) {
-    case "summary":
-      return { schema_version: 1, text };
-    case "person":
-    case "place":
-      return { schema_version: 1, display_name: text };
-    case "event":
-      return { schema_version: 1, description: text };
-    case "timeline":
-      return { schema_version: 1, items: [{ label: text }] };
-    case "cultural_clue":
-      return { schema_version: 1, theme: text, interpretation: text };
-  }
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -63,6 +50,8 @@ export function KnowledgePanel() {
   const [draftKind, setDraftKind] = useState<ResearchKind>("summary");
   const [draftTitle, setDraftTitle] = useState("");
   const [draftText, setDraftText] = useState("");
+  const [snapshot, setSnapshot] = useState<PublicationSnapshot | null>(null);
+  const [revisionEdit, setRevisionEdit] = useState<{ id: string; text: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,14 +80,16 @@ export function KnowledgePanel() {
   };
   const workspaceId = getSelectedWorkspaceId();
 
+  const current = revisions.data?.items.find((r) => r.id === selected?.current_revision_id);
+  const edits = current && revisionEdit?.id === current.id ? revisionEdit.text : undefined;
   const create = useMutation({
-    mutationFn: (operation: "save_draft" | "publish") => {
+    mutationFn: () => {
       if (!workspaceId) throw new Error("请先选择工作区");
       return createKnowledgeEntry({
         requestKey: requestKey("knowledge"),
         workspaceId,
         kind: draftKind,
-        operation,
+        operation: "save_draft",
         title: draftTitle.trim(),
         body: bodyFromText(draftKind, draftText.trim()),
         allowedUses: ["research"],
@@ -109,31 +100,50 @@ export function KnowledgePanel() {
       setNotice("已保存知识条目。");
       setDraftTitle("");
       setDraftText("");
+      setStatus("draft");
       setSelectedId(created.entry_id);
       refresh();
     },
     onError: (caught) => setError(caught instanceof Error ? caught.message : "保存失败"),
   });
 
-  const publish = useMutation({
-    mutationFn: () => {
-      if (!selected) throw new Error("未选择知识条目");
-      return appendKnowledgeRevision(selected.id, {
-        requestKey: requestKey("knowledge-publish"),
-        expectedVersion: selected.version,
-        operation: "publish",
-        title: selected.title ?? draftTitle,
-        body: bodyFromText((selected.kind as ResearchKind) ?? "summary", draftText.trim()),
-        allowedUses: selected.allowed_uses,
-      });
-    },
-    onSuccess: () => {
-      setError(null);
-      setNotice("已发布新版本。");
-      refresh();
-    },
-    onError: (caught) => setError(caught instanceof Error ? caught.message : "发布失败"),
-  });
+  function previewNew() {
+    if (!workspaceId) {
+      setError("请先选择工作区");
+      return;
+    }
+    setSnapshot({
+      workspaceId,
+      kind: draftKind,
+      title: draftTitle.trim(),
+      body: bodyFromText(draftKind, draftText.trim()),
+      allowedUses: ["research"],
+    });
+  }
+
+  function previewRevision() {
+    if (
+      !workspaceId ||
+      !selected ||
+      !current ||
+      !entry.data ||
+      entry.data.current_revision_id !== current.id
+    ) {
+      setError("请重新选择工作区和知识版本");
+      return;
+    }
+    const kind = selected.kind as ResearchKind;
+    setSnapshot({
+      workspaceId,
+      kind,
+      title: current.title,
+      body: edits === undefined ? current.body : correctedBody(kind, current.body, edits.trim()),
+      allowedUses: current.allowed_uses,
+      publicSourceNotes: current.public_source_notes,
+      entry: { id: selected.id, version: entry.data.version },
+      sourceLabel: `基于知识版本 ${current.number}`,
+    });
+  }
 
   const withdraw = useMutation({
     mutationFn: () => {
@@ -250,25 +260,29 @@ export function KnowledgePanel() {
                   撤回该知识
                 </Button>
               )}
-              {entry.data?.publication_status !== "published" && (
-                <>
-                  <Field>
-                    <span>新版本内容</span>
-                    <Textarea
-                      id="knowledge-publish-text"
-                      value={draftText}
-                      onChange={(event) => setDraftText(event.target.value)}
-                      rows={3}
-                    />
-                  </Field>
-                  <Button
-                    disabled={!draftText.trim() || publish.isPending}
-                    onClick={() => publish.mutate()}
-                  >
-                    发布新版本
-                  </Button>
-                </>
-              )}
+              {current &&
+                entry.data?.current_revision_id === current.id &&
+                current.shared_content_state !== "unavailable" && (
+                  <>
+                    <Field>
+                      <span>新版本内容</span>
+                      <Textarea
+                        id="knowledge-publish-text"
+                        value={edits ?? bodyText(current.body)}
+                        onChange={(event) =>
+                          setRevisionEdit({ id: current.id, text: event.target.value })
+                        }
+                        rows={3}
+                      />
+                    </Field>
+                    <Button
+                      disabled={edits !== undefined && !edits.trim()}
+                      onClick={previewRevision}
+                    >
+                      预览发布新版本
+                    </Button>
+                  </>
+                )}
             </>
           ) : (
             <EmptyState title="选择知识条目" description="左侧选择条目后查看版本与发布状态。" />
@@ -305,19 +319,38 @@ export function KnowledgePanel() {
           <div className="df-actions">
             <Button
               disabled={!draftTitle.trim() || !draftText.trim() || create.isPending}
-              onClick={() => create.mutate("save_draft")}
+              onClick={() => create.mutate()}
             >
               保存草稿
             </Button>
             <Button
               disabled={!draftTitle.trim() || !draftText.trim() || create.isPending}
-              onClick={() => create.mutate("publish")}
+              onClick={previewNew}
             >
-              直接发布
+              预览发布
             </Button>
           </div>
         </Card>
       </div>
+      {snapshot && (
+        <KnowledgePublicationDialog
+          snapshot={snapshot}
+          onClose={() => setSnapshot(null)}
+          onPublished={(id) => {
+            if (!snapshot.entry) {
+              setDraftText("");
+              setDraftTitle("");
+            }
+            setSnapshot(null);
+            setRevisionEdit(null);
+            setSelectedId(id);
+            setStatus("published");
+            setKind("");
+            setNotice("知识已发布。");
+            setError(null);
+          }}
+        />
+      )}
     </section>
   );
 }

@@ -1,6 +1,7 @@
 /** Research results, analyses and knowledge entries (I4-02/I4-03). */
 
 import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
+import { getSelectedWorkspaceId } from "../../lib/navigationPreferences";
 import type { components } from "../../shared/api/generated";
 
 export type ResearchResultRead = components["schemas"]["ResearchResultRead"];
@@ -28,8 +29,15 @@ export const RESEARCH_KINDS: { value: ResearchKind; label: string }[] = [
   { value: "cultural_clue", label: "文化线索" },
 ];
 
-async function send<T>(method: string, path: string, body: unknown): Promise<T> {
+async function send<T>(
+  method: string,
+  path: string,
+  body: unknown,
+  workspaceId?: string,
+): Promise<T> {
   const csrf = await fetchCsrf();
+  if (workspaceId !== undefined && workspaceId !== getSelectedWorkspaceId())
+    throw new Error("工作区已切换，请重新预览。");
   return apiSend<T>(method, path, body, csrf);
 }
 
@@ -195,49 +203,74 @@ export function listKnowledgeRevisions(entryId: string): Promise<KnowledgeRevisi
   return apiGet<KnowledgeRevisionPage>(`/api/v1/knowledge/entries/${entryId}/revisions`);
 }
 
-export function createKnowledgeEntry(input: {
-  requestKey: string;
-  workspaceId: string;
-  kind: ResearchKind;
-  operation: "save_draft" | "publish";
+export type KnowledgeContent = {
   title: string;
   body: Record<string, unknown>;
   allowedUses: string[];
-}): Promise<{ entry_id: string; revision_id: string }> {
-  return send("POST", "/api/v1/knowledge/entries", {
-    request_key: input.requestKey,
-    workspace_id: input.workspaceId,
-    kind: input.kind,
-    operation: input.operation,
+  publicSourceNotes?: Record<string, unknown>[];
+  sourceLinks?: components["schemas"]["SourceLinkWrite"][];
+};
+
+function knowledgeContent(input: KnowledgeContent) {
+  return {
     title: input.title,
     body: input.body,
     allowed_uses: input.allowedUses,
-    public_source_notes: [],
-    source_links: [],
-  });
+    public_source_notes: input.publicSourceNotes ?? [],
+    source_links: input.sourceLinks ?? [],
+  };
+}
+
+export function createKnowledgeEntry(
+  input: KnowledgeContent & {
+    requestKey: string;
+    workspaceId: string;
+    kind: ResearchKind;
+    operation: "save_draft" | "publish";
+  },
+): Promise<components["schemas"]["KnowledgeReceiptRead"]> {
+  return send(
+    "POST",
+    "/api/v1/knowledge/entries",
+    {
+      request_key: input.requestKey,
+      workspace_id: input.workspaceId,
+      kind: input.kind,
+      operation: input.operation,
+      ...knowledgeContent(input),
+    },
+    input.workspaceId,
+  );
 }
 
 export function appendKnowledgeRevision(
   entryId: string,
-  input: {
+  input: KnowledgeContent & {
     requestKey: string;
     expectedVersion: number;
+    workspaceId: string;
     operation: "save_draft" | "publish";
-    title: string;
-    body: Record<string, unknown>;
-    allowedUses: string[];
   },
+): Promise<components["schemas"]["KnowledgeReceiptRead"]> {
+  return send(
+    "POST",
+    `/api/v1/knowledge/entries/${entryId}/revisions`,
+    {
+      request_key: input.requestKey,
+      expected_version: input.expectedVersion,
+      operation: input.operation,
+      ...knowledgeContent(input),
+    },
+    input.workspaceId,
+  );
+}
+
+export function acceptResearchCandidate(
+  projectId: string,
+  resultId: string,
+  input: components["schemas"]["ResearchAccept"],
 ): Promise<{ revision_id: string }> {
-  return send("POST", `/api/v1/knowledge/entries/${entryId}/revisions`, {
-    request_key: input.requestKey,
-    expected_version: input.expectedVersion,
-    operation: input.operation,
-    title: input.title,
-    body: input.body,
-    allowed_uses: input.allowedUses,
-    public_source_notes: [],
-    source_links: [],
-  });
+  return send("POST", `/api/v1/projects/${projectId}/research-results/${resultId}/accept`, input);
 }
 
 export function withdrawKnowledgeEntry(

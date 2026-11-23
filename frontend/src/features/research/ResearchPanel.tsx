@@ -21,6 +21,7 @@ import { listFragments, listProjectFiles } from "../project-files/api";
 import {
   RESEARCH_KINDS,
   acceptAnalysis,
+  acceptResearchCandidate,
   appendResearchRevision,
   createResearchResult,
   listAnalyses,
@@ -35,52 +36,22 @@ import {
   type ResearchResultRead,
 } from "./api";
 
+import { bodyFromText, correctedBody, bodyText } from "./body";
+
+import { RevisionDetails } from "./ResearchContent";
+import { getSelectedWorkspaceId } from "../../lib/navigationPreferences";
+import {
+  KnowledgePublicationDialog,
+  type PublicationSnapshot,
+} from "../knowledge/KnowledgePublicationDialog";
+
 function requestKey(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
-}
-
-function bodyFromText(kind: ResearchKind, text: string): Record<string, unknown> {
-  switch (kind) {
-    case "summary":
-      return { schema_version: 1, text };
-    case "person":
-    case "place":
-      return { schema_version: 1, display_name: text };
-    case "event":
-      return { schema_version: 1, description: text };
-    case "timeline":
-      return { schema_version: 1, items: [{ label: text }] };
-    case "cultural_clue":
-      return { schema_version: 1, theme: text, interpretation: text };
-  }
-}
-
-function correctedBody(kind: ResearchKind, body: Record<string, unknown>, text: string) {
-  if (kind === "timeline" && Array.isArray(body.items) && body.items.length) {
-    const [first, ...rest] = body.items;
-    return { ...body, items: [{ ...first, label: text }, ...rest] };
-  }
-  if (kind === "cultural_clue") return { ...body, theme: text };
-  return { ...body, ...bodyFromText(kind, text) };
 }
 
 function modelIdOf(preview: AnalysisPreviewRead): string {
   const identity = preview.model_identity as { model_id?: string } | null | undefined;
   return identity?.model_id ?? "不可用";
-}
-
-function bodyText(body: Record<string, unknown> | undefined): string {
-  if (!body) return "";
-  for (const key of ["text", "display_name", "description", "theme"]) {
-    const value = body[key];
-    if (typeof value === "string" && value) return value;
-  }
-  const items = body.items;
-  if (Array.isArray(items) && items.length > 0) {
-    const first = items[0] as Record<string, unknown>;
-    return typeof first?.label === "string" ? first.label : "";
-  }
-  return "";
 }
 
 export function ResearchPanel({
@@ -97,7 +68,9 @@ export function ResearchPanel({
   const [historyRevision, setHistoryRevision] = useState<{
     resultId: string;
     revisionId: string;
+    baseVersion: number;
   } | null>(null);
+  const [publication, setPublication] = useState<PublicationSnapshot | null>(null);
   const [correction, setCorrection] = useState("");
   const [draftText, setDraftText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -241,8 +214,21 @@ export function ResearchPanel({
 
   const restore = useMutation({
     mutationFn: () => {
-      if (!selected || !historical.data || historical.data.result_id !== selected.id)
+      if (
+        !selected ||
+        !historical.data ||
+        historical.data.result_id !== selected.id ||
+        historyRevision?.baseVersion !== selected.version
+      )
         throw new Error("请选择要恢复的版本");
+      if (historical.data.applied_result_version === null) {
+        return acceptResearchCandidate(projectId, selected.id, {
+          request_key: requestKey("research-accept"),
+          expected_version: selected.version,
+          base_revision_id: selected.current_revision_id,
+          candidate_revision_id: historical.data.id,
+        });
+      }
       return restoreResearchRevision(projectId, selected.id, {
         requestKey: requestKey("research-restore"),
         expectedVersion: selected.version,
@@ -254,7 +240,7 @@ export function ResearchPanel({
       setHistoryRevision(null);
       setCorrection("");
       setError(null);
-      setNotice("已将历史内容恢复为新版本。");
+      setNotice("已保存选定内容为新版本。");
       refresh();
     },
     onError: (caught) => {
@@ -373,26 +359,35 @@ export function ResearchPanel({
                       RESEARCH_KINDS.find((e) => e.value === selected.kind)?.label ?? selected.kind,
                   },
                   { label: "版本", value: String(selected.version) },
-                  { label: "校验", value: currentRevision.data.verification },
                 ]}
               />
-              <pre className="df-research-body">
-                {JSON.stringify(currentRevision.data.body, null, 2)}
-              </pre>
-              {currentRevision.data.citations.length > 0 && (
-                <ul aria-label="引用来源">
-                  {currentRevision.data.citations.map((citation) => (
-                    <li key={citation.id}>
-                      「{citation.quoted_text || "（整段）"}」
-                      <span className="muted">
-                        {" "}
-                        方法 {citation.extraction_method}
-                        {citation.source_available ? "" : " · 来源已不可用"}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <RevisionDetails revision={currentRevision.data} />
+              <Button
+                onClick={() => {
+                  const workspaceId = getSelectedWorkspaceId();
+                  if (!workspaceId) {
+                    setError("请先选择工作区");
+                    return;
+                  }
+                  const revision = currentRevision.data;
+                  if (!revision || revision.id !== selected.current_revision_id) return;
+                  // Private research associations never become public knowledge relationships.
+                  const body = { ...revision.body };
+                  delete body.related_person_ids;
+                  delete body.related_place_ids;
+                  setPublication({
+                    workspaceId,
+                    kind: selected.kind as ResearchKind,
+                    title: revision.summary.slice(0, 240),
+                    body,
+                    allowedUses: ["research"],
+                    sourceLabel: `来源：研究版本 ${revision.number}`,
+                    sourceLinks: [{ project_id: projectId, research_revision_id: revision.id }],
+                  });
+                }}
+              >
+                预览发布为知识
+              </Button>
               <Field>
                 <span>修正内容</span>
                 <Textarea
@@ -419,7 +414,11 @@ export function ResearchPanel({
                       <Button
                         tone="ghost"
                         onClick={() =>
-                          setHistoryRevision({ resultId: selected.id, revisionId: revision.id })
+                          setHistoryRevision({
+                            resultId: selected.id,
+                            revisionId: revision.id,
+                            baseVersion: selected.version,
+                          })
                         }
                       >
                         查看版本 {revision.number}
@@ -433,17 +432,29 @@ export function ResearchPanel({
                   {historical.isError && <Alert type="error" description="无法读取历史版本。" />}
                   {historical.data && (
                     <>
-                      <h4>版本 {historical.data.number}</h4>
-                      <p>{bodyText(historical.data.body)}</p>
+                      <h4>当前版本 {currentRevision.data.number}</h4>
+                      <RevisionDetails revision={currentRevision.data} />
+                      <h4>
+                        {historical.data.applied_result_version === null ? "研究候选" : "历史版本"}{" "}
+                        {historical.data.number}
+                      </h4>
+                      <RevisionDetails revision={historical.data} />
+                      {correction.trim() && <p>请先保存或清空正在编辑的修正。</p>}
+                      {historyRevision?.baseVersion !== selected.version && (
+                        <p>研究已更新，请重新选择版本对照。</p>
+                      )}
                       <Button
                         disabled={
                           restore.isPending ||
+                          historyRevision?.baseVersion !== selected.version ||
                           !!correction.trim() ||
                           historical.data.id === selected.current_revision_id
                         }
                         onClick={() => restore.mutate()}
                       >
-                        恢复此版本为新版本
+                        {historical.data.applied_result_version === null
+                          ? "采纳候选为新版本"
+                          : "恢复此版本为新版本"}
                       </Button>
                     </>
                   )}
@@ -553,6 +564,17 @@ export function ResearchPanel({
           )}
         </Card>
       </div>
+      {publication && (
+        <KnowledgePublicationDialog
+          snapshot={publication}
+          onClose={() => setPublication(null)}
+          onPublished={() => {
+            setPublication(null);
+            setError(null);
+            setNotice("已发布到文化知识库。");
+          }}
+        />
+      )}
     </section>
   );
 }

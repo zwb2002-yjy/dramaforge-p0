@@ -93,11 +93,74 @@ test("real project/source persistence, browser readback and owner isolation", as
   await expect(page.getByRole("button", { name: "分析预览" })).toBeEnabled();
   await page.getByRole("button", { name: "查看版本 1", exact: true }).click();
   await expect(page.getByLabel("历史版本对照")).toContainText(note);
+  await expect(page.getByLabel("历史版本对照")).toContainText(revised);
+  await expect(page.getByLabel("历史版本对照").getByLabel("引用来源")).toHaveCount(2);
   await page.getByRole("button", { name: "恢复此版本为新版本" }).click();
   await expect(page.getByRole("heading", { name: note })).toBeVisible();
   await page.reload();
   await expect(page.getByLabel("引用来源")).toContainText(sourceText);
   await expect(page.getByText("版本 3", { exact: false }).first()).toBeVisible();
+
+  const publications: unknown[] = [];
+  page.on("request", (r) => {
+    if (new URL(r.url()).pathname === "/api/v1/knowledge/entries" && r.method() === "POST")
+      publications.push(r.postDataJSON());
+  });
+  await page.getByRole("button", { name: "预览发布为知识" }).click();
+  const preview = page.getByRole("dialog", { name: "知识发布预览" });
+  await expect(preview).toContainText("所有工作区");
+  await expect(preview).toContainText(note);
+  await expect(preview).not.toContainText(sourceText);
+  await preview.getByRole("button", { name: "取消" }).click();
+  expect(publications).toHaveLength(0);
+  const grant = await request.put(
+    `/api/v1/projects/${project.id}/file-revisions/${file.revision_id}/source-use`,
+    {
+      headers: {
+        ...headers,
+        "X-CSRF-Token": (await (await request.get("/api/v1/auth/csrf")).json()).csrf_token,
+      },
+      data: {
+        expected_version: 0,
+        request_key: randomUUID(),
+        state: "declared",
+        allowed_uses: ["research"],
+        statement: "合成资料用于研究",
+      },
+    },
+  );
+  expect(grant.status(), await grant.text()).toBe(200);
+  await page.getByRole("button", { name: "预览发布为知识" }).click();
+  await preview.getByRole("checkbox", { name: "导出交付" }).check();
+  const posted = () =>
+    page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === "/api/v1/knowledge/entries" &&
+        r.request().method() === "POST",
+    );
+  const rejected = posted();
+  await preview.getByRole("button", { name: "确认发布" }).click();
+  expect((await rejected).status()).toBe(422);
+  await expect(preview).toContainText("研究来源未允许本次用途");
+  await preview.getByRole("checkbox", { name: "导出交付" }).uncheck();
+  const acceptedKnowledge = posted();
+  await preview.getByRole("button", { name: "确认发布" }).click();
+  const published = await acceptedKnowledge;
+  expect(published.status()).toBe(201);
+  await expect(preview).toBeHidden();
+  expect(publications).toHaveLength(2);
+  const knowledge = await published.json();
+  await page.goto("/knowledge");
+  await expect(page.getByRole("heading", { name: note, exact: true })).toBeVisible();
+  const versions = await request.get(`/api/v1/knowledge/entries/${knowledge.entry_id}/revisions`, {
+    headers,
+  });
+  expect(versions.ok()).toBeTruthy();
+  const [view] = (await versions.json()).items;
+  expect(view.body.text).toEqual(note);
+  expect(view.allowed_uses).toEqual(["research"]);
+  expect(view.shared_content_state).toEqual("complete");
+  expect(JSON.stringify(view)).not.toContain(file.revision_id);
 
   const other = await playwright.request.newContext({ baseURL: "http://127.0.0.1:4173" });
   try {
