@@ -161,7 +161,7 @@ async def render_final_film_route(
                 return old
             raise ValidationAppError("请选择已保存的当前分集剪辑")
         try:
-            binding = await MasterRunService(session, actor=user, project=project).bind_export(
+            binding = await MasterRunService(session, actor=user, project=project).bind_plan_step(
                 body.delivery_plan,
                 episode_number,
             )

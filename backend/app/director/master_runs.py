@@ -25,9 +25,12 @@ from app.contracts.delivery_verification import (
     DeliveryPlanRef,
     DeliverySlotVerifier,
     DeliveryVerifier,
+    EpisodeArrangementSlot,
     EpisodeDeliveryGoal,
+    EpisodeExportSlot,
     FlowCompletionGoal,
     ProjectDeliveryGoal,
+    SeriesSlot,
 )
 from app.contracts.domain_events import (
     MasterRunChanged,
@@ -35,11 +38,11 @@ from app.contracts.domain_events import (
     MasterRunPlanProposed,
 )
 from app.director.business_flows import (
-    SERIES_EXPORTS,
     BusinessFlowDefinitionRegistry,
     BusinessFlowService,
     normalize_dispositions,
-    series_export_flow,
+    series_flow,
+    slot_definition,
     validate_plan_flows,
 )
 from app.director.master_run_models import (
@@ -314,7 +317,7 @@ class MasterRunService:
 
     # ----- plans -----------------------------------------------------------
     async def propose_delivery_check(
-        self, turn: DirectorTurn
+        self, turn: DirectorTurn, *, story_arrangement: bool = False
     ) -> tuple[DirectorMasterRunPlan, UUID]:
         """Build a technical delivery goal from project facts, without starting production."""
         if turn.master_run_id is None or turn.thread_id is None or turn.scope_type != "project":
@@ -332,6 +335,20 @@ class MasterRunService:
         work_type = self._project.work_type
         flows: list[dict[str, object]] = []
         future_count: int | None = None
+        slot: SeriesSlot = (
+            EpisodeArrangementSlot(
+                flow_key="episode_arrangement", step_key="apply_episodes", field="episode_ids"
+            )
+            if story_arrangement
+            else EpisodeExportSlot(
+                flow_key="episode_delivery", step_key="collect_exports", field="episode_exports"
+            )
+        )
+        if story_arrangement and (
+            work_type != "serial_comic" or not self._project.planned_episode_count
+        ):
+            raise ValidationAppError("请先确定连续剧计划集数，再按剧本采纳结果核验")
+
         if work_type == "animation_promo":
             targets: list[dict[str, object]] = [{"episode_id": None}]
         else:
@@ -349,12 +366,13 @@ class MasterRunService:
                 work_type == "serial_comic"
                 and self._project.planned_episode_count is not None
                 and (
-                    len(episodes) != self._project.planned_episode_count
+                    story_arrangement
+                    or len(episodes) != self._project.planned_episode_count
                     or any(e.episode_number != index for index, e in enumerate(episodes, start=1))
                 )
             ):
                 future_count = self._project.planned_episode_count
-                flows = [series_export_flow(self._project.id, future_count)]
+                flows = [series_flow(self._project.id, future_count, slot)]
             targets = [
                 {"episode_id": str(episode.id), "episode_number": episode.episode_number}
                 for episode in episodes
@@ -366,11 +384,7 @@ class MasterRunService:
         if future_count is not None:
             completion.update(
                 planned_episode_count=future_count,
-                output_slot={
-                    "flow_key": "episode_delivery",
-                    "step_key": "collect_exports",
-                    "field": "episode_exports",
-                },
+                output_slot=slot.model_dump(mode="json"),
             )
         else:
             completion["targets"] = targets
@@ -443,7 +457,8 @@ class MasterRunService:
             declarations = COMPLETION_RULES.validate_python(plan_data.get("completion"))
         except ValidationError as exc:
             raise ValidationAppError(
-                "完成条件必须是已注册的目标声明", details={"code": "MASTER_RUN_COMPLETION_SHAPE"},
+                "完成条件必须是已注册的目标声明",
+                details={"code": "MASTER_RUN_COMPLETION_SHAPE"},
             ) from exc
         # Validate the flow list early so a bad plan never reaches Apply.
         specs = validate_plan_flows(plan_data.get("flows"), allow_empty=True)
@@ -452,15 +467,17 @@ class MasterRunService:
                 continue
             if not any(
                 spec.flow_key == declaration.output_slot.flow_key
-                and spec.definition_key == SERIES_EXPORTS.definition_key
-                and spec.definition_version == SERIES_EXPORTS.definition_version
+                and spec.definition_key == slot_definition(declaration.output_slot).definition_key
+                and spec.definition_version
+                == slot_definition(declaration.output_slot).definition_version
                 and spec.scope_type == "project"
                 and spec.input == {"planned_episode_count": declaration.planned_episode_count}
                 for spec in specs
             ):
-                raise ValidationAppError("输出槽必须对应计划内已注册的分集交付步骤",
-                                         details={"code":"MASTER_RUN_OUTPUT_SLOT"})
-
+                raise ValidationAppError(
+                    "输出槽必须对应计划内已注册的分集交付步骤",
+                    details={"code": "MASTER_RUN_OUTPUT_SLOT"},
+                )
 
     async def _basis_matches(self, run: DirectorMasterRun, basis: dict[str, object]) -> bool:
         current = await self.current_plan(run)
@@ -830,8 +847,8 @@ class MasterRunService:
             and plan_hash(plan.schema_version, plan.plan_data) == plan.plan_hash
         )
 
-    async def bind_export(
-        self, requested: DeliveryPlanRef, episode_number: int
+    async def bind_plan_step(
+        self, requested: DeliveryPlanRef, episode_number: int | None = None, *, story: bool = False
     ) -> BoundDeliveryOutput:
         run = await self._locked(requested.master_run_id)
         plan = await self.current_plan(run)
@@ -848,8 +865,15 @@ class MasterRunService:
             if (
                 isinstance(goal, ProjectDeliveryGoal)
                 and goal.output_slot is not None
+                and isinstance(goal.output_slot, EpisodeArrangementSlot) == story
                 and goal.planned_episode_count is not None
-                and 1 <= episode_number <= goal.planned_episode_count
+                and (
+                    story
+                    or (
+                        episode_number is not None
+                        and 1 <= episode_number <= goal.planned_episode_count
+                    )
+                )
                 and goal.work_type == self._project.work_type
                 and goal.planned_episode_count == self._project.planned_episode_count
             ):
@@ -923,11 +947,36 @@ class MasterRunService:
                 if goal.work_type != self._project.work_type:
                     reasons.append("DELIVERY_WORK_TYPE_CHANGED")
                 actual = self._project.planned_episode_count
-                if (goal.work_type == "serial_comic" and (goal.output_slot or actual is not None)
-                        and (goal.planned_episode_count or len(targets)) != actual):
+                if (
+                    goal.work_type == "serial_comic"
+                    and (goal.output_slot or actual is not None)
+                    and (goal.planned_episode_count or len(targets)) != actual
+                ):
                     reasons.append("DELIVERY_EPISODE_COUNT_MISMATCH")
             missing_ranges: list[tuple[int, int]] = []
-            if isinstance(goal, ProjectDeliveryGoal) and goal.output_slot is not None:
+            story_receipts: list[dict[str, object]] = []
+            if isinstance(goal, ProjectDeliveryGoal) and isinstance(
+                goal.output_slot, EpisodeArrangementSlot
+            ):
+                from app.director.story_arrangement import arrangement_targets
+
+                count = goal.planned_episode_count
+                assert count is not None
+                binding = await self._flows().delivery_output(run, plan, goal.output_slot, count)
+                if binding is None:
+                    reasons.append("DELIVERY_OUTPUT_SLOT_UNAVAILABLE")
+                else:
+                    targets, missing_ranges, errors, story_receipts = await arrangement_targets(
+                        self._session,
+                        binding,
+                        count,
+                    )
+                    reasons.extend(errors)
+                    if missing_ranges:
+                        reasons.append("STORY_EPISODE_APPLY_MISSING")
+            if isinstance(goal, ProjectDeliveryGoal) and isinstance(
+                goal.output_slot, EpisodeExportSlot
+            ):
                 count = goal.planned_episode_count
                 assert count is not None
                 flows = self._flows()
@@ -984,6 +1033,7 @@ class MasterRunService:
                     "reason_code": reasons[0] if reasons else None,
                     "evidence_refs": evidence,
                     "missing_episode_ranges": missing_ranges,
+                    **({"story_receipts": story_receipts} if story_receipts else {}),
                 }
             )
         return {

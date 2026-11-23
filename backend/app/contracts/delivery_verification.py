@@ -31,6 +31,24 @@ class EpisodeExportSlot(_Frozen):
     field: Literal["episode_exports"]
 
 
+class AppliedEpisodeReceipt(_Frozen):
+    proposal_id: UUID
+    item_id: UUID
+    episode_id: UUID
+    episode_number: int = Field(strict=True, ge=1)
+    episode_version: int = Field(strict=True, ge=1)
+    decision_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class EpisodeArrangementSlot(_Frozen):
+    flow_key: Literal["episode_arrangement"]
+    step_key: Literal["apply_episodes"]
+    field: Literal["episode_ids"]
+
+
+SeriesSlot = EpisodeExportSlot | EpisodeArrangementSlot
+
+
 class DeliveryPlanRef(_Frozen):
     master_run_id: UUID
     plan_id: UUID
@@ -44,7 +62,7 @@ class BoundDeliveryOutput(DeliveryPlanRef):
     plan_revision: int
     plan_hash: str
     definition_hash: str
-    slot: EpisodeExportSlot
+    slot: SeriesSlot
 
 
 class DeliverySlotRead(BaseModel):
@@ -90,7 +108,7 @@ class ProjectDeliveryGoal(_Frozen):
     rule_id: Literal["project_delivery_ready_v1"]
     work_type: Literal["serial_comic", "single_comic", "animation_promo"]
     targets: list[DeliveryTarget] = Field(default_factory=list)
-    output_slot: EpisodeExportSlot | None = None
+    output_slot: SeriesSlot | None = None
     planned_episode_count: int | None = Field(default=None, strict=True, ge=2, le=2147483647)
 
     @model_validator(mode="after")

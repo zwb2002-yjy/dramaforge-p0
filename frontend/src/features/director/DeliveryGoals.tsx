@@ -22,6 +22,9 @@ const statuses: Record<string, string> = {
   stopping: "正在停止",
 };
 const reasons: Record<string, string> = {
+  STORY_EPISODE_CHANGED: "已采纳分集的版本有变化",
+  STORY_RECEIPT_INVALID: "分集采纳回执无效",
+  STORY_EPISODE_APPLY_MISSING: "还有分集未按计划采纳",
   DELIVERY_OUTPUT_SLOT_UNAVAILABLE: "计划交付步骤不可用",
   DELIVERY_PLAN_EXPORT_MISSING: "此剪辑版本尚未按本计划导出",
   DELIVERY_EPISODE_MISSING: "分集不存在",
@@ -77,17 +80,19 @@ function GoalDetail({ projectId, goal }: { projectId: string; goal: Goal }) {
       {check && (
         <p>
           计划 v{plan.revision} · 核对 MP4 和字幕 ·{" "}
-          {check.output_slot
-            ? `依次交付第 1 至 ${check.planned_episode_count} 集，逐集关联本计划导出`
-            : (check.targets ?? [])
-                .map((t) =>
-                  t.episode_id === null
-                    ? "项目成片"
-                    : t.episode_number
-                      ? `第 ${t.episode_number} 集`
-                      : t.episode_id,
-                )
-                .join("、")}
+          {check.output_slot?.field === "episode_ids"
+            ? `按剧本中实际采纳的第 1 至 ${check.planned_episode_count} 集核对交付`
+            : check.output_slot
+              ? `依次交付第 1 至 ${check.planned_episode_count} 集，逐集关联本计划导出`
+              : (check.targets ?? [])
+                  .map((t) =>
+                    t.episode_id === null
+                      ? "项目成片"
+                      : t.episode_number
+                        ? `第 ${t.episode_number} 集`
+                        : t.episode_id,
+                  )
+                  .join("、")}
         </p>
       )}
       {check &&
@@ -104,7 +109,7 @@ function GoalDetail({ projectId, goal }: { projectId: string; goal: Goal }) {
         )}
       {plan?.decision_status === "rejected" && <p>此计划已拒绝</p>}
       {plan &&
-        check?.output_slot &&
+        check?.output_slot?.field === "episode_exports" &&
         plan.decision_status === "accepted" &&
         goal.current_plan_id === plan.id &&
         goal.available_actions.includes("verify") && (
@@ -115,6 +120,21 @@ function GoalDetail({ projectId, goal }: { projectId: string; goal: Goal }) {
             search={{ sessionId: undefined, goalId: goal.id, planId: plan.id }}
           >
             按此计划导出分集
+          </ActionLink>
+        )}
+      {plan &&
+        check?.output_slot?.field === "episode_ids" &&
+        goal.progress.completed_steps < goal.progress.required_steps &&
+        plan.decision_status === "accepted" &&
+        goal.current_plan_id === plan.id &&
+        goal.available_actions.includes("verify") && (
+          <ActionLink
+            tone="ghost"
+            to="/projects/$projectId/script"
+            params={{ projectId }}
+            search={{ goalId: goal.id, planId: plan.id, goalEpoch: goal.control_epoch }}
+          >
+            按此计划采纳分集
           </ActionLink>
         )}
       {goal.available_actions.includes("verify") && (
@@ -131,7 +151,8 @@ function GoalDetail({ projectId, goal }: { projectId: string; goal: Goal }) {
               {entry.reason_code && <p>{reasons[entry.reason_code] ?? entry.reason_code}</p>}
               {entry.missing_episode_ranges?.map(([first, last]) => (
                 <p key={first}>
-                  {first === last ? `第 ${first} 集` : `第 ${first}–${last} 集`} · 尚未建立分集
+                  {first === last ? `第 ${first} 集` : `第 ${first}–${last} 集`} ·{" "}
+                  {entry.reason_code?.startsWith("STORY_") ? "缺少有效采纳回执" : "尚未建立分集"}
                 </p>
               ))}
               {entry.evidence_refs?.map((e, i) => (

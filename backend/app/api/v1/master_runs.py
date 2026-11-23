@@ -11,8 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
-from app.contracts.delivery_verification import DeliveryPackage, ProjectDeliveryGoal
-from app.director.business_flows import series_export_flow
+from app.contracts.delivery_verification import (
+    AppliedEpisodeReceipt,
+    DeliveryPackage,
+    ProjectDeliveryGoal,
+)
+from app.director.business_flows import series_flow
 from app.director.master_run_models import DirectorMasterRun, DirectorMasterRunPlan
 from app.director.master_runs import MasterRunService
 from app.director.proposal_models import DirectorProposalItem
@@ -31,6 +35,7 @@ class CompletionCheck(BaseModel):
     satisfied: bool
     reason_code: str | None = None
     missing_episode_ranges: list[tuple[int, int]] = Field(default_factory=list)
+    story_receipts: list[AppliedEpisodeReceipt] = Field(default_factory=list)
     evidence_refs: list[DeliveryPackage] = Field(default_factory=list)
 
 
@@ -94,7 +99,11 @@ async def _plan_read(plan: DirectorMasterRunPlan, session: SessionDep) -> PlanRe
         with suppress(ValidationError):
             candidate = ProjectDeliveryGoal.model_validate(rules[0])
             expected_flows = (
-                [series_export_flow(plan.project_id, candidate.planned_episode_count)]
+                [
+                    series_flow(
+                        plan.project_id, candidate.planned_episode_count, candidate.output_slot
+                    )
+                ]
                 if candidate.output_slot and candidate.planned_episode_count
                 else []
             )

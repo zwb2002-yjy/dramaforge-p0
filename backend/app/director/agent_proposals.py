@@ -47,6 +47,11 @@ class AgentProposalRead(BaseModel):
     observed_versions: dict[str, int]
 
 
+class DeliveryPlanProposalInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scope_source: Literal["delivery", "story_apply"] = "delivery"
+
+
 class DeliveryPlanProposalRead(BaseModel):
     proposal_ids: list[UUID]
     master_run_id: UUID

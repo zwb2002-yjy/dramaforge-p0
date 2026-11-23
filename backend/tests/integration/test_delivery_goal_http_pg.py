@@ -13,8 +13,9 @@ from test_director_agent_http_pg import http_database as http_database
 from test_director_turn_lifecycle_pg import pytestmark as pytestmark
 
 
-@pytest.mark.parametrize("future", [False, True])
-async def test_delivery_goal_via_project_conversation(http_agent, monkeypatch, future):
+@pytest.mark.parametrize("mode", ["existing", "future", "story_apply"])
+async def test_delivery_goal_via_project_conversation(http_agent, monkeypatch, mode):
+    future = mode != "existing"
     agent = http_agent
     with Session(agent.database.engine) as db:
         project = db.get(Project, agent.project_id)
@@ -44,7 +45,11 @@ async def test_delivery_goal_via_project_conversation(http_agent, monkeypatch, f
                                     "type": "function",
                                     "function": {
                                         "name": "project_delivery_plan_propose",
-                                        "arguments": "{}",
+                                        "arguments": json.dumps(
+                                            {"scope_source": "story_apply"}
+                                            if mode == "story_apply"
+                                            else {}
+                                        ),
                                     },
                                 }
                             ],
@@ -85,9 +90,8 @@ async def test_delivery_goal_via_project_conversation(http_agent, monkeypatch, f
     assert plan["decision_status"] == "pending"
     check = plan["delivery_check"]
     if future:
-        assert (
-            check["planned_episode_count"] == 2
-            and check["output_slot"]["field"] == "episode_exports"
+        assert check["planned_episode_count"] == 2 and check["output_slot"]["field"] == (
+            "episode_ids" if mode == "story_apply" else "episode_exports"
         )
     else:
         assert len(check["targets"]) == 2 and check["output_slot"] is None
@@ -111,8 +115,8 @@ async def test_delivery_goal_via_project_conversation(http_agent, monkeypatch, f
     assert receipt["status"] == "waiting" and not receipt["verification"]["satisfied"]
     evidence = receipt["verification"]["checks"][-1]["evidence_refs"]
     ranges = receipt["verification"]["checks"][-1]["missing_episode_ranges"]
-    assert ranges == ([[2, 2]] if future else [])
-    assert len(evidence) == (1 if future else 2) and all(
+    assert ranges == ([[1, 2]] if mode == "story_apply" else [[2, 2]] if future else [])
+    assert len(evidence) == (0 if mode == "story_apply" else 1 if future else 2) and all(
         p["blockers"] == ["DELIVERY_SESSION_MISSING"] for p in evidence
     )
     assert (

@@ -1204,7 +1204,12 @@ verify 在同一事务内核验确认项、计划哈希、已声明的输入版�
 把步骤、定义哈希、当前控制代次和计划身份绑定到渲染指纹、NodeRun 快照及最终 Export。
 verify 只从匹配的正式导出取得分集 ID 和 Export ID，再复核当前剪辑版本与 MP4/SRT。
 普通导出和其他计划的交付保留原用途。暂停会封锁新提交，恢复后同一计划已有的有效交付仍可核对。
-历史任务重放沿原绑定读取。剧本分集安排 Apply 的输出和人工质量结论另验。
+历史任务重放沿原绑定读取。显式创作目标的计划工具选择 `scope_source: story_apply` 时，确认清单来自已注册的
+`episode_arrangement/apply_episodes/episode_ids` 步骤。工作台 Story Apply 可携带
+`arrangement_plan={master_run_id,plan_id,control_epoch}`。每项明确采纳的 `story.upsert_episode`
+在同一事务记录实际分集 ID、版本、集号、提案项和确认内容哈希。未关联的旧采纳不能追加归入新计划。
+核验从当前计划的这些正式回执解析分集范围，检查原决定和版本，再按各集当前可用的 MP4/SRT 核对。
+项目目标详情的 `story_receipts` 记录核验依据。人工质量结论另验。
 
 ### Flow、步骤与尝试的读投影
 

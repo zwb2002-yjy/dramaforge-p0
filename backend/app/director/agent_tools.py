@@ -30,6 +30,7 @@ from app.contracts.director_model_tools import (
 )
 from app.director.agent_proposals import (
     AgentProposalRead,
+    DeliveryPlanProposalInput,
     DeliveryPlanProposalRead,
     ShotPromptProposalInput,
 )
@@ -247,8 +248,8 @@ _DEFINITIONS = (
 _DELIVERY_PLAN = _Definition(
     "project_delivery_plan_propose",
     "Propose an MP4 and subtitle delivery check for this explicit project goal. "
-    "Uses the project's current work type and episode identities. Requires the owner's Apply.",
-    EmptyInput, DeliveryPlanProposalRead, ("project",), risk="PROPOSE",
+    "Set scope_source to story_apply for episodes confirmed in Story. Requires explicit Apply.",
+    DeliveryPlanProposalInput, DeliveryPlanProposalRead, ("project",), risk="PROPOSE",
 )
 
 _MODEL_DEFINITIONS = (

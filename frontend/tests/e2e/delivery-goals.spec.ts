@@ -1,6 +1,100 @@
 import { expect, test } from "@playwright/test";
 import { EDIT_SESSION_ID, installProfessionalMock, PROJECT_ID } from "./professional-mocks";
 
+test("从目标进入剧本后只将点选的分集采纳绑定到该计划", async ({ page }) => {
+  await installProfessionalMock(page);
+  const base = `/api/v1/projects/${PROJECT_ID}`;
+  const root = base + "/director/master-runs";
+  const goal = {
+    id: "goal",
+    goal: "按剧本确定两集",
+    progress: { completed_steps: 0, required_steps: 1 },
+    status: "waiting",
+    desired_state: "run",
+    current_plan_id: "plan",
+    control_epoch: 3,
+    available_actions: ["verify"],
+    revision: 5,
+  };
+  await page.route(
+    (u) => u.pathname.startsWith(root),
+    (r) => {
+      const path = new URL(r.request().url()).pathname;
+      if (path.endsWith("/plans"))
+        return r.fulfill({
+          json: [
+            {
+              id: "plan",
+              revision: 1,
+              decision_status: "accepted",
+              delivery_check: {
+                rule_id: "project_delivery_ready_v1",
+                work_type: "serial_comic",
+                targets: [],
+                planned_episode_count: 2,
+                output_slot: {
+                  flow_key: "episode_arrangement",
+                  step_key: "apply_episodes",
+                  field: "episode_ids",
+                },
+              },
+            },
+          ],
+        });
+      return r.fulfill({ json: path === root ? { items: [goal], next_offset: null } : goal });
+    },
+  );
+  let applies = 0;
+  await page.route(
+    (u) => u.pathname === base + "/story/proposals",
+    (r) =>
+      r.fulfill({
+        json:
+          r.request().method() === "GET"
+            ? []
+            : {
+                id: "story",
+                project_id: PROJECT_ID,
+                status: "pending",
+                summary: "两集",
+                created_at: new Date().toISOString(),
+                operations: [1, 2].map((n) => ({
+                  id: "e" + n,
+                  command: "story.upsert_episode",
+                  action: "create",
+                  key: "episode:" + n,
+                  payload: { episode_number: n, title: "灯会" + n, action: "create" },
+                  impact: "episode:" + n,
+                  rationale: "创建分集",
+                })),
+              },
+      }),
+  );
+  await page.route(
+    (u) => u.pathname === base + "/story/proposals/story/apply",
+    (r) => {
+      expect(r.request().postDataJSON()).toEqual({
+        decisions: [{ item_id: "e1", decision: "accepted" }],
+        arrangement_plan: { master_run_id: "goal", plan_id: "plan", control_epoch: 3 },
+      });
+      applies++;
+      return r.fulfill({ json: { accepted: ["e1"], rejected: [], failed: [] } });
+    },
+  );
+  await page.goto(`/projects/${PROJECT_ID}`);
+  await page.getByRole("button", { name: "持续目标" }).click();
+  await page.getByRole("link", { name: "按此计划采纳分集" }).click();
+  await expect(page.getByText(/此次采纳的分集将作为交付核验依据/)).toBeVisible();
+  await page.getByLabel("故事方向").fill("两集灯会");
+  await page.getByLabel("剧本文本").fill("# 第 1 集 — 灯会");
+  await page.getByTestId("story-proposal-create").click();
+  await expect(page.getByTestId("story-proposal-preview")).toBeVisible();
+  expect(applies).toBe(0);
+  await page.getByLabel("采用 分集 2", { exact: true }).uncheck();
+  await page.getByTestId("story-proposal-apply-selected").click();
+  await expect.poll(() => applies).toBe(1);
+});
+
 test("从已确认的未来分集计划进入剪辑，显式导出绑定同一计划", async ({ page }) => {
   const state = await installProfessionalMock(page);
   const base = `/api/v1/projects/${PROJECT_ID}`;

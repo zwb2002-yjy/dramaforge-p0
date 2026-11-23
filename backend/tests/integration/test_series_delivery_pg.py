@@ -267,6 +267,60 @@ async def test_current_series_needs_two_complete_matching_packages(pg_session, m
         delivery_verifier=verifier,
     )
     assert denied["status"] == "waiting"
+    from app.contracts.delivery_verification import DeliveryPlanRef
+    from app.director.story_proposal import create_story_proposal
+
+    turn = await _turn(db, project, user, thread)
+    story_goal = await service.create_for_origin_turn(turn_id=turn.id, goal="核验已采纳剧集")
+    story_plan, story_proposal = await service.propose_delivery_check(turn, story_arrangement=True)
+    approvals = ProposalService(db, actor=user)
+    await approvals.partial_apply(
+        project=project,
+        proposal_id=story_proposal,
+        apply_input=PartialApplyInput.model_validate(
+            {"decisions": [{"item_id": str(story_plan.decision_ref), "decision": "accepted"}]}
+        ),
+    )
+    draft = await create_story_proposal(
+        db,
+        project_id=project.id,
+        actor=user,
+        draft_text="\n".join(
+            f"# 第 {n} 集 — 确认{n}\n## 场景 1 — 灯会 / 夜间\n### 镜头 1 — 中景\n画面：灯笼"
+            for n in (1, 2)
+        ),
+        brief="Episode arrangement",
+        filename="episodes.md",
+        idempotency_key="story-verify",
+    )
+    episode_items = [row for row in draft.items if row.command == "story.upsert_episode"]
+    assert len(episode_items) == 2
+    decision = await approvals.partial_apply(
+        project=project,
+        proposal_id=draft.proposal.id,
+        arrangement_plan=DeliveryPlanRef(
+            master_run_id=story_goal.id,
+            plan_id=story_plan.id,
+            control_epoch=story_goal.control_epoch,
+        ),
+        apply_input=PartialApplyInput.model_validate(
+            {"decisions": [{"item_id": str(i.id), "decision": "accepted"} for i in episode_items]}
+        ),
+    )
+    assert decision.accepted == [i.id for i in episode_items]
+    result = await service.control(
+        run_id=story_goal.id,
+        operation="verify",
+        expected_revision=story_goal.revision,
+        delivery_verifier=verifier,
+    )
+    assert result["status"] == "succeeded", result
+    proof = result["verification"]["checks"][-1]
+    assert {r["episode_id"] for r in proof["story_receipts"]} == {str(first.id), str(second.id)}
+    assert {r["export_id"] for r in proof["evidence_refs"]} == {
+        str(first_package.export_id),
+        str(receipt.id),
+    }
     subtitle = await db.get(Artifact, episode_two.srt_artifact_id)
     assert await store.get_bytes(object_key=subtitle.object_key)
     subtitle.deleted_at = datetime.now(UTC)

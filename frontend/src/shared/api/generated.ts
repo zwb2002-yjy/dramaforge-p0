@@ -4558,6 +4558,30 @@ export interface components {
             /** Resolved At */
             resolved_at: string | null;
         };
+        /** AppliedEpisodeReceipt */
+        AppliedEpisodeReceipt: {
+            /**
+             * Proposal Id
+             * Format: uuid
+             */
+            proposal_id: string;
+            /**
+             * Item Id
+             * Format: uuid
+             */
+            item_id: string;
+            /**
+             * Episode Id
+             * Format: uuid
+             */
+            episode_id: string;
+            /** Episode Number */
+            episode_number: number;
+            /** Episode Version */
+            episode_version: number;
+            /** Decision Hash */
+            decision_hash: string;
+        };
         /** ArchiveRequest */
         ArchiveRequest: {
             /** Expected Revision */
@@ -6017,6 +6041,8 @@ export interface components {
                 number,
                 number
             ][];
+            /** Story Receipts */
+            story_receipts?: components["schemas"]["AppliedEpisodeReceipt"][];
             /** Evidence Refs */
             evidence_refs?: components["schemas"]["DeliveryPackage"][];
         } & {
@@ -7240,6 +7266,24 @@ export interface components {
             allowed_purposes: string[];
             /** Policy Hash */
             policy_hash: string | null;
+        };
+        /** EpisodeArrangementSlot */
+        EpisodeArrangementSlot: {
+            /**
+             * Flow Key
+             * @constant
+             */
+            flow_key: "episode_arrangement";
+            /**
+             * Step Key
+             * @constant
+             */
+            step_key: "apply_episodes";
+            /**
+             * Field
+             * @constant
+             */
+            field: "episode_ids";
         };
         /** EpisodeDeliveryItemRead */
         EpisodeDeliveryItemRead: {
@@ -10176,7 +10220,8 @@ export interface components {
             work_type: "serial_comic" | "single_comic" | "animation_promo";
             /** Targets */
             targets?: components["schemas"]["DeliveryTarget"][];
-            output_slot?: components["schemas"]["EpisodeExportSlot"] | null;
+            /** Output Slot */
+            output_slot?: components["schemas"]["EpisodeExportSlot"] | components["schemas"]["EpisodeArrangementSlot"] | null;
             /** Planned Episode Count */
             planned_episode_count?: number | null;
         };
@@ -12759,6 +12804,12 @@ export interface components {
             unresolved_external: boolean;
             /** Error Code */
             error_code: string | null;
+        };
+        /** StoryApplyInput */
+        StoryApplyInput: {
+            /** Decisions */
+            decisions: components["schemas"]["ProposalDecision"][];
+            arrangement_plan?: components["schemas"]["DeliveryPlanRef"] | null;
         };
         /** StoryGenerationRequest */
         StoryGenerationRequest: {
@@ -20354,7 +20405,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PartialApplyInput"];
+                "application/json": components["schemas"]["StoryApplyInput"];
             };
         };
         responses: {

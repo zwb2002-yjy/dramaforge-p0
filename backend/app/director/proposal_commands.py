@@ -244,7 +244,7 @@ async def _apply_story_upsert_episode(
     project_id: UUID,
     payload: dict[str, Any],
     expected_version: int | None,
-) -> None:
+) -> Episode:
     project = await lock_episode_project(session, project_id)
     episode, episode_number = await _episode_number_row(
         session,
@@ -269,11 +269,12 @@ async def _apply_story_upsert_episode(
         )
         session.add(episode)
         await session.flush()
-        return
+        return episode
     episode.title = title or None
     episode.synopsis = synopsis
     episode.version = (episode.version or 1) + 1
     await session.flush()
+    return episode
 
 
 async def _apply_story_upsert_scene(
@@ -958,7 +959,7 @@ class ProposalCommandRegistry:
         expected_target_version: int | None = None,
         command_key: str | None = None,
         selected_item_id: UUID | None = None,
-    ) -> None:
+    ) -> Episode | None:
         if not self.is_known(command):
             raise ProposalCommandError(
                 f"unknown proposal command: {command}",
@@ -972,7 +973,7 @@ class ProposalCommandRegistry:
                 actor_id=self._actor_id,
             )
         elif command == "story.upsert_episode":
-            await _apply_story_upsert_episode(
+            return await _apply_story_upsert_episode(
                 self._session,
                 project_id=project_id,
                 payload=payload,
@@ -1086,3 +1087,4 @@ class ProposalCommandRegistry:
             )
         else:  # pragma: no cover - registry covers all whitelisted commands
             raise ProposalCommandError(f"command not implemented: {command}")
+        return None

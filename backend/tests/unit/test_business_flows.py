@@ -706,6 +706,7 @@ def test_default_registry_carries_the_domain_flows() -> None:
         DEFAULT_DEFINITIONS,
         PROJECT_ASSET_AUDIT_V1,
         SCENE_PROMPT_REVIEW_V1,
+        SERIES_ARRANGEMENT,
         SERIES_EXPORTS,
         SHOT_MODEL_CONTRACT_REVIEW_V1,
         SHOT_PROMPT_REVIEW_V1,
@@ -714,6 +715,7 @@ def test_default_registry_carries_the_domain_flows() -> None:
     assert set(DEFAULT_DEFINITIONS.keys()) == {
         SHOT_PROMPT_REVIEW_V1.flow_key,
         SCENE_PROMPT_REVIEW_V1.flow_key,
+        SERIES_ARRANGEMENT.flow_key,
         SERIES_EXPORTS.flow_key,
         SHOT_MODEL_CONTRACT_REVIEW_V1.flow_key,
         PROJECT_ASSET_AUDIT_V1.flow_key,
@@ -721,6 +723,7 @@ def test_default_registry_carries_the_domain_flows() -> None:
     for definition in (
         SHOT_PROMPT_REVIEW_V1,
         SCENE_PROMPT_REVIEW_V1,
+        SERIES_ARRANGEMENT,
         SERIES_EXPORTS,
         SHOT_MODEL_CONTRACT_REVIEW_V1,
         PROJECT_ASSET_AUDIT_V1,
@@ -738,11 +741,14 @@ def test_default_registry_carries_the_domain_flows() -> None:
 
 def test_domain_flow_tools_exist_in_the_worker_registry() -> None:
     from app.director.agent_tools import ToolRegistry
-    from app.director.business_flows import DEFAULT_DEFINITIONS, SERIES_EXPORTS
+    from app.director.business_flows import DEFAULT_DEFINITIONS, SERIES_ARRANGEMENT, SERIES_EXPORTS
 
     names = {spec.name for spec in ToolRegistry(include_model_tools=True).specs()}
     for definition in DEFAULT_DEFINITIONS.definitions():
         for step in definition.steps:
+            if definition == SERIES_ARRANGEMENT:
+                assert step.action_kind == "apply" and step.tool_name not in names
+                continue
             if definition == SERIES_EXPORTS:
                 assert step.action_kind == "review" and step.tool_name not in names
                 continue

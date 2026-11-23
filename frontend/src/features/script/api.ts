@@ -72,16 +72,19 @@ export async function generateStoryProposal(
   );
 }
 
+export type ArrangementPlanRef = components["schemas"]["DeliveryPlanRef"];
+
 export async function applyStoryProposal(
   projectId: string,
   proposalId: string,
   decisions: Array<{ item_id: string; decision: "accepted" | "rejected" }>,
+  arrangementPlan?: ArrangementPlanRef,
 ): Promise<PartialApplyResult> {
   const csrf = await fetchCsrf();
   return apiSend<PartialApplyResult>(
     "POST",
     `/api/v1/projects/${projectId}/story/proposals/${proposalId}/apply`,
-    { decisions },
+    { decisions, ...(arrangementPlan && { arrangement_plan: arrangementPlan }) },
     csrf,
   );
 }

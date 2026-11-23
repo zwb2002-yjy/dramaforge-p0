@@ -16,6 +16,7 @@ from sqlalchemy import select
 
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.contracts.delivery_verification import DeliveryPlanRef
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
 from app.director.proposal_service import (
     PartialApplyInput,
@@ -38,6 +39,10 @@ class StoryProposalCreateBody(BaseModel):
     brief: str = Field(default="", max_length=8000)
     filename: str = Field(default="story-draft.md", min_length=1, max_length=260)
     draft_text: str = Field(min_length=1, max_length=200_000)
+
+
+class StoryApplyInput(PartialApplyInput):
+    arrangement_plan: DeliveryPlanRef | None = None
 
 
 class StoryOperationRead(BaseModel):
@@ -243,7 +248,7 @@ async def get_project_story_proposal(
 async def apply_project_story_proposal(
     project_id: UUID,
     proposal_id: UUID,
-    body: PartialApplyInput,
+    body: StoryApplyInput,
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
@@ -260,7 +265,7 @@ async def apply_project_story_proposal(
         raise NotFoundError("story proposal not found")
 
     # Retrying an applied proposal is idempotent.
-    if proposal.status in {"applied", "decided"}:
+    if body.arrangement_plan is None and proposal.status in {"applied", "decided"}:
         items = list(
             (
                 await session.execute(
@@ -283,6 +288,7 @@ async def apply_project_story_proposal(
         project=project,
         proposal_id=proposal.id,
         apply_input=body,
+        arrangement_plan=body.arrangement_plan,
     )
     await session.commit()
     return result

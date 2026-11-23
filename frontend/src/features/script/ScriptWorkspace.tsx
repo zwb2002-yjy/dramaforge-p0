@@ -1,4 +1,5 @@
 import {
+  ActionLink,
   Button,
   Checkbox,
   Disclosure,
@@ -11,6 +12,8 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
+import { apiGet } from "../../lib/api";
+import type { components } from "../../shared/api/generated";
 import { queryKeys } from "../../lib/queryKeys";
 import { timeOfDayLabel } from "../../lib/sceneLabels";
 import {
@@ -19,6 +22,7 @@ import {
   fetchScriptWorkspace,
   generateStoryProposal,
   listStoryProposals,
+  type ArrangementPlanRef,
   type ScriptWorkspaceRead,
   type StoryProposalOperation,
   type StoryProposalRead,
@@ -29,6 +33,7 @@ import type { DirectorInvocationEvidence } from "../director/suggestion-types";
 import "./script-workspace.css";
 
 type ScriptWorkspaceProps = {
+  arrangementPlan?: ArrangementPlanRef;
   projectId: string;
   /** Leave the Script workspace for one imported Scene. */
   onOpenScene?: (sceneId: string) => void;
@@ -285,8 +290,26 @@ function ProposalOperationDetails({ operation }: { operation: StoryProposalOpera
   return null;
 }
 
-export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps) {
+export function ScriptWorkspace({ projectId, arrangementPlan, onOpenScene }: ScriptWorkspaceProps) {
   const queryClient = useQueryClient();
+  const destination = useQuery({
+    queryKey: [...queryKeys.director.goals(projectId), arrangementPlan?.master_run_id],
+    queryFn: ({ signal }) =>
+      apiGet<components["schemas"]["RunRead"]>(
+        `/api/v1/projects/${projectId}/director/master-runs/${arrangementPlan!.master_run_id}`,
+        undefined,
+        signal,
+      ),
+    enabled: Boolean(arrangementPlan),
+    retry: false,
+  });
+  const bindingReady =
+    !arrangementPlan ||
+    (destination.data?.current_plan_id === arrangementPlan.plan_id &&
+      destination.data.control_epoch === arrangementPlan.control_epoch &&
+      destination.data.desired_state === "run" &&
+      ["waiting", "running"].includes(destination.data.status));
+
   const [brief, setBrief] = useState("");
   const [filename, setFilename] = useState("story-draft.md");
   const [draftText, setDraftText] = useState("");
@@ -392,11 +415,23 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
     }: {
       proposalId: string;
       decisions: Array<{ item_id: string; decision: "accepted" | "rejected" }>;
-    }) => applyStoryProposal(projectId, proposalId, decisions),
+    }) =>
+      applyStoryProposal(
+        projectId,
+        proposalId,
+        decisions,
+        ...(arrangementPlan ? ([arrangementPlan] as const) : []),
+      ),
     onSuccess: (result) => {
+      if (arrangementPlan)
+        void queryClient.invalidateQueries({ queryKey: queryKeys.director.goals(projectId) });
       const accepted = result.accepted?.length ?? 0;
       const rejected = result.rejected?.length ?? 0;
       const failed = result.failed?.length ?? 0;
+      if (failed && arrangementPlan)
+        setApplyError(
+          result.failed?.map((f) => String(f.error ?? f.code ?? "分集采纳失败")).join("；") ?? null,
+        );
       setApplyMessage(
         `故事更新完成：采用 ${accepted}，拒绝 ${rejected}${failed ? `，失败 ${failed}` : ""}`,
       );
@@ -439,7 +474,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
     .map((operation) => operation.id);
 
   function submitApply(ids: string[], decision: "accepted" | "rejected" = "accepted") {
-    if (!activeProposal || ids.length === 0) return;
+    if (!activeProposal || !bindingReady || ids.length === 0) return;
     setApplyError(null);
     setApplyMessage(null);
     applyMut.mutate({
@@ -514,6 +549,20 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
 
   return (
     <div data-testid="project-script-page" className="qc-project-page">
+      {arrangementPlan && (
+        <p role="status">
+          关联持续目标 · {destination.data?.goal ?? (destination.isError ? "读取失败" : "读取中")}。
+          {bindingReady ? "此次采纳的分集将作为交付核验依据。" : "请从当前有效计划重新进入。"}{" "}
+          <ActionLink
+            to="/projects/$projectId/script"
+            params={{ projectId }}
+            search={{}}
+            tone="ghost"
+          >
+            取消关联
+          </ActionLink>
+        </p>
+      )}
       <PageHeader title="故事剧本" />
 
       {workspace.isError && (
@@ -1000,7 +1049,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
                           type="button"
                           tone="primary"
                           data-testid="story-proposal-apply-current-scene"
-                          disabled={!canApplyCurrentScene || applyMut.isPending}
+                          disabled={!bindingReady || !canApplyCurrentScene || applyMut.isPending}
                           onClick={handleApplyCurrentScene}
                         >
                           {applyMut.isPending ? "采纳中…" : "采用当前场"}
@@ -1127,7 +1176,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
               type="button"
               tone="primary"
               data-testid="story-proposal-apply-selected"
-              disabled={selectedIds.length === 0 || applyMut.isPending}
+              disabled={!bindingReady || selectedIds.length === 0 || applyMut.isPending}
               onClick={() => submitApply(selectedIds, "accepted")}
             >
               {applyMut.isPending ? "采用中…" : "采用已选"}
@@ -1135,7 +1184,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
             <Button
               type="button"
               data-testid="story-proposal-apply-all"
-              disabled={proposalOperations.length === 0 || applyMut.isPending}
+              disabled={!bindingReady || proposalOperations.length === 0 || applyMut.isPending}
               onClick={() =>
                 submitApply(
                   proposalOperations.map((op) => op.id),
@@ -1148,7 +1197,7 @@ export function ScriptWorkspace({ projectId, onOpenScene }: ScriptWorkspaceProps
             <Button
               type="button"
               data-testid="story-proposal-reject-all"
-              disabled={proposalOperations.length === 0 || applyMut.isPending}
+              disabled={!bindingReady || proposalOperations.length === 0 || applyMut.isPending}
               onClick={() =>
                 submitApply(
                   proposalOperations.map((op) => op.id),

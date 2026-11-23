@@ -1342,26 +1342,32 @@ class DirectorAgentService:
             }:
                 from app.director.agent_proposals import (
                     AgentProposalRead,
+                    DeliveryPlanProposalInput,
                     DeliveryPlanProposalRead,
                     create_agent_shot_proposal,
                 )
-                from app.director.agent_tools import EmptyInput
 
                 try:
                     proposal: AgentProposalRead | DeliveryPlanProposalRead
                     if call.name == "project_delivery_plan_propose":
-                        EmptyInput.model_validate(call.arguments)
+                        plan_input = DeliveryPlanProposalInput.model_validate(call.arguments)
                         project = await self._reader(session).project()
                         owner = await session.get(User, self.actor_id)
                         if owner is None:
                             raise NotFoundError("Director goal owner not found")
                         async with session.begin_nested():
                             plan, proposal_id = await MasterRunService(
-                                session, actor=owner, project=project,
-                            ).propose_delivery_check(turn)
+                                session,
+                                actor=owner,
+                                project=project,
+                            ).propose_delivery_check(
+                                turn, story_arrangement=plan_input.scope_source == "story_apply"
+                            )
                         proposal = DeliveryPlanProposalRead(
-                            proposal_ids=[proposal_id], master_run_id=plan.master_run_id,
-                            plan_id=plan.id, observed_versions=dict(context.expected_versions),
+                            proposal_ids=[proposal_id],
+                            master_run_id=plan.master_run_id,
+                            plan_id=plan.id,
+                            observed_versions=dict(context.expected_versions),
                         )
                     else:
                         proposal = await create_agent_shot_proposal(

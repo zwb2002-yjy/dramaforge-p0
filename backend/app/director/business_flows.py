@@ -26,7 +26,8 @@ from app.assets.models import Episode, Scene, Shot
 from app.contracts.delivery_verification import (
     BoundDeliveryOutput,
     DeliverySlotRead,
-    EpisodeExportSlot,
+    EpisodeArrangementSlot,
+    SeriesSlot,
 )
 from app.contracts.domain_events import BusinessFlowChanged, BusinessStepChanged
 from app.director.agent_tools import ToolRegistry
@@ -38,6 +39,7 @@ from app.director.business_flow_models import (
 )
 from app.director.master_run_models import DirectorMasterRun, DirectorMasterRunPlan
 from app.director.master_run_notices import append_master_run_notice
+from app.director.proposal_models import DirectorProposalItem
 from app.director.turn_models import DirectorTurn
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
@@ -369,11 +371,40 @@ SERIES_EXPORTS = BusinessFlowDefinition(
     graph_entrypoint="episode_delivery_v1",
 )
 
-def series_export_flow(project_id: UUID, episode_count: int) -> dict[str, object]:
+SERIES_ARRANGEMENT = BusinessFlowDefinition(
+    flow_key="episode_arrangement",
+    definition_key="episode_arrangement",
+    definition_version="1",
+    state_schema_version="business-flow-state-v1",
+    scope_type="project",
+    steps=(
+        FlowStepSpec(
+            step_key="apply_episodes",
+            tool_name="story.upsert_episode",
+            action_kind="apply",
+            input_keys=("planned_episode_count",),
+            completion_rule_id="confirmed_episode_items",
+        ),
+    ),
+    completion_rule_ids=("all_required_steps_succeeded", "no_unresolved_external"),
+    resume_rule_id="retain_completed_steps",
+    graph_entrypoint="episode_arrangement_v1",
+)
+
+
+def slot_definition(slot: SeriesSlot) -> BusinessFlowDefinition:
+    return SERIES_ARRANGEMENT if isinstance(slot, EpisodeArrangementSlot) else SERIES_EXPORTS
+
+
+def series_flow(project_id: UUID, episode_count: int, slot: SeriesSlot) -> dict[str, object]:
+    definition = slot_definition(slot)
     return {
-        "flow_key": SERIES_EXPORTS.flow_key, "definition_key": SERIES_EXPORTS.definition_key,
-        "definition_version": SERIES_EXPORTS.definition_version, "scope_type": "project",
-        "scope_entity_id": str(project_id), "input": {"planned_episode_count": episode_count},
+        "flow_key": definition.flow_key,
+        "definition_key": definition.definition_key,
+        "definition_version": definition.definition_version,
+        "scope_type": "project",
+        "scope_entity_id": str(project_id),
+        "input": {"planned_episode_count": episode_count},
     }
 
 
@@ -384,6 +415,7 @@ DEFAULT_DEFINITIONS = BusinessFlowDefinitionRegistry(
         SHOT_MODEL_CONTRACT_REVIEW_V1,
         PROJECT_ASSET_AUDIT_V1,
         SERIES_EXPORTS,
+        SERIES_ARRANGEMENT,
     )
 )
 
@@ -631,11 +663,11 @@ class BusinessFlowService:
                 )
             # This registered review step observes explicitly requested exports at Verify.
             # It never dispatches a model tool or a production command from the worker.
-            manual_export = definition == SERIES_EXPORTS
+            manual = definition in (SERIES_EXPORTS, SERIES_ARRANGEMENT)
             unknown_tools = sorted(
                 {step.tool_name for step in definition.steps} - controlled
             )
-            if unknown_tools and not manual_export:
+            if unknown_tools and not manual:
                 raise ValidationAppError(
                     "流程引用了未注册的受控工具",
                     details={
@@ -669,8 +701,8 @@ class BusinessFlowService:
                 scope_type=spec.scope_type,
                 scope_entity_id=spec.scope_entity_id,
                 created_by_turn_id=created_by_turn_id,
-                status="waiting" if manual_export else "pending",
-                wait_reason="user_decision" if manual_export else None,
+                status="waiting" if manual else "pending",
+                wait_reason="user_decision" if manual else None,
                 revision=1,
             )
             self._session.add(instance)
@@ -695,8 +727,8 @@ class BusinessFlowService:
                         completion_spec={"rule_id": step_spec.completion_rule_id},
                         dependencies=list(step_spec.dependencies),
                         result_refs=[],
-                        status="waiting_user" if manual_export else "pending",
-                        wait_reason="episode_exports" if manual_export else None,
+                        status="waiting_user" if manual else "pending",
+                        wait_reason=definition.steps[0].completion_rule_id if manual else None,
                     )
                 )
             await self._session.flush()
@@ -771,7 +803,8 @@ class BusinessFlowService:
                 spec = current.get(instance.flow_key)
                 if (
                     spec is None
-                    or instance.definition_key == SERIES_EXPORTS.definition_key
+                    or instance.definition_key
+                    in {SERIES_EXPORTS.definition_key, SERIES_ARRANGEMENT.definition_key}
                     or spec.definition_key != instance.definition_key
                     or spec.definition_version != instance.definition_version
                     or spec.scope_type != instance.scope_type
@@ -1152,9 +1185,10 @@ class BusinessFlowService:
         self,
         run: DirectorMasterRun,
         plan: DirectorMasterRunPlan,
-        slot: EpisodeExportSlot,
+        slot: SeriesSlot,
         count: int,
     ) -> BoundDeliveryOutput | None:
+        definition = slot_definition(slot)
         instance = await self._session.scalar(
             select(DirectorBusinessFlowInstance)
             .where(
@@ -1164,10 +1198,10 @@ class BusinessFlowService:
                 DirectorBusinessFlowInstance.plan_revision == plan.revision,
                 DirectorBusinessFlowInstance.flow_key == slot.flow_key,
                 DirectorBusinessFlowInstance.status.in_(("waiting", "running", "succeeded")),
-                DirectorBusinessFlowInstance.definition_key == SERIES_EXPORTS.definition_key,
+                DirectorBusinessFlowInstance.definition_key == definition.definition_key,
                 DirectorBusinessFlowInstance.definition_version
-                == SERIES_EXPORTS.definition_version,
-                DirectorBusinessFlowInstance.contract_hash == SERIES_EXPORTS.contract_hash,
+                == definition.definition_version,
+                DirectorBusinessFlowInstance.contract_hash == definition.contract_hash,
                 DirectorBusinessFlowInstance.scope_entity_id == self._project.id,
             )
             .with_for_update()
@@ -1203,6 +1237,17 @@ class BusinessFlowService:
             definition_hash=instance.contract_hash,
             slot=slot,
         )
+
+    async def record_episode_apply(
+        self, binding: BoundDeliveryOutput, item: DirectorProposalItem, episode: Episode,
+    ) -> None:
+        from app.director.story_arrangement import record_episode
+
+        step, complete = await record_episode(self._session, binding, item, episode)
+        await self._notify_step(step)
+        if complete:
+            instance = await self.get(binding.flow_instance_id)
+            await self._settle_instance(instance)
 
     async def observe_episode_exports(
         self,
