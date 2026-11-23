@@ -124,6 +124,45 @@ def test_plan_completion_accepts_only_declared_targets(completion):
     assert refused.value.details["code"] == "MASTER_RUN_COMPLETION_SHAPE"
 
 
+@pytest.mark.parametrize(
+    "field,flows,code",
+    [
+        ("proposal_ids", [], "MASTER_RUN_COMPLETION_SHAPE"),
+        ("episode_exports", [], "MASTER_RUN_OUTPUT_SLOT"),
+    ],
+)
+def test_future_slot_requires_registered_field_and_matching_flow(field, flows, code):
+    with pytest.raises(ValidationAppError) as refused:
+        MasterRunService.validate_plan_data(
+            {
+                "goal": "Deliver",
+                "flows": flows,
+                "dependencies": [],
+                "input_versions": {},
+                "limits": {},
+                "decision_basis": {
+                    "expected_run_revision": 1,
+                    "expected_control_epoch": 0,
+                    "current_plan_id": None,
+                    "current_plan_revision": None,
+                },
+                "completion": [
+                    {
+                        "rule_id": "project_delivery_ready_v1",
+                        "work_type": "serial_comic",
+                        "planned_episode_count": 2,
+                        "output_slot": {
+                            "flow_key": "episode_delivery",
+                            "step_key": "collect_exports",
+                            "field": field,
+                        },
+                    }
+                ],
+            }
+        )
+    assert refused.value.details["code"] == code
+
+
 async def test_only_a_thread_bound_agent_turn_can_originate_one_goal(session: AsyncSession):
     project, user, thread = await _seed(session)
     service = MasterRunService(session, actor=user, project=project)

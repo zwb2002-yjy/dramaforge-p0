@@ -14,6 +14,7 @@ import {
   renderFinalFilm,
   type FinalFilmRead,
   type FinalFilmJobRead,
+  type DeliveryPlanRef,
 } from "./api";
 
 function wait(signal: AbortSignal): Promise<void> {
@@ -74,11 +75,13 @@ export function useFinalFilmExport({
   sessionId,
   version,
   dirty,
+  deliveryPlan,
 }: {
   projectId: string;
   sessionId?: string;
   version?: number;
   dirty: boolean;
+  deliveryPlan?: DeliveryPlanRef;
 }) {
   const client = useQueryClient();
   const [result, setResult] = useState<FinalFilmRead | null>(null);
@@ -193,13 +196,16 @@ export function useFinalFilmExport({
         throw new Error("成片准备回执缺少素材版本，请确认前后端版本一致；不要重复生成。");
       }
       setPending("render");
+      // The preparation fingerprint already binds the saved session and version.
+      const renderKey = deliveryPlan
+        ? `plan-${deliveryPlan.plan_id}-${deliveryPlan.control_epoch}-${prepared.preparation_fingerprint}`
+        : `final-${sessionId}-${exactVersion}-${prepared.preparation_fingerprint}`;
       const queued = await renderFinalFilm(
         projectId,
         sessionId,
         exactVersion,
-        // The session UUID already identifies the project. Keep the full media
-        // fingerprint plus timeline version within the backend's 120-byte key limit.
-        `final-${sessionId}-${exactVersion}-${prepared.preparation_fingerprint}`,
+        renderKey,
+        ...(deliveryPlan ? ([deliveryPlan] as const) : []),
       );
       void client.invalidateQueries({ queryKey: historyKey });
       if (!current()) return;

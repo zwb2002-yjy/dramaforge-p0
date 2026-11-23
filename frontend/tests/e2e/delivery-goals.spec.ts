@@ -1,5 +1,88 @@
 import { expect, test } from "@playwright/test";
-import { installProfessionalMock, PROJECT_ID } from "./professional-mocks";
+import { EDIT_SESSION_ID, installProfessionalMock, PROJECT_ID } from "./professional-mocks";
+
+test("从已确认的未来分集计划进入剪辑，显式导出绑定同一计划", async ({ page }) => {
+  const state = await installProfessionalMock(page);
+  const base = `/api/v1/projects/${PROJECT_ID}`;
+  const master = base + "/director/master-runs";
+  const goal = {
+    id: "goal",
+    goal: "交付灯会两集",
+    status: "waiting",
+    desired_state: "run",
+    current_plan_id: "plan",
+    control_epoch: 1,
+    available_actions: ["verify"],
+    revision: 2,
+  };
+  const plan = {
+    id: "plan",
+    decision_status: "accepted",
+    revision: 1,
+    delivery_check: {
+      rule_id: "project_delivery_ready_v1",
+      work_type: "serial_comic",
+      targets: [],
+      planned_episode_count: 2,
+      output_slot: {
+        flow_key: "episode_delivery",
+        step_key: "collect_exports",
+        field: "episode_exports",
+      },
+    },
+  };
+  await page.route(
+    (url) => url.pathname.startsWith(master),
+    (route) => {
+      const path = new URL(route.request().url()).pathname;
+      return route.fulfill({
+        json: path.endsWith("/plans")
+          ? [plan]
+          : path.endsWith("/goal")
+            ? goal
+            : { items: [goal], next_offset: null },
+      });
+    },
+  );
+  const cut = { ...state.editing.session, episode_id: "episode-2", name: "灯会第二集" };
+  await page.route(
+    (url) => url.pathname === base + "/edit-sessions",
+    (route) => route.fulfill({ json: [{ ...cut, clip_count: 1 }] }),
+  );
+  await page.route(
+    (url) => url.pathname === base + "/edit-sessions/" + EDIT_SESSION_ID,
+    (route) => route.fulfill({ json: cut }),
+  );
+  let rendered = 0;
+  await page.route(
+    (url) => url.pathname === base + "/final-film/render",
+    async (route) => {
+      expect(route.request().postDataJSON()).toEqual({
+        edit_session_id: EDIT_SESSION_ID,
+        expected_timeline_version: cut.version,
+        name: "V1 Final Film",
+        delivery_plan: { master_run_id: "goal", plan_id: "plan", control_epoch: 1 },
+      });
+      expect(await route.request().headerValue("Idempotency-Key")).toBe(
+        "plan-plan-1-" + "a".repeat(64),
+      );
+      rendered++;
+      return route.fulfill({
+        status: 202,
+        json: { status: "queued", node_run_id: "slot-run", attempt_no: 1 },
+      });
+    },
+  );
+  await page.goto(`/projects/${PROJECT_ID}`);
+  await page.getByRole("button", { name: "持续目标" }).click();
+  await expect(page.getByText(/依次交付第 1 至 2 集/)).toBeVisible();
+  await page.getByRole("link", { name: "按此计划导出分集" }).click();
+  await page.getByRole("button", { name: /灯会第二集/ }).click();
+  await expect(page.getByText(/本次分集导出将绑定已确认的计划/)).toBeVisible();
+  expect(rendered).toBe(0);
+  await page.getByTestId("export-final-film").click();
+  await expect.poll(() => rendered).toBe(1);
+});
 
 test("持续目标在用户确认后核验并保留缺集原因", async ({ page }) => {
   await installProfessionalMock(page);

@@ -3,6 +3,7 @@
 import json
 
 import httpx
+import pytest
 from app.access.models import Project
 from app.assets.models import Episode
 from sqlalchemy.orm import Session
@@ -12,12 +13,14 @@ from test_director_agent_http_pg import http_database as http_database
 from test_director_turn_lifecycle_pg import pytestmark as pytestmark
 
 
-async def test_delivery_goal_via_project_conversation(http_agent, monkeypatch):
+@pytest.mark.parametrize("future", [False, True])
+async def test_delivery_goal_via_project_conversation(http_agent, monkeypatch, future):
     agent = http_agent
     with Session(agent.database.engine) as db:
         project = db.get(Project, agent.project_id)
         project.work_type, project.planned_episode_count = "serial_comic", 2
-        db.add(Episode(project_id=project.id, episode_number=2))
+        if not future:
+            db.add(Episode(project_id=project.id, episode_number=2))
         db.commit()
     calls = []
 
@@ -80,7 +83,14 @@ async def test_delivery_goal_via_project_conversation(http_agent, monkeypatch):
     plan = plans[0]
     assert plan["proposal_id"] and plan["decision_ref"]
     assert plan["decision_status"] == "pending"
-    assert len(plan["plan_data"]["completion"][0]["targets"]) == 2
+    check = plan["delivery_check"]
+    if future:
+        assert (
+            check["planned_episode_count"] == 2
+            and check["output_slot"]["field"] == "episode_exports"
+        )
+    else:
+        assert len(check["targets"]) == 2 and check["output_slot"] is None
     apply = await agent.client.post(
         f"/api/v1/projects/{agent.project_id}/director/proposals/{plan['proposal_id']}/apply",
         headers=agent.headers,
@@ -100,7 +110,9 @@ async def test_delivery_goal_via_project_conversation(http_agent, monkeypatch):
     receipt = response.json()
     assert receipt["status"] == "waiting" and not receipt["verification"]["satisfied"]
     evidence = receipt["verification"]["checks"][-1]["evidence_refs"]
-    assert len(evidence) == 2 and all(
+    ranges = receipt["verification"]["checks"][-1]["missing_episode_ranges"]
+    assert ranges == ([[2, 2]] if future else [])
+    assert len(evidence) == (1 if future else 2) and all(
         p["blockers"] == ["DELIVERY_SESSION_MISSING"] for p in evidence
     )
     assert (

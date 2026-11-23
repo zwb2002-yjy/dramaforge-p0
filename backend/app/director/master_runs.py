@@ -21,6 +21,9 @@ from app.access.models import Project, User
 from app.assets.models import Episode
 from app.contracts.delivery_verification import (
     COMPLETION_RULES,
+    BoundDeliveryOutput,
+    DeliveryPlanRef,
+    DeliverySlotVerifier,
     DeliveryVerifier,
     EpisodeDeliveryGoal,
     FlowCompletionGoal,
@@ -32,9 +35,11 @@ from app.contracts.domain_events import (
     MasterRunPlanProposed,
 )
 from app.director.business_flows import (
+    SERIES_EXPORTS,
     BusinessFlowDefinitionRegistry,
     BusinessFlowService,
     normalize_dispositions,
+    series_export_flow,
     validate_plan_flows,
 )
 from app.director.master_run_models import (
@@ -325,6 +330,8 @@ class MasterRunService:
         ):
             raise ConflictError("只有当前目标的首次规划轮次可以提出初始交付计划")
         work_type = self._project.work_type
+        flows: list[dict[str, object]] = []
+        future_count: int | None = None
         if work_type == "animation_promo":
             targets: list[dict[str, object]] = [{"episode_id": None}]
         else:
@@ -338,22 +345,40 @@ class MasterRunService:
                     .with_for_update(read=True)
                 )
             )
-            if work_type == "serial_comic" and self._project.planned_episode_count is not None and (
-                len(episodes) != self._project.planned_episode_count
-                or any(e.episode_number != index for index, e in enumerate(episodes, start=1))
+            if (
+                work_type == "serial_comic"
+                and self._project.planned_episode_count is not None
+                and (
+                    len(episodes) != self._project.planned_episode_count
+                    or any(e.episode_number != index for index, e in enumerate(episodes, start=1))
+                )
             ):
-                raise ValidationAppError("请先建立计划中的每一集，再确认整剧交付范围")
+                future_count = self._project.planned_episode_count
+                flows = [series_export_flow(self._project.id, future_count)]
             targets = [
                 {"episode_id": str(episode.id), "episode_number": episode.episode_number}
                 for episode in episodes
             ]
+        completion: dict[str, object] = {
+            "rule_id": "project_delivery_ready_v1",
+            "work_type": work_type,
+        }
+        if future_count is not None:
+            completion.update(
+                planned_episode_count=future_count,
+                output_slot={
+                    "flow_key": "episode_delivery",
+                    "step_key": "collect_exports",
+                    "field": "episode_exports",
+                },
+            )
+        else:
+            completion["targets"] = targets
         data: dict[str, object] = {
             "goal": run.goal,
-            "flows": [],
+            "flows": flows,
             "dependencies": [],
-            "completion": [
-                {"rule_id": "project_delivery_ready_v1", "work_type": work_type, "targets": targets}
-            ],
+            "completion": [completion],
             "input_versions": dict(turn.input_versions),
             "limits": {"max_model_calls": 0, "max_tool_calls": 0, "max_provider_calls": 0},
             "decision_basis": {
@@ -415,13 +440,27 @@ class MasterRunService:
                 details={"code": "MASTER_RUN_PLAN_BASIS"},
             )
         try:
-            COMPLETION_RULES.validate_python(plan_data.get("completion"))
+            declarations = COMPLETION_RULES.validate_python(plan_data.get("completion"))
         except ValidationError as exc:
             raise ValidationAppError(
                 "完成条件必须是已注册的目标声明", details={"code": "MASTER_RUN_COMPLETION_SHAPE"},
             ) from exc
         # Validate the flow list early so a bad plan never reaches Apply.
-        validate_plan_flows(plan_data.get("flows"), allow_empty=True)
+        specs = validate_plan_flows(plan_data.get("flows"), allow_empty=True)
+        for declaration in declarations:
+            if not isinstance(declaration, ProjectDeliveryGoal) or declaration.output_slot is None:
+                continue
+            if not any(
+                spec.flow_key == declaration.output_slot.flow_key
+                and spec.definition_key == SERIES_EXPORTS.definition_key
+                and spec.definition_version == SERIES_EXPORTS.definition_version
+                and spec.scope_type == "project"
+                and spec.input == {"planned_episode_count": declaration.planned_episode_count}
+                for spec in specs
+            ):
+                raise ValidationAppError("输出槽必须对应计划内已注册的分集交付步骤",
+                                         details={"code":"MASTER_RUN_OUTPUT_SLOT"})
+
 
     async def _basis_matches(self, run: DirectorMasterRun, basis: dict[str, object]) -> bool:
         current = await self.current_plan(run)
@@ -631,8 +670,14 @@ class MasterRunService:
         )
 
     async def control(
-        self, *, run_id: UUID, operation: str, expected_revision: int, reason: str = "",
+        self,
+        *,
+        run_id: UUID,
+        operation: str,
+        expected_revision: int,
+        reason: str = "",
         delivery_verifier: DeliveryVerifier | None = None,
+        slot_verifier: DeliverySlotVerifier | None = None,
     ) -> dict[str, object]:
         if operation not in CONTROL_OPERATIONS:
             raise ValidationAppError("不支持的控制操作")
@@ -651,11 +696,16 @@ class MasterRunService:
             return dict(replay.result_data)
         if run.revision != expected_revision:
             raise _state_conflict(
-                "MASTER_RUN_VERSION_CONFLICT", "目标已变化，请刷新后重新确认",
+                "MASTER_RUN_VERSION_CONFLICT",
+                "目标已变化，请刷新后重新确认",
                 current_revision=run.revision,
             )
         result = await self._apply_control(
-            run, operation=operation, reason=reason, delivery_verifier=delivery_verifier,
+            run,
+            operation=operation,
+            reason=reason,
+            delivery_verifier=delivery_verifier,
+            slot_verifier=slot_verifier,
         )
         run.revision += 1
         run.updated_at = datetime.now(UTC)
@@ -672,17 +722,27 @@ class MasterRunService:
         self._session.add(receipt)
         await self._session.flush()
         await append_master_run_notice(
-            self._session, project_id=self._project.id, actor_id=self._actor.id,
+            self._session,
+            project_id=self._project.id,
+            actor_id=self._actor.id,
             notice=MasterRunChanged(
-                run_id=run.id, revision=run.revision, status=run.status,
-                desired_state=run.desired_state, control_epoch=run.control_epoch,
+                run_id=run.id,
+                revision=run.revision,
+                status=run.status,
+                desired_state=run.desired_state,
+                control_epoch=run.control_epoch,
             ),
         )
         return dict(result)
 
     async def _apply_control(
-        self, run: DirectorMasterRun, *, operation: str, reason: str,
+        self,
+        run: DirectorMasterRun,
+        *,
+        operation: str,
+        reason: str,
         delivery_verifier: DeliveryVerifier | None,
+        slot_verifier: DeliverySlotVerifier | None,
     ) -> dict[str, object]:
         if operation == "pause":
             self._require_edge(run, "paused")
@@ -718,7 +778,9 @@ class MasterRunService:
             assert plan is not None
             flows = self._flows()
             flow_result = await flows.completion(run=run, plan=plan)
-            verification = await self._verify_plan(plan, flow_result, delivery_verifier)
+            verification = await self._verify_plan(
+                run, plan, flow_result, delivery_verifier, slot_verifier
+            )
             if verification["satisfied"] and verification.get("delivery_checked"):
                 self._require_edge(run, "succeeded")
                 run.status = "succeeded"
@@ -748,11 +810,66 @@ class MasterRunService:
             "reason": reason or None,
         }
 
+    async def _plan_confirmed(self, plan: DirectorMasterRunPlan) -> bool:
+        decision = await self._session.scalar(
+            select(DirectorProposalItem)
+            .where(
+                DirectorProposalItem.id == plan.decision_ref,
+                DirectorProposalItem.project_id == self._project.id,
+            )
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        return bool(
+            decision
+            and decision.status == "accepted"
+            and decision.command == PLAN_COMMAND
+            and decision.payload.get("plan_id") == str(plan.id)
+            and decision.payload.get("master_run_id") == str(plan.master_run_id)
+            and decision.payload.get("plan_hash") == plan.plan_hash
+            and plan_hash(plan.schema_version, plan.plan_data) == plan.plan_hash
+        )
+
+    async def bind_export(
+        self, requested: DeliveryPlanRef, episode_number: int
+    ) -> BoundDeliveryOutput:
+        run = await self._locked(requested.master_run_id)
+        plan = await self.current_plan(run)
+        if (
+            plan is None
+            or plan.id != requested.plan_id
+            or run.control_epoch != requested.control_epoch
+            or run.status not in {"waiting", "running"}
+            or run.desired_state != "run"
+            or not await self._plan_confirmed(plan)
+        ):
+            raise ConflictError("此目标尚未确认、已暂停或已更换计划")
+        for goal in COMPLETION_RULES.validate_python(plan.plan_data.get("completion")):
+            if (
+                isinstance(goal, ProjectDeliveryGoal)
+                and goal.output_slot is not None
+                and goal.planned_episode_count is not None
+                and 1 <= episode_number <= goal.planned_episode_count
+                and goal.work_type == self._project.work_type
+                and goal.planned_episode_count == self._project.planned_episode_count
+            ):
+                binding = await self._flows().delivery_output(
+                    run,
+                    plan,
+                    goal.output_slot,
+                    goal.planned_episode_count,
+                )
+                if binding is not None:
+                    return binding
+        raise ConflictError("分集不在此计划的导出范围内")
+
     async def _verify_plan(
         self,
+        run: DirectorMasterRun,
         plan: DirectorMasterRunPlan,
         flow_result: dict[str, object],
         reader: DeliveryVerifier | None,
+        slot_reader: DeliverySlotVerifier | None,
     ) -> dict[str, object]:
         try:
             goals = COMPLETION_RULES.validate_python(plan.plan_data.get("completion"))
@@ -780,24 +897,7 @@ class MasterRunService:
             or check["rule_id"] in declared_rules
             or check["rule_id"] == "no_unresolved_external"
         ]
-        decision = await self._session.scalar(
-            select(DirectorProposalItem)
-            .where(
-                DirectorProposalItem.id == plan.decision_ref,
-                DirectorProposalItem.project_id == self._project.id,
-            )
-            .with_for_update(read=True)
-            .execution_options(populate_existing=True)
-        )
-        confirmed = bool(
-            decision
-            and decision.status == "accepted"
-            and decision.command == PLAN_COMMAND
-            and decision.payload.get("plan_id") == str(plan.id)
-            and decision.payload.get("master_run_id") == str(plan.master_run_id)
-            and decision.payload.get("plan_hash") == plan.plan_hash
-            and plan_hash(plan.schema_version, plan.plan_data) == plan.plan_hash
-        )
+        confirmed = await self._plan_confirmed(plan)
         checks.append(
             {
                 "rule_id": "confirmed_plan",
@@ -822,13 +922,38 @@ class MasterRunService:
             if isinstance(goal, ProjectDeliveryGoal):
                 if goal.work_type != self._project.work_type:
                     reasons.append("DELIVERY_WORK_TYPE_CHANGED")
-                if (
-                    goal.work_type == "serial_comic"
-                    and self._project.planned_episode_count
-                    and len(targets) != self._project.planned_episode_count
-                ):
+                actual = self._project.planned_episode_count
+                if (goal.work_type == "serial_comic" and (goal.output_slot or actual is not None)
+                        and (goal.planned_episode_count or len(targets)) != actual):
                     reasons.append("DELIVERY_EPISODE_COUNT_MISMATCH")
-            if reader is None:
+            missing_ranges: list[tuple[int, int]] = []
+            if isinstance(goal, ProjectDeliveryGoal) and goal.output_slot is not None:
+                count = goal.planned_episode_count
+                assert count is not None
+                flows = self._flows()
+                binding = await flows.delivery_output(run, plan, goal.output_slot, count)
+                if binding is None or slot_reader is None:
+                    reasons.append("DELIVERY_OUTPUT_SLOT_UNAVAILABLE")
+                else:
+                    output = await slot_reader(binding=binding, episode_count=count)
+                    missing_ranges = output.missing_ranges
+                    evidence.extend(p.model_dump(mode="json") for p in output.packages)
+                    if missing_ranges or len(output.packages) != count:
+                        reasons.append("DELIVERY_EPISODE_MISSING")
+                    for package in output.packages:
+                        reasons.extend(package.blockers)
+                    inputs_valid = all(
+                        c["satisfied"]
+                        for c in checks
+                        if c["rule_id"] in {"input_versions", "no_unresolved_external"}
+                    )
+                    if not reasons and confirmed and inputs_valid:
+                        await flows.observe_episode_exports(run, binding, output)
+                        refreshed = await flows.completion(run=run, plan=plan)
+                        gate_results = cast(list[dict[str, object]], refreshed["checks"])
+                        replacements = {c["rule_id"]: c for c in gate_results}
+                        checks = [replacements.get(c["rule_id"], c) for c in checks]
+            elif reader is None:
                 reasons.append("DELIVERY_VERIFIER_UNAVAILABLE")
             else:
                 for target in targets:
@@ -858,6 +983,7 @@ class MasterRunService:
                     "satisfied": not reasons,
                     "reason_code": reasons[0] if reasons else None,
                     "evidence_refs": evidence,
+                    "missing_episode_ranges": missing_ranges,
                 }
             )
         return {

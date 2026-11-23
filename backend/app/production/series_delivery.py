@@ -10,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
 from app.assets.models import Episode
-from app.contracts.delivery_verification import DeliveryPackage
+from app.contracts.delivery_verification import (
+    BoundDeliveryOutput,
+    DeliveryPackage,
+    DeliverySlotRead,
+)
 from app.delivery.models import Export, ExportItem
 from app.editing.models import EditSession
 from app.execution.models import Artifact, NodeRun
@@ -159,6 +163,7 @@ async def _receipt_facts(
     *,
     lock: bool = False,
     export_id: UUID | None = None,
+    binding: BoundDeliveryOutput | None = None,
 ) -> tuple[
     dict[UUID, list[tuple[Export, NodeRun]]], dict[str, Artifact], dict[UUID, list[ExportItem]]
 ]:
@@ -184,6 +189,12 @@ async def _receipt_facts(
     )
     if export_id is not None:
         query = query.where(Export.id == export_id)
+    if binding is not None:
+        query = query.where(
+            NodeRun.input_snapshot["delivery_output"]["plan_id"].as_string()
+            == str(binding.plan_id),
+            Export.format == FINAL_FILM_FORMAT,
+        )
     if lock:
         query = query.with_for_update(read=True, of=(Export, NodeRun))
     receipts = (await session.execute(query.execution_options(populate_existing=True))).all()
@@ -309,37 +320,12 @@ async def series_delivery_summary(session: AsyncSession, project: Project) -> Se
     by_edit, media, items = await _receipt_facts(
         session, project.id, [e.id for e in edits.values()]
     )
-    packages: list[EpisodePackage] = []
-    for episode in episodes:
-        edit = edits.get(episode.id)
-        package = EpisodePackage(
-            episode_id=episode.id,
-            episode_number=episode.episode_number,
-            edit_session_id=edit.id if edit else None,
-            timeline_version=edit.version if edit else None,
-            timeline_hash=timeline_hash(edit.timeline) if edit else None,
-            blockers=["DELIVERY_CURRENT_EXPORT_MISSING" if edit else "DELIVERY_SESSION_MISSING"],
-        )
-        if edit:
-            for export, run in by_edit[edit.id]:
-                if export.timeline_hash != package.timeline_hash:
-                    continue
-                checked = _check_receipt(package, edit, export, run, items[export.id], media)
-                if package.export_id is None or not checked.blockers:
-                    package = checked
-                if not checked.blockers:
-                    break
-        packages.append(package)
-    # Compact gaps keep large plan counts bounded by the actual episode rows.
+    packages = [
+        _episode_package(episode, edits.get(episode.id), by_edit, media, items)
+        for episode in episodes
+    ]
     planned = project.planned_episode_count
-    missing: list[tuple[int, int]] = []
-    next_number = 1
-    for episode in episodes:
-        if planned and next_number <= planned and episode.episode_number > next_number:
-            missing.append((next_number, min(episode.episode_number - 1, planned)))
-        next_number = episode.episode_number + 1
-    if planned and next_number <= planned:
-        missing.append((next_number, planned))
+    missing = _missing_ranges(episodes, planned)
     ready = sum(not item.blockers for item in packages)
     return SeriesDeliverySummary(
         planned_episodes=planned,
@@ -348,3 +334,110 @@ async def series_delivery_summary(session: AsyncSession, project: Project) -> Se
         ready=bool(planned and not missing and ready == planned == len(episodes)),
         episodes=packages,
     )
+
+
+async def verify_bound_exports(
+    session: AsyncSession,
+    *,
+    binding: BoundDeliveryOutput,
+    episode_count: int,
+) -> DeliverySlotRead:
+    """Resolve actual completed exports for the registered step. Project is locked by Verify."""
+    project = binding.project_id
+    episodes = list(
+        await session.scalars(
+            select(Episode)
+            .where(
+                Episode.project_id == project,
+                Episode.episode_number.between(1, episode_count),
+            )
+            .order_by(Episode.episode_number)
+            .with_for_update(read=True)
+        )
+    )
+    edits: dict[UUID, EditSession] = {}
+    for edit in await session.scalars(
+        select(EditSession)
+        .where(
+            EditSession.project_id == project,
+            EditSession.episode_id.in_([ep.id for ep in episodes]),
+        )
+        .order_by(EditSession.updated_at.desc(), EditSession.id.desc())
+        .with_for_update(read=True)
+        .execution_options(populate_existing=True)
+    ):
+        if edit.episode_id is not None:
+            edits.setdefault(edit.episode_id, edit)
+    receipts, media, items = await _receipt_facts(
+        session,
+        project,
+        [edit.id for edit in edits.values()],
+        lock=True,
+        binding=binding,
+    )
+    packages = [
+        _episode_package(episode, edits.get(episode.id), receipts, media, items, binding=binding)
+        for episode in episodes
+    ]
+    return DeliverySlotRead(
+        packages=list(packages), missing_ranges=_missing_ranges(episodes, episode_count)
+    )
+
+
+def _missing_ranges(episodes: list[Episode], planned: int | None) -> list[tuple[int, int]]:
+    missing: list[tuple[int, int]] = []
+    next_number = 1
+    for episode in episodes:
+        if planned and next_number <= planned and episode.episode_number > next_number:
+            missing.append((next_number, min(episode.episode_number - 1, planned)))
+        next_number = episode.episode_number + 1
+    if planned and next_number <= planned:
+        missing.append((next_number, planned))
+    return missing
+
+
+def _episode_package(
+    episode: Episode,
+    edit: EditSession | None,
+    receipts: dict[UUID, list[tuple[Export, NodeRun]]],
+    media: dict[str, Artifact],
+    items: dict[UUID, list[ExportItem]],
+    *,
+    binding: BoundDeliveryOutput | None = None,
+) -> EpisodePackage:
+    missing_export = (
+        "DELIVERY_PLAN_EXPORT_MISSING" if binding else "DELIVERY_CURRENT_EXPORT_MISSING"
+    )
+    package = EpisodePackage(
+        episode_id=episode.id,
+        episode_number=episode.episode_number,
+        edit_session_id=edit.id if edit else None,
+        timeline_version=edit.version if edit else None,
+        timeline_hash=timeline_hash(edit.timeline) if edit else None,
+        blockers=[missing_export if edit else "DELIVERY_SESSION_MISSING"],
+    )
+    if edit is None:
+        return package
+    expected = binding.model_dump(mode="json") if binding else None
+    for export, run in receipts[edit.id]:
+        if export.timeline_hash != package.timeline_hash:
+            continue
+        if binding:
+            submitted = (run.input_snapshot or {}).get("delivery_output")
+            if not isinstance(submitted, dict) or submitted != (export.manifest or {}).get(
+                "delivery_output"
+            ):
+                continue
+            # A pause fences new submissions. Completed exports from the same
+            # unchanged plan keep the epoch that authorized their submission.
+            epoch = submitted.get("control_epoch")
+            if type(epoch) is not int or not 0 <= epoch <= binding.control_epoch:
+                continue
+            if {**submitted, "control_epoch": binding.control_epoch} != expected:
+                continue
+        checked = _check_receipt(package, edit, export, run, items[export.id], media)
+        if not checked.blockers:
+            return checked
+        if package.export_id is None:
+            package = checked
+    return package

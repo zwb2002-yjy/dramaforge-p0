@@ -6012,6 +6012,11 @@ export interface components {
             satisfied: boolean;
             /** Reason Code */
             reason_code?: string | null;
+            /** Missing Episode Ranges */
+            missing_episode_ranges?: [
+                number,
+                number
+            ][];
             /** Evidence Refs */
             evidence_refs?: components["schemas"]["DeliveryPackage"][];
         } & {
@@ -6288,6 +6293,21 @@ export interface components {
             srt_content_hash?: string | null;
             /** Blockers */
             blockers: string[];
+        };
+        /** DeliveryPlanRef */
+        DeliveryPlanRef: {
+            /**
+             * Master Run Id
+             * Format: uuid
+             */
+            master_run_id: string;
+            /**
+             * Plan Id
+             * Format: uuid
+             */
+            plan_id: string;
+            /** Control Epoch */
+            control_epoch: number;
         };
         /** DeliveryTarget */
         DeliveryTarget: {
@@ -7254,6 +7274,24 @@ export interface components {
             items?: components["schemas"]["EpisodeDeliveryItemRead"][];
             summary?: components["schemas"]["SeriesDeliverySummary"] | null;
         };
+        /** EpisodeExportSlot */
+        EpisodeExportSlot: {
+            /**
+             * Flow Key
+             * @constant
+             */
+            flow_key: "episode_delivery";
+            /**
+             * Step Key
+             * @constant
+             */
+            step_key: "collect_exports";
+            /**
+             * Field
+             * @constant
+             */
+            field: "episode_exports";
+        };
         /** EpisodePackage */
         EpisodePackage: {
             /**
@@ -8109,6 +8147,7 @@ export interface components {
              * @default V1 Final Film
              */
             name: string;
+            delivery_plan?: components["schemas"]["DeliveryPlanRef"] | null;
         };
         /** FlowScopeRead */
         FlowScopeRead: {
@@ -10136,7 +10175,10 @@ export interface components {
              */
             work_type: "serial_comic" | "single_comic" | "animation_promo";
             /** Targets */
-            targets: components["schemas"]["DeliveryTarget"][];
+            targets?: components["schemas"]["DeliveryTarget"][];
+            output_slot?: components["schemas"]["EpisodeExportSlot"] | null;
+            /** Planned Episode Count */
+            planned_episode_count?: number | null;
         };
         /** ProjectFileRead */
         ProjectFileRead: {

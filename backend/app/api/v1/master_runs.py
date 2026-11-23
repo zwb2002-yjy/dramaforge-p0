@@ -12,10 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.contracts.delivery_verification import DeliveryPackage, ProjectDeliveryGoal
+from app.director.business_flows import series_export_flow
 from app.director.master_run_models import DirectorMasterRun, DirectorMasterRunPlan
 from app.director.master_runs import MasterRunService
 from app.director.proposal_models import DirectorProposalItem
-from app.production.series_delivery import verify_delivery_target
+from app.production.series_delivery import verify_bound_exports, verify_delivery_target
 
 router = APIRouter(
     prefix="/projects/{project_id}/director/master-runs",
@@ -29,6 +30,7 @@ class CompletionCheck(BaseModel):
     rule_id: str
     satisfied: bool
     reason_code: str | None = None
+    missing_episode_ranges: list[tuple[int, int]] = Field(default_factory=list)
     evidence_refs: list[DeliveryPackage] = Field(default_factory=list)
 
 
@@ -86,12 +88,18 @@ async def _plan_read(plan: DirectorMasterRunPlan, session: SessionDep) -> PlanRe
         and len(rules) == 1
         and isinstance(rules[0], dict)
         and rules[0].get("rule_id") == "project_delivery_ready_v1"
-        and not data.get("flows")
         and data.get("limits")
         == {"max_model_calls": 0, "max_tool_calls": 0, "max_provider_calls": 0}
     ):
         with suppress(ValidationError):
-            check = ProjectDeliveryGoal.model_validate(rules[0])
+            candidate = ProjectDeliveryGoal.model_validate(rules[0])
+            expected_flows = (
+                [series_export_flow(plan.project_id, candidate.planned_episode_count)]
+                if candidate.output_slot and candidate.planned_episode_count
+                else []
+            )
+            if data.get("flows") == expected_flows:
+                check = candidate
     return PlanRead.model_validate(
         {
             **{
@@ -190,9 +198,14 @@ async def list_goals(
     rows = await service.list_runs(
         status=status, include_archived=include_archived, limit=limit, offset=offset
     )
-    more = len(rows) == limit and bool(await service.list_runs(
-        status=status, include_archived=include_archived, limit=1, offset=offset + limit,
-    ))
+    more = len(rows) == limit and bool(
+        await service.list_runs(
+            status=status,
+            include_archived=include_archived,
+            limit=1,
+            offset=offset + limit,
+        )
+    )
     return RunPage(
         items=[await _run_read(service, row) for row in rows],
         next_offset=offset + limit if more else None,
@@ -236,6 +249,7 @@ async def _control(
         expected_revision=body.expected_revision,
         reason=body.reason,
         delivery_verifier=partial(verify_delivery_target, session),
+        slot_verifier=partial(verify_bound_exports, session),
     )
     receipt = ControlReceipt.model_validate(result)
     await session.commit()

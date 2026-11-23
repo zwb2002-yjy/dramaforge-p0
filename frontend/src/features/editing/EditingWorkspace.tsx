@@ -1,3 +1,5 @@
+import { ActionLink } from "../../components/ui";
+import { apiGet } from "../../lib/api";
 import {
   PageHeader,
   Disclosure,
@@ -48,6 +50,7 @@ import {
 } from "./api";
 
 type EditingWorkspaceProps = {
+  deliveryPlan?: Pick<components["schemas"]["DeliveryPlanRef"], "master_run_id" | "plan_id">;
   projectId: string;
   workType?: string | null;
   projectScopeUnavailable?: boolean;
@@ -145,6 +148,7 @@ const EDIT_SESSION_STATUS_LABEL: Record<string, string> = {
  * after that, all editing state comes from the exact persisted session query.
  */
 export function EditingWorkspace({
+  deliveryPlan,
   projectId,
   workType,
   projectScopeUnavailable = false,
@@ -190,6 +194,37 @@ export function EditingWorkspace({
     queryFn: () => fetchEditSession(projectId, sessionId!),
     enabled: Boolean(projectId) && hasSession,
   });
+  const boundGoal = useQuery({
+    queryKey: [...queryKeys.director.goals(projectId), deliveryPlan?.master_run_id],
+    queryFn: ({ signal }) =>
+      apiGet<components["schemas"]["RunRead"]>(
+        `/api/v1/projects/${projectId}/director/master-runs/${deliveryPlan!.master_run_id}`,
+        undefined,
+        signal,
+      ),
+    enabled: Boolean(deliveryPlan),
+    retry: false,
+  });
+  const boundReady =
+    !deliveryPlan ||
+    (boundGoal.data?.current_plan_id === deliveryPlan.plan_id &&
+      boundGoal.data?.desired_state === "run" &&
+      ["waiting", "running"].includes(boundGoal.data.status) &&
+      Boolean(persistedSession.data?.episode_id));
+  const boundNotice = deliveryPlan && (
+    <p role="status">
+      关联交付目标 · {boundGoal.data?.goal ?? (boundGoal.isError ? "无法读取目标" : "读取中")}。
+      {boundReady ? "本次分集导出将绑定已确认的计划。" : "请选择当前计划下已保存的分集剪辑。"}{" "}
+      <ActionLink
+        to="/projects/$projectId/edit"
+        params={{ projectId }}
+        search={{ sessionId }}
+        tone="ghost"
+      >
+        取消关联
+      </ActionLink>
+    </p>
+  );
   const currentSessionVersion = persistedSession.data?.version;
   const timeline = useTimelineDraft(projectId, sessionId, persistedSession.data);
   const { draft, baseline, dirty, updateClipField, updateTimelineMetadata } = timeline;
@@ -218,6 +253,10 @@ export function EditingWorkspace({
     pending: finalFilmPending,
     error: finalFilmError,
   } = useFinalFilmExport({
+    deliveryPlan:
+      deliveryPlan && boundReady && boundGoal.data
+        ? { ...deliveryPlan, control_epoch: boundGoal.data.control_epoch }
+        : undefined,
     projectId,
     sessionId,
     version: currentSessionVersion,
@@ -364,6 +403,7 @@ export function EditingWorkspace({
   if (hasSession) {
     return (
       <div className="qc-project-page" data-testid="editing-workspace" data-session-id={sessionId}>
+        {boundNotice}
         <PageHeader
           title="剪辑成片"
           actions={
@@ -391,7 +431,11 @@ export function EditingWorkspace({
                   data-testid="export-final-film"
                   onClick={() => void runFinalFilmExport()}
                   disabled={
-                    dirty || !draft.clips.length || finalFilmPending !== null || save.isPending
+                    !boundReady ||
+                    dirty ||
+                    !draft.clips.length ||
+                    finalFilmPending !== null ||
+                    save.isPending
                   }
                 >
                   {finalFilmPending === "prepare"
@@ -450,6 +494,7 @@ export function EditingWorkspace({
             <Button
               type="button"
               disabled={
+                !boundReady ||
                 Boolean(finalFilmPending) ||
                 preparationPreview.blockers.length > 0 ||
                 selectedKeys.length !== preparationPreview.operations.length
@@ -1151,6 +1196,7 @@ export function EditingWorkspace({
       <PageHeader title="剪辑成片" description="选择已有剪辑，或用正式镜头创建时间线。">
         <span data-testid="editing-read-only">{copy.readOnlySource}</span>
       </PageHeader>
+      {boundNotice}
       <EditingSessionPicker projectId={projectId} onSelect={onSessionSelected} />
       {workType === "serial_comic" && <SeriesDeliveryPanel projectId={projectId} />}
       {manifest.isLoading && (

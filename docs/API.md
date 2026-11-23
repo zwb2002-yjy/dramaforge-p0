@@ -1197,7 +1197,14 @@ verify 在同一事务内核验确认项、计划哈希、已声明的输入版�
 成功回执包含计划、剪辑版本及哈希、导出、渲染、视频和字幕 ID 与文件哈希。缺项保持等待，
 控制回执按原键重放。目标详情返回当前计划最近一次交付核验结果。项目目标列表使用 limit/offset
 并返回 items、next_offset；计划列表使用 limit/offset，详情按 plan_id 定位。未实现的谓词不会作为成功依据。
-未来由正式步骤产出范围的输出槽及人工作品质量判定仍待接线。
+连续剧已确定计划集数、分集尚未建齐时，技术交付计划冻结 `planned_episode_count` 与
+`output_slot={flow_key:"episode_delivery",step_key:"collect_exports",field:"episode_exports"}`。
+确认该计划只建立等待交付的步骤。用户从计划进入剪辑后，现有 final-film/render 可随显式导出提交
+`delivery_plan={master_run_id,plan_id,control_epoch}`。服务在项目锁内复核已接受的确认项、计划与分集范围，
+把步骤、定义哈希、当前控制代次和计划身份绑定到渲染指纹、NodeRun 快照及最终 Export。
+verify 只从匹配的正式导出取得分集 ID 和 Export ID，再复核当前剪辑版本与 MP4/SRT。
+普通导出和其他计划的交付保留原用途。暂停会封锁新提交，恢复后同一计划已有的有效交付仍可核对。
+历史任务重放沿原绑定读取。剧本分集安排 Apply 的输出和人工质量结论另验。
 
 ### Flow、步骤与尝试的读投影
 

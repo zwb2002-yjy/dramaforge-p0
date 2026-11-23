@@ -236,11 +236,14 @@ export async function prepareFinalFilm(
   );
 }
 
+export type DeliveryPlanRef = components["schemas"]["DeliveryPlanRef"];
+
 export async function renderFinalFilm(
   projectId: string,
   sessionId: string,
   expectedTimelineVersion: number,
   idempotencyKey: string,
+  deliveryPlan?: DeliveryPlanRef,
 ): Promise<FinalFilmJobRead> {
   const csrf = await fetchCsrf();
   return apiSend<FinalFilmJobRead>(
@@ -250,6 +253,7 @@ export async function renderFinalFilm(
       edit_session_id: sessionId,
       expected_timeline_version: expectedTimelineVersion,
       name: "V1 Final Film",
+      ...(deliveryPlan && { delivery_plan: deliveryPlan }),
     },
     csrf,
     { "Idempotency-Key": idempotencyKey },

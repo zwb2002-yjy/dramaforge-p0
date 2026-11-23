@@ -25,6 +25,42 @@ class _Frozen(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class EpisodeExportSlot(_Frozen):
+    flow_key: Literal["episode_delivery"]
+    step_key: Literal["collect_exports"]
+    field: Literal["episode_exports"]
+
+
+class DeliveryPlanRef(_Frozen):
+    master_run_id: UUID
+    plan_id: UUID
+    control_epoch: int = Field(strict=True, ge=0)
+
+
+class BoundDeliveryOutput(DeliveryPlanRef):
+    project_id: UUID
+    flow_instance_id: UUID
+    step_id: UUID
+    plan_revision: int
+    plan_hash: str
+    definition_hash: str
+    slot: EpisodeExportSlot
+
+
+class DeliverySlotRead(BaseModel):
+    packages: list[DeliveryPackage]
+    missing_ranges: list[tuple[int, int]]
+
+
+class DeliverySlotVerifier(Protocol):
+    async def __call__(
+        self,
+        *,
+        binding: BoundDeliveryOutput,
+        episode_count: int,
+    ) -> DeliverySlotRead: ...
+
+
 class DeliveryTarget(_Frozen):
     episode_id: UUID | None
     episode_number: int | None = Field(default=None, strict=True, ge=1)
@@ -53,10 +89,24 @@ class EpisodeDeliveryGoal(_Frozen):
 class ProjectDeliveryGoal(_Frozen):
     rule_id: Literal["project_delivery_ready_v1"]
     work_type: Literal["serial_comic", "single_comic", "animation_promo"]
-    targets: list[DeliveryTarget] = Field(min_length=1)
+    targets: list[DeliveryTarget] = Field(default_factory=list)
+    output_slot: EpisodeExportSlot | None = None
+    planned_episode_count: int | None = Field(default=None, strict=True, ge=2, le=2147483647)
 
     @model_validator(mode="after")
     def complete_scope(self) -> Self:
+        if self.output_slot is not None:
+            if (
+                self.targets
+                or self.work_type != "serial_comic"
+                or self.planned_episode_count is None
+            ):
+                raise ValueError(
+                    "a future series scope requires the confirmed count and export slot"
+                )
+            return self
+        if not self.targets or self.planned_episode_count is not None:
+            raise ValueError("direct plans require explicit delivery targets")
         ids = {target.episode_id for target in self.targets}
         if len(ids) != len(self.targets):
             raise ValueError("duplicate episode target")

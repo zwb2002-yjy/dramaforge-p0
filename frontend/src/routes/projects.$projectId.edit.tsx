@@ -14,6 +14,9 @@ export const projectEditRoute = createRoute({
   path: "/edit",
   validateSearch: (search: Record<string, unknown>) => ({
     sessionId: typeof search.sessionId === "string" ? search.sessionId : undefined,
+    ...(typeof search.goalId === "string" && typeof search.planId === "string"
+      ? { goalId: search.goalId, planId: search.planId }
+      : {}),
     ...(typeof search.clipId === "string" ? { clipId: search.clipId } : {}),
   }),
   component: EditPage,
@@ -21,7 +24,8 @@ export const projectEditRoute = createRoute({
 
 function EditPage() {
   const { projectId } = projectEditRoute.useParams();
-  const { sessionId, clipId } = projectEditRoute.useSearch();
+  const { sessionId, clipId, goalId, planId } = projectEditRoute.useSearch();
+  const boundSearch = goalId && planId ? { goalId, planId } : {};
   const navigate = projectEditRoute.useNavigate();
   const project = useQuery({
     queryKey: queryKeys.project.detail(projectId),
@@ -41,6 +45,8 @@ function EditPage() {
     shouldBlockFn: ({ current, next }) =>
       dirtyRef.current &&
       (current.pathname !== next.pathname ||
+        ("planId" in current.search ? current.search.planId : undefined) !==
+          ("planId" in next.search ? next.search.planId : undefined) ||
         ("sessionId" in current.search ? current.search.sessionId : undefined) !==
           ("sessionId" in next.search ? next.search.sessionId : undefined)),
     enableBeforeUnload: dirty,
@@ -52,7 +58,8 @@ function EditPage() {
       <LazyEditingWorkspace
         workType={project.data?.work_type}
         projectScopeUnavailable={!project.isSuccess}
-        key={`${projectId}:${sessionId}:${discardRevision}`}
+        key={`${projectId}:${sessionId}:${goalId}:${planId}:${discardRevision}`}
+        deliveryPlan={goalId && planId ? { master_run_id: goalId, plan_id: planId } : undefined}
         projectId={projectId}
         sessionId={sessionId}
         clipId={clipId}
@@ -72,13 +79,16 @@ function EditPage() {
         }
         onSelectedClipChange={(selected) => {
           if (selected !== clipId)
-            void navigate({ search: { sessionId, clipId: selected }, replace: true });
+            void navigate({
+              search: { ...boundSearch, sessionId, clipId: selected },
+              replace: true,
+            });
         }}
         onSessionSelected={(selectedSessionId) =>
-          navigate({ search: { sessionId: selectedSessionId } })
+          navigate({ search: { ...boundSearch, sessionId: selectedSessionId } })
         }
         onSessionCreated={(createdSessionId) =>
-          navigate({ search: { sessionId: createdSessionId } })
+          navigate({ search: { ...boundSearch, sessionId: createdSessionId } })
         }
       />
       <Dialog

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Alert, Badge, Button } from "../../components/ui";
+import { ActionLink, Alert, Badge, Button } from "../../components/ui";
 import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import type { components } from "../../shared/api/generated";
@@ -22,6 +22,8 @@ const statuses: Record<string, string> = {
   stopping: "正在停止",
 };
 const reasons: Record<string, string> = {
+  DELIVERY_OUTPUT_SLOT_UNAVAILABLE: "计划交付步骤不可用",
+  DELIVERY_PLAN_EXPORT_MISSING: "此剪辑版本尚未按本计划导出",
   DELIVERY_EPISODE_MISSING: "分集不存在",
   DELIVERY_SESSION_MISSING: "尚未保存剪辑",
   DELIVERY_CURRENT_EXPORT_MISSING: "当前剪辑尚无对应成片",
@@ -75,15 +77,17 @@ function GoalDetail({ projectId, goal }: { projectId: string; goal: Goal }) {
       {check && (
         <p>
           计划 v{plan.revision} · 核对 MP4 和字幕 ·{" "}
-          {check.targets
-            .map((t) =>
-              t.episode_id === null
-                ? "项目成片"
-                : t.episode_number
-                  ? `第 ${t.episode_number} 集`
-                  : t.episode_id,
-            )
-            .join("、")}
+          {check.output_slot
+            ? `依次交付第 1 至 ${check.planned_episode_count} 集，逐集关联本计划导出`
+            : (check.targets ?? [])
+                .map((t) =>
+                  t.episode_id === null
+                    ? "项目成片"
+                    : t.episode_number
+                      ? `第 ${t.episode_number} 集`
+                      : t.episode_id,
+                )
+                .join("、")}
         </p>
       )}
       {check &&
@@ -99,6 +103,20 @@ function GoalDetail({ projectId, goal }: { projectId: string; goal: Goal }) {
           </>
         )}
       {plan?.decision_status === "rejected" && <p>此计划已拒绝</p>}
+      {plan &&
+        check?.output_slot &&
+        plan.decision_status === "accepted" &&
+        goal.current_plan_id === plan.id &&
+        goal.available_actions.includes("verify") && (
+          <ActionLink
+            tone="ghost"
+            to="/projects/$projectId/edit"
+            params={{ projectId }}
+            search={{ sessionId: undefined, goalId: goal.id, planId: plan.id }}
+          >
+            按此计划导出分集
+          </ActionLink>
+        )}
       {goal.available_actions.includes("verify") && (
         <Button disabled={decide.isPending} onClick={() => decide.mutate("verify")}>
           核验已确认计划
@@ -111,6 +129,11 @@ function GoalDetail({ projectId, goal }: { projectId: string; goal: Goal }) {
           {goal.last_verification.checks.map((entry, index) => (
             <div key={index}>
               {entry.reason_code && <p>{reasons[entry.reason_code] ?? entry.reason_code}</p>}
+              {entry.missing_episode_ranges?.map(([first, last]) => (
+                <p key={first}>
+                  {first === last ? `第 ${first} 集` : `第 ${first}–${last} 集`} · 尚未建立分集
+                </p>
+              ))}
               {entry.evidence_refs?.map((e, i) => (
                 <p key={i}>
                   {e.episode_number

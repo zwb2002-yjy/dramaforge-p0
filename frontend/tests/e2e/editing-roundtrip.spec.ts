@@ -122,6 +122,7 @@ test("unsaved editing changes block leaving, can return to Save and leave only a
   const { writes } = await setup(page);
   await page.goto(origin);
   await page.getByTestId("clip-subtitle-0").fill("保留这条未保存字幕");
+  await page.getByRole("button", { name: "制作工具", exact: true }).click();
   await page.getByRole("link", { name: "分镜制作", exact: true }).click();
   const guard = page.getByRole("dialog", { name: "离开剪辑前先处理当前草稿" });
   await expect(guard).toBeVisible({ timeout: 2000 });

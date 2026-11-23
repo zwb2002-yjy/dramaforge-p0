@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.models import Project, ProjectCreativeProfile
 from app.assets.models import Shot
 from app.config import get_settings
+from app.contracts.delivery_verification import BoundDeliveryOutput, DeliveryPlanRef
 from app.delivery.models import Export, ExportItem
 from app.editing.models import EditSession
 from app.editing.timeline_rules import clip_audio_volume
@@ -1440,6 +1441,48 @@ async def preview_timeline(
     )
 
 
+async def existing_bound_film(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    edit_session_id: UUID,
+    version: int,
+    name: str,
+    key: str,
+    requested: DeliveryPlanRef,
+) -> FinalFilmJobRead | None:
+    """Re-read the exact frozen submission even after a plan stops accepting new exports."""
+    run = await session.scalar(
+        select(NodeRun)
+        .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+        .where(
+            NodeRun.project_id == project_id,
+            GraphNode.node_key == FINAL_FILM_NODE,
+            NodeRun.input_snapshot["idempotency_key"].as_string() == key,
+        )
+        .order_by(NodeRun.created_at.desc(), NodeRun.attempt_no.desc())
+        .limit(1)
+    )
+    if run is None:
+        return None
+    snapshot = run.input_snapshot or {}
+    scope = snapshot.get("delivery_output")
+    if (
+        not isinstance(scope, dict)
+        or scope.get("plan_id") != str(requested.plan_id)
+        or scope.get("master_run_id") != str(requested.master_run_id)
+        or scope.get("control_epoch") != requested.control_epoch
+        or snapshot.get("edit_session_id") != str(edit_session_id)
+        or snapshot.get("timeline_version") != version
+        or snapshot.get("name") != name
+    ):
+        raise ConflictError("此导出请求已绑定其他版本或计划")
+    edit = await session.get(EditSession, edit_session_id)
+    if edit is None or edit.project_id != project_id:
+        raise NotFoundError("edit session not found")
+    return await _job_read(session, run=run, edit_session=edit)
+
+
 async def queue_final_film_render(
     session: AsyncSession,
     *,
@@ -1449,6 +1492,7 @@ async def queue_final_film_render(
     actor_id: UUID,
     idempotency_key: str | None,
     name: str,
+    delivery_output: BoundDeliveryOutput | None = None,
 ) -> FinalFilmJobRead:
     await _project_or_404(session, project_id)
     edit_session, refs = await _load_timeline_refs(
@@ -1488,6 +1532,10 @@ async def queue_final_film_render(
         "timeline": timeline,
         "name": name,
     }
+    if delivery_output is not None:
+        if delivery_output.project_id != project_id or edit_session.episode_id is None:
+            raise ValidationAppError("只有当前项目的分集剪辑可用于分集交付槽")
+        request_payload["delivery_output"] = delivery_output.model_dump(mode="json")
     request_fingerprint = hashlib.sha256(
         json.dumps(request_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -2026,6 +2074,10 @@ async def _stage_final_film_delivery(
             "idempotency_key": snapshot.get("idempotency_key"),
             "ffprobe": probe,
             "render_summary": render_summary,
+            **(
+                {"delivery_output": snapshot["delivery_output"]}
+                if "delivery_output" in snapshot else {}
+            ),
             **subtitle_delivery,
         },
         result_artifact_id=artifact.id,
