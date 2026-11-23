@@ -226,6 +226,7 @@
 | EV218 | 带研究来源的知识发布用途，只读核查 | API 规定发布须校验来源限制。当前 KnowledgeService._source_links 校验项目、Owner 和研究版本；create_entry 与 append_revision 校验用途枚举后将请求用途写入知识版本。项目关联的 _usable 检查知识版本上声明的用途与共享内容状态，没有与所链接研究资料的现行许可比对。 | 静态代码事实，未核查真实历史或运行复现，未证实实际越权。已按严重风险门槛报告 Owner，等待处置。 |
 | EV219 | 按 Owner 批准修复 EV218，只用隔离库及合成研究 | 两工作区受限角色处理带两份资料的用户修正，许可求交集；草稿保留来源，转发布时遗漏来源字段仍有效校验。实际来源变更事务持锁时，项目新引用等待后按已提交限制拒绝。已建引用变为受限，可解除；重连拒绝。无逐字引文的分析清单、旧写入遗漏映射、文件解除关联、撤回及原回执重放均覆盖。6 项 PG、63 项单元通过，Ruff、mypy 429 文件、架构和退役面通过。 | tmp/ev219-knowledge/{pg,unit,mypy}.log。外部模型请求为零，临时容器、卷、网络已回收。无迁移或常驻实例变更。来源发现按 Owner 已验证的工作区及项目切换 RLS 上下文；大规模项目数量的性能未压测。 |
 | EV220 | 研究修订对照、显式采纳／恢复及跨工作区知识发布预览 | 真实 Chromium、API、Worker、PG、对象存储检验：上传合成地方志并引用原文，修正后对照完整历史并恢复；打开预览、取消均零发布，超出原件许可的用途返回 422，收窄后 201，知识库显示已确认正文与用途，Mock 上游事件为空。5 个前端测试通过，覆盖候选显式采纳及版本绑定、未保存修正、正文附属字段和公开注记保留。前端 typecheck、lint、UI 权威检查通过。 | tmp/ev220-review/browser.log。首轮测试夹具复用浏览器操作前的 CSRF，改为写入前领取当前令牌后通过。jsdom 提示不支持伪元素测量；实际弹窗操作由 Chromium 验证。两批隔离环境均已释放，常驻实例未更新。 |
+| EV221 | 研究分析队列的原文发送边界，只读核查 | ResearchAnalysisService.preview 与受理复核 research、external_processing 和 research_text。ResearchImportService.execute 重建片段载荷后进入 DirectorTextRuntimeAdapter；_dispatch 在正式提交前调用 director_egress_decision，其用途为 director_text，未传入资料当前用途或原件关联状态。研究用途或来源撤回与队列发送之间存在授权缺口。 | 仅比对现有代码路径，没有读取真实资料、运行越权复现或触发外部生成。已按主合同 §8 报告并请求 Owner 决定。 |
 
 
 
