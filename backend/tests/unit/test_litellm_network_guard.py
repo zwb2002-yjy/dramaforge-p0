@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from app.providers.litellm_gateway.network_guard import approved_destinations, firewall_commands
+from app.providers.litellm_gateway.network_guard import (
+    approved_destinations,
+    approved_origin_pins,
+    firewall_commands,
+    write_pinned_hosts,
+)
 
 
 def test_dns_pins_exact_ports_and_requires_all_answers_authorized() -> None:
@@ -40,3 +45,42 @@ def test_firewall_has_no_unrestricted_egress_and_covers_ipv6() -> None:
     grants = [command for command in commands if "10.0.0.4" in command]
     assert len(grants) == 1
     assert grants[0][-4:] == ["--dport", "8150", "-j", "ACCEPT"]
+
+
+def test_proxy_name_pins_use_the_same_answers_as_both_port_grants(tmp_path):
+    calls = []
+
+    def lookup(host, port):
+        calls.append((host, port))
+        return ["8.8.8.8", "2001:4860:4860::8888", "8.8.8.8"]
+
+    pins = approved_origin_pins(
+        ["https://Media.Example.:8443", "https://media.example:8444"], [], lookup=lookup
+    )
+    assert calls == [("media.example", 8443)]
+    assert pins == {
+        ("media.example", port): ("2001:4860:4860::8888", "8.8.8.8") for port in (8443, 8444)
+    }
+    hosts = tmp_path / "hosts"
+    write_pinned_hosts(hosts, pins)
+    assert hosts.read_text().splitlines() == [
+        "127.0.0.1 localhost",
+        "::1 localhost ip6-localhost",
+        "2001:4860:4860::8888 media.example media.example.",
+        "8.8.8.8 media.example media.example.",
+    ]
+    inode = hosts.stat().st_ino
+    write_pinned_hosts(hosts, {("db", 5432): ("10.0.0.8",)})
+    assert hosts.stat().st_ino == inode
+    assert hosts.read_text().splitlines() == [
+        "127.0.0.1 localhost",
+        "::1 localhost ip6-localhost",
+        "10.0.0.8 db db.",
+    ]
+
+
+def test_unusable_hostnames_cannot_become_additional_hosts_entries():
+    with pytest.raises(ValueError, match="port"):
+        approved_origin_pins(["https://approved.example:0"], [], lookup=lambda *_: ["8.8.8.8"])
+    with pytest.raises(ValueError, match="hostname"):
+        approved_origin_pins(["https://bad alias.example"], [], lookup=lambda *_: ["8.8.8.8"])

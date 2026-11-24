@@ -36,6 +36,8 @@ NET_ADMIN，不能修改宿主机或业务 Worker 的防火墙。
 DNS 的全部答案在启动时检查，规则固定 IP/端口；DNS 改变后失败关闭，须重建 guard 与
 Proxy namespace 来核验新地址。仅数据库、Docker DNS、存活检查有必要的控制面例外。
 
+启动时 guard 将同一批已核准的 IPv4/IPv6 答案用于防火墙及 Proxy 的只读 `/etc/hosts`。该挂载仅含本机名、控制面数据库名和获准的上游名；TLS 仍校验配置中的原主机名。Docker 需要支持 named volume 的文件子路径。标准安装使用 Compose 的健康依赖，先生成映射再启动 Proxy。更新 origin 或 DNS 后，在数据库已就绪时执行 `docker compose up -d --no-deps --force-recreate --wait litellm-network litellm`，让两项服务按依赖顺序重建。仅重启 Proxy 可复用现行映射。映射卷只存已校验的名称和地址，可由 guard 重建。
+
 Proxy 的 HTTPX/requests/aiohttp 发送禁止跟随重定向，回调强制当前请求 retries=0、无 fallback，并拒绝
 同一 alias 下的多个部署。SDK/Router 自动重试保持关闭；DramaForge 客户端只在明确
 未发送 HTTP 请求的 DF→Proxy 连接失败时，允许对同一部署再尝试一次。Proxy→上游仍为
