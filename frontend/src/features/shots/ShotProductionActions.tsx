@@ -1,3 +1,4 @@
+import { EgressSummary } from "../../components/EgressSummary";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -145,6 +146,7 @@ function serverStatusLabel(status: string): string {
 function planDelivery(preview: ShotExecutionPlanRead): "exact" | "approximate" | "unsupported" {
   const references = preview.plan.planned_references ?? [];
   const gaps = preview.plan.capability_gaps ?? [];
+  if (preview.plan.egress?.blockers.length) return "unsupported";
   if (references.some((reference) => reference.delivery === "unsupported")) return "unsupported";
   if (gaps.some((gap) => gap.severity === "fatal")) return "unsupported";
   if (references.some((reference) => reference.delivery === "approximate")) return "approximate";
@@ -1178,6 +1180,7 @@ export function ShotProductionActions({
           <strong>模型适配：{referenceDeliveryLabel(delivery)}</strong>
           {displayedPlan && (
             <>
+              {displayedPlan.plan.egress && <EgressSummary egress={displayedPlan.plan.egress}/>}
               <p data-testid="shot-execution-plan-prompt">
                 最终提示词：{displayedPlan.plan.prompt}
               </p>

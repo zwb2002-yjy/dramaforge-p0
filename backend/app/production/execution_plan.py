@@ -28,6 +28,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from app.contracts.egress_preview import EgressPreview
 from app.providers.capabilities import Capability
 from app.providers.intents import (
     IMAGE_INTENT_OPTION_FIELDS,
@@ -159,6 +160,7 @@ class WorkbenchExecutionPlan(BaseModel):
         max_length=64,
         pattern=_FINGERPRINT_PATTERN,
     )
+    egress:EgressPreview | None = Field(default=None,exclude_if=lambda value: value is None)
     project_id: UUID
     shot_id: UUID | None = None
     asset_id: UUID | None = None

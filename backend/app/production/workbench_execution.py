@@ -37,6 +37,7 @@ from app.execution.shot_pipeline import (
     SHOT_PIPELINE_TEMPLATE_KEY,
     shot_pipeline_definition,
 )
+from app.production.media_egress import media_egress_preview
 from app.production.execution_plan import (
     PendingSuggestion,
     WorkbenchExecutionPlan,
@@ -1733,7 +1734,13 @@ class WorkbenchExecutionService:
             )
             prompt_override = override_str
 
+        egress = await media_egress_preview(self._session,project=project,
+            binding_id=resolution.provider_model_binding_id,
+            purpose="image_generation" if execution_input.stage=="image_keyframe" else "video_generation",
+            artifact_ids=[r.artifact_id for r in compiled.planned_references if r.artifact_id is not None and r.delivery!="unsupported"],
+            legacy_current=True)
         plan = WorkbenchExecutionPlan(
+            egress=egress,
             project_id=project.id,
             shot_id=execution_input.shot_id,
             experiment_branch_id=execution_input.experiment_branch_id,
@@ -2034,6 +2041,7 @@ class WorkbenchExecutionService:
 
         snapshot: dict[str, object] = {
             "workbench_plan": plan.model_dump(mode="json"),
+            "egress": plan.egress.model_dump(mode="json") if plan.egress else None,
             "workbench_request_hash": identity,
             # Keep the compiled selection visible at the NodeRun boundary as
             # well as inside the typed plan.  The Worker consumes this frozen

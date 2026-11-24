@@ -77,6 +77,20 @@ async def execute_voice_node_run(
     if operation is not None and spec.engine == "voice_model":
         raise ValidationAppError("VOICE_OPERATION_ALREADY_SUBMITTED")
     if operation is None:
+        from app.shared.runtime_admission import require_new_work
+
+        if snapshot.get("asset_id") and spec.engine == "voice_model":
+            from app.access.models import Project
+            from app.production.media_egress import media_egress_preview
+
+            project=await session.get(Project,run.project_id)
+            if project is None:
+                raise ValidationAppError("资产项目不存在")
+            admitted=await media_egress_preview(session,project=project,binding_id=spec.binding_id,
+                                              purpose="voice_generation",text_count=1,lock=True)
+            if admitted.blockers or snapshot.get("egress")!=admitted.model_dump(mode="json"):
+                raise ValidationAppError("资产语音的来源或外发依据已变化",details={"code":"ASSET_EGRESS_CHANGED"})
+        require_new_work()
         operation = ProviderOperation(
             node_run_id=run.id,
             attempt_no=run.attempt_no,
@@ -89,6 +103,7 @@ async def execute_voice_node_run(
             status="submission_started",
             request_summary={
                 "kind": "voice",
+                **({"egress":snapshot["egress"]} if snapshot.get("asset_id") and snapshot.get("egress") else {}),
                 "execution_path": path_version,
                 "voice_execution": spec.model_dump(mode="json"),
             },

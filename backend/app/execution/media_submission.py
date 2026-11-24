@@ -1235,6 +1235,13 @@ async def prepare_media_submission(
             details={"code": "EXECUTION_IDENTITY_REVISION_UNAVAILABLE"},
         )
     identity_json = identity.model_dump(mode="json")
+    # The compiler's actual referenced artifacts and actual binding determine the final admission.
+    # Older current-mode shot operations keep their historical input contract; an asset job or a
+    # strict-policy job without a frozen preview needs a new explicit decision.
+    from app.production.media_egress import require_media_egress
+    admission=await require_media_egress(session,project=project,binding_id=identity.provider_model_binding_id,
+        purpose="video_generation" if node_type=="video" else "image_generation",
+        artifact_ids=list(compiled.reference_artifact_ids),frozen=snap.get("egress"),legacy_current=not snap.get("asset_id"))
     await require_frozen_create_admission(session, identity)
     selection_snapshot["execution_identity"] = identity_json
     snap = {
@@ -1260,6 +1267,7 @@ async def prepare_media_submission(
             request_summary=normalize_request_summary(
                 {
                     "kind": kind,
+                    "egress_admission": admission.model_dump(mode="json"),
                     "execution_path": UNIFIED_PATH_VERSION,
                     "intent": (
                         image_intent.model_dump(mode="json")
