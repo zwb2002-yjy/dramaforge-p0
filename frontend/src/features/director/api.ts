@@ -32,6 +32,8 @@ export const DIRECTOR_ROUTE_TEMPLATES = {
   agentApply: "/api/v1/projects/{project_id}/director/proposals/{proposal_id}/apply",
   businessFlows: "/api/v1/projects/{project_id}/director/master-runs/{run_id}/business-flows",
   businessFlow: "/api/v1/projects/{project_id}/director/business-flows/{flow_id}",
+  businessFlowAttempts:
+    "/api/v1/projects/{project_id}/director/business-flows/{flow_id}/steps/{step_id}/attempts",
   businessFlowSteps: "/api/v1/projects/{project_id}/director/business-flows/{flow_id}/steps",
 } as const;
 
@@ -344,18 +346,48 @@ export async function stopDirectorAgentTurn(
 export type BusinessFlowRead = components["schemas"]["BusinessFlowRead"];
 export type BusinessStepRead = components["schemas"]["BusinessStepRead"];
 
-export function listBusinessFlows(projectId: string, runId: string): Promise<BusinessFlowRead[]> {
-  return apiGetList<BusinessFlowRead>(directorPath(projectId, "businessFlows", { run_id: runId }));
+export function listBusinessFlows(
+  projectId: string,
+  runId: string,
+  offset = 0,
+  signal?: AbortSignal,
+) {
+  return apiGet<components["schemas"]["BusinessFlowPage"]>(
+    directorPath(projectId, "businessFlows", { run_id: runId }) + `?limit=20&offset=${offset}`,
+    undefined,
+    signal,
+  );
 }
 
 export function listBusinessFlowSteps(
   projectId: string,
   flowId: string,
-): Promise<BusinessStepRead[]> {
-  return apiGetList<BusinessStepRead>(
-    directorPath(projectId, "businessFlowSteps", { flow_id: flowId }),
+  offset = 0,
+  signal?: AbortSignal,
+) {
+  return apiGet<components["schemas"]["BusinessStepPage"]>(
+    directorPath(projectId, "businessFlowSteps", { flow_id: flowId }) +
+      `?limit=20&offset=${offset}`,
+    undefined,
+    signal,
   );
 }
+
+export function listBusinessFlowAttempts(
+  projectId: string,
+  flowId: string,
+  stepId: string,
+  offset = 0,
+  signal?: AbortSignal,
+) {
+  return apiGet<components["schemas"]["StepAttemptPage"]>(
+    directorPath(projectId, "businessFlowAttempts", { flow_id: flowId, step_id: stepId }) +
+      `?limit=20&offset=${offset}`,
+    undefined,
+    signal,
+  );
+}
+
 export type RuntimeResumeRead = components["schemas"]["RuntimeResumeRead"];
 
 export function fetchPendingRuntimeResume(

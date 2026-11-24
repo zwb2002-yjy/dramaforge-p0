@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { ActionLink, Alert, Badge, Button } from "../../components/ui";
+import { ActionLink, Alert, Badge, Button, Disclosure } from "../../components/ui";
 import { apiGet, apiSend, fetchCsrf } from "../../lib/api";
 import { queryKeys } from "../../lib/queryKeys";
 import type { components } from "../../shared/api/generated";
 import { applyDirectorAgentProposal } from "./api";
+import { BusinessFlowPanel } from "./BusinessFlowPanel";
 
 type Goal = components["schemas"]["RunRead"];
 type Plan = components["schemas"]["PlanRead"];
@@ -172,6 +173,9 @@ function GoalDetail({ projectId, goal }: { projectId: string; goal: Goal }) {
           ))}
         </div>
       )}
+      <Disclosure title="查看流程与执行记录" lazy compact>
+        <BusinessFlowPanel projectId={projectId} runId={goal.id} />
+      </Disclosure>
     </article>
   );
 }

@@ -39,57 +39,106 @@ describe("BusinessFlowPanel", () => {
       vi.fn((input: RequestInfo | URL) => {
         const url = String(input);
         calls.push(url);
-        if (url.endsWith("/steps")) {
-          return json([
-            {
-              id: "44444444-4444-4444-8444-444444444444",
-              instance_id: FLOW,
-              step_key: "list_assets",
-              revision: 1,
-              status: "succeeded",
-              required: true,
-              dependencies: [],
-              wait_reason: null,
-            },
-          ]);
+        if (url.includes("/attempts?"))
+          return json({
+            items: [
+              {
+                id: "a",
+                attempt_no: 1,
+                status: "succeeded",
+                result_refs: [],
+                unresolved_external: false,
+              },
+            ],
+            next_offset: null,
+            total: 1,
+          });
+        if (url.includes("/steps?")) {
+          return json({
+            items: [
+              {
+                id: "44444444-4444-4444-8444-444444444444",
+                instance_id: FLOW,
+                step_key: "list_assets",
+                revision: 1,
+                status: "succeeded",
+                required: true,
+                dependencies: [],
+                result_refs: [],
+                wait_reason: null,
+              },
+            ],
+            total: 1,
+            next_offset: null,
+          });
         }
-        return json([
-          {
-            id: FLOW,
-            master_run_id: RUN,
-            plan_id: "55555555-5555-4555-8555-555555555555",
-            plan_revision: 1,
-            definition_key: "project_asset_audit",
-            definition_version: "1",
-            revision: 2,
-            status: "waiting",
-            scope: { type: "project", entity_id: PROJECT },
-            wait_reason: "flow_progress_pending",
-            terminal_reason: null,
-            created_at: "2026-11-19T00:00:00Z",
-            finished_at: null,
-          },
-        ]);
+        return json({
+          items: [
+            {
+              id: FLOW,
+              master_run_id: RUN,
+              plan_id: "55555555-5555-4555-8555-555555555555",
+              plan_revision: 1,
+              definition_key: "project_asset_audit",
+              definition_version: "1",
+              revision: 2,
+              status: "waiting",
+              scope: { type: "project", entity_id: PROJECT },
+              wait_reason: "flow_progress_pending",
+              terminal_reason: null,
+              created_at: "2026-11-19T00:00:00Z",
+              finished_at: null,
+            },
+          ],
+          total: 1,
+          next_offset: null,
+        });
       }),
     );
     renderPanel();
     const flowButton = await screen.findByRole("button", {
-      name: /project_asset_audit · waiting/,
+      name: /项目素材核对 · 等待中/,
     });
     expect(flowButton).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(flowButton);
-    expect(await screen.findByText(/list_assets · succeeded/)).toBeInTheDocument();
+    expect(await screen.findByText(/列出素材 · 已完成/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /列出素材 · 已完成/ }));
+    expect(await screen.findByText(/第 1 次 · 已完成/)).toBeInTheDocument();
     await waitFor(() => expect(flowButton).toHaveAttribute("aria-expanded", "true"));
     expect(
-      calls.some((url) => url.includes("/master-runs/") && url.endsWith("/business-flows")),
+      calls.some((url) => url.includes("/master-runs/") && url.includes("/business-flows?")),
     ).toBe(true);
-    expect(calls.some((url) => url.endsWith("/steps"))).toBe(true);
+    expect(calls.some((url) => url.includes("/steps?"))).toBe(true);
+  });
+
+  it("loads subsequent pages without losing earlier flow rows", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const second = String(input).includes("offset=1");
+        return json({
+          items: [
+            {
+              id: second ? "b" : "a",
+              definition_key: second ? "episode_delivery" : "project_asset_audit",
+              status: "waiting",
+            },
+          ],
+          total: 2,
+          next_offset: second ? null : 1,
+        });
+      }),
+    );
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "更多记录" }));
+    expect(await screen.findByText(/分集交付 · 等待中/)).toBeInTheDocument();
+    expect(screen.getByText(/项目素材核对 · 等待中/)).toBeInTheDocument();
   });
 
   it("shows an empty state when the run has no flows", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(() => json([])),
+      vi.fn(() => json({ items: [], total: 0, next_offset: null })),
     );
     renderPanel();
     expect(await screen.findByText("当前目标还没有业务流程。")).toBeInTheDocument();
