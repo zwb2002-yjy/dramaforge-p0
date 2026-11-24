@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -12,20 +11,8 @@ from app.access.projects import ProjectService
 from app.api.v1.opencut import opencut_manifest
 from app.assets.models import Episode, Scene, Shot
 from app.execution.models import Artifact, GraphNode, NodeRun
-from app.shared.base import Base
 from app.shared.security import hash_password
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _project(session: AsyncSession, *, suffix: str) -> tuple[User, Project]:
@@ -40,6 +27,7 @@ async def _project(session: AsyncSession, *, suffix: str) -> tuple[User, Project
     session.add(workspace)
     await session.flush()
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=workspace.id,
         name=f"OpenCut {suffix}",
         aspect_ratio="16:9",
@@ -117,7 +105,7 @@ async def _video_artifact(
         idempotency_key=f"{label}-{uuid4().hex}",
         input_hash=uuid4().hex * 2,
         input_snapshot=snapshot,
-        status="completed",
+        status="queued",
         created_by=created_by,
     )
     session.add(run)
@@ -136,6 +124,7 @@ async def _video_artifact(
     session.add(artifact)
     await session.flush()
     run.result_artifact_id = artifact.id
+    run.status = "completed"
     await session.flush()
     return artifact, run
 

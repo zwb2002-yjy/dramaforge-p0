@@ -48,6 +48,10 @@ class CapabilityRouter:
         spec = model.manifest.capability_specs.get(capability)
         if spec is None:
             raise UnsupportedCapabilityError(capability)
+        if model.adapter is None:
+            from app.providers.model_profiles.errors import profile_model_not_configured
+
+            raise profile_model_not_configured(model.manifest.id)
         return model.adapter
 
     async def create(
@@ -57,7 +61,6 @@ class CapabilityRouter:
         request: Any,
         context: ExecutionContext,
         model_id: str | None = None,
-        policy: object | None = None,
         mode_id: str | None = None,
         resolved_references: list[ResolvedReference] | None = None,
     ) -> ProviderCreateResult:
@@ -65,11 +68,11 @@ class CapabilityRouter:
             capability=capability,
             requested_model=model_id,
             registry=self.registry,
-            policy=policy,
         )
         spec = model.manifest.capability_specs.get(capability)
         if spec is None:
             raise UnsupportedCapabilityError(capability)
+        adapter = self._resolve(capability=capability, model_id=model.manifest.id)
         selected_mode_id = mode_id or getattr(request, "mode_id", None)
         self.validator.validate_mode(
             request,
@@ -77,7 +80,7 @@ class CapabilityRouter:
             mode_id=selected_mode_id,
             resolved_references=resolved_references,
         )
-        return await model.adapter.create(capability, request, context)
+        return await adapter.create(capability, request, context)
 
     async def poll(
         self,

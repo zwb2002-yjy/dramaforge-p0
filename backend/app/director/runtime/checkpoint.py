@@ -8,6 +8,7 @@ from uuid import UUID
 
 import psycopg
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.checkpoint.postgres.base import MIGRATIONS as _CHECKPOINT_MIGRATIONS
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
@@ -15,6 +16,10 @@ from app.config import Settings
 from app.shared.errors import ValidationAppError
 
 CHECKPOINT_SCHEMA = "director_runtime_checkpoints"
+# The saver records the last applied migration as its index; the first entry
+# only creates the bookkeeping table. Deriving the value keeps startup aligned
+# with the installed library instead of a hand-maintained constant.
+SUPPORTED_CHECKPOINT_VERSION = len(_CHECKPOINT_MIGRATIONS) - 1
 
 
 def scoped_checkpoint_dsn(base_dsn: str, *, project_id: UUID) -> str:
@@ -73,7 +78,7 @@ async def verify_checkpoint_store(settings: Settings) -> None:
         row = await (await connection.execute(
             "SELECT max(v) FROM checkpoint_migrations"
         )).fetchone()
-    if row is None or row[0] != 9:
+    if row is None or row[0] != SUPPORTED_CHECKPOINT_VERSION:
         raise ValidationAppError(
             "Director checkpoint schema is not at the supported version",
             details={"code": "DIRECTOR_CHECKPOINT_SCHEMA_UNSUPPORTED"},

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Header, Response
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
+from app.access.models import Project
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.asset_card_service import AssetCardReadService
@@ -18,24 +21,98 @@ from app.assets.from_artifact_service import (
 )
 from app.assets.models import (
     Asset,
+    AssetTag,
+    AssetTagLink,
     AssetVersion,
 )
+from app.assets.research_bodies import content_hash
 from app.assets.tag_service import AssetTagService
 from app.assets.version_service import AssetVersionService
-from app.shared.errors import ConflictError, NotFoundError
+from app.contracts.production_commands import ExecutionReceipt
+from app.production.asset_commands import (
+    AssetExecutionRead,
+    AssetVideoExecutionBody,
+    AssetVoiceExecutionBody,
+    list_asset_executions,
+    submit_asset_execution,
+    submit_asset_video_execution,
+    submit_asset_voice_execution,
+    submit_asset_voice_batch,
+)
+from app.production.asset_plan import (
+    AssetExecutionBody,
+    AssetExecutionPlanRead,
+    AssetImagePlanBody,
+    AssetVideoPlanBody,
+    AssetVideoPlanRead,
+    AssetVoicePlanBody,
+    AssetVoicePlanRead,
+    build_asset_image_plan,
+    build_asset_video_plan,
+    build_asset_voice_plan,
+)
+from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["assets"], dependencies=[Depends(require_selected_workspace)])
 
 
-class AssetCreateBody(BaseModel):
+class AssetImagePlanInput(BaseModel):
+    stage: Literal["asset_image"]
+    request: AssetImagePlanBody
+
+
+class AssetVoicePlanInput(BaseModel):
+    stage: Literal["asset_voice"]
+    request: AssetVoicePlanBody
+
+
+class AssetVideoPlanInput(BaseModel):
+    stage: Literal["asset_video"]
+    request: AssetVideoPlanBody
+
+
+AssetPlanInput = Annotated[
+    AssetImagePlanInput | AssetVoicePlanInput | AssetVideoPlanInput,
+    Field(discriminator="stage"),
+]
+
+
+class AssetImageExecutionInput(BaseModel):
+    stage: Literal["asset_image"]
+    request: AssetExecutionBody
+
+
+class AssetVoiceExecutionInput(BaseModel):
+    stage: Literal["asset_voice"]
+    request: AssetVoiceExecutionBody
+
+
+class AssetVideoExecutionInput(BaseModel):
+    stage: Literal["asset_video"]
+    request: AssetVideoExecutionBody
+
+
+AssetExecutionInput = Annotated[
+    AssetImageExecutionInput | AssetVoiceExecutionInput | AssetVideoExecutionInput,
+    Field(discriminator="stage"),
+]
+
+
+class AssetFields(BaseModel):
     kind: str = Field(min_length=1, max_length=40)
     name: str = Field(min_length=1, max_length=160)
     description: str = Field(default="", max_length=12000)
     metadata: dict[str, object] = Field(default_factory=dict)
-    status: str = Field(default="draft", pattern="^(draft|active|archived)$")
+    status: Literal["draft", "active", "recycled"] = "active"
+    tags: list[str] = Field(default_factory=list, max_length=40)
 
 
-class AssetUpdateBody(AssetCreateBody):
+class AssetCreateBody(AssetFields):
+    request_key: str | None = Field(default=None, min_length=1, max_length=160)
+    base_public_asset_link_id: UUID | None = None
+
+
+class AssetUpdateBody(AssetFields):
     expected_version: int = Field(ge=1)
 
 
@@ -47,12 +124,15 @@ class AssetRead(BaseModel):
     description: str
     metadata: dict[str, object]
     status: str
+    tags: list[str]
     version: int
     created_at: datetime
     updated_at: datetime
 
 
 class AssetVersionRead(BaseModel):
+    base_publication_id: UUID | None = None
+    base_public_asset_link_id: UUID | None = None
     id: UUID
     asset_id: UUID
     version_number: int
@@ -65,7 +145,7 @@ class AssetVersionRead(BaseModel):
     created_at: datetime
 
 
-def _asset_read(asset: Asset) -> AssetRead:
+def _asset_read(asset: Asset, *, tags: list[str] | None = None) -> AssetRead:
     return AssetRead(
         id=asset.id,
         project_id=asset.project_id,
@@ -74,14 +154,29 @@ def _asset_read(asset: Asset) -> AssetRead:
         description=asset.description,
         metadata=dict(asset.metadata_json),
         status=asset.status,
+        tags=list(tags or []),
         version=asset.version,
         created_at=asset.created_at,
         updated_at=asset.updated_at,
     )
 
 
+async def _asset_tag_names(session: SessionDep, asset_id: UUID) -> list[str]:
+    rows = (
+        await session.execute(
+            select(AssetTag.name)
+            .join(AssetTagLink, AssetTagLink.tag_id == AssetTag.id)
+            .where(AssetTagLink.asset_id == asset_id)
+            .order_by(AssetTag.normalized_name)
+        )
+    ).scalars()
+    return list(rows)
+
+
 def _version_read(version: AssetVersion) -> AssetVersionRead:
     return AssetVersionRead(
+        base_publication_id=version.base_publication_id,
+        base_public_asset_link_id=version.base_public_asset_link_id,
         id=version.id,
         asset_id=version.asset_id,
         version_number=version.version_number,
@@ -114,44 +209,191 @@ async def list_project_assets(
         name=name,
         tags=tag_list,
     )
-    return [_asset_read(row) for row in rows]
+    asset_ids = [row.id for row in rows]
+    tag_rows = (
+        (
+            await session.execute(
+                select(AssetTagLink.asset_id, AssetTag.name)
+                .join(AssetTag, AssetTag.id == AssetTagLink.tag_id)
+                .where(AssetTagLink.asset_id.in_(asset_ids))
+                .order_by(AssetTag.normalized_name)
+            )
+        ).all()
+        if asset_ids
+        else []
+    )
+    tags_by_asset: dict[UUID, list[str]] = {asset_id: [] for asset_id in asset_ids}
+    for asset_id, tag_name in tag_rows:
+        tags_by_asset[asset_id].append(tag_name)
+    return [_asset_read(row, tags=tags_by_asset[row.id]) for row in rows]
 
 
 @router.post("/projects/{project_id}/assets", response_model=AssetRead, status_code=201)
 async def create_project_asset(
     project_id: UUID,
     body: AssetCreateBody,
+    response: Response,
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
 ) -> AssetRead:
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    key = body.request_key.strip() if body.request_key is not None else None
+    if key == "":
+        raise ValidationAppError("请求键不能为空")
+    link_id = body.base_public_asset_link_id
+    if link_id is not None and (not key or body.status == "recycled"):
+        raise ValidationAppError("新项目变体需要请求键及可用状态")
+    digest = content_hash(body.model_dump(mode="json", exclude={"request_key"})) if key else None
+    await session.scalar(select(Project.id).where(Project.id == project_id).with_for_update())
+    if key:
+        prev = await session.scalar(
+            select(Asset).where(Asset.project_id == project_id, Asset.creation_request_key == key)
+        )
+        if prev is not None:
+            if prev.creation_request_hash != digest:
+                raise ConflictError(
+                    "请求键已用于另一项创建决定", details={"code": "ASSET_CREATION_REQUEST_REUSED"}
+                )
+            response.status_code = 200
+            return _asset_read(prev, tags=await _asset_tag_names(session, prev.id))
+    if await session.scalar(
+        select(Asset.id).where(
+            Asset.project_id == project_id, Asset.kind == body.kind, Asset.name == body.name
+        )
+    ):
+        raise ConflictError("项目中已有同类别、同名素材", details={"code": "ASSET_NAME_TAKEN"})
+    publication_id = await AssetVersionService(session).public_base(
+        project_id=project_id,
+        asset_kind=body.kind,
+        actor=user,
+        link_id=link_id,
+    )
     asset = Asset(
         project_id=project_id,
         kind=body.kind,
         name=body.name,
         description=body.description,
         metadata_json=dict(body.metadata),
-        status=body.status,
+        status="draft" if link_id else body.status,
+        creation_request_key=key,
+        creation_request_hash=digest,
         version=1,
     )
     session.add(asset)
     await session.flush()
-    session.add(
-        AssetVersion(
-            project_id=project_id,
-            asset_id=asset.id,
-            version_number=1,
-            kind=body.kind,
-            name=body.name,
-            description=body.description,
-            metadata_json=dict(body.metadata),
-            status=body.status,
-            created_by=user.id,
-        )
+    version = AssetVersion(
+        project_id=project_id,
+        asset_id=asset.id,
+        version_number=1,
+        kind=body.kind,
+        name=body.name,
+        description=body.description,
+        metadata_json=dict(body.metadata),
+        status="candidate" if link_id or body.status == "draft" else "formal",
+        base_public_asset_link_id=link_id,
+        base_publication_id=publication_id,
+        created_by=user.id,
+    )
+    session.add(version)
+    await session.flush()
+    if version.status == "formal":
+        asset.current_version_id = version.id
+    tags = await AssetTagService(session).set_asset_tags(
+        project_id=project_id,
+        asset_id=asset.id,
+        actor=user,
+        names=list(body.tags),
     )
     await session.commit()
-    return _asset_read(asset)
+    return _asset_read(asset, tags=[tag.name for tag in tags])
+
+
+@router.post(
+    "/projects/{project_id}/assets/{asset_id}/execution-plan",
+    response_model=AssetExecutionPlanRead | AssetVoicePlanRead | AssetVideoPlanRead,
+)
+async def plan_asset_media(
+    project_id: UUID,
+    asset_id: UUID,
+    body: AssetPlanInput,
+    user: CurrentUser,
+    session: SessionDep,
+) -> AssetExecutionPlanRead | AssetVoicePlanRead | AssetVideoPlanRead:
+    """Read-only asset plan: zero Graph/NodeRun/Provider side effects."""
+    project = await ProjectService(session).get_project_for_owner(
+        project_id=project_id, actor=user
+    )
+    if isinstance(body, AssetVoicePlanInput):
+        return await build_asset_voice_plan(
+            session, project=project, asset_id=asset_id, body=body.request
+        )
+    if isinstance(body, AssetVideoPlanInput):
+        return await build_asset_video_plan(
+            session, project=project, asset_id=asset_id, body=body.request
+        )
+    return await build_asset_image_plan(
+        session, project=project, asset_id=asset_id, body=body.request
+    )
+
+
+@router.post(
+    "/projects/{project_id}/assets/{asset_id}/executions",
+    response_model=ExecutionReceipt,
+)
+async def submit_asset_execution_route(
+    project_id: UUID,
+    asset_id: UUID,
+    body: AssetExecutionInput,
+    user: CurrentUser,
+    session: SessionDep,
+    _csrf: CsrfDep,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> ExecutionReceipt:
+    """One explicit asset command; the original receipt is returned on replay."""
+    if isinstance(body, AssetVideoExecutionInput):
+        return await submit_asset_video_execution(
+            session,
+            actor=user,
+            project_id=project_id,
+            asset_id=asset_id,
+            body=body.request,
+            idempotency_key=idempotency_key,
+        )
+    if isinstance(body, AssetVoiceExecutionInput):
+        voice_submit = submit_asset_voice_batch if body.request.max_provider_operations > 1 else submit_asset_voice_execution
+        return await voice_submit(
+            session,
+            actor=user,
+            project_id=project_id,
+            asset_id=asset_id,
+            body=body.request,
+            idempotency_key=idempotency_key,
+        )
+    return await submit_asset_execution(
+        session,
+        actor=user,
+        project_id=project_id,
+        asset_id=asset_id,
+        body=body.request,
+        idempotency_key=idempotency_key,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/assets/{asset_id}/executions",
+    response_model=list[AssetExecutionRead],
+)
+async def read_asset_executions(
+    project_id: UUID,
+    asset_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> list[AssetExecutionRead]:
+    """Read the original NodeRuns for this asset; no model resolution or Provider call."""
+    return await list_asset_executions(
+        session, actor=user, project_id=project_id, asset_id=asset_id
+    )
 
 
 @router.patch("/projects/{project_id}/assets/{asset_id}", response_model=AssetRead)
@@ -178,6 +420,11 @@ async def update_project_asset(
             "asset version conflict",
             details={"expected_version": body.expected_version, "actual_version": asset.version},
         )
+    publication, link = await AssetVersionService(session).version_base(asset, user, kind=body.kind)
+    if link and asset.current_version_id is None:
+        raise ConflictError(
+            "请先明确采用项目变体候选", details={"code": "ASSET_VARIANT_REQUIRES_ADOPTION"}
+        )
     next_version = asset.version + 1
     asset.kind = body.kind
     asset.name = body.name
@@ -185,21 +432,47 @@ async def update_project_asset(
     asset.metadata_json = dict(body.metadata)
     asset.status = body.status
     asset.version = next_version
-    session.add(
-        AssetVersion(
-            project_id=project_id,
-            asset_id=asset.id,
-            version_number=next_version,
-            kind=body.kind,
-            name=body.name,
-            description=body.description,
-            metadata_json=dict(body.metadata),
-            status=body.status,
-            created_by=user.id,
+    current_formals = (
+        (
+            await session.execute(
+                select(AssetVersion)
+                .where(
+                    AssetVersion.project_id == project_id,
+                    AssetVersion.asset_id == asset.id,
+                    AssetVersion.status == "formal",
+                )
+                .with_for_update()
+            )
         )
+        .scalars()
+        .all()
+    )
+    for current in current_formals:
+        current.status = "historical"
+    version = AssetVersion(
+        project_id=project_id,
+        asset_id=asset.id,
+        version_number=next_version,
+        kind=body.kind,
+        name=body.name,
+        description=body.description,
+        metadata_json=dict(body.metadata),
+        status="formal",
+        base_publication_id=publication,
+        base_public_asset_link_id=link,
+        created_by=user.id,
+    )
+    session.add(version)
+    await session.flush()
+    asset.current_version_id = version.id
+    tags = await AssetTagService(session).set_asset_tags(
+        project_id=project_id,
+        asset_id=asset.id,
+        actor=user,
+        names=list(body.tags),
     )
     await session.commit()
-    return _asset_read(asset)
+    return _asset_read(asset, tags=[tag.name for tag in tags])
 
 
 @router.get(
@@ -265,10 +538,41 @@ class AssetCardRead(BaseModel):
     missing_reference_roles: list[str]
 
 
+class PromoteBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_key: str = Field(min_length=1, max_length=160)
+    expected_asset_version: int = Field(ge=1)
+    public_display: PublicDisplayBody | None = None
+
+
 class AssetCandidateBody(BaseModel):
+    request_key: str = Field(min_length=1, max_length=160)
+    expected_asset_version: int = Field(ge=1)
+    base_public_asset_link_id: UUID | None = None
     name: str | None = Field(default=None, max_length=160)
     description: str | None = Field(default=None, max_length=12000)
     metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class CandidateReceiptRead(BaseModel):
+    asset_id: UUID
+    asset_version_id: UUID
+    version_number: int
+    created_asset_revision: int
+
+
+class PublicDisplayBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=160)
+    description: str = Field(default="", max_length=2_000)
+    style_labels: list[str] = Field(default_factory=list, max_length=20)
+
+
+class AssetAdoptionReceiptRead(BaseModel):
+    asset_id: UUID
+    asset_version_id: UUID
+    accepted_asset_revision: int
+    publication_id: UUID | None
 
 
 class AssetFromArtifactBody(BaseModel):
@@ -278,6 +582,7 @@ class AssetFromArtifactBody(BaseModel):
     description: str = Field(default="", max_length=12000)
     metadata: dict[str, object] = Field(default_factory=dict)
     reference_role: str = Field(default="primary", min_length=1, max_length=40)
+    public_display: PublicDisplayBody | None = None
 
 
 @router.get("/projects/{project_id}/asset-tags", response_model=list[AssetTagRead])
@@ -356,8 +661,9 @@ async def recycle_asset(
     asset = await AssetTagService(session).recycle_asset(
         project_id=project_id, asset_id=asset_id, actor=user
     )
+    response = _asset_read(asset, tags=await _asset_tag_names(session, asset.id))
     await session.commit()
-    return _asset_read(asset)
+    return response
 
 
 @router.post(
@@ -374,13 +680,14 @@ async def restore_asset(
     asset = await AssetTagService(session).restore_asset(
         project_id=project_id, asset_id=asset_id, actor=user
     )
+    response = _asset_read(asset, tags=await _asset_tag_names(session, asset.id))
     await session.commit()
-    return _asset_read(asset)
+    return response
 
 
 @router.post(
     "/projects/{project_id}/assets/from-artifact",
-    response_model=AssetRead,
+    response_model=AssetAdoptionReceiptRead,
     status_code=201,
 )
 async def create_asset_from_artifact(
@@ -389,16 +696,19 @@ async def create_asset_from_artifact(
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
+    response: Response,
     idempotency_key: str | None = Header(
         default=None, alias="Idempotency-Key", min_length=1, max_length=160
     ),
-) -> AssetRead:
+) -> AssetAdoptionReceiptRead:
     """Explicitly add a generated artifact as an asset card. Nothing is automatic.
 
     Retrying the same submission with the same ``Idempotency-Key`` returns the
     original card instead of creating a second one.
     """
-    asset = await AssetFromArtifactService(session).create(
+    from app.assets.public_assets import PublicDisplay
+
+    receipt = await AssetFromArtifactService(session).create_with_receipt(
         project_id=project_id,
         actor=user,
         request=AssetFromArtifactRequest(
@@ -410,9 +720,25 @@ async def create_asset_from_artifact(
             reference_role=body.reference_role,
         ),
         request_key=idempotency_key,
+        public_display=(
+            PublicDisplay(
+                name=body.public_display.name,
+                description=body.public_display.description,
+                style_labels=body.public_display.style_labels,
+            )
+            if body.public_display is not None
+            else None
+        ),
     )
     await session.commit()
-    return _asset_read(asset)
+    if not receipt.created:
+        response.status_code = 200
+    return AssetAdoptionReceiptRead(
+        asset_id=receipt.asset_id,
+        asset_version_id=receipt.asset_version_id,
+        accepted_asset_revision=receipt.accepted_asset_revision,
+        publication_id=receipt.publication_id,
+    )
 
 
 @router.get("/projects/{project_id}/assets/{asset_id}/card", response_model=AssetCardRead)
@@ -430,7 +756,7 @@ async def read_asset_card(
 
 @router.post(
     "/projects/{project_id}/assets/{asset_id}/versions",
-    response_model=AssetVersionRead,
+    response_model=CandidateReceiptRead,
     status_code=201,
 )
 async def create_asset_candidate(
@@ -439,37 +765,85 @@ async def create_asset_candidate(
     body: AssetCandidateBody,
     user: CurrentUser,
     session: SessionDep,
+    response: Response,
     _csrf: CsrfDep,
-) -> AssetVersionRead:
-    version = await AssetVersionService(session).create_candidate(
+) -> CandidateReceiptRead:
+    request_hash = hashlib.sha256(
+        f"candidate:{asset_id}:{body.expected_asset_version}:{body.name or ''}:"
+        f"{body.description or ''}:{body.base_public_asset_link_id or ''}".encode()
+    ).hexdigest()
+    receipt = await AssetVersionService(session).create_candidate_with_receipt(
         project_id=project_id,
         asset_id=asset_id,
         actor=user,
+        expected_asset_version=body.expected_asset_version,
+        request_key=body.request_key,
+        request_hash=request_hash,
         name=body.name,
         description=body.description,
         metadata_json=dict(body.metadata),
+        base_public_asset_link_id=body.base_public_asset_link_id,
     )
     await session.commit()
-    return _version_read(version)
+    if not receipt.created:
+        response.status_code = 200
+    return CandidateReceiptRead(
+        asset_id=receipt.asset_id,
+        asset_version_id=receipt.asset_version_id,
+        version_number=receipt.version_number,
+        created_asset_revision=receipt.created_asset_revision,
+    )
 
 
 @router.post(
     "/projects/{project_id}/assets/{asset_id}/versions/{version_id}/promote",
-    response_model=AssetVersionRead,
+    response_model=AssetAdoptionReceiptRead,
+    status_code=201,
 )
 async def promote_asset_version(
     project_id: UUID,
     asset_id: UUID,
     version_id: UUID,
+    body: PromoteBody,
     user: CurrentUser,
     session: SessionDep,
+    response: Response,
     _csrf: CsrfDep,
-) -> AssetVersionRead:
-    version = await AssetVersionService(session).promote(
-        project_id=project_id, asset_id=asset_id, version_id=version_id, actor=user
+) -> AssetAdoptionReceiptRead:
+    from app.assets.public_assets import PublicDisplay
+
+    display = (
+        PublicDisplay(
+            name=body.public_display.name,
+            description=body.public_display.description,
+            style_labels=body.public_display.style_labels,
+        )
+        if body.public_display is not None
+        else None
+    )
+    request_hash = hashlib.sha256(
+        f"promote:{asset_id}:{version_id}:{body.expected_asset_version}:"
+        f"{display.name if display else ''}".encode()
+    ).hexdigest()
+    receipt = await AssetVersionService(session).promote_with_receipt(
+        project_id=project_id,
+        asset_id=asset_id,
+        version_id=version_id,
+        actor=user,
+        expected_asset_version=body.expected_asset_version,
+        request_key=body.request_key,
+        request_hash=request_hash,
+        public_display=display,
     )
     await session.commit()
-    return _version_read(version)
+    if not receipt.created:
+        response.status_code = 200
+    return AssetAdoptionReceiptRead(
+        asset_id=receipt.asset_id,
+        asset_version_id=receipt.asset_version_id,
+        accepted_asset_revision=receipt.accepted_asset_revision,
+        publication_id=receipt.publication_id,
+    )
 
 
 @router.post(

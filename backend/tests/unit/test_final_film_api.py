@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -11,7 +12,7 @@ import pytest
 from app.config import clear_settings_cache, get_settings
 from app.delivery.models import Export
 from app.editing.models import EditSession
-from app.execution.models import NodeRun
+from app.execution.models import Artifact, NodeRun
 from app.main import create_app
 from app.shared.base import Base
 from app.shared.db import get_session
@@ -77,6 +78,7 @@ def _create_project(client: TestClient) -> str:
     response = client.post(
         "/api/v1/projects",
         json={
+            "work_type": "serial_comic",
             "workspace_id": client.headers["X-Workspace-Id"],
             "name": "Final Film API Project",
             "aspect_ratio": "9:16",
@@ -134,13 +136,20 @@ def test_final_film_routes_fail_closed_for_stale_timeline_and_non_owner(
     asyncio.run(bump())
     stale = client.post(
         f"/api/v1/projects/{project_id}/final-film/prepare",
-        json={"edit_session_id": edit_session_id, "expected_timeline_version": 1},
+        json={
+            "preparation_fingerprint": "a" * 64,
+            "command_authorization_ids": [],
+            "edit_session_id": edit_session_id,
+            "expected_timeline_version": 1,
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert stale.status_code == 422, stale.text
     assert stale.json()["details"]["code"] == "TIMELINE_VERSION_MISMATCH"
 
-    assert client.post("/api/v1/auth/logout").status_code == 204
+    assert (
+        client.post("/api/v1/auth/logout", headers={CSRF_HEADER: _csrf(client)}).status_code == 204
+    )
     registered = client.post(
         "/api/v1/auth/register",
         json={
@@ -155,7 +164,12 @@ def test_final_film_routes_fail_closed_for_stale_timeline_and_non_owner(
     csrf = _csrf(client)
     non_owner_prepare = client.post(
         f"/api/v1/projects/{project_id}/final-film/prepare",
-        json={"edit_session_id": edit_session_id, "expected_timeline_version": 2},
+        json={
+            "preparation_fingerprint": "a" * 64,
+            "command_authorization_ids": [],
+            "edit_session_id": edit_session_id,
+            "expected_timeline_version": 2,
+        },
         headers={CSRF_HEADER: csrf},
     )
     non_owner_render = client.post(
@@ -189,6 +203,45 @@ def test_final_film_history_empty_and_wrong_session_are_read_only(api: Any) -> N
     assert asyncio.run(_count_rows(factory, project_id)) == before
     missing = client.get(f"/api/v1/projects/{project_id}/edit-sessions/{uuid4()}/final-films")
     assert missing.status_code == 404
-    assert client.post("/api/v1/auth/logout").status_code == 204
+    assert (
+        client.post("/api/v1/auth/logout", headers={CSRF_HEADER: _csrf(client)}).status_code == 204
+    )
     _register(client)
     assert client.get(url).status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("storage_state", "deleted"),
+    [("quarantined", False), ("available", True)],
+)
+def test_artifact_media_routes_reject_unavailable_or_deleted_objects(
+    api: tuple[TestClient, async_sessionmaker[AsyncSession]],
+    storage_state: str,
+    deleted: bool,
+) -> None:
+    client, factory = api
+    _register(client)
+    project_id = _create_project(client)
+    artifact_id = uuid4()
+
+    async def seed() -> None:
+        async with factory() as session:
+            session.add(
+                Artifact(
+                    id=artifact_id,
+                    project_id=UUID(project_id),
+                    artifact_type="video",
+                    storage_state=storage_state,
+                    deleted_at=datetime.now(UTC) if deleted else None,
+                    object_key=f"fixture/media/{artifact_id}.mp4",
+                    content_hash="b" * 64,
+                    mime_type="video/mp4",
+                    byte_size=10,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(seed())
+    for suffix in ("content", "video-frames/start"):
+        response = client.get(f"/api/v1/projects/{project_id}/artifacts/{artifact_id}/{suffix}")
+        assert response.status_code == 404, response.text

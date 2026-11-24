@@ -24,8 +24,6 @@ _FORBIDDEN_PROVIDER_MODULES = (
     "app.providers.volcengine",
     "app.providers.openai",
     "app.providers.local_tts",
-    "app.providers.comfyui",
-    "app.providers.azure_tts",
     "app.providers.fake",
 )
 

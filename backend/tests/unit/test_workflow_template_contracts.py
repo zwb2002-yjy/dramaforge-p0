@@ -19,10 +19,6 @@ from app.director.workflows.resolver import WorkflowTemplateResolver
 from app.providers.capabilities import Capability
 
 
-def _factory(**_: object) -> dict[str, object]:
-    return {"template_key": "test", "nodes": []}
-
-
 def _spec() -> WorkflowTemplateSpec:
     return WorkflowTemplateSpec(
         template_key="test-dialogue-v1",
@@ -47,7 +43,6 @@ def _spec() -> WorkflowTemplateSpec:
             formal_outputs=["formal_keyframe", "formal_video"],
             review_nodes=["identity_review", "continuity_review"],
         ),
-        graph_factory=_factory,
     )
 
 
@@ -89,17 +84,6 @@ def test_registry_rejects_overwriting_frozen_contract() -> None:
         assert "contract mismatch" in str(exc)
         return
     raise AssertionError("expected ValueError for frozen-contract overwrite")
-
-
-def test_registry_validate_requires_graph_factory() -> None:
-    registry = WorkflowTemplateRegistry()
-    spec = replace(_spec(), graph_factory=None)
-    try:
-        registry.register(spec)
-    except ValueError as exc:
-        assert "graph_factory" in str(exc)
-        return
-    raise AssertionError("expected ValueError for missing graph_factory")
 
 
 def test_resolver_explicit_resolved() -> None:
@@ -164,7 +148,6 @@ def test_resolver_auto_selects_best_tag_match() -> None:
         display_name="Two tag",
         intent_tags=("dialogue", "two_character"),
         supported_character_count=(1, 1),
-        graph_factory=_factory,
     )
     one_tag = WorkflowTemplateSpec(
         template_key="b-one-tag",
@@ -173,7 +156,6 @@ def test_resolver_auto_selects_best_tag_match() -> None:
         display_name="One tag",
         intent_tags=("dialogue",),
         supported_character_count=(1, 1),
-        graph_factory=_factory,
     )
     registry.register(two_tag)
     registry.register(one_tag)

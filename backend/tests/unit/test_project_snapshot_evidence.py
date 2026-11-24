@@ -19,7 +19,7 @@ def _operation() -> ProviderOperation:
             "kind": "video",
             "execution_path": "unified-v1",
             "intent": {"prompt": "private prompt must not reach the snapshot"},
-            "effective_request": {
+            "effective_request_redacted": {
                 "common_options": {
                     "aspect_ratio": "9:16",
                     "frame_rate": 24,
@@ -50,7 +50,7 @@ def test_project_snapshot_exposes_only_sanitized_execution_evidence() -> None:
     response = _public_provider_response_summary(operation)
 
     assert request["execution_path"] == "unified-v1"
-    assert request["effective_request"]["reference_artifact_ids"] == ["artifact-1"]
+    assert request["effective_request_redacted"]["reference_artifact_ids"] == ["artifact-1"]
     assert request["translation_report"] == {"dropped_options": []}
     assert "intent" not in request
     assert "authorization" not in request

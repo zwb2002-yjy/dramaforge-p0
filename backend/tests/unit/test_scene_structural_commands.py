@@ -26,7 +26,12 @@ def _project_with_two_scenes(client: TestClient) -> tuple[str, str, str]:
     client.headers["X-Workspace-Id"] = workspace_id
     created = client.post(
         "/api/v1/projects",
-        json={"workspace_id": workspace_id, "name": "Struct", "aspect_ratio": "16:9"},
+        json={
+            "work_type": "serial_comic",
+            "workspace_id": workspace_id,
+            "name": "Struct",
+            "aspect_ratio": "16:9",
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert created.status_code in {200, 201}, created.text
@@ -146,3 +151,32 @@ def test_scene_reorder_and_cross_project_isolation(client: TestClient) -> None:
         ).status_code
         == 404
     )
+
+
+def test_split_and_merge_with_multiple_later_siblings(client: TestClient) -> None:
+    project_id, first, second = _project_with_two_scenes(client)
+    copied = client.post(f"/api/v1/projects/{project_id}/scenes/{second}/copy",
+                         headers={CSRF_HEADER: _csrf(client)})
+    assert copied.status_code == 201, copied.text
+    split = client.post(f"/api/v1/projects/{project_id}/scenes/{first}/split",
+                        json={"at_shot_number": 2}, headers={CSRF_HEADER: _csrf(client)})
+    assert split.status_code == 201, split.text
+    split_id = split.json()["id"]
+    merged = client.post(f"/api/v1/projects/{project_id}/scenes/{first}/merge",
+                         json={"target_scene_id": split_id},
+                         headers={CSRF_HEADER: _csrf(client)})
+    assert merged.status_code == 200, merged.text
+    scenes = client.get(f"/api/v1/projects/{project_id}/scenes").json()
+    assert sorted(row["scene_number"] for row in scenes) == [1, 2, 3]
+    assert next(row for row in scenes if row["id"] == first)["shot_count"] == 2
+
+
+def test_duplicate_shot_numbers_return_validation_error(client: TestClient) -> None:
+    project_id, _, _ = _project_with_two_scenes(client)
+    response = client.post(f"/api/v1/projects/{project_id}/scripts/import",
+        json={"filename": "duplicate.md", "text":
+              "# Episode 1 - Demo\n## Scene 1 - Studio / day\n"
+              "### Shot 2 - wide\nVisual: A\n### Shot 2 - wide\nVisual: B\n"},
+        headers={CSRF_HEADER: _csrf(client)})
+    assert response.status_code == 422, response.text
+    assert response.json()["details"]["code"] == "SCRIPT_DUPLICATE_NUMBER"

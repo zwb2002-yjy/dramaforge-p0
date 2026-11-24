@@ -4,16 +4,21 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
+from app.contracts.reference_capability import (
+    MultiCharacterCapabilityStatus,
+    dispatch_capability_gate,
+)
+from app.contracts.shot_reference import ShotReferenceIntent
 from app.director.workflows.character_participation import (
     ScreenRole,
     ShotCharacterParticipation,
     ShotParticipationPlan,
 )
 from app.director.workflows.reference_capability import (
-    MultiCharacterCapabilityStatus,
     assess_multi_character_capability,
 )
-from app.production.reference_intents import ShotReferenceIntent, compile_references
+from app.production.reference_intents import compile_references
 from app.providers.capabilities import Capability
 from app.providers.manifest import (
     CapabilitySpec,
@@ -62,6 +67,33 @@ def _plan(n: int) -> ShotParticipationPlan:
             for i, char in enumerate(chars)
         ]
     )
+
+
+@pytest.mark.parametrize("maximum", [0, 1, 2])
+@pytest.mark.parametrize("accepted,strategy", [
+    (False, None), (False, "two-pass-i2i-stabilize-v1"),
+    (True, "unknown"), (True, "two-pass-i2i-stabilize-v1"),
+])
+def test_planning_and_dispatch_share_capacity_and_explicit_consent(maximum, accepted, strategy):
+    planning = assess_multi_character_capability(
+        manifest=_manifest(max_reference_images=maximum),
+        capability=Capability.IMAGE_GENERATE, mode_id=None, plan=_plan(2),
+        accept_approximations=accepted, staged_strategy_id=strategy,
+    )
+    dispatch = dispatch_capability_gate(
+        snapshot={"workflow_participations": [
+            {"screen_role": "primary"}, {"screen_role": "secondary"},
+        ]},
+        operations={"image.generate": {"reference_constraints": {"reference_image": {
+            "max": maximum,
+        }}}},
+        accept_approximations=accepted, staged_strategy_id=strategy,
+    )
+    if planning.status is MultiCharacterCapabilityStatus.EXACT:
+        assert dispatch is None
+    else:
+        assert dispatch is not None
+        assert dispatch.model_dump(mode="json") == planning.model_dump(mode="json")
 
 
 def test_two_character_exact_when_model_supports_two() -> None:

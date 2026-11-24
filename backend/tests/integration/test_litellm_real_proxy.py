@@ -39,7 +39,10 @@ from app.providers.contracts.text import TextGenerateRequest, TextMessage
 from app.providers.litellm_adapter import LiteLLMModelAdapter
 from app.providers.litellm_gateway.model_catalog import litellm_logical_manifest
 
-IMAGE = "ghcr.io/berriai/litellm:v1.96.0"
+IMAGE = (
+    "ghcr.io/berriai/litellm:v1.96.0@sha256:"
+    "90d8de0ea6fbb3cad145d1019d00a0149ae400b1e18e2011a60f1988f143f672"
+)
 MASTER_KEY = "sk-integration-test-master-key"
 # DramaForge's client key. Without a litellm-db the only valid bearer key is the
 # master key (probe-verified 2026-08-11); with the compose litellm-db you would

@@ -1,11 +1,20 @@
-/** Project-scoped EditingAdapter HTTP client (P9-03A). */
-
 import { apiGet, apiGetList, apiSend, fetchCsrf } from "../../lib/api";
+
 import type { components } from "../../shared/api/generated";
+
+export function fetchEpisodeDeliveries(projectId: string, signal?: AbortSignal) {
+  return apiGet<components["schemas"]["EpisodeDeliveryRead"]>(
+    `/api/v1/projects/${projectId}/deliveries/episodes`,
+    undefined,
+    signal,
+  );
+}
 
 export type EditSessionSummaryRead = components["schemas"]["EditSessionSummaryRead"];
 export type EditSessionRead = components["schemas"]["EditSessionRead"];
 export type EditTimelinePayload = components["schemas"]["EditTimelinePayload"];
+export type TimelineWrite = Pick<EditTimelinePayload, "clips" | "metadata"> &
+  Partial<Pick<EditTimelinePayload, "schema_version">>;
 export type EditExportRead = components["schemas"]["EditExportRead"];
 export type EditingDirectorSuggestionRequest =
   components["schemas"]["EditingDirectorSuggestionRequest"];
@@ -17,6 +26,30 @@ export type EditingRepairRoutingRequest = components["schemas"]["EditingRepairRo
 export type FinalFilmPrepareRead = components["schemas"]["FinalFilmPrepareRead"];
 export type FinalFilmRead = components["schemas"]["FinalFilmRead"];
 export type FinalFilmJobRead = components["schemas"]["FinalFilmJobRead"];
+export type TimelinePreviewRead = components["schemas"]["TimelinePreviewRead"];
+
+/** Read-only draft compilation; no Save, tail preparation, Provider or Final Film. */
+export async function previewEditTimeline(
+  projectId: string,
+  sessionId: string,
+  timeline: TimelineWrite,
+  expectedSessionVersion: number,
+): Promise<TimelinePreviewRead> {
+  const csrf = await fetchCsrf();
+  return apiSend<TimelinePreviewRead>(
+    "POST",
+    editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/preview-plan`),
+    {
+      timeline: {
+        schema_version: timeline.schema_version,
+        clips: timeline.clips ?? [],
+        metadata: timeline.metadata ?? {},
+      },
+      expected_session_version: expectedSessionVersion,
+    },
+    csrf,
+  );
+}
 
 const editSessionPath = (projectId: string, suffix = "") =>
   `/api/v1/projects/${projectId}/edit-sessions${suffix}`;
@@ -30,9 +63,12 @@ export async function fetchEditSessions(projectId: string): Promise<EditSessionS
 export async function fetchEditFinalFilms(
   projectId: string,
   sessionId: string,
+  signal?: AbortSignal,
 ): Promise<FinalFilmJobRead[]> {
   const rows = await apiGetList<FinalFilmJobRead>(
     editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/final-films`),
+    undefined,
+    signal,
   );
   if (!Array.isArray(rows)) throw new Error("成片历史响应无效");
   return rows;
@@ -41,12 +77,13 @@ export async function fetchEditFinalFilms(
 export async function createEditSession(
   projectId: string,
   name?: string,
+  episodeId?: string,
 ): Promise<EditSessionRead> {
   const csrf = await fetchCsrf();
   return apiSend<EditSessionRead>(
     "POST",
     editSessionPath(projectId),
-    name === undefined ? {} : { name },
+    { name, episode_id: episodeId },
     csrf,
   );
 }
@@ -58,14 +95,18 @@ export function fetchEditSession(projectId: string, sessionId: string): Promise<
 export async function saveEditTimeline(
   projectId: string,
   sessionId: string,
-  timeline: Pick<EditTimelinePayload, "clips" | "metadata">,
+  timeline: TimelineWrite,
+  expectedSessionVersion: number,
 ): Promise<EditSessionRead> {
   const csrf = await fetchCsrf();
   const { clips = [], metadata = {} } = timeline;
   return apiSend<EditSessionRead>(
     "PATCH",
     editSessionPath(projectId, `/${encodeURIComponent(sessionId)}/timeline`),
-    { timeline: { clips, metadata } },
+    {
+      timeline: { schema_version: timeline.schema_version, clips, metadata },
+      expected_session_version: expectedSessionVersion,
+    },
     csrf,
   );
 }
@@ -106,9 +147,6 @@ export async function requestEditingDirectorSuggestion(
   );
 }
 
-/** Explicit alias for callers that prefer the verb used by the Director API. */
-export const suggestEditingDirector = requestEditingDirectorSuggestion;
-
 export async function requestProactiveEditingDirectorSuggestion(
   projectId: string,
   sessionId: string,
@@ -147,11 +185,42 @@ export async function routeEditingDirectorRepair(
   );
 }
 
+export type PreparationPreview = components["schemas"]["FinalFilmPreparePreviewRead"];
+
+export async function previewFinalFilm(projectId: string, sessionId: string, version: number) {
+  return apiSend<PreparationPreview>(
+    "POST",
+    `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/prepare-preview`,
+    { edit_session_id: sessionId, expected_timeline_version: version },
+    await fetchCsrf(),
+  );
+}
+
+export async function approveFinalFilm(
+  projectId: string,
+  preview: PreparationPreview,
+  keys: string[],
+) {
+  return apiSend<string[]>(
+    "POST",
+    `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/prepare-authorizations`,
+    {
+      edit_session_id: preview.edit_session_id,
+      expected_timeline_version: preview.timeline_version,
+      preparation_fingerprint: preview.preparation_fingerprint,
+      operation_keys: keys,
+    },
+    await fetchCsrf(),
+  );
+}
+
 /** Prepare the Formal shot tail required by an EditSession Timeline version. */
 export async function prepareFinalFilm(
   projectId: string,
   sessionId: string,
   expectedTimelineVersion: number,
+  preparationFingerprint: string,
+  authorizationIds: string[],
 ): Promise<FinalFilmPrepareRead> {
   const csrf = await fetchCsrf();
   return apiSend<FinalFilmPrepareRead>(
@@ -160,16 +229,21 @@ export async function prepareFinalFilm(
     {
       edit_session_id: sessionId,
       expected_timeline_version: expectedTimelineVersion,
+      preparation_fingerprint: preparationFingerprint,
+      command_authorization_ids: authorizationIds,
     },
     csrf,
   );
 }
+
+export type DeliveryPlanRef = components["schemas"]["DeliveryPlanRef"];
 
 export async function renderFinalFilm(
   projectId: string,
   sessionId: string,
   expectedTimelineVersion: number,
   idempotencyKey: string,
+  deliveryPlan?: DeliveryPlanRef,
 ): Promise<FinalFilmJobRead> {
   const csrf = await fetchCsrf();
   return apiSend<FinalFilmJobRead>(
@@ -179,6 +253,7 @@ export async function renderFinalFilm(
       edit_session_id: sessionId,
       expected_timeline_version: expectedTimelineVersion,
       name: "V1 Final Film",
+      ...(deliveryPlan && { delivery_plan: deliveryPlan }),
     },
     csrf,
     { "Idempotency-Key": idempotencyKey },
@@ -188,9 +263,12 @@ export async function renderFinalFilm(
 export function fetchFinalFilmStatus(
   projectId: string,
   nodeRunId: string,
+  signal?: AbortSignal,
 ): Promise<FinalFilmJobRead> {
   return apiGet<FinalFilmJobRead>(
     `/api/v1/projects/${encodeURIComponent(projectId)}/final-film/runs/${encodeURIComponent(nodeRunId)}`,
+    undefined,
+    signal,
   );
 }
 
@@ -214,4 +292,44 @@ export async function rejectEditingDirectorSuggestion(
   if (result.proposal_id !== proposalId || result.status !== "rejected") {
     throw new Error("剪辑建议拒绝回执无效，预览已保留。");
   }
+}
+
+/** Read only ready audio Artifacts; Asset cards are not renderer input identities. */
+export async function fetchEditingAudioArtifacts(
+  projectId: string,
+  cursor: string | null = null,
+  signal?: AbortSignal,
+): Promise<components["schemas"]["ProductionArtifactPage"]> {
+  const query = new URLSearchParams({ limit: "25", usable_audio: "true" });
+  if (cursor) query.set("cursor", cursor);
+  const page = await apiGet<components["schemas"]["ProductionArtifactPage"]>(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/production-history/artifacts?${query}`,
+    undefined,
+    signal,
+  );
+  if (
+    !page ||
+    !Array.isArray(page.items) ||
+    (page.next_cursor !== null &&
+      (typeof page.next_cursor !== "string" || !page.next_cursor || page.next_cursor === cursor)) ||
+    page.items.some(
+      (item) =>
+        !item ||
+        typeof item.id !== "string" ||
+        !item.id ||
+        typeof item.mime_type !== "string" ||
+        !item.mime_type.startsWith("audio/") ||
+        item.storage_state !== "available" ||
+        !item.object_key ||
+        item.byte_size <= 0,
+    )
+  )
+    throw new Error("音频列表回执不完整，请刷新并确认前后端版本一致；不要重复生成。");
+  return page;
+}
+
+export type OpenCutManifestRead = components["schemas"]["OpenCutManifest"];
+
+export function fetchOpenCutManifest(projectId: string): Promise<OpenCutManifestRead> {
+  return apiGet(`/api/v1/projects/${projectId}/opencut-manifest`);
 }

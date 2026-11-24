@@ -21,34 +21,3 @@ async def is_shot_locked(session: AsyncSession, *, project_id: UUID, shot_id: UU
         )
     ).scalar_one_or_none()
     return row is not None
-
-
-async def set_shot_lock(
-    session: AsyncSession,
-    *,
-    project_id: UUID,
-    shot_id: UUID,
-    user_id: UUID,
-    locked: bool,
-) -> ShotHumanLock:
-    existing = (
-        await session.execute(
-            select(ShotHumanLock).where(
-                ShotHumanLock.project_id == project_id,
-                ShotHumanLock.shot_id == shot_id,
-            )
-        )
-    ).scalar_one_or_none()
-    if existing is None:
-        existing = ShotHumanLock(
-            project_id=project_id,
-            shot_id=shot_id,
-            locked=locked,
-            locked_by=user_id if locked else None,
-        )
-        session.add(existing)
-    else:
-        existing.locked = locked
-        existing.locked_by = user_id if locked else None
-    await session.flush()
-    return existing

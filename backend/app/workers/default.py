@@ -5,6 +5,8 @@ from __future__ import annotations
 from arq.connections import RedisSettings
 
 from app.config import get_settings
+from app.runtime.resources import shutdown_runtime_resources
+from app.shared.runtime_admission import record_ready
 from app.workers.jobs import JOB_FUNCTIONS
 
 
@@ -13,10 +15,16 @@ def _redis_settings() -> RedisSettings:
     return RedisSettings.from_dsn(settings.redis_url)
 
 
+async def startup(_ctx: object) -> None:
+    record_ready("worker-default")
+
+
 class WorkerSettings:
     """Arq WorkerSettings for the default queue."""
 
     functions = JOB_FUNCTIONS
+    on_startup = startup
+    on_shutdown = shutdown_runtime_resources
     redis_settings = _redis_settings()
     queue_name = get_settings().arq_default_queue_name
     max_jobs = 10

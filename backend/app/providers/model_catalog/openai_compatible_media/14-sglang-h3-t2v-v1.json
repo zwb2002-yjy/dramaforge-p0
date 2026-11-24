@@ -1,0 +1,38 @@
+{
+  "manifest_version": "2026-09-29",
+  "provider_type": "openai_compatible_media",
+  "protocol_profile": "openai_media_v1",
+  "model_id": "@contract/sglang-h3-t2v-v1",
+  "model_revision": "v2",
+  "media_kind": "video",
+  "display_name": "SGLang H3 文生视频 (T2VA)",
+  "lifecycle": "active",
+  "catalog_source": "protocol_contract",
+  "documented_at": "2026-09-29",
+  "operations": {
+    "video.generate": {
+      "operation": "video.generate",
+      "capabilities": [
+        "video.t2v"
+      ],
+      "output_constraints": {
+        "duration_seconds": 5,
+        "native_audio": false
+      },
+      "reference_constraints": {},
+      "exclusive_groups": []
+    }
+  },
+  "option_schema": {
+    "namespace": "",
+    "options": {}
+  },
+  "implementation_status": "contract_tested",
+  "evidence": {
+    "current_contract": {
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit",
+      "checked_at": "2026-10-07"
+    }
+  }
+}

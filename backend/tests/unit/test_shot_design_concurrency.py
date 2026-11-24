@@ -27,6 +27,7 @@ def _project_with_shot(client: TestClient) -> tuple[str, str]:
     created = client.post(
         "/api/v1/projects",
         json={
+            "work_type": "serial_comic",
             "workspace_id": workspace_id,
             "name": "Design Project",
             "aspect_ratio": "16:9",
@@ -117,12 +118,75 @@ def test_shot_design_patch_requires_project_ownership(client: TestClient) -> Non
         },
     )
     assert intruder.status_code in {200, 201}, intruder.text
-    client.headers["X-Workspace-Id"] = str(
-        client.get("/api/v1/workspaces").json()[0]["id"]
-    )
+    client.headers["X-Workspace-Id"] = str(client.get("/api/v1/workspaces").json()[0]["id"])
     response = client.patch(
         f"/api/v1/projects/{project_id}/shots/{shot_id}/design",
         json={"expected_version": 1, "image_prompt": "stolen"},
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert response.status_code == 404, response.text
+
+
+def test_voice_options_are_project_scoped_and_do_not_probe(client: TestClient, monkeypatch) -> None:
+    project_id, _shot_id = _project_with_shot(client)
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Reading speech choices must not start a provider")
+
+    monkeypatch.setattr("app.providers.voice_runtime.get_voice_adapter", unexpected)
+    response = client.get(f"/api/v1/projects/{project_id}/voice-options")
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["status"] == "missing"
+    assert data["reason_code"] == "VOICE_BINDING_MISSING"
+    assert data["voices"] == []
+    assert data["binding_id"] is None
+    assert client.get(f"/api/v1/projects/{uuid4()}/voice-options").status_code == 404
+    del client.headers["X-Workspace-Id"]
+    assert client.get(f"/api/v1/projects/{project_id}/voice-options").status_code in {400, 403, 422}
+
+
+def test_saved_voice_is_validated_and_retained_without_generating(
+    client: TestClient, monkeypatch
+) -> None:
+    project_id, shot_id = _project_with_shot(client)
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Saving a voice is not a speech generation gate")
+
+    monkeypatch.setattr("app.providers.voice_runtime.get_voice_adapter", unexpected)
+    path = f"/api/v1/projects/{project_id}/shots/{shot_id}/design"
+    response = client.patch(
+        path,
+        json={
+            "expected_version": 1,
+            "director_state": {"voice": {"voice_id": "zh-CN-YunxiNeural", "rate_percent": -10}},
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["director_state"]["voice"] == {
+        "voice_id": "zh-CN-YunxiNeural",
+        "rate_percent": -10,
+    }
+    # The shot stores a draft voice id; the project voice binding validates it
+    # at generation time (unknown voices fail there, never silently substituted).
+    draft = client.patch(
+        path,
+        json={
+            "expected_version": response.json()["version"],
+            "director_state": {"voice": {"voice_id": "cmn", "rate_percent": 0}},
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert draft.status_code == 200, draft.text
+    assert draft.json()["director_state"]["voice"]["voice_id"] == "cmn"
+    excessive = client.patch(
+        path,
+        json={
+            "expected_version": response.json()["version"],
+            "director_state": {"voice": {"rate_percent": 31}},
+        },
+        headers={CSRF_HEADER: _csrf(client)},
+    )
+    assert excessive.status_code == 422, excessive.text

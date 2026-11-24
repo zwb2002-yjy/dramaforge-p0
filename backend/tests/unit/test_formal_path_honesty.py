@@ -7,9 +7,7 @@ from uuid import uuid4
 
 import pytest
 from app.events.models import OutboxEvent
-from app.events.outbox import OutboxDispatcher
-from app.providers.errors import ProviderNotConfiguredError
-from app.providers.local_tts import get_local_tts_adapter
+from app.events.outbox import OutboxDispatcher, StreamPublisher
 from app.shared.enums import OutboxStatus
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,21 +62,6 @@ def test_formal_dispatch_uses_its_bound_source_commit(monkeypatch: pytest.Monkey
         clear_settings_cache()
 
 
-def test_local_tts_adapter_fail_closed_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("APP_ENV", "development")
-    monkeypatch.setenv("TTS_ENABLED", "false")
-    from app.config import clear_settings_cache
-
-    clear_settings_cache()
-    try:
-        with pytest.raises(ProviderNotConfiguredError) as ei:
-            get_local_tts_adapter()
-        assert ei.value.code == "PROVIDER_NOT_CONFIGURED"
-    finally:
-        monkeypatch.setenv("APP_ENV", "test")
-        clear_settings_cache()
-
-
 @pytest.mark.asyncio
 async def test_enqueue_does_not_return_local_on_redis_failure(
     monkeypatch: pytest.MonkeyPatch,
@@ -114,7 +97,7 @@ async def test_media_node_enqueues_on_heavy_queue(monkeypatch: pytest.MonkeyPatc
     session = MagicMock()
     session.get = AsyncMock(
         side_effect=[
-            SimpleNamespace(graph_node_id=uuid4()),
+            SimpleNamespace(graph_node_id=uuid4(), input_snapshot={}, output_summary={}),
             SimpleNamespace(node_type="keyframe"),
         ]
     )
@@ -159,7 +142,7 @@ async def test_outbox_reclaim_expired_lease() -> None:
         db_session.add(ev)
         await db_session.flush()
 
-        disp = OutboxDispatcher(db_session)
+        disp = OutboxDispatcher(db_session, StreamPublisher())
         n = await disp.reclaim_expired_leases()
         assert n >= 1
         await db_session.refresh(ev)
@@ -190,17 +173,23 @@ def test_identity_review_has_no_biometric_runtime_contract() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_media_bytes_no_stub_outside_test(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_media_file_no_stub_outside_test(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from app.config import clear_settings_cache
-    from app.execution.product_path import _resolve_media_bytes
+    from app.execution.media_io import _resolve_media_file
     from app.shared.errors import ValidationAppError
 
     monkeypatch.setenv("APP_ENV", "development")
     clear_settings_cache()
     try:
         with pytest.raises(ValidationAppError) as ei:
-            await _resolve_media_bytes(
-                kind="keyframe", remote="r1", prompt="p", artifact_uri=None
+            await _resolve_media_file(
+                kind="keyframe",
+                remote="r1",
+                prompt="p",
+                artifact_uri=None,
+                destination=tmp_path / f"media-{uuid4().hex}",
             )
         assert "PROVIDER_MEDIA_MISSING" in ei.value.message or "STUB" in ei.value.message
     finally:

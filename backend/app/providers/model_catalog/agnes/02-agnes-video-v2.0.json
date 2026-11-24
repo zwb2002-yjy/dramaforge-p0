@@ -1,0 +1,54 @@
+{
+  "manifest_version": "2026-08-10",
+  "provider_type": "agnes",
+  "protocol_profile": "agnes_cn_v1",
+  "model_id": "agnes-video-v2.0",
+  "model_revision": "v2",
+  "media_kind": "video",
+  "display_name": "Agnes Video V2.0",
+  "lifecycle": "active",
+  "catalog_source": "official_static",
+  "documented_at": "2026-08-10",
+  "operations": {
+    "video.generate": {
+      "operation": "video.generate",
+      "capabilities": [
+        "video.i2v.first_frame"
+      ],
+      "output_constraints": {
+        "num_frames": {
+          "allowed": [
+            121
+          ]
+        },
+        "frame_rate": {
+          "allowed": [
+            24
+          ]
+        },
+        "height": 1280,
+        "width": 720,
+        "aspect_ratio": "9:16"
+      },
+      "reference_constraints": {
+        "first_frame": {
+          "min": 1,
+          "max": 1
+        }
+      },
+      "exclusive_groups": []
+    }
+  },
+  "option_schema": {
+    "namespace": "",
+    "options": {}
+  },
+  "implementation_status": "contract_tested",
+  "evidence": {
+    "current_contract": {
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit",
+      "checked_at": "2026-10-07"
+    }
+  }
+}

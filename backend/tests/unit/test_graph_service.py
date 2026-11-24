@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 import pytest
@@ -12,22 +11,10 @@ from app.execution.models import GraphEdge, GraphNode
 from app.production import models as _production_models  # noqa: F401
 from app.production.models import GraphVersion
 from app.production.service import GraphService, validate_graph_definition
-from app.shared.base import Base
 from app.shared.errors import ValidationAppError
 from app.shared.security import hash_password
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _definition() -> dict[str, object]:
@@ -85,6 +72,7 @@ async def _project(session: AsyncSession) -> tuple[User, object]:
     session.add(workspace)
     await session.flush()
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=workspace.id,
         name=f"Graph-{uuid4().hex[:8]}",
         aspect_ratio="9:16",
@@ -250,3 +238,33 @@ async def test_shot_experiment_graph_independent_from_formal(session: AsyncSessi
     # B is its own published graph
     assert graph_b.scope_type == "shot_experiment"
     assert graph_b.scope_entity_id == experiment_id
+
+
+@pytest.mark.asyncio
+async def test_asset_scope_requires_a_project_asset(session: AsyncSession) -> None:
+    from app.assets.models import Asset
+
+    user, project = await _project(session)
+    service = GraphService(session)
+    with pytest.raises(ValidationAppError) as missing:
+        await service.create_graph(
+            project_id=project.id,
+            scope_type="asset",
+            scope_entity_id=uuid4(),
+            template_key="asset-image",
+            created_by=user.id,
+        )
+    assert missing.value.details["code"] == "GRAPH_ASSET_SCOPE_INVALID"
+    asset = Asset(project_id=project.id, kind="character", name="Hero")
+    session.add(asset)
+    await session.flush()
+    graph = await service.create_graph(
+        project_id=project.id,
+        scope_type="asset",
+        scope_entity_id=asset.id,
+        template_key="asset-image",
+        created_by=user.id,
+        definition={"nodes": [{"key": "image", "type": "keyframe"}], "edges": []},
+    )
+    assert graph.scope_type == "asset"
+    assert graph.scope_entity_id == asset.id

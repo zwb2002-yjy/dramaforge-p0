@@ -27,6 +27,7 @@ def _project_with_scenes(client: TestClient) -> tuple[str, list[str]]:
     created = client.post(
         "/api/v1/projects",
         json={
+            "work_type": "serial_comic",
             "workspace_id": workspace_id,
             "name": "Scene Project",
             "aspect_ratio": "16:9",

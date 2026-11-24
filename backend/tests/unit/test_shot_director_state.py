@@ -17,6 +17,8 @@ def test_shot_director_state_defaults_are_serializable() -> None:
         "continuity_constraints": [],
         "model_overrides": {"image_model_id": None, "video_model_id": None},
         "video_reference_risk": None,
+        "voice": {"voice_id": None, "rate_percent": 0},
+        "generation_settings": None,
     }
 
 
@@ -31,6 +33,26 @@ def test_shot_director_state_round_trips_design_example() -> None:
         "continuity_constraints": [{"kind": "screen_direction", "value": "right"}],
         "model_overrides": {"image_model_id": None, "video_model_id": "provider/video-x"},
         "video_reference_risk": {"level": "low"},
+        "voice": {"voice_id": "zh-CN-XiaoxiaoNeural", "rate_percent": 10},
+        "generation_settings": {
+            "schema_version": 1,
+            "image_keyframe": {
+                "mode_id": "text_to_image",
+                "source_contract_hash": "hash-image-contract",
+                "common_options": {"seed": 42},
+                "native_options": {"guidance": 7.5},
+                "prompt_override": None,
+                "request_duration_seconds": None,
+            },
+            "video": {
+                "mode_id": "image_to_video",
+                "source_contract_hash": "hash-video-contract",
+                "common_options": {"motion": 5},
+                "native_options": {},
+                "prompt_override": "smooth camera pan",
+                "request_duration_seconds": 4.0,
+            },
+        },
     }
     state = ShotDirectorState.model_validate(payload)
     assert state.model_dump() == payload

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -27,6 +25,26 @@ class RuntimeLease(BaseModel):
     worker_id: str = Field(min_length=1, max_length=160)
     epoch: int = Field(ge=1)
     expires_at: datetime
+
+
+class StepTicket(BaseModel):
+    """Fence captured by a short admission transaction before a graph step runs.
+
+    The row lock is never held across the step itself (model/tool/network work),
+    so a slow step cannot block control or recovery. The ticket records the epoch
+    and row revision the worker observed; ``commit_step`` refuses to write when
+    either moved, which is how late results from a fenced worker are dropped.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    project_id: UUID
+    turn_id: UUID
+    runtime_execution_id: UUID
+    worker_id: str = Field(min_length=1, max_length=160)
+    epoch: int = Field(ge=0)
+    revision: int = Field(ge=1)
+
 
 
 class DirectorRuntimeControlService:
@@ -137,17 +155,63 @@ class DirectorRuntimeControlService:
         await self._session.flush()
         return self._lease(row)
 
-    @asynccontextmanager
-    async def guard(self, lease: RuntimeLease) -> AsyncIterator[DirectorRuntimeControl]:
-        """Hold the control-row lock while one checkpoint-changing step runs."""
+    async def begin_step(self, lease: RuntimeLease) -> StepTicket:
+        """Short admission: verify the lease, then let the caller commit and run.
 
+        No row lock survives this call, so a graph step (including model and tool
+        work) never holds a database lock and cannot block control operations.
+        """
         row = await self._get(
             project_id=lease.project_id,
             runtime_execution_id=lease.runtime_execution_id,
             lock=True,
         )
         self._assert_lease(row, lease)
-        yield row
+        return StepTicket(
+            project_id=row.project_id,
+            turn_id=row.turn_id,
+            runtime_execution_id=row.runtime_execution_id,
+            worker_id=lease.worker_id,
+            epoch=row.lease_epoch,
+            revision=row.revision,
+        )
+
+    async def commit_step(
+        self, ticket: StepTicket, *, runtime_status: str,
+    ) -> DirectorRuntimeControl:
+        """Short publication: refused when the epoch or row moved while the step ran."""
+        row = await self._get(
+            project_id=ticket.project_id,
+            runtime_execution_id=ticket.runtime_execution_id,
+            lock=True,
+        )
+        if (
+            row.turn_id != ticket.turn_id
+            or row.lease_owner != ticket.worker_id
+            or row.lease_epoch != ticket.epoch
+            or row.revision != ticket.revision
+            or row.stop_requested_at is not None
+        ):
+            # A stop, a new lease epoch or any concurrent control write wins over
+            # this worker's late result; the caller records nothing for it.
+            raise ConflictError(
+                "Director runtime step result is fenced",
+                details={
+                    "code": "DIRECTOR_RUNTIME_LEASE_STALE",
+                    "epoch": row.lease_epoch,
+                    "revision": row.revision,
+                },
+            )
+        row.lease_owner = None
+        row.lease_expires_at = None
+        row.status = {
+            "completed": "completed",
+            "failed": "failed",
+            "cancelled": "stopped",
+        }.get(runtime_status, "waiting")
+        row.revision += 1
+        await self._session.flush()
+        return row
 
     async def release_waiting(self, lease: RuntimeLease) -> DirectorRuntimeControl:
         return await self.settle(lease, runtime_status="awaiting_user")
@@ -330,4 +394,4 @@ class DirectorRuntimeControlService:
         )
 
 
-__all__ = ["DirectorRuntimeControlService", "RuntimeLease"]
+__all__ = ["DirectorRuntimeControlService", "RuntimeLease", "StepTicket"]

@@ -30,7 +30,7 @@ test("Visual 2.0 project lobby loads without page errors", async ({ page }) => {
     "projects",
   );
   await expect(page.getByRole("navigation", { name: "一级导航" })).toBeVisible();
-  await expect(page.getByRole("complementary", { name: "二级导航" })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "二级导航" })).toHaveCount(0);
   await expect(page.getByTestId("home-panel")).toBeVisible();
   expect(errors).toEqual([]);
 });

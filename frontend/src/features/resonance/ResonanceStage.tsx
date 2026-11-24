@@ -1,3 +1,4 @@
+import { Button, Input } from "../../components/ui";
 import { ArrowUp, Check, Focus, Link2, Orbit, X } from "lucide-react";
 import { useRef, useState, type PointerEvent, type ReactNode } from "react";
 
@@ -124,19 +125,19 @@ export function ResonanceStage({
             onOpen={onOpenDirector}
           />
         )}
-        <button
+        <Button
           type="button"
           aria-label={worldOpen ? "回到当前画面" : "展开镜头关系图"}
           aria-expanded={worldOpen}
           onClick={() => setWorldOpen((value) => !value)}
         >
           {worldOpen ? <Focus size={19} /> : <Orbit size={19} />}
-        </button>
+        </Button>
       </div>
       {identities.length > 0 && (
         <div className="rs-cast" aria-label="当前镜头身份参考">
           {identities.map((subject, index) => (
-            <button
+            <Button
               key={subject.id}
               type="button"
               aria-label={`关注身份参考：${subject.label || `角色 ${index + 1}`}`}
@@ -154,7 +155,7 @@ export function ResonanceStage({
                 {(subject.label || `${index + 1}`).slice(0, 1)}
               </span>
               <span>{subject.label || `角色参考 ${index + 1}`}</span>
-            </button>
+            </Button>
           ))}
         </div>
       )}
@@ -165,7 +166,7 @@ export function ResonanceStage({
         <div className="rs-world" data-testid="resonance-world">
           <div className="rs-world-actions">
             {attention.length === 2 && (
-              <button
+              <Button
                 type="button"
                 onClick={() => {
                   const source = shots.find((shot) => shot.id === attention[0]);
@@ -175,20 +176,20 @@ export function ResonanceStage({
               >
                 <Link2 size={16} />
                 衔接这两刻
-              </button>
+              </Button>
             )}
-            <button
+            <Button
               type="button"
               aria-pressed={groupMode}
               onClick={() => setGroupMode((value) => !value)}
             >
               <Focus size={16} />
               共同关注
-            </button>
+            </Button>
             {attention.length > 0 && (
-              <button type="button" aria-label="清除共同关注" onClick={() => setAttention([])}>
+              <Button type="button" aria-label="清除共同关注" onClick={() => setAttention([])}>
                 <X size={16} />
-              </button>
+              </Button>
             )}
           </div>
           <div className="rs-map-scroll">
@@ -265,7 +266,7 @@ export function ResonanceStage({
                 const p = position(index);
                 const included = attention.includes(shot.id);
                 return (
-                  <button
+                  <Button
                     type="button"
                     key={shot.id}
                     data-world-shot={shot.id}
@@ -301,7 +302,7 @@ export function ResonanceStage({
                     <span className="rs-node-description">
                       {shot.visual_description || `镜头 ${shot.shot_number}`}
                     </span>
-                  </button>
+                  </Button>
                 );
               })}
               {shots.length === 0 && <p className="rs-empty">故事尚未展开</p>}
@@ -333,7 +334,7 @@ export function ResonanceStage({
           <i aria-hidden="true" />
           {selected ? String(selected.shot_number).padStart(2, "0") : "—"}
         </span>
-        <input
+        <Input
           ref={input}
           aria-label="此刻的创作意图"
           placeholder="你想让这一刻发生什么？"
@@ -342,13 +343,13 @@ export function ResonanceStage({
           onChange={(event) => setInstruction(event.target.value)}
           maxLength={4000}
         />
-        <button
+        <Button
           type="submit"
           aria-label="与导演讨论这个意图"
           disabled={!selected || !instruction.trim()}
         >
           <ArrowUp size={20} />
-        </button>
+        </Button>
       </form>
       {attention.length > 0 && (
         <div className="rs-attention" role="status">

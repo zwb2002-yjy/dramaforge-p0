@@ -1,14 +1,15 @@
 # DOMAIN_VOCABULARY — 术语唯一解
 
 Status: current（入口见 [CURRENT.md](CURRENT.md)）
-Date: 2026-09-15 / Base: dev 5ea45d6 / Alembic head: 20260910_0066
+Updated: 2026-10-08；迁移状态统一见 [DATA_MODEL.md](DATA_MODEL.md)。
 
-本文件是 DramaForge 的**唯一词典**。任何模块、PR、Review、文档只能使用这里的词。
+本文件是 DramaForge **共享领域概念、持久事实与公共合同的唯一词典**。
+局部变量名、通用技术词和普通说明文字不要求逐词登记；不得借此为同一领域事实另造名称。
 
 规则：
 
 1. 每个词在此处**只有一个含义**，并给出当前代码锚点。
-2. 想表达的意思不在下表 → 先在本文件补词条，再写代码；不得临时造词。
+2. 新共享领域概念不在下表 → 先明确含义及权威归属，再补词条和代码；不得临时造同义词。
 3. 同一含义已有词条 → 禁止新增同义词。
 4. 世界观与依赖约束见
    [CANONICAL_ARCHITECTURE.md](CANONICAL_ARCHITECTURE.md) /
@@ -22,26 +23,49 @@ Date: 2026-09-15 / Base: dev 5ea45d6 / Alembic head: 20260910_0066
 | 术语 | 唯一含义 | 代码锚点 |
 |---|---|---|
 | **Workspace** | 顶层租户/空间容器，所有 Project 归属它 | `access/models.py::Workspace` |
-| **Project** | 一部作品；主链的起点，所有生产事实的项目范围 | `access/models.py::Project` |
+| **Project** | 一部作品或同一连续系列；主链的起点，所有生产事实的项目范围 | `access/models.py::Project` |
 | **Creative Profile** | 每个 Project 唯一一份的创作档案：启动方式、导演自主度、选中的类型/风格/技能/镜头语言 | `access/models.py::ProjectCreativeProfile`（`project_creative_profiles`，`project_id` unique） |
 | **Story** | 故事层内容，由 Director 提案产生，用户显式 Apply 后成为事实 | `director/story_proposal.py`、`director/story_generation.py` |
 | **Script** | 剧本文档；导入或生成的脚本事实 | `assets/models.py::ScriptDocument`、`assets/script_import.py` |
 | **Episode** | 剧集容器，Scene 的父级 | `assets/models.py::Episode` |
 | **Scene** | 场；Shot 的容器，带场景级空间与影响面报告 | `assets/models.py::Scene`、`assets/scene_service.py` |
-| **Shot** | 镜头；**生产的最小单位**，ProductionGraph 的 `scope_type="shot"` 对应实体 | `assets/models.py::Shot` |
+| **Shot** | 镜头级媒体生产单位，ProductionGraph 的 `scope_type="shot"` 对应实体；不排除 Project 级成片渲染图 | `assets/models.py::Shot` |
 | **Asset** | 可复用创作资产（角色、场景、道具等） | `assets/models.py::Asset` |
 | **AssetVersion** | Asset 的一次不可变版本；身份引用只认版本 | `assets/models.py::AssetVersion` |
 | **AssetVersionReference** | Shot/Production 对某个 AssetVersion 的显式身份引用——**唯一身份引用源**，不存在 Character/CharacterReference 兼容层 | `assets/models.py::AssetVersionReference` |
 | **Candidate** | 生产出来但未被用户选定的结果。**没有 Candidate 表**：候选直接从 NodeRun + Artifact 派生 | `production/formal_selection.py::list_formal_candidates` |
 | **Formal** | 用户显式确认后的正式结果。Keyframe 与 Video 各记录一个正式 Artifact 引用 | `production/formal_selection.py::set_formal_keyframe` / `set_formal_video` / `require_formal_keyframe`；列为 `Shot.formal_keyframe_artifact_id`、`Shot.formal_video_artifact_id` |
-| **Experiment** | 隔离的 Shot 实验分支与采纳；**复用同一图引擎，不是第二条生产链** | `production/models.py::ExperimentBranch`、`production/models.py::ProductionExperiment`、`production/models.py::ShotExperiment`、`production/experiment_service.py` |
+| **Experiment** | 隔离的 Shot 实验分支与采纳；**复用同一图引擎，不是第二条生产链** | `production/models.py::ExperimentBranch`、`production/experiment_service.py` |
 | **Review** | 对生产结果的标注与决策；只读生产事实、只写评审事实 | `delivery/models.py::ReviewAnnotation`、`production/service.py` |
 | **Repair** | 有证据的显式修复计划，绝不静默重跑 | `production/repair_service.py` |
 | **EditSession** | 剪辑会话及其 timeline 版本（成片领域） | `editing/models.py::EditSession`、`editing/timeline_builder.py` |
 | **FinalFilm** | 绑定 timeline 版本渲染出的成片交付（MP4 + SRT）。**不是独立持久化实体**，是 `final-film-v1` ProductionGraph 的渲染结果读模型 | `production/final_film.py`（`FinalFilmRead`、`queue_final_film_render`）、`production/timeline_renderer.py`、`production/timeline_subtitles.py` |
+| **OpenCut** | 剪辑时间线的开放清单/交换格式能力：把 EditSession timeline 投影为可检视清单，**不是第二条剪辑主链或独立 Runtime** | `api/v1/opencut.py`、`editing` 相关投影 |
 | **Export** | 对外导出记录与条目 | `delivery/models.py::Export`、`delivery/models.py::ExportItem` |
+| **Delivery** | 交付域：人工审片决定、导出与交付读模型（Review/Delivery）。**不是独立主链终点之外的第二产品路径**；Final Film 经 Export 完成交付 | `delivery/models.py`（`ReviewAnnotation`、`HumanReviewDecision`、`Export`、`ExportItem`） |
+| **Resonance** | 前端表现层的受控视觉例外（共鸣舞台），**不是产品实体或第二主链**；仅允许在既定局部范围内偏离全局 Visual System | 见 [frontend/design/README.md](../frontend/design/README.md) §5.5 |
 
 ---
+
+### 界面入口与导航
+
+界面入口与制作导航使用下列显示名称，不改变产品实体或业务路由：
+
+| 显示名称 | 含义 / 既有地址 | 前端代码锚点 |
+|---|---|---|
+| 我的项目 | 全局唯一项目列表 `/`；创建、查找、切换当前空间项目 | `routes/index.tsx` |
+| 进入工作台 | 卡片唯一主动作 `/projects/:id`；按本项目导航偏好恢复，不推断业务进度 | `routes/projects.$projectId.tsx` |
+| 项目导航 | 项目顶栏的侧栏/抽屉开关 | `components/workstation/ProjectWorkspaceShell.tsx` |
+| 项目总览 | `/projects/:id/production` | `components/workstation/projectNavigation.ts` |
+| 故事剧本 | `/projects/:id/script` | 同上 |
+| 角色与素材 | `/projects/:id/assets` | 同上 |
+| 分镜制作 | `/projects/:id/scenes` 及具体场景；生成关键帧/视频仍是独立业务操作 | 同上 |
+| 审片确认 | `/projects/:id/review` | 同上 |
+| 剪辑成片 | `/projects/:id/edit` | 同上 |
+| 最近打开 | 当前空间中匹配单个记忆项目 ID 的筛选；不是多条历史记录 | `lib/navigationPreferences.ts` |
+
+本地项目路径、服务器 `workspace_state.last_view` 均为导航偏好；Project `stage` 是业务事实，
+不得拼接成导航地址。模型就绪提示复用目录与工作空间默认绑定，不声明实际生成成功。
 
 ## 二、Creative Layer
 
@@ -60,10 +84,10 @@ Creative Layer 是普通领域能力与编译能力的集合，**不是 Runtime*
 | **Quality Policy** | 质量维度与失败分类（TECHNICAL_BLOCKER / QUALITY_WARNING / HUMAN_JUDGMENT） | `creative_capabilities/shot_language.py::QualityPolicySpec`、`QualityDimension` |
 | **Skill Resolver** | 按适用条件从 Skill 库解析出应生效的 Skill 组合 | `creative_capabilities/skill_library.py`、`registry.py`、`composer.py` |
 | **Creative Compiler** | 把用户意图 + 项目上下文 + Genre + SkillStack + Style + ShotLanguage + QualityPolicy 确定性编译成一份冻结的 CreativeIntent | `creative_capabilities/creative_compiler.py::CreativeCapabilityCompiler` |
-| **CreativeIntent** | **前段创意系统与后段 Production 之间的唯一中间协议**。代码名为 `CompiledCreativeIntent`，`frozen=True`。字段表与实现差异见宪法第四节 | `creative_capabilities/creative_compiler.py::CompiledCreativeIntent` |
+| **CreativeIntent** | Creative Layer 向生产编译传递的唯一创意语义合同；代码名为 `CompiledCreativeIntent`，`frozen=True`。不替代操作 Command、冻结执行计划或执行回执；适用边界见宪法第四节 | `creative_capabilities/creative_compiler.py::CompiledCreativeIntent` |
 | **CreativeIntent freeze** | 把 CreativeIntent 及其 pack 身份序列化，保证 resume 使用同一组 hash | `creative_capabilities/freeze.py` |
 | **Creative Template** | 项目启动模板（`start_type="TEMPLATE"` 时引用），贡献 Genre/Style/Skill 预设；**只是项目初始化方式** | `creative_capabilities/creative_templates.py`、`access/projects.py` |
-| **Model Adaptation** | 把 CreativeIntent + ModelCapability 编译为 `EffectiveProviderRequest` 的能力 `[未落地：当前由 Provider layer 的 compiler/runtime 承担]` | 参见 `providers/` |
+| **Model Adaptation** | 将已确认的创意和输入约束落实为模型请求的能力；当前由 Production 计划编译与 Provider compiler/runtime 分工实现，不要求另建同名层或重新解释 Style/Skill | `production/workbench_execution.py`、`providers/`；职责差距见 ARCHITECTURE_MAPPING |
 
 **优先级门（Creative 域唯一权威，不得改写）：**
 
@@ -87,11 +111,11 @@ explicit user value > accepted proposal > project override > pack default
 | **DirectorTurn** | 一次有界的导演轮次（有状态、可恢复、可 fencing） | `director/turn_models.py::DirectorTurn`、`turn_service.py` |
 | **DirectorInvocation** | 一次具体的 LLM 调用事实及其证据 | `director/invocation_models.py::DirectorInvocation`、`invocations.py` |
 | **DirectorProposal** | 结构化提案（含 ProposalItem）；用户 Apply 后才成为事实 | `director/proposal_models.py::DirectorProposal`、`DirectorProposalItem`、`proposal_service.py` |
-| **DirectorDecision** | 用户对提案的显式决定（Apply / Save / Formal / Export 用户门） | `director/proposal_commands.py` |
+| **DirectorDecision** | 用户对导演提案的显式接受、部分接受或拒绝；不合并 Save / Formal / Export 等其他领域操作 | `director/proposal_commands.py` |
 | **DirectorInbox** | 传给导演的事件收件箱 | `director/inbox_models.py::DirectorInbox`、`inbox.py` |
 | **DirectorWakeup** | 唤醒导演的信号（含重放） | `director/inbox_models.py::DirectorWakeup`、`wakeup.py`、`wakeup_replay.py` |
-| **Director autonomy** | AUTO / ASSIST / MANUAL：**只是 Director 参与模式**，不创建第二条生产链 | `director/autonomy_policy.py`、`ProjectCreativeProfile.director_autonomy` |
-| **Checkpoint** | Director 轮次的可恢复检查点 | `director/runtime/checkpoint.py`、`business_checkpoints.py` |
+| **Director autonomy** | AUTO / ASSIST / MANUAL：**只是 Director 参与模式**，不创建第二条生产链 | `ProjectCreativeProfile.director_autonomy`（`backend/app/access/models.py`）；消费点见 `DIRECTOR_RUNTIME.md` |
+| **Checkpoint** | Director 轮次的可恢复检查点 | `director/runtime/checkpoint.py`；旧 BusinessCheckpoints 已退役 |
 
 **用户门（不可绕过）：** Apply / Save / Formal / Export。Director 自主度任何时候都
 不得绕过这四个显式用户门。
@@ -110,10 +134,11 @@ explicit user value > accepted proposal > project override > pack default
 | **GraphEdge** | Graph 版本内的节点依赖边 | `execution/models.py::GraphEdge` |
 | **Node** | ProductionGraph 内一个有明确输入和输出的**生产步骤定义**。不是普通函数 | 持久化节点类型见 [PRODUCTION_GRAPH.md](PRODUCTION_GRAPH.md) 第三节 |
 | **NodeRun** | 某个 Node 的**一次实际执行事实**（排队 → 运行 → 终态）。同一个 Node 的多次重做是多个 NodeRun | `execution/models.py::NodeRun` |
-| **ProviderOperation** | 一次真实的外部模型/API 调用事实。**只有 NodeRun 一个 owner**，关系为 `NodeRun 1..N ProviderOperation` | `execution/models.py::ProviderOperation` |
+| **ProviderOperation** | 一次已冻结执行后端操作事实，可为远端模型/API或已注册本地媒体处理。**只有 NodeRun 一个 owner**；当前非空node_run_id唯一，对应每NodeRun `0..1` | `execution/models.py::ProviderOperation`；本地例见`production/final_film.py` |
 | **Artifact** | 不可变产物及其血缘 | `execution/models.py::Artifact`、`execution/artifact_lineage.py` |
 | **Outbox** | 事务性事件外发与死信 | `events/`、`workers/dispatcher.py` |
 | **WorkbenchExecutionPlan** | 冻结的执行计划：模型身份、引用编译、阶段与节点契约在提交前被显式冻结 | `production/execution_plan.py::WorkbenchExecutionPlan` |
+| **VoiceExecutionSpec** | 冻结的配音引擎、音色、语速与实现版本；与媒体/文本模型槽分开，失败不自动换引擎 | `assets/voice.py`、`providers/voice_config.py`、`providers/voice_runtime.py` |
 | **ShotHumanLock** | Shot 级人工锁，防并发执行冲突 | `execution/shot_locks.py` |
 | **Production Planner** | Production Runtime 内部逻辑角色：由 CreativeIntent + 现有 Artifact + Formal 状态 + ModelCapability + 修改范围推导**最小** ProductionGraph。它不负责创意 `[部分落地：`production/execution_plan.py` 冻结阶段契约；完整最小重算规划器尚未独立成形]` | `production/execution_plan.py`、`production/workbench_execution.py` |
 
@@ -130,6 +155,12 @@ explicit user value > accepted proposal > project override > pack default
 | **ProviderConnection** | 用户 BYOK 连接及其修订 | `providers/models.py::ProviderConnection`、`connection_service.py` |
 | **EffectiveProviderRequest** | CreativeIntent + ModelCapability 编译后的最终 Provider 请求 | `providers/` compiler/runtime（`unified-v1`） |
 | **ArtifactReferenceToken** | 提供给 Provider 的临时引用令牌（不泄露凭据） | `providers/models.py::ArtifactReferenceToken`、`reference_delivery.py` |
+| **InputContractSpec** | 一个模型 operation 的输入槽、基数、素材元数据与参数约束；实际素材须唯一匹配合同 | `providers/manifest.py`、`capability_resolver.py` |
+| **ProductCapabilityPolicy** | 当前编译调用显式传入的产品开放子集；不能由供应商声明或 LLM 自行放宽 | `providers/capability_resolver.py` |
+| **ProviderAvailabilityEvidence / ProviderModelAvailability** | 前者是具体模型、连接/凭证 revision 的不可变证据；后者是独立当前投影；不等于静态支持或质量认证 | `providers/availability_models.py`、`availability_projection.py` |
+| **BindingModelId** | `binding:<UUID>`，模型方案精确指向一条连接的媒体 Binding；不是显示名或供应商默认模型 | `providers/model_resolution.py` |
+| **ConnectionTextModelId** | `litellm/<connection-UUID>/<remote-id>`，连接身份与 wire model 分离，不覆盖部署逻辑 alias | `providers/litellm_gateway/workspace_registry.py` |
+| **ResolvedGenerationPlan** | 技术能力匹配的只读结果；不等于生产命令、用户授权或 WorkbenchExecutionPlan | `providers/capability_resolver.py` |
 
 ---
 
@@ -150,18 +181,52 @@ explicit user value > accepted proposal > project override > pack default
 | 禁止新增 | 应使用 |
 |---|---|
 | `GenerationTask`、`RenderTask`、`WorkflowTask`、`MediaJob`、`VideoJob`、`GenerationRun`、`GenerationService`（作为新概念） | **NodeRun** |
-| `ProviderCall`、`ModelCall`、`ApiCall` | **ProviderOperation** |
+| `ProviderCall`、`ModelCall`、`ApiCall`（作为重复生产事实实体） | **ProviderOperation**；Director文本调用仍用其既有Invocation，不因此创建NodeRun/Operation副本 |
 | `DirectorGraph`、`CreativeGraph`、`SkillGraph`、`EditingGraph`、`UIWorkflowGraph` | **Director Runtime Flow**（控制流）或 **ProductionGraph**（执行计划） |
-| `ProductionWorkbench`、`CreativeWorkspace`、`SceneWorkbench`、`ShotWorkbench`、`DirectorBoard`（作为一级产品区域） | 一级区域只保留 **Project Lobby / Creation / Production / Editing**；上述名称最多只能是 Production 区域**内部组件或视图** |
+| `ProductionWorkbench`、`CreativeWorkspace`、`SceneWorkbench`、`ShotWorkbench`、`DirectorBoard`（作为并列产品入口） | 机构版按N08/N10统一项目/资料/研究/内容/素材/交付及三栏；独立文化知识和平台设置是明确全局能力。技术组件名不得变成第二套工作台/Runtime |
 | `CreativeRuntime`、`SkillRuntime`、`StyleRuntime`、`EditingRuntime` | 禁止存在；Creative Layer 是能力集合，Editing 属于成片领域 |
 | `Character`、`CharacterReference`（兼容层） | **AssetVersionReference** |
 | `Quick Creation`、`V1 Workbench`、`Professional`（作为并列产品） | 只有一个产品主链 |
 
-**已存在的同义风险（历史遗留，需在后续 Phase 消除，见
+## 机构版新增领域术语（D2目标，未实施）
+
+本节补充共享概念，具体表列/生命周期以[DATA_MODEL](DATA_MODEL.md#institution-schema)和Runtime权威为准。
+新概念与旧事实不同，不将新增目标描述为当前代码能力；D2数据设计已审查，D8前继续与执行/API合同交叉核对。
+
+| 术语 | 唯一含义 | 当前/目标落点 |
+|---|---|---|
+| ProjectFile / ProjectFileRevision | 项目私有资料关联 / 不可变原件版本；解除关联不物理删除 | assets/models.py已有 |
+| SourceExtraction / SourceFragment | 一次成功解析的不可变内容快照 / 带定位的原文片段 | 目标source_extractions/source_fragments，替换excerpts消费者；不是研究结果或新Runtime |
+| ResearchResult / ResearchResultRevision | 稳定研究条目及当前有效指针 / 不可变AI候选、用户编辑或恢复快照 | 目标research_results/research_result_revisions |
+| ResearchCitation | 某研究修订到确切原件修订与解析片段的引用 | 目标research_citations；来源失效不改写历史 |
+| ResearchAnalysis | 一次分析的不可变覆盖清单与输出/Invocation引用，允许某类零发现 | 目标research_analyses；执行状态仍归Turn/Flow，不新增分析Runtime |
+| SourceUseSubject / SourceUseRevision | 某原件修订或Artifact的当前使用限制指针 / 不可变声明与撤销 | 目标source_use_subjects/source_use_revisions；区别于外发目的地策略 |
+| ArtifactSourceUse | 生成Artifact到实际消费来源及当时限制版本的不可变依赖 | 目标artifact_source_uses；不改变produced_by_run_id或生产所有权 |
+| KnowledgeEntry / KnowledgeRevision | 独立文化知识身份与发布状态 / 显式选择的内容版本 | 目标knowledge_entries/knowledge_revisions，按N05同用户跨Workspace共享；不等同私有研究 |
+| KnowledgeSourceLink | 知识发布到私有研究的受限溯源关系 | 目标项目RLS，仅来源项目可读 |
+| ProjectKnowledgeReference | 项目对已发布知识固定版本及用途的引用 | 目标项目引用；不跟随知识current自动更新 |
+| MasterRun | 跨多个Turn监督的持续创作目标 | 第三轮候选，目标director_master_runs；不是每个HTTP请求 |
+| MasterRunPlanRevision | 目标的不可变计划版本 | 目标director_master_run_plans；复用typed Proposal决定 |
+| MasterRunControlReceipt | pause/resume/cancel/verify受理结果的不可变幂等回执 | 目标专用回执表；不是任务或生产状态 |
+| BusinessFlowDefinition | 代码注册的版本化业务步骤/条件/恢复合同 | 目标Python LangGraph注册入口；不是用户JSON解释器 |
+| BusinessFlowInstance / BusinessFlowStep / BusinessFlowStepAttempt | 跨Turn业务流程 / 业务步骤 / 一次冻结输入的业务尝试 | 第三轮三表目标；production attempt只关联一个NodeRun |
+| RuntimeControl | 有界执行的授权、lease/epoch、停止与恢复控制端口 | runtime/control.py已有局部；O6统一接口先于删旧Turn字段 |
+| EgressPolicyRevision | 项目内容外发许可不可变版本 | 目标策略revision/head；与SSRF网络守卫不同 |
+| PublicAssetPublication | 用户采用的生成AssetVersion在实例库的发布资格及安全展示投影 | D2候选public_asset_publications；原版本/Artifact所有权不变，不是第二可变资产 |
+| ProjectPublicAssetLink | 消费项目对某已发布AssetVersion的固定引用与项目显示标签 | D2候选project_public_asset_links；不复制媒体/资产版本 |
+| ProviderDestinationRevision | 实际处理目的地的可信版本化声明 | 目标workspace声明；Proxy在本地不等于上游在本地 |
+
+Project含单部作品或同一连续系列，Episode表示分集。Character可在用户语言中表示角色，
+代码仍以Asset/AssetVersion/Reference为身份，不恢复旧Character兼容表。
+公共资产已核对卡片/引用API/编译/令牌消费者，目标限制传播/组合键/API合同回填DATA_MODEL、MODEL_PROVIDER、API；仍未实施，不能创建第二套可变Asset真相。
+旧Workflow符号的正式改名按模板/生产读模型/创意规划分别处理，保留不同含义的turn_kind='workflow'，
+不机械全仓替换。具体命名映射见DIRECTOR_RUNTIME的O2消费者合同，尚待实施。
+
+**已存在的同义风险（当前处置见映射，不按历史 Phase 编号启动新任务，见
 [ARCHITECTURE_MAPPING.md](ARCHITECTURE_MAPPING.md)）：**
 
 | 词 | 现状 | 处置 |
 |---|---|---|
-| `Experiment`（`ExperimentBranch` / `ProductionExperiment` / `ShotExperiment`） | 三个类名并存，语义分层合理但命名易混 | KEEP，但必须在文档中固定为"Experiment = 隔离的 Shot 分支" |
+| `Experiment`（`ExperimentBranch`） | 唯一当前实验分支；旧 `ProductionExperiment` / `ShotExperiment` 已删除 | 旧 ORM/表不在当前 schema；历史实例数据与证据按 DEVELOPMENT 生命周期处置 |
 | `Node` 与 `GraphNode` | `Node` 是概念，`GraphNode` 是持久化实例 | KEEP，成对使用 |
-| `Workflow` | 仅存在于 `director/workflows/`，指"镜头生产模板目录" | RENAME/MERGE，见映射文档 |
+| `Workflow`旧命名 | `director/workflows/`混合模板、生产聚合读模型、创意规划/连续性/质量；Turn的workflow表示另一个事实 | 按O2/O3分类改名，D3补精确消费者映射；不是整个目录迁入Production或恢复旧Workflow运行表 |

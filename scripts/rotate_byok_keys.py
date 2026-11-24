@@ -16,7 +16,12 @@ import sys
 from pathlib import Path
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "backend"))
@@ -25,7 +30,6 @@ from app.config import get_settings  # noqa: E402
 from app.security.byok_keyring import parse_keyring  # noqa: E402
 from app.security.credentials import rotate_credentials  # noqa: E402
 from app.shared.model_registry import load_all_models  # noqa: E402
-
 
 ROTATION_ROLE = "dramaforge_byok_rotation"
 

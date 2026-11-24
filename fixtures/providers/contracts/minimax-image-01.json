@@ -24,38 +24,62 @@
           }
         ]
       },
-      "status_machine": ["synchronous"],
+      "status_machine": [
+        "synchronous"
+      ],
       "success_response": {
-        "data": {"image_urls": ["https://cdn.minimax.example/image.png"]}
+        "data": {
+          "image_urls": [
+            "https://cdn.minimax.example/image.png"
+          ]
+        }
       }
     }
   },
   "manifest": {
-    "catalog_source": "official_static",
-    "display_name": "MiniMax Image 01",
-    "documented_at": "2026-08-13",
-    "lifecycle": "active",
     "manifest_version": "2026-08-13",
-    "media_kind": "image",
+    "provider_type": "minimax",
+    "protocol_profile": "minimax_cn_v1",
     "model_id": "image-01",
-    "model_revision": "v1",
+    "model_revision": "v3",
+    "media_kind": "image",
+    "display_name": "MiniMax Image 01",
+    "lifecycle": "active",
+    "catalog_source": "official_static",
+    "documented_at": "2026-08-13",
     "operations": {
       "image.generate": {
-        "capabilities": ["image.i2i"],
-        "exclusive_groups": [],
         "operation": "image.generate",
+        "capabilities": [
+          "image.i2i"
+        ],
         "output_constraints": {
+          "size": "1024x1024",
           "aspect_ratio": "1:1",
-          "n": 1,
           "response_format": "url",
-          "size": "1024x1024"
+          "n": 1
         },
-        "reference_constraints": {"reference_image": {"max": 1, "min": 1}}
+        "reference_constraints": {
+          "reference_image": {
+            "min": 1,
+            "max": 1
+          }
+        },
+        "exclusive_groups": []
       }
     },
-    "option_schema": {"namespace": "", "options": {}},
-    "protocol_profile": "minimax_cn_v1",
-    "provider_type": "minimax"
+    "option_schema": {
+      "namespace": "",
+      "options": {}
+    },
+    "implementation_status": "contract_tested",
+    "evidence": {
+      "current_contract": {
+        "source_type": "contract_fixture",
+        "source_url": "repository:backend/tests/unit",
+        "checked_at": "2026-10-07"
+      }
+    }
   },
-  "manifest_hash": "30793572ba52b743ab05b3d6237354110a4c51e1b9adb29f5a2b8b51e9e01e3e"
+  "manifest_hash": "82fd2ab4186f236c6cd2a2a81134cc205715d3d72ad43a8a8c187a9331530184"
 }

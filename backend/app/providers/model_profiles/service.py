@@ -26,6 +26,8 @@ from app.providers.model_profiles.errors import (
     profile_version_conflict,
 )
 from app.providers.model_profiles.models import (
+    MediaConfig,
+    MediaConfigReview,
     ModelProfileSnapshot,
     ModelSlotBinding,
     ResolvedModelBinding,
@@ -43,6 +45,7 @@ from app.providers.model_profiles.slots import (
     ModelSlot,
     slot_definition,
 )
+from app.providers.models import ProviderModelBinding
 from app.providers.registry import ModelRegistry, RegisteredModel
 from app.providers.validator import validate_parameter
 from app.shared.errors import ValidationAppError
@@ -79,7 +82,6 @@ def parse_binding_json(raw: object) -> ModelSlotBinding:
             slot=slot,
             model_id=str(raw.get("model_id") or ""),
             native_options=dict(raw.get("native_options") or {}),
-            generation_policy=raw.get("generation_policy"),
             enabled=bool(raw.get("enabled", True)),
         )
     except PydanticValidationError as exc:
@@ -140,10 +142,24 @@ class ProductionModelProfileService:
         registry: ModelRegistry | None = None,
     ) -> None:
         self._session = session
+        self._workspace_dynamic = registry is None
+        self._loaded_workspace_id: UUID | None = None
         if registry is None:
             self._registry = default_model_registry()
         else:
             self._registry = registry
+
+    async def _ensure_workspace_registry(self, workspace_id: UUID) -> None:
+        if not self._workspace_dynamic or self._loaded_workspace_id == workspace_id:
+            return
+        from app.providers.litellm_gateway.workspace_registry import workspace_model_registry
+
+        self._registry = await workspace_model_registry(
+            self._session,
+            workspace_id=workspace_id,
+            base_registry=default_model_registry(),
+        )
+        self._loaded_workspace_id = workspace_id
 
     # ------------------------------------------------------------------
     # Queries
@@ -174,9 +190,7 @@ class ProductionModelProfileService:
             raise profile_not_found()
         return profile
 
-    async def list_workspace_profiles(
-        self, *, workspace_id: UUID
-    ) -> list[ProductionModelProfile]:
+    async def list_workspace_profiles(self, *, workspace_id: UUID) -> list[ProductionModelProfile]:
         rows = list(
             (
                 await self._session.execute(
@@ -193,9 +207,7 @@ class ProductionModelProfileService:
         )
         return rows
 
-    async def get_workspace_default(
-        self, *, workspace_id: UUID
-    ) -> ProductionModelProfile | None:
+    async def get_workspace_default(self, *, workspace_id: UUID) -> ProductionModelProfile | None:
         return cast(
             "ProductionModelProfile | None",
             await self._session.scalar(
@@ -207,9 +219,7 @@ class ProductionModelProfileService:
             ),
         )
 
-    async def get_project_profile(
-        self, *, project_id: UUID
-    ) -> ProductionModelProfile | None:
+    async def get_project_profile(self, *, project_id: UUID) -> ProductionModelProfile | None:
         return cast(
             "ProductionModelProfile | None",
             await self._session.scalar(
@@ -219,15 +229,227 @@ class ProductionModelProfileService:
             ),
         )
 
-    async def get_effective_for_project(
-        self, *, project: Project
-    ) -> ProductionModelProfile | None:
+    async def get_effective_for_project(self, *, project: Project) -> ProductionModelProfile | None:
         """Project profile, else the workspace default (spec §14/§54)."""
         profile = await self.get_project_profile(project_id=project.id)
         if profile is None:
-            profile = await self.get_workspace_default(
-                workspace_id=project.workspace_id
+            profile = await self.get_workspace_default(workspace_id=project.workspace_id)
+        return profile
+
+    async def media_config(self, *, profile_id: UUID) -> MediaConfig:
+        profile = await self.get(profile_id=profile_id)
+        return self._media_config(profile)
+
+    @staticmethod
+    def _media_slots_in_bindings(bindings: dict[str, object]) -> list[dict[str, object]]:
+        conflicts: list[dict[str, object]] = []
+        for slot_value in sorted(bindings):
+            if slot_value.startswith(("visual.", "video.")):
+                raw = bindings.get(slot_value)
+                model_id = raw.get("model_id") if isinstance(raw, dict) else None
+                conflicts.append({"slot": slot_value, "model_id": model_id})
+        return conflicts
+
+    @staticmethod
+    def _legacy_review_fingerprint(profile: ProductionModelProfile) -> str:
+        import hashlib
+        import json
+
+        canonical = json.dumps(
+            {
+                "version": profile.version,
+                "media_config_version": profile.media_config_version,
+                "bindings": profile.bindings,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    async def media_config_review(self, *, profile_id: UUID) -> MediaConfigReview:
+        profile = await self.get(profile_id=profile_id)
+        return MediaConfigReview(
+            media_config_version=profile.media_config_version,
+            review_fingerprint=self._legacy_review_fingerprint(profile),
+            conflicts=self._media_slots_in_bindings(dict(profile.bindings)),
+        )
+
+    async def reconcile_media_config(
+        self,
+        *,
+        profile_id: UUID,
+        actor_id: UUID,
+        expected_version: int,
+        review_fingerprint: str,
+        image_model_binding_id: UUID | None = None,
+        video_model_binding_id: UUID | None = None,
+        voice_model_binding_id: UUID | None = None,
+        voice_options: dict[str, object] | None = None,
+    ) -> ProductionModelProfile:
+        """Explicitly reconcile a legacy (version 1) profile into D6 media columns."""
+        profile = await self._get_for_update(profile_id=profile_id)
+        if profile.version != expected_version:
+            raise profile_version_conflict(expected_version, profile.version)
+        if profile.media_config_version != 1:
+            raise ValidationAppError(
+                "this profile already uses the D6 media configuration",
+                details={"code": "MODEL_MEDIA_ALREADY_RECONCILED"},
             )
+        if self._legacy_review_fingerprint(profile) != review_fingerprint:
+            raise ValidationAppError(
+                "legacy media configuration changed; review it again",
+                details={"code": "MODEL_MEDIA_REVIEW_CHANGED"},
+            )
+        if profile.project_id is None:
+            raise ValidationAppError(
+                "workspace-level profiles cannot carry media defaults",
+                details={"code": "MODEL_MEDIA_WORKSPACE_SCOPE"},
+            )
+        options = dict(voice_options or {})
+        if image_model_binding_id is not None:
+            await self._media_binding(
+                profile.workspace_id,
+                image_model_binding_id,
+                media_type="image",
+                purpose="keyframe",
+            )
+        if video_model_binding_id is not None:
+            await self._media_binding(
+                profile.workspace_id,
+                video_model_binding_id,
+                media_type="video",
+                purpose="video",
+            )
+        if voice_model_binding_id is not None:
+            await self._media_binding(
+                profile.workspace_id,
+                voice_model_binding_id,
+                media_type="voice",
+                purpose="voice",
+            )
+        if voice_model_binding_id is None and options:
+            raise ValidationAppError(
+                "voice options require a voice model binding",
+                details={"code": "MODEL_VOICE_OPTIONS_WITHOUT_BINDING"},
+            )
+        remaining = {
+            key: value
+            for key, value in dict(profile.bindings).items()
+            if not key.startswith(("visual.", "video."))
+        }
+        report = self.validate_bindings(parse_bindings(remaining))
+        report.raise_if_invalid()
+        profile.bindings = remaining
+        profile.image_model_binding_id = image_model_binding_id
+        profile.video_model_binding_id = video_model_binding_id
+        profile.voice_model_binding_id = voice_model_binding_id
+        profile.voice_options = options
+        profile.media_config_version = 2
+        profile.updated_by = actor_id
+        profile.version += 1
+        profile.updated_at = _now()
+        await self._session.flush()
+        return profile
+
+    def _media_config(self, profile: ProductionModelProfile) -> MediaConfig:
+        return MediaConfig(
+            media_config_version=profile.media_config_version,
+            image_model_binding_id=profile.image_model_binding_id,
+            video_model_binding_id=profile.video_model_binding_id,
+            voice_model_binding_id=profile.voice_model_binding_id,
+            voice_options=dict(profile.voice_options),
+        )
+
+    async def _media_binding(
+        self,
+        workspace_id: UUID,
+        binding_id: UUID,
+        *,
+        media_type: str,
+        purpose: str,
+    ) -> ProviderModelBinding:
+        binding = await self._session.get(ProviderModelBinding, binding_id)
+        if binding is None or binding.workspace_id != workspace_id:
+            raise ValidationAppError(
+                "media binding does not belong to this workspace",
+                details={"code": "MODEL_MEDIA_BINDING_SCOPE"},
+            )
+        if binding.media_type != media_type or binding.purpose != purpose:
+            raise ValidationAppError(
+                "media binding does not match its media type and purpose",
+                details={
+                    "code": "MODEL_MEDIA_BINDING_KIND",
+                    "expected_media_type": media_type,
+                    "expected_purpose": purpose,
+                },
+            )
+        return binding
+
+    async def update_media_config(
+        self,
+        *,
+        profile_id: UUID,
+        actor_id: UUID,
+        expected_version: int,
+        image_model_binding_id: UUID | None = None,
+        video_model_binding_id: UUID | None = None,
+        voice_model_binding_id: UUID | None = None,
+        voice_options: dict[str, object] | None = None,
+    ) -> ProductionModelProfile:
+        """One CAS decision covering the three media defaults and voice options."""
+        profile = await self._get_for_update(profile_id=profile_id)
+        if profile.version != expected_version:
+            raise profile_version_conflict(expected_version, profile.version)
+        options = dict(voice_options or {})
+        if profile.project_id is None:
+            if (
+                image_model_binding_id is not None
+                or video_model_binding_id is not None
+                or voice_model_binding_id is not None
+                or options
+            ):
+                raise ValidationAppError(
+                    "workspace-level profiles cannot carry media defaults",
+                    details={"code": "MODEL_MEDIA_WORKSPACE_SCOPE"},
+                )
+        else:
+            if image_model_binding_id is not None:
+                await self._media_binding(
+                    profile.workspace_id,
+                    image_model_binding_id,
+                    media_type="image",
+                    purpose="keyframe",
+                )
+            if video_model_binding_id is not None:
+                await self._media_binding(
+                    profile.workspace_id,
+                    video_model_binding_id,
+                    media_type="video",
+                    purpose="video",
+                )
+            if voice_model_binding_id is not None:
+                await self._media_binding(
+                    profile.workspace_id,
+                    voice_model_binding_id,
+                    media_type="voice",
+                    purpose="voice",
+                )
+            if voice_model_binding_id is None and options:
+                raise ValidationAppError(
+                    "voice options require a voice model binding",
+                    details={"code": "MODEL_VOICE_OPTIONS_WITHOUT_BINDING"},
+                )
+        profile.image_model_binding_id = image_model_binding_id
+        profile.video_model_binding_id = video_model_binding_id
+        profile.voice_model_binding_id = voice_model_binding_id
+        profile.voice_options = options
+        profile.media_config_version = 2
+        profile.updated_by = actor_id
+        profile.version += 1
+        profile.updated_at = _now()
+        await self._session.flush()
         return profile
 
     # ------------------------------------------------------------------
@@ -248,6 +470,7 @@ class ProductionModelProfileService:
         """Create a profile. ``copy_from`` snapshots another profile's bindings
         into this one (spec §54 Snapshot — creating a project copies the
         workspace default rather than live-inheriting)."""
+        await self._ensure_workspace_registry(workspace_id)
         if copy_from is not None:
             source = await self.get(profile_id=copy_from)
             if source.workspace_id != workspace_id:
@@ -292,12 +515,17 @@ class ProductionModelProfileService:
         expected_version: int | None = None,
     ) -> ProductionModelProfile:
         profile = await self._get_for_update(profile_id=profile_id)
+        await self._ensure_workspace_registry(profile.workspace_id)
         if expected_version is not None and profile.version != expected_version:
             raise profile_version_conflict(expected_version, profile.version)
         if name is not None:
             profile.name = name
         if bindings is not None:
-            report = self.validate_bindings(bindings)
+            existing = parse_bindings(profile.bindings)
+            changed = {
+                slot: binding for slot, binding in bindings.items() if existing.get(slot) != binding
+            }
+            report = self.validate_bindings(changed)
             report.raise_if_invalid()
             profile.bindings = bindings_to_json(bindings)
         if is_default is not None and profile.project_id is None:
@@ -325,6 +553,7 @@ class ProductionModelProfileService:
         """Simple-mode batch patch (spec §30/§77/§78): LLM / Image / Video map to
         slot groups. ``bindings`` stays the single source of truth."""
         profile = await self._get_for_update(profile_id=profile_id)
+        await self._ensure_workspace_registry(profile.workspace_id)
         if expected_version is not None and profile.version != expected_version:
             raise profile_version_conflict(expected_version, profile.version)
         bindings = parse_bindings(profile.bindings)
@@ -333,13 +562,20 @@ class ProductionModelProfileService:
             "image": selection.image_model_id,
             "video": selection.video_model_id,
         }
+        changed: dict[ModelSlot, ModelSlotBinding] = {}
         for group, model_id in patches.items():
             if model_id is None:
                 continue
             for slot in SIMPLE_MODE_SLOT_GROUPS[group]:
-                bindings[slot] = ModelSlotBinding(slot=slot, model_id=model_id)
-        report = self.validate_bindings(bindings)
+                current = bindings.get(slot)
+                if current is not None and current.model_id == model_id:
+                    continue
+                changed[slot] = ModelSlotBinding(slot=slot, model_id=model_id)
+        if not changed:
+            return profile
+        report = self.validate_bindings(changed)
         report.raise_if_invalid()
+        bindings.update(changed)
         profile.bindings = bindings_to_json(bindings)
         profile.updated_by = actor_id
         profile.version += 1
@@ -445,10 +681,18 @@ class ProductionModelProfileService:
                         ),
                     )
                 )
-            for option, value in binding.native_options.items():
-                self._validate_native_option(
-                    model, option, value, slot, binding, issues
+            if manifest.metadata.get("inspection_only"):
+                issues.append(
+                    ProfileValidationIssue(
+                        code="MODEL_PROFILE_MODEL_NOT_CONFIGURED",
+                        slot=str(slot),
+                        model_id=binding.model_id,
+                        message="Select a configured model binding",
+                    )
                 )
+                continue
+            for option, value in binding.native_options.items():
+                self._validate_native_option(model, option, value, slot, binding, issues)
         return ProfileValidationReport(issues)
 
     def _validate_native_option(
@@ -488,11 +732,6 @@ class ProductionModelProfileService:
                 )
             )
 
-    async def validate_bindings_api(
-        self, bindings: dict[ModelSlot, ModelSlotBinding]
-    ) -> ProfileValidationReport:
-        return self.validate_bindings(bindings)
-
     # ------------------------------------------------------------------
     # Reads / mapping
     # ------------------------------------------------------------------
@@ -503,6 +742,7 @@ class ProductionModelProfileService:
         workspace_id: UUID,
         bindings: dict[ModelSlot, ModelSlotBinding],
     ) -> dict[str, BindingRead]:
+        await self._ensure_workspace_registry(workspace_id)
         from app.providers.models import ProviderConnection
 
         rows = list(
@@ -518,21 +758,19 @@ class ProductionModelProfileService:
             .all()
         )
         configured: set[str] = set(rows)
-        # The LiteLLM gateway is configured via settings, not a ProviderConnection
-        # (spec §113), so its text model must not display as unconfigured.
-        from app.config import get_settings
-
-        settings = get_settings()
-        litellm_configured = bool(
-            settings.litellm_gateway_url.strip() and settings.litellm_api_key.strip()
-        )
         result: dict[str, BindingRead] = {}
         for slot, binding in bindings.items():
             model = self._registry.get_or_none(binding.model_id)
             provider_id = model.manifest.provider_id if model is not None else ""
             display_name = model.manifest.display_name if model is not None else binding.model_id
             is_configured = (
-                litellm_configured if provider_id == "litellm" else provider_id in configured
+                (
+                    model is not None
+                    and model.adapter is not None
+                    and not model.manifest.metadata.get("new_create_blocker")
+                )
+                if provider_id == "litellm"
+                else provider_id in configured
             )
             result[str(slot)] = BindingRead(
                 slot=str(slot),
@@ -545,9 +783,7 @@ class ProductionModelProfileService:
             )
         return result
 
-    async def profile_read(
-        self, profile: ProductionModelProfile
-    ) -> ProfileRead:
+    async def profile_read(self, profile: ProductionModelProfile) -> ProfileRead:
         bindings = parse_bindings(profile.bindings)
         reads = await self.binding_reads(
             workspace_id=profile.workspace_id,
@@ -565,18 +801,15 @@ class ProductionModelProfileService:
             updated_at=profile.updated_at,
         )
 
-    async def snapshot_for_project(
-        self, *, project: Project
-    ) -> ModelProfileSnapshot:
+    async def snapshot_for_project(self, *, project: Project) -> ModelProfileSnapshot:
         """Resolve the effective profile for a project and freeze its bindings
         into an immutable snapshot (spec §21/§92). The snapshot uses the *current*
         bindings at graph start; a running graph keeps them even if the profile
         changes."""
+        await self._ensure_workspace_registry(project.workspace_id)
         profile = await self.get_effective_for_project(project=project)
         if profile is None:
-            return ModelProfileSnapshot(
-                profile_id=None, profile_version=None, bindings={}
-            )
+            return ModelProfileSnapshot(profile_id=None, profile_version=None, bindings={})
         snapshot: dict[ModelSlot, ResolvedModelBinding] = {}
         for slot, binding in parse_bindings(profile.bindings).items():
             if not binding.enabled:
@@ -598,9 +831,7 @@ class ProductionModelProfileService:
                 capability=supported[0],
                 model_id=binding.model_id,
                 source=(
-                    "project_profile"
-                    if profile.project_id is not None
-                    else "workspace_profile"
+                    "project_profile" if profile.project_id is not None else "workspace_profile"
                 ),
                 profile_id=profile.id,
                 profile_version=profile.version,
@@ -617,16 +848,3 @@ def _now() -> datetime:
     from datetime import UTC
 
     return datetime.now(UTC)
-
-
-def build_snapshot_json(snapshot: ModelProfileSnapshot) -> dict[str, object]:
-    """Serialize a :class:`ModelProfileSnapshot` for ``GraphVersion.definition``
-    / ``NodeRun.input_snapshot``."""
-    return {
-        "profile_id": str(snapshot.profile_id) if snapshot.profile_id is not None else None,
-        "profile_version": snapshot.profile_version,
-        "bindings": {
-            str(slot): binding.model_dump(mode="json")
-            for slot, binding in snapshot.bindings.items()
-        },
-    }

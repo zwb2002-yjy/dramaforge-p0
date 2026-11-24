@@ -8,13 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import ProjectCreativeProfile, User
 from app.access.projects import ProjectService
-from app.assets.models import Shot
+from app.assets.models import Asset, Shot
 from app.contracts.production_commands import ExecutionBody, ExecutionReceipt
 from app.execution.models import NodeRun
 from app.production.application.commands import ProductionCommands, execution_receipt
 from app.production.command_models import ProductionCommandAuthorization
 from app.production.workbench_execution import WorkbenchExecutionService, workbench_request_hash
-from app.shared.errors import ConflictError, NotFoundError
+from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 
 class ProductionAuthorizations:
@@ -43,10 +43,11 @@ class ProductionAuthorizations:
         *,
         actor: User,
         project_id: UUID,
-        shot_id: UUID,
         decision_id: UUID,
         body: ExecutionBody,
         expires_at: datetime,
+        shot_id: UUID | None = None,
+        asset_id: UUID | None = None,
     ) -> UUID:
         """Called only for an explicit product user decision, never a model tool.
 
@@ -54,6 +55,11 @@ class ProductionAuthorizations:
         freezes stage, target version, model choice and plan; each grant allows
         one command only. Repeated submission reuses its persisted key.
         """
+        if (shot_id is None) == (asset_id is None):
+            raise ValidationAppError(
+                "Exactly one command target is required",
+                details={"code": "COMMAND_TARGET_REQUIRED"},
+            )
         profile = await self._lock(actor=actor, project_id=project_id)
         command_key = f"approved:{decision_id}"
         request_hash = workbench_request_hash(body.model_dump(mode="json"))
@@ -70,6 +76,7 @@ class ProductionAuthorizations:
             if (
                 existing.actor_id != actor.id
                 or existing.shot_id != shot_id
+                or existing.asset_id != asset_id
                 or existing.request_hash != request_hash
                 or expiry != expires_at
             ):
@@ -86,11 +93,18 @@ class ProductionAuthorizations:
             )
         if expires_at.tzinfo is None or expires_at <= datetime.now(UTC):
             raise ConflictError("Authorization must have a future timezone-aware expiry")
-        shot = await self._session.scalar(
-            select(Shot).where(Shot.id == shot_id, Shot.project_id == project_id),
-        )
-        if shot is None:
-            raise NotFoundError("Shot not found")
+        if shot_id is not None:
+            shot = await self._session.scalar(
+                select(Shot).where(Shot.id == shot_id, Shot.project_id == project_id),
+            )
+            if shot is None:
+                raise NotFoundError("Shot not found")
+        else:
+            asset = await self._session.scalar(
+                select(Asset).where(Asset.id == asset_id, Asset.project_id == project_id),
+            )
+            if asset is None:
+                raise NotFoundError("Asset not found")
         authorization_id = uuid4()
         self._session.add(
             ProductionCommandAuthorization(
@@ -98,6 +112,7 @@ class ProductionAuthorizations:
                 project_id=project_id,
                 actor_id=actor.id,
                 shot_id=shot_id,
+                asset_id=asset_id,
                 command_key=command_key,
                 request_hash=request_hash,
                 body=body.model_dump(mode="json"),
@@ -172,6 +187,13 @@ class ProductionAuthorizations:
         body = ExecutionBody.model_validate(grant.body)
         if workbench_request_hash(body.model_dump(mode="json")) != grant.request_hash:
             raise ConflictError("Authorized command payload changed")
+        if grant.asset_id is not None:
+            raise ValidationAppError(
+                "Asset command submission is not wired yet",
+                details={"code": "ASSET_COMMAND_NOT_WIRED"},
+            )
+        if grant.shot_id is None:
+            raise ConflictError("Authorization has no shot target")
         receipt = await ProductionCommands(self._session).submit_user_execution(
             actor=actor,
             project_id=project_id,

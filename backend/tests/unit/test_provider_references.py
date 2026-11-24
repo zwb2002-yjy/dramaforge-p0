@@ -9,7 +9,9 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 import pytest
+from app.access.egress_models import ProviderDestinationRevision
 from app.access.models import Project, User, Workspace
+from app.access.project_data_policy import ProjectDataPolicy
 from app.config import Settings
 from app.execution.models import Artifact
 from app.providers.models import ArtifactReferenceToken
@@ -19,11 +21,11 @@ from app.providers.reference_delivery import (
     resolve_public_reference,
 )
 from app.shared.base import Base
-from app.shared.errors import NotFoundError
+from app.shared.errors import NotFoundError, ValidationAppError
 from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
 from fastapi import Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
@@ -166,3 +168,76 @@ async def test_reference_head_get_hash_length_and_one_artifact_binding(
     await session.flush()
     with pytest.raises(NotFoundError):
         await resolve_public_reference(session, token=first_token)
+
+
+@pytest.mark.asyncio
+async def test_reference_issuance_requires_project_egress_admission(
+    session: AsyncSession,
+) -> None:
+    user = User(
+        email=f"reference-egress-{uuid4().hex}@example.com",
+        display_name="Reference",
+        password_hash=hash_password("password123"),
+    )
+    session.add(user)
+    await session.flush()
+    workspace = Workspace(owner_user_id=user.id, name=f"Reference-{uuid4().hex[:8]}")
+    session.add(workspace)
+    await session.flush()
+    artifact = await _seed_artifact(
+        session, user=user, workspace=workspace, suffix="egress", data=b"\x89PNG\r\n\x1a\nx",
+    )
+    project = await session.get(Project, artifact.project_id)
+    settings = Settings(
+        app_env="test",
+        reference_public_base_url="https://references.example",
+        reference_token_ttl_seconds=60,
+    )
+    # The historical default path keeps working and records its admission.
+    await issue_artifact_reference(
+        session, artifact=artifact, workspace_id=workspace.id,
+        created_by_user_id=user.id, settings=settings,
+    )
+    token = await session.scalar(select(ArtifactReferenceToken))
+    assert token is not None
+    assert token.egress_admission["decision"] == "allowed"
+    assert token.egress_admission["reason_code"] == "legacy_current"
+    before = await session.scalar(select(func.count()).select_from(ArtifactReferenceToken))
+    # Strict policy refuses without a declared destination and creates no grant.
+    destination = ProviderDestinationRevision(
+        workspace_id=workspace.id, binding_ref=str(uuid4()), revision=1,
+        origin_expected_revision=0, upstream_origin="https://api.example.cn:443",
+        processing_location="external", purposes=["reference_delivery"],
+        declaration_hash="a" * 64, configuration_hash="b" * 64,
+        route_manifest={"schema_version": 1}, location_evidence={}, created_by=user.id,
+    )
+    session.add(destination)
+    await session.flush()
+    await ProjectDataPolicy(session, actor=user, project=project).put(
+        expected_revision=0, mode="allowlisted",
+        allowed_destination_revision_ids=[str(destination.id)],
+        allowed_purposes=["reference_delivery"],
+    )
+    with pytest.raises(ValidationAppError) as missing:
+        await issue_artifact_reference(
+            session, artifact=artifact, workspace_id=workspace.id,
+            created_by_user_id=user.id, settings=settings,
+        )
+    assert missing.value.details["code"] == "EGRESS_DESTINATION_REQUIRED"
+    assert await session.scalar(
+        select(func.count()).select_from(ArtifactReferenceToken)
+    ) == before
+    # A local-only policy cannot mint a public reference for an external fetch.
+    await ProjectDataPolicy(session, actor=user, project=project).put(
+        expected_revision=1, mode="local_only",
+        allowed_destination_revision_ids=[], allowed_purposes=[],
+    )
+    with pytest.raises(ValidationAppError) as local:
+        await issue_artifact_reference(
+            session, artifact=artifact, workspace_id=workspace.id,
+            created_by_user_id=user.id, settings=settings,
+        )
+    assert local.value.details["code"] == "EGRESS_LOCAL_ONLY"
+    assert await session.scalar(
+        select(func.count()).select_from(ArtifactReferenceToken)
+    ) == before

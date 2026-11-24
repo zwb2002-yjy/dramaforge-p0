@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.models import User
 from app.access.projects import ProjectService
 from app.assets.models import Shot
+from app.assets.voice import ShotVoiceSettings
 from app.director.turn_service import DirectorTurnService
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
@@ -61,6 +62,14 @@ class ShotDesignService:
         if director_state is not None:
             if not isinstance(director_state, dict):
                 raise ValidationAppError("director_state must be a JSON object")
+            old_voice = ShotVoiceSettings.model_validate(
+                (shot.director_state or {}).get("voice") or {}
+            )
+            new_voice = ShotVoiceSettings.model_validate(director_state.get("voice") or {})
+            if old_voice != new_voice:
+                # Shape is validated above; the voice binding is enforced at
+                # generation time so saving never requires a configured model.
+                pass
             shot.director_state = dict(director_state)
         if image_prompt is not None:
             shot.image_prompt = image_prompt

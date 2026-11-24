@@ -14,11 +14,15 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   timeout: 30_000,
-  globalTimeout: process.env.P0_REAL_UI === "1" ? 2_800_000 : 180_000,
+  // Let the full single-worker suite finish on slower CI and local Docker hosts.
+  // The 201-case suite can exceed 15 minutes on Docker Desktop even with no
+  // failed case. Keep individual tests strict; allow the whole run 30 minutes.
+  globalTimeout: process.env.P0_REAL_UI === "1" ? 2_800_000 : 1_800_000,
   reporter: [["list"]],
   use: {
     baseURL: `http://127.0.0.1:${e2ePort}`,
     trace: "on-first-retry",
+    screenshot: "only-on-failure",
     launchOptions: process.env.DRAMAFORGE_E2E_EXECUTABLE_PATH
       ? {
           executablePath: process.env.DRAMAFORGE_E2E_EXECUTABLE_PATH,
@@ -26,5 +30,18 @@ export default defineConfig({
         }
       : undefined,
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    {
+      name: "chromium",
+      testIgnore: "**/workbench-resource.spec.ts",
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      // Isolate resource samples from the functional suite's browser process.
+      // Keep the same browser, 1 -> 30 -> 100 order, thresholds and retry policy.
+      name: "chromium-resource",
+      testMatch: "**/workbench-resource.spec.ts",
+      use: { ...devices["Desktop Chrome"] },
+    },
+  ],
 });

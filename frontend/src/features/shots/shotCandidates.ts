@@ -20,6 +20,12 @@ export type ShotCandidate = {
   mimeType: string | null;
   storageState: string | null;
   createdAt: string | null;
+  reviewAllowed: boolean;
+  reviewDecision: string | null;
+  reviewBlockedReason: string | null;
+  reviewNodeRunId: string | null;
+  contentHash: string | null;
+  duplicateContent: boolean;
 };
 
 const SUCCESSFUL_STATUSES = new Set(["completed", "cached", "completed_after_cancel", "succeeded"]);
@@ -90,6 +96,12 @@ export function parseShotCandidate(value: unknown): ShotCandidate | null {
     mimeType: nonEmptyString(row.mime_type),
     storageState,
     createdAt: nonEmptyString(row.created_at),
+    reviewAllowed: row.review_allowed === true,
+    reviewDecision: nonEmptyString(row.review_decision),
+    reviewBlockedReason: nonEmptyString(row.review_blocked_reason),
+    reviewNodeRunId: nonEmptyString(row.review_node_run_id),
+    contentHash: nonEmptyString(row.content_hash),
+    duplicateContent: row.duplicate_content === true,
   };
 }
 
@@ -109,11 +121,6 @@ export function parseShotCandidates(values: unknown): ShotCandidate[] {
   return parsed;
 }
 
-// Short aliases keep the read-side parser easy to reuse in focused tests and
-// older feature imports without introducing another candidate implementation.
-export const parseCandidate = parseShotCandidate;
-export const parseCandidates = parseShotCandidates;
-
 /** Only successful, available candidates can be shown as formal options. */
 export function isConfirmableShotCandidate(candidate: ShotCandidate): boolean {
   const status = candidate.status.toLowerCase();
@@ -122,8 +129,6 @@ export function isConfirmableShotCandidate(candidate: ShotCandidate): boolean {
     !candidate.storageState || AVAILABLE_STORAGE_STATES.has(candidate.storageState.toLowerCase())
   );
 }
-
-export const isArtifactMediaCandidate = isConfirmableShotCandidate;
 
 export function shotCandidateKey(candidate: Pick<ShotCandidate, "stage" | "artifactId">): string {
   return `${candidate.stage}:${candidate.artifactId}`;

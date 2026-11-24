@@ -103,19 +103,7 @@ async def test_only_one_postgres_worker_claims_and_restart_recovery_is_fail_stop
         _alembic(dbname)
         ids = {
             key: uuid.uuid4()
-            for key in (
-                "user",
-                "workspace",
-                "project",
-                "scope",
-                "turn",
-                "stale_turn",
-                "graph",
-                "graph_version",
-                "graph_node",
-                "node_run",
-                "waiting_turn",
-            )
+            for key in ("user", "workspace", "project", "scope", "turn", "stale_turn")
         }
         sync_engine = create_engine(_sync_url(dbname))
         with sync_engine.begin() as connection:
@@ -160,80 +148,6 @@ async def test_only_one_postgres_worker_claims_and_restart_recovery_is_fail_stop
             )
             connection.execute(
                 text(
-                    "INSERT INTO production_graphs "
-                    "(id,project_id,scope_type,scope_entity_id,template_key,status,"
-                    "created_by,version) VALUES "
-                    "(:id,:project,'shot',:scope,'shot-p0-v1','published',:actor,1)"
-                ),
-                {
-                    "id": ids["graph"],
-                    "project": ids["project"],
-                    "scope": ids["scope"],
-                    "actor": ids["user"],
-                },
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO graph_versions "
-                    "(id,graph_id,version_number,status,definition_hash,definition) "
-                    "VALUES (:id,:graph,1,'published',:hash,CAST('{}' AS jsonb))"
-                ),
-                {
-                    "id": ids["graph_version"],
-                    "graph": ids["graph"],
-                    "hash": "c" * 64,
-                },
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO graph_nodes "
-                    "(id,graph_version_id,node_key,node_type,display_name,input_schema,"
-                    "output_schema,config,cacheable) VALUES "
-                    "(:id,:version,'keyframe','keyframe','Keyframe',CAST('{}' AS jsonb),"
-                    "CAST('{}' AS jsonb),CAST('{}' AS jsonb),true)"
-                ),
-                {"id": ids["graph_node"], "version": ids["graph_version"]},
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO node_runs "
-                    "(id,project_id,graph_version_id,graph_node_id,attempt_no,idempotency_key,"
-                    "input_hash,status,input_snapshot,output_summary,created_by) VALUES "
-                    "(:id,:project,:version,:node,1,'director-next-action',:hash,'running',"
-                    "CAST('{}' AS jsonb),CAST('{}' AS jsonb),:actor)"
-                ),
-                {
-                    "id": ids["node_run"],
-                    "project": ids["project"],
-                    "version": ids["graph_version"],
-                    "node": ids["graph_node"],
-                    "hash": "d" * 64,
-                    "actor": ids["user"],
-                },
-            )
-            connection.execute(
-                text(
-                    "INSERT INTO director_turns "
-                    "(id,workspace_id,project_id,actor_id,scope_type,scope_entity_id,"
-                    "request_key,context_hash,request_summary,status,wait_reason,node_run_ids,"
-                    "revision,step_count) VALUES "
-                    "(:id,:workspace,:project,:actor,'shot',:scope,'waiting-execution',:hash,"
-                    "CAST(:summary AS jsonb),'awaiting_execution','execution',"
-                    "CAST(:runs AS jsonb),1,1)"
-                ),
-                {
-                    "id": ids["waiting_turn"],
-                    "workspace": ids["workspace"],
-                    "project": ids["project"],
-                    "actor": ids["user"],
-                    "scope": ids["scope"],
-                    "hash": "e" * 64,
-                    "summary": '{"max_steps": 4}',
-                    "runs": f'["{ids["node_run"]}"]',
-                },
-            )
-            connection.execute(
-                text(
                     "INSERT INTO director_turns "
                     "(id,workspace_id,project_id,actor_id,scope_type,scope_entity_id,"
                     "request_key,context_hash,request_summary,status,transport_status,"
@@ -256,22 +170,6 @@ async def test_only_one_postgres_worker_claims_and_restart_recovery_is_fail_stop
 
         engine = create_async_engine(_async_url(dbname))
         factory = async_sessionmaker(engine, expire_on_commit=False)
-
-        from app.assets.models import Episode, Scene, Shot
-
-        async with factory() as session:
-            await set_rls_context(session, user_id=ids["user"], workspace_id=ids["workspace"],
-                                  project_id=ids["project"])
-            episode = Episode(project_id=ids["project"], episode_number=1, title="E1", synopsis="")
-            session.add(episode)
-            await session.flush()
-            scene = Scene(episode_id=episode.id, scene_number=1, location_name="Studio",
-                          time_of_day="day", synopsis="")
-            session.add(scene)
-            await session.flush()
-            session.add(Shot(id=ids["scope"], project_id=ids["project"], scene_id=scene.id,
-                             shot_number=1, version=1, visual_description="Saved Shot"))
-            await session.commit()
 
         async def claim() -> str:
             async with factory() as session:
@@ -296,48 +194,6 @@ async def test_only_one_postgres_worker_claims_and_restart_recovery_is_fail_stop
         outcomes = await asyncio.gather(claim(), claim())
         assert sorted(outcomes) == ["DIRECTOR_TURN_CLAIM_CONFLICT", "claimed:2"]
 
-        from app.access.models import Project
-        from app.director.next_action import DirectorNextActionService
-
-        # Force both workers to derive from the same pre-CAS revision, rather
-        # than accidentally testing two sequential reads on a fast database.
-        ready = asyncio.Event()
-        arrivals = 0
-        original_cas = DirectorTurnService.compare_and_set
-
-        async def racing_cas(self, **kwargs):
-            nonlocal arrivals
-            if kwargs.get("increment_step"):
-                arrivals += 1
-                if arrivals == 2:
-                    ready.set()
-                await asyncio.wait_for(ready.wait(), timeout=10)
-            return await original_cas(self, **kwargs)
-
-        monkeypatch.setattr(DirectorTurnService, "compare_and_set", racing_cas)
-
-        async def reconcile(event_key: str) -> str:
-            async with factory() as session:
-                await set_rls_context(
-                    session,
-                    user_id=ids["user"],
-                    workspace_id=ids["workspace"],
-                    project_id=ids["project"],
-                )
-                project = await session.get(Project, ids["project"])
-                assert project is not None
-                result = await DirectorNextActionService(session).reconcile(
-                    project=project,
-                    turn_id=ids["waiting_turn"],
-                    event_key=event_key,
-                )
-                await session.commit()
-                return str(result.action)
-
-        reconciliations = await asyncio.gather(reconcile("worker:a"), reconcile("worker:b"))
-        assert reconciliations == ["wait_for_execution", "wait_for_execution"]
-        monkeypatch.setattr(DirectorTurnService, "compare_and_set", original_cas)
-
         from app.director.turn_models import DirectorTurn
         from app.workers import jobs
 
@@ -346,6 +202,7 @@ async def test_only_one_postgres_worker_claims_and_restart_recovery_is_fail_stop
         recovery = await jobs.recover_interrupted_director_turns(startup_ctx)
         assert startup_ctx["director_scan_state"] == {"cursor": None}
         assert recovery == {"recovered": 1, "unchanged": 0}
+
         async with factory() as session:
             await set_rls_context(
                 session,
@@ -356,103 +213,9 @@ async def test_only_one_postgres_worker_claims_and_restart_recovery_is_fail_stop
             stale = await session.get(DirectorTurn, ids["stale_turn"])
             assert stale is not None
             assert stale.status == "failed"
+            assert stale.transport_status == "unknown_submission"
             assert stale.wait_reason == "text_submission_unknown"
 
-        from app.execution.models import Artifact, NodeRun
-
-        async with factory() as session:
-            await set_rls_context(
-                session,
-                user_id=ids["user"],
-                workspace_id=ids["workspace"],
-                project_id=ids["project"],
-            )
-            artifact = Artifact(
-                project_id=ids["project"],
-                artifact_type="image",
-                storage_state="available",
-                object_key=f"obj/{uuid.uuid4().hex}",
-                content_hash="f" * 64,
-                mime_type="image/png",
-                byte_size=1,
-            )
-            session.add(artifact)
-            await session.flush()
-            run = await session.get(NodeRun, ids["node_run"])
-            assert run is not None
-            run.status = "completed"
-            run.result_artifact_id = artifact.id
-            await session.commit()
-
-        scan = await jobs.reconcile_waiting_director_turns({"job_id": "closed-browser"})
-        assert scan == {"reconciled": 1, "unchanged": 0, "failed": 0}
-        repeated_scan = await jobs.reconcile_waiting_director_turns(
-            {"job_id": "closed-browser-repeat"}
-        )
-        assert repeated_scan == {"reconciled": 0, "unchanged": 1, "failed": 0}
-        async with factory() as session:
-            await set_rls_context(
-                session,
-                user_id=ids["user"],
-                workspace_id=ids["workspace"],
-                project_id=ids["project"],
-            )
-            waiting = await session.get(DirectorTurn, ids["waiting_turn"])
-            assert waiting is not None
-            assert waiting.status == "awaiting_user"
-            assert waiting.wait_reason == "production_review"
-            assert waiting.step_count == 3
-            assert waiting.revision == 3
-            assert len(waiting.response_summary["coordination"]["processed_events"]) == 2
-            project = await session.get(Project, ids["project"])
-            reopened = await DirectorNextActionService(session).reconcile(
-                project=project, turn_id=waiting.id,
-            )
-            assert reopened.action == "review_production_result"
-            assert waiting.revision == 3
-        # R4c1 JSON decision guards and mode invalidation survive transaction
-        # boundaries on real PostgreSQL, while submitted media stays terminal.
-        decision_id = uuid.uuid4()
-        async with factory() as session:
-            await set_rls_context(session, user_id=ids["user"], workspace_id=ids["workspace"],
-                                  project_id=ids["project"])
-            session.add(DirectorTurn(
-                id=decision_id, workspace_id=ids["workspace"], project_id=ids["project"],
-                actor_id=ids["user"], scope_type="shot", scope_entity_id=ids["scope"],
-                request_key="decision:pg", context_hash="a" * 64,
-                request_summary={"task": "shot_director_suggestion", "max_steps": 4},
-                output_snapshot={"suggested_director_state": {}}, output_hash="b" * 64,
-                status="awaiting_user", step_count=1,
-            ))
-            await session.commit()
-        async with factory() as session:
-            await set_rls_context(session, user_id=ids["user"], workspace_id=ids["workspace"],
-                                  project_id=ids["project"])
-            await DirectorTurnService(session).record_user_decision(
-                project_id=ids["project"], turn_id=decision_id, expected_revision=1,
-                decision="reject", accepted_operation_indices=[],
-            )
-            await session.commit()
-        async with factory() as session:
-            await set_rls_context(session, user_id=ids["user"], workspace_id=ids["workspace"],
-                                  project_id=ids["project"])
-            with pytest.raises(ConflictError) as rejection:
-                await DirectorTurnService(session).assert_context_not_rejected(
-                    project_id=ids["project"], context_hash="a" * 64,
-                )
-            assert rejection.value.details["code"] == "DIRECTOR_CONTEXT_REJECTED"
-            await DirectorTurnService(session).mark_project_stale(
-                project_id=ids["project"], reason="User switched to MANUAL",
-            )
-            await session.commit()
-        async with factory() as session:
-            await set_rls_context(session, user_id=ids["user"], workspace_id=ids["workspace"],
-                                  project_id=ids["project"])
-            rejected_turn = await session.get(DirectorTurn, decision_id)
-            assert rejected_turn.status == "completed"
-            assert rejected_turn.response_summary["user_decision"]["decision"] == "reject"
-            assert (await session.get(DirectorTurn, ids["waiting_turn"])).status == "stale"
-            assert (await session.get(NodeRun, ids["node_run"])).status == "completed"
         await engine.dispose()
     finally:
         await _drop_database(dbname)

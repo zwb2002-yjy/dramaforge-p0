@@ -34,43 +34,51 @@
     }
   },
   "manifest": {
-    "catalog_source": "official_static",
-    "display_name": "Agnes Image Flash",
-    "documented_at": "2026-08-19",
-    "lifecycle": "active",
     "manifest_version": "2026-08-19",
-    "media_kind": "image",
+    "provider_type": "agnes",
+    "protocol_profile": "agnes_cn_v1",
     "model_id": "agnes-image-2.1-flash",
-    "model_revision": "v2",
+    "model_revision": "v3",
+    "media_kind": "image",
+    "display_name": "Agnes Image Flash",
+    "lifecycle": "active",
+    "catalog_source": "official_static",
+    "documented_at": "2026-08-19",
     "operations": {
       "image.generate": {
+        "operation": "image.generate",
         "capabilities": [
           "image.t2i",
           "image.i2i"
         ],
-        "exclusive_groups": [],
-        "operation": "image.generate",
         "output_constraints": {
-          "aspect_ratio": "9:16",
-          "height": 1312,
-          "response_format": "url",
           "size": "1K",
-          "width": 736
+          "aspect_ratio": "9:16",
+          "width": 736,
+          "height": 1312,
+          "response_format": "url"
         },
         "reference_constraints": {
           "reference_image": {
-            "max": 1,
-            "min": 0
+            "min": 0,
+            "max": 1
           }
-        }
+        },
+        "exclusive_groups": []
       }
     },
     "option_schema": {
       "namespace": "",
       "options": {}
     },
-    "protocol_profile": "agnes_cn_v1",
-    "provider_type": "agnes"
+    "implementation_status": "contract_tested",
+    "evidence": {
+      "current_contract": {
+        "source_type": "contract_fixture",
+        "source_url": "repository:backend/tests/unit",
+        "checked_at": "2026-10-07"
+      }
+    }
   },
-  "manifest_hash": "eb8bd2da7a29f3cb8cd061fb994db2b69c9bfb16265ad2c26a521463b9ca4a2c"
+  "manifest_hash": "dee74a67d40756264a3b872c06704de215aeb484be70a01f4bca5b3077c46625"
 }

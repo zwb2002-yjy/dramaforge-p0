@@ -17,6 +17,18 @@ from app.director.workflows.contracts import (
 )
 
 
+def version_sort_key(version: str) -> tuple[int, ...]:
+    """Order dotted numeric versions numerically (``2.10`` after ``2.9``).
+
+    Non-numeric segments sort before numeric ones so an unparsable label can
+    never silently win over a real release.
+    """
+    parts: list[int] = []
+    for segment in version.split("."):
+        parts.append(int(segment) if segment.isdigit() else -1)
+    return tuple(parts)
+
+
 class WorkflowTemplateRegistry:
     """In-memory registration and eligibility lookup for production templates."""
 
@@ -32,7 +44,6 @@ class WorkflowTemplateRegistry:
         idempotent; re-registering a different contract under the same
         ``template_key`` + ``version`` raises (fail closed, no silent overwrite).
         """
-        self.validate(spec)
         versions = self._entries.setdefault(spec.template_key, {})
         existing = versions.get(spec.template_version)
         if existing is not None and existing.contract_hash != spec.contract_hash:
@@ -43,7 +54,7 @@ class WorkflowTemplateRegistry:
         versions[spec.template_version] = spec
         # Keep ``_keys`` pointing at the highest registered version.
         self._keys[spec.template_key] = max(
-            versions.values(), key=lambda s: s.template_version
+            versions.values(), key=lambda s: version_sort_key(s.template_version)
         )
         return spec
 
@@ -83,11 +94,6 @@ class WorkflowTemplateRegistry:
         """Public eligibility check for one spec (no I/O, deterministic)."""
         return self._evaluate(spec, request)
 
-    def validate(self, spec: WorkflowTemplateSpec) -> None:
-        """Validate that a spec is well-formed (no I/O)."""
-        if spec.graph_factory is None:
-            raise ValueError(f"template {spec.template_key} must provide a graph_factory")
-
     def _evaluate(
         self, spec: WorkflowTemplateSpec, request: WorkflowTemplateRequest
     ) -> WorkflowTemplateEligibility:
@@ -111,16 +117,13 @@ class WorkflowTemplateRegistry:
 
         # Medium.
         if request.medium not in spec.supported_mediums:
-            reasons.append(
-                f"medium {request.medium!r} not in {list(spec.supported_mediums)!r}"
-            )
+            reasons.append(f"medium {request.medium!r} not in {list(spec.supported_mediums)!r}")
 
         # Character count.
         min_char, max_char = spec.supported_character_count
         if not (min_char <= request.character_count <= max_char):
             reasons.append(
-                f"character count {request.character_count} outside "
-                f"[{min_char}, {max_char}]"
+                f"character count {request.character_count} outside [{min_char}, {max_char}]"
             )
 
         # Reference roles.

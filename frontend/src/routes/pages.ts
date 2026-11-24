@@ -18,6 +18,11 @@ export const LazyAssetCardsPanel = lazyRouteComponent(
   "AssetCardsPanel",
 );
 
+export const LazyPublicAssetLibrary = lazyRouteComponent(
+  () => import("../features/assets/PublicAssetLibrary"),
+  "PublicAssetLibrary",
+);
+
 export const LazySceneStoryboardWall = lazyRouteComponent(
   () => import("../features/scenes/SceneStoryboardWall"),
   "SceneStoryboardWall",
@@ -61,11 +66,6 @@ export const LazyWorkspaceSettingsPage = lazyRouteComponent(
 export const LazyModelConnectionSettingsPage = lazyRouteComponent(
   () => import("./settings-page"),
   "ModelConnectionSettingsPage",
-);
-
-export const LazyDefaultPreferencesSettingsPage = lazyRouteComponent(
-  () => import("./settings-page"),
-  "DefaultPreferencesSettingsPage",
 );
 
 export const LazyProjectSettingsPage = lazyRouteComponent(

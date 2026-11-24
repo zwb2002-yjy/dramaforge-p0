@@ -180,3 +180,13 @@ def test_plan_requires_mode_and_capability() -> None:
         _base_plan(mode_id="", capability=Capability.VIDEO_IMAGE_TO_VIDEO)  # type: ignore[arg-type]
     with pytest.raises(ValidationError):
         _base_plan(mode_id="explicit_binding", capability="not-a-capability")  # type: ignore[arg-type]
+
+
+def test_plan_requires_exactly_one_target() -> None:
+    with pytest.raises(ValidationError):
+        _base_plan(shot_id=None)
+    with pytest.raises(ValidationError):
+        _base_plan(asset_id=uuid4())
+    asset_plan = _base_plan(shot_id=None, asset_id=uuid4())
+    assert asset_plan.shot_id is None and asset_plan.asset_id is not None
+    assert asset_plan.freeze().plan_fingerprint is not None

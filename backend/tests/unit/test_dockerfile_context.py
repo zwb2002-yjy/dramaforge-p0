@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import shutil
 import tomllib
 from pathlib import Path
@@ -21,7 +22,8 @@ def _parse_copy_sources(dockerfile_text: str) -> list[str]:
         # COPY [--chown=...] src [src ...] dest
         body = stripped[len("COPY ") :]
         parts = [p for p in body.split() if not p.startswith("--")]
-        if len(parts) < 2:
+        if len(parts) < 2 or "--from=" in body:
+            # Stage copies reference image paths, not files in the build context.
             continue
         # last is dest; earlier are sources
         sources.extend(parts[:-1])
@@ -79,13 +81,11 @@ def test_dockerignore_excludes_local_heavy_and_sensitive_paths() -> None:
 
 def test_dockerfile_installs_only_locked_python_dependencies() -> None:
     text = DOCKERFILE.read_text(encoding="utf-8")
-    assert "Acquire::Retries=10" in text
-    assert "Acquire::Queue-Mode=access" in text
-    assert "Acquire::http::Pipeline-Depth=0" in text
-    assert "https://deb.debian.org" in text
-    assert "type=cache,target=/var/cache/apt" in text
-    assert "type=cache,target=/var/lib/apt/lists" in text
-    assert "uv export --frozen --no-dev --no-emit-project" in text
+    # Dependency identity is the contract; retry tuning/cache layout is not.
+    tokens = shlex.split(text.replace("\\\n", " "), comments=True)
+    start = next(i for i in range(len(tokens) - 1) if tokens[i:i + 2] == ["uv", "export"])
+    end = next((i for i in range(start, len(tokens)) if tokens[i] in {";", "&&"}), len(tokens))
+    assert {"--frozen", "--no-dev", "--no-emit-project"} <= set(tokens[start:end])
     assert "pip install --no-deps insightface" not in text
     assert 'pip install "requests' not in text
     assert "DRAMAFORGE_SOURCE_COMMIT" in text

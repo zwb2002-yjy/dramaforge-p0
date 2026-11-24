@@ -1,7 +1,16 @@
 import { useState, type ReactNode } from "react";
-import { Link } from "@tanstack/react-router";
-
-import { Badge, Button, Card, Input, PageHeader, Tab, Tabs } from "../components/ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Field,
+  Input,
+  PageHeader,
+  Select,
+  Tabs,
+  Textarea,
+  ActionLink,
+} from "../components/ui";
 
 const PALETTE = [
   { name: "Obsidian", hex: "#071013", value: "var(--df-obsidian)" },
@@ -31,10 +40,10 @@ export function DesignPreviewPage() {
         eyebrow="DramaForge"
         title="Visual System 2.0"
         actions={
-          <Link to="/" search={{ create: false }} className="df-btn ghost">
+          <ActionLink to="/" search={{ create: undefined }} tone="ghost">
             <span aria-hidden="true">←</span>
-            返回项目大厅
-          </Link>
+            返回我的项目
+          </ActionLink>
         }
       />
 
@@ -76,38 +85,38 @@ export function DesignPreviewPage() {
 
       <PreviewSection title="Input">
         <div className="df-preview-form">
-          <label className="df-form-group" htmlFor="preview-title">
-            <span className="df-label">作品名</span>
+          <Field className="df-preview-field" htmlFor="preview-title">
+            作品名
             <Input id="preview-title" defaultValue="雨停之前" />
-          </label>
-          <label className="df-form-group" htmlFor="preview-idea">
-            <span className="df-label">一句话创意</span>
-            <textarea
+          </Field>
+          <Field className="df-preview-field" htmlFor="preview-idea">
+            一句话创意
+            <Textarea
               id="preview-idea"
-              className="df-input"
               rows={3}
               defaultValue="一对多年未见的父女，在末班车上重新认识彼此。"
             />
-          </label>
-          <label className="df-form-group" htmlFor="preview-ratio">
-            <span className="df-label">画幅</span>
-            <select id="preview-ratio" className="df-input" defaultValue="9:16">
+          </Field>
+          <Field className="df-preview-field" htmlFor="preview-ratio">
+            画幅
+            <Select id="preview-ratio" defaultValue="9:16">
               <option value="9:16">9:16 竖屏</option>
               <option value="16:9">16:9 横屏</option>
-            </select>
-          </label>
+            </Select>
+          </Field>
         </div>
       </PreviewSection>
 
       <PreviewSection title="Tabs">
-        <Tabs label="工作模式">
-          <Tab active={activeTab === "story"} onClick={() => setActiveTab("story")}>
-            创作
-          </Tab>
-          <Tab active={activeTab === "production"} onClick={() => setActiveTab("production")}>
-            制作
-          </Tab>
-        </Tabs>
+        <Tabs
+          label="工作模式"
+          activeKey={activeTab}
+          onChange={(key) => setActiveTab(key as "story" | "production")}
+          items={[
+            { key: "story", label: "创作", children: "故事工作区" },
+            { key: "production", label: "制作", children: "制作工作区" },
+          ]}
+        />
       </PreviewSection>
 
       <PreviewSection title="Badge">

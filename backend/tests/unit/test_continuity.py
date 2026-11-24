@@ -56,3 +56,8 @@ def test_violation_has_remediation_and_shot_link() -> None:
     v = r.violations[0]
     assert v.remediation
     assert v.shot_id == "shot-1"
+
+
+def test_blank_lead_name_is_absent_instead_of_crashing():
+    report = continuity_four_layers(subtitle="Hello", visual_desc="landscape", lead_name=" \t ")
+    assert not any(item.rule_key == "character.lead_in_frame" for item in report.violations)

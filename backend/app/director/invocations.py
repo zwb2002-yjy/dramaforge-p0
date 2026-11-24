@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.director.invocation_models import DirectorInvocation
 from app.director.turn_models import DirectorTurn
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
+from app.shared.runtime_admission import require_new_work
 
 
 def _hash(value: object) -> str:
@@ -94,6 +95,7 @@ class InvocationService:
         row = await self.get(project_id=project_id, invocation_id=invocation_id)
         if row.status != "prepared":
             return False
+        require_new_work()
         row.status = "submission_started"
         row.submission_started_at = datetime.now(UTC)
         await self._session.flush()

@@ -26,10 +26,10 @@ esac
 [ "${#source_commit}" -eq 40 ] || { echo "release.env has an invalid source commit." >&2; exit 2; }
 
 if [ "$offline" = true ]; then
-    [ -f images.tar ] || {
-        echo "images.tar is missing. Use the complete offline release bundle." >&2; exit 2;
+    [ -f images.tar.gz ] || {
+        echo "images.tar.gz is missing. Use the complete offline release bundle." >&2; exit 2;
     }
-    docker load --input images.tar
+    docker load --input images.tar.gz
 fi
 
 if [ ! -f .env ]; then
@@ -81,6 +81,42 @@ if [ "$offline" = true ]; then
 else
     docker compose "$@" pull
 fi
-docker compose "$@" up -d --wait --no-build
+docker compose "$@" up -d --no-build
+# Bootstrap jobs exit successfully; Compose --wait must only watch daemons.
+for init_service in migrate database-bootstrap litellm-bootstrap; do
+    init_container=$(docker compose "$@" ps --all -q "$init_service")
+    if [ -z "$init_container" ]; then
+        echo "Could not identify initialization container: $init_service" >&2
+        exit 1
+    fi
+    initialized=false
+    attempt=0
+    while [ "$attempt" -lt 180 ]; do
+        init_state=$(docker inspect --format '{{.State.Status}}:{{.State.ExitCode}}' "$init_container")
+        case "$init_state" in
+            exited:0) initialized=true; break ;;
+            exited:*|dead:*) echo "Initialization failed: $init_service ($init_state)" >&2; exit 1 ;;
+        esac
+        attempt=$((attempt + 1))
+        sleep 1
+    done
+    if [ "$initialized" != true ]; then
+        echo "Initialization timed out: $init_service" >&2
+        exit 1
+    fi
+done
+services=$(docker compose "$@" config --services)
+daemon_services=$(printf '%s\n' "$services" | while IFS= read -r service; do
+    case "$service" in
+        migrate|database-bootstrap|litellm-bootstrap) ;;
+        *) printf '%s\n' "$service" ;;
+    esac
+done)
+if [ -z "$daemon_services" ]; then
+    echo "Could not resolve DramaForge runtime services." >&2
+    exit 1
+fi
+# Compose service names are whitespace-free; split this generated list into arguments.
+docker compose "$@" up -d --no-build --no-deps --no-recreate --wait --wait-timeout 180 $daemon_services
 port=$(sed -n 's/^DRAMAFORGE_PORT=//p' .env | tail -n 1)
 echo "DramaForge is ready at http://localhost:${port:-8080}"

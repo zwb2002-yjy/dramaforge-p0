@@ -17,21 +17,50 @@ backup = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(backup)
 
 
-def test_restore_must_use_distinct_database_and_bucket() -> None:
-    with pytest.raises(ValueError, match="database"):
-        backup._assert_isolated_target(
-            "postgresql+asyncpg://user:pass@db/dramaforge",
-            "postgresql+asyncpg://user:pass@db/dramaforge",
-            "dramaforge",
-            "dramaforge-restore",
-        )
-    with pytest.raises(ValueError, match="bucket"):
-        backup._assert_isolated_target(
-            "postgresql+asyncpg://user:pass@db/source",
-            "postgresql+asyncpg://user:pass@db/restore",
-            "dramaforge",
-            "dramaforge",
-        )
+def test_legacy_inspection_verifies_declared_bytes_without_modifying_files(tmp_path, monkeypatch):
+    import hashlib
+    import io
+    import json
+
+    key = Fernet.generate_key()
+    monkeypatch.setenv("TEST_LEGACY_KEY", key.decode())
+    for content, valid in [(b"synthetic", True), (b"damaged", False)]:
+        data = b"PGDMP synthetic"
+
+        def h(v):
+            return hashlib.sha256(v).hexdigest()
+
+        manifest = {
+            "archive_version": 1,
+            "database": {"archive_name": "database.dump", "sha256": h(data)},
+            "objects": [
+                {
+                    "archive_name": "objects/00000000.bin",
+                    "object_key": "fixture",
+                    "byte_size": 9,
+                    "sha256": h(b"synthetic"),
+                }
+            ],
+        }
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tar:
+            for name, v in [
+                ("manifest.json", json.dumps(manifest).encode()),
+                ("database.dump", data),
+                ("objects/00000000.bin", content),
+            ]:
+                info = tarfile.TarInfo(name)
+                info.size = len(v)
+                tar.addfile(info, io.BytesIO(v))
+        encrypted = Fernet(key).encrypt(buf.getvalue())
+        path = tmp_path / "legacy.enc"
+        path.write_bytes(encrypted)
+        if valid:
+            assert backup.inspect_legacy(path, "TEST_LEGACY_KEY")["object_count"] == 1
+        else:
+            with pytest.raises(ValueError, match="checksum mismatch"):
+                backup.inspect_legacy(path, "TEST_LEGACY_KEY")
+        assert path.read_bytes() == encrypted and list(tmp_path.iterdir()) == [path]
 
 
 def test_archive_reader_rejects_wrong_key_and_path_traversal(
@@ -49,15 +78,7 @@ def test_archive_reader_rejects_wrong_key_and_path_traversal(
     archive_path.write_bytes(Fernet(key.encode("ascii")).encrypt(tar_path.read_bytes()))
 
     with pytest.raises(ValueError, match="unsafe"):
-        backup._read_archive(
-            archive_path,
-            key_env="P0_TEST_BACKUP_KEY",
-            work=tmp_path / "work",
-        )
+        backup.inspect_legacy(archive_path, key_env="P0_TEST_BACKUP_KEY")
     monkeypatch.setenv("P0_TEST_BACKUP_KEY", Fernet.generate_key().decode("ascii"))
     with pytest.raises(ValueError, match="authentication"):
-        backup._read_archive(
-            archive_path,
-            key_env="P0_TEST_BACKUP_KEY",
-            work=tmp_path / "other-work",
-        )
+        backup.inspect_legacy(archive_path, key_env="P0_TEST_BACKUP_KEY")

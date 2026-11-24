@@ -7,8 +7,6 @@ and deterministic; it never touches a Provider or falls back to another pack.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-
 from pydantic import BaseModel
 
 
@@ -70,10 +68,3 @@ class PackRegistry[T: BaseModel]:
 
     def keys(self) -> list[str]:
         return list(self._keys)
-
-
-def build_pack_registry(specs: Iterable[BaseModel], *, key_field: str) -> PackRegistry[BaseModel]:
-    registry: PackRegistry[BaseModel] = PackRegistry(key_field=key_field)
-    for spec in specs:
-        registry.register(spec)
-    return registry

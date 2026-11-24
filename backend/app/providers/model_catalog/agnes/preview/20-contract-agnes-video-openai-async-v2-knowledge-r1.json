@@ -1,0 +1,24 @@
+{
+  "schema_version": "2",
+  "manifest_version": "2026-10-13",
+  "provider_type": "agnes",
+  "protocol_profile": "agnes_cn_v1",
+  "api_version": "unknown",
+  "region": "unknown",
+  "model_id": "@contract/agnes-video-openai-async-v2",
+  "model_revision": "knowledge-2026-10-13-r1",
+  "refines_revision": "v2",
+  "media_kind": "video",
+  "display_name": "Agnes Video 2.5 协议插件",
+  "lifecycle": "preview",
+  "catalog_source": "protocol_contract",
+  "documented_at": "2026-10-13",
+  "operations": {
+    "video.generate": {
+      "operation": "video.generate",
+      "claim_status": "unknown",
+      "input_contracts": {},
+      "output_options": {}
+    }
+  }
+}

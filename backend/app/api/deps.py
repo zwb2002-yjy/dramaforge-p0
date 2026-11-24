@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from typing import Annotated
 from uuid import UUID
 
@@ -23,8 +22,15 @@ from app.shared.security import (
 )
 
 
-def settings_dep() -> Settings:
-    return get_settings()
+def settings_dep(request: Request) -> Settings:
+    """Return the settings the running app was created with.
+
+    ``create_app(settings=...)`` stores the effective configuration on
+    ``app.state``; falling back to the process cache keeps module-level test
+    apps working.
+    """
+    configured = getattr(request.app.state, "settings", None)
+    return configured if isinstance(configured, Settings) else get_settings()
 
 
 SettingsDep = Annotated[Settings, Depends(settings_dep)]
@@ -101,7 +107,3 @@ async def require_csrf(
 
 
 CsrfDep = Annotated[None, Depends(require_csrf)]
-
-
-async def access_service(session: SessionDep) -> AsyncGenerator[AccessService, None]:
-    yield AccessService(session)

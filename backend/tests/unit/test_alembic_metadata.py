@@ -50,6 +50,8 @@ def test_fresh_alembic_environment_loads_models_before_exposing_metadata() -> No
         context.configure = lambda **kwargs: None
         context.begin_transaction = contextlib.nullcontext
         context.run_migrations = lambda: None
+        context.get_context = lambda: type("MigrationContext", (), {"opts": {}})()
+        context.get_starting_revision_argument = lambda: None
 
         runpy.run_path("alembic/env.py")
         required = {

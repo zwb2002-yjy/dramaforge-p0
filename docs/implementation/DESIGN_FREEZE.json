@@ -1,0 +1,194 @@
+{
+  "schema_version": 1,
+  "freeze_id": "D8-20261117-r1",
+  "captured_at": "2026-11-16T17:24:06.8829541+00:00",
+  "scope": "Design freeze only; uncommitted working-tree documents and synthetic prototype. Not implementation, runtime acceptance or release.",
+  "authority_entry": "docs/CURRENT.md",
+  "source_branch": "dev",
+  "source_head": "eff39bf0c940da4dc5dcaa42388d432a2a77111f",
+  "contracts": [
+    {
+      "name": "Owner contract 12",
+      "sha256": "74509d48027988a502cd0858f3e045069cbebd959d363b94fbd485d3ebc003cf"
+    },
+    {
+      "name": "Owner contract 11",
+      "sha256": "6343af65767f58b40dd4187f09afad929a30aa6a817aa0ddd30b7f68f599dd1c"
+    }
+  ],
+  "source_migration_head": "20261113_0099",
+  "actual_database_schema": "unverified; Docker unavailable",
+  "open_runtime_items": [
+    "C10 instance identity/schema/roles/active operations",
+    "C12 target hardware and real work acceptance",
+    "All implementation and product gates"
+  ],
+  "files": [
+    {
+      "path": "docs/adr/0008-single-workbench-quick-hard-remove.md",
+      "bytes": 1756,
+      "sha256": "5695116f9d5cc173178cb2155d6176ea1e0d62be7dad32933323591fe92c0058"
+    },
+    {
+      "path": "docs/adr/README.md",
+      "bytes": 789,
+      "sha256": "2468f4d5185027eb41e14bc5f3e35689d37df5f3168e91a2e7eb7a4e4c053452"
+    },
+    {
+      "path": "docs/API.md",
+      "bytes": 144642,
+      "sha256": "d03ca4d33259899de428fa9ec292b0142a80cd12f9252c9873de51cf1727920c"
+    },
+    {
+      "path": "docs/ARCHITECTURE_MAPPING.md",
+      "bytes": 73714,
+      "sha256": "9e8208fe74566ea1fe8543ac9780c9f9d43cedcd19005c7a2371c7abfc542e29"
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "bytes": 32676,
+      "sha256": "249e5dec9bbca5d133e3aaa8931f8981d72493402bf06cfefd41ff6e9ab1b7ce"
+    },
+    {
+      "path": "docs/CANONICAL_ARCHITECTURE.md",
+      "bytes": 13953,
+      "sha256": "a263bdc200bb4a4bc65dbd0248c14dd9e47caca1dced3377d1c3509f482b1f04"
+    },
+    {
+      "path": "docs/CREATION_FLOW.md",
+      "bytes": 16234,
+      "sha256": "bae316c7d814512aff69c71e7a49c839e9570c1c1bf9270fee8b4f4dcb90e224"
+    },
+    {
+      "path": "docs/CURRENT.md",
+      "bytes": 10374,
+      "sha256": "8c194394dc75a02e702917d1907613119ece8fd5d698abc7fee96935cfa9779b"
+    },
+    {
+      "path": "docs/DATA_MODEL.md",
+      "bytes": 148123,
+      "sha256": "2e7798b48b72b4ab06cd7b5439733e379abf4c658c43f83282831a0bd599544a"
+    },
+    {
+      "path": "docs/DEPLOYMENT.md",
+      "bytes": 35751,
+      "sha256": "43ea682ee1633dc4774562db80992eb0df9954e9fc6d99f1528c63f896d61bdb"
+    },
+    {
+      "path": "docs/DEVELOPMENT.md",
+      "bytes": 36276,
+      "sha256": "e9766d1fee06b8b853f52acbf71701b19adc083a4469a71f5662f7aee78ea296"
+    },
+    {
+      "path": "docs/DIRECTOR_RUNTIME.md",
+      "bytes": 56653,
+      "sha256": "1f077fce878f526f8410cd5c182e9203e92b00ea0fd1575735ca0f6438f299f4"
+    },
+    {
+      "path": "docs/DOMAIN_VOCABULARY.md",
+      "bytes": 24138,
+      "sha256": "2b9e51cb41c3ae968497cdafc4ec296459ca0d72c368f2174f4739ba99f5345b"
+    },
+    {
+      "path": "docs/FRONTEND_WORKBENCH.md",
+      "bytes": 88025,
+      "sha256": "78445537d16456462384e3ee2e7f996ff31eaafa02dda71745dcc39a8bed3e66"
+    },
+    {
+      "path": "docs/implementation/DECISION_LOG.md",
+      "bytes": 7410,
+      "sha256": "e03ddd290ba3ec3bb20b6fbb18ba918650b3f99d617026e77f6fc4baf0a3e630"
+    },
+    {
+      "path": "docs/implementation/EXECUTION_STATUS.md",
+      "bytes": 30478,
+      "sha256": "cedf1a9708a33efafb4fda4ac9851023cc4108a13ebd7386cb99c8295a866f0e"
+    },
+    {
+      "path": "docs/implementation/MASTER_EXECUTION_PLAN.md",
+      "bytes": 16942,
+      "sha256": "f92f1a66ac311154738739c7da64cb6aae6d70d689b201cbd7866222b3ad920c"
+    },
+    {
+      "path": "docs/implementation/PHASE_GATES.md",
+      "bytes": 4206,
+      "sha256": "65042f0b7e4176b813a0c8dce369eeebd2e3a14709aa796fcfb1ef5e40cea609"
+    },
+    {
+      "path": "docs/implementation/RISK_REGISTER.md",
+      "bytes": 5376,
+      "sha256": "eea7ef80c0fd7a56ab2455ecb41bd3a5f805b3a8105a989edfbb12251bdcf920"
+    },
+    {
+      "path": "docs/implementation/TEST_EVIDENCE.md",
+      "bytes": 27930,
+      "sha256": "ce0bc6cb09dcdd38def9fd33aca3d42c5f5946f07af44a34dcbfb038f92c51ba"
+    },
+    {
+      "path": "docs/MODEL_PROVIDER.md",
+      "bytes": 120947,
+      "sha256": "065ede6da33d987d74f65f5d97865390e6cb58bf54bb0732670055de4eb81a1f"
+    },
+    {
+      "path": "docs/MODULE_BOUNDARIES.md",
+      "bytes": 15217,
+      "sha256": "4bc0d207eac8a0c60113dccb71ac9912ee7126994b8a7caa6b04d43149d172bf"
+    },
+    {
+      "path": "docs/PRODUCT.md",
+      "bytes": 31406,
+      "sha256": "a0abb979a9d67ce537fe3bec22ac5443e0a9502976731fa6eadda8bfed83c665"
+    },
+    {
+      "path": "docs/PRODUCTION_GRAPH.md",
+      "bytes": 14750,
+      "sha256": "effd3cf6707b15ad47a4ee020f49d09f36a23712d9ffccb968256693c59e2e85"
+    },
+    {
+      "path": "docs/PRODUCTION_RUNTIME.md",
+      "bytes": 31880,
+      "sha256": "69fc9a7671a61962ab66bd86facdd075f067badd0972fdf650837858e91dadc2"
+    },
+    {
+      "path": "docs/RELEASE.md",
+      "bytes": 6302,
+      "sha256": "3acf91f83d9edbc89fcb8b10209c7da66107dd819852e05a64c1f0c8187761cf"
+    },
+    {
+      "path": "docs/V1_STATUS.md",
+      "bytes": 6952,
+      "sha256": "a53f6e8d523f977d9fdd87129a35e0c7dd427caba61a5bc2fcc8fed339bb5415"
+    },
+    {
+      "path": "frontend/design/prototypes/institution-studio.js",
+      "bytes": 55353,
+      "sha256": "f342be98d9134a80b414162382bfab6231eaa59ff9a89393165cc44f72929751"
+    },
+    {
+      "path": "frontend/design/prototypes/institution.css",
+      "bytes": 10982,
+      "sha256": "3c833cf5ca2a5cca0c273066759806e8529b4e409cf5cd5c4d52baa2dc11563d"
+    },
+    {
+      "path": "frontend/design/prototypes/institution.html",
+      "bytes": 1112,
+      "sha256": "75f7d1a50e50e0ab52f31f230656b538673c8c710b0795cb16cf7e801a79884d"
+    },
+    {
+      "path": "frontend/design/prototypes/owner-reference.png",
+      "bytes": 2198414,
+      "sha256": "c6ff6d5c691c8709902006ad5cc9a3d7362decdd8af914dc8c48878dccdc69b0"
+    },
+    {
+      "path": "frontend/design/README.md",
+      "bytes": 15123,
+      "sha256": "8ccc4f336b41a1e29539c3363c7d7f911f112e504fe032a53710071ea496994d"
+    }
+  ],
+  "snapshot": {
+    "path": "tmp/design-freeze/D8-20261117-r1.zip",
+    "sha256": "78a4801a89a50d106388cf893bc00141c7d2209afdfc842c3308f2b7d28075aa",
+    "retention": "Temporary evidence for active design-to-implementation review; not a second authority."
+  },
+  "updates": "Later design changes update original authorities and execution status; these fingerprints identify the frozen point and are not silently regenerated."
+}

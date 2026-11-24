@@ -39,6 +39,11 @@ SSE_RECONNECT_TOTAL = Counter(
     "SSE clients resuming via Last-Event-ID",
 )
 
+FINAL_FILM_CLEANUP_FAILURES = Counter(
+    "dramaforge_final_film_cleanup_failures_total",
+    "Final Film upload cleanup failures retained for maintenance retry",
+)
+
 
 def metrics_payload() -> bytes:
     return generate_latest()

@@ -1,0 +1,18 @@
+{
+  "pageHeaders": [
+    "src/routes/index.tsx",
+    "src/routes/settings-page.tsx",
+    "src/routes/production-page.tsx",
+    "src/features/script/ScriptWorkspace.tsx",
+    "src/features/assets/AssetCardsPanel.tsx",
+    "src/features/review/ReviewWorkspace.tsx",
+    "src/features/scenes/SceneStoryboardWall.tsx",
+    "src/features/editing/EditingWorkspace.tsx"
+  ],
+  "layoutStyles": [
+    "src/styles/index.css",
+    "src/components/workstation/navigation-shell.css",
+    "src/components/workstation/project-shell.css",
+    "src/components/workstation/project-shell-visual.css"
+  ]
+}

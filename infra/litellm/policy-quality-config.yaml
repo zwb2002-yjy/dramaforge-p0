@@ -1,0 +1,17 @@
+model_list:
+  - model_name: quality-legacy
+    litellm_params:
+      model: openai/synthetic-legacy
+      mock_response: historical-alias
+router_settings:
+  num_retries: 0
+  disable_cooldowns: true
+  fallbacks: []
+litellm_settings:
+  callbacks: [proxy_policy.policy]
+  num_retries: 0
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  store_model_in_db: true
+  disable_spend_logs: true
+  disable_error_logs: true

@@ -56,16 +56,6 @@ def profile_version_conflict(expected: int, actual: int) -> ConflictError:
     )
 
 
-def profile_native_option_invalid(option: str, model_id: str, reason: str) -> ValidationAppError:
-    return ValidationAppError(
-        f"native option {option} is invalid for {model_id}: {reason}",
-        details={
-            "code": MODEL_PROFILE_NATIVE_OPTION_INVALID,
-            "option": option,
-            "model_id": model_id,
-        },
-    )
-
 
 def profile_slot_unknown(slot: str) -> ValidationAppError:
     return ValidationAppError(
@@ -73,12 +63,6 @@ def profile_slot_unknown(slot: str) -> ValidationAppError:
         details={"code": MODEL_PROFILE_SLOT_UNKNOWN, "slot": slot},
     )
 
-
-def profile_model_disabled(model_id: str) -> ValidationAppError:
-    return ValidationAppError(
-        f"model is disabled: {model_id}",
-        details={"code": MODEL_PROFILE_MODEL_DISABLED, "model_id": model_id},
-    )
 
 
 def profile_model_not_configured(model_id: str) -> ValidationAppError:

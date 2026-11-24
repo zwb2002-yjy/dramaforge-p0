@@ -3,7 +3,15 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.base import Base
@@ -14,6 +22,7 @@ class ProductionCommandAuthorization(Base):
     __tablename__ = "production_command_authorizations"
     __table_args__ = (
         UniqueConstraint("project_id", "command_key", name="uq_production_authorized_command"),
+        UniqueConstraint("id", "project_id", name="uq_command_auth_scope"),
         CheckConstraint(
             "status IN ('approved','accepted','revoked')", name="ck_command_auth_status"
         ),
@@ -23,12 +32,23 @@ class ProductionCommandAuthorization(Base):
             "(status <> 'accepted' AND node_run_id IS NULL)",
             name="ck_command_auth_receipt",
         ),
+        CheckConstraint(
+            "(shot_id IS NOT NULL AND asset_id IS NULL) OR "
+            "(shot_id IS NULL AND asset_id IS NOT NULL)",
+            name="ck_command_auth_target",
+        ),
+        Index("ix_command_auth_asset", "asset_id"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     actor_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
-    shot_id: Mapped[UUID] = mapped_column(ForeignKey("shots.id", ondelete="CASCADE"))
+    shot_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("shots.id", ondelete="CASCADE"), nullable=True
+    )
+    asset_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="CASCADE"), nullable=True
+    )
     command_key: Mapped[str] = mapped_column(String(200))
     request_hash: Mapped[str] = mapped_column(String(64))
     body: Mapped[dict[str, object]] = mapped_column(JSON_DOCUMENT)

@@ -39,7 +39,12 @@ def _register(client: TestClient) -> str:
 def _create_project(client: TestClient, workspace_id: str, name: str) -> str:
     created = client.post(
         "/api/v1/projects",
-        json={"workspace_id": workspace_id, "name": name, "aspect_ratio": "16:9"},
+        json={
+            "work_type": "serial_comic",
+            "workspace_id": workspace_id,
+            "name": name,
+            "aspect_ratio": "16:9",
+        },
         headers={CSRF_HEADER: _csrf(client)},
     )
     assert created.status_code in {200, 201}, created.text
@@ -182,6 +187,7 @@ async def test_workspace_state_drops_a_selection_that_no_longer_resolves() -> No
             session.add(workspace)
             await session.flush()
             project = await ProjectService(session).create_project(
+                work_type="serial_comic",
                 workspace_id=workspace.id,
                 actor=owner,
                 name="恢复项目",

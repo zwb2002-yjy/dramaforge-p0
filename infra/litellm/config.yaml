@@ -1,9 +1,8 @@
 # LiteLLM Proxy configuration for DramaForge (fix spec §15/§75/§89).
 #
-# This file defines LOGICAL MODEL ALIASES only. DramaForge requests a logical
-# group (e.g. ``script-quality``); the LiteLLM Router picks the deployment
-# (load balancing / retry / fallback / cooldown). DramaForge never sees the
-# upstream provider model (fix spec §16/§42).
+# These legacy aliases remain readable during the DB cutover. New versioned
+# deployments are managed in the Proxy DB; never create a DB deployment with
+# an existing YAML alias. Every executable alias must identify one deployment.
 #
 # Secrets use litellm's ``os.environ/<KEY>`` substitution — never write real
 # keys here (fix spec §75). Empty values are valid; an alias becomes usable
@@ -30,29 +29,22 @@ model_list:
         type: disabled
       mock_response: os.environ/LITELLM_SCRIPT_FAST_MOCK_RESPONSE
 
-  # Bootstrap bridge target for ``litellm/text-llm`` (fix spec §32/§33).
-  - model_name: legacy-text
-    litellm_params:
-      model: os.environ/LITELLM_LEGACY_TEXT_MODEL
-      api_base: os.environ/LITELLM_LEGACY_TEXT_API_BASE
-      api_key: os.environ/LITELLM_LEGACY_TEXT_API_KEY
-      thinking:
-        type: disabled
-      mock_response: os.environ/LITELLM_LEGACY_TEXT_MOCK_RESPONSE
-
 router_settings:
-  routing_strategy: simple-shuffle
-  # A deployment is cooled down after this many consecutive failures; Router
-  # handles provider-level retry so DramaForge does not (fix spec §4.4/§5).
-  num_retries: 2
+  # One alias has one fixed deployment; duplicate groups are rejected by policy.
+  num_retries: 0
+  fallbacks: []
+  context_window_fallbacks: []
+  content_policy_fallbacks: []
+
+litellm_settings:
+  callbacks: [proxy_policy.policy]
+  num_retries: 0
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   # Strict (spec §62): never silently drop unsupported params.
   drop_params: false
-  # Emit cost headers so DramaForge can record x-litellm-response-cost (spec §43).
-  enable_response_cost_headers: true
-  # Do not use the LiteLLM DB for spend if we can avoid it in P0 — but the
-  # compose stack wires a dedicated litellm-db (spec §9/§10) for master keys,
-  # virtual keys and spend once enabled.
+  # Existing historical receipt parsing remains; no billing product is added.
+  disable_spend_logs: true
   database_connection_pool_limit: 10
+  store_model_in_db: true

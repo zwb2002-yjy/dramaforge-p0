@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 import pytest
 from app.production.timeline_renderer import TimelineRenderClip, render_timeline
-from app.production.timeline_subtitles import TimelineTimingError, build_timeline_subtitles
+from app.production.timeline_subtitles import (
+    TimelineClipInstructions,
+    TimelineTimingError,
+    build_timeline_subtitles,
+)
 
 
 def clip(key="one", **changes):
     return replace(
-        TimelineRenderClip(
+        TimelineClipInstructions(
             clip_id=key,
             video_artifact_id=key,
-            video_bytes=b"video",
-            audio_bytes=None,
             subtitle_text="第一行\nSecond line",
             source_in_seconds=1.25,
             duration_seconds=2.0,
@@ -65,10 +67,19 @@ def test_empty_subtitles_do_not_create_a_fake_file():
 
 
 @pytest.mark.asyncio
-async def test_test_renderer_duration_matches_real_crossfade_map():
+async def test_test_renderer_duration_matches_real_crossfade_map(tmp_path):
+    video = tmp_path / "source.mp4"
+    video.write_bytes(b"video")
     result = await render_timeline(
-        [clip(), clip("two", transition_kind="crossfade", transition_duration_seconds=0.5)],
+        [
+            TimelineRenderClip(**asdict(item), video_path=video)
+            for item in [
+                clip(),
+                clip("two", transition_kind="crossfade", transition_duration_seconds=0.5),
+            ]
+        ],
         lineage="same",
+        output_path=tmp_path / "final.mp4",
     )
     assert result.ffprobe["format"]["duration"] == "3.500"
     assert result.summary["timeline_time_map"][1]["start_ms"] == 1500

@@ -1,0 +1,69 @@
+{
+  "contract": {
+    "documentation_source": {
+      "notes": "Conservative versioned Images fixture; no deployed service or account certification.",
+      "verified_at": "2026-10-27"
+    },
+    "wire_template": {
+      "host": "https://configured-service.test/v1",
+      "method": "POST",
+      "path": "/images/generations",
+      "request_body": {
+        "model": "<configured-model-id>",
+        "prompt": "<prompt>",
+        "size": "1024x1024",
+        "n": 1
+      },
+      "status_machine": [
+        "synchronous"
+      ],
+      "success_response": {
+        "data": [
+          {
+            "url": "https://configured-service.test/result.png"
+          }
+        ]
+      }
+    }
+  },
+  "manifest": {
+    "catalog_source": "protocol_contract",
+    "display_name": "通用 Images：单张 1024×1024 文生图",
+    "documented_at": "2026-10-27",
+    "evidence": {
+      "protocol_fixture": {
+        "checked_at": "2026-10-27",
+        "source_type": "contract_fixture",
+        "source_url": "repository:backend/tests/unit/test_generic_images_protocol.py"
+      }
+    },
+    "implementation_status": "contract_tested",
+    "lifecycle": "active",
+    "manifest_version": "2026-10-27",
+    "media_kind": "image",
+    "model_id": "@contract/openai-images-v2",
+    "model_revision": "v1",
+    "operations": {
+      "image.generate": {
+        "capabilities": [
+          "image.t2i"
+        ],
+        "exclusive_groups": [],
+        "operation": "image.generate",
+        "output_constraints": {
+          "aspect_ratio": "1:1",
+          "num_outputs": 1,
+          "size": "1024x1024"
+        },
+        "reference_constraints": {}
+      }
+    },
+    "option_schema": {
+      "namespace": "",
+      "options": {}
+    },
+    "protocol_profile": "openai_images_v2",
+    "provider_type": "openai_compatible_media"
+  },
+  "manifest_hash": "b5b5a38cdd88b3537cd849a2f4bf60ef9bafb4a7c4199829a7bb110d886d1583"
+}

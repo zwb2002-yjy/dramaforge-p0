@@ -4,21 +4,26 @@ Status: current（入口见 [CURRENT.md](CURRENT.md)）
 
 ## Branch flow
 
-- `main` 是受保护的稳定发布分支，禁止直接 push（本地 pre-push hook 与
-  GitHub ruleset 双重拦截）。
-- `dev` 是常规集成分支；根 worktree 正常跟踪 `dev`，日常 commit 直接推送
-  `origin/dev`。每次 push 到 `dev` 都运行完整 CI 与 Security workflow。
-- 发布的唯一正常方向：`dev -> main` PR。合并后本地 `main` fast-forward，
-  并在历史分叉时把 `main` 合回 `dev`。
-- 短生命周期 `agent/<task-id>` 分支 + `.worktrees/<task-id>` 只用于并行隔离
-  工作：从 `dev` 出发、PR 目标 `dev`。生产 hotfix 可从 `main` 出发、目标
-  `main`，事后同步回 `dev`。
-- Dependabot 常规版本更新当前暂停（各 ecosystem 的
-  `open-pull-requests-limit: 0`）；安全告警保留人工分诊，自动安全修复关闭。
-  恢复常规更新时只允许直接依赖、忽略 major 更新、使用
-  `dependabot/* -> dev` PR，并在 CI 和安全检查后由 Owner 决定是否集成；不直接
-  作为稳定版本更新合入 `main`。
-- 只有 `@zwb2002-yjy` 批准 / 合并 PR；Agent 不自批、不自合、不记录 MERGED。
+- `main` 必须作为受保护的稳定发布分支，禁止直接 push；本地 pre-push hook
+  与远端分支保护共同落实该政策，本地 hook 不能替代远端强制配置。
+- `dev` 是常规集成分支，当前处于快速开发模式：不运行 PR CI，不启用 ruleset，
+  允许直接 push 或直接合并分支；完整质量与安全验证集中在 `dev -> main`。
+  恢复 dev 门禁时，在 `ci.yml` 的 `pull_request.branches` 加回 `dev`
+  并先实现、验证对应分层作业；当前 workflow 没有 `backend-fast` / `frontend-fast`。
+  Ruleset 的变更须由 Owner 另行决定，不能只加监听分支就声称门禁闭环。
+- 发布的唯一正常方向：`dev -> main` PR。该 PR 必须执行完整质量与安全
+  required checks；合并后本地 `main` fast-forward，并在历史分叉时把
+  `main` 合回 `dev`。
+- 短生命周期分支 + `.worktrees/<task-id>` 可用于并行隔离
+  工作：从 `dev` 出发、合回 `dev`。当前未发布阶段的修复也遵循此流程，
+  不以 hotfix 名义绕过 `dev -> main` 和 Owner 合并边界。
+- Dependabot 常规版本更新按月运行，只允许直接依赖并忽略 major 更新；PR 目标为
+  `dev`。并发限额为 backend pip 3、frontend npm 3、GitHub Actions 2、backend/frontend
+  Docker 各 1。Python Docker 基线继续停留在 3.14.x，Node Docker 基线继续停留在
+  24 LTS。dev 快速开发模式下 `dependabot/* -> dev` PR 不触发 CI，由 Owner
+  决定是否集成，依赖审计在 `dev -> main` 执行；不直接作为稳定版本更新合入 `main`。
+- 合入 `dev` 由 Owner 授权的开发任务直接执行；`dev -> main` 只有
+  `@zwb2002-yjy` 批准 / 合并，Agent 不自批、不自合该 PR。
 
 ### 合并提交说明检查
 
@@ -30,24 +35,37 @@ Squash 必须显式传入审阅过的标题和正文，不使用自动拼接的�
 
 ## Required GitHub ruleset（main）
 
-1. 合并前必须 PR；
-2. 至少一个 approval；
-3. 需要 Code Owners review；
-4. 新 commit 使过期 approval 失效；
-5. 合并前必须解决所有 conversation；
-6. 禁止 force push 与分支删除；
-7. 要求精确状态检查：`policy`、`container-gates`；
-8. 管理员与 automation 不绕过 ruleset。
+`main` 的远端保护必须满足以下要求（由适用的 ruleset / branch protection 落实）：
 
-`dev` 分支 ruleset 保留删除与 force-push 保护，同时允许正常直接 push 工作流。
-Dependency Review 由仓库变量 `DEPENDENCY_REVIEW_ENABLED=true` 能力门控；
-不可用时显式跳过而非报假失败——`pip-audit`、`npm audit`、secret scan 与
-Trivy filesystem scan 始终阻断。
+1. 禁止 force push 与分支删除；
+2. required status checks 使用 strict 模式；
+3. 精确要求：
+   - `policy`
+   - `container-gates`
+   - `secret-scan`
+   - `python-dependencies`
+   - `frontend-dependencies`
+   - `filesystem-scan`
+
+发布前核对实际仓库的保护和审批配置符合本页政策；本文、本地 hook 或本地测试通过不证明
+远端已强制执行。无法查询的保护项不能记作已验证，也不构成绕过 PR 或 Owner 审批的理由。
+
+`dev` ruleset（删除与 non-fast-forward 保护）当前为 disabled，PR CI 不监听 `dev`。
+
+本地验证选择与当前 CI 执行范围见 [DEVELOPMENT.md](DEVELOPMENT.md)。`dev -> main` 不走
+Fast Gate：上述六个 required checks 全部执行，其中 `container-gates`
+包含 backend/frontend、PostgreSQL migration/integration、Playwright 与 LiteLLM
+完整质量门。
+
+Dependency Review 对 Python / frontend 依赖文件变更和所有 `dev -> main` PR
+自动执行，不依赖仓库变量开关。Python/Node 依赖审计、secret scan 与 Trivy filesystem scan
+在 `dev -> main` 必须执行；周度完整安全扫描由
+`.github/workflows/security.yml` 执行。
 
 ## 发布步骤
 
 1. Check out the exact candidate SHA.
-2. Run `scripts/run_quality_in_docker.ps1`（或 Linux 等价 Docker Compose 命令）.
+2. Run `scripts/run_quality_in_docker.ps1 -Stage Full -KeepArtifacts` to retain candidate outputs.
 3. Confirm Alembic reports a single head and that `alembic check` is clean
    （当前 head 记录在 [DATA_MODEL.md](DATA_MODEL.md)，以候选本身
    `alembic heads` 为准）.
@@ -59,9 +77,11 @@ Trivy filesystem scan 始终阻断。
 Only the frontend gateway publishes a host port. The backend API port 8000 is
 internal container networking and is not a second public entry.
 
-The application path is Project → Story/Script → Scene/Shot → Workbench
-Execution → Review/Repair → EditSession → Delivery, with proposal-only Director
-assistance available alongside it. Retired Quick, Creation and controlled
+The application path is the single creation mainchain (summary below; canonical
+definition is [CREATION_FLOW.md](CREATION_FLOW.md)):
+Project → Story/Script → Scene/Shot → Workbench Execution → Review/Repair →
+EditSession → Delivery (Final Film via Export). Proposal-only Director
+assistance is available alongside it. Retired Quick, Creation and controlled
 Director paths are not supported and are not restored by release operations.
 
 ## Local setup
@@ -77,16 +97,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install_git_hooks.
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\task_worktree.ps1 `
   -Operation create `
-  -TaskId example-task `
-  -OwnedPaths "backend/app/example;backend/tests/unit/test_example.py"
+  -TaskId example-task
 ```
 
-GitHub 是权威强制点（本地 hook 可被移除）。本地 `.agent-control` ledger 只是
-审计数据，其 `approved_by` 不构成身份认证，不能替代 GitHub review 或受保护
-分支合并记录。
+该可选助手从 dev 提交创建 `codex/<task-id>`，不要求主工作区干净，不替主工作区提交修改。
+其他合法分支或 worktree 布局也可使用 Git 原生命令；写入范围在现有任务中协调。
+不维护本地 STARTED/COMPLETED/MERGED 台账；完成工作不强制制造提交或 PR。
+GitHub 是审批与受保护分支合并的权威，本地 hook 只阻止直接推送 main。
 
 ## Release evidence
 
 发布或 P0 tag 前，从 exact candidate commit 的干净 checkout 运行 Docker
 Compose 正式证明。任何 FAIL / BLOCKED / dirty source / source mismatch 都
 阻止发布。生成的报告默认写入 `tmp/p0-evidence/<sha>/`（不入 Git）。
+这只适用于正式发布候选，不要求每次修改生成证据包。候选废弃或开发环境重置后，
+没有恢复、交付或明确归档用途的历史材料按 DEVELOPMENT 的生命周期清理；
+被删除的证据不能继续作为当前通过依据。有效发布记录与制品不随普通开发清理删除。

@@ -12,13 +12,14 @@ from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from sqlalchemy import select
 
 from app.access.models import User
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
+from app.delivery.models import Export
 from app.director.editing_repair import (
     EditingRepairRoutingRead,
     EditingRepairRoutingRequest,
@@ -37,6 +38,11 @@ from app.director.turn_service import DirectorTurnService
 from app.editing.adapter import EditingAdapter
 from app.editing.models import EditSession
 from app.editing.timeline_builder import build_edit_session_for_project
+from app.production.edit_session_render import create_edit_session_render
+from app.production.episode_delivery import EpisodeDeliveryItem, EpisodeDeliveryService
+from app.production.final_film import TimelinePreviewRead, preview_timeline
+from app.production.series_delivery import SeriesDeliverySummary, series_delivery_summary
+from app.production.session_exports import SessionExports
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["editing"], dependencies=[Depends(require_selected_workspace)])
@@ -61,6 +67,7 @@ class EditSessionCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(default=_DEFAULT_SESSION_NAME, min_length=1, max_length=200)
+    episode_id: UUID | None = None
 
 
 class EditTimelinePayload(BaseModel):
@@ -68,6 +75,7 @@ class EditTimelinePayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    schema_version: int = Field(default=1, ge=1, le=2)
     clips: list[dict[str, JsonValue]] = Field(default_factory=list)
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
 
@@ -76,6 +84,7 @@ class EditTimelineUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     timeline: EditTimelinePayload
+    expected_session_version: int = Field(ge=1)
 
     @model_validator(mode="after")
     def reject_production_lineage(self) -> EditTimelineUpdateRequest:
@@ -88,6 +97,7 @@ class EditSessionRead(BaseModel):
 
     id: UUID
     project_id: UUID
+    episode_id: UUID | None = None
     name: str
     status: str
     version: int
@@ -146,6 +156,7 @@ def _edit_session_read(row: EditSession) -> EditSessionRead:
     return EditSessionRead(
         id=row.id,
         project_id=row.project_id,
+        episode_id=row.episode_id,
         name=row.name,
         status=row.status,
         version=row.version,
@@ -218,6 +229,7 @@ async def create_edit_session(
         project_id=project_id,
         user_id=user.id,
         name=body.name,
+        episode_id=body.episode_id,
     )
     # Load the just-flushed row before commit while the project RLS context is
     # active.  ``set_config(..., true)`` is transaction-local on PostgreSQL;
@@ -249,6 +261,28 @@ async def get_edit_session(
     return _edit_session_read(row)
 
 
+@router.post(
+    "/projects/{project_id}/edit-sessions/{session_id}/preview-plan",
+    response_model=TimelinePreviewRead,
+)
+async def get_timeline_preview_plan(
+    project_id: UUID,
+    session_id: UUID,
+    body: EditTimelineUpdateRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> TimelinePreviewRead:
+    await _owned_session(project_id=project_id, session_id=session_id, user=user, session=session)
+    return await preview_timeline(
+        session,
+        project_id=project_id,
+        edit_session_id=session_id,
+        expected_timeline_version=body.expected_session_version,
+        draft_timeline=body.timeline.model_dump(mode="json"),
+    )
+
+
 @router.patch(
     "/projects/{project_id}/edit-sessions/{session_id}/timeline",
     response_model=EditSessionRead,
@@ -271,6 +305,7 @@ async def save_edit_timeline(
         project_id=project_id,
         session_id=row.id,
         timeline=dict(body.timeline.model_dump(mode="json")),
+        expected_session_version=body.expected_session_version,
     )
     await DirectorTurnService(session).mark_scope_stale(
         project_id=project_id,
@@ -280,6 +315,262 @@ async def save_edit_timeline(
     )
     await session.commit()
     return _edit_session_read(saved)
+
+
+class EditSessionScopeUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    episode_id: UUID | None = None
+    expected_session_version: int = Field(ge=1)
+
+
+@router.patch(
+    "/projects/{project_id}/edit-sessions/{session_id}/episode",
+    response_model=EditSessionRead,
+)
+async def switch_edit_session_episode(
+    project_id: UUID,
+    session_id: UUID,
+    body: EditSessionScopeUpdateRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> EditSessionRead:
+    """Move the episode scope; clips from another episode reject the switch."""
+    row = await _owned_session(
+        project_id=project_id,
+        session_id=session_id,
+        user=user,
+        session=session,
+    )
+    updated = await EditingAdapter(session).switch_episode(
+        project_id=project_id,
+        session_id=row.id,
+        episode_id=body.episode_id,
+        expected_session_version=body.expected_session_version,
+    )
+    await session.commit()
+    return _edit_session_read(updated)
+
+
+class ExportReceiptRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    project_id: UUID
+    episode_id: UUID | None = None
+    edit_session_id: UUID | None = None
+    format: str
+    status: str
+    timeline_version: int | None = None
+    timeline_hash: str | None = None
+    manifest: dict[str, JsonValue] = Field(default_factory=dict)
+    result_artifact_id: UUID | None = None
+    created_at: datetime
+
+
+class EditSessionExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    format: str = Field(default="timeline_json", min_length=1, max_length=40)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+def _export_read(row: Export) -> ExportReceiptRead:
+    return ExportReceiptRead(
+        id=row.id,
+        project_id=row.project_id,
+        episode_id=row.episode_id,
+        edit_session_id=row.edit_session_id,
+        format=row.format,
+        status=row.status,
+        timeline_version=row.timeline_version,
+        timeline_hash=row.timeline_hash,
+        manifest=cast(dict[str, JsonValue], dict(row.manifest or {})),
+        result_artifact_id=row.result_artifact_id,
+        created_at=row.created_at,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/edit-sessions/{session_id}/exports",
+    response_model=ExportReceiptRead,
+)
+async def create_edit_session_export(
+    project_id: UUID,
+    session_id: UUID,
+    body: EditSessionExportRequest,
+    user: CurrentUser,
+    session: SessionDep,
+    response: Response,
+    _: CsrfDep,
+) -> ExportReceiptRead:
+    """Freeze the session's current version into a durable export receipt."""
+    row = await _owned_session(
+        project_id=project_id,
+        session_id=session_id,
+        user=user,
+        session=session,
+    )
+    export, created = await SessionExports(session).create_session_export(
+        project_id=project_id,
+        session_id=row.id,
+        requested_by=user.id,
+        format=body.format,
+        idempotency_key=body.idempotency_key,
+    )
+    await session.commit()
+    response.status_code = 201 if created else 200
+    return _export_read(export)
+
+
+class ExportRenderRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    export_id: UUID
+    node_run_id: UUID
+    status: str
+    attempt_no: int
+
+
+@router.post(
+    "/projects/{project_id}/exports/{export_id}/render",
+    response_model=ExportRenderRead,
+)
+async def create_export_render(
+    project_id: UUID,
+    export_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+) -> ExportRenderRead:
+    """Queue the render of the export's frozen timeline version."""
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    export = await SessionExports(session).get(project_id=project_id, export_id=export_id)
+    if export.edit_session_id is None:
+        raise ValidationAppError(
+            "this export is not bound to an edit session",
+            details={"code": "RENDER_SESSION_MISSING", "export_id": str(export.id)},
+        )
+    run = await create_edit_session_render(
+        session,
+        project_id=project_id,
+        session_id=export.edit_session_id,
+        export_id=export.id,
+        actor_id=user.id,
+    )
+    await session.commit()
+    return ExportRenderRead(
+        export_id=export.id,
+        node_run_id=run.id,
+        status=run.status,
+        attempt_no=run.attempt_no,
+    )
+
+
+@router.get("/projects/{project_id}/exports/{export_id}/content")
+async def download_export_content(
+    project_id: UUID,
+    export_id: UUID,
+    request: Request,
+    user: CurrentUser,
+    session: SessionDep,
+) -> Response:
+    """Serve the rendered artifact an export delivers; refuse unfinished ones."""
+    from app.api.content_streaming import content_response
+
+    await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    export, artifact = await SessionExports(session).delivery_artifact(
+        project_id=project_id, export_id=export_id
+    )
+    suffix = (
+        "srt"
+        if artifact.mime_type == "application/x-subrip"
+        else artifact.mime_type.rsplit("/", 1)[-1] or "bin"
+    )
+    scope = export.episode_id or "project"
+    filename = f"episode-{scope}-{export.id}.{suffix}"
+    return await content_response(
+        request,
+        object_key=artifact.object_key,
+        mime_type=artifact.mime_type,
+        byte_size=artifact.byte_size,
+        extra_headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+class EpisodeDeliveryItemRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    episode_id: UUID
+    episode_number: int
+    session_id: UUID | None = None
+    session_version: int | None = None
+    export_id: UUID | None = None
+    node_run_id: UUID | None = None
+    status: str
+    blockers: list[str] = Field(default_factory=list)
+
+
+class EpisodeDeliveryRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: UUID
+    items: list[EpisodeDeliveryItemRead] = Field(default_factory=list)
+    summary: SeriesDeliverySummary | None = None
+
+
+def _delivery_read(project_id: UUID, items: list[EpisodeDeliveryItem]) -> EpisodeDeliveryRead:
+    return EpisodeDeliveryRead(
+        project_id=project_id,
+        items=[EpisodeDeliveryItemRead.model_validate(item.as_dict()) for item in items],
+    )
+
+
+@router.get(
+    "/projects/{project_id}/deliveries/episodes",
+    response_model=EpisodeDeliveryRead,
+)
+async def plan_episode_deliveries(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+) -> EpisodeDeliveryRead:
+    """Report per-episode deliverability; writes nothing."""
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    if project.work_type == "serial_comic":
+        summary = await series_delivery_summary(session, project)
+        return EpisodeDeliveryRead(
+            project_id=project_id, summary=summary,
+            items=[EpisodeDeliveryItemRead(
+                episode_id=p.episode_id, episode_number=p.episode_number,
+                session_id=p.edit_session_id, session_version=p.timeline_version,
+                status="planned" if p.edit_session_id else "blocked",
+                blockers=[] if p.edit_session_id else ["DELIVERY_SESSION_MISSING"],
+            ) for p in summary.episodes],
+        )
+    items = await EpisodeDeliveryService(session).plan(project_id=project_id)
+    return _delivery_read(project_id, items)
+
+
+@router.post(
+    "/projects/{project_id}/deliveries/episodes",
+    response_model=EpisodeDeliveryRead,
+)
+async def start_episode_deliveries(
+    project_id: UUID,
+    user: CurrentUser,
+    session: SessionDep,
+    _: CsrfDep,
+    format: str = "mp4",
+) -> EpisodeDeliveryRead:
+    """Freeze an export and a render run for every ready episode."""
+    project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    items = await EpisodeDeliveryService(session).start(
+        project=project, actor_id=user.id, format=format
+    )
+    await session.commit()
+    return _delivery_read(project_id, items)
 
 
 @router.post(
@@ -344,15 +635,6 @@ async def reject_editing_suggestion(
     _csrf: CsrfDep,
 ) -> EditingSuggestionRejectRead:
     project = await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
-    edit = await session.scalar(
-        select(EditSession)
-        .where(
-            EditSession.id == session_id,
-            EditSession.project_id == project_id,
-        )
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
     proposal = await session.scalar(
         select(DirectorProposal)
         .where(
@@ -361,6 +643,12 @@ async def reject_editing_suggestion(
             DirectorProposal.scope_type == "edit_session",
             DirectorProposal.scope_entity_id == session_id,
         )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    edit = await session.scalar(
+        select(EditSession)
+        .where(EditSession.id == session_id, EditSession.project_id == project_id)
         .with_for_update()
         .execution_options(populate_existing=True)
     )
@@ -470,8 +758,7 @@ async def export_edit_session(
     user: CurrentUser,
     session: SessionDep,
 ) -> EditExportRead:
-    # Ownership is checked before the adapter export. The adapter export is a
-    # read-only manifest operation and does not load Artifact/Provider rows.
+    # Public media in the read-only manifest still requires current export permission.
     await _owned_session(
         project_id=project_id,
         session_id=session_id,

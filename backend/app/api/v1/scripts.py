@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 
+from app.access.models import Project
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import (
@@ -326,6 +327,9 @@ async def create_shot_change_proposal(
     _csrf: CsrfDep,
 ) -> ShotChangeProposalResult:
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    # Serialize same-key creation before the read-and-insert window: a concurrent
+    # retry must return the committed proposal, not hit the unique constraint.
+    await session.scalar(select(Project.id).where(Project.id == project_id).with_for_update())
     shot = (
         await session.execute(
             select(Shot).where(Shot.id == shot_id, Shot.project_id == project_id)

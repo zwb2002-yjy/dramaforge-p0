@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.base import Base
@@ -16,6 +16,31 @@ from app.shared.pg_enums import OUTBOX_STATUS, col_enum
 
 class EventLog(Base):
     __tablename__ = "event_log"
+    __table_args__ = (
+        # One acceptance per request key and per accepted attempt. The partial
+        # expression indexes are PostgreSQL-only (the portable test database has no
+        # JSONB); the revision row lock already serializes acceptance.
+        Index(
+            "uq_project_file_acceptance_key",
+            "project_id",
+            "aggregate_id",
+            text("(payload ->> 'request_key')"),
+            unique=True,
+            postgresql_where=text(
+                "event_type = 'project_file.extraction_requested' AND schema_version = 2"
+            ),
+        ).ddl_if(dialect="postgresql"),
+        Index(
+            "uq_project_file_acceptance_attempt",
+            "project_id",
+            "aggregate_id",
+            text("(payload ->> 'accepted_attempt')"),
+            unique=True,
+            postgresql_where=text(
+                "event_type = 'project_file.extraction_requested' AND schema_version = 2"
+            ),
+        ).ddl_if(dialect="postgresql"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     event_id: Mapped[UUID] = mapped_column(nullable=False, unique=True, default=uuid4)
@@ -94,4 +119,26 @@ Index(
     "idx_event_log_project_occurred",
     EventLog.__table__.c.project_id,
     EventLog.__table__.c.occurred_at,
+)
+# Dispatcher hot path: claim/metrics/reclaim scan pending and leased rows
+# every second while published rows accumulate forever (backend-review 1.2;
+# EXPLAIN evidence: 201k rows -> 35ms parallel seq scan per claim). The
+# partial index keeps the scan proportional to unpublished rows only.
+Index(
+    "idx_outbox_events_unpublished",
+    OutboxEvent.__table__.c.status,
+    OutboxEvent.__table__.c.next_attempt_at,
+    postgresql_where=text("status <> 'published'"),
+    sqlite_where=text("status <> 'published'"),
+)
+# Enqueue dedupe: the scheduler asks whether this run already has an enqueue
+# fact for its current dispatch generation. The partial expression index makes
+# that lookup independent of a project's accumulated Outbox history.
+Index(
+    "idx_outbox_events_node_run_enqueue",
+    OutboxEvent.__table__.c.project_id,
+    OutboxEvent.__table__.c.payload.op("->>")("node_run_id"),
+    OutboxEvent.__table__.c.payload.op("->>")("dispatch_generation"),
+    postgresql_where=text("topic = 'node_run.enqueue'"),
+    sqlite_where=text("topic = 'node_run.enqueue'"),
 )

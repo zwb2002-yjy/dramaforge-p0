@@ -215,10 +215,19 @@ class GraphService:
         created_by: UUID,
         definition: dict[str, object] | None = None,
     ) -> ProductionGraph:
-        if scope_type not in {"shot", "episode", "shot_experiment", "project"}:
+        if scope_type not in {"shot", "episode", "shot_experiment", "project", "asset"}:
             raise ValidationAppError(
-                "scope_type must be shot, episode, shot_experiment or project"
+                "scope_type must be shot, episode, shot_experiment, project or asset"
             )
+        if scope_type == "asset":
+            from app.assets.models import Asset
+
+            asset = await self._session.get(Asset, scope_entity_id)
+            if asset is None or asset.project_id != project_id:
+                raise ValidationAppError(
+                    "asset scope must name a project asset",
+                    details={"code": "GRAPH_ASSET_SCOPE_INVALID"},
+                )
         body = definition or {"nodes": [], "edges": []}
         validate_graph_definition(body)
         graph = ProductionGraph(
@@ -245,6 +254,34 @@ class GraphService:
         await self._session.refresh(graph)
         return graph
 
+    async def create_version(
+        self,
+        *,
+        graph_id: UUID,
+        definition: dict[str, object],
+        created_by: UUID,
+    ) -> GraphVersion:
+        """Add one draft version to an existing graph; publish switches current."""
+        graph = await self._session.get(ProductionGraph, graph_id)
+        if graph is None:
+            raise ValidationAppError("graph not found")
+        validate_graph_definition(definition)
+        latest = await self._session.scalar(
+            select(GraphVersion.version_number)
+            .where(GraphVersion.graph_id == graph_id)
+            .order_by(GraphVersion.version_number.desc())
+            .limit(1)
+        )
+        version = GraphVersion(
+            graph_id=graph_id,
+            version_number=(latest or 0) + 1,
+            status=GraphStatus.DRAFT.value,
+            definition_hash=definition_hash(definition),
+            definition=definition,
+        )
+        self._session.add(version)
+        await self._session.flush()
+        return version
     async def materialize_definition(self, *, version_id: UUID) -> MaterializedGraph:
         """Idempotently materialize one draft definition into GraphNode/GraphEdge.
 
@@ -401,7 +438,14 @@ class GraphService:
         return version
 
     async def publish(self, *, version_id: UUID, published_by: UUID) -> GraphVersion:
-        version = await self.get_version(version_id)
+        # Serialize publish against concurrent callers; a stale DRAFT read
+        # must not overwrite the first published graph version.
+        version = await self._session.scalar(
+            select(GraphVersion).where(GraphVersion.id == version_id)
+            .with_for_update().execution_options(populate_existing=True)
+        )
+        if version is None:
+            raise NotFoundError("graph version not found")
         if version.status != GraphStatus.DRAFT.value:
             raise ValidationAppError("only draft versions can be published")
         materialized = await self.materialize_definition(version_id=version.id)

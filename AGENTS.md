@@ -5,8 +5,9 @@
 - The single documentation entry point is [`docs/CURRENT.md`](docs/CURRENT.md).
   Each core domain has exactly one authoritative document listed there.
 - Code, migrations, tests, runtime state, and evidence establish current facts;
-  the authoritative docs describe intended behavior. When they conflict, code
-  wins and the doc must be updated.
+  the authoritative docs describe intended behavior. A conflict requires diagnosis:
+  fix defective code or outdated documentation against current requirements and
+  valid decisions; never redefine intended behavior merely to match a defect.
 - Historical designs, deleted task contracts, reviews, and execution records
   live only in Git history (`git log` / `git show`). They never justify new
   work or override current authority.
@@ -15,6 +16,13 @@
   run full product gates.
 
 ## Task Scope
+
+- This project is unreleased and has no production business to preserve. Maintain
+  one current implementation per capability; remove replaced runtimes, transitional
+  writers, obsolete DTO aliases and speculative parallel schemas. Update all current
+  callers and tests directly. Retain data/evidence only for a current purpose under
+  DEVELOPMENT's lifecycle; do not silently adapt
+  an old execution into the new contract or re-submit a possibly billed operation.
 
 - Complete the requested outcome and relevant fixes; do not expand product
   scope, rewrite intended behavior to make a failing test pass, or create
@@ -28,6 +36,16 @@
 
 ## Verification
 
+- Before editing, identify branch/SHA, existing changes, affected authority and
+  the smallest relevant verification scope. Record results in the conversation;
+  do not create a new task report or copy of the plan for every iteration.
+- Use the development feedback and evidence lifecycle in
+  [DEVELOPMENT.md](docs/DEVELOPMENT.md). Re-run passed checks only after relevant
+  source/dependency/environment changes, failures or unresolved concerns.
+- Batch related edits into a coherent slice before verification. Cleanup does
+  not require a new test, report, snapshot or full gate for every deleted file;
+  retain independent risk coverage and follow DEVELOPMENT for test selection,
+  evidence retention and coordinator-owned final verification.
 - Choose verification proportionate to the change (focused tests plus affected
   regression); formal gates required by CI are not reduced.
 - Command facts come from [`frontend/package.json`](frontend/package.json),
@@ -40,20 +58,31 @@
 
 ## Git and Ownership
 
-- Routine integration happens on `dev`; `main` only advances through a
-  protected `dev -> main` PR. Only `@zwb2002-yjy` approves and merges; agents
-  never approve, merge, or record `MERGED`.
-- No force push, history rewrite, `reset --hard`, or `clean -fd`. Cleanup is
-  limited to the current task's resources.
+- Routine integration happens on `dev`, currently in fast-development mode:
+  no dev PR CI and no active dev ruleset, so Owner-authorized tasks may push or merge
+  into `dev` directly. `main` only advances through a protected `dev -> main`
+  PR; only `@zwb2002-yjy` approves and merges it, agents never do.
+- No force push, history rewrite, `reset --hard`, or `clean -fd`. Routine cleanup
+  is limited to the current task's resources. An Owner-authorized historical
+  cleanup may cover explicit batches across old tasks; approval is not required
+  again for each file inside that scope. A reset does not identify active resources.
 - When a merge is explicitly authorized, inspect the final commit title, body,
   author and all attribution trailers before merging. For squash merges, provide
   an explicit reviewed title and body; never accept automatically concatenated
   branch history or unverified `Co-authored-by` trailers. Preserve only verified,
   intended attribution, then inspect the resulting remote commit before proceeding.
-- Paid provider operations (probe, production, repair) require an explicit
-  positive budget and Owner authorization per operation; historical
-  authorization never extends to a new task. Never blind-retry a possibly
-  billed or `unknown_submission` call.
+- A new paid Provider create (production, repair, batch fill) must be
+  explicitly triggered by the Owner. A batch create binds the current preview
+  fingerprint and states the maximum number of Provider operations it may
+  create. Provider pricing and actual charges are managed by the provider
+  account; DramaForge keeps no money budget, balance or credits. Poll,
+  download, resume and recovery of an existing remote task reuse the facts
+  frozen at creation; they are not a new create, are never resubmitted and
+  never blind-retried, nor is any possibly billed or `unknown_submission`
+  call. Generation probes stay unavailable until a standalone Owner
+  paid-probe authorization contract exists. Agents run paid operations only
+  under Owner authorization for the current task; historical authorization
+  never extends to a new task.
 
 ## Image Evidence Handling
 
@@ -65,7 +94,10 @@
 - Do not call `view_image` on an image larger than 200 KiB or with a long edge over 1200 pixels.
 - If automated evidence cannot answer a narrowly defined visual question, create the smallest useful temporary thumbnail or focused crop. The derived image must stay within both limits before it is passed to `view_image`, and only that specific question may be inspected.
 - If Playwright evidence and a minimal visual sample are still insufficient or ambiguous, do not load additional or larger images. Ask the user to perform a manual visual review with concrete steps and expected observations, then confirm or modify the implementation from the user's feedback.
-- Keep original evidence screenshots unchanged and in place. Use metadata, dimensions, SHA-256 hashes, Playwright assertions, and structured evidence files for primary verification.
+- While evidence is needed, keep original screenshots unchanged and in place.
+  This is an integrity rule, not permanent retention. Apply DEVELOPMENT's lifecycle
+  when the task, candidate or retired environment no longer needs the evidence.
+  Use metadata, dimensions, SHA-256 hashes, Playwright assertions, and structured evidence files for primary verification.
 - Do not print base64 data, hex dumps, or binary file contents through shell commands.
 - Do not use `Get-Content` or equivalent text readers on PNG, JPEG, WebP, MP4, ZIP, or other binary files.
 - Do not pass local evidence screenshots to `view_image` when metadata or automated assertions answer the question.

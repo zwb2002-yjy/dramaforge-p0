@@ -1,7 +1,22 @@
+import { Film, Image, Music2, Package, UserRound, MapPin } from "lucide-react";
+import "./asset-gallery.css";
+import {
+  Button,
+  Field,
+  Input,
+  Select,
+  PageHeader,
+  Disclosure,
+  EmptyState,
+  Badge,
+  Alert,
+} from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState, useRef } from "react";
 
-import { apiGetList, type AssetRead } from "../../lib/api";
+import { apiGetList } from "../../lib/api";
+import { AssetProductionPanel, NewAssetSetting } from "./AssetProductionPanel";
+import { type AssetRead } from "./api";
 import {
   ASSET_KIND_LABEL,
   ASSET_STATUS_LABEL,
@@ -10,11 +25,13 @@ import {
 } from "../../lib/assetLabels";
 import { queryKeys } from "../../lib/queryKeys";
 import {
+  assetDecisionKey,
   createAssetCandidate,
   fetchAssetCard,
   fetchAssetTags,
   fetchAssetVersions,
   promoteAssetVersion,
+  rejectAssetVersion,
   recycleAsset,
   restoreAsset,
   setAssetTags,
@@ -37,10 +54,12 @@ const ROLE_LABEL: Record<string, string> = {
 const VERSION_STATUS_LABEL: Record<string, string> = {
   candidate: "候选",
   formal: "正式",
-  archived: "已归档",
+  historical: "历史",
+  rejected: "已拒绝",
 };
 
 type AssetCardsPanelProps = {
+  initialKind?: string;
   projectId: string;
 };
 
@@ -57,12 +76,15 @@ function fetchAssetsFiltered(
   return apiGetList<AssetRead>(`/api/v1/projects/${projectId}/assets${query ? `?${query}` : ""}`);
 }
 
-export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
+export function AssetCardsPanel({ projectId, initialKind }: AssetCardsPanelProps) {
   const queryClient = useQueryClient();
-  const [kindFilter, setKindFilter] = useState("");
+  const [kindFilter, setKindFilter] = useState(
+    initialKind && initialKind in ASSET_KIND_LABEL ? initialKind : "",
+  );
   const [statusFilter, setStatusFilter] = useState("");
   const [nameFilter, setNameFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
+  const [newSetting,setNewSetting]=useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
   const assets = useQuery({
@@ -83,6 +105,10 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.asset.root(projectId) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.asset.tags(projectId) });
+    // Version decisions and card projections live under their own prefixes; the
+    // list root alone does not refresh them.
+    void queryClient.invalidateQueries({ queryKey: queryKeys.asset.versionsRoot(projectId) });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.asset.cardRoot(projectId) });
   };
 
   const recycle = useMutation({
@@ -99,13 +125,25 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
     onSuccess: invalidate,
   });
   const addCandidate = useMutation({
-    mutationFn: ({ assetId, name }: { assetId: string; name: string }) =>
-      createAssetCandidate(projectId, assetId, { name }),
+    mutationFn: ({ asset, name, key }: { asset: AssetRead; name: string; key: string }) =>
+      createAssetCandidate(projectId, asset.id, {
+        name,
+        expected_asset_version: asset.version,
+        request_key: key,
+      }),
     onSuccess: invalidate,
   });
   const promote = useMutation({
+    mutationFn: ({ asset, versionId, key }: { asset: AssetRead; versionId: string; key: string }) =>
+      promoteAssetVersion(projectId, asset.id, versionId, {
+        expected_asset_version: asset.version,
+        request_key: key,
+      }),
+    onSuccess: invalidate,
+  });
+  const reject = useMutation({
     mutationFn: ({ assetId, versionId }: { assetId: string; versionId: string }) =>
-      promoteAssetVersion(projectId, assetId, versionId),
+      rejectAssetVersion(projectId, assetId, versionId),
     onSuccess: invalidate,
   });
 
@@ -117,26 +155,31 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
 
   return (
     <div data-testid="asset-cards-panel" className="qc-project-page">
-      <header className="qc-page-heading">
-        <h1>项目资产</h1>
-        <span>管理版本、标签与正式提升；生成结果需显式加入资产。</span>
-      </header>
+      <PageHeader
+        title="项目资产"
+        description="让角色、画面与声音，在这里相遇。"
+        actions={<><Badge>{assets.isPending ? "读取中…" : `${rows.length} 项素材`}</Badge><Button onClick={()=>setNewSetting(true)}>新建素材设定</Button></>}
+      />
 
-      <section className="qc-asset-filters">
-        <label>
+      {newSetting && <NewAssetSetting projectId={projectId} onClose={()=>setNewSetting(false)} onCreated={()=>{
+        invalidate();setKindFilter("");setStatusFilter("");setNameFilter("");setTagFilter("");setNewSetting(false);
+      }}/>}
+      <section className="qc-asset-filters" aria-label="筛选资产">
+        <Field>
           名称
-          <input
+          <Input
             aria-label="资产名称过滤"
+            placeholder="搜索素材名称"
             value={nameFilter}
             onChange={(event) => setNameFilter(event.target.value)}
           />
-        </label>
-        <label>
+        </Field>
+        <Field>
           类型
-          <select
+          <Select
             aria-label="资产类型过滤"
             value={kindFilter}
-            onChange={(event) => setKindFilter(event.target.value)}
+            onChange={(event) => setKindFilter(event)}
           >
             <option value="">全部</option>
             {Object.entries(ASSET_KIND_LABEL).map(([value, label]) => (
@@ -144,14 +187,14 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
                 {label}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
+          </Select>
+        </Field>
+        <Field>
           状态
-          <select
+          <Select
             aria-label="资产状态过滤"
             value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
+            onChange={(event) => setStatusFilter(event)}
           >
             <option value="">全部</option>
             {Object.entries(ASSET_STATUS_LABEL).map(([value, label]) => (
@@ -159,89 +202,173 @@ export function AssetCardsPanel({ projectId }: AssetCardsPanelProps) {
                 {label}
               </option>
             ))}
-          </select>
-        </label>
-        <label>
+          </Select>
+        </Field>
+        <Field>
           标签
-          <input
+          <Input
             aria-label="资产标签过滤"
             value={tagFilter}
             onChange={(event) => setTagFilter(event.target.value)}
             placeholder="主角,雨夜"
           />
-        </label>
+        </Field>
       </section>
 
-      {assets.isError && <div className="flash err">无法读取资产：{String(assets.error)}</div>}
+      {(recycle.isError || restore.isError) && (
+        <Alert role="alert" type="error" showIcon description={<>操作失败，请稍后重试。</>} />
+      )}
+      {assets.isError && (
+        <Alert
+          role="note"
+          type="error"
+          showIcon
+          description={<>无法读取资产：{String(assets.error)}</>}
+        />
+      )}
 
       <ul className="qc-asset-grid">
         {rows.map((asset) => (
           <li key={asset.id} className="qc-asset-card" data-testid="asset-card">
-            <header>
-              <strong>{asset.name}</strong>
-              <span>
-                {assetKindLabel(asset.kind)} · v{asset.version}
-              </span>
-            </header>
-            <p className="muted">{asset.description || "（无描述）"}</p>
-            <footer>
-              <span
-                className={`qc-asset-status ${asset.status}`}
-                data-status={asset.status}
-                title={assetStatusLabel(asset.status)}
-              >
-                {assetStatusLabel(asset.status)}
-              </span>
-              <TagEditor
-                options={tagOptions}
-                onSave={(names) => setTags.mutateAsync({ assetId: asset.id, names })}
-              />
-              {asset.status === "recycled" ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    restore.mutate(asset.id);
-                    setFeedback(`已恢复「${asset.name}」。`);
-                  }}
-                >
-                  恢复
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (
-                      !window.confirm(
-                        `回收「${asset.name}」？回收后资产不再出现在正式选择中，可在本页“恢复”。`,
-                      )
-                    ) {
-                      return;
-                    }
-                    recycle.mutate(asset.id);
-                    setFeedback(`已回收「${asset.name}」，可在本页恢复。`);
-                  }}
-                >
-                  回收
-                </button>
+            <AssetCover kind={asset.kind} />
+            <div className="qc-asset-card-body">
+              <header>
+                <strong>{asset.name}</strong>
+                <span>
+                  {assetKindLabel(asset.kind)} · 第 {asset.version} 版
+                </span>
+              </header>
+              {asset.description && <p className="qc-asset-description">{asset.description}</p>}
+              {asset.tags?.length > 0 && (
+                <div className="qc-asset-tags">
+                  {asset.tags.map((tag) => (
+                    <Badge key={tag}>{tag}</Badge>
+                  ))}
+                </div>
               )}
-              <VersionControls
-                asset={asset}
-                projectId={projectId}
-                onAddCandidate={(name) => addCandidate.mutate({ assetId: asset.id, name })}
-                onPromote={(versionId) => promote.mutate({ assetId: asset.id, versionId })}
-              />
-            </footer>
+              <footer>
+                <span
+                  className={`qc-asset-status ${asset.status}`}
+                  data-status={asset.status}
+                  title={assetStatusLabel(asset.status)}
+                >
+                  {assetStatusLabel(asset.status)}
+                </span>
+                {["character","scene","image","video","audio"].includes(asset.kind) && asset.status !== "recycled" && (
+                  <Disclosure compact lazy title={asset.kind==="audio"?"制作语音":asset.kind==="video"?"制作视频":"制作图片"}>
+                    <AssetProductionPanel projectId={projectId} asset={asset}/>
+                  </Disclosure>
+                )}
+                <Disclosure compact title="管理素材">
+                  <TagEditor
+                    options={tagOptions}
+                    onSave={(names) => setTags.mutateAsync({ assetId: asset.id, names })}
+                  />
+                  {asset.status === "recycled" ? (
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        restore.mutate(asset.id, {
+                          onSuccess: () => setFeedback(`已恢复「${asset.name}」。`),
+                        });
+                      }}
+                    >
+                      恢复
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            `回收「${asset.name}」？回收后资产不再出现在正式选择中，可在本页“恢复”。`,
+                          )
+                        ) {
+                          return;
+                        }
+                        recycle.mutate(asset.id, {
+                          onSuccess: () => setFeedback(`已回收「${asset.name}」，可在本页恢复。`),
+                        });
+                      }}
+                    >
+                      回收
+                    </Button>
+                  )}
+                  <VersionControls
+                    asset={asset}
+                    projectId={projectId}
+                    onAddCandidate={(name, key) => addCandidate.mutateAsync({ asset, name, key })}
+                    onPromote={(versionId, key) => promote.mutate({ asset, versionId, key })}
+                    onReject={(versionId) => reject.mutate({ assetId: asset.id, versionId })}
+                  />
+                </Disclosure>
+              </footer>
+            </div>
           </li>
         ))}
       </ul>
-      {rows.length === 0 && (
-        <p className="muted">暂无资产。生成结果需显式“加入资产”才会出现在这里。</p>
+      {(addCandidate.error || promote.error || reject.error) && (
+        <p role="alert">{(addCandidate.error ?? promote.error ?? reject.error)?.message}</p>
       )}
-      {feedback && (
-        <p className="flash ok" role="status">
-          {feedback}
+      {assets.isPending && (
+        <p role="status" className="muted">
+          正在整理素材…
         </p>
       )}
+      {!assets.isPending && !assets.isError && rows.length === 0 && (
+        <EmptyState
+          icon={<Package />}
+          title={
+            kindFilter || statusFilter || nameFilter || tagFilter
+              ? "没有找到匹配的素材"
+              : "故事的素材，从这里积累"
+          }
+          description={
+            kindFilter || statusFilter || nameFilter || tagFilter
+              ? "试试其他名称或筛选条件。"
+              : "把生成结果“加入资产”后，就能在这里整理和复用。"
+          }
+        >
+          {(kindFilter || statusFilter || nameFilter || tagFilter) && (
+            <Button
+              onClick={() => {
+                setKindFilter("");
+                setStatusFilter("");
+                setNameFilter("");
+                setTagFilter("");
+              }}
+            >
+              清除筛选
+            </Button>
+          )}
+        </EmptyState>
+      )}
+      {feedback && <Alert role="status" type="success" showIcon description={<>{feedback}</>} />}
+    </div>
+  );
+}
+
+function AssetCover({ kind }: { kind: string }) {
+  const Icon =
+    kind === "video"
+      ? Film
+      : kind === "image"
+        ? Image
+        : kind === "audio"
+          ? Music2
+          : kind === "character"
+            ? UserRound
+            : kind === "scene"
+              ? MapPin
+              : Package;
+  return (
+    <div
+      className="qc-asset-cover"
+      data-kind={kind}
+      aria-label={assetKindLabel(kind) + "素材类型封面"}
+    >
+      <Icon aria-hidden="true" />
+      <span>{assetKindLabel(kind)}</span>
     </div>
   );
 }
@@ -253,6 +380,7 @@ function TagEditor({
   options: string[];
   onSave: (names: string[]) => Promise<unknown>;
 }) {
+  const listId = useId();
   const [value, setValue] = useState("");
   const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   return (
@@ -265,20 +393,25 @@ function TagEditor({
           .filter(Boolean);
         if (names.length === 0) return;
         setState("saving");
-        setValue("");
         void onSave(names)
           .then(() => {
+            setValue("");
             setState("saved");
-            setTimeout(() => setState("idle"), 2000);
           })
           .catch(() => setState("error"));
       }}
     >
-      <input
+      <Input
+        aria-describedby={state === "error" ? `${listId}-error` : undefined}
+        aria-invalid={state === "error" || undefined}
         aria-label="资产标签"
-        list="asset-tag-options"
+        list={listId}
+        disabled={state === "saving"}
         value={value}
-        onChange={(event) => setValue(event.target.value)}
+        onChange={(event) => {
+          setValue(event.target.value);
+          setState("idle");
+        }}
         placeholder={
           state === "saved"
             ? "标签已保存"
@@ -289,12 +422,19 @@ function TagEditor({
                 : "输入标签"
         }
       />
-      <datalist id="asset-tag-options">
+      <datalist id={listId}>
         {options.map((option) => (
           <option key={option} value={option} />
         ))}
       </datalist>
-      <button type="submit">保存</button>
+      <Button type="submit" disabled={state === "saving" || !value.trim()}>
+        保存
+      </Button>
+      {state === "error" && (
+        <span id={`${listId}-error`} className="qc-asset-tag-message" role="alert">
+          标签保存失败，输入已保留。
+        </span>
+      )}
     </form>
   );
 }
@@ -304,14 +444,26 @@ function VersionControls({
   projectId,
   onAddCandidate,
   onPromote,
+  onReject,
 }: {
   asset: AssetRead;
   projectId: string;
-  onAddCandidate: (name: string) => void;
-  onPromote: (versionId: string) => void;
+  onAddCandidate: (name: string, key: string) => Promise<unknown>;
+  onPromote: (versionId: string, key: string) => void;
+  onReject: (versionId: string) => void;
 }) {
   const [showVersions, setShowVersions] = useState(false);
   const [candidateName, setCandidateName] = useState("");
+  const [pendingAdd, setPendingAdd] = useState(false);
+  const decisionKeys = useRef(new Map<string, string>());
+  function decisionKey(label: string) {
+    const id = JSON.stringify([asset.id, asset.version, label]);
+    const known = decisionKeys.current.get(id);
+    if (known) return known;
+    const key = assetDecisionKey();
+    decisionKeys.current.set(id, key);
+    return key;
+  }
   const versions = useQuery({
     queryKey: queryKeys.asset.versions(projectId, asset.id),
     queryFn: () => fetchAssetVersions(projectId, asset.id),
@@ -325,26 +477,41 @@ function VersionControls({
   const rows = versions.data ?? [];
   return (
     <div>
-      <button type="button" onClick={() => setShowVersions((value) => !value)}>
+      <Button
+        type="button"
+        aria-expanded={showVersions}
+        onClick={() => setShowVersions((value) => !value)}
+      >
         {showVersions ? "收起版本" : "版本"}
-      </button>
+      </Button>
       {showVersions && (
         <div className="qc-asset-versions">
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              if (!candidateName.trim()) return;
-              onAddCandidate(candidateName.trim());
-              setCandidateName("");
+              if (!candidateName.trim() || pendingAdd) return;
+              setPendingAdd(true);
+              void onAddCandidate(
+                candidateName.trim(),
+                decisionKey("candidate:" + candidateName.trim()),
+              )
+                .then(
+                  () => setCandidateName(""),
+                  () => {},
+                )
+                .finally(() => setPendingAdd(false));
             }}
           >
-            <input
+            <Input
+              disabled={pendingAdd}
               aria-label="候选版本名称"
               value={candidateName}
               onChange={(event) => setCandidateName(event.target.value)}
               placeholder="新候选版本名称"
             />
-            <button type="submit">创建候选</button>
+            <Button type="submit" disabled={pendingAdd || !candidateName.trim()}>
+              创建候选
+            </Button>
           </form>
           <ul>
             {rows.map((version) => (
@@ -353,10 +520,25 @@ function VersionControls({
                   v{version.version_number} · {version.name} ·{" "}
                   {VERSION_STATUS_LABEL[version.status] ?? version.status}
                 </span>
+                {version.base_publication_id && <Badge>公共素材的项目变体</Badge>}
                 {version.status === "candidate" && (
-                  <button type="button" onClick={() => onPromote(version.id)}>
-                    提升为正式
-                  </button>
+                  <>
+                    <Button
+                      type="button"
+                      data-testid="asset-version-promote"
+                      onClick={() => onPromote(version.id, decisionKey("promote:" + version.id))}
+                    >
+                      提升为正式
+                    </Button>
+                    <Button
+                      type="button"
+                      tone="danger"
+                      data-testid="asset-version-reject"
+                      onClick={() => onReject(version.id)}
+                    >
+                      拒绝候选
+                    </Button>
+                  </>
                 )}
               </li>
             ))}

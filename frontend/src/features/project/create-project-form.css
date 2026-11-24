@@ -1,0 +1,9 @@
+.df-project-create-form,
+.df-project-create-form fieldset {
+  display: grid;
+  gap: var(--df-space-4);
+  padding: 0;
+  margin: 0;
+  border: 0;
+  min-width: 0;
+}

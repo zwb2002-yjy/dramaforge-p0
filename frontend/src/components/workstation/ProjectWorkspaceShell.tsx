@@ -1,10 +1,24 @@
-import type { ReactNode } from "react";
+import { useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Menu } from "lucide-react";
+import { Button } from "../ui";
+import { CreativeDirectionPanel } from "../../features/script/CreativeDirectionPanel";
+import "./institution-studio.css";
+import { ProjectNavigationContext, PROJECT_VIEW_LABELS } from "./projectNavigation";
 
 import "./project-shell.css";
 import "./project-shell-visual.css";
+import "./creation-controls.css";
 
 export type ProjectWorkspaceView =
-  "overview" | "script" | "assets" | "scenes" | "production" | "review" | "edit";
+  | "overview"
+  | "files"
+  | "research"
+  | "script"
+  | "assets"
+  | "scenes"
+  | "production"
+  | "review"
+  | "edit";
 
 type ProjectWorkspaceShellProps = {
   projectId: string;
@@ -12,16 +26,13 @@ type ProjectWorkspaceShellProps = {
   activeView: ProjectWorkspaceView;
   children: ReactNode;
   modeLabel?: string;
+  goal?: string;
+  creationControls?: ReactNode;
 };
 
 const VIEW_LABELS: Record<ProjectWorkspaceView, string> = {
-  overview: "场景总览",
-  script: "剧本",
-  assets: "资产",
-  scenes: "场景",
-  production: "制作",
-  review: "制作 · 待审内容",
-  edit: "剪辑",
+  overview: "项目总览",
+  ...PROJECT_VIEW_LABELS,
 };
 
 export function ProjectWorkspaceShell({
@@ -30,22 +41,83 @@ export function ProjectWorkspaceShell({
   activeView,
   children,
   modeLabel,
+  creationControls,
+  goal,
 }: ProjectWorkspaceShellProps) {
   const displayModeLabel = modeLabel ?? VIEW_LABELS[activeView];
+  const navigation = useContext(ProjectNavigationContext);
+  const [chatExpanded, setChatExpanded] = useState(false);
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const barRef = useRef<HTMLElement | null>(null);
+
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    const shell = shellRef.current;
+    if (!bar || !shell) return;
+
+    // The measured height is consumed by sticky children, never by the bar itself:
+    // feeding it back into min-height would prevent the bar from shrinking.
+    let measuredHeight = 0;
+    const syncTopbarHeight = () => {
+      const height = Math.ceil(bar.getBoundingClientRect().height);
+      if (height > 0 && height !== measuredHeight) {
+        measuredHeight = height;
+        shell.style.setProperty("--df-project-topbar-height", `${height}px`);
+      }
+    };
+
+    syncTopbarHeight();
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(syncTopbarHeight);
+    observer?.observe(bar);
+
+    return () => {
+      observer?.disconnect();
+      shell.style.removeProperty("--df-project-topbar-height");
+    };
+  }, []);
 
   return (
     <div
+      ref={shellRef}
       className={`qc-project-shell${activeView === "scenes" ? " scene-view" : ""}`}
       data-testid="project-workspace-shell"
       data-project-id={projectId}
+      data-chat-expanded={chatExpanded}
     >
-      <header className="qc-project-bar">
+      <header ref={barRef} className="qc-project-bar">
+        {navigation && (
+          <Button
+            ref={navigation.triggerRef}
+            tone="ghost"
+            aria-controls="project-navigation"
+            aria-expanded={navigation.open}
+            data-testid="project-navigation-toggle"
+            onClick={navigation.toggle}
+          >
+            <Menu size={17} aria-hidden="true" />
+            项目导航
+          </Button>
+        )}
         <span className="qc-project-name">{projectName}</span>
+        <Button
+          className="studio-chat-toggle"
+          id="studio-chat-toggle"
+          tone="ghost"
+          aria-expanded={chatExpanded}
+          aria-controls="project-chat-rail"
+          onClick={() => setChatExpanded(!chatExpanded)}
+        >
+          {chatExpanded ? "返回作品" : "创意助手"}
+        </Button>
         <span className="qc-project-mode">{displayModeLabel}</span>
+
+        {activeView !== "overview" && creationControls}
       </header>
 
-      <div className="qc-content-grid no-inspector">
+      <div className="institution-stage">
         <main className="qc-main-canvas qc-project-canvas">{children}</main>
+        <CreativeDirectionPanel key={projectId} projectId={projectId} goal={goal} />
       </div>
     </div>
   );

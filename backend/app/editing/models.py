@@ -5,7 +5,16 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.shared.base import Base
@@ -22,18 +31,24 @@ class EditSession(Base):
     __tablename__ = "edit_sessions"
     __table_args__ = (
         CheckConstraint("version > 0", name="ck_edit_sessions_version_positive"),
+        # Candidate key for episode-scoped exports and delayed foreign keys.
+        UniqueConstraint("id", "project_id", name="uq_edit_sessions_id_project"),
+        Index("ix_edit_sessions_project_episode", "project_id", "episode_id", "id"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     project_id: Mapped[UUID] = mapped_column(
         ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
+    # NULL keeps the historical project-wide meaning; a value scopes the session
+    # (and therefore its clips) to exactly one episode.
+    episode_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("episodes.id", ondelete="RESTRICT"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False, default="Edit")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    timeline: Mapped[dict[str, object]] = mapped_column(
-        JSON_DOCUMENT, nullable=False, default=dict
-    )
+    timeline: Mapped[dict[str, object]] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
     production_lineage: Mapped[dict[str, object]] = mapped_column(
         JSON_DOCUMENT, nullable=False, default=dict
     )

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import asyncpg
 import pytest
-from pg_support import alembic_head, env_target
+from pg_support import env_target
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 
@@ -94,12 +94,12 @@ async def test_director_turn_migration_constraints_and_rls() -> None:
     dbname = f"dramaforge_director_turn_{uuid.uuid4().hex[:8]}"
     try:
         await _create_database(dbname)
-        _alembic(dbname, "upgrade", "head")
+        _alembic(dbname, "upgrade", "20261007_0083")
         engine = create_engine(_sync_url(dbname))
         ids = {key: uuid.uuid4() for key in ("user", "workspace", "project", "scope")}
         with engine.begin() as connection:
             head = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            assert head == alembic_head()
+            assert head == "20261007_0083"
             columns = {
                 row[0]
                 for row in connection.execute(
@@ -148,7 +148,8 @@ async def test_director_turn_migration_constraints_and_rls() -> None:
             provider_recovery_definition = connection.execute(
                 text(
                     "SELECT pg_get_functiondef("
-                    "'app.resumable_provider_node_run_contexts(integer,text)'::regprocedure)"
+                    "'app.resumable_provider_node_run_contexts(integer,text,uuid,timestamptz)'"
+                    "::regprocedure)"
                 )
             ).scalar_one()
             assert "cancel_requested" in provider_recovery_definition
@@ -160,7 +161,8 @@ async def test_director_turn_migration_constraints_and_rls() -> None:
                     "AND a.privilege_type = 'EXECUTE') AS no_public "
                     "FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner "
                     "WHERE p.oid = "
-                    "'app.resumable_provider_node_run_contexts(integer,text)'::regprocedure"
+                    "'app.resumable_provider_node_run_contexts(integer,text,uuid,timestamptz)'"
+                    "::regprocedure"
                 )
             ).one()
             assert provider_recovery_security.prosecdef
@@ -173,15 +175,17 @@ async def test_director_turn_migration_constraints_and_rls() -> None:
                 )
             ).scalar_one()
             assert waiting_function is not None
-            security = connection.execute(text(
-                "SELECT p.prosecdef, r.rolname, "
-                "NOT EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, "
-                "acldefault('f', p.proowner))) a WHERE a.grantee = 0 "
-                "AND a.privilege_type = 'EXECUTE') AS no_public "
-                "FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner "
-                "WHERE p.oid = "
-                "'app.reconcilable_director_turn_contexts(integer,uuid)'::regprocedure"
-            )).one()
+            security = connection.execute(
+                text(
+                    "SELECT p.prosecdef, r.rolname, "
+                    "NOT EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, "
+                    "acldefault('f', p.proowner))) a WHERE a.grantee = 0 "
+                    "AND a.privilege_type = 'EXECUTE') AS no_public "
+                    "FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner "
+                    "WHERE p.oid = "
+                    "'app.reconcilable_director_turn_contexts(integer,uuid)'::regprocedure"
+                )
+            ).one()
             assert security.prosecdef and security.no_public
             assert security.rolname == "dramaforge_worker_resolver"
             connection.execute(
@@ -254,6 +258,6 @@ async def test_director_turn_migration_constraints_and_rls() -> None:
             ).scalar_one()
             assert table_name is None
         engine.dispose()
-        _alembic(dbname, "upgrade", "head")
+        _alembic(dbname, "upgrade", "20261007_0083")
     finally:
         await _drop_database(dbname)

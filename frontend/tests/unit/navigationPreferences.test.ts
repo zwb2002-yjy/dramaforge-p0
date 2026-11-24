@@ -16,6 +16,7 @@ describe("durable navigation preferences", () => {
       "/?create=false&panel=workspace",
       "/projects/a/edit?session=session-1",
       "/projects/a/scenes/scene-1",
+      "/projects/a/scenes/scene-1?shotId=shot-1&tool=candidates&review=true",
     ]) {
       expect(validateSettingsReturnTo(path)).toBe(path);
     }
@@ -70,5 +71,21 @@ describe("durable navigation preferences", () => {
     expect(getRememberedProjectPath("a")).toBe("/projects/a/scenes/scene-1");
     window.sessionStorage.setItem("dramaforge.project-path:a", "/projects/a/scenes/..");
     expect(getRememberedProjectPath("a")).toBeNull();
+  });
+
+  it("keeps recognized scene query parameters across durable recovery", () => {
+    const path = "/projects/a/scenes/scene-1?shotId=shot-1&tool=candidates&review=true";
+    rememberProjectPath("a", path);
+    window.sessionStorage.clear();
+    expect(getRememberedProjectPath("a")).toBe(path);
+    for (const invalid of [
+      "/projects/a/unknown",
+      "/projects/a/script/extra",
+      "/projects/b/edit",
+      "/projects/a/scenes/%2e%2e",
+    ]) {
+      window.sessionStorage.setItem("dramaforge.project-path:a", invalid);
+      expect(getRememberedProjectPath("a")).toBeNull();
+    }
   });
 });

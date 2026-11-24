@@ -1,9 +1,10 @@
+import { selectValue } from "./selectValue";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CreativeAutonomySwitcher } from "../../src/features/project/CreativeAutonomySwitcher";
-import type { ProjectRead } from "../../src/lib/api";
+import type { ProjectRead } from "../../src/features/project/api";
 
 function profile(directorAutonomy = "ASSIST", version = 1) {
   return {
@@ -32,6 +33,11 @@ function project(): ProjectRead {
     stage: "planning",
     aspect_ratio: "9:16",
     target_platform: "general",
+    work_type: null,
+    creative_goal: "",
+    audience: "",
+    planned_duration_seconds: null,
+    planned_episode_count: null,
     provider_dispatch_frozen: false,
     version: 1,
     creative_profile: profile(),
@@ -76,9 +82,9 @@ describe("CreativeAutonomySwitcher", () => {
 
     renderSwitcher();
     const select = screen.getByTestId("creative-autonomy-select");
-    expect(select).toHaveValue("ASSIST");
+    expect(select).toHaveTextContent("导演辅助");
 
-    fireEvent.change(select, { target: { value: "AUTO" } });
+    await selectValue(select, "AUTO");
     await waitFor(() => {
       expect(screen.getByTestId("creative-autonomy-message")).toHaveTextContent(
         "导演参与度已切换为导演自动",
@@ -111,10 +117,10 @@ describe("CreativeAutonomySwitcher", () => {
 
     renderSwitcher();
     const select = screen.getByTestId("creative-autonomy-select");
-    fireEvent.change(select, { target: { value: "MANUAL" } });
+    await selectValue(select, "MANUAL");
     await waitFor(() => {
       expect(screen.getByTestId("creative-autonomy-message")).toHaveTextContent("切换失败");
     });
-    expect(select).toHaveValue("ASSIST");
+    expect(select).toHaveTextContent("导演辅助");
   });
 });

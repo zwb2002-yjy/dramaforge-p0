@@ -7,6 +7,7 @@ These are pure data models with no ORM/IO. A profile only references
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID
 
@@ -16,14 +17,24 @@ from app.providers.capabilities import Capability
 from app.providers.model_profiles.slots import ModelSlot
 
 
-class GenerationPolicy(BaseModel):
-    """Placeholder for P1 fallback policy (spec §87/§88).
+@dataclass(frozen=True)
+class MediaConfig:
+    """Project media defaults + voice options (D6, one CAS row)."""
 
-    P0 selects only the default model — fallback is owned by
-    ``GenerationPolicy`` / ``ModelSelector`` later, never by the Profile. Kept
-    as a typed field so a future binding can carry it without a migration."""
+    media_config_version: int
+    image_model_binding_id: UUID | None
+    video_model_binding_id: UUID | None
+    voice_model_binding_id: UUID | None
+    voice_options: dict[str, object]
 
-    name: str = "default"
+
+@dataclass(frozen=True)
+class MediaConfigReview:
+    """Legacy media configuration evidence for an explicit reconciliation."""
+
+    media_config_version: int
+    review_fingerprint: str
+    conflicts: list[dict[str, object]]
 
 
 class ModelSlotBinding(BaseModel):
@@ -35,7 +46,6 @@ class ModelSlotBinding(BaseModel):
     slot: ModelSlot
     model_id: str
     native_options: dict[str, Any] = Field(default_factory=dict)
-    generation_policy: GenerationPolicy | None = None
     enabled: bool = True
 
 

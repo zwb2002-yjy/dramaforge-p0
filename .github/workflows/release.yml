@@ -21,6 +21,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/dev' && contains(github.event.head_commit.message, '[release-candidate]')) }}
     env:
       QUALITY_CONTRACT_DIR: ./tmp/quality-contract
+      COMPOSE_PROJECT_NAME: df-quality-release-${{ github.run_id }}-${{ github.run_attempt }}
     outputs:
       version: ${{ steps.identity.outputs.version }}
       migration_head: ${{ steps.migration-head.outputs.migration_head }}
@@ -56,26 +57,22 @@ jobs:
               python scripts/check_directory_compliance.py
               python scripts/repo_guardrails.py policy --repo-root /workspace
             '
+      - name: Verify quality output lifecycle
+        shell: pwsh
+        run: ./backend/tests/unit/test_quality_output_lifecycle.ps1
       - name: Run the exact source quality gate in containers
-        run: |
-          set -euo pipefail
-          mkdir -p tmp/quality-contract
-          docker compose -f docker-compose.quality.yml build backend-quality frontend-quality
-          docker compose -f docker-compose.quality.yml up \
-            --no-build --abort-on-container-exit --exit-code-from backend-quality \
-            postgres-quality backend-quality
-          docker compose -f docker-compose.quality.yml run --rm --no-deps frontend-quality
-          docker compose -f docker-compose.quality.yml up \
-            --no-build --abort-on-container-exit --exit-code-from litellm-integration-quality \
-            litellm-quality litellm-integration-quality
+        id: quality
+        shell: pwsh
+        run: ./scripts/run_quality_in_docker.ps1 -Stage Full -KeepArtifacts
       - name: Resolve single migration head
         id: migration-head
         shell: bash
         run: |
           set -euo pipefail
+          backend_image="$(cat tmp/quality-contract/backend.iid)"
           mapfile -t heads < <(
-            docker run --rm dramaforge-backend-quality:local \
-              sh -ec 'uv run --directory backend alembic heads' | awk 'NF {print $1}'
+            docker run --rm "$backend_image" \
+              sh -ec 'uv run --offline --no-sync --directory backend alembic heads' | awk 'NF {print $1}'
           )
           if [[ "${#heads[@]}" -ne 1 ]]; then
             echo "Release requires exactly one Alembic head; found ${#heads[@]}." >&2
@@ -83,8 +80,17 @@ jobs:
           fi
           echo "migration_head=${heads[0]}" >> "$GITHUB_OUTPUT"
       - name: Remove verification resources
-        if: always()
+        if: always() && steps.quality.outputs.cleanup_owned == 'true'
         run: docker compose -f docker-compose.quality.yml down --volumes --remove-orphans
+      - name: Preserve failed browser evidence
+        if: failure() && steps.quality.outputs.cleanup_owned == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tmp/quality-contract/playwright-results
+          if-no-files-found: ignore
+          # Ordinary failure evidence is disposable; formal release material is handled separately.
+          retention-days: 7
 
   containers-and-sbom:
     name: Build, smoke, and publish containers
@@ -94,10 +100,13 @@ jobs:
     env:
       POSTGRES_PASSWORD: release-compose-postgres-password
       POSTGRES_APP_PASSWORD: release-compose-app-password
+      DIRECTOR_CHECKPOINT_PASSWORD: release-compose-checkpoint-password
       MINIO_ROOT_PASSWORD: release-compose-minio-password
       LITELLM_DB_PASSWORD: release-compose-litellm-db-password
       LITELLM_MASTER_KEY: sk-release-compose-master-key
-      LITELLM_API_KEY: sk-release-compose-master-key
+      LITELLM_SALT_KEY: sk-release-compose-stable-salt
+      LITELLM_API_KEY: sk-release-compose-data-key
+      LITELLM_MODEL_ADMIN_KEY: sk-release-compose-model-admin-key
       SESSION_SECRET: release-compose-session-secret-32-characters
       WORKER_TOKEN: release-compose-worker-token-32-characters
       BYOK_FERNET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
@@ -262,6 +271,20 @@ jobs:
               --frontend-digest "${{ steps.manifest-digests.outputs.frontend }}" \
               "${published[@]}" \
               --output-file /workspace/release-manifest.json
+      - name: Reclaim runner disk before packaging
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The bundle step saves every runtime image to one tar. On a hosted
+          # runner the gate steps before it leave tens of GB of intermediate
+          # layers and cache behind, and `docker save` then fails with
+          # "no space left on device" after the redownload of the archives is
+          # already committed. Keep runtime images for the following bundle:
+          # image prune -a also deletes tagged images without container references.
+          df -h /
+          docker container prune -f || true
+          docker builder prune -af || true
+          df -h /
       - name: Create online and offline release bundles
         shell: bash
         env:
@@ -275,6 +298,10 @@ jobs:
           set -euo pipefail
           online_dir="dramaforge-online-v${VERSION}"
           offline_dir="dramaforge-offline-linux-amd64-v${VERSION}"
+          # Both bundles are flat: every file the installers read at run time
+          # (release.env, images.tar.gz, the Compose files) must land in the
+          # directory the user extracts and invokes install.sh from.
+          rm -rf "$online_dir" "$offline_dir"
           mkdir -p "$online_dir/infra/litellm" "$offline_dir/infra/litellm"
 
           common_files=(
@@ -296,6 +323,12 @@ jobs:
           done
           cp infra/litellm/config.yaml "$online_dir/infra/litellm/config.yaml"
           cp infra/litellm/config.yaml "$offline_dir/infra/litellm/config.yaml"
+          cp infra/litellm/proxy_policy.py "$online_dir/infra/litellm/proxy_policy.py"
+          cp infra/litellm/proxy_policy.py "$offline_dir/infra/litellm/proxy_policy.py"
+          cp infra/litellm/transport_policy.py "$online_dir/infra/litellm/transport_policy.py"
+          cp infra/litellm/transport_policy.py "$offline_dir/infra/litellm/transport_policy.py"
+          cp infra/litellm/bootstrap_keys.py "$online_dir/infra/litellm/bootstrap_keys.py"
+          cp infra/litellm/bootstrap_keys.py "$offline_dir/infra/litellm/bootstrap_keys.py"
 
           cat > "$online_dir/release.env" <<EOF
           DRAMAFORGE_VERSION=$VERSION
@@ -321,7 +354,7 @@ jobs:
             "postgres:15-alpine"
             "redis:7-alpine"
             "quay.io/minio/minio:RELEASE.2024-12-18T13-15-44Z"
-            "ghcr.io/berriai/litellm:v1.96.0"
+            "ghcr.io/berriai/litellm:v1.96.0@sha256:90d8de0ea6fbb3cad145d1019d00a0149ae400b1e18e2011a60f1988f143f672"
           )
           for expected in "${expected_images[@]}"; do
             printf '%s\n' "${runtime_images[@]}" | grep -Fqx "$expected" || {
@@ -334,10 +367,15 @@ jobs:
             exit 1
           fi
           docker image inspect "${runtime_images[@]}" >/dev/null
-          docker save --output "$offline_dir/images.tar" "${runtime_images[@]}"
+          # Write the archive compressed in one pass. Saving an uncompressed
+          # images.tar first and then gzipping it needs room for both copies at
+          # once (~2.2 GB for this image set), and `docker load` reads the
+          # compressed stream directly.
+          docker save "${runtime_images[@]}" | gzip -c > "$offline_dir/images.tar.gz"
+          gzip -t "$offline_dir/images.tar.gz"
 
           (cd "$online_dir" && zip -q -r "../${online_dir}.zip" .)
-          tar -czf "${offline_dir}.tar.gz" "$offline_dir"
+          tar -czf "${offline_dir}.tar.gz" -C "$offline_dir" .
       - name: Create checksums
         run: >-
           sha256sum

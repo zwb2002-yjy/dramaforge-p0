@@ -14,7 +14,10 @@ from uuid import UUID
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access.egress_admission import EgressAdmission
 from app.access.models import Project
+from app.assets.models import AssetVersion
+from app.assets.render_lineage import sqlite_render_lineage
 from app.config import Settings, get_settings
 from app.execution.branches import branch_priority
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun
@@ -42,6 +45,9 @@ class PublicArtifactReference:
     mime_type: str
     content_hash: str
     expires_at: datetime
+    publication_id: UUID | None = None
+    publication_item_id: UUID | None = None
+    public_asset_link_id: UUID | None = None
 
 
 def _public_origin(settings: Settings) -> str:
@@ -170,6 +176,12 @@ async def issue_artifact_reference(
     created_by_run_id: UUID | None = None,
     created_by_user_id: UUID | None = None,
     settings: Settings | None = None,
+    destination_id: UUID | None = None,
+    processing_location: str = "external",
+    publication_id: UUID | None = None,
+    publication_item_id: UUID | None = None,
+    public_asset_link_id: UUID | None = None,
+    owner_user_id: UUID | None = None,
 ) -> ArtifactReferenceGrant:
     if (created_by_run_id is None) == (created_by_user_id is None):
         raise ValueError("reference grant requires exactly one audited creator")
@@ -186,11 +198,76 @@ async def issue_artifact_reference(
             "reference Artifact is unavailable",
             details={"code": "UPSTREAM_ARTIFACT_MISSING"},
         )
+    # A public reference URL is an outbound path: the project policy is checked
+    # before a token exists, so a refusal leaves no redeemable grant behind.
+    admission = await EgressAdmission(session).decide(
+        project,
+        purpose="reference_delivery",
+        required_purposes=["reference_delivery"],
+        destination_id=destination_id,
+        processing_location=processing_location,
+    )
+    if not admission.allowed:
+        raise ValidationAppError(
+            "项目外发策略不允许签发本次引用地址",
+            details={"code": admission.reason_code},
+        )
     cfg = settings or get_settings()
     origin = _public_origin(cfg)
     token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
     expires_at = datetime.now(UTC) + timedelta(seconds=cfg.reference_token_ttl_seconds)
+    if public_asset_link_id is not None and owner_user_id is None:
+        from app.assets.public_asset_models import ProjectPublicAssetLink
+
+        link_owner = await session.scalar(
+            select(ProjectPublicAssetLink.owner_user_id).where(
+                ProjectPublicAssetLink.id == public_asset_link_id
+            )
+        )
+        owner_user_id = link_owner
+    public_identity = (publication_id, publication_item_id, public_asset_link_id, owner_user_id)
+    if any(value is not None for value in public_identity) and not all(
+        value is not None for value in public_identity
+    ):
+        raise ValidationAppError(
+            "public reference tokens need the complete public identity",
+            details={"code": "REFERENCE_PUBLIC_IDENTITY_INCOMPLETE"},
+        )
+    if public_asset_link_id is not None:
+        from app.assets.public_asset_models import (
+            ProjectPublicAssetLink,
+            PublicAssetPublication,
+            PublicAssetPublicationItem,
+        )
+
+        link = await session.get(ProjectPublicAssetLink, public_asset_link_id)
+        publication = (
+            await session.get(PublicAssetPublication, publication_id)
+            if publication_id is not None
+            else None
+        )
+        item = (
+            await session.get(PublicAssetPublicationItem, publication_item_id)
+            if publication_item_id is not None
+            else None
+        )
+        if (
+            link is None
+            or publication is None
+            or item is None
+            or link.project_id != artifact.project_id
+            or link.publication_id != publication.id
+            or publication.source_project_id != artifact.project_id
+            or item.publication_id != publication.id
+            or item.artifact_id != artifact.id
+            or link.detached_at is not None
+            or publication.status != "available"
+        ):
+            raise ValidationAppError(
+                "public reference identity is not eligible",
+                details={"code": "REFERENCE_PUBLIC_NOT_AVAILABLE"},
+            )
     session.add(
         ArtifactReferenceToken(
             workspace_id=workspace_id,
@@ -200,6 +277,11 @@ async def issue_artifact_reference(
             expires_at=expires_at,
             created_by_run_id=created_by_run_id,
             created_by_user_id=created_by_user_id,
+            egress_admission=admission.evidence(),
+            publication_id=publication_id,
+            publication_item_id=publication_item_id,
+            public_asset_link_id=public_asset_link_id,
+            owner_user_id=owner_user_id,
         )
     )
     await session.flush()
@@ -209,6 +291,23 @@ async def issue_artifact_reference(
         content_hash=artifact.content_hash,
         expires_at=expires_at,
     )
+
+
+def runtime_reference_transport(compiler: object, manifest: object) -> str | None:
+    """The reference transport the selected compiler consumes for ``manifest``.
+
+    Compilers declare their transport as a class attribute; revisions whose
+    wire semantics differ per catalog contract (e.g. Agnes contract revisions
+    take public HTTPS URLs while legacy revisions embed bytes) override with
+    ``reference_transport_for(manifest)``. Returns ``None`` when undeclared.
+    """
+
+    method = getattr(compiler, "reference_transport_for", None)
+    if callable(method):
+        value = method(manifest)
+        return value if isinstance(value, str) else None
+    value = getattr(compiler, "reference_transport", None)
+    return value if isinstance(value, str) else None
 
 
 async def resolve_reference_for_runtime(
@@ -222,18 +321,27 @@ async def resolve_reference_for_runtime(
     mime_type: str,
     fingerprint: str | None,
     provider_type: str,
+    reference_transport: str | None = None,
+    publication_id: UUID | None = None,
+    publication_item_id: UUID | None = None,
+    public_asset_link_id: UUID | None = None,
+    owner_user_id: UUID | None = None,
 ) -> ResolvedReference:
-    """Build the runtime reference using the selected provider's transport.
+    """Build the runtime reference using the compiler's declared transport.
 
     Transport-specific URL versus bytes policy belongs in the provider
-    delivery layer, not in the shared execution orchestration module.
+    delivery layer, not in the shared execution orchestration module. The
+    selected compiler's declaration decides (``runtime_reference_transport``);
+    callers that have not adopted it fail closed to the stored-bytes path.
     """
     from app.providers.runtime import ResolvedReference
 
-    if provider_type == "volcengine":
+    # Public-URL compilers (Ark, MiniMax, Agnes contract revisions) receive
+    # short-lived signed grants; every bytes compiler gets the stored bytes.
+    if reference_transport == "public_url":
         if artifact is None:
             raise ValidationAppError(
-                "Ark reference requires a bound image artifact",
+                "public-URL reference requires a bound image artifact",
                 details={"code": "REFERENCE_ARTIFACT_REQUIRED"},
             )
         grant = await issue_artifact_reference(
@@ -241,6 +349,10 @@ async def resolve_reference_for_runtime(
             artifact=artifact,
             workspace_id=project.workspace_id,
             created_by_run_id=run.id,
+            publication_id=publication_id,
+            publication_item_id=publication_item_id,
+            public_asset_link_id=public_asset_link_id,
+            owner_user_id=owner_user_id,
         )
         return ResolvedReference(
             role=role,
@@ -248,6 +360,12 @@ async def resolve_reference_for_runtime(
             content_url=grant.url,
             mime_type=artifact.mime_type or mime_type,
             fingerprint=artifact.content_hash,
+            byte_size=artifact.byte_size,
+            duration_seconds=(
+                float(artifact.duration_seconds) if artifact.duration_seconds is not None else None
+            ),
+            width=artifact.width,
+            height=artifact.height,
         )
     if content_bytes is None:
         raise ValidationAppError(
@@ -260,7 +378,46 @@ async def resolve_reference_for_runtime(
         content_bytes=content_bytes,
         mime_type=mime_type,
         fingerprint=fingerprint,
+        byte_size=artifact.byte_size if artifact is not None else len(content_bytes),
+        duration_seconds=(
+            float(artifact.duration_seconds)
+            if artifact is not None and artifact.duration_seconds is not None
+            else None
+        ),
+        width=artifact.width if artifact is not None else None,
+        height=artifact.height if artifact is not None else None,
     )
+
+
+_SQLITE_REFERENCE_USE_DENIED = """
+WITH RECURSIVE media(id, depth) AS (
+        SELECT :artifact, 0
+        UNION
+        SELECT s.artifact_id, m.depth + 1
+        FROM media m
+        JOIN artifact_source_uses u ON u.artifact_id = m.id
+        JOIN source_use_subjects s ON s.id = u.source_subject_id
+        WHERE s.artifact_id IS NOT NULL AND m.depth < 33
+    ), bounded AS (SELECT id, depth FROM media LIMIT 1025),
+    required(id) AS (
+        SELECT s.id FROM bounded m JOIN source_use_subjects s ON s.artifact_id = m.id
+        UNION
+        SELECT u.source_subject_id FROM bounded m
+          JOIN artifact_source_uses u ON u.artifact_id = m.id
+          LIMIT 1025
+    )
+    SELECT 1 FROM required q
+    LEFT JOIN source_use_subjects s ON s.id = q.id
+    LEFT JOIN source_use_revisions r ON r.id = s.current_revision_id AND r.subject_id = s.id
+    WHERE (r.state IS NULL OR r.state != 'declared')
+       OR NOT EXISTS (SELECT 1 FROM json_each(r.allowed_uses) WHERE value = 'external_processing')
+       OR (:is_public AND NOT EXISTS (SELECT 1 FROM json_each(r.allowed_uses)
+                                    WHERE value = 'library_reference'))
+    UNION ALL SELECT 1 WHERE :is_public AND NOT EXISTS (SELECT 1 FROM required)
+    UNION ALL SELECT 1 FROM bounded WHERE depth > 32
+    UNION ALL SELECT 1 WHERE (SELECT count(*) FROM bounded) > 1024
+    UNION ALL SELECT 1 WHERE (SELECT count(*) FROM required) > 1024 LIMIT 1
+"""
 
 
 async def resolve_public_reference(
@@ -278,7 +435,8 @@ async def resolve_public_reference(
                     text(
                         """
                     SELECT artifact_id, project_id, object_key, mime_type,
-                           content_hash, expires_at
+                           content_hash, expires_at, publication_id,
+                           publication_item_id, public_asset_link_id
                     FROM app.artifact_reference_for_token(:token_hash)
                     """
                     ),
@@ -297,6 +455,9 @@ async def resolve_public_reference(
             mime_type=str(row["mime_type"]),
             content_hash=str(row["content_hash"]),
             expires_at=row["expires_at"],
+            publication_id=row["publication_id"],
+            publication_item_id=row["publication_item_id"],
+            public_asset_link_id=row["public_asset_link_id"],
         )
     record = await session.scalar(
         select(ArtifactReferenceToken).where(
@@ -312,6 +473,49 @@ async def resolve_public_reference(
         or artifact.deleted_at is not None
     ):
         raise NotFoundError("reference not found")
+    blocked = await session.scalar(text(_SQLITE_REFERENCE_USE_DENIED), {
+        "artifact": artifact.id.hex, "is_public": record.publication_id is not None,
+    })
+    if blocked or not await session.scalar(text(sqlite_render_lineage(":artifact")),
+                                                {"artifact":artifact.id.hex}):
+        raise NotFoundError("reference not found")
+    if record.publication_id is not None:
+        from app.assets.public_asset_models import (
+            ProjectPublicAssetLink,
+            PublicAssetPublication,
+            PublicAssetPublicationItem,
+        )
+
+        publication = await session.get(PublicAssetPublication, record.publication_id)
+        link = (
+            await session.get(ProjectPublicAssetLink, record.public_asset_link_id)
+            if record.public_asset_link_id is not None
+            else None
+        )
+        item = (
+            await session.get(
+                PublicAssetPublicationItem, record.publication_item_id
+            )
+            if record.publication_item_id is not None
+            else None
+        )
+        version = (
+            await session.get(AssetVersion, publication.source_asset_version_id)
+            if publication is not None
+            else None
+        )
+        if (
+            publication is None
+            or link is None
+            or item is None
+            or version is None
+            or publication.status != "available"
+            or publication.withdrawn_at is not None
+            or link.detached_at is not None
+            or version.status != "formal"
+            or item.artifact_id != artifact.id
+        ):
+            raise NotFoundError("reference not found")
     return PublicArtifactReference(
         artifact_id=artifact.id,
         project_id=artifact.project_id,
@@ -319,6 +523,9 @@ async def resolve_public_reference(
         mime_type=artifact.mime_type,
         content_hash=artifact.content_hash,
         expires_at=record.expires_at,
+        publication_id=record.publication_id,
+        publication_item_id=record.publication_item_id,
+        public_asset_link_id=record.public_asset_link_id,
     )
 
 

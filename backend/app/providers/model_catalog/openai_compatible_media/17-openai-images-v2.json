@@ -1,0 +1,30 @@
+{
+  "manifest_version": "2026-10-27",
+  "provider_type": "openai_compatible_media",
+  "protocol_profile": "openai_images_v2",
+  "model_id": "@contract/openai-images-v2",
+  "model_revision": "v1",
+  "media_kind": "image",
+  "display_name": "通用 Images：单张 1024×1024 文生图",
+  "lifecycle": "active",
+  "catalog_source": "protocol_contract",
+  "documented_at": "2026-10-27",
+  "implementation_status": "contract_tested",
+  "operations": {
+    "image.generate": {
+      "operation": "image.generate",
+      "capabilities": ["image.t2i"],
+      "output_constraints": {"size": "1024x1024", "aspect_ratio": "1:1", "num_outputs": 1},
+      "reference_constraints": {},
+      "exclusive_groups": []
+    }
+  },
+  "option_schema": {"namespace": "", "options": {}},
+  "evidence": {
+    "protocol_fixture": {
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit/test_generic_images_protocol.py",
+      "checked_at": "2026-10-27"
+    }
+  }
+}

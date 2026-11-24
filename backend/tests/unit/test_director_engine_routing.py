@@ -24,7 +24,7 @@ def _turn() -> DirectorTurn:
 
 
 @pytest.mark.asyncio
-async def test_enabling_langgraph_does_not_rebind_existing_blank_turn() -> None:
+async def test_unbound_replay_is_rejected_without_an_old_engine_path() -> None:
     controls = AsyncMock()
     router = DirectorEngineRouter(
         settings=Settings(
@@ -33,7 +33,10 @@ async def test_enabling_langgraph_does_not_rebind_existing_blank_turn() -> None:
         ),
         controls=controls,
     )
-    assert await router.bind_new(_turn(), created=False) is None
+    from app.shared.errors import ConflictError
+
+    with pytest.raises(ConflictError, match="binding is invalid"):
+        await router.bind_new(_turn(), created=False)
     controls.bind.assert_not_awaited()
 
 
@@ -60,7 +63,7 @@ async def test_enabled_new_turn_binds_exact_validated_engine_once() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rollback_keeps_an_already_bound_turn_on_langgraph() -> None:
+async def test_replay_keeps_the_exact_durable_engine() -> None:
     controls = AsyncMock()
     expected = object()
     controls.bind.return_value = expected

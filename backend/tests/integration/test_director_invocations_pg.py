@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from app.director.invocation_models import DirectorInvocation
 from app.director.invocations import InvocationService
-from app.director.text_transport import DirectorTextTransport
+from app.director.text_transport import DirectorTextRuntimeAdapter
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
 from app.providers.contracts.common import ExecutionContext, ProviderCreateResult
@@ -49,7 +49,8 @@ async def test_invocation_identity_unknown_response_and_verified_result_survive_
     await _create_database(dbname)
     engine = create_async_engine(_async_url(dbname))
     app_engine = create_async_engine(
-        _async_url(dbname), connect_args={"server_settings": {"role": "dramaforge_app"}},
+        _async_url(dbname),
+        connect_args={"server_settings": {"role": "dramaforge_app"}},
     )
     try:
         _alembic(dbname)
@@ -60,23 +61,32 @@ async def test_invocation_identity_unknown_response_and_verified_result_survive_
             await session.commit()
             other, _other_binding, other_actor = await _seed(session)
             turn = DirectorTurn(
-                project_id=project.id, workspace_id=project.workspace_id, actor_id=actor.id,
-                scope_type="shot", scope_entity_id=uuid4(), request_key="invocation-test",
+                project_id=project.id,
+                workspace_id=project.workspace_id,
+                actor_id=actor.id,
+                scope_type="shot",
+                scope_entity_id=uuid4(),
+                request_key="invocation-test",
                 context_hash="a" * 64,
             )
             session.add(turn)
             await session.commit()
         args = dict(
-            project_id=project.id, turn_id=turn.id, invocation_key="step:1:primary:1",
-            step_key="step:1:primary", attempt=1,
+            project_id=project.id,
+            turn_id=turn.id,
+            invocation_key="step:1:primary:1",
+            step_key="step:1:primary",
+            attempt=1,
             model_resolution={"model_id": "test-model", "binding_revision": 1},
             request_snapshot={"prompt": "A bounded suggestion"},
-            output_schema=Suggestion.model_json_schema(mode="validation"), intent_version="v1",
+            output_schema=Suggestion.model_json_schema(mode="validation"),
+            intent_version="v1",
         )
 
         async def scope(session):
-            await set_rls_context(session, user_id=actor.id,
-                                  workspace_id=project.workspace_id, project_id=project.id)
+            await set_rls_context(
+                session, user_id=actor.id, workspace_id=project.workspace_id, project_id=project.id
+            )
 
         async def prepare():
             async with factory() as session:
@@ -90,16 +100,20 @@ async def test_invocation_identity_unknown_response_and_verified_result_survive_
         async with factory() as session:
             await scope(session)
             with pytest.raises(ConflictError):
-                await InvocationService(session).prepare(**{
-                    **args, "request_snapshot": {"prompt": "Changed"},
-                })
+                await InvocationService(session).prepare(
+                    **{
+                        **args,
+                        "request_snapshot": {"prompt": "Changed"},
+                    }
+                )
             await session.rollback()
 
         async def start():
             async with factory() as session:
                 await scope(session)
                 accepted = await InvocationService(session).start(
-                    project_id=project.id, invocation_id=first,
+                    project_id=project.id,
+                    invocation_id=first,
                 )
                 await session.commit()
                 return accepted
@@ -108,14 +122,17 @@ async def test_invocation_identity_unknown_response_and_verified_result_survive_
         async with factory() as session:
             await scope(session)
             await InvocationService(session).mark_unknown(
-                project_id=project.id, invocation_id=first,
+                project_id=project.id,
+                invocation_id=first,
             )
             await session.commit()
         assert not await start()
         async with factory() as session:
             await scope(session)
             row = await InvocationService(session).complete(
-                project_id=project.id, invocation_id=first, output=Suggestion(text="Verified"),
+                project_id=project.id,
+                invocation_id=first,
+                output=Suggestion(text="Verified"),
                 token_usage={"prompt_tokens": 10},
             )
             assert row.cost_status == "unknown" and row.reported_cost is None
@@ -129,7 +146,9 @@ async def test_invocation_identity_unknown_response_and_verified_result_survive_
             assert restored.validated_output == {"text": "Verified"}
             with pytest.raises(ConflictError):
                 await journal.complete(
-                    project_id=project.id, invocation_id=first, output=Suggestion(text="Changed"),
+                    project_id=project.id,
+                    invocation_id=first,
+                    output=Suggestion(text="Changed"),
                     token_usage={"prompt_tokens": 10},
                 )
             await session.rollback()
@@ -137,19 +156,31 @@ async def test_invocation_identity_unknown_response_and_verified_result_survive_
             async with factory() as session:
                 await scope(session)
                 with pytest.raises(IntegrityError):
-                    await session.execute(update(DirectorInvocation).where(
-                        DirectorInvocation.id == first,
-                    ).values(**invalid))
+                    await session.execute(
+                        update(DirectorInvocation)
+                        .where(
+                            DirectorInvocation.id == first,
+                        )
+                        .values(**invalid)
+                    )
                 await session.rollback()
         async with factory() as session:
-            await set_rls_context(session, user_id=other_actor.id,
-                                  workspace_id=other.workspace_id, project_id=other.id)
+            await set_rls_context(
+                session,
+                user_id=other_actor.id,
+                workspace_id=other.workspace_id,
+                project_id=other.id,
+            )
             assert await session.scalar(select(DirectorInvocation)) is None
             with pytest.raises(NotFoundError):
                 await InvocationService(session).get(project_id=project.id, invocation_id=first)
-            result = await session.execute(update(DirectorInvocation).where(
-                DirectorInvocation.id == first,
-            ).values(status="failed"))
+            result = await session.execute(
+                update(DirectorInvocation)
+                .where(
+                    DirectorInvocation.id == first,
+                )
+                .values(status="failed")
+            )
             assert result.rowcount == 0
             await session.rollback()
         # Even a privileged insert cannot attach a project's invocation to a
@@ -175,7 +206,8 @@ async def test_transport_recovers_completed_journal_and_never_replays_uncertain_
     await _create_database(dbname)
     engine = create_async_engine(_async_url(dbname))
     app_engine = create_async_engine(
-        _async_url(dbname), connect_args={"server_settings": {"role": "dramaforge_app"}},
+        _async_url(dbname),
+        connect_args={"server_settings": {"role": "dramaforge_app"}},
     )
     try:
         _alembic(dbname)
@@ -235,7 +267,8 @@ async def test_transport_recovers_completed_journal_and_never_replays_uncertain_
         async with factory() as session:
             await scope(session)
             turn, entity_id, context, intent, versions = await make_turn(
-                session, request_key="transport:completed",
+                session,
+                request_key="transport:completed",
             )
             await session.commit()
             await scope(session)
@@ -253,7 +286,8 @@ async def test_transport_recovers_completed_journal_and_never_replays_uncertain_
             await session.commit()
             await scope(session)
             assert await InvocationService(session).start(
-                project_id=project.id, invocation_id=invocation.id,
+                project_id=project.id,
+                invocation_id=invocation.id,
             )
             await session.commit()
             await scope(session)
@@ -272,7 +306,7 @@ async def test_transport_recovers_completed_journal_and_never_replays_uncertain_
 
             never = NeverTextModel()
             await scope(session)
-            restored = await DirectorTextTransport(
+            restored = await DirectorTextRuntimeAdapter(
                 session,
                 registry=ModelRegistry(),
                 text_model=never,
@@ -296,7 +330,8 @@ async def test_transport_recovers_completed_journal_and_never_replays_uncertain_
 
             await scope(session)
             uncertain_turn, entity_id, context, intent, versions = await make_turn(
-                session, request_key="transport:uncertain",
+                session,
+                request_key="transport:uncertain",
             )
             await session.commit()
             await scope(session)
@@ -314,13 +349,14 @@ async def test_transport_recovers_completed_journal_and_never_replays_uncertain_
             await session.commit()
             await scope(session)
             assert await InvocationService(session).start(
-                project_id=project.id, invocation_id=uncertain.id,
+                project_id=project.id,
+                invocation_id=uncertain.id,
             )
             await session.commit()
 
             await scope(session)
             with pytest.raises(ValidationAppError) as raised:
-                await DirectorTextTransport(
+                await DirectorTextRuntimeAdapter(
                     session,
                     registry=ModelRegistry(),
                     text_model=never,
@@ -342,10 +378,12 @@ async def test_transport_recovers_completed_journal_and_never_replays_uncertain_
             assert never.calls == 0
             await scope(session)
             saved_uncertain = await InvocationService(session).get(
-                project_id=project.id, invocation_id=uncertain.id,
+                project_id=project.id,
+                invocation_id=uncertain.id,
             )
             saved_turn = await DirectorTurnService(session).get(
-                project_id=project.id, turn_id=uncertain_turn.id,
+                project_id=project.id,
+                turn_id=uncertain_turn.id,
             )
             assert saved_uncertain.status == "unknown_submission"
             assert saved_turn.status == "failed"

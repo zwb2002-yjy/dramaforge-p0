@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -35,25 +34,13 @@ from app.delivery import models as _dm  # noqa: F401
 from app.events import models as _em  # noqa: F401
 from app.execution import models as _xm  # noqa: F401
 from app.production import models as _pm  # noqa: F401
-from app.shared.base import Base
 from app.shared.errors import ConflictError, ValidationAppError
 from app.shared.security import hash_password
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 REPO = Path(__file__).resolve().parents[3]
 SCRIPT = REPO / "fixtures" / "scripts" / "episode_script.md"
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with factory() as s:
-        yield s
-    await engine.dispose()
 
 
 async def _project(session: AsyncSession):
@@ -68,6 +55,7 @@ async def _project(session: AsyncSession):
     session.add(workspace)
     await session.flush()
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=workspace.id,
         name=f"Script-{uuid4().hex[:6]}",
         aspect_ratio="9:16",
@@ -84,6 +72,39 @@ def test_parse_script_fixture() -> None:
     assert len(parsed.scenes) == 2
     assert sum(len(s.shots) for s in parsed.scenes) == 3
     assert parsed.scenes[0].shots[0].visual
+
+
+@pytest.mark.parametrize("kind,limit", [("single_comic", 1), ("serial_comic", 2)])
+async def test_script_import_rejects_episode_over_plan_without_partial_document(
+    session, kind, limit
+):
+    from app.assets.models import Episode
+
+    user, project = await _project(session)
+    project.work_type = kind
+    project.planned_episode_count = limit if kind == "serial_comic" else None
+    await session.commit()
+    source = SCRIPT.read_text(encoding="utf-8")
+    for number in range(1, limit + 1):
+        await import_script(
+            session, project_id=project.id, actor_id=user.id, actor=user,
+            filename=f"episode-{number}.md",
+            text=source.replace("# Episode 1", f"# Episode {number}", 1),
+        )
+    await session.commit()
+    documents_before = await session.scalar(select(func.count()).select_from(ScriptDocument))
+    shots_before = await session.scalar(select(func.count()).select_from(Shot))
+    with pytest.raises(ConflictError) as caught:
+        await import_script(
+            session, project_id=project.id, actor_id=user.id, actor=user,
+            filename="extra.md", text=source.replace("# Episode 1", f"# Episode {limit + 1}", 1),
+        )
+    assert caught.value.details["code"] == "PROJECT_STRUCTURE_CONFLICT"
+    assert await session.scalar(select(func.count()).select_from(Episode)) == limit
+    assert (
+        await session.scalar(select(func.count()).select_from(ScriptDocument)) == documents_before
+    )
+    assert await session.scalar(select(func.count()).select_from(Shot)) == shots_before
 
 
 @pytest.mark.asyncio
@@ -114,6 +135,42 @@ async def test_import_script_creates_variable_shot_count(session: AsyncSession) 
     assert rows[0].sort_order == 1
     assert rows[2].sort_order == 3
     assert "neon" in rows[0].visual_description.lower() or "Lin" in rows[0].visual_description
+
+
+@pytest.mark.asyncio
+async def test_duplicate_shot_number_is_rejected_before_any_insert(
+    session: AsyncSession,
+) -> None:
+    user, project = await _project(session)
+    text = SCRIPT.read_text(encoding="utf-8")
+    duplicated = text.replace("### Shot 2", "### Shot 1", 1)
+    assert duplicated != text
+    with pytest.raises(ValidationAppError) as exc:
+        await import_script(
+            session,
+            project_id=project.id,
+            actor_id=user.id,
+            filename="duplicate.md",
+            text=duplicated,
+            actor=user,
+        )
+    assert exc.value.details["code"] == "SCRIPT_DUPLICATE_NUMBER"
+    assert (
+        await session.scalar(select(func.count()).select_from(Shot))
+    ) == 0
+
+    duplicated_scene = text.replace("## Scene 2", "## Scene 1", 1)
+    assert duplicated_scene != text
+    with pytest.raises(ValidationAppError) as scene_exc:
+        await import_script(
+            session,
+            project_id=project.id,
+            actor_id=user.id,
+            filename="duplicate-scene.md",
+            text=duplicated_scene,
+            actor=user,
+        )
+    assert scene_exc.value.details["code"] == "SCRIPT_DUPLICATE_NUMBER"
 
 
 @pytest.mark.asyncio
@@ -241,7 +298,8 @@ async def test_get_script_workspace_deterministic_latest_document(session: Async
     user, project = await _project(session)
     first_text = SCRIPT.read_text(encoding="utf-8")
     # A second, different script that parses to a valid scene/shot structure.
-    second_text = first_text.replace("Lin Xia", "Han Yu").replace("Neon Rain Lead", "Old Town")
+    second_text = first_text.replace("Lin Xia", "Han Yu")
+    assert second_text != first_text, "script fixture no longer contains the replaced name"
     await import_script(
         session,
         project_id=project.id,

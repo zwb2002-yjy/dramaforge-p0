@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from decimal import Decimal
 from uuid import uuid4
 
@@ -15,22 +14,10 @@ from app.director.suggestion import (
     ShotDirectorSuggestionRequest,
     ShotDirectorSuggestionService,
 )
-from app.shared.base import Base
 from app.shared.enums import ProjectStage
 from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    async with factory() as db_session:
-        yield db_session
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _seed(session: AsyncSession) -> tuple[User, Project, Scene, Shot]:
@@ -272,6 +259,45 @@ async def test_nested_forbidden_field_families_fail_closed(
     assert shot.image_prompt == "A cinematic keyframe"
     assert shot.video_prompt == "A slow turn toward the window"
     assert shot.director_state["workflow_template_key"] == "single-pass-v1"
+
+
+@pytest.mark.asyncio
+async def test_director_state_the_design_endpoint_would_reject_fails_closed(
+    session: AsyncSession,
+) -> None:
+    """A suggestion must be savable.
+
+    The suggestion service accepted any design-only state map, but the design
+    save endpoint validates the canonical shot director state.  A model that
+    emitted `continuity_constraints` as plain strings therefore produced a
+    proposal the user could accept and was then unable to save: the design PATCH
+    answered "Request validation failed" and the work was stranded in the draft.
+    """
+    user, project, scene, shot = await _seed(session)
+
+    class ShapeBrokenTransport:
+        async def generate(self, _context: ShotDirectorSuggestionContext) -> object:
+            return {
+                "base_shot_version": shot.version,
+                "suggested_image_prompt": "restrained street scene",
+                "suggested_video_prompt": "slow restrained movement",
+                "suggested_director_state": {
+                    "action": {"description": "小幅动作"},
+                    "continuity_constraints": ["身份跨镜头稳定", "造型配色一致"],
+                },
+                "change_summary": "把情绪调得更克制",
+            }
+
+    with pytest.raises(ValidationAppError) as raised:
+        await ShotDirectorSuggestionService(
+            session, transport=ShapeBrokenTransport()
+        ).suggest(
+            project_id=project.id,
+            actor=user,
+            request=_request(scene, shot),
+        )
+    assert raised.value.details["code"] == "INVALID_DIRECTOR_SUGGESTION_STATE"
+    assert shot.version == 5
 
 
 @pytest.mark.asyncio

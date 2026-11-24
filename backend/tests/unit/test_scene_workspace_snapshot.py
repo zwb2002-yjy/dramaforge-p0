@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
@@ -123,6 +124,19 @@ async def _add_node_run(
         )
         session.add(node)
         await session.flush()
+    result_artifact = None
+    if status in {"completed", "cached", "completed_after_cancel"}:
+        result_artifact = Artifact(
+            project_id=project_id,
+            artifact_type="image",
+            storage_state="available",
+            object_key=f"trace/{uuid4().hex}.png",
+            content_hash=uuid4().hex * 2,
+            mime_type="image/png",
+            byte_size=1,
+        )
+        session.add(result_artifact)
+        await session.flush()
     run = NodeRun(
         project_id=project_id,
         graph_version_id=current_version_id,
@@ -132,12 +146,39 @@ async def _add_node_run(
         input_hash=uuid4().hex * 2,
         input_snapshot={"shot_id": str(shot_id), "node_key": "keyframe"},
         status=status,
+        result_artifact_id=result_artifact.id if result_artifact is not None else None,
         created_by=user.id,
     )
     session.add(run)
     await session.flush()
+    if result_artifact is not None:
+        result_artifact.produced_by_run_id = run.id
+        await session.flush()
     return run
 
+
+async def test_shot_workbench_exposes_exact_media_candidates() -> None:
+    engine, session = await _make_env()
+    try:
+        user, project, _episode, _scene, shot = await _seed(session)
+        run = await _add_node_run(
+            session,
+            project_id=project.id,
+            shot_id=shot.id,
+            user=user,
+            status="completed",
+        )
+        workbench = await ShotWorkbenchService(session).get_workbench(
+            project_id=project.id, shot_id=shot.id, actor=user
+        )
+        rows = [row for row in workbench["candidates"] if row.get("artifact_id") is not None]
+        assert len(rows) == 1
+        assert rows[0]["artifact_id"] == run.result_artifact_id
+        assert rows[0]["stage"] == "image_keyframe"
+        assert rows[0]["node_run_id"] == run.id
+    finally:
+        await session.close()
+        await engine.dispose()  # type: ignore[union-attr]
 
 async def test_trace_marks_unknown_provider_submission_for_manual_reconciliation() -> None:
     """A possibly-billed submission must be visible instead of inviting a retry."""
@@ -317,6 +358,80 @@ async def test_shot_workbench_snapshot_aggregates_and_warns_old_version() -> Non
         assert len(warnings) == 1
         assert warnings[0]["asset_name"] == "林墨"
         assert warnings[0]["current_version_number"] == 2
+    finally:
+        await session.close()
+        await engine.dispose()  # type: ignore[union-attr]
+
+async def test_scene_and_shot_render_the_same_node_run_identically() -> None:
+    """B6: one NodeRun must not render differently between the two views."""
+    engine, session = await _make_env()
+    try:
+        user, project, _episode, scene, shot = await _seed(session)
+        run = await _add_node_run(
+            session, project_id=project.id, shot_id=shot.id, user=user, status="failed"
+        )
+        run.error_code = "PROVIDER_FAILED"
+        run.error_summary = "Agnes video HTTP 503; no task ID: Old private prompt fragment"
+        session.add(
+            ProviderOperation(
+                node_run_id=run.id,
+                attempt_no=1,
+                purpose="primary",
+                operation_kind="video.generate",
+                actual_provider="agnes",
+                actual_model="agnes-video-v2.0",
+                request_fingerprint=uuid4().hex * 2,
+                status="unknown_submission",
+            )
+        )
+        await session.flush()
+
+        workspace = await SceneWorkspaceService(session).get_workspace(
+            project_id=project.id, scene_id=scene.id, actor=user
+        )
+        scene_rows = {str(row["node_run_id"]): row for row in workspace["trace"][str(shot.id)]}
+        workbench = await ShotWorkbenchService(session).get_workbench(
+            project_id=project.id, shot_id=shot.id, actor=user
+        )
+        shot_rows = {str(row["node_run_id"]): row for row in workbench["trace"]}
+
+        assert scene_rows[str(run.id)] == shot_rows[str(run.id)]
+        assert scene_rows[str(run.id)]["error_summary"] == "Agnes video HTTP 503; no task ID"
+        assert "Old private prompt fragment" in run.error_summary
+        assert scene_rows[str(run.id)]["operation_outcome_unknown"] is True
+    finally:
+        await session.close()
+        await engine.dispose()  # type: ignore[union-attr]
+
+
+async def test_scene_and_shot_trace_order_is_creation_then_attempt_not_completion() -> None:
+    engine, session = await _make_env()
+    try:
+        user, project, _episode, scene, shot = await _seed(session)
+        runs = [
+            await _add_node_run(
+                session, project_id=project.id, shot_id=shot.id, user=user,
+                status="failed", attempt_no=attempt,
+            )
+            for attempt in (1, 2, 3)
+        ]
+        start = datetime(2026, 1, 1, tzinfo=UTC)
+        # Insert order, completion order and creation order deliberately differ.
+        runs[0].created_at = start + timedelta(seconds=1)
+        runs[1].created_at = start
+        runs[2].created_at = start + timedelta(seconds=1)
+        for index, run in enumerate(runs):
+            run.finished_at = start + timedelta(seconds=20 - index)
+        await session.flush()
+        scene_view = await SceneWorkspaceService(session).get_workspace(
+            project_id=project.id, scene_id=scene.id, actor=user,
+        )
+        shot_view = await ShotWorkbenchService(session).get_workbench(
+            project_id=project.id, shot_id=shot.id, actor=user,
+        )
+        expected = [runs[2].id, runs[0].id, runs[1].id]
+        assert [row["node_run_id"] for row in scene_view["trace"][str(shot.id)]] == expected
+        assert [row["node_run_id"] for row in shot_view["trace"]] == expected
     finally:
         await session.close()
         await engine.dispose()  # type: ignore[union-attr]

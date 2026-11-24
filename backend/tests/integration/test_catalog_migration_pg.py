@@ -15,7 +15,6 @@ from pathlib import Path
 
 import asyncpg
 import pytest
-from pg_support import alembic_head
 from sqlalchemy import create_engine, text
 
 BACKEND = Path(__file__).resolve().parents[2]
@@ -77,9 +76,7 @@ def _alembic(dbname: str, *args: str) -> None:
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("TEST_PG_ENABLED") != "1" or not _pg_available_sync(),
-    reason=(
-        "set TEST_PG_ENABLED=1 with an explicitly configured isolated PostgreSQL target"
-    ),
+    reason=("set TEST_PG_ENABLED=1 with an explicitly configured isolated PostgreSQL target"),
 )
 
 
@@ -341,12 +338,12 @@ async def test_identity_review_storage_contract_on_isolated_db() -> None:
             ]
         engine.dispose()
 
-        _alembic(dbname, "upgrade", "head")
+        _alembic(dbname, "upgrade", "20261007_0083")
         engine = create_engine(_db_sync_url(dbname))
         with engine.connect() as conn:
             assert (
                 conn.execute(text("select version_num from alembic_version")).scalar_one()
-                == alembic_head()
+                == "20261007_0083"
             )
             reupgraded = conn.execute(
                 text(

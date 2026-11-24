@@ -1,0 +1,150 @@
+{
+  "manifest_version": "2026-09-28",
+  "provider_type": "minimax",
+  "protocol_profile": "minimax_cn_v1",
+  "model_id": "MiniMax-H3-Max",
+  "model_revision": "2026-09-28-candidate",
+  "media_kind": "video",
+  "display_name": "MiniMax-H3-Max",
+  "lifecycle": "preview",
+  "catalog_source": "official_static",
+  "implementation_status": "documented",
+  "documented_at": "2026-09-28",
+  "operations": {
+    "video.generate": {
+      "operation": "video.generate",
+      "capabilities": [
+        "video.t2v",
+        "video.i2v.first_frame",
+        "video.i2v.last_frame",
+        "video.reference.image",
+        "video.reference.video",
+        "video.reference.audio"
+      ],
+      "input_contracts": {
+        "text": {
+          "input_slots": {},
+          "maximum_total_references": 0,
+          "common_options": {
+            "aspect_ratio": {
+              "type": "string",
+              "enum": [
+                "21:9",
+                "16:9",
+                "4:3",
+                "1:1",
+                "3:4",
+                "9:16"
+              ],
+              "required": true
+            }
+          }
+        },
+        "frame": {
+          "input_slots": {
+            "first_frame": {
+              "maximum": 1,
+              "media_types": [
+                "image/*"
+              ]
+            },
+            "last_frame": {
+              "maximum": 1,
+              "media_types": [
+                "image/*"
+              ]
+            }
+          },
+          "minimum_total_references": 1,
+          "maximum_total_references": 2
+        },
+        "reference": {
+          "input_slots": {
+            "reference_image": {
+              "maximum": 9,
+              "media_types": [
+                "image/jpeg",
+                "image/png",
+                "image/webp",
+                "image/heic",
+                "image/heif"
+              ],
+              "max_bytes": 30000000
+            },
+            "reference_video": {
+              "maximum": 3,
+              "media_types": [
+                "video/mp4",
+                "video/quicktime"
+              ],
+              "max_bytes": 50000000,
+              "min_duration_seconds": 2,
+              "max_duration_seconds": 15
+            },
+            "reference_audio": {
+              "maximum": 3,
+              "media_types": [
+                "audio/wav",
+                "audio/mpeg"
+              ],
+              "max_bytes": 15000000,
+              "min_duration_seconds": 2,
+              "max_duration_seconds": 15
+            }
+          },
+          "minimum_total_references": 1,
+          "maximum_total_references": 12,
+          "max_total_duration_seconds": {
+            "reference_video": 15,
+            "reference_audio": 15
+          }
+        }
+      },
+      "output_options": {
+        "duration_seconds": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 15,
+          "default": 5
+        },
+        "resolution": {
+          "type": "string",
+          "enum": [
+            "480P",
+            "768P"
+          ],
+          "default": "768P"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": [
+            "adaptive",
+            "21:9",
+            "16:9",
+            "4:3",
+            "1:1",
+            "3:4",
+            "9:16"
+          ]
+        }
+      }
+    }
+  },
+  "documented_features": [],
+  "evidence": {
+    "model": {
+      "source_type": "official_api_doc",
+      "source_url": "https://platform.minimax.io/docs/api-reference/video-generation-v2-create",
+      "checked_at": "2026-09-28"
+    },
+    "model_list": {
+      "source_type": "official_model_list",
+      "source_url": "https://platform.minimax.io/docs/guides/models-intro",
+      "checked_at": "2026-09-28"
+    }
+  },
+  "option_schema": {
+    "namespace": "",
+    "options": {}
+  }
+}

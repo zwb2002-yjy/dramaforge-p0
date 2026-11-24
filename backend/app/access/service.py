@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
@@ -20,6 +21,9 @@ from app.shared.errors import (
 from app.shared.security import hash_password, verify_password
 
 DEFAULT_WORKSPACE_NAME = "我的创作空间"
+# A missing/inactive user performs the same password KDF work as an active
+# account. This value is never accepted as a credential or persisted.
+_DUMMY_PASSWORD_HASH = hash_password(secrets.token_urlsafe(32))
 
 
 class AccessService:
@@ -89,7 +93,10 @@ class AccessService:
 
     async def authenticate(self, *, email: str, password: str) -> User:
         user = await self._repo.get_user_by_email(email.lower())
-        if user is None or not user.is_active or not verify_password(password, user.password_hash):
+        password_valid = verify_password(
+            password, user.password_hash if user is not None else _DUMMY_PASSWORD_HASH
+        )
+        if user is None or not user.is_active or not password_valid:
             raise UnauthorizedError("invalid credentials")
         return user
 

@@ -10,7 +10,6 @@ or touches production/execution facts.
 from __future__ import annotations
 
 import math
-import re
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -33,9 +32,12 @@ from app.access.models import User
 from app.access.projects import ProjectService
 from app.config import get_settings
 from app.director.assistant_models import DirectorThread
+from app.director.forbidden_fields import is_forbidden_field, reject_forbidden_fields
+from app.director.proposal_creation import ProposalItemDraft, create_proposal
 from app.director.proposal_models import DirectorProposal, DirectorProposalItem
+from app.director.runtime.capabilities import require_director_runtime_available
 from app.director.runtime.start import DirectorRuntimeStartService
-from app.director.text_transport import DirectorInvocationEvidence, DirectorTextTransport
+from app.director.text_transport import DirectorInvocationEvidence, DirectorTextRuntimeAdapter
 from app.director.turn_models import DirectorTurn
 from app.director.turn_service import DirectorTurnService
 from app.editing.adapter import EditingAdapter
@@ -104,76 +106,31 @@ class EditingDirectorSuggestionContext(BaseModel):
     user_instruction: str = Field(min_length=1, max_length=4000)
 
 
-_FORBIDDEN_PLAN_FIELDS = frozenset(
+_FORBIDDEN_PLAN_EXTRAS = frozenset(
     {
-        "artifact",
-        "artifact_id",
-        "artifact_ids",
-        "artifact_url",
-        "column",
-        "execution",
-        "execution_id",
-        "execution_plan",
         "field_path",
         "from",
         "json_patch",
-        "node_run",
-        "node_run_id",
-        "node_run_ids",
-        "patch",
         "path",
-        "production_lineage",
-        "provider",
-        "provider_model_id",
-        "provider_operation",
         "raw_replacement",
-        "raw_sql",
         "replacement",
         "replacement_payload",
-        "runtime",
-        "runtime_id",
-        "sql",
-        "sql_query",
-        "table",
         "to",
-        "worker",
-        "worker_queue",
     }
 )
 
 
-def _normalize_key(key: object) -> str:
-    text = str(key).strip().replace("-", "_").replace(" ", "_")
-    text = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", text)
-    text = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", text)
-    return re.sub(r"_+", "_", text).lower()
-
-
 def _is_forbidden_plan_field(key: object) -> bool:
-    normalized = _normalize_key(key)
-    return normalized in _FORBIDDEN_PLAN_FIELDS or normalized.startswith(
-        (
-            "artifact_",
-            "execution_",
-            "node_run_",
-            "provider_",
-            "raw_sql_",
-            "runtime_",
-            "sql_",
-            "worker_",
-        )
-    )
+    return is_forbidden_field(key, extra_keys=_FORBIDDEN_PLAN_EXTRAS)
 
 
 def _reject_forbidden_plan_fields(value: object, *, path: str = "candidate") -> None:
-    if isinstance(value, Mapping):
-        for key, nested in value.items():
-            if _is_forbidden_plan_field(key):
-                raise ValueError(f"{path} contains forbidden field: {key}")
-            _reject_forbidden_plan_fields(nested, path=f"{path}.{key}")
-    elif isinstance(value, list | tuple):
-        for index, nested in enumerate(value):
-            _reject_forbidden_plan_fields(nested, path=f"{path}[{index}]")
+    reject_forbidden_fields(
+        value,
+        path=path,
+        extra_keys=_FORBIDDEN_PLAN_EXTRAS,
+        message="contains forbidden field",
+    )
 
 
 def _sanitize_design_metadata(value: object) -> object:
@@ -230,12 +187,6 @@ class EditingDirectorSuggestionResult(EditingDirectorSuggestionCandidate):
     @property
     def candidate(self) -> EditingDirectorSuggestionCandidate:
         """Return the validated candidate represented by this persisted result."""
-
-        return self._candidate
-
-    @property
-    def suggestion(self) -> EditingDirectorSuggestionCandidate:
-        """Compatibility alias for callers using the HTTP response vocabulary."""
 
         return self._candidate
 
@@ -391,11 +342,11 @@ class EditingDirectorSuggestionService:
         session: AsyncSession,
         *,
         transport: EditingDirectorSuggestionTransport | None = None,
-        text_transport: DirectorTextTransport | None = None,
+        text_transport: DirectorTextRuntimeAdapter | None = None,
     ) -> None:
         self._session = session
         self._transport = transport
-        self._text_transport = text_transport or DirectorTextTransport(session)
+        self._text_transport = text_transport or DirectorTextRuntimeAdapter(session)
 
     async def suggest(
         self,
@@ -413,7 +364,8 @@ class EditingDirectorSuggestionService:
             await DirectorTurnService(self._session).require_proactive_authorization(
                 project_id=project.id,
             )
-            if proactive else None
+            if proactive
+            else None
         )
         adapter = EditingAdapter(self._session)
         edit_session = await adapter.load_timeline(
@@ -447,6 +399,7 @@ class EditingDirectorSuggestionService:
                     await self._transport.generate(context)
                 )
             else:
+                require_director_runtime_available(get_settings())
                 text_result = await self._text_transport.generate_structured(
                     project=project,
                     actor=actor,
@@ -598,36 +551,29 @@ class EditingDirectorSuggestionService:
                 self._session.add(thread)
                 await self._session.flush()
 
-            proposal = DirectorProposal(
-                project_id=project.id,
-                thread_id=thread.id,
+            proposal, items = await create_proposal(
+                self._session,
+                thread=thread,
                 scope_type="edit_session",
                 scope_entity_id=edit_session.id,
-                status="pending",
                 created_by=actor.id,
+                items=[
+                    ProposalItemDraft(
+                        command="edit_session.apply_timeline_plan",
+                        payload={
+                            "edit_session_id": str(edit_session.id),
+                            "plan": candidate.plan.model_dump(mode="json"),
+                        },
+                        expected_target_version=context.session_version,
+                        rationale=candidate.rationale,
+                        benefit=candidate.benefit,
+                        cost=candidate.cost,
+                        risk=candidate.risk,
+                        impact=candidate.impact,
+                    )
+                ],
             )
-            self._session.add(proposal)
-            await self._session.flush()
-            item = DirectorProposalItem(
-                proposal_id=proposal.id,
-                project_id=project.id,
-                command="edit_session.apply_timeline_plan",
-                payload={
-                    "edit_session_id": str(edit_session.id),
-                    "plan": candidate.plan.model_dump(mode="json"),
-                },
-                expected_target_version=context.session_version,
-                rationale=candidate.rationale,
-                benefit=candidate.benefit,
-                cost=candidate.cost,
-                risk=candidate.risk,
-                impact=candidate.impact,
-                status="pending",
-            )
-            self._session.add(item)
-            # Both ids are read from rows created in this invocation; never a
-            # timestamp-based "latest" query.
-            await self._session.flush()
+            item = items[0]
         except Exception as exc:  # noqa: BLE001 - keep text evidence durable
             if text_result is not None:
                 await self._record_persistence_failure(
@@ -654,7 +600,8 @@ class EditingDirectorSuggestionService:
                 proposal_id=proposal.id,
             )
             await DirectorRuntimeStartService(
-                self._session, settings=get_settings(),
+                self._session,
+                settings=get_settings(),
             ).accept_existing_new_turn(
                 project=project,
                 actor=actor,

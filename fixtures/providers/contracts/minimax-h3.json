@@ -1,21 +1,28 @@
 {
   "contract": {
     "documentation_source": {
-      "notes": "Official MiniMax H3 Video V2 API. First-launch subset is one HTTPS first frame with fixed 768P, five seconds, adaptive ratio, and no native audio.",
-      "url": "https://platform.minimaxi.com/docs/api-reference/video-generation-v2-create.md",
-      "verified_at": "2026-08-13"
+      "notes": "Official MiniMax H3 Video V2 API. First-frame mode uses 768P and adaptive ratio; text-only mode uses 2K and a concrete ratio. Both are five seconds in this product contract.",
+      "url": "https://github.com/MiniMax-AI/cli/blob/main/src/video/v2.ts",
+      "verified_at": "2026-09-29"
     },
     "wire_template": {
       "host": "https://api.minimaxi.com",
       "method": "POST",
       "path": "/v2/video_generation",
-      "poll": {"task_id": "GET /v2/query/video_generation/{id}"},
+      "poll": {
+        "task_id": "GET /v2/query/video_generation/{id}"
+      },
       "request_body": {
         "aigc_watermark": false,
         "content": [
-          {"text": "<prompt>", "type": "text"},
           {
-            "image_url": {"url": "https://dramaforge.example/api/v1/provider-references/<token>"},
+            "text": "<prompt>",
+            "type": "text"
+          },
+          {
+            "image_url": {
+              "url": "https://dramaforge.example/api/v1/provider-references/<token>"
+            },
             "role": "first_frame",
             "type": "image_url"
           }
@@ -25,36 +32,89 @@
         "ratio": "adaptive",
         "resolution": "768P"
       },
-      "status_machine": ["queued", "running", "succeeded"],
-      "success_response": {"task_id": "task-..."}
+      "text_to_video_request_body": {
+        "aigc_watermark": false,
+        "content": [
+          {
+            "text": "<prompt>",
+            "type": "text"
+          }
+        ],
+        "duration": 5,
+        "model": "MiniMax-H3",
+        "ratio": "16:9",
+        "resolution": "2K"
+      },
+      "status_machine": [
+        "queued",
+        "running",
+        "succeeded"
+      ],
+      "success_response": {
+        "task_id": "task-..."
+      }
     }
   },
   "manifest": {
-    "catalog_source": "official_static",
-    "display_name": "MiniMax H3",
-    "documented_at": "2026-08-13",
-    "lifecycle": "active",
-    "manifest_version": "2026-08-13",
-    "media_kind": "video",
+    "manifest_version": "2026-09-29",
+    "provider_type": "minimax",
+    "protocol_profile": "minimax_cn_v1",
     "model_id": "MiniMax-H3",
-    "model_revision": "v1",
+    "model_revision": "v4",
+    "media_kind": "video",
+    "display_name": "MiniMax H3",
+    "lifecycle": "active",
+    "catalog_source": "official_static",
+    "documented_at": "2026-09-29",
     "operations": {
       "video.generate": {
-        "capabilities": ["video.i2v.first_frame"],
-        "exclusive_groups": [],
         "operation": "video.generate",
+        "capabilities": [
+          "video.i2v.first_frame",
+          "video.t2v"
+        ],
         "output_constraints": {
-          "aspect_ratio": "adaptive",
-          "duration_seconds": 5,
-          "native_audio": false,
-          "resolution": "768P"
+          "modes": {
+            "first_frame": {
+              "resolution": "768P",
+              "duration_seconds": 5,
+              "aspect_ratio": "adaptive",
+              "native_audio": false
+            },
+            "text_to_video": {
+              "resolution": "2K",
+              "duration_seconds": 5,
+              "aspect_ratio": {
+                "allowed": [
+                  "9:16",
+                  "16:9"
+                ]
+              },
+              "native_audio": true
+            }
+          }
         },
-        "reference_constraints": {"first_frame": {"max": 1, "min": 1}}
+        "reference_constraints": {
+          "first_frame": {
+            "min": 0,
+            "max": 1
+          }
+        },
+        "exclusive_groups": []
       }
     },
-    "option_schema": {"namespace": "", "options": {}},
-    "protocol_profile": "minimax_cn_v1",
-    "provider_type": "minimax"
+    "option_schema": {
+      "namespace": "",
+      "options": {}
+    },
+    "implementation_status": "contract_tested",
+    "evidence": {
+      "current_contract": {
+        "source_type": "contract_fixture",
+        "source_url": "repository:backend/tests/unit",
+        "checked_at": "2026-10-07"
+      }
+    }
   },
-  "manifest_hash": "04dd2d914a517a45bbc14a6a5ab91c525185a76b9145d8a2b5f040f6a8e00ba8"
+  "manifest_hash": "d396524de99e0d65868f8291caaf1acf14c7f5383e15e77a277cf37b7bb4c3a6"
 }

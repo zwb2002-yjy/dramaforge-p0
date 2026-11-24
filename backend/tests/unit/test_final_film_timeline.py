@@ -7,8 +7,8 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from app.access.models import Project, User, Workspace
-from app.assets.models import Episode, Scene, Shot
+from app.access.models import Project, User
+from app.assets.models import Shot
 from app.delivery.models import Export, ExportItem
 from app.editing.models import EditSession
 from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
@@ -17,17 +17,15 @@ from app.production.final_film import (
     execute_final_film_node_run,
     queue_final_film_render,
 )
-from app.production.review_gate import record_human_decision
-from app.production.service import GraphService
 from app.production.timeline_renderer import TimelineRenderClip, render_timeline
 from app.runtime.scheduler import NodeRunScheduler
 from app.shared.base import Base
-from app.shared.enums import ProjectStage
 from app.shared.errors import NotFoundError, ValidationAppError
-from app.shared.security import hash_password
 from app.storage.minio_store import get_object_store, reset_object_store_for_tests
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from fixtures.final_film_seed import _fake_enqueue, _seed_project, _seed_renderable_final_film
 
 
 @pytest.fixture
@@ -43,261 +41,166 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
     reset_object_store_for_tests()
 
 
-async def _seed_project(session: AsyncSession) -> tuple[Project, User]:
-    user = User(
-        email=f"final-{uuid4().hex}@example.com",
-        display_name="Final Owner",
-        password_hash=hash_password("x"),
-    )
-    session.add(user)
-    await session.flush()
-    workspace = Workspace(owner_user_id=user.id, name=f"W-{uuid4().hex[:8]}")
-    session.add(workspace)
-    await session.flush()
-    project = Project(
-        workspace_id=workspace.id,
-        name="Final Film Project",
-        stage=ProjectStage.DRAFT.value,
-        aspect_ratio="9:16",
-        target_platform="general",
-        style_bible={},
-        budget_limit=Decimal("0"),
-        budget_currency="USD",
-        provider_dispatch_frozen=False,
-    )
-    session.add(project)
-    await session.flush()
-    return project, user
-
-
-async def _seed_renderable_final_film(
-    session: AsyncSession,
-    *,
-    shot_count: int = 1,
-) -> tuple[Project, User, EditSession, list[Shot], list[Artifact]]:
-    project, user = await _seed_project(session)
-    episode = Episode(project_id=project.id, episode_number=1, title="Episode 1", synopsis="")
-    session.add(episode)
-    await session.flush()
-    scene = Scene(
-        episode_id=episode.id,
-        scene_number=1,
-        location_name="Rooftop",
-        time_of_day="night",
-        synopsis="",
-    )
-    session.add(scene)
-    await session.flush()
-    store = get_object_store()
-    shots: list[Shot] = []
-    formal_videos: list[Artifact] = []
-    timeline_clips: list[dict[str, object]] = []
-    for index in range(shot_count):
-        shot = Shot(
-            project_id=project.id,
-            scene_id=scene.id,
-            shot_number=index + 1,
-            sort_order=index + 1,
-            visual_description=f"Shot {index + 1}",
-            dialogue=f"Line {index + 1}",
-            duration_seconds=Decimal("5"),
-        )
-        session.add(shot)
-        await session.flush()
-        graph = await GraphService(session).create_graph(
-            project_id=project.id,
-            scope_type="shot",
-            scope_entity_id=shot.id,
-            template_key="shot-p0-v1",
-            created_by=user.id,
-            definition={
-                "nodes": [
-                    {"key": "video", "type": "video"},
-                    {"key": "composite", "type": "composite"},
-                ],
-                "edges": [],
-            },
-        )
-        assert graph.current_version_id is not None
-        await GraphService(session).materialize_definition(version_id=graph.current_version_id)
-        nodes = list(
-            (
-                await session.execute(
-                    select(GraphNode).where(GraphNode.graph_version_id == graph.current_version_id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        composite_node = next(node for node in nodes if node.node_key == "composite")
-        video_node = next(node for node in nodes if node.node_key == "video")
-
-        video_stored = await store.put_bytes(
-            object_key=f"projects/{project.id}/test/video-{index}.mp4",
-            data=f"\x00\x00\x00\x18ftypmp42video-{index}".encode(),
-            mime_type="video/mp4",
-        )
-        video_artifact = Artifact(
-            project_id=project.id,
-            artifact_type="video",
-            storage_state="available",
-            object_key=video_stored.object_key,
-            content_hash=video_stored.content_hash,
-            mime_type="video/mp4",
-            byte_size=video_stored.byte_size,
-            duration_seconds=Decimal("5"),
-        )
-        session.add(video_artifact)
-        await session.flush()
-        voice_stored = await store.put_bytes(
-            object_key=f"projects/{project.id}/test/voice-{index}.wav",
-            data=f"RIFFvoice-{index}".encode(),
-            mime_type="audio/wav",
-        )
-        voice_artifact = Artifact(
-            project_id=project.id,
-            artifact_type="audio",
-            storage_state="available",
-            object_key=voice_stored.object_key,
-            content_hash=voice_stored.content_hash,
-            mime_type="audio/wav",
-            byte_size=voice_stored.byte_size,
-        )
-        session.add(voice_artifact)
-        subtitle_stored = await store.put_bytes(
-            object_key=f"projects/{project.id}/test/subtitle-{index}.srt",
-            data=f"1\n00:00:00,000 --> 00:00:02,000\nLine {index + 1}\n".encode(),
-            mime_type="application/x-subrip",
-        )
-        subtitle_artifact = Artifact(
-            project_id=project.id,
-            artifact_type="subtitle",
-            storage_state="available",
-            object_key=subtitle_stored.object_key,
-            content_hash=subtitle_stored.content_hash,
-            mime_type="application/x-subrip",
-            byte_size=subtitle_stored.byte_size,
-        )
-        session.add(subtitle_artifact)
-        await session.flush()
-        composite_run = NodeRun(
-            project_id=project.id,
-            graph_version_id=graph.current_version_id,
-            graph_node_id=composite_node.id,
-            attempt_no=1,
-            idempotency_key=f"formal-composite-{index}-{uuid4()}",
-            input_hash="c" * 64,
-            status="running",
-            input_snapshot={
-                "shot_id": str(shot.id),
-                "node_key": "composite",
-                "execution_branch": "formal",
-                "media_inputs": {
-                    "video": {
-                        "artifact_id": str(video_artifact.id),
-                        "content_hash": video_artifact.content_hash,
-                    },
-                    "voice": {
-                        "artifact_id": str(voice_artifact.id),
-                        "content_hash": voice_artifact.content_hash,
-                    },
-                    "subtitle": {
-                        "artifact_id": str(subtitle_artifact.id),
-                        "content_hash": subtitle_artifact.content_hash,
-                    },
-                },
-            },
-            created_by=user.id,
-        )
-        session.add(composite_run)
-        await session.flush()
-        composite_stored = await store.put_bytes(
-            object_key=f"projects/{project.id}/test/composite-{index}.mp4",
-            data=f"\x00\x00\x00\x18ftypmp42composite-{index}".encode(),
-            mime_type="video/mp4",
-        )
-        composite_artifact = Artifact(
-            project_id=project.id,
-            artifact_type="video",
-            storage_state="available",
-            object_key=composite_stored.object_key,
-            content_hash=composite_stored.content_hash,
-            mime_type="video/mp4",
-            byte_size=composite_stored.byte_size,
-            duration_seconds=Decimal("5"),
-            produced_by_run_id=composite_run.id,
-        )
-        session.add(composite_artifact)
-        await session.flush()
-        composite_run.result_artifact_id = composite_artifact.id
-        composite_run.status = "completed"
-        shot.formal_video_artifact_id = video_artifact.id
-        shot.formal_composite_artifact_id = composite_artifact.id
-        # Delivery requires a stored human decision for the exact clip Artifact,
-        # so this fixture records one exactly like the product flow does.
-        review_run = NodeRun(
-            project_id=project.id,
-            graph_version_id=graph.current_version_id,
-            graph_node_id=video_node.id,
-            idempotency_key=f"video-drift-review-{uuid4().hex}",
-            input_hash=uuid4().hex * 2,
-            input_snapshot={
-                "shot_id": str(shot.id),
-                "node_key": "video_drift_review",
-                "upstream_artifact_id": str(video_artifact.id),
-            },
-            output_summary={"status": "needs_human"},
-            status="completed",
-            result_artifact_id=voice_artifact.id,
-            created_by=user.id,
-        )
-        session.add(review_run)
-        await session.flush()
-        await record_human_decision(
-            session,
-            project_id=project.id,
-            shot_id=shot.id,
-            artifact_id=video_artifact.id,
-            review_node_run_id=review_run.id,
-            review_kind="video_drift",
-            decision="approved",
-            reason="人工确认成片素材可用。",
-            actor_id=user.id,
-            shot_version=shot.version,
-            request_key=f"review-fixture-{uuid4().hex}",
-        )
-        formal_videos.append(video_artifact)
-        shots.append(shot)
-        timeline_clips.append(
-            {
-                "id": f"clip-{index + 1}",
-                "shot_id": str(shot.id),
-                "artifact_id": str(video_artifact.id),
-                "order": index + 1,
-                "duration_seconds": 5,
-                "source_in_seconds": 0,
-                "subtitle": "",
-                "audio_id": None,
-                "transition": None,
-            }
-        )
-    edit = EditSession(
+async def test_final_film_releases_transaction_at_every_io_boundary(session, monkeypatch):
+    monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
+    project, user, edit, _shots, _videos = await _seed_renderable_final_film(session)
+    queued = await queue_final_film_render(
+        session,
         project_id=project.id,
-        name="Final timeline",
-        status="draft",
-        version=1,
-        timeline={"clips": timeline_clips, "metadata": {}},
-        production_lineage={"lineage_readonly": True},
-        created_by=user.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+        idempotency_key="io-boundaries",
+        name="Final",
     )
-    session.add(edit)
+    run = await session.get(NodeRun, queued.node_run_id)
+    run.status = "running"
     await session.commit()
-    return project, user, edit, shots, formal_videos
+    node = await session.get(GraphNode, run.graph_node_id)
+    store = get_object_store()
+    original_get, original_put = store.iter_bytes, store.put_file
+    original_render = render_timeline
+    boundaries = []
+
+    async def read(**kwargs):
+        assert not session.in_transaction(), "input download holds a transaction"
+        boundaries.append("read")
+        async for chunk in original_get(**kwargs):
+            yield chunk
+
+    async def write(**kwargs):
+        assert not session.in_transaction(), "output upload holds a transaction"
+        boundaries.append("write")
+        return await original_put(**kwargs)
+
+    async def render(*args, **kwargs):
+        assert not session.in_transaction(), "ffmpeg holds a transaction"
+        boundaries.append("render")
+        return await original_render(*args, **kwargs)
+
+    monkeypatch.setattr(store, "iter_bytes", read)
+    monkeypatch.setattr(store, "put_file", write)
+    monkeypatch.setattr("app.production.timeline_renderer.render_timeline", render)
+    await execute_final_film_node_run(session, run=run, node=node, obj_store=store)
+    assert {"read", "render", "write"} <= set(boundaries)
 
 
-async def _fake_enqueue(self: NodeRunScheduler, node_run_id: object) -> str:
-    _ = self
-    return f"job-{node_run_id}"
+async def test_crashed_upload_is_journaled_and_cleanup_failure_is_retried(session, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from app.production.final_film_uploads import cleanup_final_film_uploads
+
+    class ProcessKilled(BaseException):
+        pass
+
+    monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
+    project, user, edit, _shots, _videos = await _seed_renderable_final_film(session)
+    queued = await queue_final_film_render(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+        idempotency_key="crashed-upload",
+        name="Final",
+    )
+    run = await session.get(NodeRun, queued.node_run_id)
+    run.status = "running"
+    await session.commit()
+    node = await session.get(GraphNode, run.graph_node_id)
+    store = get_object_store()
+    original_put = store.put_file
+
+    async def kill_after_remote_write(**kwargs):
+        await original_put(**kwargs)
+        raise ProcessKilled()
+
+    monkeypatch.setattr(store, "put_file", kill_after_remote_write)
+    with pytest.raises(ProcessKilled):
+        await execute_final_film_node_run(session, run=run, node=node, obj_store=store)
+    operation = await session.scalar(
+        select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+    )
+    run_id = run.id
+    keys = operation.request_summary["upload_objects"]
+    assert keys and await store.get_bytes(object_key=keys[0])
+    # A still-active upload is never collected.
+    assert await cleanup_final_film_uploads(session, node_run_id=run_id, store=store) == 0
+    await session.refresh(operation)
+    operation.submitted_at = datetime.now(UTC) - timedelta(minutes=32)
+    await session.commit()
+    original_delete = store.delete_bytes
+
+    async def fail_delete(**kwargs):
+        assert not session.in_transaction()
+        raise OSError("storage unavailable")
+
+    monkeypatch.setattr(store, "delete_bytes", fail_delete)
+    assert await cleanup_final_film_uploads(session, node_run_id=run_id, store=store) == 0
+    assert operation.request_summary["upload_objects"] == keys
+    await session.refresh(run)
+    assert run.status == "failed"
+    monkeypatch.setattr(store, "delete_bytes", original_delete)
+    assert await cleanup_final_film_uploads(session, node_run_id=run_id, store=store) == len(keys)
+    # A killed caller cannot attest that an in-flight remote PUT has stopped.
+    assert operation.request_summary["upload_objects"] == keys
+    with pytest.raises(KeyError):
+        await store.get_bytes(object_key=keys[0])
+    await store.put_bytes(object_key=keys[0], data=b"late bytes", mime_type="video/mp4")
+    await cleanup_final_film_uploads(session, node_run_id=run_id, store=store)
+    with pytest.raises(KeyError):
+        await store.get_bytes(object_key=keys[0])
+    assert operation.request_summary["upload_objects"] == keys
+
+
+async def test_late_upload_after_cleanup_cannot_escape_reclamation(session, monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from app.production.final_film_uploads import cleanup_final_film_uploads
+
+    monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
+    project, user, edit, _shots, _videos = await _seed_renderable_final_film(session)
+    project_id = project.id
+    queued = await queue_final_film_render(
+        session,
+        project_id=project_id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+        idempotency_key="late-upload",
+        name="Final",
+    )
+    run_id = queued.node_run_id
+    run = await session.get(NodeRun, run_id)
+    run.status = "running"
+    await session.commit()
+    node = await session.get(GraphNode, run.graph_node_id)
+    store = get_object_store()
+    original_put = store.put_file
+    input_keys = set(store.keys())
+    factory = async_sessionmaker(session.bind, expire_on_commit=False)
+
+    async def late_put(**kwargs):
+        async with factory() as cleanup_session:
+            operation = await cleanup_session.scalar(
+                select(ProviderOperation).where(ProviderOperation.node_run_id == run_id)
+            )
+            operation.submitted_at = datetime.now(UTC) - timedelta(minutes=32)
+            await cleanup_session.commit()
+            await cleanup_final_film_uploads(cleanup_session, node_run_id=run_id, store=store)
+        return await original_put(**kwargs)
+
+    monkeypatch.setattr(store, "put_file", late_put)
+    with pytest.raises(ValidationAppError) as failure:
+        await execute_final_film_node_run(session, run=run, node=node, obj_store=store)
+    assert failure.value.details["code"] == "FINAL_FILM_ATTEMPT_EXPIRED"
+    assert set(store.keys()) == input_keys, "late upload escaped the cleanup journal"
+    assert await session.scalar(select(Export).where(Export.project_id == project_id)) is None
+    operation = await session.scalar(
+        select(ProviderOperation).where(ProviderOperation.node_run_id == run_id)
+    )
+    assert operation.request_summary["uploads_finished"] is True
+    assert operation.request_summary["upload_objects"] == []
 
 
 @pytest.mark.asyncio
@@ -339,9 +242,7 @@ async def test_delivery_requires_a_human_decision_for_every_clip(
     project, user, edit, shots, videos = await _seed_renderable_final_film(session)
     decision = (
         await session.execute(
-            select(HumanReviewDecision).where(
-                HumanReviewDecision.artifact_id == videos[0].id
-            )
+            select(HumanReviewDecision).where(HumanReviewDecision.artifact_id == videos[0].id)
         )
     ).scalar_one()
     await session.delete(decision)
@@ -362,10 +263,10 @@ async def test_delivery_requires_a_human_decision_for_every_clip(
     assert blocked.value.details.get("artifact_id") == str(videos[0].id)
     # Nothing was queued for a clip that was never approved.
     runs = (
-        await session.execute(
-            select(NodeRun).where(NodeRun.project_id == project.id)
-        )
-    ).scalars().all()
+        (await session.execute(select(NodeRun).where(NodeRun.project_id == project.id)))
+        .scalars()
+        .all()
+    )
     assert not any(
         str((run.input_snapshot or {}).get("idempotency_key") or "").startswith("auto-")
         or (run.input_snapshot or {}).get("node_key") == "final_film"
@@ -520,6 +421,70 @@ async def test_failed_final_film_retry_uses_next_attempt_and_same_external_key(
 
 
 @pytest.mark.asyncio
+async def test_explicit_typed_edit_freezes_legacy_sound_text_and_timing(
+    session: AsyncSession,
+) -> None:
+    from app.editing.adapter import EditingAdapter
+    from app.production.edit_render_plan import build_render_plan
+
+    project, _user, edit, shots, videos = await _seed_renderable_final_film(session, shot_count=2)
+    old = dict(edit.timeline)
+    clips = [dict(c) for c in old["clips"]]
+    audio_ids = []
+    for shot in shots:
+        composite = await session.get(Artifact, shot.formal_composite_artifact_id)
+        run = await session.get(NodeRun, composite.produced_by_run_id)
+        facts = dict(run.input_snapshot)
+        run.input_snapshot = {**facts, "dialogue": shot.dialogue}
+        audio_ids.append(facts["media_inputs"]["voice"]["artifact_id"])
+    clips[0].pop("subtitle")
+    clips[0].pop("source_in_seconds")
+    clips[0].update(
+        trim_start_seconds=0.5, trim_end_seconds=4.5, duration_seconds=4, audio_volume=0.62
+    )
+    clips[1].update(audio_id=audio_ids[0], transition="crossfade")
+    music = {"music_artifact_id": audio_ids[1], "music_volume": 0.17}
+    edit.timeline = {"clips": clips, "metadata": music}
+    await session.commit()
+    # A later edit to the canonical dialogue must not replace the approved original wording.
+    shots[0].dialogue = "later canonical dialogue"
+    await session.flush()
+    adapter = EditingAdapter(session)
+    saved = await adapter.save_timeline(
+        project_id=project.id,
+        session_id=edit.id,
+        expected_session_version=1,
+        timeline={**edit.timeline, "schema_version": 2},
+    )
+    first, second = saved.timeline["clips"]
+    assert first["subtitle"] == "Line 1" and first["audio_id"] == audio_ids[0]
+    assert second["subtitle"] == "" and second["audio_id"] == audio_ids[0]
+    assert saved.timeline["metadata"] == music
+    plan = build_render_plan(
+        edit_session_id=edit.id,
+        timeline_version=2,
+        timeline_hash="test",
+        episode_id=edit.episode_id,
+        document=saved.timeline,
+    )
+    assert (
+        plan.instructions[0].source_in_seconds,
+        plan.instructions[0].source_out_seconds,
+        plan.instructions[0].audio_volume,
+    ) == (0.5, 4.5, 0.62)
+    assert plan.instructions[1].transition_duration_seconds == 0.25
+    shots[0].formal_video_artifact_id = None
+    await session.flush()
+    updated = await adapter.save_timeline(
+        project_id=project.id,
+        session_id=edit.id,
+        expected_session_version=2,
+        timeline=saved.timeline,
+    )
+    assert updated.timeline["clips"][0]["selection_snapshot"] == first["selection_snapshot"]
+    assert updated.timeline["clips"][0]["source"]["artifact_id"] == str(videos[0].id)
+
+
 async def test_queued_retry_is_idempotent_and_key_reuse_is_rejected(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -563,6 +528,18 @@ async def test_queued_retry_is_idempotent_and_key_reuse_is_rejected(
     edit.timeline["metadata"] = {"changed": True}
     edit.version = 2
     await session.commit()
+    # A retry of the original user decision still finds the original run
+    # after a later Save; only a different decision using this key conflicts.
+    historic = await queue_final_film_render(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=1,
+        actor_id=user.id,
+        idempotency_key="completed-final",
+        name="Final",
+    )
+    assert historic.node_run_id == retry.node_run_id
     with pytest.raises(ValidationAppError) as exc:
         await queue_final_film_render(
             session,
@@ -583,6 +560,15 @@ async def test_worker_renders_frozen_timeline_and_persists_lineage(
 ) -> None:
     monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
     project, user, edit, shots, _videos = await _seed_renderable_final_film(session, shot_count=2)
+    from app.assets.models import Scene
+    from app.production.session_exports import timeline_hash
+
+    scene = await session.get(Scene, shots[0].scene_id)
+    assert scene is not None
+    episode_id = scene.episode_id
+    edit.episode_id = episode_id
+    await session.commit()
+    expected_hash = timeline_hash(edit.timeline)
     queued = await queue_final_film_render(
         session,
         project_id=project.id,
@@ -594,6 +580,9 @@ async def test_worker_renders_frozen_timeline_and_persists_lineage(
     )
     run = await session.get(NodeRun, queued.node_run_id)
     assert run is not None
+    assert queued.episode_id == episode_id and queued.timeline_hash == expected_hash
+    edit.episode_id = None
+    edit.version += 1
     run.status = "running"
     await session.commit()
     node = await session.get(GraphNode, run.graph_node_id)
@@ -614,6 +603,9 @@ async def test_worker_renders_frozen_timeline_and_persists_lineage(
         .scalars()
         .one()
     )
+    assert export.episode_id == episode_id and export.timeline_hash == expected_hash
+    assert export.timeline_version == 1 and export.edit_session_id == edit.id
+    assert export.render_node_run_id == run.id
     assert export.result_artifact_id == artifact.id
     items = (
         (await session.execute(select(ExportItem).where(ExportItem.export_id == export.id)))
@@ -636,14 +628,17 @@ async def test_worker_renders_frozen_timeline_and_persists_lineage(
 
 
 @pytest.mark.asyncio
-async def test_timeline_renderer_reports_edit_semantics_in_test_mode() -> None:
+async def test_timeline_renderer_reports_edit_semantics_in_test_mode(tmp_path) -> None:
+    video, audio = tmp_path / "video.mp4", tmp_path / "audio.wav"
+    video.write_bytes(b"video")
+    audio.write_bytes(b"audio")
     result = await render_timeline(
         [
             TimelineRenderClip(
                 clip_id="clip-1",
                 video_artifact_id="video-1",
-                video_bytes=b"video",
-                audio_bytes=b"audio",
+                video_path=video,
+                audio_path=audio,
                 subtitle_text="Edited subtitle",
                 source_in_seconds=1.25,
                 duration_seconds=2.5,
@@ -651,6 +646,7 @@ async def test_timeline_renderer_reports_edit_semantics_in_test_mode() -> None:
             )
         ],
         lineage="lineage",
+        output_path=tmp_path / "final.mp4",
     )
     assert result.summary["timeline_renderer"] == "ffmpeg-v2"
     assert result.summary["clip_count"] == 1
@@ -695,7 +691,6 @@ async def test_history_uses_frozen_timeline_and_survives_unavailable_media(
     )
     run = await session.get(NodeRun, job.node_run_id)
     assert run is not None
-    run.status = "completed"
     artifact = Artifact(
         project_id=project.id,
         artifact_type="video",
@@ -705,8 +700,12 @@ async def test_history_uses_frozen_timeline_and_survives_unavailable_media(
         mime_type="video/mp4",
         byte_size=32,
         duration_seconds=Decimal("5"),
+        produced_by_run_id=run.id,
     )
     session.add(artifact)
+    await session.flush()
+    run.result_artifact_id = artifact.id
+    run.status = "completed"
     await session.flush()
     exported = Export(
         project_id=project.id,
@@ -832,6 +831,55 @@ async def test_subtitle_export_is_frozen_and_rerender_never_creates_media(sessio
 
 
 @pytest.mark.asyncio
+async def test_reexporting_an_unchanged_timeline_keeps_its_result(session, monkeypatch):
+    """Re-exporting identical bytes must still return a readable Final Film.
+
+    Rendering the same frozen timeline twice produces identical media on purpose,
+    so the second export reuses the first run's Artifacts.  The read model then
+    saw a subtitle Artifact owned by the earlier run and reported the film as
+    unavailable, which dropped the newest export out of the history and left the
+    editing page showing the older one.
+    """
+    from app.production.final_film import get_final_film_status
+
+    monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
+    project, user, edit, _shots, _videos = await _seed_renderable_final_film(session, shot_count=2)
+    clips = [dict(clip) for clip in edit.timeline["clips"]]
+    for index, clip in enumerate(clips):
+        clip["subtitle"] = f"字幕 {index + 1}"
+    edit.timeline = {"clips": clips, "metadata": {}}
+    await session.commit()
+
+    async def render(key):
+        queued = await queue_final_film_render(
+            session,
+            project_id=project.id,
+            edit_session_id=edit.id,
+            expected_timeline_version=edit.version,
+            actor_id=user.id,
+            idempotency_key=key,
+            name="Re-export",
+        )
+        run = await session.get(NodeRun, queued.node_run_id)
+        run.status = "running"
+        await session.commit()
+        node = await session.get(GraphNode, run.graph_node_id)
+        await execute_final_film_node_run(session, run=run, node=node, obj_store=get_object_store())
+        return await get_final_film_status(session, project_id=project.id, node_run_id=run.id)
+
+    first = await render("reexport:first")
+    assert first.result.subtitle_artifact_id is not None
+    assert first.result.subtitle_cue_count > 0
+
+    # Same timeline version, deliberately exported again.
+    second = await render("reexport:second")
+    assert second.result is not None, "a re-export must stay readable"
+    assert second.result.artifact_id == first.result.artifact_id
+    assert second.result.subtitle_artifact_id == first.result.subtitle_artifact_id
+    assert second.result.subtitle_cue_count == first.result.subtitle_cue_count
+
+
+@pytest.mark.asyncio
 async def test_subtitle_store_failure_does_not_publish_half_an_export(session, monkeypatch):
     monkeypatch.setattr(NodeRunScheduler, "enqueue_node_run_only", _fake_enqueue)
     project, user, edit, _shots, _videos = await _seed_renderable_final_film(session)
@@ -879,4 +927,414 @@ async def test_subtitle_store_failure_does_not_publish_half_an_export(session, m
             ).scalars()
         )
         == []
+    )
+
+
+async def test_prepare_voice_change_refreshes_tail_not_video_and_changes_export_identity(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.providers.voice_config import freeze_project_voice
+
+    project, user, edit, shots, videos = await _seed_renderable_final_film(
+        session, canonical_graph=True
+    )
+    shot = shots[0]
+    await _canonicalize_tail_fixture(session, project, user)
+    await session.flush()
+    monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", _fake_enqueue)
+    first = await _confirm_and_prepare(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    first_runs = list(
+        (await session.execute(select(NodeRun).where(NodeRun.id.in_(first.node_run_ids)))).scalars()
+    )
+    assert first_runs
+    assert not any(run.input_snapshot.get("node_key") == "video" for run in first_runs)
+    composite = next(run for run in first_runs if run.input_snapshot["node_key"] == "composite")
+    assert composite.input_snapshot["formal_video_artifact_id"] == str(videos[0].id)
+    voice = next(run for run in first_runs if run.input_snapshot["node_key"] == "voice")
+    expected_voice = (
+        await freeze_project_voice(
+            session,
+            project_id=project.id,
+            director_state={},
+            silent=not shot.dialogue.strip(),
+        )
+    ).model_dump(mode="json")
+    assert voice.input_snapshot["voice_execution"] == expected_voice
+    repeated = await _confirm_and_prepare(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    assert not repeated.node_run_ids
+    assert repeated.preparation_fingerprint == first.preparation_fingerprint
+    shot.director_state = {"voice": {"voice_id": "v2", "rate_percent": -10}}
+    await session.flush()
+    # A changed voice selection cannot supersede an unfinished, possibly submitted run.
+    from app.shared.errors import ConflictError
+
+    with pytest.raises(ConflictError):
+        await _confirm_and_prepare(
+            session,
+            project_id=project.id,
+            edit_session_id=edit.id,
+            expected_timeline_version=edit.version,
+            actor_id=user.id,
+        )
+    voice.status = "cancelled"  # Explicit cancellation before the first submission.
+    await session.flush()
+    changed = await _confirm_and_prepare(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    changed_runs = list(
+        (
+            await session.execute(select(NodeRun).where(NodeRun.id.in_(changed.node_run_ids)))
+        ).scalars()
+    )
+    assert changed.preparation_fingerprint != first.preparation_fingerprint
+    assert changed.node_run_ids
+    assert not any(run.input_snapshot.get("node_key") == "video" for run in changed_runs)
+    new_voice = next(run for run in changed_runs if run.input_snapshot["node_key"] == "voice")
+    assert new_voice.input_snapshot["voice_execution"]["voice"] == "v2"
+    assert shot.formal_video_artifact_id == videos[0].id
+
+
+async def test_muted_clip_preparation_freezes_local_silence_not_remote_tts(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+
+    project, user, edit, _shots, _videos = await _seed_renderable_final_film(
+        session, canonical_graph=True
+    )
+    await _canonicalize_tail_fixture(session, project, user)
+    edit.timeline = {**edit.timeline, "clips": [{**edit.timeline["clips"][0], "muted": True}]}
+    await session.flush()
+    monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", _fake_enqueue)
+    prepared = await _confirm_and_prepare(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    runs = list(
+        (
+            await session.execute(select(NodeRun).where(NodeRun.id.in_(prepared.node_run_ids)))
+        ).scalars()
+    )
+    voice = next(run for run in runs if run.input_snapshot["node_key"] == "voice")
+    assert voice.input_snapshot["voice_execution"]["engine"] == "pcm-silence"
+    assert voice.input_snapshot["plan"]["prompt"] == ""
+
+
+async def _canonicalize_tail_fixture(session: AsyncSession, project: Project, user: User) -> None:
+    from app.production.models import GraphVersion
+
+    node = (
+        (
+            await session.execute(
+                select(GraphNode)
+                .join(NodeRun, NodeRun.graph_node_id == GraphNode.id)
+                .where(NodeRun.project_id == project.id)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    assert node is not None
+    version = await session.get(GraphVersion, node.graph_version_id)
+    assert version is not None
+    video_node = (
+        await session.execute(
+            select(GraphNode).where(
+                GraphNode.graph_version_id == version.id, GraphNode.node_key == "video"
+            )
+        )
+    ).scalar_one()
+    shot = (await session.execute(select(Shot).where(Shot.project_id == project.id))).scalar_one()
+    session.add(
+        NodeRun(
+            project_id=project.id,
+            graph_version_id=version.id,
+            graph_node_id=video_node.id,
+            attempt_no=2,
+            idempotency_key=f"formal-video-source-{uuid4()}",
+            input_hash="e" * 64,
+            status="completed",
+            result_artifact_id=shot.formal_video_artifact_id,
+            created_by=user.id,
+            input_snapshot={
+                "shot_id": str(shot.id),
+                "node_key": "video",
+                "execution_branch": "formal",
+            },
+        )
+    )
+    await session.flush()
+
+
+@pytest.mark.parametrize("valid_wav", [True, False])
+async def test_voice_worker_records_frozen_identity_and_rejects_invalid_audio(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch, valid_wav: bool
+) -> None:
+    from app.execution.voice_path import execute_voice_node_run
+    from app.providers.voice_config import freeze_project_voice
+    from app.providers.voice_runtime import SilentVoiceAdapter
+
+    project, user, edit, shots, _videos = await _seed_renderable_final_film(
+        session, canonical_graph=True
+    )
+    await _canonicalize_tail_fixture(session, project, user)
+    monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", _fake_enqueue)
+    prepared = await _confirm_and_prepare(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    runs = list(
+        (
+            await session.execute(select(NodeRun).where(NodeRun.id.in_(prepared.node_run_ids)))
+        ).scalars()
+    )
+    run = next(item for item in runs if item.input_snapshot["node_key"] == "voice")
+    node = await session.get(GraphNode, run.graph_node_id)
+    assert node is not None
+    adapter = SilentVoiceAdapter()
+    original_create = adapter.create
+
+    async def create(request):
+        assert request["prompt"] == shots[0].dialogue
+        response = await original_create(request)
+        if not valid_wav:
+            adapter.blobs[response["remote_task_id"]] = b"RIFF-this-is-not-a-wave-file"
+        return response
+
+    adapter.create = create
+    received = []
+
+    async def fake_adapter(spec, **_kwargs):
+        received.append(spec)
+        return adapter
+
+    monkeypatch.setattr("app.execution.voice_path.get_voice_adapter", fake_adapter)
+    run.status = "running"
+    if valid_wav:
+        result = await execute_voice_node_run(
+            session,
+            run=run,
+            node=node,
+            snapshot=run.input_snapshot,
+            store=get_object_store(),
+            prompt=shots[0].dialogue,
+        )
+        artifact = await session.get(Artifact, result.artifact_id)
+        assert artifact is not None
+        assert artifact.mime_type == "audio/wav"
+        assert artifact.duration_seconds == Decimal("0.25")
+    else:
+        with pytest.raises(ValidationAppError, match="VOICE_OUTPUT_INVALID"):
+            await execute_voice_node_run(
+                session,
+                run=run,
+                node=node,
+                snapshot=run.input_snapshot,
+                store=get_object_store(),
+                prompt=shots[0].dialogue,
+            )
+        assert run.status == "failed"
+        assert run.result_artifact_id is None
+    assert received == [
+        await freeze_project_voice(session, project_id=project.id, director_state={})
+    ]
+    operation = (
+        await session.execute(
+            select(ProviderOperation).where(ProviderOperation.node_run_id == run.id)
+        )
+    ).scalar_one()
+    assert operation.actual_provider == "agnes"
+    assert operation.actual_model == "unit-voice"
+    assert operation.execution_path_version == "voice-model:aaaaaaaaaaaa"
+    assert operation.status == ("succeeded" if valid_wav else "failed")
+    if valid_wav:
+        assert operation.response_summary["local"] is False
+
+
+async def test_prepare_replaces_unpinned_composite_without_repeating_voice_or_video(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+
+    project, user, edit, shots, videos = await _seed_renderable_final_film(
+        session, canonical_graph=True
+    )
+    await _canonicalize_tail_fixture(session, project, user)
+    monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", _fake_enqueue)
+    first = await _confirm_and_prepare(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    runs = list(
+        (await session.execute(select(NodeRun).where(NodeRun.id.in_(first.node_run_ids)))).scalars()
+    )
+    stale = next(run for run in runs if run.input_snapshot["node_key"] == "composite")
+    stale.input_snapshot = {
+        key: value
+        for key, value in stale.input_snapshot.items()
+        if key != "formal_video_artifact_id"
+    }
+    stale.status = "completed"
+    stale.result_artifact_id = videos[0].id
+    shots[0].formal_composite_artifact_id = None
+    await session.flush()
+    prepared = await _confirm_and_prepare(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    replacements = list(
+        (
+            await session.execute(select(NodeRun).where(NodeRun.id.in_(prepared.node_run_ids)))
+        ).scalars()
+    )
+    assert [run.input_snapshot["node_key"] for run in replacements] == ["composite"]
+    assert replacements[0].input_snapshot["formal_video_artifact_id"] == str(videos[0].id)
+
+
+async def test_prepare_preview_is_read_only_and_stable(session: AsyncSession) -> None:
+    from app.execution.models import NodeRun
+    from app.production.final_film import preview_formal_tail
+    from sqlalchemy import func
+
+    project, user, edit, shots, _videos = await _seed_renderable_final_film(
+        session, canonical_graph=True
+    )
+    await _canonicalize_tail_fixture(session, project, user)
+    await session.flush()
+    before = await session.scalar(
+        select(func.count()).select_from(NodeRun).where(NodeRun.project_id == project.id)
+    )
+    first = await preview_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+    )
+    after = await session.scalar(
+        select(func.count()).select_from(NodeRun).where(NodeRun.project_id == project.id)
+    )
+    assert before == after
+    assert first.operations
+    assert {item.shot_id for item in first.operations} == {shot.id for shot in shots}
+    assert all(item.model_identity for item in first.operations if item.kind == "voice")
+    second = await preview_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+    )
+    assert second.preparation_fingerprint == first.preparation_fingerprint
+
+
+async def test_prepare_authorizes_each_command_and_preview_does_not(
+    session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.production.command_models import ProductionCommandAuthorization
+    from app.production.final_film import preview_formal_tail
+    from sqlalchemy import func
+
+    project, user, edit, _shots, _videos = await _seed_renderable_final_film(
+        session, canonical_graph=True
+    )
+    await _canonicalize_tail_fixture(session, project, user)
+    await session.flush()
+    monkeypatch.setattr(NodeRunScheduler, "_enqueue_node_run", _fake_enqueue)
+
+    async def _grants() -> list[ProductionCommandAuthorization]:
+        return list(
+            (
+                await session.execute(
+                    select(ProductionCommandAuthorization).where(
+                        ProductionCommandAuthorization.command_key.like("final-film-prepare:%")
+                    )
+                )
+            ).scalars()
+        )
+
+    assert await _grants() == []
+    await preview_formal_tail(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+    )
+    assert await _grants() == []
+
+    prepared = await _confirm_and_prepare(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=edit.version,
+        actor_id=user.id,
+    )
+    grants = await _grants()
+    assert {grant.node_run_id for grant in grants} == set(prepared.node_run_ids)
+    assert all(grant.status == "accepted" for grant in grants)
+    assert all(grant.actor_id == user.id for grant in grants)
+    assert await session.scalar(
+        select(func.count()).select_from(ProductionCommandAuthorization)
+    ) == len(prepared.node_run_ids)
+
+
+async def _confirm_and_prepare(
+    session, *, project_id, edit_session_id, expected_timeline_version, actor_id
+):
+    from app.production.final_film import (
+        approve_preparation,
+        prepare_formal_tail,
+        preview_formal_tail,
+    )
+
+    scope = dict(
+        project_id=project_id,
+        edit_session_id=edit_session_id,
+        expected_timeline_version=expected_timeline_version,
+    )
+    preview = await preview_formal_tail(session, **scope)
+    keys = [item.operation_key for item in preview.operations]
+    ids = (
+        (
+            await approve_preparation(
+                session,
+                **scope,
+                actor_id=actor_id,
+                preparation_fingerprint=preview.preparation_fingerprint,
+                operation_keys=keys,
+            )
+        )
+        if keys
+        else []
+    )
+    return await prepare_formal_tail(
+        session,
+        **scope,
+        actor_id=actor_id,
+        preparation_fingerprint=preview.preparation_fingerprint,
+        command_authorization_ids=ids,
     )

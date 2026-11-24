@@ -1,0 +1,108 @@
+{
+  "manifest_version": "2026-11-03",
+  "provider_type": "agnes",
+  "protocol_profile": "agnes_cn_v1",
+  "model_id": "agnes-video-2.5-flash",
+  "model_revision": "cn-2026-11-03-r1",
+  "media_kind": "video",
+  "display_name": "agnes-video-2.5-flash",
+  "lifecycle": "active",
+  "catalog_source": "official_static",
+  "implementation_status": "contract_tested",
+  "documented_at": "2026-11-03",
+  "operations": {
+    "video.generate": {
+      "operation": "video.generate",
+      "capabilities": [
+        "video.t2v",
+        "video.i2v.first_frame",
+        "video.i2v.last_frame",
+        "video.reference.image",
+        "video.reference.audio"
+      ],
+      "input_contracts": {
+        "text": {
+          "input_slots": {},
+          "maximum_total_references": 0
+        },
+        "frame": {
+          "input_slots": {
+            "first_frame": {
+              "maximum": 1,
+              "media_types": ["image/*"]
+            },
+            "last_frame": {
+              "maximum": 1,
+              "media_types": ["image/*"]
+            }
+          },
+          "minimum_total_references": 1
+        },
+        "reference": {
+          "input_slots": {
+            "reference_image": {
+              "maximum": 5,
+              "media_types": ["image/*"]
+            },
+            "reference_audio": {
+              "maximum": 3,
+              "media_types": ["audio/*"]
+            }
+          },
+          "minimum_total_references": 1,
+          "maximum_total_references": 8
+        }
+      },
+      "output_options": {
+        "duration_seconds": {
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 12,
+          "default": 5
+        },
+        "resolution": {
+          "type": "string",
+          "enum": ["720P"],
+          "default": "720P"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "enum": ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"],
+          "default": "16:9"
+        }
+      }
+    }
+  },
+  "documented_features": ["product_subset.cn_generate_only"],
+  "evidence": {
+    "official_cn_request": {
+      "checked_at": "2026-11-03",
+      "source_type": "official_api_doc",
+      "source_url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-video-25-flash"
+    },
+    "compiler_contract": {
+      "checked_at": "2026-11-03",
+      "source_type": "contract_fixture",
+      "source_url": "repository:backend/tests/unit/test_agnes_flash_release.py"
+    },
+    "/operations/video.generate/capabilities": {
+      "source_type": "official_api_doc",
+      "checked_at": "2026-11-03",
+      "source_url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-video-25-flash"
+    },
+    "/operations/video.generate/input_contracts": {
+      "source_type": "official_api_doc",
+      "checked_at": "2026-11-03",
+      "source_url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-video-25-flash"
+    },
+    "/operations/video.generate/output_options": {
+      "source_type": "official_api_doc",
+      "checked_at": "2026-11-03",
+      "source_url": "https://wiki.agnes-ai.cn/zh-Hans/docs/agnes-video-25-flash"
+    }
+  },
+  "option_schema": {
+    "namespace": "",
+    "options": {}
+  }
+}

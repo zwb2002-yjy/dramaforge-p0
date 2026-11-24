@@ -73,6 +73,7 @@ async def _project(session: AsyncSession):
     session.add(workspace)
     await session.flush()
     project = await ProjectService(session).create_project(
+        work_type="serial_comic",
         workspace_id=workspace.id,
         name=f"P4-{uuid4().hex[:6]}",
         aspect_ratio="9:16",

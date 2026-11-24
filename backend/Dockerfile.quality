@@ -1,26 +1,91 @@
+# Local ASR build stage shared by the quality image: fixed whisper.cpp tag plus the
+# frozen multilingual model, verified by SHA-256 before use. No cloud fallback.
+FROM python:3.14-slim-bookworm AS whisper
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN set -eux; \
+    sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends build-essential cmake curl ca-certificates; \
+    rm -rf /var/lib/apt/lists/*
+
+ARG WHISPER_SOURCE_URL=https://codeload.github.com/ggml-org/whisper.cpp/tar.gz/refs/tags/v1.9.5
+ARG WHISPER_MODEL_SHA256=60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe
+ARG WHISPER_MODEL_URLS="https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin https://hf-mirror.com/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.bin"
+
+RUN set -eux; \
+    mkdir -p /src; \
+    curl -fsSL --retry 5 --retry-delay 3 --max-time 900 -o /src/whisper.tar.gz "$WHISPER_SOURCE_URL"; \
+    tar -xzf /src/whisper.tar.gz -C /src; \
+    mv /src/whisper.cpp-* /src/whisper; \
+    cmake -S /src/whisper -B /src/build -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON \
+        -DWHISPER_BUILD_SERVER=OFF; \
+    cmake --build /src/build --target whisper-cli -j"$(nproc)"; \
+    install -m 0755 /src/build/bin/whisper-cli /usr/local/bin/whisper-cli
+
+RUN set -eux; \
+    mkdir -p /opt/whisper; \
+    for url in $WHISPER_MODEL_URLS; do \
+        if curl -fsSL --retry 2 --retry-delay 5 --connect-timeout 15 --max-time 900 -o /opt/whisper/ggml-base.bin "$url"; then \
+            break; \
+        fi; \
+        rm -f /opt/whisper/ggml-base.bin; \
+    done; \
+    test -s /opt/whisper/ggml-base.bin; \
+    echo "$WHISPER_MODEL_SHA256  /opt/whisper/ggml-base.bin" | sha256sum -c -
+
+FROM python:3.14-slim-bookworm AS restic
+COPY backend/image-tools/ /opt/restic-release/
+RUN python /opt/restic-release/install_restic.py /usr/local/bin/restic
+
 FROM python:3.14-slim-bookworm
 
 WORKDIR /workspace
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    UV_HTTP_TIMEOUT=180
+    UV_HTTP_TIMEOUT=180 \
+    DRAMAFORGE_WHISPER_CLI=/usr/local/bin/whisper-cli \
+    DRAMAFORGE_WHISPER_MODEL=/opt/whisper/ggml-base.bin \
+    DRAMAFORGE_WHISPER_MODEL_SHA256=60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe \
+    DRAMAFORGE_WHISPER_VERSION=v1.9.5 \
+    DRAMAFORGE_WHISPER_THREADS=4
 
 RUN set -eux; \
     sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources; \
     apt_options="-o Acquire::Retries=10 -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0 -o Acquire::http::Timeout=60"; \
     apt-get ${apt_options} update; \
     attempt=1; \
-    while ! apt-get ${apt_options} install -y --no-install-recommends ffmpeg espeak-ng fonts-noto-cjk git; do \
+    while ! apt-get ${apt_options} install -y --no-install-recommends ffmpeg espeak-ng fonts-noto-cjk git postgresql-client iptables libgomp1 poppler-utils tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-chi-tra tesseract-ocr-eng; do \
         if [ "${attempt}" -ge 3 ]; then exit 1; fi; \
         attempt=$((attempt + 1)); \
         apt-get ${apt_options} update; \
     done; \
     rm -rf /var/lib/apt/lists/*; \
-    pip install --no-cache-dir "uv==0.12.0"
+    pip install --no-cache-dir "uv==0.13.3"
+
+COPY --from=restic /usr/local/bin/restic /usr/local/bin/restic
+COPY --from=whisper /usr/local/bin/whisper-cli /usr/local/bin/whisper-cli
+COPY --from=whisper /opt/whisper/ggml-base.bin /opt/whisper/ggml-base.bin
+
+RUN command -v pdftotext >/dev/null \
+    && command -v tesseract >/dev/null \
+    && tesseract --list-langs 2>/dev/null | grep -qx chi_sim \
+    && whisper-cli --help 2>&1 | grep -q 'usage: whisper-cli' \
+    && test -s /opt/whisper/ggml-base.bin
+
+# Cache dependency installation independently from source/docs changes.
+COPY backend/pyproject.toml backend/uv.lock backend/README.md /workspace/backend/
+RUN uv sync --locked --extra dev --directory /workspace/backend --no-install-project
 
 COPY . .
 
-RUN uv sync --locked --extra dev --directory /workspace/backend
+# Install the local project after source arrives. The resolved dependencies stay
+# in the earlier image layer while pyproject.toml and uv.lock are unchanged.
+ARG QUALITY_UV_OFFLINE=false
+RUN --mount=type=cache,id=dramaforge-quality-uv,target=/root/.cache/uv,sharing=locked \
+    UV_OFFLINE=${QUALITY_UV_OFFLINE} uv sync --locked --extra dev --directory /workspace/backend
 
-CMD ["sh", "-c", "set -eu; python3 scripts/check_directory_compliance.py; python3 scripts/check_canonical_surface.py; uv run --directory backend ruff check app tests alembic/versions; uv run --directory backend mypy app; uv run --directory backend pytest tests/unit -q; uv run --directory backend alembic upgrade head; uv run --directory backend alembic check; uv run --directory backend pytest tests/integration --ignore=tests/integration/test_litellm_real_proxy.py -q -rs --fail-on-skip; mkdir -p /contract; PYTHONPATH=/workspace/backend uv run --directory backend python /workspace/scripts/_export_openapi.py --out /contract/openapi.json"]
+CMD ["sh", "-c", "set -eu; python3 scripts/check_directory_compliance.py; python3 scripts/check_canonical_surface.py; python3 scripts/arch_import_scan.py --check; python3 scripts/check_provider_authority.py; PYTHONPATH=/workspace/backend uv run --offline --no-sync --directory backend python /workspace/scripts/generate_model_support_docs.py --check; uv run --offline --no-sync --directory backend ruff check app tests alembic/versions; uv run --offline --no-sync --directory backend ruff check --ignore E501 ../scripts; uv run --offline --no-sync --directory backend mypy app; uv run --offline --no-sync --directory backend pytest tests/unit -q; uv run --offline --no-sync --directory backend alembic upgrade head; uv run --offline --no-sync --directory backend alembic check; uv run --offline --no-sync --directory backend pytest tests/integration --ignore=tests/integration/test_litellm_real_proxy.py --ignore=tests/integration/test_litellm_proxy_policy.py -q -rs --fail-on-skip; mkdir -p /contract; PYTHONPATH=/workspace/backend uv run --offline --no-sync --directory backend python /workspace/scripts/_export_openapi.py --out /contract/openapi.json"]

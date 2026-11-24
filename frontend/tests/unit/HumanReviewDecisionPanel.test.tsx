@@ -185,6 +185,32 @@ describe("HumanReviewDecisionPanel", () => {
     );
   });
 
+  it("records demo confirmation without presenting it as a quality approval", async () => {
+    const decisions: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.includes("/review-summary")) return json(summary());
+      if (url.includes("/review-decisions")) {
+        const body = JSON.parse(String(init?.body)) as { decision: string };
+        decisions.push(body.decision);
+        return json({ ...summary(), decision: "demo_confirmed", reason: "演示链路完成" }, 201);
+      }
+      return json({});
+    });
+    renderPanel();
+
+    fireEvent.change(await screen.findByLabelText("关键帧身份审查判断理由"), {
+      target: { value: "演示链路完成" },
+    });
+    fireEvent.click(screen.getByTestId("review-demo-confirm-identity"));
+
+    await waitFor(() => expect(decisions).toEqual(["demo_confirmed"]));
+    expect(await screen.findByTestId("review-decision-feedback")).toHaveTextContent(
+      "不会放行正式素材",
+    );
+  });
+
   it("refuses to record a decision when no automatic evidence exists", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
       const url = String(input);
@@ -235,12 +261,86 @@ describe("HumanReviewDecisionPanel", () => {
     await waitFor(() => expect(screen.getByTestId("review-blocker")).toHaveTextContent("不再适用"));
   });
 
+  it("clears the previous artifact's draft when the review target changes", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      const artifactId = new URL(url, "http://localhost").searchParams.get("artifact_id");
+      return json(summary({ artifact_id: artifactId }));
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const panel = (artifactId: string) => (
+      <QueryClientProvider client={client}>
+        <HumanReviewDecisionPanel
+          projectId={PROJECT_ID}
+          shotId={SHOT_ID}
+          artifactId={artifactId}
+          reviewKind="identity"
+          stage="formal_keyframe"
+          shotVersion={4}
+          title="关键帧身份审查"
+        />
+      </QueryClientProvider>
+    );
+    const view = render(panel(ARTIFACT_ID));
+    fireEvent.change(await screen.findByLabelText("关键帧身份审查判断理由"), {
+      target: { value: "甲的判断理由" },
+    });
+    view.rerender(panel("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"));
+    expect(screen.getByLabelText("关键帧身份审查判断理由")).toHaveValue("");
+    expect(screen.getByTestId("review-approve-identity")).toBeDisabled();
+  });
+  it("does not show A's late approval in B's review session", async () => {
+    let finish!: (response: Response) => void;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/auth/csrf")) return json({ csrf_token: "csrf-test" });
+      if (url.includes("/review-decisions")) {
+        return new Promise<Response>((resolve) => {
+          finish = resolve;
+        });
+      }
+      const artifactId = new URL(url, "http://localhost").searchParams.get("artifact_id");
+      return json(summary({ artifact_id: artifactId }));
+    });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const panel = (artifactId: string) => (
+      <QueryClientProvider client={client}>
+        <HumanReviewDecisionPanel
+          projectId={PROJECT_ID}
+          shotId={SHOT_ID}
+          artifactId={artifactId}
+          reviewKind="identity"
+          stage="formal_keyframe"
+          shotVersion={4}
+          title="关键帧身份审查"
+        />
+      </QueryClientProvider>
+    );
+    const view = render(panel(ARTIFACT_ID));
+    fireEvent.change(await screen.findByLabelText("关键帧身份审查判断理由"), {
+      target: { value: "甲的判断理由" },
+    });
+    await waitFor(() => expect(screen.getByTestId("review-approve-identity")).toBeEnabled());
+    fireEvent.click(screen.getByTestId("review-approve-identity"));
+    await waitFor(() => expect(finish).toBeDefined());
+    view.rerender(panel("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"));
+    finish(
+      new Response(JSON.stringify({ decision: "approved" }), {
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await waitFor(() => expect(client.isMutating()).toBe(0));
+    expect(screen.queryByTestId("review-decision-feedback")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("关键帧身份审查判断理由")).toHaveValue("");
+  });
   it("translates the machine and blocker vocabulary", () => {
     expect(reviewMachineStatusLabel(null)).toBe("尚无自动检查证据");
     expect(reviewMachineStatusLabel("needs_human")).toBe("待人工判断");
-    expect(reviewMachineStatusLabel("weird_status")).toBe("weird_status");
+    expect(reviewMachineStatusLabel("not_applicable")).toBe("无需自动检查");
+    // An unknown stored value must not reach the surface as a raw token.
+    expect(reviewMachineStatusLabel("weird_status")).toBe("自动检查状态待同步");
     expect(reviewBlockerLabel(null)).toBeNull();
     expect(reviewBlockerLabel("REVIEW_DECISION_REJECTED")).toContain("拒绝");
-    expect(reviewBlockerLabel("SOMETHING_ELSE")).toBe("SOMETHING_ELSE");
+    expect(reviewBlockerLabel("SOMETHING_ELSE")).toBe("该素材尚未满足采用条件。");
   });
 });

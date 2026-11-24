@@ -14,8 +14,9 @@ from app.api.v1.schemas.scenes import (
     SceneSummaryRead,
     SceneWorkspaceRead,
 )
-from app.assets.scene_service import SceneStructureService, SceneSummaryService
+from app.assets.scene_service import SceneStructureService
 from app.workbench.scene_service import SceneWorkspaceService
+from app.workbench.scene_summary import SceneSummaryService
 
 router = APIRouter(tags=["scenes"], dependencies=[Depends(require_selected_workspace)])
 
@@ -41,9 +42,7 @@ async def list_scene_summaries(
     user: CurrentUser,
     session: SessionDep,
 ) -> list[SceneSummaryRead]:
-    summaries = await SceneSummaryService(session).list_summaries(
-        project_id=project_id, actor=user
-    )
+    summaries = await SceneSummaryService(session).list_summaries(project_id=project_id, actor=user)
     return [SceneSummaryRead.model_validate(summary) for summary in summaries]
 
 

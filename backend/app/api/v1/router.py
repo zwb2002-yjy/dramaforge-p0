@@ -1,12 +1,13 @@
 """Version 1 API router."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app.api.v1 import (
     assets,
     auth,
+    batch_production,
+    business_flows,
     creative_capabilities,
-    credentials,
     director,
     director_board,
     editing,
@@ -14,17 +15,26 @@ from app.api.v1 import (
     experiments,
     final_film,
     generations,
+    knowledge,
+    maintenance,
+    master_runs,
     model_candidates,
+    model_inspection,
     model_profiles,
     opencut,
     production,
+    project_egress,
+    project_files,
     projects,
     provider_connections,
     provider_references,
+    public_assets,
     references,
+    research,
     review,
     scenes,
     scripts,
+    source_use,
     story,
     worker,
     workflow_overview,
@@ -35,7 +45,12 @@ api_router = APIRouter()
 
 api_router.include_router(assets.router)
 api_router.include_router(auth.router)
+api_router.include_router(batch_production.router)
+api_router.include_router(business_flows.router)
+api_router.include_router(master_runs.router)
 api_router.include_router(projects.router)
+api_router.include_router(project_egress.router)
+api_router.include_router(project_files.router)
 api_router.include_router(director.router)
 api_router.include_router(director_board.router)
 api_router.include_router(editing.router)
@@ -43,25 +58,34 @@ api_router.include_router(production.router)
 api_router.include_router(review.router)
 api_router.include_router(scenes.router)
 api_router.include_router(scripts.router)
+api_router.include_router(source_use.router)
 api_router.include_router(story.router)
-api_router.include_router(credentials.router)
 api_router.include_router(provider_connections.router)
 api_router.include_router(provider_references.router)
 api_router.include_router(references.router)
+api_router.include_router(research.router)
 api_router.include_router(model_candidates.router)
+api_router.include_router(model_inspection.router)
 api_router.include_router(generations.router)
+api_router.include_router(knowledge.router)
+api_router.include_router(public_assets.router)
 api_router.include_router(model_profiles.router)
 api_router.include_router(opencut.router)
 api_router.include_router(worker.router)
 api_router.include_router(events.router)
 api_router.include_router(experiments.router)
 api_router.include_router(final_film.router)
+api_router.include_router(maintenance.router)
 api_router.include_router(workflow_planning.router)
 api_router.include_router(workflow_overview.router)
 api_router.include_router(creative_capabilities.router)
 
 
 @api_router.get("/status", tags=["system"])
-async def api_status() -> dict[str, str]:
+async def api_status(request: Request) -> dict[str, str]:
     """Lightweight API surface probe."""
-    return {"status": "ok", "api": "v1"}
+    return {
+        "status": "ok",
+        "api": "v1",
+        "runtime_admission_mode": request.app.state.settings.runtime_admission_mode,
+    }

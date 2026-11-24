@@ -58,4 +58,7 @@ ready line, then starts `arq app.workers.<kind>.WorkerSettings`.
 
 The Docker quality gate runs directory and canonical-surface scans, ruff, mypy,
 unit tests, PostgreSQL migration and integration tests, and exports the OpenAPI
-contract before the frontend gate.
+contract before the frontend gate. Provider authority and the generated model-support
+matrix are checked alongside the catalog. The single migration head and the preserved
+model-system/local-media parent chains are documented in
+[DATA_MODEL.md](../docs/DATA_MODEL.md); runtime cutover remains a separate gate.

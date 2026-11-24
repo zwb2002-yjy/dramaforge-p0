@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import select
@@ -9,10 +10,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User
 from app.access.projects import ProjectService
+from app.assets.from_artifact_service import AssetAdoptionReceipt
 from app.assets.models import Asset, AssetVersion
-from app.shared.errors import NotFoundError, ValidationAppError
+from app.assets.public_asset_models import (
+    ProjectPublicAssetLink,
+    PublicAssetPublication,
+)
+from app.assets.public_assets import PublicAssetService, PublicDisplay
+from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 ASSET_VERSION_STATUSES = ("candidate", "formal", "historical", "rejected")
+
+
+@dataclass(frozen=True)
+class CandidateReceipt:
+    asset_id: UUID
+    asset_version_id: UUID
+    version_number: int
+    created_asset_revision: int
+    created: bool
 
 
 class AssetVersionService:
@@ -80,6 +96,7 @@ class AssetVersionService:
         asset = await self._get_asset(
             project_id=project_id, asset_id=asset_id, actor=actor, for_update=True
         )
+        publication, link = await self.version_base(asset, actor)
         next_version = asset.version + 1
         asset.version = next_version
         version = AssetVersion(
@@ -90,11 +107,11 @@ class AssetVersionService:
             name=name if name is not None else asset.name,
             description=description if description is not None else asset.description,
             metadata_json=(
-                dict(metadata_json)
-                if metadata_json is not None
-                else dict(asset.metadata_json)
+                dict(metadata_json) if metadata_json is not None else dict(asset.metadata_json)
             ),
             status="candidate",
+            base_publication_id=publication,
+            base_public_asset_link_id=link,
             created_by=actor.id,
         )
         self._session.add(version)
@@ -125,19 +142,30 @@ class AssetVersionService:
                 "only candidate versions can be promoted",
                 details={"status": candidate.status},
             )
+        if candidate.base_public_asset_link_id:
+            await self.public_base(
+                project_id=project_id,
+                asset_kind=candidate.kind,
+                actor=actor,
+                link_id=candidate.base_public_asset_link_id,
+            )
         # Demote any existing formal first so only one formal exists at a time.
         current_formal = (
-            await self._session.execute(
-                select(AssetVersion)
-                .where(
-                    AssetVersion.asset_id == asset_id,
-                    AssetVersion.project_id == project_id,
-                    AssetVersion.status == "formal",
-                    AssetVersion.id != candidate.id,
+            (
+                await self._session.execute(
+                    select(AssetVersion)
+                    .where(
+                        AssetVersion.asset_id == asset_id,
+                        AssetVersion.project_id == project_id,
+                        AssetVersion.status == "formal",
+                        AssetVersion.id != candidate.id,
+                    )
+                    .with_for_update()
                 )
-                .with_for_update()
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for old in current_formal:
             old.status = "historical"
         candidate.status = "formal"
@@ -145,6 +173,271 @@ class AssetVersionService:
         await self._session.flush()
         return candidate
 
+    async def version_base(
+        self, asset: Asset, actor: User, link_id: UUID | None = None, *, kind: str | None = None
+    ) -> tuple[UUID | None, UUID | None]:
+        """Edits inherit the fixed source of the adopted version or first unadopted variant."""
+        if link_id is None:
+            prior = select(AssetVersion.base_public_asset_link_id).where(
+                AssetVersion.asset_id == asset.id,
+                AssetVersion.project_id == asset.project_id,
+            )
+            if asset.current_version_id:
+                prior = prior.where(AssetVersion.id == asset.current_version_id)
+            else:
+                prior = prior.order_by(AssetVersion.version_number.asc()).limit(1)
+            link_id = await self._session.scalar(prior)
+        publication = await self.public_base(
+            project_id=asset.project_id, asset_kind=kind or asset.kind, actor=actor, link_id=link_id
+        )
+        return publication, link_id
+
+    async def public_base(
+        self, *, project_id: UUID, asset_kind: str, actor: User, link_id: UUID | None
+    ) -> UUID | None:
+        if link_id is None:
+            return None
+        link = await self._session.scalar(
+            select(ProjectPublicAssetLink)
+            .where(
+                ProjectPublicAssetLink.id == link_id,
+                ProjectPublicAssetLink.project_id == project_id,
+                ProjectPublicAssetLink.owner_user_id == actor.id,
+            )
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        if link is None:
+            raise ValidationAppError(
+                "公共引用不属于当前项目", details={"code": "REFERENCE_PROJECT_MISMATCH"}
+            )
+        if link.detached_at is not None:
+            raise ConflictError(
+                "项目已解除此公共引用", details={"code": "REFERENCE_PUBLIC_LINK_DETACHED"}
+            )
+        publication = await self._session.scalar(
+            select(PublicAssetPublication)
+            .where(
+                PublicAssetPublication.id == link.publication_id,
+                PublicAssetPublication.owner_user_id == actor.id,
+            )
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        if (
+            publication is None
+            or not (
+                await PublicAssetService(self._session, actor=actor).read(publication.id)
+            ).usable
+        ):
+            raise ConflictError(
+                "此公共素材当前不可用于项目变体", details={"code": "PUBLIC_ASSET_NOT_AVAILABLE"}
+            )
+        if publication.kind != asset_kind:
+            raise ValidationAppError(
+                "项目变体类别必须与公共素材一致", details={"code": "ASSET_BASE_KIND_MISMATCH"}
+            )
+        return publication.id
+
+    async def create_candidate_with_receipt(
+        self,
+        *,
+        project_id: UUID,
+        asset_id: UUID,
+        actor: User,
+        expected_asset_version: int,
+        request_key: str,
+        request_hash: str,
+        name: str | None = None,
+        description: str | None = None,
+        metadata_json: dict[str, object] | None = None,
+        base_public_asset_link_id: UUID | None = None,
+    ) -> CandidateReceipt:
+        """Create one keyed candidate at the expected Asset revision."""
+        if not 1 <= len(request_key) <= 160:
+            raise ValidationAppError("Invalid candidate request key")
+        asset = await self._get_asset(
+            project_id=project_id, asset_id=asset_id, actor=actor, for_update=True
+        )
+        replay = await self._session.scalar(
+            select(AssetVersion).where(
+                AssetVersion.project_id == project_id,
+                AssetVersion.asset_id == asset_id,
+                AssetVersion.creation_request_key == request_key,
+            )
+        )
+        if replay is not None:
+            if (
+                replay.creation_request_hash != request_hash
+                or (name is not None and replay.name != name)
+                or (description is not None and replay.description != description)
+                or (metadata_json is not None and replay.metadata_json != metadata_json)
+                or (
+                    base_public_asset_link_id is not None
+                    and replay.base_public_asset_link_id != base_public_asset_link_id
+                )
+            ):
+                raise ConflictError(
+                    "This candidate request key was already used with a different input",
+                    details={
+                        "code": "ASSET_CREATION_REQUEST_REUSED",
+                        "asset_id": str(asset.id),
+                        "asset_version_id": str(replay.id),
+                    },
+                )
+            return CandidateReceipt(
+                asset_id=asset.id,
+                asset_version_id=replay.id,
+                version_number=replay.version_number,
+                created_asset_revision=replay.version_number,
+                created=False,
+            )
+        if asset.version != expected_asset_version:
+            raise ConflictError(
+                "Asset version changed; reload before deciding",
+                details={"code": "ASSET_STALE_VERSION", "version": asset.version},
+            )
+        base_publication_id, base_public_asset_link_id = await self.version_base(
+            asset, actor, base_public_asset_link_id
+        )
+        next_version = asset.version + 1
+        asset.version = next_version
+        version = AssetVersion(
+            project_id=project_id,
+            asset_id=asset_id,
+            version_number=next_version,
+            kind=asset.kind,
+            name=name if name is not None else asset.name,
+            description=description if description is not None else asset.description,
+            metadata_json=(
+                dict(metadata_json) if metadata_json is not None else dict(asset.metadata_json)
+            ),
+            status="candidate",
+            base_publication_id=base_publication_id,
+            base_public_asset_link_id=base_public_asset_link_id,
+            creation_request_key=request_key,
+            creation_request_hash=request_hash,
+            created_by=actor.id,
+        )
+        self._session.add(version)
+        await self._session.flush()
+        return CandidateReceipt(
+            asset_id=asset.id,
+            asset_version_id=version.id,
+            version_number=version.version_number,
+            created_asset_revision=asset.version,
+            created=True,
+        )
+
+    async def promote_with_receipt(
+        self,
+        *,
+        project_id: UUID,
+        asset_id: UUID,
+        version_id: UUID,
+        actor: User,
+        expected_asset_version: int,
+        request_key: str,
+        request_hash: str,
+        public_display: PublicDisplay | None = None,
+    ) -> AssetAdoptionReceipt:
+        """Promote one candidate as an explicit adoption decision with a replay receipt."""
+        if not 1 <= len(request_key) <= 160:
+            raise ValidationAppError("Invalid adoption request key")
+        asset = await self._get_asset(
+            project_id=project_id, asset_id=asset_id, actor=actor, for_update=True
+        )
+        candidate = await self._get_version(
+            project_id=project_id,
+            asset_id=asset_id,
+            version_id=version_id,
+            actor=actor,
+            for_update=True,
+        )
+        if candidate.adoption_request_key == request_key:
+            if candidate.adoption_request_hash != request_hash:
+                raise ConflictError(
+                    "This adoption request key was already used with a different decision",
+                    details={
+                        "code": "ASSET_ADOPTION_REQUEST_REUSED",
+                        "asset_id": str(asset.id),
+                        "asset_version_id": str(candidate.id),
+                    },
+                )
+            return AssetAdoptionReceipt(
+                asset_id=asset.id,
+                asset_version_id=candidate.id,
+                accepted_asset_revision=int(candidate.adopted_asset_revision or asset.version),
+                publication_id=None,
+                created=False,
+            )
+        if candidate.adopted_asset_revision is not None:
+            raise ConflictError(
+                "This asset version was already adopted",
+                details={
+                    "code": "ASSET_VERSION_ALREADY_ADOPTED",
+                    "asset_id": str(asset.id),
+                    "asset_version_id": str(candidate.id),
+                    "accepted_asset_revision": candidate.adopted_asset_revision,
+                },
+            )
+        if asset.version != expected_asset_version:
+            raise ConflictError(
+                "Asset version changed; reload before deciding",
+                details={"code": "ASSET_STALE_VERSION", "version": asset.version},
+            )
+        if candidate.status != "candidate":
+            raise ValidationAppError(
+                "only candidate versions can be promoted",
+                details={"status": candidate.status},
+            )
+        if candidate.base_public_asset_link_id is not None:
+            await self.public_base(
+                project_id=project_id,
+                asset_kind=candidate.kind,
+                actor=actor,
+                link_id=candidate.base_public_asset_link_id,
+            )
+        current_formal = (
+            (
+                await self._session.execute(
+                    select(AssetVersion)
+                    .where(
+                        AssetVersion.asset_id == asset_id,
+                        AssetVersion.project_id == project_id,
+                        AssetVersion.status == "formal",
+                        AssetVersion.id != candidate.id,
+                    )
+                    .with_for_update()
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for old in current_formal:
+            old.status = "historical"
+        candidate.status = "formal"
+        asset.current_version_id = candidate.id
+        asset.version += 1
+        if candidate.base_public_asset_link_id is not None and asset.status == "draft":
+            asset.status = "active"
+        candidate.adoption_request_key = request_key
+        candidate.adoption_request_hash = request_hash
+        candidate.adopted_asset_revision = asset.version
+        await self._session.flush()
+        publication_id: UUID | None = None
+        if public_display is not None:
+            published = await PublicAssetService(
+                self._session, actor=actor
+            ).publish(candidate.id, display=public_display)
+            publication_id = published.id
+        return AssetAdoptionReceipt(
+            asset_id=asset.id,
+            asset_version_id=candidate.id,
+            accepted_asset_revision=asset.version,
+            publication_id=publication_id,
+            created=True,
+        )
     async def reject(
         self,
         *,

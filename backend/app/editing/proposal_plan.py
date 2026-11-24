@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _FORBIDDEN_FIELDS = frozenset(
     {
@@ -81,21 +81,6 @@ def _reject_forbidden_fields(value: object, *, path: str = "plan") -> None:
             _reject_forbidden_fields(nested, path=f"{path}[{index}]")
 
 
-def _normalize_operation_tag(value: object) -> object:
-    if not isinstance(value, Mapping):
-        return value
-    if "operation" in value:
-        return value
-    aliases = ("kind", "type", "op")
-    alias = next((key for key in aliases if key in value), None)
-    if alias is None:
-        return value
-    normalized = dict(value)
-    normalized.pop(alias, None)
-    normalized["operation"] = value[alias]
-    return normalized
-
-
 class _StrictPlanModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -112,11 +97,6 @@ class ReorderClipsOperation(_StrictPlanModel):
         if len(set(value)) != len(value):
             raise ValueError("reorder_clips clip_ids must be unique")
         return value
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_operation(cls, value: object) -> object:
-        return _normalize_operation_tag(value)
 
 
 class SetClipDurationOperation(_StrictPlanModel):
@@ -137,11 +117,6 @@ class SetClipDurationOperation(_StrictPlanModel):
         if not math.isfinite(value):
             raise ValueError("duration_seconds must be finite")
         return value
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_operation(cls, value: object) -> object:
-        return _normalize_operation_tag(value)
 
 
 class SetClipSubtitleOperation(_StrictPlanModel):
@@ -164,11 +139,6 @@ class SetClipSubtitleOperation(_StrictPlanModel):
     def normalize_subtitle(cls, value: str) -> str:
         return value.replace("\r\n", "\n").replace("\r", "\n")
 
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_operation(cls, value: object) -> object:
-        return _normalize_operation_tag(value)
-
 
 EditSessionTimelineOperation = Annotated[
     ReorderClipsOperation | SetClipDurationOperation | SetClipSubtitleOperation,
@@ -185,15 +155,7 @@ class EditSessionTimelinePlan(_StrictPlanModel):
     @classmethod
     def reject_untrusted_fields(cls, value: object) -> object:
         _reject_forbidden_fields(value)
-        if not isinstance(value, Mapping):
-            return value
-        operations = value.get("operations")
-        if not isinstance(operations, list):
-            return value
-        return {
-            **value,
-            "operations": [_normalize_operation_tag(operation) for operation in operations],
-        }
+        return value
 
 
 class EditSessionTimelineCommand(_StrictPlanModel):
@@ -204,22 +166,19 @@ class EditSessionTimelineCommand(_StrictPlanModel):
 
     @model_validator(mode="before")
     @classmethod
-    def normalize_session_id(cls, value: object) -> object:
+    def reject_untrusted_fields(cls, value: object) -> object:
         _reject_forbidden_fields(value)
-        if not isinstance(value, Mapping):
-            return value
-        normalized = dict(value)
-        if "edit_session_id" not in value and "session_id" in value:
-            normalized.pop("session_id", None)
-            normalized["edit_session_id"] = value["session_id"]
-        if "plan" not in value:
-            if "timeline_plan" in value:
-                normalized.pop("timeline_plan", None)
-                normalized["plan"] = value["timeline_plan"]
-            elif "operations" in value:
-                normalized.pop("operations", None)
-                normalized["plan"] = {"operations": value["operations"]}
-        return normalized
+        return value
+
+
+class EditingRepairProposalCommand(BaseModel):
+    """Acknowledge a production-repair scope; never authorizes execution."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    edit_session_id: UUID
+    shot_ids: list[UUID] = Field(min_length=1, max_length=1000)
+    no_auto_execute: Literal[True]
 
 
 def validate_edit_session_timeline_command(
@@ -227,14 +186,12 @@ def validate_edit_session_timeline_command(
 ) -> EditSessionTimelineCommand:
     """Validate untrusted proposal JSON into the narrow typed command shape."""
 
-    try:
-        return EditSessionTimelineCommand.model_validate(payload)
-    except ValidationError:
-        raise
+    return EditSessionTimelineCommand.model_validate(payload)
 
 
 __all__ = [
     "EditSessionTimelineCommand",
+    "EditingRepairProposalCommand",
     "EditSessionTimelineOperation",
     "EditSessionTimelinePlan",
     "ReorderClipsOperation",

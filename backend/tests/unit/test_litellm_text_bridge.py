@@ -7,14 +7,13 @@ the canonical LiteLLM capability and resolver path.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncGenerator
 from typing import Any
 from uuid import uuid4
 
 import httpx
 import pytest
 from app.config import Settings
-from app.providers.bootstrap import litellm_text_manifest
+from app.providers.bootstrap import default_text_manifest
 from app.providers.capabilities import Capability
 from app.providers.contracts.common import (
     ExecutionContext,
@@ -26,8 +25,7 @@ from app.providers.model_profiles.resolver import ModelBindingResolver
 from app.providers.model_profiles.slots import ModelSlot
 from app.providers.registry import ModelRegistry
 from app.providers.router import CapabilityRouter
-from app.shared.base import Base
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 _GATEWAY = Settings(
     app_env="development",
@@ -56,17 +54,6 @@ def _text_result(payload: dict[str, Any]) -> httpx.Response:
     )
 
 
-@pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with factory() as s:
-        yield s
-    await engine.dispose()
-
-
 async def test_litellm_adapter_builds_chat_contract() -> None:
     requests: list[httpx.Request] = []
 
@@ -80,7 +67,7 @@ async def test_litellm_adapter_builds_chat_contract() -> None:
             },
         )
 
-    manifest = litellm_text_manifest()
+    manifest = default_text_manifest()
     adapter = LiteLLMModelAdapter(
         manifest,
         settings=_gateway_settings(),
@@ -106,7 +93,7 @@ async def test_litellm_adapter_builds_chat_contract() -> None:
 
 
 async def test_litellm_adapter_unconfigured_fails_closed() -> None:
-    manifest = litellm_text_manifest()
+    manifest = default_text_manifest()
     adapter = LiteLLMModelAdapter(
         manifest,
         settings=Settings(app_env="development"),
@@ -131,7 +118,7 @@ async def test_litellm_adapter_single_attempt_on_gateway_503() -> None:
         calls["n"] += 1
         return httpx.Response(503, json={"error": {"message": "upstream down"}})
 
-    manifest = litellm_text_manifest()
+    manifest = default_text_manifest()
     adapter = LiteLLMModelAdapter(
         manifest,
         settings=_gateway_settings(),
@@ -139,7 +126,7 @@ async def test_litellm_adapter_single_attempt_on_gateway_503() -> None:
     )
     result = await adapter.create(
         Capability.TEXT_GENERATE,
-        TextGenerateRequest(prompt="hi"),
+        TextGenerateRequest(messages=[TextMessage(role="user", content="hi")]),
         ExecutionContext(trace_id="t"),
     )
     assert result.status == GenerationStatus.FAILED
@@ -161,12 +148,11 @@ async def test_litellm_adapter_classifies_gateway_errors() -> None:
     ]
 
     for status, body, expected_code in cases:
-        async def handler(
-            request: httpx.Request, status=status, body=body
-        ) -> httpx.Response:
+
+        async def handler(request: httpx.Request, status=status, body=body) -> httpx.Response:
             return httpx.Response(status, json=body)
 
-        manifest = litellm_text_manifest()
+        manifest = default_text_manifest()
         adapter = LiteLLMModelAdapter(
             manifest,
             settings=_gateway_settings(),
@@ -174,7 +160,7 @@ async def test_litellm_adapter_classifies_gateway_errors() -> None:
         )
         result = await adapter.create(
             Capability.TEXT_GENERATE,
-            TextGenerateRequest(prompt="hi"),
+            TextGenerateRequest(messages=[TextMessage(role="user", content="hi")]),
             ExecutionContext(trace_id="t"),
         )
         assert result.status == GenerationStatus.FAILED, status
@@ -190,7 +176,7 @@ async def test_litellm_adapter_read_timeout_returns_submit_unknown() -> None:
         calls["n"] += 1
         raise httpx.ReadTimeout("timed out reading response", request=request)
 
-    manifest = litellm_text_manifest()
+    manifest = default_text_manifest()
     adapter = LiteLLMModelAdapter(
         manifest,
         settings=_gateway_settings(),
@@ -198,7 +184,7 @@ async def test_litellm_adapter_read_timeout_returns_submit_unknown() -> None:
     )
     result = await adapter.create(
         Capability.TEXT_GENERATE,
-        TextGenerateRequest(prompt="hi"),
+        TextGenerateRequest(messages=[TextMessage(role="user", content="hi")]),
         ExecutionContext(trace_id="t"),
     )
     assert result.status == GenerationStatus.SUBMIT_UNKNOWN
@@ -230,7 +216,7 @@ async def test_litellm_adapter_records_allowlisted_metadata() -> None:
             },
         )
 
-    manifest = litellm_text_manifest()
+    manifest = default_text_manifest()
     adapter = LiteLLMModelAdapter(
         manifest,
         settings=_gateway_settings(),
@@ -238,7 +224,7 @@ async def test_litellm_adapter_records_allowlisted_metadata() -> None:
     )
     result = await adapter.create(
         Capability.TEXT_GENERATE,
-        TextGenerateRequest(prompt="hi"),
+        TextGenerateRequest(messages=[TextMessage(role="user", content="hi")]),
         ExecutionContext(trace_id="t"),
     )
     assert result.status == GenerationStatus.SUCCEEDED
@@ -263,7 +249,7 @@ async def test_router_routes_text_generate_through_litellm_model() -> None:
             },
         )
 
-    manifest = litellm_text_manifest()
+    manifest = default_text_manifest()
     adapter = LiteLLMModelAdapter(
         manifest,
         settings=_gateway_settings(),
@@ -291,11 +277,12 @@ async def test_resolver_returns_system_text_model(
     """The default registry's system default for text.generate is the LiteLLM
     text model (spec §15 system-default tier)."""
     resolver = ModelBindingResolver(session)
-    resolved = await resolver.resolve(
-        workspace_id=uuid4(),
-        project_id=None,
-        slot=ModelSlot.PLANNING_SCRIPT,
-        capability=Capability.TEXT_GENERATE,
-    )
-    assert resolved.source == "system_default"
-    assert resolved.model_id == "litellm/text-llm"
+    from app.shared.errors import ValidationAppError
+
+    with pytest.raises(ValidationAppError):
+        await resolver.resolve(
+            workspace_id=uuid4(),
+            project_id=None,
+            slot=ModelSlot.PLANNING_SCRIPT,
+            capability=Capability.TEXT_GENERATE,
+        )

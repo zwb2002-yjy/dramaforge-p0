@@ -1,0 +1,605 @@
+{
+  "schema_version": "2",
+  "manifest_version": "2026-10-13",
+  "provider_type": "agnes",
+  "protocol_profile": "agnes_cn_v1",
+  "api_version": "v1",
+  "region": "CN",
+  "model_id": "agnes-video-2.5",
+  "model_revision": "knowledge-2026-10-13-r1",
+  "refines_revision": "2026-09-28-candidate",
+  "media_kind": "video",
+  "display_name": "agnes-video-2.5",
+  "lifecycle": "preview",
+  "catalog_source": "official_static",
+  "documented_at": "2026-10-13",
+  "operations": {
+    "video.generate": {
+      "operation": "video.generate",
+      "claim_status": "documented_supported",
+      "input_contracts": {
+        "text": {
+          "claim_status": "documented_supported",
+          "input_slots": {},
+          "minimum_total_references": {
+            "kind": "bounded",
+            "value": 0,
+            "claim_status": "documented_supported"
+          },
+          "maximum_total_references": {
+            "kind": "bounded",
+            "value": 0,
+            "claim_status": "documented_supported"
+          },
+          "output_options": {
+            "mode": {
+              "type": "string",
+              "claim_status": "documented_supported",
+              "control": "native",
+              "required": true,
+              "enum": [
+                "text"
+              ]
+            }
+          },
+          "constraints": [
+            {
+              "kind": "forced",
+              "claim_status": "documented_supported",
+              "target": "mode",
+              "value": "text"
+            }
+          ]
+        },
+        "keyframe": {
+          "claim_status": "documented_supported",
+          "input_slots": {
+            "first_frame": {
+              "claim_status": "documented_supported",
+              "required": false,
+              "minimum": {
+                "kind": "bounded",
+                "value": 0,
+                "claim_status": "documented_supported"
+              },
+              "maximum": {
+                "kind": "bounded",
+                "value": 1,
+                "claim_status": "documented_supported"
+              },
+              "media_types": [],
+              "ordering": "preserve",
+              "wire_field": "first_frame",
+              "delivery_formats": [
+                "public_https"
+              ]
+            },
+            "last_frame": {
+              "claim_status": "documented_supported",
+              "required": false,
+              "minimum": {
+                "kind": "bounded",
+                "value": 0,
+                "claim_status": "documented_supported"
+              },
+              "maximum": {
+                "kind": "bounded",
+                "value": 1,
+                "claim_status": "documented_supported"
+              },
+              "media_types": [],
+              "ordering": "preserve",
+              "wire_field": "last_frame",
+              "delivery_formats": [
+                "public_https"
+              ]
+            }
+          },
+          "minimum_total_references": {
+            "kind": "bounded",
+            "value": 1,
+            "claim_status": "documented_supported"
+          },
+          "maximum_total_references": {
+            "kind": "bounded",
+            "value": 2,
+            "claim_status": "documented_supported"
+          },
+          "output_options": {
+            "mode": {
+              "type": "string",
+              "claim_status": "documented_supported",
+              "control": "native",
+              "required": true,
+              "enum": [
+                "keyframe"
+              ]
+            }
+          },
+          "constraints": [
+            {
+              "kind": "forced",
+              "claim_status": "documented_supported",
+              "target": "mode",
+              "value": "keyframe"
+            }
+          ]
+        },
+        "reference": {
+          "claim_status": "documented_supported",
+          "input_slots": {
+            "reference_image": {
+              "claim_status": "documented_supported",
+              "required": false,
+              "minimum": {
+                "kind": "bounded",
+                "value": 0,
+                "claim_status": "documented_supported"
+              },
+              "maximum": {
+                "kind": "bounded",
+                "value": 8,
+                "claim_status": "documented_supported"
+              },
+              "media_types": [],
+              "ordering": "preserve",
+              "wire_field": "images",
+              "delivery_formats": [
+                "public_https"
+              ],
+              "max_bytes": {
+                "kind": "bounded",
+                "value": 15000000,
+                "claim_status": "documented_supported",
+                "inclusive": false
+              },
+              "min_width": {
+                "kind": "bounded",
+                "value": 256,
+                "claim_status": "documented_supported"
+              },
+              "max_width": {
+                "kind": "bounded",
+                "value": 5760,
+                "claim_status": "documented_supported"
+              },
+              "min_height": {
+                "kind": "bounded",
+                "value": 256,
+                "claim_status": "documented_supported"
+              },
+              "max_height": {
+                "kind": "bounded",
+                "value": 5760,
+                "claim_status": "documented_supported"
+              }
+            },
+            "reference_audio": {
+              "claim_status": "documented_supported",
+              "required": false,
+              "minimum": {
+                "kind": "bounded",
+                "value": 0,
+                "claim_status": "documented_supported"
+              },
+              "maximum": {
+                "kind": "bounded",
+                "value": 3,
+                "claim_status": "documented_supported"
+              },
+              "media_types": [],
+              "ordering": "preserve",
+              "wire_field": "audios",
+              "delivery_formats": [
+                "public_https"
+              ],
+              "max_bytes": {
+                "kind": "bounded",
+                "value": 15000000,
+                "claim_status": "documented_supported",
+                "inclusive": false
+              },
+              "min_duration_seconds": {
+                "kind": "unknown",
+                "claim_status": "unknown"
+              },
+              "max_duration_seconds": {
+                "kind": "bounded",
+                "value": 12,
+                "claim_status": "documented_supported"
+              }
+            },
+            "reference_video": {
+              "claim_status": "documented_supported",
+              "required": false,
+              "minimum": {
+                "kind": "bounded",
+                "value": 0,
+                "claim_status": "documented_supported"
+              },
+              "maximum": {
+                "kind": "bounded",
+                "value": 1,
+                "claim_status": "documented_supported"
+              },
+              "media_types": [],
+              "ordering": "preserve",
+              "wire_field": "videos[].url",
+              "delivery_formats": [
+                "public_https"
+              ],
+              "max_bytes": {
+                "kind": "bounded",
+                "value": 50000000,
+                "claim_status": "documented_supported",
+                "inclusive": false
+              },
+              "min_duration_seconds": {
+                "kind": "bounded",
+                "value": 2,
+                "claim_status": "documented_supported"
+              },
+              "max_duration_seconds": {
+                "kind": "bounded",
+                "value": 12,
+                "claim_status": "documented_supported"
+              },
+              "min_fps": {
+                "kind": "bounded",
+                "value": 24,
+                "claim_status": "documented_supported"
+              },
+              "max_fps": {
+                "kind": "bounded",
+                "value": 60,
+                "claim_status": "documented_supported"
+              },
+              "wire_options": {
+                "start_seconds": {
+                  "type": "number",
+                  "claim_status": "documented_supported",
+                  "control": "native",
+                  "required": false,
+                  "default": 0,
+                  "default_status": "documented_supported",
+                  "minimum": {
+                    "kind": "bounded",
+                    "value": 0,
+                    "claim_status": "documented_supported"
+                  }
+                },
+                "require_audio": {
+                  "type": "boolean",
+                  "claim_status": "documented_supported",
+                  "control": "native",
+                  "required": false,
+                  "default": false,
+                  "default_status": "documented_supported"
+                }
+              }
+            }
+          },
+          "minimum_total_references": {
+            "kind": "bounded",
+            "value": 1,
+            "claim_status": "documented_supported"
+          },
+          "maximum_total_references": {
+            "kind": "bounded",
+            "value": 12,
+            "claim_status": "documented_supported"
+          },
+          "max_total_duration_seconds": {
+            "reference_video": {
+              "kind": "bounded",
+              "value": 12,
+              "claim_status": "documented_supported"
+            },
+            "reference_audio": {
+              "kind": "bounded",
+              "value": 12,
+              "claim_status": "documented_supported"
+            }
+          },
+          "max_total_bytes_by_role": {
+            "reference_image": {
+              "kind": "bounded",
+              "value": 50000000,
+              "claim_status": "unknown",
+              "inclusive": false
+            }
+          },
+          "output_options": {
+            "mode": {
+              "type": "string",
+              "claim_status": "documented_supported",
+              "control": "native",
+              "required": true,
+              "enum": [
+                "reference"
+              ]
+            }
+          },
+          "constraints": [
+            {
+              "kind": "forced",
+              "claim_status": "documented_supported",
+              "target": "mode",
+              "value": "reference"
+            }
+          ],
+          "min_total_duration_seconds": {
+            "reference_audio": {
+              "kind": "bounded",
+              "value": 2,
+              "claim_status": "documented_supported"
+            },
+            "reference_video": {
+              "kind": "bounded",
+              "value": 2,
+              "claim_status": "documented_supported"
+            }
+          }
+        }
+      },
+      "output_options": {
+        "duration_seconds": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "derived",
+          "required": false,
+          "enum": [
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12
+          ],
+          "wire_name": "seconds",
+          "default": 5,
+          "default_status": "documented_supported"
+        },
+        "seconds": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "11",
+            "12"
+          ],
+          "default": "5",
+          "default_status": "documented_supported"
+        },
+        "resolution": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "720P",
+            "1080P",
+            "1K",
+            "2K"
+          ],
+          "wire_name": "size"
+        },
+        "size": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "720P",
+            "1080P",
+            "1K",
+            "2K"
+          ]
+        },
+        "n": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            1
+          ],
+          "default": 1,
+          "default_status": "documented_supported"
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "21:9",
+            "16:9",
+            "4:3",
+            "1:1",
+            "3:4",
+            "9:16",
+            "1:1"
+          ],
+          "default": "16:9",
+          "default_status": "documented_supported"
+        },
+        "seed": {
+          "type": "integer",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false
+        },
+        "width": {
+          "type": "string",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        },
+        "height": {
+          "type": "string",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        },
+        "fps": {
+          "type": "string",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        },
+        "num_frames": {
+          "type": "string",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        },
+        "quality": {
+          "type": "string",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        },
+        "num_inference_steps": {
+          "type": "string",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        },
+        "input_reference": {
+          "type": "string",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        },
+        "reference_url": {
+          "type": "string",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        },
+        "video_url": {
+          "type": "string",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        },
+        "video_path": {
+          "type": "string",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        },
+        "video_reference": {
+          "type": "string",
+          "claim_status": "documented_unsupported",
+          "control": "unsupported",
+          "required": false
+        }
+      },
+      "protocol_facts": {
+        "remote_id_field": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "video_id"
+          ]
+        },
+        "result_field": {
+          "type": "string",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "enum": [
+            "url"
+          ]
+        },
+        "terminal_states": {
+          "type": "array",
+          "claim_status": "documented_supported",
+          "control": "native",
+          "required": false,
+          "default": [
+            "completed",
+            "failed"
+          ],
+          "default_status": "documented_supported"
+        },
+        "audio_request_byte_scope": {
+          "type": "object",
+          "claim_status": "unknown",
+          "control": "unsupported",
+          "required": false,
+          "default": {
+            "maximum_bytes": 64000000,
+            "scope": "ambiguous_full_request_or_audio"
+          },
+          "default_status": "unknown"
+        },
+        "1K_dimensions": {
+          "type": "array",
+          "claim_status": "documented_supported",
+          "control": "unsupported",
+          "required": false,
+          "default": [
+            1024,
+            1024
+          ],
+          "default_status": "documented_supported"
+        },
+        "poll_model_name_rules": {
+          "type": "object",
+          "claim_status": "documented_supported",
+          "control": "unsupported",
+          "required": false,
+          "default": {
+            "keyframe": "required",
+            "reference": "required",
+            "text": "optional"
+          },
+          "default_status": "documented_supported"
+        }
+      },
+      "maximum_request_bytes": {
+        "kind": "bounded",
+        "value": 64000000,
+        "claim_status": "unknown"
+      },
+      "evidence_group_ref": "48229922d30cf2460937a72ef08480375273e4b2fbe331f4462d3b4d0646badd:388893ce1813a6b277faeca5b095d966854fc06442d853e21f148da2487da14e:knowledge-review-20261013",
+      "evidence_review": {
+        "covers": "/operations/video.generate",
+        "reviewed_subtree_hash": "f3a9328bd864f3e7135377688627df515a977267409c781d57800d1fb734b465",
+        "reviewed_by": "Codex authorized task reviewer",
+        "review_kind": "authorized_agent",
+        "locator": "Exact model and request parameters; unknown limits explicitly retained"
+      },
+      "prompt_spec": {
+        "type": "string",
+        "claim_status": "documented_supported",
+        "control": "native",
+        "required": true,
+        "min_length": {
+          "kind": "unknown",
+          "claim_status": "unknown"
+        },
+        "max_length": {
+          "kind": "unknown",
+          "claim_status": "unknown"
+        }
+      }
+    }
+  }
+}

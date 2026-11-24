@@ -14,18 +14,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import User
 from app.access.projects import ProjectService
+from app.assets.episodes import lock_episode_project, require_new_episode_capacity
 from app.assets.models import Episode, Scene, ScriptDocument, Shot
 from app.shared.errors import ValidationAppError
 
 _SCENE_RE = re.compile(
-    r"^##\s*Scene\s+(\d+)\s*[—\-–:]\s*(.+?)(?:\s*/\s*(.+))?\s*$",
+    r"^##\s*(?:Scene\s+|场景\s*)(\d+)\s*[—\-–:：]\s*(.+?)(?:\s*/\s*(.+))?\s*$",
     re.IGNORECASE,
 )
 _SHOT_RE = re.compile(
-    r"^###\s*Shot\s+(\d+)\s*[—\-–:]\s*(.+)$",
+    r"^###\s*(?:Shot\s+|镜头\s*)(\d+)\s*[—\-–:：]\s*(.+)$",
     re.IGNORECASE,
 )
-_EPISODE_RE = re.compile(r"^#\s*Episode\s+(\d+)\s*[—\-–:]\s*(.+)$", re.IGNORECASE)
+_EPISODE_RE = re.compile(
+    r"^#\s*(?:Episode\s+(\d+)|第\s*(\d+)\s*集)\s*[—\-–:：]\s*(.+)$", re.IGNORECASE
+)
 
 # First-release bound for one pasted/uploaded script. The browser converts the
 # file to text, so the same limit is enforced on both sides and stated in the UI.
@@ -144,6 +147,7 @@ def parse_script_markdown(text: str) -> ParsedScript:
         )
         cur_scene = None
 
+    episode_header_seen = False
     for raw in lines:
         line = raw.rstrip()
         if not line.strip():
@@ -151,14 +155,18 @@ def parse_script_markdown(text: str) -> ParsedScript:
         m_ep = _EPISODE_RE.match(line)
         if m_ep:
             flush_scene()
-            episode_number = int(m_ep.group(1))
-            title = m_ep.group(2).strip()
+            if episode_header_seen:
+                raise ValidationAppError("逐集导入只接受一集。多集草稿请在连续剧的剧本提案中采用。")
+            episode_header_seen = True
+            episode_number = int(m_ep.group(1) or m_ep.group(2))
+            title = m_ep.group(3).strip()
             continue
         m_sc = _SCENE_RE.match(line)
         if m_sc:
             flush_scene()
             loc = m_sc.group(2).strip()
             tod = (m_sc.group(3) or "day").strip()
+            tod = {"日间": "day", "夜间": "night"}.get(tod, tod)
             cur_scene = {
                 "scene_number": int(m_sc.group(1)),
                 "location_name": loc,
@@ -172,7 +180,9 @@ def parse_script_markdown(text: str) -> ParsedScript:
             flush_shot()
             cur_shot = {
                 "shot_number": int(m_sh.group(1)),
-                "shot_type": m_sh.group(2).strip() or "medium",
+                "shot_type": {"中景": "medium", "特写": "close_up", "远景": "wide"}.get(
+                    m_sh.group(2).strip(), m_sh.group(2).strip()
+                ),
                 "visual": "",
                 "dialogue": "",
                 "camera_move": "static",
@@ -180,12 +190,19 @@ def parse_script_markdown(text: str) -> ParsedScript:
             continue
         low = line.strip()
         if cur_shot is not None:
-            if low.lower().startswith("visual:"):
-                cur_shot["visual"] = low.split(":", 1)[1].strip()
-            elif low.lower().startswith("dialogue:"):
-                cur_shot["dialogue"] = low.split(":", 1)[1].strip()
-            elif low.lower().startswith("camera:"):
-                cur_shot["camera_move"] = low.split(":", 1)[1].strip()
+            field = re.match(
+                r"^(visual|画面|dialogue|对白|camera|运镜)\s*[:：]\s*(.*)$", low, re.IGNORECASE
+            )
+            if field:
+                key = {
+                    "visual": "visual",
+                    "画面": "visual",
+                    "dialogue": "dialogue",
+                    "对白": "dialogue",
+                    "camera": "camera_move",
+                    "运镜": "camera_move",
+                }[field.group(1).lower()]
+                cur_shot[key] = field.group(2).strip()
             elif not cur_shot["visual"]:
                 cur_shot["visual"] = low
             else:
@@ -210,6 +227,22 @@ def parse_script_markdown(text: str) -> ParsedScript:
     )
 
 
+def parse_serial_draft(text: str) -> list[ParsedScript]:
+    """Read the numbered episodes explicitly present in a serial proposal."""
+    lines = text.splitlines(keepends=True)
+    starts = [index for index, line in enumerate(lines) if _EPISODE_RE.match(line.rstrip())]
+    if len(starts) < 2:
+        return [parse_script_markdown(text)]
+    starts[0] = 0
+    episodes = [
+        parse_script_markdown("".join(lines[start:end]))
+        for start, end in zip(starts, [*starts[1:], len(lines)], strict=True)
+    ]
+    if len({item.episode_number for item in episodes}) != len(episodes):
+        raise ValidationAppError("同一草稿中出现了重复集号，请核对分集标题。")
+    return episodes
+
+
 async def import_script(
     session: AsyncSession,
     *,
@@ -223,7 +256,17 @@ async def import_script(
     if actor is not None:
         await ProjectService(session).get_project_for_owner(project_id=project_id, actor=actor)
     parsed = parse_script_markdown(text)
+    scene_numbers: set[int] = set()
+    for scene_input in parsed.scenes:
+        numbers = [shot.shot_number for shot in scene_input.shots]
+        if scene_input.scene_number in scene_numbers or len(numbers) != len(set(numbers)):
+            raise ValidationAppError(
+                "scene numbers and shot numbers within each scene must be unique",
+                details={"code": "SCRIPT_DUPLICATE_NUMBER"},
+            )
+        scene_numbers.add(scene_input.scene_number)
     content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    project = await lock_episode_project(session, project_id)
     existing_doc = (
         await session.execute(
             select(ScriptDocument)
@@ -271,9 +314,7 @@ async def import_script(
             .scalars()
             .all()
         )
-        shots_by_scene_number = {
-            (shot.scene_id, shot.shot_number): shot for shot in existing_shots
-        }
+        shots_by_scene_number = {(shot.scene_id, shot.shot_number): shot for shot in existing_shots}
         expected_shot_count = sum(len(scene.shots) for scene in parsed.scenes)
         ordered_shots: list[Shot] = []
         for parsed_scene in parsed.scenes:
@@ -308,6 +349,15 @@ async def import_script(
             outcome=IMPORT_OUTCOME_REUSED,
         )
 
+    existing = await session.scalar(
+        select(Episode).where(
+            Episode.project_id == project_id,
+            Episode.episode_number == parsed.episode_number,
+        )
+    )
+    if existing is None:
+        await require_new_episode_capacity(session, project)
+
     fmt = "md" if filename.lower().endswith(".md") else "txt"
     doc = ScriptDocument(
         project_id=project_id,
@@ -321,14 +371,6 @@ async def import_script(
     await session.flush()
 
     # Upsert episode by number
-    existing = (
-        await session.execute(
-            select(Episode).where(
-                Episode.project_id == project_id,
-                Episode.episode_number == parsed.episode_number,
-            )
-        )
-    ).scalar_one_or_none()
     if existing is None:
         ep = Episode(
             project_id=project_id,
@@ -369,9 +411,7 @@ async def import_script(
         .scalars()
         .all()
     )
-    shots_by_scene_number = {
-        (shot.scene_id, shot.shot_number): shot for shot in existing_shots
-    }
+    shots_by_scene_number = {(shot.scene_id, shot.shot_number): shot for shot in existing_shots}
     shots_by_number: dict[int, Shot | None] = {}
     for shot in existing_shots:
         if shot.shot_number in shots_by_number:
