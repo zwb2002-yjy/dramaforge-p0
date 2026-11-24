@@ -4240,6 +4240,7 @@ export interface components {
             master_run_id?: string | null;
             ui_context?: components["schemas"]["AgentUIContext"] | null;
             research_ref?: components["schemas"]["ResearchDiscussionRef"] | null;
+            knowledge_ref?: components["schemas"]["KnowledgeDiscussionRef"] | null;
             /** Media Parts */
             media_parts?: (components["schemas"]["ArtifactVisionInput"] | components["schemas"]["FileVisionInput"] | components["schemas"]["PublicVisionInput"])[];
             /** Expected Versions */
@@ -4387,6 +4388,7 @@ export interface components {
         };
         /** AnalysisPreviewRead */
         AnalysisPreviewRead: {
+            egress: components["schemas"]["EgressPreview"];
             /** Preview Fingerprint */
             preview_fingerprint: string;
             /**
@@ -4696,6 +4698,11 @@ export interface components {
         };
         /** AssetBatchPreviewItem */
         AssetBatchPreviewItem: {
+            /**
+             * Max Provider Operations
+             * @default 0
+             */
+            max_provider_operations: number;
             /** Item Id */
             item_id: string;
             /**
@@ -4815,6 +4822,10 @@ export interface components {
             status: "draft" | "active" | "recycled";
             /** Tags */
             tags?: string[];
+            /** Request Key */
+            request_key?: string | null;
+            /** Base Public Asset Link Id */
+            base_public_asset_link_id?: string | null;
         };
         /** AssetCreativeRequirementChange */
         AssetCreativeRequirementChange: {
@@ -4886,6 +4897,7 @@ export interface components {
         };
         /** AssetExecutionPlanRead */
         AssetExecutionPlanRead: {
+            egress: components["schemas"]["EgressPreview"];
             target: components["schemas"]["AssetPlanTarget"];
             /**
              * Stage
@@ -4946,6 +4958,10 @@ export interface components {
             attempt_no: number;
             /** Status */
             status: string;
+            /** Result Artifact Id */
+            result_artifact_id?: string | null;
+            /** Media Kind */
+            media_kind?: string | null;
             /** Plan Fingerprint */
             plan_fingerprint?: string | null;
             /** Created At */
@@ -5192,6 +5208,10 @@ export interface components {
         };
         /** AssetVersionRead */
         AssetVersionRead: {
+            /** Base Publication Id */
+            base_publication_id?: string | null;
+            /** Base Public Asset Link Id */
+            base_public_asset_link_id?: string | null;
             /**
              * Id
              * Format: uuid
@@ -5296,6 +5316,7 @@ export interface components {
         };
         /** AssetVideoPlanRead */
         AssetVideoPlanRead: {
+            egress: components["schemas"]["EgressPreview"];
             target: components["schemas"]["AssetPlanTarget"];
             /**
              * Stage
@@ -5354,10 +5375,7 @@ export interface components {
             asset_id: string;
             request: components["schemas"]["AssetVoicePlanBody"];
         };
-        /**
-         * AssetVoiceExecutionBody
-         * @description One explicit asset voice command: the previewed plan plus its fingerprint.
-         */
+        /** AssetVoiceExecutionBody */
         AssetVoiceExecutionBody: {
             /** Expected Asset Version */
             expected_asset_version: number;
@@ -5375,6 +5393,11 @@ export interface components {
             source_context_refs?: {
                 [key: string]: components["schemas"]["JsonValue"];
             }[];
+            /**
+             * Max Provider Operations
+             * @default 1
+             */
+            max_provider_operations: number;
             /** Plan Fingerprint */
             plan_fingerprint: string;
         };
@@ -5417,6 +5440,8 @@ export interface components {
         };
         /** AssetVoicePlanRead */
         AssetVoicePlanRead: {
+            egress: components["schemas"]["EgressPreview"];
+            voice_execution: components["schemas"]["VoiceExecutionSpec"];
             target: components["schemas"]["AssetPlanTarget"];
             /**
              * Stage
@@ -5647,6 +5672,15 @@ export interface components {
             /** Public Registration Enabled */
             public_registration_enabled: boolean;
         };
+        /** BusinessFlowPage */
+        BusinessFlowPage: {
+            /** Items */
+            items: components["schemas"]["BusinessFlowRead"][];
+            /** Total */
+            total: number;
+            /** Next Offset */
+            next_offset: number | null;
+        };
         /** BusinessFlowRead */
         BusinessFlowRead: {
             /**
@@ -5687,6 +5721,15 @@ export interface components {
             /** Finished At */
             finished_at: string | null;
         };
+        /** BusinessStepPage */
+        BusinessStepPage: {
+            /** Items */
+            items: components["schemas"]["BusinessStepRead"][];
+            /** Total */
+            total: number;
+            /** Next Offset */
+            next_offset: number | null;
+        };
         /** BusinessStepRead */
         BusinessStepRead: {
             /**
@@ -5711,12 +5754,9 @@ export interface components {
             dependencies: string[];
             /** Wait Reason */
             wait_reason: string | null;
-            /** Completion */
-            completion: {
-                [key: string]: unknown;
-            };
+            completion: components["schemas"]["FlowCompletionRead"];
             /** Result Refs */
-            result_refs: unknown[];
+            result_refs: components["schemas"]["PublicResultRef"][];
         };
         /** CandidateIssueRead */
         CandidateIssueRead: {
@@ -5919,6 +5959,16 @@ export interface components {
         };
         /** CitationRead */
         CitationRead: {
+            /** Filename */
+            filename: string;
+            /** File Version */
+            file_version: number;
+            /** Extraction Schema Version */
+            extraction_schema_version: number;
+            /** Locator */
+            locator: {
+                [key: string]: unknown;
+            };
             /**
              * Id
              * Format: uuid
@@ -6404,6 +6454,7 @@ export interface components {
         /** DirectorAgentMessageRead */
         DirectorAgentMessageRead: {
             research_ref?: components["schemas"]["ResearchDiscussionRef"] | null;
+            knowledge_ref?: components["schemas"]["KnowledgeDiscussionRef"] | null;
             context?: components["schemas"]["AgentUIContext"] | null;
             /** Media Parts */
             media_parts?: (components["schemas"]["ArtifactVisionInput"] | components["schemas"]["FileVisionInput"] | components["schemas"]["PublicVisionInput"])[];
@@ -7269,6 +7320,32 @@ export interface components {
             allowed_purposes: string[];
             /** Policy Hash */
             policy_hash: string | null;
+        };
+        /** EgressPreview */
+        EgressPreview: {
+            /** Mode */
+            mode: string;
+            /** Policy Revision */
+            policy_revision: number;
+            /** Policy Revision Id */
+            policy_revision_id: string | null;
+            /**
+             * Actual Processing Location
+             * @enum {string}
+             */
+            actual_processing_location: "local" | "external" | "unknown";
+            /** Destination Revision Id */
+            destination_revision_id: string | null;
+            /** Destination Host */
+            destination_host: string | null;
+            /** Purpose */
+            purpose: string;
+            /** Required Purposes */
+            required_purposes: string[];
+            payload_summary: components["schemas"]["PayloadSummary"];
+            source_eligibility: components["schemas"]["SourceEligibility"];
+            /** Blockers */
+            blockers: string[];
         };
         /** EpisodeArrangementSlot */
         EpisodeArrangementSlot: {
@@ -8196,6 +8273,15 @@ export interface components {
             name: string;
             delivery_plan?: components["schemas"]["DeliveryPlanRef"] | null;
         };
+        /** FlowCompletionRead */
+        FlowCompletionRead: {
+            /** Rule Id */
+            rule_id: string | null;
+            /** Satisfied */
+            satisfied: boolean;
+            /** Evidence Refs */
+            evidence_refs: components["schemas"]["PublicResultRef"][];
+        };
         /** FlowScopeRead */
         FlowScopeRead: {
             /** Type */
@@ -8635,6 +8721,21 @@ export interface components {
             public_source_notes?: components["schemas"]["SourceNoteInput"][];
             /** Source Links */
             source_links?: components["schemas"]["SourceLinkWrite"][];
+        };
+        /** KnowledgeDiscussionRef */
+        KnowledgeDiscussionRef: {
+            /**
+             * Reference Id
+             * Format: uuid
+             */
+            reference_id: string;
+            /**
+             * Revision Id
+             * Format: uuid
+             */
+            revision_id: string;
+            /** Content Hash */
+            content_hash: string;
         };
         /** KnowledgeEntryPage */
         KnowledgeEntryPage: {
@@ -9505,6 +9606,29 @@ export interface components {
              * @default none
              */
             dialogue_role: string;
+        };
+        /** PayloadSummary */
+        PayloadSummary: {
+            /**
+             * Text Count
+             * @default 0
+             */
+            text_count: number;
+            /**
+             * Reference Count
+             * @default 0
+             */
+            reference_count: number;
+            /**
+             * File Count
+             * @default 0
+             */
+            file_count: number;
+            /**
+             * Fragment Count
+             * @default 0
+             */
+            fragment_count: number;
         };
         /**
          * PendingSuggestion
@@ -10666,6 +10790,31 @@ export interface components {
             detached_at: string | null;
             /** Availability */
             availability: string;
+        };
+        /** PublicPlaybackRef */
+        PublicPlaybackRef: {
+            /**
+             * Public Asset Link Id
+             * Format: uuid
+             */
+            public_asset_link_id: string;
+            /**
+             * Publication Item Id
+             * Format: uuid
+             */
+            publication_item_id: string;
+        };
+        /** PublicResultRef */
+        PublicResultRef: {
+            /** Kind */
+            kind: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Display Name */
+            display_name: string;
         };
         /** PublicVisionInput */
         PublicVisionInput: {
@@ -12610,6 +12759,18 @@ export interface components {
             /** Limitations */
             limitations: string[];
         };
+        /** SourceEligibility */
+        SourceEligibility: {
+            /** Allowed */
+            allowed: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "eligible" | "blocked" | "no_source_inputs" | "legacy_undeclared";
+            /** Eligibility Fingerprint */
+            eligibility_fingerprint: string;
+        };
         /** SourceFragmentPage */
         SourceFragmentPage: {
             /** Items */
@@ -12707,6 +12868,8 @@ export interface components {
         };
         /** SourceUseImpact */
         SourceUseImpact: {
+            /** Other Project Uses Count */
+            other_project_uses_count: number;
             /** Items */
             items: components["schemas"]["ImpactItem"][];
             /** Next Cursor */
@@ -12800,6 +12963,15 @@ export interface components {
             /** Request Duration Seconds */
             request_duration_seconds?: number | null;
         };
+        /** StepAttemptPage */
+        StepAttemptPage: {
+            /** Items */
+            items: components["schemas"]["StepAttemptRead"][];
+            /** Total */
+            total: number;
+            /** Next Offset */
+            next_offset: number | null;
+        };
         /** StepAttemptRead */
         StepAttemptRead: {
             /**
@@ -12822,12 +12994,9 @@ export interface components {
             action_kind: string;
             /** Node Run Id */
             node_run_id: string | null;
-            /** Receipt */
-            receipt: {
-                [key: string]: unknown;
-            } | null;
+            receipt: components["schemas"]["ExecutionReceipt"] | null;
             /** Result Refs */
-            result_refs: unknown[];
+            result_refs: components["schemas"]["PublicResultRef"][];
             /** Unresolved External */
             unresolved_external: boolean;
             /** Error Code */
@@ -12976,11 +13145,10 @@ export interface components {
         TimelinePreviewClipRead: {
             /** Clip Id */
             clip_id: string;
-            /**
-             * Video Artifact Id
-             * Format: uuid
-             */
-            video_artifact_id: string;
+            /** Video Artifact Id */
+            video_artifact_id: string | null;
+            video_public_ref?: components["schemas"]["PublicPlaybackRef"] | null;
+            audio_public_ref?: components["schemas"]["PublicPlaybackRef"] | null;
             /** Start Ms */
             start_ms: number;
             /** End Ms */
@@ -13369,6 +13537,48 @@ export interface components {
              */
             max_edge: number;
         };
+        /**
+         * VoiceExecutionSpec
+         * @description Frozen speech identity: a voice-model binding or a historical local engine.
+         */
+        VoiceExecutionSpec: {
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "edge-tts" | "espeak-ng" | "pcm-silence" | "voice_model";
+            /** Voice */
+            voice: string;
+            /**
+             * Rate Percent
+             * @default 0
+             */
+            rate_percent: number;
+            /** Engine Version */
+            engine_version: string;
+            /**
+             * Output Format
+             * @default audio/wav
+             * @constant
+             */
+            output_format: "audio/wav";
+            /** Binding Id */
+            binding_id?: string | null;
+            /** Provider Type */
+            provider_type?: string | null;
+            /** Model Id */
+            model_id?: string | null;
+            /** Protocol Profile */
+            protocol_profile?: string | null;
+            /** Manifest Hash */
+            manifest_hash?: string | null;
+            /** Connection Revision Id */
+            connection_revision_id?: string | null;
+            /** Destination Revision Id */
+            destination_revision_id?: string | null;
+            /** Policy Revision Id */
+            policy_revision_id?: string | null;
+        };
         /** VoiceOptionRead */
         VoiceOptionRead: {
             /** Id */
@@ -13420,6 +13630,7 @@ export interface components {
         WorkbenchExecutionPlan: {
             /** Plan Fingerprint */
             plan_fingerprint?: string | null;
+            egress?: components["schemas"]["EgressPreview"] | null;
             /**
              * Project Id
              * Format: uuid
@@ -14931,6 +15142,8 @@ export interface operations {
     list_business_flows_api_v1_projects__project_id__director_master_runs__run_id__business_flows_get: {
         parameters: {
             query?: {
+                limit?: number;
+                offset?: number;
                 workspace_id?: string | null;
             };
             header?: {
@@ -14952,7 +15165,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BusinessFlowRead"][];
+                    "application/json": components["schemas"]["BusinessFlowPage"];
                 };
             };
             /** @description Validation Error */
@@ -15007,6 +15220,8 @@ export interface operations {
     list_business_flow_steps_api_v1_projects__project_id__director_business_flows__flow_id__steps_get: {
         parameters: {
             query?: {
+                limit?: number;
+                offset?: number;
                 workspace_id?: string | null;
             };
             header?: {
@@ -15028,7 +15243,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BusinessStepRead"][];
+                    "application/json": components["schemas"]["BusinessStepPage"];
                 };
             };
             /** @description Validation Error */
@@ -15045,6 +15260,8 @@ export interface operations {
     list_business_flow_attempts_api_v1_projects__project_id__director_business_flows__flow_id__steps__step_id__attempts_get: {
         parameters: {
             query?: {
+                limit?: number;
+                offset?: number;
                 workspace_id?: string | null;
             };
             header?: {
@@ -15067,7 +15284,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StepAttemptRead"][];
+                    "application/json": components["schemas"]["StepAttemptPage"];
                 };
             };
             /** @description Validation Error */

@@ -948,8 +948,11 @@ quoted_text:string}`；服务核对同Extraction项目归属、claim存在、范
 `ResearchResultRead={id,project_id,kind,version,archived_at,current_revision_id,current:RevisionSummary|null}`；
 `RevisionSummary={id,number,origin,verification,content_hash,summary,created_at}`；
 `ResearchRevisionRead=RevisionSummary+{result_id,body:ResearchBody,base_revision_id,restores_revision_id,accepts_revision_id,
-applied_result_version,citations:CitationRead[]}`。CitationRead增加source_available/extraction_method/limitations，
-不返回object_key/签名URL；原文下载沿既有授权端点。正文详情中的引用受前述总量上限限制。
+applied_result_version,citations:CitationRead[]}`。CitationRead 从固定的 Fragment 和文件历史修订投影
+`filename,file_version,extraction_schema_version,locator,source_available,extraction_method,limitations`。
+locator_override 仅可缩小原片段的范围，保留页／段／表格身份。旧自定义标记不可信时展示原定位并提示复核。
+私有原件由当前工作区和项目权限下载指定文件修订；解除关联后保留历史位置、引文和识别限制，关闭原件读取。
+正文详情中的引用受前述总量上限限制。
 
 | 方法/路径 | 输入 | 输出/语义 |
 |---|---|---|
@@ -1398,7 +1401,9 @@ I5-02c已实施候选回执（迁移0117）：`POST /projects/{p}/assets/{a}/ver
 `{request_key,expected_asset_version:int>=1,name?,description?,metadata?,base_public_asset_link_id?}`，
 201新建/同key重放200返回`CandidateReceipt={asset_id,asset_version_id,version_number,created_asset_revision}`；
 `expected_asset_version`陈旧409 `ASSET_STALE_VERSION`；`base_public_asset_link_id`须属于当前项目、未detach、
-publication可用，写入AssetVersion的base两列（仅元数据变体，不复制源Artifact）；同key异载荷409
+publication可用，写入AssetVersion的base两列（仅元数据变体，不复制源Artifact）。从公共库显式创建项目变体采用 `POST /projects/{p}/assets` 加 `request_key` 及 `base_public_asset_link_id`；
+同项目内相同决定重放指向同一素材。新变体的第一版为候选，用户采用后才成为当前正式版本。
+版本历史返回固定的 base_publication_id/base_public_asset_link_id。后续本地修改继承该基线，采用或新建时复核当前公共资格；同key异载荷409
 `ASSET_CREATION_REQUEST_REUSED`。
 
 I5-02b已实施promote采用回执（迁移0116）：`POST /projects/{p}/assets/{a}/versions/{v}/promote`
