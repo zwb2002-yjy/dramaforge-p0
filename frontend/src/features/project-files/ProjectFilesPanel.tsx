@@ -27,6 +27,8 @@ import {
   type SourceCapabilityFormat,
 } from "./api";
 
+import { locatorText } from "./locatorText";
+
 const STATUS_LABELS: Record<string, string> = {
   pending: "等待本地解析",
   parsed: "已完成本地解析",
@@ -45,35 +47,6 @@ const COMPONENT_LABELS: Record<string, string> = {
 
 function requestKey(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
-}
-
-function locatorText(locator: Record<string, unknown>): string {
-  const kind = String(locator.kind ?? "");
-  if (kind === "paragraph") {
-    const start = Number(locator.paragraph_start ?? 0);
-    return String(locator.container_key) === "text-lines"
-      ? `第 ${start + 1} 行`
-      : `第 ${start + 1} 段`;
-  }
-  if (kind === "table_cells") {
-    const row = Number(locator.row_start ?? 0) + 1;
-    const column = Number(locator.column_start ?? 0) + 1;
-    const sheet = locator.sheet ? `${String(locator.sheet)} · ` : "";
-    return `${sheet}第 ${row} 行第 ${column} 列`;
-  }
-  if (kind === "page_region") {
-    return `第 ${Number(locator.page_start ?? 0) + 1} 页`;
-  }
-  if (kind === "time_range") {
-    const start = Number(locator.start_ms ?? 0);
-    const end = Number(locator.end_ms ?? 0);
-    return `${(start / 1000).toFixed(1)}–${(end / 1000).toFixed(1)} 秒`;
-  }
-  if (kind === "image_region") {
-    const frame = locator.time_ms ?? locator.frame;
-    return frame === undefined ? "图像区域" : `画面 ${frame}${locator.time_ms ? " 毫秒" : ""}`;
-  }
-  return kind || "未知定位";
 }
 
 function formatMiB(bytes: number): string {
@@ -336,7 +309,7 @@ export function ProjectFilesPanel({ projectId }: { projectId: string }) {
             <>
               <p className="muted">
                 {revision.data.extraction.parser_key} · 定位版本{" "}
-                {revision.data.extraction.extraction_schema_version}（从 0 开始）· 覆盖{" "}
+                {revision.data.extraction.extraction_schema_version}· 覆盖{" "}
                 {revision.data.extraction.coverage.complete ? "完整" : "部分"} · 尝试{" "}
                 {revision.data.extraction.attempt}
               </p>
@@ -344,7 +317,9 @@ export function ProjectFilesPanel({ projectId }: { projectId: string }) {
               <ol aria-label="证据片段">
                 {fragments.data?.items.map((fragment) => (
                   <li key={fragment.id} data-testid="source-fragment">
-                    <strong>{locatorText(fragment.locator)}</strong>
+                    <strong>
+                      {locatorText(fragment.locator, fragment.extraction_schema_version)}
+                    </strong>
                     <p>{fragment.text_content}</p>
                     {selected.source_available && fragment.source_available && (
                       <ActionLink
@@ -376,7 +351,10 @@ export function ProjectFilesPanel({ projectId }: { projectId: string }) {
                                 source_fragment_id: fragment.id,
                                 expected_content_hash: selected.content_hash,
                               },
-                              label: selected.filename + " · " + locatorText(fragment.locator),
+                              label:
+                                selected.filename +
+                                " · " +
+                                locatorText(fragment.locator, fragment.extraction_schema_version),
                             });
                             const input = document.getElementById("project-director-message");
                             if (!input?.getClientRects().length)

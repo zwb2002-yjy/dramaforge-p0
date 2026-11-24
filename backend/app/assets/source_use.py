@@ -9,13 +9,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+from functools import lru_cache
+from pathlib import Path
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project, User
+from app.assets.render_lineage import render_origins_available
 from app.assets.source_use_models import (
     USE_PURPOSES,
     ArtifactSourceUse,
@@ -27,12 +30,29 @@ from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 def _canonical(value: object) -> str:
     return json.dumps(
-        value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False,
+        value,
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
     )
 
 
 def _hash(value: object) -> str:
     return hashlib.sha256(_canonical(value).encode()).hexdigest()
+
+
+@lru_cache(maxsize=1)
+def _sqlite_impact_count() -> str:
+    template = Path(__file__).with_name("sql") / "source_other_project_impact_v1.sql"
+    return template.read_text(encoding="utf-8").format(
+        schema="",
+        actor=":actor",
+        workspace=":workspace",
+        project=":project",
+        subject=":subject",
+        active_project=":project",
+    )
 
 
 class SourceUseService:
@@ -294,6 +314,30 @@ class SourceUseService:
         next_cursor = str(page[-1].id) if len(rows) > limit else None
         return page, next_cursor
 
+    async def other_project_uses_count(self, subject_id: UUID) -> int:
+        if self._session.get_bind().dialect.name == "postgresql":
+            value = await self._session.scalar(
+                text("SELECT app.source_other_project_uses(:project,:subject)"),
+                {"project": self._project.id, "subject": subject_id},
+            )
+        else:
+            value = await self._session.scalar(
+                text(_sqlite_impact_count()),
+                {
+                    "project": self._project.id.hex,
+                    "subject": subject_id.hex,
+                    "workspace": self._project.workspace_id.hex,
+                    "actor": self._actor.id.hex,
+                },
+            )
+        if value is None or value == -1:
+            raise NotFoundError("source subject not found")
+        if value < 0:
+            raise ValidationAppError(
+                "来源依赖超出核验范围", details={"code": "SOURCE_IMPACT_REVIEW_REQUIRED"}
+            )
+        return int(value)
+
     async def record_artifact_source_use(
         self,
         *,
@@ -332,6 +376,7 @@ async def vision_source_revisions(
     project_id: UUID,
     artifact_ids: list[UUID],
     file_revision_ids: tuple[UUID, ...] = (),
+    required_uses: frozenset[str] = frozenset({"external_processing"}),
 ) -> list[str]:
     """Freeze current declared uses of every private source of every attachment."""
     revisions: set[str] = set()
@@ -351,11 +396,13 @@ async def vision_source_revisions(
             )
         ).all()
         if {file_id for file_id, _ in rows} != set(file_revision_ids) or any(
-            r.state != "declared" or "external_processing" not in r.allowed_uses for _, r in rows
+            r.state != "declared" or not required_uses.issubset(r.allowed_uses) for _, r in rows
         ):
             raise _vision_denied()
         revisions.update(str(r.id) for _, r in rows)
     for root in artifact_ids:
+        if not await render_origins_available(session, project_id, root):
+            raise _vision_denied()
         seen: set[UUID] = set()
         frontier = {root}
         found = False

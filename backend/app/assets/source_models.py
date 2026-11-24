@@ -133,4 +133,21 @@ class SourceFragment(Base):
     )
 
 
+    @property
+    def limitations(self) -> list[str]:
+        """Derived review hints; never a claim that the content is verified history."""
+        limitations: list[str] = []
+        if self.extraction_method == "transcript":
+            limitations.append("machine_transcript")
+        elif self.extraction_method == "visual_input":
+            limitations.append("visual_input_only")
+        elif self.extraction_method == "ocr":
+            confidence = self.evidence_meta.get("confidence")
+            if isinstance(confidence, (int, float)) and float(confidence) < 60:
+                limitations.append("low_ocr_confidence")
+            if self.evidence_meta.get("page_ocr"):
+                limitations.append("page_ocr")
+        return limitations
+
+
 __all__ = ["EXTRACTION_METHODS", "LOCATOR_KINDS", "SourceExtraction", "SourceFragment"]

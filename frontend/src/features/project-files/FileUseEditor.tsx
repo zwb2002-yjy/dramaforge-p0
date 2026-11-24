@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Checkbox, Disclosure, Field, Textarea } from "../../components/ui";
 import { queryKeys } from "../../lib/queryKeys";
-import { readFileUse, saveFileUse, type SourceUseWrite } from "./api";
+import { readFileUse, readFileUseImpact, saveFileUse, type SourceUseWrite } from "./api";
 
 type Purpose = NonNullable<SourceUseWrite["allowed_uses"]>[number];
 const labels: Record<Purpose, string> = {
@@ -13,6 +13,60 @@ const labels: Record<Purpose, string> = {
   export: "导出交付",
 };
 const purposes = Object.keys(labels) as Purpose[];
+
+function SourceImpact({
+  projectId,
+  subjectId,
+  version,
+}: {
+  projectId: string;
+  subjectId: string;
+  version: number;
+}) {
+  const [opened, setOpened] = useState(false);
+  const page = useInfiniteQuery({
+    queryKey: ["source-use-impact", projectId, subjectId, version],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam, signal }) => readFileUseImpact(projectId, subjectId, pageParam, signal),
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    enabled: opened,
+    retry: false,
+  });
+  const pages = page.data?.pages;
+  return (
+    <Disclosure title="查看使用影响" compact lazy open={opened} onOpenChange={setOpened}>
+      {page.isPending && <p role="status">正在核对影响…</p>}
+      {page.isError && (
+        <p role="alert">
+          影响读取失败。<Button onClick={() => void page.refetch()}>重试</Button>
+        </p>
+      )}
+      {pages && (
+        <>
+          <p>其它项目的关联使用：{pages[0].other_project_uses_count}</p>
+          {pages[0].items.length === 0 ? (
+            <p>当前项目尚无使用记录。</p>
+          ) : (
+            <ul>
+              {pages
+                .flatMap((p) => p.items)
+                .map((item, i) => (
+                  <li key={i}>
+                    {item.usage} · {item.status} · {item.id}
+                  </li>
+                ))}
+            </ul>
+          )}
+        </>
+      )}
+      {page.hasNextPage && (
+        <Button disabled={page.isFetching} onClick={() => void page.fetchNextPage()}>
+          更多使用记录
+        </Button>
+      )}
+    </Disclosure>
+  );
+}
 
 export function FileUseEditor({
   projectId,
@@ -71,6 +125,14 @@ export function FileUseEditor({
         <p role="alert">
           无法读取许可。<Button onClick={() => void current.refetch()}>重新读取</Button>
         </p>
+      )}
+      {row?.subject_id && (
+        <SourceImpact
+          key={row.subject_id}
+          projectId={projectId}
+          subjectId={row.subject_id}
+          version={row.version}
+        />
       )}
       {row?.state === "revoked" && <p>此修订的使用许可已撤回。</p>}
       {row && row.state !== "revoked" && (

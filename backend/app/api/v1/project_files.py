@@ -13,7 +13,7 @@ from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.models import ProjectFile, ProjectFileRevision
 from app.assets.project_files import ExtractionAcceptance, ProjectFileService
-from app.assets.source_models import SourceExtraction, SourceFragment
+from app.assets.source_models import SourceExtraction
 from app.assets.source_parser import MAX_SOURCE_BYTES, source_capabilities
 from app.shared.errors import AppError
 from app.storage.minio_store import get_object_store
@@ -162,22 +162,6 @@ def _read(item: ProjectFile, revision: ProjectFileRevision) -> ProjectFileRead:
         created_at=revision.created_at,
     )
 
-
-
-def _fragment_limitations(fragment: SourceFragment) -> list[str]:
-    """Derived review hints; never a claim that the content is verified history."""
-    limitations: list[str] = []
-    if fragment.extraction_method == "transcript":
-        limitations.append("machine_transcript")
-    elif fragment.extraction_method == "visual_input":
-        limitations.append("visual_input_only")
-    elif fragment.extraction_method == "ocr":
-        confidence = fragment.evidence_meta.get("confidence")
-        if isinstance(confidence, (int, float)) and float(confidence) < 60:
-            limitations.append("low_ocr_confidence")
-        if fragment.evidence_meta.get("page_ocr"):
-            limitations.append("page_ocr")
-    return limitations
 
 
 @router.get(
@@ -348,7 +332,7 @@ async def list_fragments(
                 processor_ref=fragment.processor_ref,
                 evidence_meta=fragment.evidence_meta,
                 source_available=True,
-                limitations=_fragment_limitations(fragment),
+                limitations=fragment.limitations,
             )
             for fragment in fragments
         ],

@@ -64,6 +64,7 @@ class ImpactItem(BaseModel):
 
 
 class SourceUseImpact(BaseModel):
+    other_project_uses_count: int
     items: list[ImpactItem]
     next_cursor: str | None
 
@@ -220,10 +221,17 @@ async def read_source_use_impact(
             status = str(artifact.storage_state)
         items.append(
             ImpactItem(
-                kind="artifact", id=str(use.artifact_id), usage=use.input_role, status=status,
+                kind="artifact",
+                id=str(use.artifact_id),
+                usage=use.input_role,
+                status=status,
             )
         )
-    return SourceUseImpact(items=items, next_cursor=next_cursor)
+    return SourceUseImpact(
+        items=items,
+        next_cursor=next_cursor,
+        other_project_uses_count=await service.other_project_uses_count(subject_id),
+    )
 
 
 __all__ = ["router"]

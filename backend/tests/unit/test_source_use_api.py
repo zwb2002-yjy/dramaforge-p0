@@ -50,6 +50,10 @@ def test_source_use_http_defaults_declaration_replay_and_revocation(api):
     current = client.get(path).json()
     assert current["state"] == "declared" and current["allowed_uses"] == ["research"]
     assert current["statement"] == "本人整理，可用于研究引用。"
+    impact = client.get(
+        f"/api/v1/projects/{project}/source-use-subjects/{current['subject_id']}/impact"
+    )
+    assert impact.json() == {"items": [], "next_cursor": None, "other_project_uses_count": 0}
     incomplete = client.put(
         path,
         json={**body, "request_key": "declare-2", "expected_version": 2, "statement": " "},

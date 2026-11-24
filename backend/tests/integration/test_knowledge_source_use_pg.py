@@ -82,7 +82,7 @@ async def test_linked_publication_and_pins_follow_each_current_source(http_agent
             verification="user_asserted",
             request_key="edit",
         )
-        await source_use.declare(
+        first_grant = await source_use.declare(
             file_revision_id=originals[0].id,
             allowed_uses=["research"],
             statement="合成测试",
@@ -173,6 +173,12 @@ async def test_linked_publication_and_pins_follow_each_current_source(http_agent
 
     reference = await pin("export")
     assert reference.status_code == 201 and reference.json()["availability"] == "published"
+    impact = await a.client.get(
+        f"/api/v1/projects/{source_project}/source-use-subjects/{first_grant.subject_id}/impact",
+        headers={**a.headers, "X-Workspace-Id": str(a.other_workspace_id)},
+    )
+    assert impact.status_code == 200, impact.text
+    assert impact.json() == {"items": [], "next_cursor": None, "other_project_uses_count": 1}
     # An in-flight grant change takes the normal writer's project lock. A concurrent new pin
     # must wait and see the committed restriction before it inserts a reference.
     async with a.factory() as writer:

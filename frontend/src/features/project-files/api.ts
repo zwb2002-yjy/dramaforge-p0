@@ -1,6 +1,13 @@
 /** Project source originals, immutable extraction snapshots and fragment pages. */
 
-import { apiGet, apiGetList, apiSend, apiUpload, fetchCsrf } from "../../lib/api";
+import {
+  workspaceScopedUrl,
+  apiGet,
+  apiGetList,
+  apiSend,
+  apiUpload,
+  fetchCsrf,
+} from "../../lib/api";
 import type { components } from "../../shared/api/generated";
 
 export type ProjectFileRead = components["schemas"]["ProjectFileRead"];
@@ -125,7 +132,9 @@ export async function unlinkSource(
 }
 
 export function sourceOriginalUrl(projectId: string, revisionId: string): string {
-  return `/api/v1/projects/${projectId}/file-revisions/${revisionId}/original`;
+  return workspaceScopedUrl(
+    `/api/v1/projects/${encodeURIComponent(projectId)}/file-revisions/${encodeURIComponent(revisionId)}/original`,
+  );
 }
 export type SourceUseRead = components["schemas"]["SourceUseRead"];
 export type SourceUseWrite = components["schemas"]["SourceUseWrite"];
@@ -133,6 +142,21 @@ export type SourceUseReceipt = components["schemas"]["SourceUseReceipt"];
 
 export function readFileUse(projectId: string, revisionId: string): Promise<SourceUseRead> {
   return apiGet(`/api/v1/projects/${projectId}/file-revisions/${revisionId}/source-use`);
+}
+
+export function readFileUseImpact(
+  projectId: string,
+  subjectId: string,
+  cursor: string | null,
+  signal?: AbortSignal,
+) {
+  const query = new URLSearchParams({ limit: "20" });
+  if (cursor) query.set("cursor", cursor);
+  return apiGet<components["schemas"]["SourceUseImpact"]>(
+    `/api/v1/projects/${projectId}/source-use-subjects/${subjectId}/impact?${query}`,
+    undefined,
+    signal,
+  );
 }
 
 export async function saveFileUse(

@@ -154,6 +154,9 @@ class ArtifactSourceUse(Base):
     source_access_kind: Mapped[str] = mapped_column(
         String(24), nullable=False, default="private", server_default="private",
     )
+    access_basis: Mapped[dict[str, object]] = mapped_column(
+        JSON_DOCUMENT, nullable=False, default=dict, server_default="{}",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False,
     )
