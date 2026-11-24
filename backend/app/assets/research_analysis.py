@@ -735,7 +735,9 @@ class ResearchAnalysisService:
                     details={"code": "RESEARCH_QUOTE_NOT_VERBATIM"},
                 )
             if citation.locator_override is not None:
-                ResearchService._validate_locator(fragment, citation.locator_override)
+                ResearchService._validate_locator(
+                    fragment, citation.locator_override, citation.quoted_text
+                )
             prepared.append(citation)
         return prepared
 

@@ -29,7 +29,7 @@ from app.assets.research_models import (
     ResearchResult,
     ResearchResultRevision,
 )
-from app.assets.source_models import SourceFragment
+from app.assets.source_models import SourceExtraction, SourceFragment
 from app.shared.errors import AppError, NotFoundError, ValidationAppError
 
 
@@ -38,6 +38,28 @@ class ResearchConflictError(AppError):
 
     def __init__(self, code: str, message: str) -> None:
         super().__init__(code=code, message=message, status_code=409)
+
+
+@dataclass(frozen=True)
+class CitationSourceView:
+    citation: ResearchCitation
+    fragment: SourceFragment
+    filename: str
+    file_version: int
+    extraction_schema_version: int
+    source_available: bool
+
+    def location_override(self) -> tuple[dict[str, object] | None, list[str]]:
+        override = self.citation.locator_override
+        limitations = self.fragment.limitations
+        if override is not None:
+            try:
+                ResearchService._validate_locator(
+                    self.fragment, override, self.citation.quoted_text
+                )
+            except ValidationAppError:
+                return None, [*limitations, "unverified_locator_override"]
+        return override, limitations
 
 
 @dataclass(frozen=True)
@@ -190,7 +212,7 @@ class ResearchService:
                     details={"code": "RESEARCH_QUOTE_NOT_VERBATIM"},
                 )
             if citation.locator_override is not None:
-                self._validate_locator(fragment, citation.locator_override)
+                self._validate_locator(fragment, citation.locator_override, citation.quoted_text)
             self.session.add(
                 ResearchCitation(
                     project_id=self.project_id,
@@ -204,7 +226,9 @@ class ResearchService:
             )
 
     @staticmethod
-    def _validate_locator(fragment: SourceFragment, locator: dict[str, object]) -> None:
+    def _validate_locator(
+        fragment: SourceFragment, locator: dict[str, object], quoted_text: str = ""
+    ) -> None:
         """The override must stay inside the fragment it claims to locate."""
         kind = locator.get("kind")
         if kind != fragment.locator_kind:
@@ -212,31 +236,83 @@ class ResearchService:
                 "Locator kind does not match the fragment",
                 details={"code": "RESEARCH_LOCATOR_KIND_MISMATCH"},
             )
-        length = len(fragment.text_content)
-        if kind in {"paragraph", "page_region", "image_region"}:
-            start = locator.get("char_start")
-            end = locator.get("char_end")
-            if not isinstance(start, int) or not isinstance(end, int):
-                raise ValidationAppError(
-                    "Character range is required", details={"code": "RESEARCH_LOCATOR_INVALID"}
-                )
-            if start < 0 or end <= start or end > length:
-                raise ValidationAppError(
-                    "Character range is outside the fragment",
-                    details={"code": "RESEARCH_LOCATOR_OUT_OF_RANGE"},
-                )
-        elif kind == "time_range":
-            start_ms = locator.get("start_ms")
-            end_ms = locator.get("end_ms")
-            if (
-                not isinstance(start_ms, int)
-                or not isinstance(end_ms, int)
-                or start_ms < 0
-                or end_ms <= start_ms
+        parent = fragment.locator
+        allowed = set(parent)
+        if set(locator) - allowed:
+            raise ValidationAppError(
+                "Unexpected locator field", details={"code": "RESEARCH_LOCATOR_INVALID"}
+            )
+        dimensions = (
+            ("char_start", "char_end"),
+            ("page_start", "page_end"),
+            ("paragraph_start", "paragraph_end"),
+            ("start_ms", "end_ms"),
+            ("row_start", "row_end"),
+            ("column_start", "column_end"),
+        )
+        bounded = {"kind", "bbox"}
+        for low, high in dimensions:
+            if low not in locator and high not in locator:
+                continue
+            bounded.update((low, high))
+            left, right, minimum, maximum = (
+                locator.get(low),
+                locator.get(high),
+                parent.get(low),
+                parent.get(high),
+            )
+            if not (
+                type(left) is int
+                and type(right) is int
+                and type(minimum) is int
+                and type(maximum) is int
+                and minimum <= left <= right <= maximum
+                and (left < right or low == "char_start" and minimum == maximum)
             ):
                 raise ValidationAppError(
-                    "Time range is invalid", details={"code": "RESEARCH_LOCATOR_INVALID"}
+                    "Range is outside the fragment",
+                    details={"code": "RESEARCH_LOCATOR_OUT_OF_RANGE"},
                 )
+            if (
+                low == "char_start"
+                and quoted_text
+                and quoted_text not in fragment.text_content[left - minimum : right - minimum]
+            ):
+                raise ValidationAppError(
+                    "Quoted text is outside the cited character range",
+                    details={"code": "RESEARCH_QUOTE_NOT_VERBATIM"},
+                )
+        if locator.get("bbox") != parent.get("bbox") and "bbox" in locator:
+            area, base = locator["bbox"], parent.get("bbox")
+            keys = {"x", "y", "width", "height"}
+            if (
+                not isinstance(area, dict)
+                or not isinstance(base, dict)
+                or set(area) != keys
+                or not keys <= set(base)
+            ):
+                raise ValidationAppError(
+                    "Invalid image region", details={"code": "RESEARCH_LOCATOR_INVALID"}
+                )
+            if not all(type(area[k]) is int and type(base[k]) is int for k in keys) or not (
+                base["x"] <= area["x"]
+                and base["y"] <= area["y"]
+                and 0 < area["width"] <= base["x"] + base["width"] - area["x"]
+                and 0 < area["height"] <= base["y"] + base["height"] - area["y"]
+            ):
+                raise ValidationAppError(
+                    "Region is outside the fragment",
+                    details={"code": "RESEARCH_LOCATOR_OUT_OF_RANGE"},
+                )
+        if any(
+            type(value) is not type(parent[key]) or parent[key] != value
+            for key, value in locator.items()
+            if key not in bounded
+        ):
+            raise ValidationAppError(
+                "Locator addresses another source",
+                details={"code": "RESEARCH_LOCATOR_OUT_OF_RANGE"},
+            )
 
     async def _copy_citations(
         self, source_revision: ResearchResultRevision, target: ResearchResultRevision
@@ -683,9 +759,7 @@ class ResearchService:
         await self._authorize()
         return await self._result(result_id)
 
-    async def current_revisions(
-        self, ids: set[UUID]
-    ) -> dict[UUID, ResearchResultRevision]:
+    async def current_revisions(self, ids: set[UUID]) -> dict[UUID, ResearchResultRevision]:
         if not ids:
             return {}
         rows = await self.session.scalars(
@@ -714,41 +788,39 @@ class ResearchService:
             )
         )
 
-    async def citation_views(
-        self, revision_id: UUID
-    ) -> list[tuple[ResearchCitation, SourceFragment, bool]]:
-        """Citations with their fragment and whether the original is still available."""
-        citations = await self.list_citations(revision_id)
-        if not citations:
-            return []
-        fragment_ids = {citation.source_fragment_id for citation in citations}
-        fragments = {
-            fragment.id: fragment
-            for fragment in await self.session.scalars(
-                select(SourceFragment).where(
-                    SourceFragment.id.in_(fragment_ids),
-                    SourceFragment.project_id == self.project_id,
-                )
+    async def citation_views(self, revision_id: UUID) -> list[CitationSourceView]:
+        """Read evidence from the cited extraction and file revision, including old revisions."""
+        await self._authorize()
+        await self._revision(revision_id)
+        rows = await self.session.execute(
+            select(
+                ResearchCitation,
+                SourceFragment,
+                ProjectFileRevision.filename,
+                ProjectFileRevision.number,
+                SourceExtraction.extraction_schema_version,
+                ProjectFile.detached_at,
             )
-        }
-        revision_ids = {fragment.file_revision_id for fragment in fragments.values()}
-        availability: dict[UUID, bool] = {}
-        if revision_ids:
-            rows = await self.session.execute(
-                select(ProjectFileRevision.id, ProjectFile.detached_at)
-                .join(ProjectFile, ProjectFile.id == ProjectFileRevision.file_id)
-                .where(ProjectFileRevision.id.in_(revision_ids))
+            .join(SourceFragment, SourceFragment.id == ResearchCitation.source_fragment_id)
+            .join(SourceExtraction, SourceExtraction.id == SourceFragment.extraction_id)
+            .join(ProjectFileRevision, ProjectFileRevision.id == ResearchCitation.file_revision_id)
+            .join(ProjectFile, ProjectFile.id == ProjectFileRevision.file_id)
+            .where(
+                ResearchCitation.research_revision_id == revision_id,
+                ResearchCitation.project_id == self.project_id,
+                SourceFragment.file_revision_id == ProjectFileRevision.id,
+                SourceExtraction.file_revision_id == ProjectFileRevision.id,
+                SourceFragment.project_id == self.project_id,
+                SourceExtraction.project_id == self.project_id,
+                ProjectFileRevision.project_id == self.project_id,
+                ProjectFile.project_id == self.project_id,
             )
-            availability = {row[0]: row[1] is None for row in rows}
-        views: list[tuple[ResearchCitation, SourceFragment, bool]] = []
-        for citation in citations:
-            fragment = fragments.get(citation.source_fragment_id)
-            if fragment is None:
-                continue
-            views.append(
-                (citation, fragment, availability.get(fragment.file_revision_id, False))
-            )
-        return views
+            .order_by(ResearchCitation.created_at, ResearchCitation.id)
+        )
+        return [
+            CitationSourceView(citation, fragment, name, number, schema, detached is None)
+            for citation, fragment, name, number, schema, detached in rows
+        ]
 
 
 __all__ = [

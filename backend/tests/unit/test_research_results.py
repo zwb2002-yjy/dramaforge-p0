@@ -104,7 +104,7 @@ async def test_citations_must_be_verbatim_and_inside_the_fragment(research):
         request_key="cite-good",
     )
     views = await service.citation_views(good.revision_id)
-    assert len(views) == 1 and views[0][2] is True
+    assert len(views) == 1 and views[0].source_available is True
     with pytest.raises(ValidationAppError) as not_verbatim:
         await service.create_result(
             kind="summary",
@@ -264,3 +264,65 @@ async def test_list_filters_by_kind_query_and_suggestions(research):
     assert total == 0
     suggestions, total = await service.list_results(view="suggestions")
     assert suggestions == [] and total == 0
+
+@pytest.mark.parametrize(
+    ("parent", "override"),
+    [
+        (
+            {"kind": "time_range", "start_ms": 2000, "end_ms": 3000},
+            {"start_ms": 1000, "end_ms": 2200},
+        ),
+        (
+            {
+                "kind": "table_cells",
+                "row_start": 1,
+                "row_end": 2,
+                "column_start": 0,
+                "column_end": 1,
+                "sheet": "甲",
+            },
+            {"sheet": "乙"},
+        ),
+        ({"kind": "page_region", "page_start": 4, "page_end": 5}, {"page_start": 0, "page_end": 1}),
+        (
+            {"kind": "image_region", "bbox": {"x": 10, "y": 10, "width": 30, "height": 30}},
+            {"bbox": {"x": 8, "y": 12, "width": 1, "height": 1}},
+        ),
+    ],
+)
+def test_citation_cannot_point_outside_its_snapshot(parent, override):
+    from app.assets.source_models import SourceFragment
+
+    fragment = SourceFragment(locator_kind=parent["kind"], locator=parent)
+    with pytest.raises(ValidationAppError):
+        ResearchService._validate_locator(fragment, {"kind": parent["kind"], **override})
+    ResearchService._validate_locator(fragment, parent)
+
+
+def test_quote_range_and_invalid_old_override():
+    from app.assets.research import CitationSourceView
+    from app.assets.research_models import ResearchCitation
+    from app.assets.source_models import SourceFragment
+
+    parent = {
+        "kind": "paragraph",
+        "paragraph_start": 0,
+        "paragraph_end": 1,
+        "char_start": 10,
+        "char_end": 14,
+    }
+    fragment = SourceFragment(
+        locator_kind="paragraph",
+        locator=parent,
+        text_content="甲乙丙丁",
+        extraction_method="ocr",
+        evidence_meta={"confidence": 45},
+    )
+    sub = {"kind": "paragraph", "char_start": 11, "char_end": 13}
+    ResearchService._validate_locator(fragment, sub, "乙丙")
+    with pytest.raises(ValidationAppError):
+        ResearchService._validate_locator(fragment, sub, "甲乙")
+    citation = ResearchCitation(locator_override=sub, quoted_text="甲乙")
+    view = CitationSourceView(citation, fragment, "县志.pdf", 1, 2, False)
+    assert view.location_override() == (None, ["low_ocr_confidence", "unverified_locator_override"])
+    assert view.citation.locator_override == sub

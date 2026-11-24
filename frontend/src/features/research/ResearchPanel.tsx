@@ -1,5 +1,6 @@
 /** Project cultural research: typed findings, corrections and analysis acceptance. */
 
+import { EgressSummary } from "../../components/EgressSummary";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, useContext, useEffect } from "react";
 
@@ -7,6 +8,7 @@ import {
   Alert,
   Badge,
   Button,
+  Checkbox,
   Card,
   EmptyState,
   Field,
@@ -33,6 +35,7 @@ import {
   readResearchRevision,
   restoreResearchRevision,
   type AnalysisPreviewRead,
+  type AnalysisInput,
   type ResearchKind,
   type ResearchResultRead,
 } from "./api";
@@ -48,7 +51,7 @@ import {
 } from "../knowledge/KnowledgePublicationDialog";
 
 function requestKey(prefix: string): string {
-  return `${prefix}-${crypto.randomUUID()}`;
+  return `${prefix}-${Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,"0")).join("")}`;
 }
 
 function modelIdOf(preview: AnalysisPreviewRead): string {
@@ -77,7 +80,8 @@ export function ResearchPanel({
   const [draftText, setDraftText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [preview, setPreview] = useState<AnalysisPreviewRead | null>(null);
+  const [target, setTarget]=useState<{result_id:string;base_revision_id:string}|null>(null);
+  const [decision,setDecision]=useState<{revisionId:string;input:AnalysisInput;read:AnalysisPreviewRead;requestKey:string}|null>(null);
   const [sourceRevisionId, setSourceRevisionId] = useState<string | null>(source?.revision ?? null);
 
   const results = useQuery({
@@ -277,46 +281,42 @@ export function ResearchPanel({
     },
   });
 
+  const currentTarget=target && !selected?.archived_at && selected?.id===target.result_id &&
+    selected.current_revision_id===target.base_revision_id ? target : null;
+  const analysisInput:AnalysisInput|null=sourceFile?.current_extraction_id ? {
+    source_extraction_id:sourceFile.current_extraction_id, expected_file_version:sourceFile.version,
+    category_set:currentTarget && selected ? [selected.kind] : [],
+    target_results:currentTarget ? [currentTarget] : [],
+  }:null;
+  const preview=decision && decision.revisionId===sourceFile?.revision_id &&
+    JSON.stringify(decision.input)===JSON.stringify(analysisInput) ? decision.read : null;
   const previewMutation = useMutation({
-    mutationFn: () => {
-      if (!sourceFile || !sourceFile.current_extraction_id) {
-        throw new Error("请选择已完成本地解析的资料");
-      }
-      return previewAnalysis(projectId, sourceFile.revision_id, {
-        extractionId: sourceFile.current_extraction_id,
-        expectedFileVersion: sourceFile.version,
-      });
+    mutationFn: async() => {
+      if(!analysisInput || !sourceFile)throw new Error("请选择已完成本地解析的资料");
+      const read=await previewAnalysis(projectId,sourceFile.revision_id,analysisInput);
+      return {revisionId:sourceFile.revision_id,input:analysisInput,read,requestKey:requestKey("analysis")};
     },
-    onSuccess: (value) => {
-      setError(null);
-      setPreview(value);
-      setNotice(null);
-    },
+    onSuccess: value => {setError(null);setDecision(value);setNotice(null);},
     onError: (caught) => setError(caught instanceof Error ? caught.message : "预览失败"),
   });
 
   const accept = useMutation({
+    retry:false,
     mutationFn: () => {
-      if (!preview || !sourceFile || !sourceFile.current_extraction_id) {
-        throw new Error("请先生成预览");
-      }
-      return acceptAnalysis(projectId, sourceFile.revision_id, {
-        requestKey: requestKey("analysis"),
-        extractionId: sourceFile.current_extraction_id,
-        expectedFileVersion: sourceFile.version,
-        previewFingerprint: preview.preview_fingerprint,
-      });
+      if(!decision||!preview||preview.blockers.length)throw new Error("请先生成可执行的预览");
+      return acceptAnalysis(projectId,decision.revisionId,{requestKey:decision.requestKey,
+        preview:decision.input,previewFingerprint:decision.read.preview_fingerprint});
     },
     onSuccess: (acceptance) => {
       setError(null);
       setNotice(`已受理分析（Turn ${acceptance.turn_id.slice(0, 8)}），执行结果稍后可见。`);
-      setPreview(null);
+      setDecision(null);
       refresh();
     },
     onError: (caught) => {
       if (caught instanceof ApiError && caught.status === 409) {
         setError("预览已过期或存在阻断项，请重新预览。");
-        setPreview(null);
+        setDecision(null);
         return;
       }
       setError(caught instanceof Error ? caught.message : "受理失败");
@@ -390,7 +390,7 @@ export function ResearchPanel({
                   { label: "版本", value: String(selected.version) },
                 ]}
               />
-              <RevisionDetails revision={currentRevision.data} />
+              <RevisionDetails projectId={projectId} revision={currentRevision.data} />
               {showAttachment &&
                 selected.current_revision_id === currentRevision.data.id &&
                 currentRevision.data.content_hash &&
@@ -481,12 +481,12 @@ export function ResearchPanel({
                   {historical.data && (
                     <>
                       <h4>当前版本 {currentRevision.data.number}</h4>
-                      <RevisionDetails revision={currentRevision.data} />
+                      <RevisionDetails projectId={projectId} revision={currentRevision.data} />
                       <h4>
                         {historical.data.applied_result_version === null ? "研究候选" : "历史版本"}{" "}
                         {historical.data.number}
                       </h4>
-                      <RevisionDetails revision={historical.data} />
+                      <RevisionDetails projectId={projectId} revision={historical.data} />
                       {correction.trim() && <p>请先保存或清空正在编辑的修正。</p>}
                       {historyRevision?.baseVersion !== selected.version && (
                         <p>研究已更新，请重新选择版本对照。</p>
@@ -561,7 +561,7 @@ export function ResearchPanel({
               value={sourceRevisionId ?? ""}
               onChange={(value) => {
                 setSourceRevisionId(value || null);
-                setPreview(null);
+                setDecision(null);
               }}
               options={[
                 { value: "", label: "选择已解析资料" },
@@ -569,14 +569,23 @@ export function ResearchPanel({
               ]}
             />
           </Field>
+          {selected?.current_revision_id && !selected.archived_at && <Field>
+            <Checkbox checked={!!currentTarget} disabled={accept.isPending} onChange={e=>{
+              setTarget(e.target.checked ? {result_id:selected.id,base_revision_id:selected.current_revision_id!}:null);
+              setDecision(null);
+            }}/>
+            对当前研究版本生成修改建议
+          </Field>}
+          {currentTarget && <p>再分析目标：{selected?.current?.summary} · 研究版本 {selected?.current?.number}。新建议保留为候选。</p>}
           <Button
-            disabled={!sourceFile || previewMutation.isPending}
+            disabled={!sourceFile || previewMutation.isPending || accept.isPending}
             onClick={() => previewMutation.mutate()}
           >
             分析预览
           </Button>
           {preview && (
             <div aria-label="分析预览结果">
+              {preview.egress && <EgressSummary egress={preview.egress}/>}
               <MetadataList
                 items={[
                   { label: "指纹", value: preview.preview_fingerprint.slice(0, 12) },

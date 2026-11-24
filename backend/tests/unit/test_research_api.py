@@ -99,7 +99,17 @@ def test_research_result_lifecycle_and_typed_validation(api, monkeypatch):
         f"/api/v1/projects/{project}/research-revisions/{receipt['revision_id']}"
     ).json()
     assert revision["citations"][0]["quoted_text"] == "古桥始建于明代。"
-    assert revision["citations"][0]["source_available"] is True
+    cite = revision["citations"][0]
+    assert cite["source_available"] is True
+    assert (cite["filename"], cite["file_version"], cite["extraction_schema_version"]) == (
+        "地方志.txt",
+        1,
+        2,
+    )
+    assert (
+        cite["locator"]["paragraph_start"] == 0 and cite["locator"]["container_key"] == "text-lines"
+    )
+    assert not cite["limitations"] and "object_key" not in cite
 
     corrected = client.post(
         f"{base}/{result_id}/revisions",

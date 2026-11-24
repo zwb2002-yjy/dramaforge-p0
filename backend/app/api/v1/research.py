@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -10,11 +11,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.access.egress_models import ProviderDestinationRevision
+from app.contracts.egress_preview import EgressPreview, PayloadSummary, SourceEligibility
 from app.access.models import Project
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.research import (
     CitationInput,
+    CitationSourceView,
     ResearchMutationReceipt,
     ResearchService,
 )
@@ -37,6 +41,10 @@ router = APIRouter(tags=["research"], dependencies=[Depends(require_selected_wor
 
 
 class CitationRead(BaseModel):
+    filename: str
+    file_version: int
+    extraction_schema_version: int
+    locator: dict[str, object]
     id: UUID
     source_fragment_id: UUID
     file_revision_id: UUID
@@ -46,6 +54,25 @@ class CitationRead(BaseModel):
     source_available: bool
     extraction_method: str
     limitations: list[str] = Field(default_factory=list)
+
+
+def _citation_read(view: CitationSourceView) -> CitationRead:
+    override, limitations = view.location_override()
+    return CitationRead(
+        id=view.citation.id,
+        source_fragment_id=view.citation.source_fragment_id,
+        file_revision_id=view.citation.file_revision_id,
+        claim_key=view.citation.claim_key,
+        locator_override=override,
+        quoted_text=view.citation.quoted_text,
+        source_available=view.source_available,
+        extraction_method=view.fragment.extraction_method,
+        limitations=limitations,
+        filename=view.filename,
+        file_version=view.file_version,
+        extraction_schema_version=view.extraction_schema_version,
+        locator=view.fragment.locator,
+    )
 
 
 class CitationWrite(BaseModel):
@@ -315,20 +342,7 @@ async def read_research_revision(
         restores_revision_id=revision.restores_revision_id,
         accepts_revision_id=revision.accepts_revision_id,
         applied_result_version=revision.applied_result_version,
-        citations=[
-            CitationRead(
-                id=citation.id,
-                source_fragment_id=citation.source_fragment_id,
-                file_revision_id=citation.file_revision_id,
-                claim_key=citation.claim_key,
-                locator_override=citation.locator_override,
-                quoted_text=citation.quoted_text,
-                source_available=available,
-                extraction_method=fragment.extraction_method,
-                limitations=[],
-            )
-            for citation, fragment, available in views
-        ],
+        citations=[_citation_read(view) for view in views],
     )
 
 
@@ -450,6 +464,7 @@ class AnalysisPreviewInput(BaseModel):
 
 
 class AnalysisPreviewRead(BaseModel):
+    egress: EgressPreview
     preview_fingerprint: str
     source_revision_id: UUID
     source_extraction_id: UUID
@@ -505,7 +520,27 @@ async def preview_research_analysis(
         model_blocker=blocker,
         requested_text_model_id=body.requested_text_model_id,
     )
+    from app.director.research_import import MAX_CONTEXT_FRAGMENTS
+    facts=preview.input_versions["egress"]
+    assert isinstance(facts,dict)
+    destination = None
+    if rid:=facts.get("destination_revision_id"):
+        destination=await session.scalar(select(ProviderDestinationRevision).where(
+            ProviderDestinationRevision.id==UUID(str(rid)),ProviderDestinationRevision.workspace_id==project.workspace_id))
+    raw_origin = (destination.route_manifest or {}).get("primary_origin") if destination else None
+    eligible = preview.source_use_summary.get("allowed") is True
+    loc = facts.get("processing_location")
+    summary = EgressPreview(mode=str(facts["mode"]),policy_revision=int(facts["policy_revision"]),
+        policy_revision_id=facts.get("policy_revision_id"),destination_revision_id=facts.get("destination_revision_id"),
+        actual_processing_location=loc if loc in ("local","external") else "unknown",
+        destination_host=urlsplit(raw_origin).hostname if isinstance(raw_origin,str) else None,
+        purpose=str(facts["purpose"]),required_purposes=facts["required_purposes"],
+        payload_summary=PayloadSummary(file_count=1,fragment_count=min(int(str(preview.input_versions["fragment_count"])),MAX_CONTEXT_FRAGMENTS)),
+        source_eligibility=SourceEligibility(allowed=eligible,status="eligible" if eligible else "blocked",
+                             eligibility_fingerprint=content_hash(preview.source_use_summary)),
+        blockers=preview.blockers)
     return AnalysisPreviewRead(
+        egress=summary,
         preview_fingerprint=preview.preview_fingerprint,
         source_revision_id=preview.source_revision_id,
         source_extraction_id=preview.source_extraction_id,

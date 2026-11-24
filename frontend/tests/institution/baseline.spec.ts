@@ -83,6 +83,17 @@ test("real project/source persistence, browser readback and owner isolation", as
   await page.getByRole("button", { name: "保存研究条目" }).click();
   await expect(page.getByRole("heading", { name: note })).toBeVisible();
   await expect(page.getByLabel("引用来源")).toContainText(sourceText);
+  const primaryCitation = page.getByLabel("引用来源");
+  await expect(primaryCitation).toContainText("synthetic.txt · 文件版本 1 · 第 1 行");
+  const original = await primaryCitation
+    .getByRole("link", { name: "下载引用版本的原件" })
+    .getAttribute("href");
+  expect(new URL(original!, page.url()).pathname).toBe(
+    `/api/v1/projects/${project.id}/file-revisions/${file.revision_id}/original`,
+  );
+  const downloaded = await page.request.get(original!);
+  expect(downloaded.status()).toBe(200);
+  expect((await downloaded.body()).toString("utf8")).toBe(sourceText);
   const revised = "合成资料记载，古城每年都举办灯会。";
   await page.getByLabel("修正内容").fill(revised);
   await page.getByRole("button", { name: "保存修正为新版本" }).click();

@@ -144,42 +144,15 @@ export function restoreResearchRevision(
   });
 }
 
-export function previewAnalysis(
-  projectId: string,
-  revisionId: string,
-  input: { extractionId: string; expectedFileVersion: number },
-): Promise<AnalysisPreviewRead> {
-  return send(
-    "POST",
-    `/api/v1/projects/${projectId}/file-revisions/${revisionId}/analysis-preview`,
-    {
-      source_extraction_id: input.extractionId,
-      expected_file_version: input.expectedFileVersion,
-      category_set: [],
-      target_results: [],
-    },
-  );
+export type AnalysisInput = components["schemas"]["AnalysisPreviewInput"];
+export function previewAnalysis(projectId:string,revisionId:string,input:AnalysisInput):Promise<AnalysisPreviewRead> {
+  return send("POST",`/api/v1/projects/${projectId}/file-revisions/${revisionId}/analysis-preview`,input);
 }
-
-export function acceptAnalysis(
-  projectId: string,
-  revisionId: string,
-  input: {
-    requestKey: string;
-    extractionId: string;
-    expectedFileVersion: number;
-    previewFingerprint: string;
-  },
-): Promise<ResearchAcceptanceRead> {
-  return send("POST", `/api/v1/projects/${projectId}/file-revisions/${revisionId}/analyses`, {
-    request_key: input.requestKey,
-    preview: {
-      source_extraction_id: input.extractionId,
-      expected_file_version: input.expectedFileVersion,
-      category_set: [],
-      target_results: [],
-    },
-    preview_fingerprint: input.previewFingerprint,
+export function acceptAnalysis(projectId:string,revisionId:string,decision:{
+  requestKey:string;preview:AnalysisInput;previewFingerprint:string
+}):Promise<ResearchAcceptanceRead>{
+  return send("POST",`/api/v1/projects/${projectId}/file-revisions/${revisionId}/analyses`,{
+    request_key:decision.requestKey,preview:decision.preview,preview_fingerprint:decision.previewFingerprint,
   });
 }
 

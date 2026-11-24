@@ -101,7 +101,8 @@ class ResolvedAgentTextModel:
             current.media_parts = [SecretBytes(png) for png in images]
         result = await self.text_model.generate(
             request=TextGenerateRequest(
-                messages=wire, tools=tools, tool_choice="auto", parallel_tool_calls=False,
+                messages=wire, tools=tools, tool_choice="auto" if tools else None,
+                parallel_tool_calls=False if tools else None,
                 max_tokens=4096, native_options=self.native_options,
             ),
             model_id=self.model_id,

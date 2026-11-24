@@ -63,6 +63,93 @@ afterEach(() => {
 });
 
 describe("ResearchPanel", () => {
+  it("shows the fixed file version and real location of each citation, even when the original is later detached", async () => {
+    setSelectedWorkspaceId("workspace-1");
+    const source = {
+      id: "cite",
+      file_revision_id: "file-v1",
+      source_fragment_id: "fragment",
+      filename: "县志.pdf",
+      file_version: 1,
+      extraction_schema_version: 2,
+      locator: {
+        kind: "page_region",
+        page_start: 1,
+        page_end: 2,
+        bbox: { x: 20, y: 30, width: 30, height: 15 },
+      },
+      locator_override: null,
+      quoted_text: "古桥原文",
+      source_available: true,
+      extraction_method: "ocr",
+      limitations: ["low_ocr_confidence"],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/research-results?")) return json({ items: [RESULT], total: 1 });
+        if (url.endsWith("/research-revisions/" + REVISION_ID))
+          return json({
+            ...REVISION,
+            citations: [
+              source,
+              {
+                ...source,
+                id: "detached",
+                file_revision_id: "detached-v2",
+                source_available: false,
+              },
+            ],
+          });
+        if (url.endsWith("/files")) return json([]);
+        return json({ items: [], total: 0 });
+      }),
+    );
+    renderWithClient(<ResearchPanel projectId={PROJECT_ID} />);
+    const citations = within(await screen.findByLabelText("引用来源"));
+    expect(citations.getAllByText(/县志.pdf.*文件版本 1.*第 2 页.*20, 30/)).toHaveLength(2);
+    expect(citations.getAllByText("文字识别置信度较低")).toHaveLength(2);
+    const [download] = citations.getAllByRole("link", { name: "下载引用版本的原件" });
+    expect(download.getAttribute("href")).toBe(
+      `/api/v1/projects/${PROJECT_ID}/file-revisions/file-v1/original?workspace_id=workspace-1`,
+    );
+    expect(citations.getAllByRole("link")).toHaveLength(1);
+    expect(citations.getByText(/来源已不可用/)).toBeTruthy();
+  });
+
+  it("binds a reanalysis to the chosen revision and keeps standalone analysis separate",async()=>{
+    const previews:Record<string,unknown>[]=[]; const decisions:Record<string,unknown>[]=[];
+    vi.stubGlobal("fetch",vi.fn((input:RequestInfo|URL,init?:RequestInit)=>{
+      const url=String(input);
+      if(url.endsWith("/auth/csrf"))return json({csrf_token:"token"});
+      if(url.endsWith("/analysis-preview")){
+        previews.push(JSON.parse(String(init?.body)));
+        return json({preview_fingerprint:"a".repeat(64),max_model_calls:1,model_identity:{model_id:"test"},
+          missing_categories:[],blockers:[]});
+      }
+      if(url.endsWith("/analyses")&&init?.method==="POST"){
+        decisions.push(JSON.parse(String(init.body)));return json({turn_id:CANDIDATE_ID},202);
+      }
+      if(url.endsWith("/files"))return json([{revision_id:"file",current_extraction_id:"extraction",source_available:true,status:"parsed",version:1,filename:"县志"}]);
+      if(url.includes("/research-results?"))return json({items:[RESULT],total:1});
+      if(url.endsWith(REVISION_ID))return json(REVISION);
+      return json({items:[],total:0});
+    }));
+    renderWithClient(<ResearchPanel projectId={PROJECT_ID} source={{revision:"file"}}/>);
+    const target=await screen.findByRole("checkbox",{name:"对当前研究版本生成修改建议"});
+    await waitFor(()=>expect(screen.getByRole("button",{name:"分析预览"})).toBeEnabled());
+    fireEvent.click(screen.getByRole("button",{name:"分析预览"}));
+    await screen.findByRole("button",{name:"确认分析"});
+    expect(previews[0].target_results).toEqual([]);
+    fireEvent.click(target);expect(screen.queryByRole("button",{name:"确认分析"})).toBeNull();
+    fireEvent.click(screen.getByRole("button",{name:"分析预览"}));
+    fireEvent.click(await screen.findByRole("button",{name:"确认分析"}));
+    await waitFor(()=>expect(decisions.length).toBe(1));
+    expect(previews[1]).toMatchObject({category_set:["person"],target_results:[{result_id:RESULT_ID,base_revision_id:REVISION_ID}]});
+    expect(decisions[0].preview).toEqual(previews[1]);
+  });
+
   it("compares the full candidate and accepts it only after the user selects it", async () => {
     const writes: { url: string; body: Record<string, unknown> }[] = [];
     const current = {

@@ -1,5 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useContext, useRef, useState } from "react";
+import {
+  useEffect,
+  useContext,
+  useRef,
+  useState,
+  useMemo,
+  useCallback,
+  useSyncExternalStore,
+  type SetStateAction,
+} from "react";
 
 import {
   ApiError,
@@ -21,7 +30,11 @@ import {
   readDirectorAgentThread,
   sendDirectorAgentMessage,
 } from "../director/api";
-import { getSelectedWorkspaceId } from "../../lib/navigationPreferences";
+import { fetchCurrentUser } from "../access/api";
+import {
+  getSelectedWorkspaceId,
+  subscribeSelectedWorkspaceId,
+} from "../../lib/navigationPreferences";
 import { fetchCreativeDirection, saveCreativeDirection } from "./api";
 
 type CreativeDirectionPanelProps = {
@@ -40,7 +53,10 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
   const studio = useContext(StudioSelection);
   const selection = studio?.attachment;
   const selectedPart = selection && "part" in selection ? selection.part : null;
-  const research = selection && "research_ref" in selection ? selection : null;
+  const discussion =
+    selection && ("research_ref" in selection || "knowledge_ref" in selection) ? selection : null;
+  const knowledge = discussion && "knowledge_ref" in discussion ? discussion : null;
+  const research = discussion && "research_ref" in discussion ? discussion : null;
   const preview = selection ? null : studio?.media;
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -59,24 +75,41 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
       ? discovery.data.id
       : null;
   const threadId = existingThread ?? openedThread;
-  const userId = queryClient.getQueryData<{ id: string }>(queryKeys.auth.currentUser())?.id;
-  const workspaceId = getSelectedWorkspaceId();
+  const user = useQuery({
+    queryKey: queryKeys.auth.currentUser(),
+    queryFn: fetchCurrentUser,
+    retry: false,
+  });
+  const workspaceId = useSyncExternalStore(subscribeSelectedWorkspaceId, getSelectedWorkspaceId);
+  const userId = user.data?.id;
   const draftKey = userId && workspaceId ? `${storageKey}.${userId}.${workspaceId}.draft` : null;
-  const [question, setQuestion] = useState(() =>
-    draftKey ? (sessionStorage.getItem(draftKey) ?? "") : "",
+  const restored = useMemo(
+    () => (draftKey ? (sessionStorage.getItem(draftKey) ?? "") : ""),
+    [draftKey],
+  );
+  const [localDraft, setLocalDraft] = useState<{ key: string | null; text: string } | null>(null);
+  const question = localDraft?.key === draftKey ? localDraft.text : restored;
+  const setQuestion = useCallback(
+    (action: SetStateAction<string>) => {
+      setLocalDraft((current) => {
+        const previous = current?.key === draftKey ? current.text : restored;
+        return { key: draftKey, text: typeof action === "function" ? action(previous) : action };
+      });
+    },
+    [draftKey, restored],
   );
   useEffect(() => {
-    if (!draftKey) return;
-    if (question) sessionStorage.setItem(draftKey, question);
+    if (!draftKey || localDraft?.key !== draftKey) return;
+    if (localDraft.text) sessionStorage.setItem(draftKey, localDraft.text);
     else sessionStorage.removeItem(draftKey);
-  }, [draftKey, question]);
+  }, [localDraft, draftKey]);
   const lastSuggestedQuestion = useRef<string | null>(null);
   useEffect(() => {
-    if (!research) return;
+    if (!discussion) return;
     const prior = lastSuggestedQuestion.current;
-    setQuestion((value) => (!value.trim() || value === prior ? research.prompt : value));
-    lastSuggestedQuestion.current = research.prompt;
-  }, [research]);
+    setQuestion((value) => (!value.trim() || value === prior ? discussion.prompt : value));
+    lastSuggestedQuestion.current = discussion.prompt;
+  }, [discussion, setQuestion]);
   const submitLock = useRef(false);
   const sentText = useRef<string | null>(null);
   const mounted = useRef(true);
@@ -218,7 +251,7 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
       void queryClient.invalidateQueries({ queryKey: ["direction-thread", projectId] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.director.goals(projectId) });
     }
-  }, [pendingRequest, pendingKey, receipt.data, thread.data, projectId, queryClient]);
+  }, [pendingRequest, pendingKey, receipt.data, thread.data, projectId, queryClient, setQuestion]);
 
   const save = useMutation({
     mutationFn: () => {
@@ -262,8 +295,9 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
       return sendDirectorAgentMessage(projectId, id, {
         content: content.trim(),
         request_key: requestKey,
-        intent: !research && goalsOpen && createGoal ? "create_goal" : "conversation",
+        intent: !discussion && goalsOpen && createGoal ? "create_goal" : "conversation",
         ...(research && { research_ref: research.research_ref }),
+        ...(knowledge && { knowledge_ref: knowledge.knowledge_ref }),
         ...(selectedPart && { media_parts: [selectedPart] }),
         ...(attached && {
           media_parts: [
@@ -404,12 +438,15 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
             <p>{goal}</p>
           </article>
         )}
-        {research && (
-          <article className="studio-context-card" aria-label="将随消息发送的研究正文">
-            <strong>{research.label}</strong>
-            <ContentFields value={research.body} />
+        {discussion && (
+          <article
+            className="studio-context-card"
+            aria-label={knowledge ? "将随消息发送的知识正文" : "将随消息发送的研究正文"}
+          >
+            <strong>{discussion.label}</strong>
+            <ContentFields value={discussion.body} />
             <Button tone="ghost" onClick={() => studio?.showAttachment(null)}>
-              移除研究附件
+              {knowledge ? "移除知识附件" : "移除研究附件"}
             </Button>
           </article>
         )}
@@ -481,6 +518,9 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
           <article key={item.id} data-role={item.role}>
             <strong>{item.role === "assistant" ? "导演" : "你"}</strong>
             <p>{item.content}</p>
+            {item.role === "user" && "knowledge_ref" in item && !!item.knowledge_ref && (
+              <small>已引用项目固定知识版本</small>
+            )}
             {item.role === "user" && "research_ref" in item && !!item.research_ref && (
               <small>已引用固定研究版本</small>
             )}
@@ -634,7 +674,7 @@ export function CreativeDirectionPanel({ projectId, goal }: CreativeDirectionPan
           value={question}
           onChange={(event) => setQuestion(event.target.value)}
         />
-        {goalsOpen && !research && (
+        {goalsOpen && !discussion && (
           <Checkbox checked={createGoal} onChange={(e) => setCreateGoal(e.target.checked)}>
             将本条消息建立为持续目标
           </Checkbox>

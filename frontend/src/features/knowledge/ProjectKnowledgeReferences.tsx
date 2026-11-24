@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Disclosure, Field, Input, Select } from "../../components/ui";
 import { getSelectedWorkspaceId } from "../../lib/navigationPreferences";
+import { StudioSelection } from "../../components/workstation/StudioSelection";
 import { ContentFields } from "../research/ResearchContent";
 import {
   createKnowledgeReference,
@@ -39,6 +40,33 @@ function ReferenceRow({
   pending: boolean;
 }) {
   const revision = useFixedRevision(row.knowledge_entry_id, row.knowledge_revision_id);
+  const studio = useContext(StudioSelection);
+  function selectForDirector() {
+    const data = revision.data;
+    if (
+      !data ||
+      !studio ||
+      row.detached_at ||
+      row.allowed_use !== "external_processing" ||
+      row.availability !== "published" ||
+      !data.allowed_uses.includes("research") ||
+      data.shared_content_state !== "complete"
+    )
+      return;
+    studio.showAttachment({
+      label: `项目固定知识 · ${data.title} · 版本 ${data.number}`,
+      knowledge_ref: {
+        reference_id: row.id,
+        revision_id: data.id,
+        content_hash: data.content_hash,
+      },
+      body: data.body,
+      prompt: "请解释这份已发布知识，指出仍需核实的内容。",
+    });
+    const input = document.getElementById("project-director-message");
+    if (!input?.getClientRects().length) document.getElementById("studio-chat-toggle")?.click();
+    requestAnimationFrame(() => input?.focus());
+  }
   return (
     <li>
       <strong>
@@ -52,6 +80,23 @@ function ReferenceRow({
           <ContentFields value={revision.data.body} />
         </Disclosure>
       )}
+      {studio &&
+        !row.detached_at &&
+        row.availability === "published" &&
+        (row.allowed_use === "external_processing" ? (
+          <Button
+            tone="ghost"
+            disabled={
+              revision.data?.shared_content_state !== "complete" ||
+              !revision.data?.allowed_uses.includes("research")
+            }
+            onClick={selectForDirector}
+          >
+            附到导演对话
+          </Button>
+        ) : (
+          <p>如需发送给导演，请另行选择允许外部模型处理的项目引用。</p>
+        ))}
       <Button
         tone="ghost"
         disabled={pending || (!!row.detached_at && row.availability !== "published")}

@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { sourceOriginalUrl } from "../project-files/api";
+import { locatorText } from "../project-files/locatorText";
 import type { ResearchRevisionRead } from "./api";
 
 const labels: Record<string, string> = {
@@ -60,13 +62,26 @@ export function ContentFields({ value }: { value: Record<string, unknown> }) {
   );
 }
 
+const sourceLimits: Record<string, string> = {
+  machine_transcript: "机器转写，需核对录音",
+  visual_input_only: "画面采样",
+  low_ocr_confidence: "文字识别置信度较低",
+  page_ocr: "扫描页文字识别",
+  unverified_locator_override: "原引文标记超出片段，已展示原始片段位置",
+};
 const checks: Record<string, string> = {
   unverified: "待核实",
   user_asserted: "用户确认",
   corroborated: "已交叉印证",
 };
 
-export function RevisionDetails({ revision }: { revision: ResearchRevisionRead }) {
+export function RevisionDetails({
+  projectId,
+  revision,
+}: {
+  projectId: string;
+  revision: ResearchRevisionRead;
+}) {
   return (
     <>
       <p>{checks[revision.verification] ?? revision.verification}</p>
@@ -81,8 +96,21 @@ export function RevisionDetails({ revision }: { revision: ResearchRevisionRead }
                 · {citation.extraction_method}
                 {citation.source_available ? "" : " · 来源已不可用"}
               </span>
-              {citation.locator_override && <ContentFields value={citation.locator_override} />}
-              {citation.limitations?.length ? <p>{citation.limitations.join("、")}</p> : null}
+              <p>
+                {citation.filename} · 文件版本 {citation.file_version} ·{" "}
+                {locatorText(
+                  { ...citation.locator, ...citation.locator_override },
+                  citation.extraction_schema_version,
+                )}
+              </p>
+              {citation.source_available && (
+                <a download href={sourceOriginalUrl(projectId, citation.file_revision_id)}>
+                  下载引用版本的原件
+                </a>
+              )}
+              {citation.limitations?.length ? (
+                <p>{citation.limitations.map((code) => sourceLimits[code] ?? code).join("、")}</p>
+              ) : null}
             </li>
           ))}
         </ul>

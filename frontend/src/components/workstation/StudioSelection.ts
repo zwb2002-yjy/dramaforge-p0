@@ -18,6 +18,12 @@ export type StudioAttachment =
   | ResearchAttachment
   | {
       label: string;
+      knowledge_ref: { reference_id: string; revision_id: string; content_hash: string };
+      body: Record<string, unknown>;
+      prompt: string;
+    }
+  | {
+      label: string;
       part: components["schemas"]["FileVisionInput"] | components["schemas"]["PublicVisionInput"];
     };
 export const StudioSelection = createContext<{

@@ -96,13 +96,16 @@ class KnowledgeReferenceService:
         *,
         lock: bool = False,
         known: dict[UUID, set[SourceLinkInput]] | None = None,
+        grant_revisions: dict[str, str] | None = None,
+        additional_uses: tuple[str, ...] = (),
     ) -> bool:
         current = await self._current(entry)
         if current is None or entry.publication_status != "published":
             return False
         rows = [pinned] if pinned.id == current.id else [pinned, current]
+        required_uses = {allowed_use, *additional_uses}
         if any(
-            row.publication_status != "published" or allowed_use not in row.allowed_uses
+            row.publication_status != "published" or not required_uses.issubset(row.allowed_uses)
             for row in rows
         ):
             return False
@@ -114,7 +117,9 @@ class KnowledgeReferenceService:
             known = await self.sources.stored(revision_ids)
         links = {link for row in rows for link in known.get(row.id, set())}
         try:
-            await self.sources.resolve(links, uses={allowed_use}, lock=lock)
+            await self.sources.resolve(
+                links, uses=required_uses, lock=lock, grant_revisions=grant_revisions
+            )
         except ValidationAppError:
             return False
         if lock:
@@ -126,6 +131,56 @@ class KnowledgeReferenceService:
             )
             return head.one_or_none() == (current.id, "published")
         return True
+
+    async def discussion_snapshot(
+        self, reference_id: UUID, revision_id: UUID, content_hash: str
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        ref = await self.session.scalar(
+            select(ProjectKnowledgeReference)
+            .where(
+                ProjectKnowledgeReference.id == reference_id,
+                ProjectKnowledgeReference.project_id == self.project_id,
+                ProjectKnowledgeReference.owner_user_id == self.actor.id,
+                ProjectKnowledgeReference.detached_at.is_(None),
+                ProjectKnowledgeReference.allowed_use == "external_processing",
+                ProjectKnowledgeReference.knowledge_revision_id == revision_id,
+            )
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        if ref is None:
+            raise ValidationAppError(
+                "请先在当前项目固定可用于外部模型处理的知识引用",
+                details={"code": "KNOWLEDGE_CONTEXT_UNAVAILABLE"},
+            )
+        entry = await self._entry(ref.knowledge_entry_id)
+        pinned = await self._revision(entry.id, revision_id)
+        grants: dict[str, str] = {}
+        if pinned.content_hash != content_hash or not await self._usable(
+            entry,
+            pinned,
+            ref.allowed_use,
+            lock=True,
+            grant_revisions=grants,
+            additional_uses=("research",),
+        ):
+            raise ValidationAppError(
+                "知识版本、使用许可或来源已改变", details={"code": "KNOWLEDGE_CONTEXT_STALE"}
+            )
+        public = (await shared_revisions(self.session, self.actor.id, entry.kind, [pinned]))[0]
+        if public.shared_content_state != "complete":
+            raise ValidationAppError(
+                "该知识的公开内容需要核对", details={"code": "KNOWLEDGE_CONTEXT_STALE"}
+            )
+        return (
+            {
+                "link_version": ref.version,
+                "entry_version": entry.version,
+                "head": str(entry.current_revision_id),
+                "source_grants": grants,
+            },
+            public.body,
+        )
 
     async def availability(
         self,

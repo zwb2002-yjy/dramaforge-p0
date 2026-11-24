@@ -54,9 +54,10 @@ from app.director.invocation_models import DirectorInvocation
 from app.director.invocations import InvocationService
 from app.director.master_runs import MasterRunService
 from app.director.research_discussion import (
+    KnowledgeDiscussionRef,
     ResearchDiscussionRef,
     discussion_messages,
-    read_research_discussion,
+    read_discussion,
 )
 from app.director.text_transport import (
     ResolvedAgentTextModel,
@@ -173,6 +174,7 @@ class AgentRequest(BaseModel):
     master_run_id: UUID | None = None
     ui_context: AgentUIContext | None = None
     research_ref: ResearchDiscussionRef | None = None
+    knowledge_ref: KnowledgeDiscussionRef | None = None
     media_parts: list[SourceMediaInput] = Field(
         default_factory=list, max_length=MAX_VISION_PARTS
     )
@@ -185,6 +187,8 @@ class AgentRequest(BaseModel):
         omit = set()
         if self.ui_context is None:
             omit.add("ui_context")
+        if self.knowledge_ref is None:
+            omit.add("knowledge_ref")
         if self.research_ref is None:
             omit.add("research_ref")
         if not self.media_parts:
@@ -203,7 +207,11 @@ class AgentRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_intent_binding(self) -> Self:
-        if self.research_ref is not None and (self.intent != "conversation" or self.media_parts):
+        if self.research_ref is not None and self.knowledge_ref is not None:
+            raise ValueError("Select one discussion source")
+        if (self.research_ref or self.knowledge_ref) and (
+            self.intent != "conversation" or self.media_parts
+        ):
             raise ValueError("Research discussion requires a standalone conversation input")
         if self.intent == "continue_goal" and self.master_run_id is None:
             raise ValueError("continue_goal requires master_run_id")
@@ -416,7 +424,17 @@ class DirectorAgentService:
                         "role": row.role,
                         "content": row.content,
                         "created_at": row.created_at,
-                        **({"research_ref": research_ref} if research_ref else {}),
+                        **(
+                            {
+                                (
+                                    "knowledge_ref"
+                                    if "reference_id" in research_ref
+                                    else "research_ref"
+                                ): research_ref
+                            }
+                            if research_ref
+                            else {}
+                        ),
                         **({"context": ui_context} if ui_context else {}),
                         **({"media_parts": parts} if parts else {}),
                     }
@@ -592,12 +610,12 @@ class DirectorAgentService:
             }
             if request.ui_context is not None:
                 snapshot["ui_context"] = request.ui_context.model_dump(mode="json")
-            if request.research_ref is not None:
+            if selected_ref := request.research_ref or request.knowledge_ref:
                 try:
                     if thread.scope_type != "project":
                         raise ValidationAppError("请在当前项目对话中附上研究")
-                    basis, _, _ = await read_research_discussion(
-                        session, project, request.research_ref, model.resolution,
+                    basis, _, _ = await read_discussion(
+                        session, project, selected_ref, model.resolution, actor_id=self.actor_id,
                     )
                     snapshot["research"] = basis
                     snapshot["tools"] = []
@@ -1206,13 +1224,19 @@ class DirectorAgentService:
             try:
                 frozen_research = turn.intent_snapshot.get("research")
                 if isinstance(frozen_research, dict):
-                    ref = ResearchDiscussionRef.model_validate(frozen_research["ref"])
-                    _, admission, evidence = await read_research_discussion(
+                    raw_ref = frozen_research["ref"]
+                    ref = (
+                        KnowledgeDiscussionRef.model_validate(raw_ref)
+                        if "reference_id" in raw_ref
+                        else ResearchDiscussionRef.model_validate(raw_ref)
+                    )
+                    _, admission, evidence = await read_discussion(
                         session,
                         project,
                         ref,
                         dict(turn.model_resolution),
                         expected=frozen_research,
+                        actor_id=self.actor_id,
                     )
                     if not evidence:
                         raise AgentHalt("research_permission_changed")
@@ -1224,7 +1248,11 @@ class DirectorAgentService:
                         ).context_bytes,
                     )
                     messages = list(projected.messages)
-                    attachment_evidence["research_ref"] = ref.model_dump(mode="json")
+                    attachment_evidence[
+                        "knowledge_ref"
+                        if isinstance(ref, KnowledgeDiscussionRef)
+                        else "research_ref"
+                    ] = ref.model_dump(mode="json")
                 else:
                     admission = await director_egress_decision(
                         session,

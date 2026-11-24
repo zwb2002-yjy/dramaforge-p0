@@ -39,7 +39,7 @@ from app.director.recommendation import (
     DirectorRecommendationRequest,
     DirectorRecommendationService,
 )
-from app.director.research_discussion import ResearchDiscussionRef
+from app.director.research_discussion import KnowledgeDiscussionRef, ResearchDiscussionRef
 from app.director.runtime.capabilities import (
     DirectorCapabilitiesRead,
     build_director_capabilities,
@@ -227,6 +227,7 @@ class DirectorAgentThreadRef(BaseModel):
 
 class DirectorAgentMessageRead(BaseModel):
     research_ref: ResearchDiscussionRef | None = None
+    knowledge_ref: KnowledgeDiscussionRef | None = None
     context: AgentUIContext | None = None
     media_parts: list[SourceMediaInput] = Field(default_factory=list)
     model_config = ConfigDict(extra="forbid")

@@ -107,6 +107,7 @@ class KnowledgeSources:
         uses: set[str] | None,
         lock: bool,
         explicit: Iterable[SourceLinkInput] = (),
+        grant_revisions: dict[str, str] | None = None,
     ) -> dict[UUID, UUID]:
         grouped: dict[UUID, set[UUID]] = defaultdict(set)
         for link in links:
@@ -143,13 +144,17 @@ class KnowledgeSources:
                     raise ValidationAppError(
                         "研究来源不可用", details={"code": "KNOWLEDGE_SOURCE_UNKNOWN"}
                     )
-                if (uses is not None and await research_source_permissions(
-                    self.session, project, ids, uses, lock=lock
-                ) is None):
-                    raise ValidationAppError(
-                        "研究来源未允许本次用途",
-                        details={"code": "KNOWLEDGE_SOURCE_USE_RESTRICTED"},
+                if uses is not None:
+                    current = await research_source_permissions(
+                        self.session, project, ids, uses, lock=lock
                     )
+                    if current is None:
+                        raise ValidationAppError(
+                            "研究来源未允许本次用途",
+                            details={"code": "KNOWLEDGE_SOURCE_USE_RESTRICTED"},
+                        )
+                    if grant_revisions is not None:
+                        grant_revisions.update(current)
         return scopes
 
     async def persist(

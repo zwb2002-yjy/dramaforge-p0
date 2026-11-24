@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 from uuid import UUID
@@ -11,7 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.egress_admission import AdmissionDecision, EgressAdmission
-from app.access.models import Project
+from app.access.models import Project, User
+from app.assets.knowledge_references import KnowledgeReferenceService
 from app.assets.research_models import ResearchResult, ResearchResultRevision
 from app.assets.research_source_access import research_source_permissions
 from app.contracts.agent import AgentMessage, AgentToolCall
@@ -26,45 +28,72 @@ class ResearchDiscussionRef(BaseModel):
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-async def read_research_discussion(
+class KnowledgeDiscussionRef(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    reference_id: UUID
+    revision_id: UUID
+    content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+async def read_discussion(
     session: AsyncSession,
     project: Project,
-    ref: ResearchDiscussionRef,
+    ref: ResearchDiscussionRef | KnowledgeDiscussionRef,
     resolution: dict[str, Any],
     *,
+    actor_id: UUID,
     expected: dict[str, object] | None = None,
 ) -> tuple[dict[str, object], AdmissionDecision, str | None]:
     """The project, research head and cited-file locks are held through submission."""
     await session.scalar(
         select(Project.id).where(Project.id == project.id).with_for_update(read=True)
     )
-    head = await session.scalar(
-        select(ResearchResult.kind)
-        .join(
-            ResearchResultRevision, ResearchResult.current_revision_id == ResearchResultRevision.id
+    head: str | None
+    grants: dict[str, str] | None
+    public_body = None
+    if isinstance(ref, KnowledgeDiscussionRef):
+        actor = await session.get(User, actor_id)
+        if actor is None:
+            raise ValidationAppError("用户不可用")
+        eligibility, public_body = await KnowledgeReferenceService(
+            session, actor=actor, project_id=project.id
+        ).discussion_snapshot(ref.reference_id, ref.revision_id, ref.content_hash)
+        # Consumer-side evidence stores only the hash; private source mappings stay private.
+        grants = {
+            "eligibility_hash": hashlib.sha256(
+                json.dumps(eligibility, sort_keys=True).encode()
+            ).hexdigest()
+        }
+        head = "published_knowledge"
+    else:
+        head = await session.scalar(
+            select(ResearchResult.kind)
+            .join(
+                ResearchResultRevision,
+                ResearchResult.current_revision_id == ResearchResultRevision.id,
+            )
+            .where(
+                ResearchResult.id == ref.result_id,
+                ResearchResult.project_id == project.id,
+                ResearchResult.archived_at.is_(None),
+                ResearchResultRevision.result_id == ref.result_id,
+                ResearchResultRevision.project_id == project.id,
+                ResearchResultRevision.id == ref.revision_id,
+                ResearchResultRevision.content_hash == ref.content_hash,
+            )
+            .with_for_update(read=True, of=ResearchResult)
         )
-        .where(
-            ResearchResult.id == ref.result_id,
-            ResearchResult.project_id == project.id,
-            ResearchResult.archived_at.is_(None),
-            ResearchResultRevision.result_id == ref.result_id,
-            ResearchResultRevision.project_id == project.id,
-            ResearchResultRevision.id == ref.revision_id,
-            ResearchResultRevision.content_hash == ref.content_hash,
+        if head is None:
+            raise ValidationAppError(
+                "所选研究版本已更新或不可用", details={"code": "RESEARCH_CONTEXT_STALE"}
+            )
+        grants = await research_source_permissions(
+            session, project.id, {ref.revision_id}, {"research", "external_processing"}, lock=True
         )
-        .with_for_update(read=True, of=ResearchResult)
-    )
-    if head is None:
-        raise ValidationAppError(
-            "所选研究版本已更新或不可用", details={"code": "RESEARCH_CONTEXT_STALE"}
-        )
-    grants = await research_source_permissions(
-        session, project.id, {ref.revision_id}, {"research", "external_processing"}, lock=True
-    )
-    if grants is None:
-        raise ValidationAppError(
-            "研究来源未允许本次导演解读", details={"code": "RESEARCH_CONTEXT_SOURCE_RESTRICTED"}
-        )
+        if grants is None:
+            raise ValidationAppError(
+                "研究来源未允许本次导演解读", details={"code": "RESEARCH_CONTEXT_SOURCE_RESTRICTED"}
+            )
     identity = await research_model_identity(session, project.workspace_id, resolution)
     destination = identity["destination_revision_id"]
     decision = await EgressAdmission(session).decide(
@@ -90,12 +119,14 @@ async def read_research_discussion(
             raise ValidationAppError(
                 "研究版本的发送依据已改变", details={"code": "RESEARCH_CONTEXT_STALE"}
             )
-        body = await session.scalar(
-            select(ResearchResultRevision.body).where(
-                ResearchResultRevision.id == ref.revision_id,
-                ResearchResultRevision.project_id == project.id,
+        body = public_body
+        if isinstance(ref, ResearchDiscussionRef):
+            body = await session.scalar(
+                select(ResearchResultRevision.body).where(
+                    ResearchResultRevision.id == ref.revision_id,
+                    ResearchResultRevision.project_id == project.id,
+                )
             )
-        )
         evidence = json.dumps(
             {"kind": head, "body": body}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
@@ -107,22 +138,25 @@ async def read_research_discussion(
 
 
 def discussion_messages(
-    turn_id: UUID, ref: ResearchDiscussionRef, evidence: str
+    turn_id: UUID, ref: ResearchDiscussionRef | KnowledgeDiscussionRef, evidence: str
 ) -> list[AgentMessage]:
     """A server-performed read is untrusted tool data, never an instruction or a user utterance."""
-    call_id = f"research_{turn_id.hex}"
+    tool_name = (
+        "read_pinned_knowledge"
+        if isinstance(ref, KnowledgeDiscussionRef)
+        else "read_selected_research"
+    )
+    call_id = f"source_{turn_id.hex}"
     return [
         AgentMessage(
             role="assistant",
             tool_calls=[
                 AgentToolCall(
                     call_id=call_id,
-                    name="read_selected_research",
+                    name=tool_name,
                     arguments={"revision_id": str(ref.revision_id)},
                 )
             ],
         ),
-        AgentMessage(
-            role="tool", tool_call_id=call_id, name="read_selected_research", content=evidence
-        ),
+        AgentMessage(role="tool", tool_call_id=call_id, name=tool_name, content=evidence),
     ]

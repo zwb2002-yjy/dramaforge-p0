@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { setSelectedWorkspaceId } from "../../src/lib/navigationPreferences";
 import { UiProvider } from "../../src/components/ui";
 import { CreativeDirectionPanel } from "../../src/features/script/CreativeDirectionPanel";
 
@@ -194,6 +195,36 @@ describe("CreativeDirectionPanel", () => {
     expect(send).toBeDisabled();
     fireEvent.click(retry);
     await waitFor(() => expect(keys).toEqual([keys[0], keys[0]]));
+  });
+
+  it("restores the user's draft when settings navigation reloads before account discovery", async () => {
+    setSelectedWorkspaceId("workspace-1");
+    const key = `df.project.director.${PROJECT}.user-1.workspace-1.draft`;
+    sessionStorage.setItem(key, "走过石桥");
+    let authorize!: () => void;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/auth/me")) {
+          await new Promise<void>((r) => {
+            authorize = r;
+          });
+          return json({ id: "user-1" });
+        }
+        if (url.includes("/threads?")) return json(null);
+        return json({ messages: [] });
+      }),
+    );
+    renderPanel();
+    const composer = screen.getByRole("textbox", { name: "给导演的想法" });
+    expect(composer).toHaveValue("");
+    expect(sessionStorage.getItem(key)).toBe("走过石桥");
+    authorize();
+    await waitFor(() => expect(composer).toHaveValue("走过石桥"));
+    fireEvent.change(composer, { target: { value: "走过石桥，看见灯会" } });
+    await waitFor(() => expect(sessionStorage.getItem(key)).toBe("走过石桥，看见灯会"));
+    setSelectedWorkspaceId(null);
   });
 
   it("keeps the save button disabled for a blank direction", async () => {
