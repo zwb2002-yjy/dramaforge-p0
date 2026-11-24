@@ -28,6 +28,7 @@ from app.assets.public_asset_models import (
     PublicAssetPublication,
     PublicAssetPublicationItem,
 )
+from app.assets.render_lineage import sqlite_render_lineage
 from app.shared.errors import AppError, NotFoundError, ValidationAppError
 
 
@@ -70,6 +71,7 @@ def _sqlite_public_item_sql(
             permits_library=("EXISTS (SELECT 1 FROM json_each(r.allowed_uses) "
                              "WHERE value='library_reference')"),
         )
+        + " AND (" + sqlite_render_lineage("(SELECT id FROM candidate)") + ")"
     )
 
 

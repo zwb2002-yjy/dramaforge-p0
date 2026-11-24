@@ -27,7 +27,7 @@ from app.config import get_settings
 from app.contracts.delivery_verification import BoundDeliveryOutput, DeliveryPlanRef
 from app.delivery.models import Export, ExportItem
 from app.editing.models import EditSession
-from app.editing.timeline_rules import clip_audio_volume
+from app.editing.timeline_rules import clip_audio_volume, clip_transition, timeline_number
 from app.execution.artifact_lineage import get_or_create_artifact
 from app.execution.branches import branch_priority
 from app.execution.experiment_nodes import queue_branch_nodes
@@ -35,6 +35,10 @@ from app.execution.models import Artifact, GraphNode, NodeRun, ProviderOperation
 from app.production.command_models import ProductionCommandAuthorization
 from app.production.delivery_graph import FINAL_FILM_FORMAT, FINAL_FILM_NODE, delivery_graph
 from app.production.models import GraphVersion, ProductionGraph
+from app.production.public_render_provenance import (
+    complete_public_render_grants,
+    freeze_public_render_grants,
+)
 from app.production.session_exports import timeline_hash as saved_timeline_hash
 from app.providers.voice_config import freeze_project_voice
 from app.runtime.scheduler import NodeRunScheduler
@@ -51,6 +55,7 @@ from app.storage.scratch import OwnedMediaDirectory
 if TYPE_CHECKING:
     from app.execution.product_path import ExecuteNodeResult
     from app.production.timeline_renderer import TimelineRenderClip, TimelineRenderResult
+    from app.production.timeline_subtitles import TimelineClipInstructions
     from app.storage.minio_store import StoredObject
 
 _TAIL_NODE_KEYS = [
@@ -201,54 +206,6 @@ class _TimelineRef:
     raw_clip: dict[str, Any]
 
 
-def _number(value: object, *, default: float | None, code: str) -> float | None:
-    if value is None:
-        return default
-    try:
-        result = float(cast(Any, value))
-    except (TypeError, ValueError) as exc:
-        raise ValidationAppError(
-            "Timeline numeric field is invalid", details={"code": code}
-        ) from exc
-    if result != result or result in {float("inf"), float("-inf")}:
-        raise ValidationAppError("Timeline numeric field is not finite", details={"code": code})
-    return result
-
-
-def _transition(value: object) -> tuple[str | None, float]:
-    if value is None:
-        return None, 0.0
-    if isinstance(value, str):
-        kind = value.strip().lower()
-        duration = 0.25 if kind == "crossfade" else 0.0
-    elif isinstance(value, dict):
-        kind = str(value.get("kind") or value.get("type") or "cut").strip().lower()
-        duration = (
-            _number(
-                value.get("duration_seconds"),
-                default=0.25 if kind == "crossfade" else 0.0,
-                code="INVALID_TIMELINE_TRANSITION_DURATION",
-            )
-            or 0.0
-        )
-    else:
-        raise ValidationAppError(
-            "Timeline transition must be a string or object",
-            details={"code": "INVALID_TIMELINE_TRANSITION"},
-        )
-    if kind not in {"cut", "crossfade"}:
-        raise ValidationAppError(
-            f"unsupported Timeline transition: {kind}",
-            details={"code": "UNSUPPORTED_TIMELINE_TRANSITION"},
-        )
-    if duration < 0:
-        raise ValidationAppError(
-            "Timeline transition duration must be non-negative",
-            details={"code": "INVALID_TIMELINE_TRANSITION_DURATION"},
-        )
-    return kind, duration
-
-
 async def _project_or_404(session: AsyncSession, project_id: UUID) -> Project:
     project = await session.get(Project, project_id)
     if project is None:
@@ -256,14 +213,13 @@ async def _project_or_404(session: AsyncSession, project_id: UUID) -> Project:
     return project
 
 
-async def _load_timeline_refs(
+async def _versioned_session(
     session: AsyncSession,
     *,
     project_id: UUID,
     edit_session_id: UUID,
     expected_timeline_version: int | None,
-    draft_timeline: dict[str, Any] | None = None,
-) -> tuple[EditSession, list[_TimelineRef]]:
+) -> EditSession:
     row = await session.scalar(
         select(EditSession).where(
             EditSession.id == edit_session_id,
@@ -281,7 +237,52 @@ async def _load_timeline_refs(
                 "actual": row.version,
             },
         )
-    raw_clips = (draft_timeline if draft_timeline is not None else row.timeline or {}).get("clips")
+    return row
+
+
+def _shot_clips(document: dict[str, Any]) -> Any:
+    clips = document.get("clips", [])
+    if document.get("schema_version") != 2 or not isinstance(clips, list):
+        return clips
+    result = []
+    for clip in clips:
+        source = clip.get("source") if isinstance(clip, dict) else None
+        if not isinstance(source, dict) or source.get("kind") not in {
+            "shot_formal",
+            "public_material",
+            "asset_version",
+        }:
+            raise ValidationAppError("剪辑片段缺少有效来源")
+        if source["kind"] == "shot_formal":
+            result.append(
+                {
+                    **clip,
+                    "shot_id": source["shot_id"],
+                    "artifact_id": source["artifact_id"],
+                    "muted": bool(clip.get("muted") or clip.get("audio_source")),
+                    "audio_id": None if clip.get("audio_source") else clip.get("audio_id"),
+                }
+            )
+    return result
+
+
+async def _load_timeline_refs(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    edit_session_id: UUID,
+    expected_timeline_version: int | None,
+    draft_timeline: dict[str, Any] | None = None,
+) -> tuple[EditSession, list[_TimelineRef]]:
+    row = await _versioned_session(
+        session,
+        project_id=project_id,
+        edit_session_id=edit_session_id,
+        expected_timeline_version=expected_timeline_version,
+    )
+    raw_clips = _shot_clips(
+        draft_timeline if draft_timeline is not None else dict(row.timeline or {})
+    )
     if not isinstance(raw_clips, list):
         raise ValidationAppError(
             "edit session timeline clips must be a list",
@@ -328,7 +329,9 @@ async def _load_timeline_refs(
                     "artifact_id": str(artifact_id),
                 },
             )
-        order_value = _number(raw.get("order"), default=float(index), code="INVALID_TIMELINE_ORDER")
+        order_value = timeline_number(
+            raw.get("order"), default=float(index), code="INVALID_TIMELINE_ORDER"
+        )
         if order_value is None or not order_value.is_integer():
             raise ValidationAppError(
                 "Timeline order must be an integer",
@@ -346,19 +349,19 @@ async def _load_timeline_refs(
                 details={"code": "DUPLICATE_TIMELINE_ORDER", "order": order},
             )
         source_in = (
-            _number(
+            timeline_number(
                 raw.get("source_in_seconds", raw.get("trim_start_seconds")),
                 default=0.0,
                 code="INVALID_TIMELINE_SOURCE_IN",
             )
             or 0.0
         )
-        source_out = _number(
+        source_out = timeline_number(
             raw.get("source_out_seconds", raw.get("trim_end_seconds")),
             default=None,
             code="INVALID_TIMELINE_SOURCE_OUT",
         )
-        duration = _number(
+        duration = timeline_number(
             raw.get("duration_seconds"),
             default=(source_out - source_in) if source_out is not None else None,
             code="INVALID_TIMELINE_DURATION",
@@ -392,7 +395,7 @@ async def _load_timeline_refs(
                     "Timeline audio_id must be a UUID",
                     details={"code": "INVALID_TIMELINE_AUDIO_ID", "clip_id": clip_id},
                 ) from exc
-        transition_kind, transition_duration = _transition(raw.get("transition"))
+        transition_kind, transition_duration = clip_transition(raw.get("transition"))
         audio_volume = clip_audio_volume(raw)
         subtitle = raw.get("subtitle") if isinstance(raw.get("subtitle"), str) else None
         subtitle_enabled = raw.get("subtitle_enabled")
@@ -429,6 +432,7 @@ async def _formal_shots_for_refs(
     *,
     project_id: UUID,
     refs: list[_TimelineRef],
+    saved_typed: bool = False,
 ) -> list[Shot]:
     shots: list[Shot] = []
     seen: set[UUID] = set()
@@ -439,7 +443,19 @@ async def _formal_shots_for_refs(
                 "timeline shot does not belong to project",
                 details={"code": "TIMELINE_SHOT_SCOPE", "shot_id": str(ref.shot_id)},
             )
-        if shot.formal_video_artifact_id != ref.artifact_id:
+        observed = ref.raw_clip.get("selection_snapshot")
+        historical = (
+            saved_typed
+            and isinstance(observed, dict)
+            and observed.get("artifact_id") == str(ref.artifact_id)
+            and observed.get("identity")
+            == {
+                "kind": "shot_formal",
+                "shot_id": str(ref.shot_id),
+                "artifact_id": str(ref.artifact_id),
+            }
+        )
+        if not historical and shot.formal_video_artifact_id != ref.artifact_id:
             raise ValidationAppError(
                 "timeline Formal video reference no longer matches Shot formal video",
                 details={
@@ -496,9 +512,32 @@ async def preview_formal_tail(
         edit_session_id=edit_session_id,
         expected_timeline_version=expected_timeline_version,
     )
-    if not refs:
+    if not edit.timeline.get("clips"):
         raise ValidationAppError("empty timeline", details={"code": "EMPTY_TIMELINE"})
-    shots = await _formal_shots_for_refs(session, project_id=project_id, refs=refs)
+    typed = edit.timeline.get("schema_version") == 2
+    shots = await _formal_shots_for_refs(
+        session, project_id=project_id, refs=refs, saved_typed=typed
+    )
+    if typed:
+        from app.production.typed_film import freeze_typed_film
+
+        # Saved source-typed clips already bind the visual and any selected sound.
+        # A render must never regenerate a shot's current dialogue in their place.
+        hashes = await freeze_typed_film(session, edit)
+        digest = saved_timeline_hash(edit.timeline)
+        return FinalFilmPreparePreviewRead(
+            project_id=project_id,
+            edit_session_id=edit.id,
+            episode_id=edit.episode_id,
+            timeline_version=edit.version,
+            timeline_hash=digest,
+            preparation_fingerprint=_fingerprint([str(edit.id), edit.version, digest, hashes]),
+            operations=[],
+            reuse=[],
+            blockers=[],
+            max_provider_operations=0,
+            max_external_model_operations=0,
+        )
     timeline_hash = saved_timeline_hash(edit.timeline)
     operations: list[PreparationOperation] = []
     reuse: list[ReusedPreparation] = []
@@ -954,7 +993,7 @@ def _snapshot_order(value: object, *, fallback: int) -> int:
 
 def _snapshot_refs(snapshot: dict[str, object]) -> list[_TimelineRef]:
     timeline = snapshot.get("timeline")
-    raw_clips = timeline.get("clips") if isinstance(timeline, dict) else None
+    raw_clips = _shot_clips(timeline) if isinstance(timeline, dict) else None
     if not isinstance(raw_clips, list):
         raise ValidationAppError(
             "Final Film run has no frozen Timeline",
@@ -977,7 +1016,7 @@ def _snapshot_refs(snapshot: dict[str, object]) -> list[_TimelineRef]:
                 "Final Film Timeline reference is invalid",
                 details={"code": "TIMELINE_SNAPSHOT_INVALID"},
             ) from exc
-        transition_kind, transition_duration = _transition(raw.get("transition"))
+        transition_kind, transition_duration = clip_transition(raw.get("transition"))
         refs.append(
             _TimelineRef(
                 clip_id=clip_id,
@@ -1195,7 +1234,7 @@ async def _final_film_read(
         status=export.status,
         duration_seconds=artifact.duration_seconds or Decimal("0"),
         shot_count=len({ref.shot_id for ref in refs}),
-        timeline_clip_count=len(refs),
+        timeline_clip_count=len((manifest.get("timeline") or {}).get("clips", refs)),
         composite_artifact_ids=[
             str(item.source_artifact_id) for item in items if item.role == "shot_composite"
         ],
@@ -1282,11 +1321,18 @@ async def _assert_delivery_reviews(
         )
 
 
+class PublicPlaybackRef(BaseModel):
+    public_asset_link_id: UUID
+    publication_item_id: UUID
+
+
 class TimelinePreviewClipRead(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     clip_id: str
-    video_artifact_id: UUID
+    video_artifact_id: UUID | None
+    video_public_ref: PublicPlaybackRef | None = None
+    audio_public_ref: PublicPlaybackRef | None = None
     start_ms: int
     end_ms: int
     source_in_ms: int
@@ -1318,12 +1364,62 @@ async def preview_timeline(
     draft_timeline: dict[str, Any],
 ) -> TimelinePreviewRead:
     """Read-only draft instructions using the exact export reference and timing rules."""
-    from app.production.timeline_subtitles import (
-        TimelineClipInstructions,
-        TimelineTimingError,
-        build_timeline_subtitles,
-        normalize_subtitle_text,
-    )
+    from app.production.timeline_subtitles import TimelineClipInstructions
+
+    if draft_timeline.get("schema_version") == 2:
+        from app.editing.timeline_schema import normalize_timeline_for_save
+        from app.production.edit_render_plan import build_render_plan
+
+        row = await _versioned_session(
+            session,
+            project_id=project_id,
+            edit_session_id=edit_session_id,
+            expected_timeline_version=expected_timeline_version,
+        )
+        # Preview uses Save's permission checks without persisting its observations.
+        document = await normalize_timeline_for_save(
+            session,
+            project_id=project_id,
+            timeline=draft_timeline,
+            episode_id=row.episode_id,
+            previous_timeline=row.timeline,
+            session_version=row.version,
+        )
+        plan = build_render_plan(
+            edit_session_id=row.id,
+            timeline_version=row.version,
+            timeline_hash=saved_timeline_hash(draft_timeline),
+            episode_id=row.episode_id,
+            document=document,
+        )
+        ordered = sorted(
+            cast(list[dict[str, Any]], document["clips"]), key=lambda clip: clip["order"]
+        )
+
+        def public_ref(source: Any) -> PublicPlaybackRef | None:
+            if isinstance(source, dict) and source.get("kind") == "public_material":
+                return PublicPlaybackRef(
+                    public_asset_link_id=source["public_asset_link_id"],
+                    publication_item_id=source["publication_item_id"],
+                )
+            return None
+
+        sources = {
+            clip["id"]: (public_ref(clip["source"]), public_ref(clip.get("audio_source")))
+            for clip in ordered
+        }
+        states: list[Literal["available", "muted", "none", "unavailable"]] = [
+            "muted" if clip.get("muted") else "available" if item.audio_artifact_id else "none"
+            for clip, item in zip(ordered, plan.instructions, strict=True)
+        ]
+        unsupported_typed = (
+            ["crossfade"]
+            if any(item.transition_kind == "crossfade" for item in plan.instructions[1:])
+            else []
+        )
+        return _playback_plan(
+            row, draft_timeline, list(plan.instructions), states, unsupported_typed, sources
+        )
 
     row, refs = await _load_timeline_refs(
         session,
@@ -1389,7 +1485,7 @@ async def preview_timeline(
                 if ref.subtitle is not None
                 else shots[ref.shot_id].dialogue,
                 source_in_seconds=ref.source_in_seconds,
-                source_out_seconds=_number(
+                source_out_seconds=timeline_number(
                     ref.raw_clip.get("source_out_seconds", ref.raw_clip.get("trim_end_seconds")),
                     default=None,
                     code="INVALID_TIMELINE_SOURCE_OUT",
@@ -1401,6 +1497,23 @@ async def preview_timeline(
                 audio_volume=ref.audio_volume,
             )
         )
+    return _playback_plan(row, draft_timeline, instructions, audio_states, unsupported, {})
+
+
+def _playback_plan(
+    row: EditSession,
+    draft_timeline: dict[str, Any],
+    instructions: list[TimelineClipInstructions],
+    audio_states: list[Literal["available", "muted", "none", "unavailable"]],
+    unsupported: list[str],
+    public_refs: dict[str, tuple[PublicPlaybackRef | None, PublicPlaybackRef | None]],
+) -> TimelinePreviewRead:
+    from app.production.timeline_subtitles import (
+        TimelineTimingError,
+        build_timeline_subtitles,
+        normalize_subtitle_text,
+    )
+
     metadata = draft_timeline.get("metadata") or {}
     if isinstance(metadata, dict) and metadata.get("music_artifact_id"):
         unsupported.append("background_music")
@@ -1411,18 +1524,23 @@ async def preview_timeline(
     clips = [
         TimelinePreviewClipRead(
             clip_id=clip.clip_id,
-            video_artifact_id=UUID(clip.video_artifact_id),
+            video_artifact_id=None if video_ref else UUID(clip.video_artifact_id),
+            video_public_ref=video_ref,
+            audio_public_ref=audio_ref,
             start_ms=clock.start_ms,
             end_ms=clock.end_ms,
             source_in_ms=clock.source_in_ms,
             source_out_ms=clock.source_out_ms,
             duration_ms=clock.duration_ms,
             subtitle_text=normalize_subtitle_text(clip.subtitle_text),
-            audio_artifact_id=UUID(clip.audio_artifact_id) if clip.audio_artifact_id else None,
+            audio_artifact_id=UUID(clip.audio_artifact_id)
+            if clip.audio_artifact_id and not audio_ref
+            else None,
             audio_state=audio_state,
             audio_volume=clip.audio_volume,
         )
         for clip, clock, audio_state in zip(instructions, timing.clips, audio_states, strict=True)
+        for video_ref, audio_ref in [public_refs.get(clip.clip_id, (None, None))]
     ]
     fingerprint = hashlib.sha256(
         json.dumps(
@@ -1449,7 +1567,7 @@ async def existing_bound_film(
     version: int,
     name: str,
     key: str,
-    requested: DeliveryPlanRef,
+    requested: DeliveryPlanRef | None,
 ) -> FinalFilmJobRead | None:
     """Re-read the exact frozen submission even after a plan stops accepting new exports."""
     run = await session.scalar(
@@ -1467,16 +1585,25 @@ async def existing_bound_film(
         return None
     snapshot = run.input_snapshot or {}
     scope = snapshot.get("delivery_output")
+    same_scope = (
+        scope is None
+        if requested is None
+        else isinstance(scope, dict)
+        and scope.get("plan_id") == str(requested.plan_id)
+        and scope.get("master_run_id") == str(requested.master_run_id)
+        and scope.get("control_epoch") == requested.control_epoch
+    )
     if (
-        not isinstance(scope, dict)
-        or scope.get("plan_id") != str(requested.plan_id)
-        or scope.get("master_run_id") != str(requested.master_run_id)
-        or scope.get("control_epoch") != requested.control_epoch
+        not same_scope
         or snapshot.get("edit_session_id") != str(edit_session_id)
         or snapshot.get("timeline_version") != version
         or snapshot.get("name") != name
     ):
-        raise ConflictError("此导出请求已绑定其他版本或计划")
+        if requested is not None:
+            raise ConflictError("此导出请求已绑定其他版本或计划")
+        raise ValidationAppError(
+            "导出请求键已用于另一项决定", details={"code": "IDEMPOTENCY_KEY_REUSED"}
+        )
     edit = await session.get(EditSession, edit_session_id)
     if edit is None or edit.project_id != project_id:
         raise NotFoundError("edit session not found")
@@ -1495,17 +1622,37 @@ async def queue_final_film_render(
     delivery_output: BoundDeliveryOutput | None = None,
 ) -> FinalFilmJobRead:
     await _project_or_404(session, project_id)
+    if idempotency_key:
+        original = await existing_bound_film(
+            session,
+            project_id=project_id,
+            edit_session_id=edit_session_id,
+            version=expected_timeline_version,
+            name=name,
+            key=idempotency_key.strip(),
+            requested=delivery_output,
+        )
+        if original is not None and original.status != "failed":
+            return original
+    await session.scalar(
+        select(EditSession.id)
+        .where(EditSession.project_id == project_id, EditSession.id == edit_session_id)
+        .with_for_update(read=True)
+    )
     edit_session, refs = await _load_timeline_refs(
         session,
         project_id=project_id,
         edit_session_id=edit_session_id,
         expected_timeline_version=expected_timeline_version,
     )
-    if not refs:
+    typed = edit_session.timeline.get("schema_version") == 2
+    if not edit_session.timeline.get("clips"):
         raise ValidationAppError("no timeline clips", details={"code": "EMPTY_TIMELINE"})
     shots = {
         shot.id: shot
-        for shot in await _formal_shots_for_refs(session, project_id=project_id, refs=refs)
+        for shot in await _formal_shots_for_refs(
+            session, project_id=project_id, refs=refs, saved_typed=typed
+        )
     }
     await _assert_delivery_reviews(session, project_id=project_id, refs=refs)
     metadata = (edit_session.timeline or {}).get("metadata")
@@ -1525,6 +1672,8 @@ async def queue_final_film_render(
         ],
         "metadata": dict(metadata) if isinstance(metadata, dict) else {},
     }
+    if typed:
+        timeline = dict(edit_session.timeline)
     request_payload = {
         "project_id": str(project_id),
         "edit_session_id": str(edit_session.id),
@@ -1542,22 +1691,26 @@ async def queue_final_film_render(
     # The idempotency hash describes the user's saved Timeline, not a mutable
     # default. Freeze defaults separately so a same-key replay after a dialogue
     # edit restores the original queued result rather than inventing a new one.
-    frozen_timeline = {
-        **timeline,
-        "clips": [
-            {
-                **clip,
-                "subtitle": (
-                    ""
-                    if ref.subtitle_enabled is False
-                    else ref.subtitle
-                    if ref.subtitle is not None
-                    else shots[ref.shot_id].dialogue
-                ),
-            }
-            for clip, ref in zip(timeline["clips"], refs, strict=True)
-        ],
-    }
+    frozen_timeline = (
+        timeline
+        if typed
+        else {
+            **timeline,
+            "clips": [
+                {
+                    **clip,
+                    "subtitle": (
+                        ""
+                        if ref.subtitle_enabled is False
+                        else ref.subtitle
+                        if ref.subtitle is not None
+                        else shots[ref.shot_id].dialogue
+                    ),
+                }
+                for clip, ref in zip(timeline["clips"], refs, strict=True)
+            ],
+        }
+    )
     external_key = (
         idempotency_key.strip() if idempotency_key else f"auto-{request_fingerprint[:48]}"
     )
@@ -1630,6 +1783,17 @@ async def queue_final_film_render(
     )
     next_attempt = max(current_attempt or 0, max((r.attempt_no for r in matching), default=0)) + 1
     frozen_timeline_hash = saved_timeline_hash(edit_session.timeline)
+    typed_provenance: dict[str, Any] = {}
+    if typed:
+        from app.editing.timeline_schema import public_render_inputs
+        from app.production.typed_film import freeze_typed_film
+
+        inputs = public_render_inputs(timeline)
+        typed_provenance = {
+            "source_hashes": await freeze_typed_film(session, edit_session),
+            "public_inputs": [item.model_dump(mode="json") for item in inputs],
+            "public_source_grants": await freeze_public_render_grants(session, project_id, inputs),
+        }
     snapshot = {
         **request_payload,
         "node_key": _FINAL_FILM_GRAPH_KEY,
@@ -1640,6 +1804,8 @@ async def queue_final_film_render(
         "idempotency_key": external_key,
         "request_fingerprint": request_fingerprint,
         "timeline": frozen_timeline,
+        **typed_provenance,
+        "subtitle_input_kind": "saved_text_and_timing",
         "formal_references": [
             {
                 "clip_id": ref.clip_id,
@@ -2019,6 +2185,9 @@ async def _stage_final_film_delivery(
             # an unchanged timeline are the expected outcome of a re-export.
             allow_cross_run_reuse=True,
         )
+    await complete_public_render_grants(session, run, artifact)
+    if subtitle_artifact is not None:
+        await complete_public_render_grants(session, run, subtitle_artifact)
     subtitle_delivery = {
         "subtitle_artifact_id": str(subtitle_artifact.id) if subtitle_artifact else None,
         "subtitle_content_hash": subtitle_artifact.content_hash if subtitle_artifact else None,
@@ -2090,8 +2259,14 @@ async def _stage_final_film_delivery(
             ExportItem(
                 export_id=export.id,
                 ordinal=ordinal,
-                source_artifact_id=UUID(str(item["composite_artifact_id"])),
-                role="shot_composite",
+                source_artifact_id=UUID(
+                    str(
+                        item["video_artifact_id"]
+                        if "source_kind" in item
+                        else item["composite_artifact_id"]
+                    )
+                ),
+                role="video" if "source_kind" in item else "shot_composite",
                 metadata_json=item,
             )
         )
@@ -2134,12 +2309,16 @@ async def execute_final_film_node_run(
         raise ValidationAppError(
             "Final Film EditSession not found", details={"code": "FINAL_FILM_SESSION_MISSING"}
         )
+    snapshot_doc = snapshot.get("timeline")
+    typed = isinstance(snapshot_doc, dict) and snapshot_doc.get("schema_version") == 2
     shots = {
         shot.id: shot
-        for shot in await _formal_shots_for_refs(session, project_id=run.project_id, refs=refs)
+        for shot in await _formal_shots_for_refs(
+            session, project_id=run.project_id, refs=refs, saved_typed=typed
+        )
     }
     resolved: list[tuple[_TimelineRef, NodeRun, Artifact, dict[str, Any]]] = []
-    for ref in refs:
+    for ref in [] if typed else refs:
         composite_run, composite_artifact = await _tail_for_ref(
             session, project_id=run.project_id, ref=ref, shot=shots[ref.shot_id]
         )
@@ -2224,16 +2403,34 @@ async def execute_final_film_node_run(
                 "Final Film input exceeds the local resource limit",
                 details={"code": "FINAL_FILM_INPUT_TOO_LARGE"},
             )
-        film = await _render_final_film_media(
-            project_id=run.project_id,
-            snapshot=snapshot,
-            resolved=resolved,
-            artifacts=artifacts,
-            obj_store=obj_store,
-            directory=directory,
-            metadata=metadata,
-            music_id=music_id,
-        )
+        if typed:
+            from app.production.typed_film import render_typed_film
+
+            await set_node_run_rls_context(session, node_run_id=run_id)
+            rendered, lineage, clips = await render_typed_film(
+                session,
+                run.project_id,
+                snapshot,
+                obj_store,
+                directory,
+                max_input_bytes=_MAX_FINAL_FILM_INPUT_BYTES,
+                max_single_bytes=_MAX_INPUT_MEDIA_BYTES,
+                node_run_id=run_id,
+            )
+            film = _RenderedFinalFilm(
+                rendered, lineage, _validate_final_film_media(rendered, clips)
+            )
+        else:
+            film = await _render_final_film_media(
+                project_id=run.project_id,
+                snapshot=snapshot,
+                resolved=resolved,
+                artifacts=artifacts,
+                obj_store=obj_store,
+                directory=directory,
+                metadata=metadata,
+                music_id=music_id,
+            )
         rendered = film.rendered
         # Persist the intended keys BEFORE the first upload. A process kill at
         # any upload boundary leaves a recoverable journal, including a failed

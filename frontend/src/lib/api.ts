@@ -24,7 +24,7 @@ function workspaceHeaders(workspaceIdOverride?: string | null): Record<string, s
   return workspaceId ? { "X-Workspace-Id": workspaceId } : {};
 }
 
-function workspaceScopedUrl(path: string): string {
+export function workspaceScopedUrl(path: string): string {
   const workspaceId = getSelectedWorkspaceId();
   if (!workspaceId) return apiUrl(path);
   const separator = path.includes("?") ? "&" : "?";
@@ -189,6 +189,10 @@ export function publicItemContentUrl(publicationId: string, itemId: string): str
 
 function projectPublicItemPath(projectId: string, linkId: string, itemId: string) {
   return `/api/v1/projects/${projectId}/public-asset-links/${linkId}/items/${itemId}`;
+}
+
+export function projectPublicContentUrl(projectId: string, linkId: string, itemId: string): string {
+  return workspaceScopedUrl(projectPublicItemPath(projectId, linkId, itemId) + "/content");
 }
 
 export async function publicItemHash(

@@ -5,6 +5,7 @@ import { artifactContentUrl } from "../../lib/api";
 import { fetchOpenCutManifest, type OpenCutManifestRead } from "./api";
 import { queryKeys } from "../../lib/queryKeys";
 import type { EditableClip } from "./useTimelineDraft";
+import { formalClipSource } from "./publicCutSource";
 import { timelineCopy as copy } from "./timelineCopy";
 import "./editing-clip-source.css";
 
@@ -20,7 +21,7 @@ function sourceFor(
     .flatMap((track) => track.clips)
     .find(
       (source) =>
-        source.track_kind === "video" && source.shot_id === clip.shot_id && source.artifact_id,
+        source.track_kind === "video" && source.shot_id === formalClipSource(clip)?.shotId && source.artifact_id,
     );
 }
 
@@ -46,6 +47,7 @@ export function EditingClipSource({
     queryFn: () => fetchOpenCutManifest(projectId),
     staleTime: 30_000,
   });
+  const shot = formalClipSource(clip);
   const source = sourceFor(manifest.data, clip, projectId);
   const [comparison, setComparison] = useState<{ source: SourceClip; clip: EditableClip } | null>(
     null,
@@ -90,7 +92,8 @@ export function EditingClipSource({
     !Number.isFinite(sourceOut) ||
     sourceOut <= sourceIn ||
     sourceOut > duration;
-  const changed = Boolean(source && source.artifact_id !== clip.artifact_id);
+  const sceneId = typeof clip.scene_id === "string" ? clip.scene_id : source?.scene_id;
+  const changed = Boolean(source && source.artifact_id !== shot?.artifactId);
   async function apply() {
     if (!comparisonOpen || !comparison || !durationValid || (needsReset && !resetCrop) || pending)
       return;
@@ -115,7 +118,9 @@ export function EditingClipSource({
       }
       onReplace({
         ...captured.clip,
-        artifact_id: captured.source.artifact_id,
+        ...(formalClipSource(captured.clip)?.typed
+          ? { source: {kind:"shot_formal", shot_id:captured.source.shot_id, artifact_id:captured.source.artifact_id!} }
+          : { artifact_id: captured.source.artifact_id }),
         ...(resetCrop
           ? { source_in_seconds: 0, source_out_seconds: duration }
           : captured.clip.source_out_seconds == null
@@ -133,10 +138,10 @@ export function EditingClipSource({
   return (
     <section className="editing-clip-source" aria-label={copy.sourceLink}>
       <div className="editing-source-actions">
-        {typeof clip.scene_id === "string" && typeof clip.shot_id === "string" && (
+        {sceneId && shot && (
           <ExternalLink
             type="link"
-            href={`/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(clip.scene_id)}?${new URLSearchParams({ shotId: clip.shot_id, editSessionId: sessionId, editClipId: String(clip.id) })}`}
+            href={`/projects/${encodeURIComponent(projectId)}/scenes/${encodeURIComponent(sceneId)}?${new URLSearchParams({ shotId: shot.shotId, editSessionId: sessionId, editClipId: String(clip.id) })}`}
             onClick={(event) => {
               if (
                 onOpenShot &&
@@ -147,7 +152,7 @@ export function EditingClipSource({
                 event.button === 0
               ) {
                 event.preventDefault();
-                onOpenShot(String(clip.scene_id), String(clip.shot_id), String(clip.id));
+                onOpenShot(sceneId, shot.shotId, String(clip.id));
               }
             }}
           >
@@ -215,7 +220,7 @@ export function EditingClipSource({
           <p>{copy.replaceNotice}</p>
           <div className="editing-source-comparison">
             {[
-              { label: copy.currentVideo, artifactId: comparison.clip.artifact_id },
+              { label: copy.currentVideo, artifactId: formalClipSource(comparison.clip)?.artifactId },
               { label: copy.newVideo, artifactId: comparison.source.artifact_id },
             ].map(({ label, artifactId }) => (
               <figure key={label}>

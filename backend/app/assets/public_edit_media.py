@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assets.from_artifact_service import MediaSource
+from app.assets.render_lineage import sqlite_render_lineage
 
 
 @lru_cache(maxsize=1)
@@ -22,6 +23,7 @@ def _sqlite_sql() -> str:
         permits_library="(SELECT count(DISTINCT value) FROM json_each(r.allowed_uses) "
                         "WHERE value IN ('library_reference', :purpose)) = 2",
     )
+    content += " AND (" + sqlite_render_lineage("(SELECT id FROM candidate)") + ")"
     return (root / "public_edit_media_v1.sql").read_text(encoding="utf-8").format(
         content_query=content, schema="", item=":item",
         publication=":publication", purpose=":purpose",

@@ -290,6 +290,101 @@ afterEach(() => {
 });
 
 describe("EditingWorkspace", () => {
+  it.each(["append", "replace", "audio"] as const)(
+    "selects linked public media in the draft before Save (%s)",
+    async (action) => {
+      const video = action !== "audio";
+      const old = {
+        ...DEFAULT_SESSION_TIMELINE.clips[1],
+        order: 1,
+        source_in_seconds: 1,
+        source_out_seconds: 5,
+        audio_volume: 0.6,
+      };
+      const initial = {
+        metadata: { music_artifact_id: "bgm", music_volume: 0.7 },
+        clips: action === "append" ? [] : [old],
+      };
+      const writes: unknown[] = [];
+      mockEditingFetch((input, init) => {
+        const url = String(input);
+        if (url.endsWith(`/edit-sessions/${SESSION_ID}`)) return json(persistedSession(initial));
+        if (url.endsWith("/auth/csrf")) return json({ csrf_token: "test" });
+        if (url.includes("/public-asset-links?"))
+          return json({
+            items: [{ id: "link", publication_id: "pub", availability: "available", version: 2 }],
+            next_offset: null,
+          });
+        if (url.endsWith("/public-assets/pub"))
+          return json({
+            id: "pub",
+            safe_name: "灯会素材",
+            usable: true,
+            items: [
+              { id: "media", media_kind: video ? "video" : "audio", preview_available: true },
+            ],
+          });
+        if (init?.method === "PATCH") {
+          const patch = JSON.parse(String(init.body));
+          writes.push(patch);
+          return json(persistedSession(patch.timeline, 2));
+        }
+        return json({});
+      });
+      renderPersistedSession();
+      fireEvent.click(await screen.findByText("选用公共素材"));
+      fireEvent.click(await screen.findByRole("button", { name: video ? "预览视频" : "试听音频" }));
+      const media = screen.getByLabelText(video ? "公共视频预览" : "公共音频试听");
+      expect(media.getAttribute("src")).toContain(
+        `/projects/${PROJECT_ID}/public-asset-links/link/items/media/content`,
+      );
+      const apply = screen.getByRole("button", {
+        name:
+          action === "audio"
+            ? "用作当前片段音轨"
+            : action === "replace"
+              ? "替换当前片段画面"
+              : "添加为新片段",
+      });
+      expect(apply).toBeDisabled();
+      Object.defineProperty(media, "duration", { value: 2.5 });
+      fireEvent.loadedMetadata(media);
+      if (action === "replace") {
+        expect(apply).toBeDisabled();
+        fireEvent.click(screen.getByRole("checkbox", { name: /原裁切超出/ }));
+      }
+      expect(screen.getByTestId("save-edit-timeline")).toBeDisabled();
+      fireEvent.click(apply);
+      expect(writes).toHaveLength(0);
+      if (action === "audio")
+        expect(screen.getByLabelText("镜头 1 配音试听")).toHaveAttribute(
+          "src",
+          media.getAttribute("src"),
+        );
+      fireEvent.click(screen.getByTestId("save-edit-timeline"));
+      const source = {
+        kind: "public_material",
+        publication_id: "pub",
+        publication_item_id: "media",
+        public_asset_link_id: "link",
+      };
+      const clip =
+        action === "append"
+          ? { id: expect.any(String), order: 1, duration_seconds: 2.5, source }
+          : action === "replace"
+            ? { ...old, source, source_in_seconds: 0, source_out_seconds: 2.5 }
+            : { ...old, audio_id: null, muted: false, audio_source: source };
+      await waitFor(() =>
+        expect(writes).toEqual([
+          {
+            expected_session_version: 1,
+            timeline: { schema_version: 2, metadata: initial.metadata, clips: [clip] },
+          },
+        ]),
+      );
+    },
+  );
+
   it("loads the real manifest GET and renders project, scene, shot, and storage lineage", async () => {
     const calls: Array<{ method: string; url: string }> = [];
     mockEditingFetch((input, init) => {
@@ -309,7 +404,9 @@ describe("EditingWorkspace", () => {
     expect(clip).not.toHaveTextContent(SCENE_ID);
     expect(clip).not.toHaveTextContent(SHOT_ID);
     expect(clip).not.toHaveTextContent("artifact-formal");
-    expect(screen.getByText("选择已有剪辑，或用正式镜头创建时间线。")).toBeInTheDocument();
+    expect(
+      screen.getByText("选择已有剪辑，或用正式镜头和已引用的公共素材创建时间线。"),
+    ).toBeInTheDocument();
     expect(calls).toEqual([{ method: "GET", url: "/api/v1/projects/project-1/opencut-manifest" }]);
     expect(screen.getByTestId("editing-read-only")).toHaveTextContent("只读");
     expect(screen.getByTestId("create-edit-session")).toBeEnabled();

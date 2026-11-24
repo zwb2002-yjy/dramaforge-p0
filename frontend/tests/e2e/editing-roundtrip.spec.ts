@@ -141,6 +141,34 @@ test("unsaved editing changes block leaving, can return to Save and leave only a
   ]);
 });
 
+test("a saved typed shot can be previewed and explicitly replaced after reopening", async ({ page }) => {
+  const { state } = await setup(page);
+  const edit = state.editing.session;
+  const stored = edit.timeline.clips.map(({shot_id, artifact_id, ...clip}) => ({
+    ...clip, source: {kind:"shot_formal", shot_id, artifact_id}
+  }));
+  let saved = { ...edit, timeline: { ...edit.timeline, schema_version:2,clips:stored } };
+  const api = `**/api/v1/projects/${PROJECT_ID}/edit-sessions/${EDIT_SESSION_ID}`;
+  await page.route(api, route => route.fulfill({json:saved}));
+  await page.route(api+"/timeline", async route => {
+    const input=route.request().postDataJSON();
+    expect(input.expected_session_version).toBe(saved.version);
+    expect(input.timeline.clips[0].source).toMatchObject({kind:"shot_formal",shot_id:SHOT_ID,artifact_id:"new-formal-video"});
+    expect(input.timeline.clips[0]).not.toHaveProperty("artifact_id");
+    saved={...saved,version:saved.version+1,timeline:input.timeline};
+    await route.fulfill({json:saved});
+  });
+  await page.goto(origin);
+  await expect(page.getByLabel("片段 1 原始视频预览")).toHaveAttribute("src",new RegExp(stored[0].source.artifact_id!));
+  await page.getByRole("button",{name:"对照并替换素材"}).click();
+  const dialog=page.getByRole("dialog",{name:"替换当前片段素材"});
+  await dialog.getByRole("button",{name:"替换到剪辑草稿",exact:true}).click();
+  await page.getByTestId("save-edit-timeline").click();
+  await expect(page.getByTestId("edit-session-dirty")).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByLabel("片段 1 原始视频预览")).toHaveAttribute("src",/new-formal-video/);
+});
+
 test("opening a clip's storyboard and returning preserves the exact editing session and selected clip", async ({
   page,
 }) => {

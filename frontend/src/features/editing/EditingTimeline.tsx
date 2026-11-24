@@ -8,6 +8,7 @@ import { timelineGeometry } from "./timelineGeometry";
 import { TimelineCropHandle } from "./TimelineCropHandle";
 import { timelineCopy as copy } from "./timelineCopy";
 import { editingClipLabel, timelineTime } from "./clipPresentation";
+import { localClipVideo } from "./publicCutSource";
 import { EditingClipThumbnail } from "./EditingClipThumbnail";
 import "./editing-timeline.css";
 
@@ -303,7 +304,7 @@ export function EditingTimeline({
                   >
                     <EditingClipThumbnail
                       projectId={projectId}
-                      artifactId={typeof clip.artifact_id === "string" ? clip.artifact_id : null}
+                      artifactId={localClipVideo(clip)}
                       label={editingClipLabel(clip, index)}
                     />
                     <span className="editing-track-clip-label">

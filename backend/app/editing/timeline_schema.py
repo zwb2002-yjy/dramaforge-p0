@@ -19,9 +19,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.assets.from_artifact_service import MediaSource, read_media_source
+from app.assets.from_artifact_service import (
+    MediaSource,
+    read_formal_clip_defaults,
+    read_media_source,
+)
 from app.assets.models import Asset, AssetVersion, Scene, Shot
 from app.assets.public_edit_media import read_public_edit_media
+from app.editing.timeline_rules import clip_transition
 from app.shared.errors import ValidationAppError
 
 TIMELINE_SCHEMA_V1 = 1
@@ -60,6 +65,8 @@ class TimelineClip(BaseModel):
     subtitle: str = ""
     transition: dict[str, Any] | None = None
     source: ClipSource
+    # An explicitly selected project-private voice uses the existing local audio identity.
+    audio_id: UUID | None = None
     audio_source: ClipSource | None = None
     # Server-written observation of the source at Save; never client-authoritative.
     selection_snapshot: dict[str, Any] | None = None
@@ -315,13 +322,19 @@ async def _verify_source(
     index: int,
     media_kind: str,
     episode_id: UUID | None,
+    previous: object = None,
 ) -> MediaSource | None:
     """Verify one clip source and return the media artifact it resolves to."""
     if source.kind == "shot_formal":
         if media_kind != "video":
             raise _invalid("a formal shot video cannot be used as an audio asset", clip_index=index)
         await _verify_shot_formal(
-            session, project_id=project_id, source=source, index=index, episode_id=episode_id
+            session,
+            project_id=project_id,
+            source=source,
+            index=index,
+            episode_id=episode_id,
+            previous=previous,
         )
         assert source.artifact_id is not None
         return await read_media_source(session, artifact_id=source.artifact_id)
@@ -341,6 +354,7 @@ async def _verify_shot_formal(
     source: ClipSource,
     index: int,
     episode_id: UUID | None = None,
+    previous: object = None,
 ) -> None:
     assert source.shot_id is not None and source.artifact_id is not None
     shot = await session.scalar(
@@ -359,15 +373,27 @@ async def _verify_shot_formal(
                 "episode-scoped session cannot hold a clip from another episode",
                 details={"code": "EDIT_CLIP_OUT_OF_EPISODE", "clip_index": index},
             )
-    if shot.formal_video_artifact_id != source.artifact_id:
-        raise ValidationAppError(
-            "clip source is not the shot's current formal video",
-            details={"code": "EDIT_SOURCE_NOT_FORMAL", "clip_index": index},
-        )
     artifact = await read_media_source(session, artifact_id=source.artifact_id)
-    if artifact is None or artifact.project_id != project_id:
+    if (
+        artifact is None
+        or artifact.project_id != project_id
+        or artifact.artifact_type != "video"
+        or artifact.storage_state != "available"
+    ):
         raise ValidationAppError(
             "clip source artifact is unavailable",
+            details={"code": "EDIT_SOURCE_NOT_FORMAL", "clip_index": index},
+        )
+    # Only the previous server-owned document can attest an earlier Formal choice.
+    already_selected = (
+        isinstance(previous, dict)
+        and previous.get("identity") == source.model_dump(mode="json", exclude_none=True)
+        and previous.get("artifact_id") == str(artifact.id)
+        and previous.get("artifact_hash") == artifact.content_hash
+    )
+    if shot.formal_video_artifact_id != source.artifact_id and not already_selected:
+        raise ValidationAppError(
+            "clip source is not the shot's current formal video",
             details={"code": "EDIT_SOURCE_NOT_FORMAL", "clip_index": index},
         )
 
@@ -408,6 +434,134 @@ def _same_observation(previous: object, current: dict[str, Any]) -> bool:
     )
 
 
+async def _preserve_clip_edits(
+    session: AsyncSession,
+    project_id: UUID,
+    timeline: dict[str, object],
+    previous: dict[str, object] | None,
+) -> dict[str, object]:
+    """Resolve legacy defaults only during an explicit typed edit; never rewrite old versions."""
+    raw_clips = timeline.get("clips")
+    if not isinstance(raw_clips, list):
+        return timeline
+    old_clips = (previous or {}).get("clips", [])
+    prior = (
+        {c.get("id"): c for c in old_clips if isinstance(c, dict)}
+        if isinstance(old_clips, list)
+        else {}
+    )
+    clips: list[object] = []
+    for raw in raw_clips:
+        if not isinstance(raw, dict):
+            clips.append(raw)
+            continue
+        clip = dict(raw)
+        old = prior.get(clip.get("id"), {})
+        if clip.get("audio_id") == "":
+            clip["audio_id"] = None
+        current = clip.get("source")
+        restore_voice = (
+            "shot_id" not in clip and isinstance(current, dict) and current.get("kind") == "shot_formal"
+            and "audio_id" in clip and clip["audio_id"] is None
+            and not clip.get("audio_source") and not clip.get("muted")
+            and old.get("source") == current and (old.get("audio_source") or old.get("audio_id") or old.get("muted"))
+        )
+        if restore_voice:
+            ref = ClipSource.model_validate(current)
+            if ref.shot_id is None or ref.artifact_id is None:
+                raise _invalid("缺少镜头音轨来源")
+            shot = await session.scalar(select(Shot).where(Shot.id==ref.shot_id, Shot.project_id==project_id))
+            if shot is None:
+                raise _invalid("镜头无法核对")
+            voice, spoken = await read_formal_clip_defaults(
+                session, project_id=project_id, shot_id=ref.shot_id, video_id=ref.artifact_id,
+                composite_id=shot.formal_composite_artifact_id if shot.formal_video_artifact_id==ref.artifact_id else None)
+            if voice is None and spoken != "":
+                raise _invalid("此镜头原配音无法核对，请选择已有音轨或明确静音")
+            clip["audio_id"]=voice
+        # Navigation labels are only hints from the previous session. The typed source
+        # and server-observed media are authoritative once a user elects to mix sources.
+        if "shot_id" in clip or "artifact_id" in clip:
+            if (
+                not old
+                or clip.get("shot_id") != old.get("shot_id")
+                or clip.get("artifact_id") != old.get("artifact_id")
+            ):
+                raise _invalid("legacy source has changed; reload the saved edit")
+            if not clip.get("source"):
+                clip["source"] = {
+                    "kind": "shot_formal",
+                    "shot_id": clip.get("shot_id"),
+                    "artifact_id": clip.get("artifact_id"),
+                }
+            shot = await session.scalar(
+                select(Shot).where(
+                    Shot.id == UUID(str(clip["shot_id"])), Shot.project_id == project_id
+                )
+            )
+            if shot is None:
+                raise _invalid("original shot is unavailable")
+            need_voice = (
+                not clip.get("muted") and not clip.get("audio_id") and not clip.get("audio_source")
+            )
+            need_caption = (
+                clip.get("subtitle_enabled") is not False and clip.get("subtitle") is None
+            )
+            if need_voice or need_caption:
+                inherited_voice, spoken = await read_formal_clip_defaults(
+                    session,
+                    project_id=project_id,
+                    shot_id=shot.id,
+                    video_id=UUID(str(old["artifact_id"])),
+                    composite_id=shot.formal_composite_artifact_id,
+                )
+                if need_voice:
+                    if inherited_voice is None and spoken != "":
+                        raise _invalid("请先选择已有配音或明确静音，再保存混合剪辑")
+                    clip["audio_id"] = inherited_voice
+                if need_caption:
+                    if spoken is None:
+                        raise _invalid("请明确本段字幕，再保存混合剪辑")
+                    clip["subtitle"] = spoken
+            for key in (
+                "shot_id",
+                "artifact_id",
+                "scene_id",
+                "episode_id",
+                "scene_number",
+                "shot_number",
+                "episode_number",
+            ):
+                clip.pop(key, None)
+        for legacy, key in (
+            ("trim_start_seconds", "source_in_seconds"),
+            ("trim_end_seconds", "source_out_seconds"),
+        ):
+            if legacy in clip:
+                value = clip.pop(legacy)
+                clip.setdefault(key, value)
+        if clip.get("transition") is not None:
+            kind, seconds = clip_transition(clip["transition"])
+            clip["transition"] = {"kind": kind, "duration_seconds": seconds}
+        if clip.get("audio_id") is not None:
+            if clip.get("audio_source"):
+                raise _invalid("select one clip audio source")
+            try:
+                audio_id = UUID(str(clip["audio_id"]))
+            except ValueError as exc:
+                raise _invalid("invalid private audio") from exc
+            audio = await read_media_source(session, artifact_id=audio_id)
+            if (
+                audio is None
+                or audio.project_id != project_id
+                or audio.artifact_type != "audio"
+                or audio.storage_state != "available"
+            ):
+                raise _invalid("所选配音在当前项目不可用")
+        clips.append(clip)
+    return {**timeline, "clips": clips}
+
+
 async def normalize_timeline_for_save(
     session: AsyncSession,
     *,
@@ -429,8 +583,17 @@ async def normalize_timeline_for_save(
         # Schema 1 carries no on-disk marker: strip an explicitly-sent default so
         # historical documents keep their exact stored shape.
         return {key: value for key, value in timeline.items() if key != "schema_version"}
-    document = parse_schema2(timeline)
+    document = parse_schema2(
+        await _preserve_clip_edits(session, project_id, timeline, previous_timeline)
+    )
     previous_by_clip = _previous_snapshots(previous_timeline)
+    original_clips = (previous_timeline or {}).get("clips")
+    previous_legacy = (
+        {item.get("id"): item for item in original_clips if isinstance(item, dict)}
+        if isinstance(original_clips, list)
+        and (previous_timeline or {}).get("schema_version", 1) == 1
+        else {}
+    )
     stored: list[dict[str, Any]] = []
     for index, clip in enumerate(document.clips):
         payload = clip.model_dump(mode="json", exclude_unset=True)
@@ -442,6 +605,7 @@ async def normalize_timeline_for_save(
             payload.pop(field, None)
             if source is None:
                 continue
+            previous = old.get(field)
             verified = await _verify_source(
                 session,
                 project_id=project_id,
@@ -449,8 +613,8 @@ async def normalize_timeline_for_save(
                 index=index,
                 episode_id=episode_id,
                 media_kind=media_kind,
+                previous=previous,
             )
-            previous = old.get(field)
             observed = await _observe_source(
                 session,
                 clip_id=clip.id,
@@ -462,6 +626,17 @@ async def normalize_timeline_for_save(
                 payload[field] = dict(previous)
             else:
                 initial = previous.get("initial_source") if isinstance(previous, dict) else None
+                old_clip = previous_legacy.get(clip.id, {})
+                if (
+                    field == "selection_snapshot"
+                    and old_clip.get("shot_id")
+                    and old_clip.get("artifact_id")
+                ):
+                    initial = {
+                        "kind": "shot_formal",
+                        "shot_id": old_clip["shot_id"],
+                        "artifact_id": old_clip["artifact_id"],
+                    }
                 payload[field] = {
                     **observed,
                     "initial_source": initial or source.model_dump(mode="json", exclude_none=True),

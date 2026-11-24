@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.access.egress_admission import EgressAdmission
 from app.access.models import Project
 from app.assets.models import AssetVersion
+from app.assets.render_lineage import sqlite_render_lineage
 from app.config import Settings, get_settings
 from app.execution.branches import branch_priority
 from app.execution.models import Artifact, GraphEdge, GraphNode, NodeRun
@@ -475,7 +476,8 @@ async def resolve_public_reference(
     blocked = await session.scalar(text(_SQLITE_REFERENCE_USE_DENIED), {
         "artifact": artifact.id.hex, "is_public": record.publication_id is not None,
     })
-    if blocked:
+    if blocked or not await session.scalar(text(sqlite_render_lineage(":artifact")),
+                                                {"artifact":artifact.id.hex}):
         raise NotFoundError("reference not found")
     if record.publication_id is not None:
         from app.assets.public_asset_models import (

@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useRef } from "react";
+import { formalClipSource, type PublicCutSelection } from "./publicCutSource";
 import type { components } from "../../shared/api/generated";
 import type {
   EditSessionRead,
@@ -180,6 +181,46 @@ export function useTimelineDraft(
       ),
     }));
   }
+  function usePublicSource(selection: PublicCutSelection, selectedId: string) {
+    const { action, source, seconds, resetCrop } = selection;
+    const id =
+      action === "append"
+        ? `clip-${Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("")}`
+        : selectedId;
+    edit((draft) => {
+      if (action === "append")
+        return {
+          ...draft,
+          schema_version: 2,
+          clips: [
+            ...draft.clips,
+            {
+              id,
+              order: draft.clips.length + 1,
+              duration_seconds: seconds,
+              source,
+            },
+          ],
+        };
+      const index = draft.clips.findIndex((c) => c.id === selectedId);
+      if (index < 0) return draft;
+      return {
+        ...draft,
+        schema_version: 2,
+        clips: draft.clips.map((clip, i) => {
+          if (i !== index) return clip;
+          if (action === "audio")
+            return { ...clip, audio_source: source, audio_id: null, muted: false };
+          return {
+            ...clip,
+            source,
+            ...(resetCrop ? { source_in_seconds: 0, source_out_seconds: seconds } : {}),
+          };
+        }),
+      };
+    });
+    return id;
+  }
   function moveClip(index: number, offset: -1 | 1) {
     reorderClip(index, index + offset);
   }
@@ -219,13 +260,13 @@ export function useTimelineDraft(
         clips = reordered.map((clip, index) => ({ ...clip!, order: index + 1 }));
       } else if (operation.operation === "set_clip_duration") {
         clips = clips.map((clip) =>
-          clip.id === operation.clip_id || String(clip.shot_id) === operation.clip_id
+          clip.id === operation.clip_id || formalClipSource(clip)?.shotId === operation.clip_id
             ? { ...clip, duration_seconds: operation.duration_seconds }
             : clip,
         );
       } else if (operation.operation === "set_clip_subtitle") {
         clips = clips.map((clip) =>
-          clip.id === operation.clip_id || String(clip.shot_id) === operation.clip_id
+          clip.id === operation.clip_id || formalClipSource(clip)?.shotId === operation.clip_id
             ? { ...clip, subtitle: operation.subtitle }
             : clip,
         );
@@ -245,6 +286,7 @@ export function useTimelineDraft(
     isCurrentSave,
     acceptSaved,
     updateClipField,
+    usePublicSource,
     replaceClip,
     updateTimelineMetadata,
     moveClip,

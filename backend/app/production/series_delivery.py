@@ -78,7 +78,9 @@ def _check_receipt[Package: DeliveryPackage](
         blockers.append("DELIVERY_RENDER_MISMATCH")
     # Session exports record clip items in document order. Final films record
     # the ordered composites actually assembled, plus their subtitle item.
-    if final:
+    timeline = snapshot.get("timeline")
+    typed_film = final and isinstance(timeline, dict) and timeline.get("schema_version") == 2
+    if final and not typed_film:
         raw_refs = snapshot.get("formal_references")
         refs = raw_refs if isinstance(raw_refs, list) else []
         expected = [
@@ -96,7 +98,7 @@ def _check_receipt[Package: DeliveryPackage](
                     else clip.get("artifact_id")
                 ),
             )
-            for clip in clips
+            for clip in (sorted(clips, key=lambda c: c["order"]) if typed_film else clips)
             if isinstance(clip, dict)
         ]
     clip_items = [item for item in items if item.role != "final_subtitle"]
@@ -106,7 +108,7 @@ def _check_receipt[Package: DeliveryPackage](
         or len(expected) != len(clips)
         or actual != expected
         or any(
-            i.ordinal != n or i.role != ("shot_composite" if final else "video")
+            i.ordinal != n or i.role != ("shot_composite" if final and not typed_film else "video")
             for n, i in enumerate(clip_items, start=1)
         )
         or (

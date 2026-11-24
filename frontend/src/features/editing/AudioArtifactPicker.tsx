@@ -17,6 +17,7 @@ export function AudioArtifactPicker({
   defaultLabel,
   muted = false,
   allowMute = false,
+  publicPreviewUrl,
   testId,
   onChange,
 }: {
@@ -26,6 +27,7 @@ export function AudioArtifactPicker({
   defaultLabel: string;
   muted?: boolean;
   allowMute?: boolean;
+  publicPreviewUrl?: string;
   testId: string;
   onChange: (artifactId: string, muted: boolean) => void;
 }) {
@@ -45,7 +47,9 @@ export function AudioArtifactPicker({
     staleTime: 60_000,
     retry: false,
   });
-  const previewId = muted ? "" : value;
+  const previewId = muted
+    ? ""
+    : publicPreviewUrl || (value ? artifactContentUrl(projectId, value) : "");
 
   return (
     <div className="editing-audio-picker">
@@ -55,9 +59,14 @@ export function AudioArtifactPicker({
           id={id}
           aria-label={label}
           data-testid={testId}
-          value={muted ? MUTED : value}
+          value={muted ? MUTED : publicPreviewUrl ? "__public__" : value}
           onChange={(event) => onChange(event === MUTED ? "" : event, event === MUTED)}
         >
+          {publicPreviewUrl && (
+            <option value="__public__" disabled>
+              已选公共音轨
+            </option>
+          )}
           <option value="">{defaultLabel}</option>
           {allowMute && <option value={MUTED}>不使用配音</option>}
           {value && (
@@ -82,7 +91,7 @@ export function AudioArtifactPicker({
             controls
             preload="none"
             aria-label={`${label}试听`}
-            src={artifactContentUrl(projectId, previewId)}
+            src={previewId}
             onError={() => setFailedPreview(previewId)}
             onCanPlay={() => setFailedPreview(null)}
           />

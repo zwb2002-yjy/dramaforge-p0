@@ -126,6 +126,22 @@ async def test_schema1_timeline_is_stored_without_an_upgrade(session: AsyncSessi
 
 
 @pytest.mark.asyncio
+async def test_cleared_audio_in_legacy_muted_clip_survives_explicit_typed_save(session):
+    project, user, shot, artifact = await _shot(session)
+    assert artifact is not None
+    original = {"id":"muted", "order":1, "duration_seconds":1, "subtitle":"",
+                "shot_id":str(shot.id), "artifact_id":str(artifact.id),
+                "audio_id":"", "muted":True}
+    adapter = EditingAdapter(session)
+    edit = await adapter.create_session(project_id=project.id, user_id=user.id, name="旧版静音",
+                                        timeline={"clips":[original]})
+    saved = await adapter.save_timeline(project_id=project.id,session_id=edit.id,
+        expected_session_version=1,timeline={"schema_version":2,"clips":[original]})
+    clip = saved.timeline["clips"][0]
+    assert clip["muted"] and clip["audio_id"] is None and clip["source"]["shot_id"]==str(shot.id)
+
+
+@pytest.mark.asyncio
 async def test_schema2_shot_formal_source_is_verified_and_stored(session: AsyncSession) -> None:
     project, user, shot, artifact = await _shot(session)
     assert artifact is not None

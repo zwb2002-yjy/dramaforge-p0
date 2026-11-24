@@ -24,6 +24,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
 from app.assets.from_artifact_service import MediaSource
+from app.production.public_render_provenance import (
+    complete_public_render_grants,
+    freeze_public_render_grants,
+)
 from app.config import get_settings
 from app.delivery.models import Export
 from app.editing.models import EditSession
@@ -114,7 +118,7 @@ async def create_edit_session_render(
     instructions = [asdict(item) for item in plan.instructions]
     public_inputs = public_render_inputs(document)
     public_media = await resolve_public_render_inputs(session, project_id, public_inputs)
-    sources = await _render_sources(session, project_id, instructions, public_media)
+    sources = await resolve_render_sources(session, project_id, instructions, public_media)
     for clip in document["clips"] if document.get("schema_version") == 2 else []:
         for field in ("selection_snapshot", "audio_selection_snapshot"):
             saved = clip.get(field)
@@ -134,6 +138,10 @@ async def create_edit_session_render(
         "timeline_hash": plan.timeline_hash,
         "instructions": instructions,
         "public_inputs": [item.model_dump(mode="json") for item in public_inputs],
+        "subtitle_input_kind": "saved_text_and_timing",
+        "public_source_grants": await freeze_public_render_grants(
+            session, project_id, public_inputs
+        ),
         "source_hashes": {str(key): row.content_hash for key, row in sources.items()},
     }
     input_hash = _snapshot_hash(snapshot)
@@ -183,8 +191,10 @@ async def create_edit_session_render(
     return run
 
 
-async def _render_sources(
-    session: AsyncSession, project_id: UUID, instructions: list[dict[str, Any]],
+async def resolve_render_sources(
+    session: AsyncSession,
+    project_id: UUID,
+    instructions: list[dict[str, Any]],
     public_media: dict[UUID, MediaSource],
 ) -> dict[UUID, Artifact | MediaSource]:
     expected = [
@@ -215,7 +225,7 @@ async def _render_sources(
     return sources
 
 
-async def _stage_source(
+async def stage_verified_source(
     store: ObjectStore, artifact: Artifact | MediaSource, path: Path, expected_hash: str
 ) -> None:
     digest = hashlib.sha256()
@@ -296,7 +306,16 @@ async def execute_edit_session_render(
             )
         public_inputs = public_render_inputs(dict(frozen.timeline or {}))
     public_media = await resolve_public_render_inputs(session, run.project_id, public_inputs)
-    artifacts = await _render_sources(session, run.project_id, raw_instructions, public_media)
+    if public_inputs and (
+        not snapshot.get("public_source_grants") or "public_inputs" not in snapshot
+    ):
+        raise ValidationAppError(
+            "此旧渲染任务缺少冻结的来源许可，请重新确认剪辑导出",
+            details={"code": "RENDER_PROVENANCE_UNAVAILABLE"},
+        )
+    artifacts = await resolve_render_sources(
+        session, run.project_id, raw_instructions, public_media
+    )
     grants_by_artifact: dict[UUID, list[PublicRenderInput]] = {}
     for item in public_inputs:
         grants_by_artifact.setdefault(item.artifact_id, []).append(item)
@@ -321,7 +340,7 @@ async def execute_edit_session_render(
                     "render source metadata changed",
                     details={"code": "RENDER_INPUT_HASH_MISMATCH", "artifact_id": key},
                 )
-            await _stage_source(obj_store, artifact, path, expected_hash)
+            await stage_verified_source(obj_store, artifact, path, expected_hash)
             paths[key] = path
         clips = [
             TimelineRenderClip(
@@ -370,6 +389,7 @@ async def execute_edit_session_render(
     )
     session.add(mp4)
     await session.flush()
+    await complete_public_render_grants(session, run, mp4)
     deliverable = mp4
     subtitle_artifact_id: str | None = None
     if subtitle_stored is not None:
@@ -385,6 +405,7 @@ async def execute_edit_session_render(
         )
         session.add(subtitle)
         await session.flush()
+        await complete_public_render_grants(session, run, subtitle)
         subtitle_artifact_id = str(subtitle.id)
         if export.format == "srt":
             deliverable = subtitle

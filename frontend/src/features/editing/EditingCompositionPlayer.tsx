@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { artifactContentUrl } from "../../lib/api";
+import { artifactContentUrl, projectPublicContentUrl } from "../../lib/api";
 import type { TimelinePreviewRead } from "./api";
 import { timelineCopy as copy } from "./timelineCopy";
 
@@ -43,6 +43,9 @@ export function EditingCompositionPlayer({
   const callbacks = useRef({ onPosition, onClipChange, onPlayingChange });
   callbacks.current = { onPosition, onClipChange, onPlayingChange };
   const clip = plan.clips[index];
+  const playbackUrl = (id: string | null, ref?: {public_asset_link_id: string; publication_item_id:string} | null) =>
+    ref ? projectPublicContentUrl(projectId, ref.public_asset_link_id, ref.publication_item_id)
+      : id ? artifactContentUrl(projectId, id) : undefined;
   const position = clip ? clip.start_ms + elapsed : 0;
   const positionRef = useRef(position);
   positionRef.current = position;
@@ -185,7 +188,7 @@ export function EditingCompositionPlayer({
           muted
           playsInline
           preload="auto"
-          src={artifactContentUrl(projectId, clip.video_artifact_id)}
+          src={playbackUrl(clip.video_artifact_id,clip.video_public_ref)}
           aria-label={copy.playback}
           onLoadedMetadata={prepareVideo}
           onLoadedData={prepareVideo}
@@ -213,12 +216,12 @@ export function EditingCompositionPlayer({
           </p>
         )}
       </div>
-      {clip.audio_state === "available" && clip.audio_artifact_id && (
+      {clip.audio_state === "available" && (clip.audio_public_ref || clip.audio_artifact_id) && (
         <audio
           key={clip.clip_id}
           ref={audioRef}
           preload="auto"
-          src={artifactContentUrl(projectId, clip.audio_artifact_id)}
+          src={playbackUrl(clip.audio_artifact_id,clip.audio_public_ref)}
           aria-label={copy.audioPlayback}
           onError={fail}
         />

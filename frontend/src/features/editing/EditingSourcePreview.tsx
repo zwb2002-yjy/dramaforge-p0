@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { artifactContentUrl } from "../../lib/api";
 import type { EditableClip } from "./useTimelineDraft";
 import { timelineCopy as copy } from "./timelineCopy";
+import { localClipVideo, publicCutUrl } from "./publicCutSource";
 import { editingClipLabel } from "./clipPresentation";
 import { Badge, SectionHeader } from "../../components/ui";
 import "./editing-source-preview.css";
@@ -37,11 +38,14 @@ export function EditingSourcePreview({
   const chosen = selectedIndex ?? 0;
   const index = Math.min(chosen, Math.max(0, clips.length - 1));
   const clip = clips[index];
-  const artifactId = typeof clip?.artifact_id === "string" ? clip.artifact_id : null;
+  const artifactId = localClipVideo(clip);
+  const sourceUrl =
+    publicCutUrl(projectId, clip, "source") ??
+    (artifactId ? artifactContentUrl(projectId, artifactId) : undefined);
   useLayoutEffect(() => {
     const video = videoRef.current;
     if (video && !video.paused) video.pause();
-  }, [pauseRevision, index, artifactId]);
+  }, [pauseRevision, index, sourceUrl]);
   const positionSource = useCallback(() => {
     const video = videoRef.current;
     if (!video || video.readyState < 1 || !seekRequest || !Number.isFinite(seekRequest.progress))
@@ -57,21 +61,21 @@ export function EditingSourcePreview({
     );
     if (Math.abs(video.currentTime - target) > 0.001) video.currentTime = target;
   }, [clip, seekRequest]);
-  useEffect(positionSource, [positionSource, artifactId]);
+  useEffect(positionSource, [positionSource, sourceUrl]);
   useEffect(() => {
     const video = videoRef.current;
     return () => {
       if (video && !video.paused) video.pause();
     };
-  }, [artifactId]);
+  }, [sourceUrl]);
   return (
     <section className="editing-source-preview" aria-label="剪辑素材预览">
       <SectionHeader title={clip ? editingClipLabel(clip, index) : copy.source}>
         <Badge>{copy.sourceNotice}</Badge>
       </SectionHeader>
-      {artifactId ? (
+      {sourceUrl ? (
         <video
-          key={artifactId}
+          key={sourceUrl}
           ref={videoRef}
           controls
           preload="metadata"
@@ -82,7 +86,7 @@ export function EditingSourcePreview({
             if (Number.isFinite(start) && Number.isFinite(end) && end > start)
               onPosition?.(Math.max(0, Math.min(1, (video.currentTime - start) / (end - start))));
           }}
-          src={artifactContentUrl(projectId, artifactId)}
+          src={sourceUrl}
           aria-label={`片段 ${index + 1} 原始视频预览`}
         />
       ) : (

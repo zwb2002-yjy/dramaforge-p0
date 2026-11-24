@@ -421,6 +421,70 @@ async def test_failed_final_film_retry_uses_next_attempt_and_same_external_key(
 
 
 @pytest.mark.asyncio
+async def test_explicit_typed_edit_freezes_legacy_sound_text_and_timing(
+    session: AsyncSession,
+) -> None:
+    from app.editing.adapter import EditingAdapter
+    from app.production.edit_render_plan import build_render_plan
+
+    project, _user, edit, shots, videos = await _seed_renderable_final_film(session, shot_count=2)
+    old = dict(edit.timeline)
+    clips = [dict(c) for c in old["clips"]]
+    audio_ids = []
+    for shot in shots:
+        composite = await session.get(Artifact, shot.formal_composite_artifact_id)
+        run = await session.get(NodeRun, composite.produced_by_run_id)
+        facts = dict(run.input_snapshot)
+        run.input_snapshot = {**facts, "dialogue": shot.dialogue}
+        audio_ids.append(facts["media_inputs"]["voice"]["artifact_id"])
+    clips[0].pop("subtitle")
+    clips[0].pop("source_in_seconds")
+    clips[0].update(
+        trim_start_seconds=0.5, trim_end_seconds=4.5, duration_seconds=4, audio_volume=0.62
+    )
+    clips[1].update(audio_id=audio_ids[0], transition="crossfade")
+    music = {"music_artifact_id": audio_ids[1], "music_volume": 0.17}
+    edit.timeline = {"clips": clips, "metadata": music}
+    await session.commit()
+    # A later edit to the canonical dialogue must not replace the approved original wording.
+    shots[0].dialogue = "later canonical dialogue"
+    await session.flush()
+    adapter = EditingAdapter(session)
+    saved = await adapter.save_timeline(
+        project_id=project.id,
+        session_id=edit.id,
+        expected_session_version=1,
+        timeline={**edit.timeline, "schema_version": 2},
+    )
+    first, second = saved.timeline["clips"]
+    assert first["subtitle"] == "Line 1" and first["audio_id"] == audio_ids[0]
+    assert second["subtitle"] == "" and second["audio_id"] == audio_ids[0]
+    assert saved.timeline["metadata"] == music
+    plan = build_render_plan(
+        edit_session_id=edit.id,
+        timeline_version=2,
+        timeline_hash="test",
+        episode_id=edit.episode_id,
+        document=saved.timeline,
+    )
+    assert (
+        plan.instructions[0].source_in_seconds,
+        plan.instructions[0].source_out_seconds,
+        plan.instructions[0].audio_volume,
+    ) == (0.5, 4.5, 0.62)
+    assert plan.instructions[1].transition_duration_seconds == 0.25
+    shots[0].formal_video_artifact_id = None
+    await session.flush()
+    updated = await adapter.save_timeline(
+        project_id=project.id,
+        session_id=edit.id,
+        expected_session_version=2,
+        timeline=saved.timeline,
+    )
+    assert updated.timeline["clips"][0]["selection_snapshot"] == first["selection_snapshot"]
+    assert updated.timeline["clips"][0]["source"]["artifact_id"] == str(videos[0].id)
+
+
 async def test_queued_retry_is_idempotent_and_key_reuse_is_rejected(
     session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -464,6 +528,18 @@ async def test_queued_retry_is_idempotent_and_key_reuse_is_rejected(
     edit.timeline["metadata"] = {"changed": True}
     edit.version = 2
     await session.commit()
+    # A retry of the original user decision still finds the original run
+    # after a later Save; only a different decision using this key conflicts.
+    historic = await queue_final_film_render(
+        session,
+        project_id=project.id,
+        edit_session_id=edit.id,
+        expected_timeline_version=1,
+        actor_id=user.id,
+        idempotency_key="completed-final",
+        name="Final",
+    )
+    assert historic.node_run_id == retry.node_run_id
     with pytest.raises(ValidationAppError) as exc:
         await queue_final_film_render(
             session,

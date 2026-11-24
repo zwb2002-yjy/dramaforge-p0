@@ -34,6 +34,8 @@ import {
 import { fetchScriptWorkspace } from "../script/api";
 import { EditingSessionPicker } from "./EditingSessionPicker";
 import { EditingClipSource } from "./EditingClipSource";
+import { PublicCutPicker } from "./PublicCutPicker";
+import { publicCutUrl } from "./publicCutSource";
 import { EditingSourceInventory } from "./EditingSourceInventory";
 import { editingClipLabel } from "./clipPresentation";
 import { timelineCopy as copy } from "./timelineCopy";
@@ -226,6 +228,7 @@ export function EditingWorkspace({
     </p>
   );
   const currentSessionVersion = persistedSession.data?.version;
+  const [publicPickerOpen, setPublicPickerOpen] = useState(false);
   const timeline = useTimelineDraft(projectId, sessionId, persistedSession.data);
   const { draft, baseline, dirty, updateClipField, updateTimelineMetadata } = timeline;
   useEffect(() => onDirtyStateChange?.(dirty), [dirty, onDirtyStateChange]);
@@ -564,24 +567,51 @@ export function EditingWorkspace({
                       </span>
                     )}
                   </header>
-                  {draft.clips[clipIndex] && (
-                    <EditingClipSource
-                      key={`${projectId}:${sessionId}:${String(draft.clips[clipIndex].id)}`}
-                      projectId={projectId}
-                      sessionId={sessionId!}
-                      clip={draft.clips[clipIndex]}
-                      onOpenShot={onOpenShot}
-                      onReplaced={() => saveButton.current?.focus()}
-                      onReplace={(replacement) => {
-                        timeline.replaceClip(clipIndex, replacement);
-                        setFeedback(copy.sourceReplaced);
-                        setExported(null);
-                      }}
-                    />
-                  )}
+                  <Disclosure
+                    title="选用公共素材"
+                    compact
+                    lazy
+                    open={publicPickerOpen}
+                    onOpenChange={setPublicPickerOpen}
+                  >
+                    {publicPickerOpen && (
+                      <PublicCutPicker
+                        key={sessionId}
+                        projectId={projectId}
+                        clip={draft.clips[clipIndex]}
+                        onUse={(selection) => {
+                          const id = timeline.usePublicSource(
+                            selection,
+                            String(draft.clips[clipIndex]?.id ?? ""),
+                          );
+                          setSelectedClipId(id);
+                          onSelectedClipChange?.(id);
+                          setPublicPickerOpen(false);
+                          setExported(null);
+                          setFeedback("已更新剪辑草稿，请保存时间线。");
+                        }}
+                      />
+                    )}
+                  </Disclosure>
+                  {draft.clips[clipIndex] &&
+                    !publicCutUrl(projectId, draft.clips[clipIndex], "source") && (
+                      <EditingClipSource
+                        key={`${projectId}:${sessionId}:${String(draft.clips[clipIndex].id)}`}
+                        projectId={projectId}
+                        sessionId={sessionId!}
+                        clip={draft.clips[clipIndex]}
+                        onOpenShot={onOpenShot}
+                        onReplaced={() => saveButton.current?.focus()}
+                        onReplace={(replacement) => {
+                          timeline.replaceClip(clipIndex, replacement);
+                          setFeedback(copy.sourceReplaced);
+                          setExported(null);
+                        }}
+                      />
+                    )}
                   {draft.clips.length === 0 ? (
                     <p className="muted" data-testid="edit-session-no-clips">
-                      当前 EditSession 没有正式视频片段。
+                      当前剪辑为空。可选用已引用的公共视频添加第一个片段。
                     </p>
                   ) : (
                     <ol>
@@ -698,12 +728,22 @@ export function EditingWorkspace({
                             label={`镜头 ${index + 1} 配音`}
                             testId={`clip-audio-${index}`}
                             value={editableValue(clip, "audio_id")}
-                            defaultLabel="沿用镜头对白"
+                            defaultLabel={
+                              publicCutUrl(projectId, clip, "source")
+                                ? "无替代音轨"
+                                : "沿用镜头对白"
+                            }
+                            publicPreviewUrl={publicCutUrl(projectId, clip, "audio_source")}
                             allowMute
                             muted={clip.muted === true}
                             onChange={(artifactId, muted) => {
-                              updateClipField(index, "audio_id", artifactId);
-                              updateClipField(index, "muted", muted);
+                              const next: EditableClip = {
+                                ...clip,
+                                audio_id: artifactId || (draft.schema_version === 2 ? null : ""),
+                                muted,
+                              };
+                              delete next.audio_source;
+                              timeline.replaceClip(index, next);
                             }}
                           />
                           <Field>
@@ -1193,7 +1233,10 @@ export function EditingWorkspace({
 
   return (
     <div className="qc-project-page" data-testid="editing-workspace">
-      <PageHeader title="剪辑成片" description="选择已有剪辑，或用正式镜头创建时间线。">
+      <PageHeader
+        title="剪辑成片"
+        description="选择已有剪辑，或用正式镜头和已引用的公共素材创建时间线。"
+      >
         <span data-testid="editing-read-only">{copy.readOnlySource}</span>
       </PageHeader>
       {boundNotice}
@@ -1251,7 +1294,11 @@ export function EditingWorkspace({
           onClick={() => create.mutate()}
           disabled={create.isPending || manifest.isLoading || !manifest.data || !scopeReady}
         >
-          {create.isPending ? "正在创建剪辑会话…" : "创建可编辑剪辑会话"}
+          {create.isPending
+            ? "正在创建剪辑会话…"
+            : formalVideoClips.length === 0
+              ? "创建空剪辑草稿"
+              : "创建可编辑剪辑会话"}
         </Button>
       )}
       {manifest.data && !manifest.isError && (

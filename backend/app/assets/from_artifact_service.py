@@ -92,6 +92,70 @@ async def read_media_shot_id(
     return UUID(raw) if raw else None
 
 
+async def read_formal_clip_defaults(
+    session: AsyncSession,
+    *,
+    project_id: UUID,
+    shot_id: UUID,
+    video_id: UUID,
+    composite_id: UUID | None,
+) -> tuple[str | None, str | None]:
+    """Recover the voice and subtitle observed by the original formal composite."""
+    from app.execution.models import GraphNode
+
+    video = await read_media_source(session, artifact_id=video_id)
+    if video is None or video.project_id != project_id or video.artifact_type != "video":
+        raise ValidationAppError("旧剪辑的视频来源无法核对")
+    q = (
+        select(NodeRun)
+        .join(Artifact, Artifact.id == NodeRun.result_artifact_id)
+        .join(GraphNode, GraphNode.id == NodeRun.graph_node_id)
+        .where(
+            NodeRun.project_id == project_id,
+            GraphNode.node_key == "composite",
+            GraphNode.graph_version_id == NodeRun.graph_version_id,
+            NodeRun.status.in_(("completed", "cached", "completed_after_cancel")),
+            NodeRun.input_snapshot["shot_id"].as_string() == str(shot_id),
+            NodeRun.input_snapshot["execution_branch"].as_string() == "formal",
+            Artifact.project_id == project_id,
+            Artifact.produced_by_run_id == NodeRun.id,
+            Artifact.deleted_at.is_(None),
+            Artifact.storage_state == "available",
+        )
+        .order_by(NodeRun.attempt_no.desc(), NodeRun.created_at.desc(), NodeRun.id.desc())
+    )
+    if composite_id:
+        q = q.where(Artifact.id == composite_id)
+    for run in await session.scalars(q):
+        facts = run.input_snapshot
+        media = facts.get("media_inputs")
+        if facts.get("experiment_id") or not isinstance(media, dict):
+            continue
+        frame = media.get("video")
+        if (
+            not isinstance(frame, dict)
+            or frame.get("artifact_id") != str(video_id)
+            or frame.get("content_hash") != video.content_hash
+        ):
+            continue
+        spoken = facts.get("dialogue")
+        caption = spoken if isinstance(spoken, str) else None
+        voice = media.get("voice")
+        if not isinstance(voice, dict) or not voice.get("artifact_id"):
+            return None, caption
+        audio = await read_media_source(session, artifact_id=UUID(voice["artifact_id"]))
+        if (
+            audio is None
+            or audio.project_id != project_id
+            or audio.artifact_type != "audio"
+            or audio.storage_state != "available"
+            or audio.content_hash != voice.get("content_hash")
+        ):
+            raise ValidationAppError("旧剪辑引用的配音已不可用")
+        return str(audio.id), caption
+    return None, None
+
+
 async def read_media_source(
     session: AsyncSession,
     *,
