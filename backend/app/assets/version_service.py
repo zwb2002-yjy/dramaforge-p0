@@ -96,6 +96,7 @@ class AssetVersionService:
         asset = await self._get_asset(
             project_id=project_id, asset_id=asset_id, actor=actor, for_update=True
         )
+        publication, link = await self.version_base(asset, actor)
         next_version = asset.version + 1
         asset.version = next_version
         version = AssetVersion(
@@ -106,11 +107,11 @@ class AssetVersionService:
             name=name if name is not None else asset.name,
             description=description if description is not None else asset.description,
             metadata_json=(
-                dict(metadata_json)
-                if metadata_json is not None
-                else dict(asset.metadata_json)
+                dict(metadata_json) if metadata_json is not None else dict(asset.metadata_json)
             ),
             status="candidate",
+            base_publication_id=publication,
+            base_public_asset_link_id=link,
             created_by=actor.id,
         )
         self._session.add(version)
@@ -141,25 +142,102 @@ class AssetVersionService:
                 "only candidate versions can be promoted",
                 details={"status": candidate.status},
             )
+        if candidate.base_public_asset_link_id:
+            await self.public_base(
+                project_id=project_id,
+                asset_kind=candidate.kind,
+                actor=actor,
+                link_id=candidate.base_public_asset_link_id,
+            )
         # Demote any existing formal first so only one formal exists at a time.
         current_formal = (
-            await self._session.execute(
-                select(AssetVersion)
-                .where(
-                    AssetVersion.asset_id == asset_id,
-                    AssetVersion.project_id == project_id,
-                    AssetVersion.status == "formal",
-                    AssetVersion.id != candidate.id,
+            (
+                await self._session.execute(
+                    select(AssetVersion)
+                    .where(
+                        AssetVersion.asset_id == asset_id,
+                        AssetVersion.project_id == project_id,
+                        AssetVersion.status == "formal",
+                        AssetVersion.id != candidate.id,
+                    )
+                    .with_for_update()
                 )
-                .with_for_update()
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for old in current_formal:
             old.status = "historical"
         candidate.status = "formal"
         asset.current_version_id = candidate.id
         await self._session.flush()
         return candidate
+
+    async def version_base(
+        self, asset: Asset, actor: User, link_id: UUID | None = None, *, kind: str | None = None
+    ) -> tuple[UUID | None, UUID | None]:
+        """Edits inherit the fixed source of the adopted version or first unadopted variant."""
+        if link_id is None:
+            prior = select(AssetVersion.base_public_asset_link_id).where(
+                AssetVersion.asset_id == asset.id,
+                AssetVersion.project_id == asset.project_id,
+            )
+            if asset.current_version_id:
+                prior = prior.where(AssetVersion.id == asset.current_version_id)
+            else:
+                prior = prior.order_by(AssetVersion.version_number.asc()).limit(1)
+            link_id = await self._session.scalar(prior)
+        publication = await self.public_base(
+            project_id=asset.project_id, asset_kind=kind or asset.kind, actor=actor, link_id=link_id
+        )
+        return publication, link_id
+
+    async def public_base(
+        self, *, project_id: UUID, asset_kind: str, actor: User, link_id: UUID | None
+    ) -> UUID | None:
+        if link_id is None:
+            return None
+        link = await self._session.scalar(
+            select(ProjectPublicAssetLink)
+            .where(
+                ProjectPublicAssetLink.id == link_id,
+                ProjectPublicAssetLink.project_id == project_id,
+                ProjectPublicAssetLink.owner_user_id == actor.id,
+            )
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        if link is None:
+            raise ValidationAppError(
+                "公共引用不属于当前项目", details={"code": "REFERENCE_PROJECT_MISMATCH"}
+            )
+        if link.detached_at is not None:
+            raise ConflictError(
+                "项目已解除此公共引用", details={"code": "REFERENCE_PUBLIC_LINK_DETACHED"}
+            )
+        publication = await self._session.scalar(
+            select(PublicAssetPublication)
+            .where(
+                PublicAssetPublication.id == link.publication_id,
+                PublicAssetPublication.owner_user_id == actor.id,
+            )
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        if (
+            publication is None
+            or not (
+                await PublicAssetService(self._session, actor=actor).read(publication.id)
+            ).usable
+        ):
+            raise ConflictError(
+                "此公共素材当前不可用于项目变体", details={"code": "PUBLIC_ASSET_NOT_AVAILABLE"}
+            )
+        if publication.kind != asset_kind:
+            raise ValidationAppError(
+                "项目变体类别必须与公共素材一致", details={"code": "ASSET_BASE_KIND_MISMATCH"}
+            )
+        return publication.id
 
     async def create_candidate_with_receipt(
         self,
@@ -189,7 +267,16 @@ class AssetVersionService:
             )
         )
         if replay is not None:
-            if replay.creation_request_hash != request_hash:
+            if (
+                replay.creation_request_hash != request_hash
+                or (name is not None and replay.name != name)
+                or (description is not None and replay.description != description)
+                or (metadata_json is not None and replay.metadata_json != metadata_json)
+                or (
+                    base_public_asset_link_id is not None
+                    and replay.base_public_asset_link_id != base_public_asset_link_id
+                )
+            ):
                 raise ConflictError(
                     "This candidate request key was already used with a different input",
                     details={
@@ -202,7 +289,7 @@ class AssetVersionService:
                 asset_id=asset.id,
                 asset_version_id=replay.id,
                 version_number=replay.version_number,
-                created_asset_revision=asset.version,
+                created_asset_revision=replay.version_number,
                 created=False,
             )
         if asset.version != expected_asset_version:
@@ -210,33 +297,9 @@ class AssetVersionService:
                 "Asset version changed; reload before deciding",
                 details={"code": "ASSET_STALE_VERSION", "version": asset.version},
             )
-        base_publication_id: UUID | None = None
-        if base_public_asset_link_id is not None:
-            link = await self._session.scalar(
-                select(ProjectPublicAssetLink).where(
-                    ProjectPublicAssetLink.id == base_public_asset_link_id,
-                    ProjectPublicAssetLink.project_id == project_id,
-                )
-            )
-            if link is None:
-                raise ValidationAppError(
-                    "public link does not belong to the current project",
-                    details={"code": "REFERENCE_PROJECT_MISMATCH"},
-                )
-            if link.detached_at is not None:
-                raise ConflictError(
-                    "public link is detached",
-                    details={"code": "REFERENCE_PUBLIC_LINK_DETACHED"},
-                )
-            publication = await self._session.get(
-                PublicAssetPublication, link.publication_id
-            )
-            if publication is None or publication.status != "available":
-                raise ConflictError(
-                    "public asset is not available",
-                    details={"code": "PUBLIC_ASSET_NOT_AVAILABLE"},
-                )
-            base_publication_id = publication.id
+        base_publication_id, base_public_asset_link_id = await self.version_base(
+            asset, actor, base_public_asset_link_id
+        )
         next_version = asset.version + 1
         asset.version = next_version
         version = AssetVersion(
@@ -247,9 +310,7 @@ class AssetVersionService:
             name=name if name is not None else asset.name,
             description=description if description is not None else asset.description,
             metadata_json=(
-                dict(metadata_json)
-                if metadata_json is not None
-                else dict(asset.metadata_json)
+                dict(metadata_json) if metadata_json is not None else dict(asset.metadata_json)
             ),
             status="candidate",
             base_publication_id=base_publication_id,
@@ -267,6 +328,7 @@ class AssetVersionService:
             created_asset_revision=asset.version,
             created=True,
         )
+
     async def promote_with_receipt(
         self,
         *,
@@ -329,23 +391,36 @@ class AssetVersionService:
                 "only candidate versions can be promoted",
                 details={"status": candidate.status},
             )
-        current_formal = (
-            await self._session.execute(
-                select(AssetVersion)
-                .where(
-                    AssetVersion.asset_id == asset_id,
-                    AssetVersion.project_id == project_id,
-                    AssetVersion.status == "formal",
-                    AssetVersion.id != candidate.id,
-                )
-                .with_for_update()
+        if candidate.base_public_asset_link_id is not None:
+            await self.public_base(
+                project_id=project_id,
+                asset_kind=candidate.kind,
+                actor=actor,
+                link_id=candidate.base_public_asset_link_id,
             )
-        ).scalars().all()
+        current_formal = (
+            (
+                await self._session.execute(
+                    select(AssetVersion)
+                    .where(
+                        AssetVersion.asset_id == asset_id,
+                        AssetVersion.project_id == project_id,
+                        AssetVersion.status == "formal",
+                        AssetVersion.id != candidate.id,
+                    )
+                    .with_for_update()
+                )
+            )
+            .scalars()
+            .all()
+        )
         for old in current_formal:
             old.status = "historical"
         candidate.status = "formal"
         asset.current_version_id = candidate.id
         asset.version += 1
+        if candidate.base_public_asset_link_id is not None and asset.status == "draft":
+            asset.status = "active"
         candidate.adoption_request_key = request_key
         candidate.adoption_request_hash = request_hash
         candidate.adopted_asset_revision = asset.version

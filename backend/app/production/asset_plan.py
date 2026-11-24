@@ -18,8 +18,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.models import Project
+from app.assets.voice import VoiceExecutionSpec
+from app.contracts.egress_preview import EgressPreview
 from app.assets.models import Asset, AssetVersionReference
 from app.production.execution_plan import fingerprint_plan
+from app.production.media_egress import media_egress_preview
 from app.providers.catalog_models import ModelCatalogEntry
 from app.providers.manifest import (
     ModelCapabilityManifest,
@@ -97,6 +100,7 @@ class AssetPlannedReference(BaseModel):
 
 
 class AssetExecutionPlanRead(BaseModel):
+    egress: EgressPreview
     target: AssetPlanTarget
     stage: Literal["asset_image"] = "asset_image"
     plan_fingerprint: str
@@ -239,6 +243,7 @@ async def build_asset_image_plan(
     project: Project,
     asset_id: UUID,
     body: AssetImagePlanBody,
+    lock: bool = False,
 ) -> AssetExecutionPlanRead:
     """Build the read-only plan; no Graph/NodeRun/Provider side effects."""
     asset = await session.scalar(
@@ -310,8 +315,12 @@ async def build_asset_image_plan(
     references = await _resolve_references(
         session, project=project, references=body.references, operation=operation
     )
+    egress=await media_egress_preview(session,project=project,binding_id=binding.id,purpose="image_generation",
+        artifact_ids=[ref.artifact_id for ref in references],text_count=1,lock=lock)
     prompt = _compile_prompt(body.requirements, body.prompt_override)
     payload = {
+        "resolution": resolution.model_dump(mode="json"),"egress":egress.model_dump(mode="json"),
+        "max_provider_operations":1,
         "target": {
             "kind": "asset",
             "asset_id": str(asset.id),
@@ -333,6 +342,7 @@ async def build_asset_image_plan(
     if body.prompt_override is not None:
         notices.append("已使用高级提示词覆盖；普通用户可留空由服务编译。")
     return AssetExecutionPlanRead(
+        egress=egress,
         target=AssetPlanTarget(
             asset_id=asset.id, asset_version=asset.version
         ),
@@ -393,6 +403,8 @@ class AssetVoiceSegmentRead(BaseModel):
 
 
 class AssetVoicePlanRead(BaseModel):
+    egress: EgressPreview
+    voice_execution: VoiceExecutionSpec
     target: AssetPlanTarget
     stage: Literal["asset_voice"] = "asset_voice"
     plan_fingerprint: str
@@ -414,6 +426,7 @@ async def build_asset_voice_plan(
     project: Project,
     asset_id: UUID,
     body: AssetVoicePlanBody,
+    lock: bool = False,
 ) -> AssetVoicePlanRead:
     """Read-only asset voice plan: binding projection plus one frozen text request."""
     from app.providers.voice_binding import resolve_voice_binding
@@ -471,7 +484,16 @@ async def build_asset_voice_plan(
     from app.production.voice_segments import segment_text
 
     segments = segment_text(body.text)
+    from app.providers.voice_config import freeze_voice_execution
+
+    voice_execution=freeze_voice_execution({"voice":{"voice_id":voice_id,
+        "rate_percent":options.get("rate_percent",0)}},binding=binding)
+    egress=await media_egress_preview(session,project=project,binding_id=binding.binding_id,
+                                     purpose="voice_generation",text_count=1,lock=lock)
     payload = {
+        "voice_execution":voice_execution.model_dump(mode="json"),
+        "egress":egress.model_dump(mode="json"),"max_provider_operations": max(1,len(segments)),
+        "segments":[{"index":segment.index,"text":segment.text} for segment in segments],
         "target": {
             "kind": "asset",
             "asset_id": str(asset.id),
@@ -484,6 +506,7 @@ async def build_asset_voice_plan(
         "source_context_refs": body.source_context_refs,
     }
     return AssetVoicePlanRead(
+        egress=egress,voice_execution=voice_execution,
         target=AssetPlanTarget(asset_id=asset.id, asset_version=asset.version),
         plan_fingerprint=fingerprint_plan(payload),
         binding_id=binding.binding_id,
@@ -513,6 +536,7 @@ class AssetVideoPlanBody(BaseModel):
 
 
 class AssetVideoPlanRead(BaseModel):
+    egress: EgressPreview
     target: AssetPlanTarget
     stage: Literal["asset_video"] = "asset_video"
     plan_fingerprint: str
@@ -535,6 +559,7 @@ async def build_asset_video_plan(
     project: Project,
     asset_id: UUID,
     body: AssetVideoPlanBody,
+    lock: bool = False,
 ) -> AssetVideoPlanRead:
     """Read-only asset video plan; the target must be a video asset, never a shot."""
     from app.providers.capabilities import Capability
@@ -640,10 +665,14 @@ async def build_asset_video_plan(
             "credential_revision_id": revision.credential_revision_id,
         }
     )
+    egress=await media_egress_preview(session,project=project,binding_id=binding.id,purpose="video_generation",
+        artifact_ids=[ref.artifact_id for ref in references],text_count=1,lock=lock)
     prompt = _compile_prompt(body.requirements, body.prompt_override)
     raw_duration = body.parameters.get("duration_seconds")
     duration = float(raw_duration) if isinstance(raw_duration, (int, float)) else None
     payload = {
+        "resolution": resolution.model_dump(mode="json"),"egress":egress.model_dump(mode="json"),
+        "max_provider_operations":1,
         "target": {
             "kind": "asset",
             "asset_id": str(asset.id),
@@ -659,6 +688,7 @@ async def build_asset_video_plan(
         "source_context_refs": body.source_context_refs,
     }
     return AssetVideoPlanRead(
+        egress=egress,
         target=AssetPlanTarget(asset_id=asset.id, asset_version=asset.version),
         plan_fingerprint=fingerprint_plan(payload),
         resolution=resolution.model_dump(mode="json"),

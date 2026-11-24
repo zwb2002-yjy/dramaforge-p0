@@ -268,6 +268,13 @@ async def world(session: AsyncSession):
     await session.flush()
     asset.current_version_id = version.id
     await session.flush()
+    from app.providers.destinations import DestinationService, destination_configuration_hash
+
+    destinations = DestinationService(session, actor=user,workspace=workspace)
+    for selected,purpose in [(binding,"image_generation"),(video_binding,"video_generation"),(voice_binding,"voice_generation")]:
+        await destinations.declare(binding_ref=str(selected.id), expected_revision=0,
+            expected_configuration_hash=destination_configuration_hash(selected,connection),
+            processing_location="external", purposes=[purpose])
     return {
         "user": user,
         "project": project,

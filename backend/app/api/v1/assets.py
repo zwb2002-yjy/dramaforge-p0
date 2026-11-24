@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Header, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
+from app.access.models import Project
 from app.access.projects import ProjectService
 from app.api.deps import CsrfDep, CurrentUser, SessionDep, require_selected_workspace
 from app.assets.asset_card_service import AssetCardReadService
@@ -24,6 +25,7 @@ from app.assets.models import (
     AssetTagLink,
     AssetVersion,
 )
+from app.assets.research_bodies import content_hash
 from app.assets.tag_service import AssetTagService
 from app.assets.version_service import AssetVersionService
 from app.contracts.production_commands import ExecutionReceipt
@@ -35,6 +37,7 @@ from app.production.asset_commands import (
     submit_asset_execution,
     submit_asset_video_execution,
     submit_asset_voice_execution,
+    submit_asset_voice_batch,
 )
 from app.production.asset_plan import (
     AssetExecutionBody,
@@ -48,7 +51,7 @@ from app.production.asset_plan import (
     build_asset_video_plan,
     build_asset_voice_plan,
 )
-from app.shared.errors import ConflictError, NotFoundError
+from app.shared.errors import ConflictError, NotFoundError, ValidationAppError
 
 router = APIRouter(tags=["assets"], dependencies=[Depends(require_selected_workspace)])
 
@@ -95,7 +98,7 @@ AssetExecutionInput = Annotated[
 ]
 
 
-class AssetCreateBody(BaseModel):
+class AssetFields(BaseModel):
     kind: str = Field(min_length=1, max_length=40)
     name: str = Field(min_length=1, max_length=160)
     description: str = Field(default="", max_length=12000)
@@ -104,7 +107,12 @@ class AssetCreateBody(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=40)
 
 
-class AssetUpdateBody(AssetCreateBody):
+class AssetCreateBody(AssetFields):
+    request_key: str | None = Field(default=None, min_length=1, max_length=160)
+    base_public_asset_link_id: UUID | None = None
+
+
+class AssetUpdateBody(AssetFields):
     expected_version: int = Field(ge=1)
 
 
@@ -123,6 +131,8 @@ class AssetRead(BaseModel):
 
 
 class AssetVersionRead(BaseModel):
+    base_publication_id: UUID | None = None
+    base_public_asset_link_id: UUID | None = None
     id: UUID
     asset_id: UUID
     version_number: int
@@ -165,6 +175,8 @@ async def _asset_tag_names(session: SessionDep, asset_id: UUID) -> list[str]:
 
 def _version_read(version: AssetVersion) -> AssetVersionRead:
     return AssetVersionRead(
+        base_publication_id=version.base_publication_id,
+        base_public_asset_link_id=version.base_public_asset_link_id,
         id=version.id,
         asset_id=version.asset_id,
         version_number=version.version_number,
@@ -199,13 +211,17 @@ async def list_project_assets(
     )
     asset_ids = [row.id for row in rows]
     tag_rows = (
-        await session.execute(
-            select(AssetTagLink.asset_id, AssetTag.name)
-            .join(AssetTag, AssetTag.id == AssetTagLink.tag_id)
-            .where(AssetTagLink.asset_id.in_(asset_ids))
-            .order_by(AssetTag.normalized_name)
-        )
-    ).all() if asset_ids else []
+        (
+            await session.execute(
+                select(AssetTagLink.asset_id, AssetTag.name)
+                .join(AssetTag, AssetTag.id == AssetTagLink.tag_id)
+                .where(AssetTagLink.asset_id.in_(asset_ids))
+                .order_by(AssetTag.normalized_name)
+            )
+        ).all()
+        if asset_ids
+        else []
+    )
     tags_by_asset: dict[UUID, list[str]] = {asset_id: [] for asset_id in asset_ids}
     for asset_id, tag_name in tag_rows:
         tags_by_asset[asset_id].append(tag_name)
@@ -216,18 +232,52 @@ async def list_project_assets(
 async def create_project_asset(
     project_id: UUID,
     body: AssetCreateBody,
+    response: Response,
     user: CurrentUser,
     session: SessionDep,
     _csrf: CsrfDep,
 ) -> AssetRead:
     await ProjectService(session).get_project_for_owner(project_id=project_id, actor=user)
+    key = body.request_key.strip() if body.request_key is not None else None
+    if key == "":
+        raise ValidationAppError("请求键不能为空")
+    link_id = body.base_public_asset_link_id
+    if link_id is not None and (not key or body.status == "recycled"):
+        raise ValidationAppError("新项目变体需要请求键及可用状态")
+    digest = content_hash(body.model_dump(mode="json", exclude={"request_key"})) if key else None
+    await session.scalar(select(Project.id).where(Project.id == project_id).with_for_update())
+    if key:
+        prev = await session.scalar(
+            select(Asset).where(Asset.project_id == project_id, Asset.creation_request_key == key)
+        )
+        if prev is not None:
+            if prev.creation_request_hash != digest:
+                raise ConflictError(
+                    "请求键已用于另一项创建决定", details={"code": "ASSET_CREATION_REQUEST_REUSED"}
+                )
+            response.status_code = 200
+            return _asset_read(prev, tags=await _asset_tag_names(session, prev.id))
+    if await session.scalar(
+        select(Asset.id).where(
+            Asset.project_id == project_id, Asset.kind == body.kind, Asset.name == body.name
+        )
+    ):
+        raise ConflictError("项目中已有同类别、同名素材", details={"code": "ASSET_NAME_TAKEN"})
+    publication_id = await AssetVersionService(session).public_base(
+        project_id=project_id,
+        asset_kind=body.kind,
+        actor=user,
+        link_id=link_id,
+    )
     asset = Asset(
         project_id=project_id,
         kind=body.kind,
         name=body.name,
         description=body.description,
         metadata_json=dict(body.metadata),
-        status=body.status,
+        status="draft" if link_id else body.status,
+        creation_request_key=key,
+        creation_request_hash=digest,
         version=1,
     )
     session.add(asset)
@@ -240,12 +290,15 @@ async def create_project_asset(
         name=body.name,
         description=body.description,
         metadata_json=dict(body.metadata),
-        status="formal",
+        status="candidate" if link_id or body.status == "draft" else "formal",
+        base_public_asset_link_id=link_id,
+        base_publication_id=publication_id,
         created_by=user.id,
     )
     session.add(version)
     await session.flush()
-    asset.current_version_id = version.id
+    if version.status == "formal":
+        asset.current_version_id = version.id
     tags = await AssetTagService(session).set_asset_tags(
         project_id=project_id,
         asset_id=asset.id,
@@ -308,7 +361,8 @@ async def submit_asset_execution_route(
             idempotency_key=idempotency_key,
         )
     if isinstance(body, AssetVoiceExecutionInput):
-        return await submit_asset_voice_execution(
+        voice_submit = submit_asset_voice_batch if body.request.max_provider_operations > 1 else submit_asset_voice_execution
+        return await voice_submit(
             session,
             actor=user,
             project_id=project_id,
@@ -366,6 +420,11 @@ async def update_project_asset(
             "asset version conflict",
             details={"expected_version": body.expected_version, "actual_version": asset.version},
         )
+    publication, link = await AssetVersionService(session).version_base(asset, user, kind=body.kind)
+    if link and asset.current_version_id is None:
+        raise ConflictError(
+            "请先明确采用项目变体候选", details={"code": "ASSET_VARIANT_REQUIRES_ADOPTION"}
+        )
     next_version = asset.version + 1
     asset.kind = body.kind
     asset.name = body.name
@@ -374,16 +433,20 @@ async def update_project_asset(
     asset.status = body.status
     asset.version = next_version
     current_formals = (
-        await session.execute(
-            select(AssetVersion)
-            .where(
-                AssetVersion.project_id == project_id,
-                AssetVersion.asset_id == asset.id,
-                AssetVersion.status == "formal",
+        (
+            await session.execute(
+                select(AssetVersion)
+                .where(
+                    AssetVersion.project_id == project_id,
+                    AssetVersion.asset_id == asset.id,
+                    AssetVersion.status == "formal",
+                )
+                .with_for_update()
             )
-            .with_for_update()
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for current in current_formals:
         current.status = "historical"
     version = AssetVersion(
@@ -395,6 +458,8 @@ async def update_project_asset(
         description=body.description,
         metadata_json=dict(body.metadata),
         status="formal",
+        base_publication_id=publication,
+        base_public_asset_link_id=link,
         created_by=user.id,
     )
     session.add(version)

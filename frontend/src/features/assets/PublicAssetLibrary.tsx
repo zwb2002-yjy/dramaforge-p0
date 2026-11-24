@@ -16,6 +16,7 @@ import { StudioSelection } from "../../components/workstation/StudioSelection";
 import { assetKindLabel } from "../../lib/assetLabels";
 import { queryKeys } from "../../lib/queryKeys";
 import type { components } from "../../shared/api/generated";
+import { PublicVariantForm } from "./PublicVariantForm";
 import { loadPublicLinks } from "./publicLinks";
 import "./asset-gallery.css";
 
@@ -131,6 +132,7 @@ export function PublicAssetLibrary({ projectId }: { projectId: string }) {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
   const [offset, setOffset] = useState(0);
+  const [variant, setVariant] = useState<{ asset: Publication; link: Link } | null>(null);
   const [opened, setOpened] = useState<string | null>(null);
   const queryKey = queryKeys.asset.publicLibrary(projectId, q, status, offset);
   const linksKey = queryKeys.asset.publicLinks(projectId);
@@ -233,6 +235,11 @@ export function PublicAssetLibrary({ projectId }: { projectId: string }) {
                   </span>
                 </header>
                 {asset.safe_description && <p>{asset.safe_description}</p>}
+                {attached && link && link.availability === "available" && asset.usable && (
+                  <Button tone="ghost" onClick={() => setVariant({ asset, link })}>
+                    创建项目变体
+                  </Button>
+                )}
                 {attached && <Badge>当前项目已引用</Badge>}
                 {asset.usable && (
                   <Button onClick={() => setOpened(opened === asset.id ? null : asset.id)}>
@@ -263,6 +270,14 @@ export function PublicAssetLibrary({ projectId }: { projectId: string }) {
           );
         })}
       </ul>
+      {variant && (
+        <PublicVariantForm
+          projectId={projectId}
+          asset={variant.asset}
+          link={variant.link}
+          onClose={() => setVariant(null)}
+        />
+      )}
       {(offset > 0 || library.data?.next_offset != null) && (
         <nav aria-label="公共资产分页">
           <Button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - pageSize))}>

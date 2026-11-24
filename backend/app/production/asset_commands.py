@@ -22,7 +22,7 @@ from app.access.models import User
 from app.access.projects import ProjectService
 from app.assets.models import Asset
 from app.contracts.production_commands import ExecutionReceipt
-from app.execution.models import NodeRun
+from app.execution.models import Artifact, NodeRun
 from app.production.asset_plan import (
     AssetExecutionBody,
     AssetVideoPlanBody,
@@ -109,16 +109,7 @@ async def submit_asset_execution(
     project = await ProjectService(session).get_project_for_owner(
         project_id=project_id, actor=actor
     )
-    from app.access.egress_admission import EgressAdmission
 
-    decision = await EgressAdmission(session).decide(
-        project, purpose="image_generation", processing_location="external"
-    )
-    if not decision.allowed:
-        raise ValidationAppError(
-            "项目外发策略不允许本次生成",
-            details={"code": decision.reason_code},
-        )
     service = WorkbenchExecutionService(session, user_id=actor.id)
     await service.lock_command_scope(project_id=project.id)
     key = _asset_idempotency_key(
@@ -150,8 +141,10 @@ async def submit_asset_execution(
             details={"code": "ASSET_VERSION_CONFLICT", "current": asset.version},
         )
     plan = await build_asset_image_plan(
-        session, project=project, asset_id=asset.id, body=body
+        session, project=project, asset_id=asset.id, body=body, lock=True
     )
+    if plan.egress.blockers:
+        raise ValidationAppError("项目策略或来源许可阻止本次生成",details={"code":plan.egress.blockers[0]})
     if plan.plan_fingerprint != body.plan_fingerprint:
         raise ValidationAppError(
             "plan fingerprint mismatch: inputs changed since preview",
@@ -197,6 +190,7 @@ async def submit_asset_execution(
     snapshot: dict[str, object] = {
         "workbench_request_hash": fingerprint_plan(body.model_dump(mode="json")),
         "plan_fingerprint": plan.plan_fingerprint,
+        "egress":plan.egress.model_dump(mode="json"),
         "stage": "image_keyframe",
         "mode_id": body.mode_id,
         "prompt": plan.prompt,
@@ -277,6 +271,8 @@ class AssetExecutionRead(BaseModel):
     graph_version_id: UUID
     attempt_no: int
     status: str
+    result_artifact_id: UUID | None = None
+    media_kind: str | None = None
     plan_fingerprint: str | None = None
     created_at: datetime | None = None
 
@@ -297,9 +293,11 @@ async def list_asset_executions(
         raise NotFoundError("Asset not found")
     rows = (
         await session.execute(
-            select(NodeRun, GraphVersion.graph_id)
+            select(NodeRun, GraphVersion.graph_id, Artifact.id, Artifact.artifact_type)
             .join(GraphVersion, GraphVersion.id == NodeRun.graph_version_id)
             .join(ProductionGraph, ProductionGraph.id == GraphVersion.graph_id)
+            .outerjoin(Artifact, (Artifact.id==NodeRun.result_artifact_id) & (Artifact.project_id==project.id)
+                       & (Artifact.storage_state=="available") & (Artifact.deleted_at.is_(None)))
             .where(
                 NodeRun.project_id == project.id,
                 ProductionGraph.scope_type == "asset",
@@ -316,12 +314,13 @@ async def list_asset_executions(
             attempt_no=run.attempt_no,
             status=run.status,
             plan_fingerprint=(run.input_snapshot or {}).get("plan_fingerprint"),
-            created_at=run.created_at,
+            created_at=run.created_at,result_artifact_id=artifact_id,media_kind=kind,
         )
-        for run, graph_id in rows
+        for run, graph_id, artifact_id, kind in rows
     ]
 
 class AssetVoiceExecutionBody(AssetVoicePlanBody):
+    max_provider_operations:int=Field(default=1,ge=1,le=1000)
     """One explicit asset voice command: the previewed plan plus its fingerprint."""
 
     plan_fingerprint: str = Field(min_length=64, max_length=64)
@@ -336,21 +335,10 @@ async def submit_asset_voice_execution(
     body: AssetVoiceExecutionBody,
     idempotency_key: str | None = None,
 ) -> ExecutionReceipt:
-    from app.access.egress_admission import EgressAdmission
-    from app.providers.voice_binding import resolve_voice_binding
-    from app.providers.voice_config import freeze_voice_execution
 
     project = await ProjectService(session).get_project_for_owner(
         project_id=project_id, actor=actor
     )
-    decision = await EgressAdmission(session).decide(
-        project, purpose="voice_generation", processing_location="external"
-    )
-    if not decision.allowed:
-        raise ValidationAppError(
-            "项目外发策略不允许本次生成",
-            details={"code": decision.reason_code},
-        )
     service = WorkbenchExecutionService(session, user_id=actor.id)
     await service.lock_command_scope(project_id=project.id)
     key = _asset_idempotency_key(
@@ -382,8 +370,10 @@ async def submit_asset_voice_execution(
             details={"code": "ASSET_VERSION_CONFLICT", "current": asset.version},
         )
     plan = await build_asset_voice_plan(
-        session, project=project, asset_id=asset.id, body=body
+        session, project=project, asset_id=asset.id, body=body, lock=True
     )
+    if plan.egress.blockers:
+        raise ValidationAppError("项目策略或来源许可阻止本次生成",details={"code":plan.egress.blockers[0]})
     if plan.plan_fingerprint != body.plan_fingerprint:
         raise ValidationAppError(
             "plan fingerprint mismatch: inputs changed since preview",
@@ -397,11 +387,7 @@ async def submit_asset_voice_execution(
                 "segments": len(plan.segments),
             },
         )
-    status = await resolve_voice_binding(session, project=project)
-    spec = freeze_voice_execution(
-        {"voice": {"voice_id": plan.voice_options.get("voice_id")}},
-        binding=status,
-    )
+    spec = plan.voice_execution
     graphs = GraphService(session)
     graph = await session.scalar(
         select(ProductionGraph).where(
@@ -442,6 +428,7 @@ async def submit_asset_voice_execution(
         "voice_execution": spec.model_dump(mode="json"),
         "workbench_request_hash": fingerprint_plan(body.model_dump(mode="json")),
         "plan_fingerprint": plan.plan_fingerprint,
+        "egress":plan.egress.model_dump(mode="json"),
         "stage": "voice",
         "prompt": plan.text,
         "project_id": str(project.id),
@@ -497,20 +484,11 @@ async def submit_asset_video_execution(
     body: AssetVideoExecutionBody,
     idempotency_key: str | None = None,
 ) -> ExecutionReceipt:
-    from app.access.egress_admission import EgressAdmission
     from app.production.asset_plan import build_asset_video_plan
 
     project = await ProjectService(session).get_project_for_owner(
         project_id=project_id, actor=actor
     )
-    decision = await EgressAdmission(session).decide(
-        project, purpose="video_generation", processing_location="external"
-    )
-    if not decision.allowed:
-        raise ValidationAppError(
-            "项目外发策略不允许本次生成",
-            details={"code": decision.reason_code},
-        )
     service = WorkbenchExecutionService(session, user_id=actor.id)
     await service.lock_command_scope(project_id=project.id)
     key = _asset_idempotency_key(
@@ -542,8 +520,10 @@ async def submit_asset_video_execution(
             details={"code": "ASSET_VERSION_CONFLICT", "current": asset.version},
         )
     plan = await build_asset_video_plan(
-        session, project=project, asset_id=asset.id, body=body
+        session, project=project, asset_id=asset.id, body=body, lock=True
     )
+    if plan.egress.blockers:
+        raise ValidationAppError("项目策略或来源许可阻止本次生成",details={"code":plan.egress.blockers[0]})
     if plan.plan_fingerprint != body.plan_fingerprint:
         raise ValidationAppError(
             "plan fingerprint mismatch: inputs changed since preview",
@@ -596,6 +576,7 @@ async def submit_asset_video_execution(
     snapshot: dict[str, object] = {
         "workbench_request_hash": fingerprint_plan(body.model_dump(mode="json")),
         "plan_fingerprint": plan.plan_fingerprint,
+        "egress":plan.egress.model_dump(mode="json"),
         "stage": "video",
         "mode_id": body.mode_id,
         "prompt": plan.prompt,
@@ -660,21 +641,10 @@ async def submit_asset_voice_batch(
     idempotency_key: str | None = None,
 ) -> ExecutionReceipt:
     """Segmented speech: one voice run per segment plus a local concat dependency."""
-    from app.access.egress_admission import EgressAdmission
-    from app.providers.voice_binding import resolve_voice_binding
-    from app.providers.voice_config import freeze_voice_execution
 
     project = await ProjectService(session).get_project_for_owner(
         project_id=project_id, actor=actor
     )
-    decision = await EgressAdmission(session).decide(
-        project, purpose="voice_generation", processing_location="external"
-    )
-    if not decision.allowed:
-        raise ValidationAppError(
-            "项目外发策略不允许本次生成",
-            details={"code": decision.reason_code},
-        )
     service = WorkbenchExecutionService(session, user_id=actor.id)
     await service.lock_command_scope(project_id=project.id)
     key = _asset_idempotency_key(
@@ -706,23 +676,23 @@ async def submit_asset_voice_batch(
             details={"code": "ASSET_VERSION_CONFLICT", "current": asset.version},
         )
     plan = await build_asset_voice_plan(
-        session, project=project, asset_id=asset.id, body=body
+        session, project=project, asset_id=asset.id, body=body, lock=True
     )
+    if plan.egress.blockers:
+        raise ValidationAppError("项目策略或来源许可阻止本次生成",details={"code":plan.egress.blockers[0]})
     if plan.plan_fingerprint != body.plan_fingerprint:
         raise ValidationAppError(
             "plan fingerprint mismatch: inputs changed since preview",
             details={"code": "PLAN_FINGERPRINT_MISMATCH"},
         )
+    if plan.max_provider_operations != body.max_provider_operations:
+        raise ValidationAppError("分段语音的授权次数与预览不符",details={"code":"ASSET_VOICE_LIMIT_MISMATCH"})
     if len(plan.segments) < 2:
         raise ValidationAppError(
             "single-segment text uses the single voice command",
             details={"code": "ASSET_VOICE_SINGLE_SEGMENT"},
         )
-    status = await resolve_voice_binding(session, project=project)
-    spec = freeze_voice_execution(
-        {"voice": {"voice_id": plan.voice_options.get("voice_id")}},
-        binding=status,
-    )
+    spec = plan.voice_execution
     graphs = GraphService(session)
     graph = await session.scalar(
         select(ProductionGraph).where(
@@ -757,13 +727,18 @@ async def submit_asset_voice_batch(
     segment_keys = [f"voice_seg_{index}" for index in range(len(plan.segments))]
     missing = [key for key in [*segment_keys, "voice_concat"] if key not in existing_keys]
     if missing:
-        definition: dict[str, object] = {
-            "nodes": [
-                {"key": key, "type": "voice"} for key in [*existing_keys, *segment_keys]
-            ]
-            + [{"key": "voice_concat", "type": "voice_concat"}],
-            "edges": [[key, "voice_concat"] for key in segment_keys],
-        }
+        raw_nodes, raw_edges = version.definition.get("nodes"), version.definition.get("edges",[])
+        if not isinstance(raw_nodes,list) or not isinstance(raw_edges,list):
+            raise ValidationAppError("资产生产图结构无效")
+        nodes=list(raw_nodes)
+        edges=list(raw_edges)
+        for key in missing:
+            nodes.append({"key":key, "type":"voice_concat" if key=="voice_concat" else "voice"})
+        for key in segment_keys:
+            edge=[key,"voice_concat"]
+            if edge not in edges:
+                edges.append(edge)
+        definition = {**version.definition, "nodes":nodes,"edges":edges}
         new_version = await graphs.create_version(
             graph_id=graph.id, definition=definition, created_by=actor.id
         )
@@ -784,6 +759,7 @@ async def submit_asset_voice_batch(
         snapshot: dict[str, object] = {
             "voice_execution": spec.model_dump(mode="json"),
             "plan_fingerprint": plan.plan_fingerprint,
+        "egress":plan.egress.model_dump(mode="json"),
             "stage": "voice",
             "prompt": segment.text,
             "segment_index": index,
@@ -821,6 +797,7 @@ async def submit_asset_voice_batch(
     ) + 1
     concat_snapshot: dict[str, object] = {
         "plan_fingerprint": plan.plan_fingerprint,
+        "egress":plan.egress.model_dump(mode="json"),
         "stage": "voice",
         "project_id": str(project.id),
         "asset_id": str(asset.id),

@@ -20,6 +20,7 @@ from app.production.asset_commands import (
     AssetVoiceExecutionBody,
     submit_asset_execution,
     submit_asset_voice_execution,
+    submit_asset_voice_batch,
 )
 from app.production.asset_plan import (
     AssetExecutionBody,
@@ -64,6 +65,7 @@ class AssetBatchPreviewBody(BaseModel):
 
 
 class AssetBatchPreviewItem(BaseModel):
+    max_provider_operations: int = 0
     item_id: str
     asset_id: UUID
     status: Literal["ready", "blocked"]
@@ -111,6 +113,9 @@ async def preview_asset_batch(
                     session, project=project, asset_id=item.asset_id, body=item.request
                 )
                 plan_fingerprint = voice_plan.plan_fingerprint
+                operations=voice_plan.max_provider_operations
+                if voice_plan.egress.blockers:
+                    raise ValidationAppError("外发受限", details={"code":voice_plan.egress.blockers[0]})
                 binding_id = voice_plan.binding_id
                 model_id = voice_plan.model_id
             else:
@@ -118,6 +123,9 @@ async def preview_asset_batch(
                     session, project=project, asset_id=item.asset_id, body=item.request
                 )
                 plan_fingerprint = image_plan.plan_fingerprint
+                operations=image_plan.max_provider_operations
+                if image_plan.egress.blockers:
+                    raise ValidationAppError("外发受限", details={"code":image_plan.egress.blockers[0]})
                 binding_id = image_plan.binding_id
                 model_id = image_plan.model_id
         except AppError as error:
@@ -134,7 +142,7 @@ async def preview_asset_batch(
             AssetBatchPreviewItem(
                 item_id=item.item_id,
                 asset_id=item.asset_id,
-                status="ready",
+                status="ready",max_provider_operations=operations,
                 plan_fingerprint=plan_fingerprint,
                 binding_id=binding_id,
                 model_id=model_id,
@@ -149,7 +157,7 @@ async def preview_asset_batch(
         batch_fingerprint=fingerprint_plan(payload),
         ready_count=len(ready),
         blocked_count=len(items) - len(ready),
-        max_provider_operations=len(ready),
+        max_provider_operations=sum(i.max_provider_operations for i in ready),
         items=items,
     )
 
@@ -171,12 +179,12 @@ async def dispatch_asset_batch(
             "asset batch has no executable items",
             details={"code": "ASSET_BATCH_EMPTY"},
         )
-    if preview.ready_count > body.max_provider_operations:
+    if preview.max_provider_operations > body.max_provider_operations:
         raise ValidationAppError(
             "batch exceeds the authorized provider-operation limit",
             details={
                 "code": "ASSET_BATCH_LIMIT_EXCEEDED",
-                "required_operations": preview.ready_count,
+                "required_operations": preview.max_provider_operations,
                 "max_provider_operations": body.max_provider_operations,
             },
         )
@@ -195,10 +203,12 @@ async def dispatch_asset_batch(
         try:
             if isinstance(item, AssetVoiceBatchItem):
                 voice_command = AssetVoiceExecutionBody(
+                    max_provider_operations=preview_item.max_provider_operations,
                     **item.request.model_dump(),
                     plan_fingerprint=preview_item.plan_fingerprint,
                 )
-                receipt = await submit_asset_voice_execution(
+                submit = submit_asset_voice_batch if preview_item.max_provider_operations>1 else submit_asset_voice_execution
+                receipt = await submit(
                     session,
                     actor=actor,
                     project_id=project.id,

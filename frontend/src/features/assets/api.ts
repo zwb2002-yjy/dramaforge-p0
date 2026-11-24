@@ -46,21 +46,62 @@ export async function restoreAsset(projectId: string, assetId: string): Promise<
   );
 }
 
+export function assetDecisionKey() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
+    b.toString(16).padStart(2, "0"),
+  ).join("");
+}
+
+export type AssetPlanInput = components["schemas"]["AssetImagePlanInput"] | components["schemas"]["AssetVideoPlanInput"] | components["schemas"]["AssetVoicePlanInput"];
+export type AssetPlan = components["schemas"]["AssetExecutionPlanRead"] | components["schemas"]["AssetVideoPlanRead"] | components["schemas"]["AssetVoicePlanRead"];
+export function previewAssetProduction(projectId:string,assetId:string,input:AssetPlanInput):Promise<AssetPlan>{
+  return apiSend("POST",`/api/v1/projects/${projectId}/assets/${assetId}/execution-plan`,input);
+}
+export async function submitAssetProduction(projectId:string,assetId:string,input:AssetPlanInput,plan:AssetPlan):Promise<components["schemas"]["ExecutionReceipt"]>{
+  return apiSend("POST",`/api/v1/projects/${projectId}/assets/${assetId}/executions`,{
+    stage:input.stage, request:{...input.request,plan_fingerprint:plan.plan_fingerprint,
+      ...(input.stage==="asset_voice"?{max_provider_operations:plan.max_provider_operations}:{})}
+  },await fetchCsrf());
+}
+export function listAssetProduction(projectId:string,assetId:string,signal?:AbortSignal):Promise<components["schemas"]["AssetExecutionRead"][]>{
+  return apiGetList(`/api/v1/projects/${projectId}/assets/${assetId}/executions`,undefined,signal);
+}
+export async function createAssetDraft(projectId:string, key:string, name:string, kind:string):Promise<AssetRead>{
+  return apiSend("POST",`/api/v1/projects/${projectId}/assets`,{name,kind,request_key:key,status:"draft"},await fetchCsrf());
+}
+
+export async function createProjectVariant(
+  projectId: string,
+  input: {
+    request_key: string;
+    base_public_asset_link_id: string;
+    kind: string;
+    name: string;
+    description: string;
+  },
+): Promise<AssetRead> {
+  return apiSend(
+    "POST",
+    `/api/v1/projects/${projectId}/assets`,
+    { ...input, status: "draft" },
+    await fetchCsrf(),
+  );
+}
+
 export async function createAssetCandidate(
   projectId: string,
   assetId: string,
-  input: { name?: string; description?: string; metadata?: Record<string, unknown> },
-): Promise<AssetVersionRead> {
-  const csrf = await fetchCsrf();
-  return apiSend<AssetVersionRead>(
+  input: {
+    request_key: string;
+    expected_asset_version: number;
+    name: string;
+  },
+): Promise<components["schemas"]["CandidateReceiptRead"]> {
+  return apiSend(
     "POST",
     `/api/v1/projects/${projectId}/assets/${assetId}/versions`,
-    {
-      name: input.name ?? null,
-      description: input.description ?? null,
-      metadata: input.metadata ?? {},
-    },
-    csrf,
+    input,
+    await fetchCsrf(),
   );
 }
 
@@ -68,13 +109,16 @@ export async function promoteAssetVersion(
   projectId: string,
   assetId: string,
   versionId: string,
-): Promise<AssetVersionRead> {
-  const csrf = await fetchCsrf();
-  return apiSend<AssetVersionRead>(
+  input: {
+    request_key: string;
+    expected_asset_version: number;
+  },
+): Promise<AssetAdoptionReceiptRead> {
+  return apiSend(
     "POST",
     `/api/v1/projects/${projectId}/assets/${assetId}/versions/${versionId}/promote`,
-    {},
-    csrf,
+    input,
+    await fetchCsrf(),
   );
 }
 

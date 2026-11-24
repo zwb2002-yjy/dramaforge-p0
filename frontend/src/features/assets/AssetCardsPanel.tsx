@@ -12,9 +12,10 @@ import {
   Alert,
 } from "../../components/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useState, useRef } from "react";
 
 import { apiGetList } from "../../lib/api";
+import { AssetProductionPanel, NewAssetSetting } from "./AssetProductionPanel";
 import { type AssetRead } from "./api";
 import {
   ASSET_KIND_LABEL,
@@ -24,6 +25,7 @@ import {
 } from "../../lib/assetLabels";
 import { queryKeys } from "../../lib/queryKeys";
 import {
+  assetDecisionKey,
   createAssetCandidate,
   fetchAssetCard,
   fetchAssetTags,
@@ -82,6 +84,7 @@ export function AssetCardsPanel({ projectId, initialKind }: AssetCardsPanelProps
   const [statusFilter, setStatusFilter] = useState("");
   const [nameFilter, setNameFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
+  const [newSetting,setNewSetting]=useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
   const assets = useQuery({
@@ -122,13 +125,20 @@ export function AssetCardsPanel({ projectId, initialKind }: AssetCardsPanelProps
     onSuccess: invalidate,
   });
   const addCandidate = useMutation({
-    mutationFn: ({ assetId, name }: { assetId: string; name: string }) =>
-      createAssetCandidate(projectId, assetId, { name }),
+    mutationFn: ({ asset, name, key }: { asset: AssetRead; name: string; key: string }) =>
+      createAssetCandidate(projectId, asset.id, {
+        name,
+        expected_asset_version: asset.version,
+        request_key: key,
+      }),
     onSuccess: invalidate,
   });
   const promote = useMutation({
-    mutationFn: ({ assetId, versionId }: { assetId: string; versionId: string }) =>
-      promoteAssetVersion(projectId, assetId, versionId),
+    mutationFn: ({ asset, versionId, key }: { asset: AssetRead; versionId: string; key: string }) =>
+      promoteAssetVersion(projectId, asset.id, versionId, {
+        expected_asset_version: asset.version,
+        request_key: key,
+      }),
     onSuccess: invalidate,
   });
   const reject = useMutation({
@@ -148,9 +158,12 @@ export function AssetCardsPanel({ projectId, initialKind }: AssetCardsPanelProps
       <PageHeader
         title="项目资产"
         description="让角色、画面与声音，在这里相遇。"
-        actions={<Badge>{assets.isPending ? "读取中…" : `${rows.length} 项素材`}</Badge>}
+        actions={<><Badge>{assets.isPending ? "读取中…" : `${rows.length} 项素材`}</Badge><Button onClick={()=>setNewSetting(true)}>新建素材设定</Button></>}
       />
 
+      {newSetting && <NewAssetSetting projectId={projectId} onClose={()=>setNewSetting(false)} onCreated={()=>{
+        invalidate();setKindFilter("");setStatusFilter("");setNameFilter("");setTagFilter("");setNewSetting(false);
+      }}/>}
       <section className="qc-asset-filters" aria-label="筛选资产">
         <Field>
           名称
@@ -241,6 +254,11 @@ export function AssetCardsPanel({ projectId, initialKind }: AssetCardsPanelProps
                 >
                   {assetStatusLabel(asset.status)}
                 </span>
+                {["character","scene","image","video","audio"].includes(asset.kind) && asset.status !== "recycled" && (
+                  <Disclosure compact lazy title={asset.kind==="audio"?"制作语音":asset.kind==="video"?"制作视频":"制作图片"}>
+                    <AssetProductionPanel projectId={projectId} asset={asset}/>
+                  </Disclosure>
+                )}
                 <Disclosure compact title="管理素材">
                   <TagEditor
                     options={tagOptions}
@@ -279,8 +297,8 @@ export function AssetCardsPanel({ projectId, initialKind }: AssetCardsPanelProps
                   <VersionControls
                     asset={asset}
                     projectId={projectId}
-                    onAddCandidate={(name) => addCandidate.mutate({ assetId: asset.id, name })}
-                    onPromote={(versionId) => promote.mutate({ assetId: asset.id, versionId })}
+                    onAddCandidate={(name, key) => addCandidate.mutateAsync({ asset, name, key })}
+                    onPromote={(versionId, key) => promote.mutate({ asset, versionId, key })}
                     onReject={(versionId) => reject.mutate({ assetId: asset.id, versionId })}
                   />
                 </Disclosure>
@@ -289,6 +307,9 @@ export function AssetCardsPanel({ projectId, initialKind }: AssetCardsPanelProps
           </li>
         ))}
       </ul>
+      {(addCandidate.error || promote.error || reject.error) && (
+        <p role="alert">{(addCandidate.error ?? promote.error ?? reject.error)?.message}</p>
+      )}
       {assets.isPending && (
         <p role="status" className="muted">
           正在整理素材…
@@ -427,12 +448,22 @@ function VersionControls({
 }: {
   asset: AssetRead;
   projectId: string;
-  onAddCandidate: (name: string) => void;
-  onPromote: (versionId: string) => void;
+  onAddCandidate: (name: string, key: string) => Promise<unknown>;
+  onPromote: (versionId: string, key: string) => void;
   onReject: (versionId: string) => void;
 }) {
   const [showVersions, setShowVersions] = useState(false);
   const [candidateName, setCandidateName] = useState("");
+  const [pendingAdd, setPendingAdd] = useState(false);
+  const decisionKeys = useRef(new Map<string, string>());
+  function decisionKey(label: string) {
+    const id = JSON.stringify([asset.id, asset.version, label]);
+    const known = decisionKeys.current.get(id);
+    if (known) return known;
+    const key = assetDecisionKey();
+    decisionKeys.current.set(id, key);
+    return key;
+  }
   const versions = useQuery({
     queryKey: queryKeys.asset.versions(projectId, asset.id),
     queryFn: () => fetchAssetVersions(projectId, asset.id),
@@ -458,18 +489,29 @@ function VersionControls({
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              if (!candidateName.trim()) return;
-              onAddCandidate(candidateName.trim());
-              setCandidateName("");
+              if (!candidateName.trim() || pendingAdd) return;
+              setPendingAdd(true);
+              void onAddCandidate(
+                candidateName.trim(),
+                decisionKey("candidate:" + candidateName.trim()),
+              )
+                .then(
+                  () => setCandidateName(""),
+                  () => {},
+                )
+                .finally(() => setPendingAdd(false));
             }}
           >
             <Input
+              disabled={pendingAdd}
               aria-label="候选版本名称"
               value={candidateName}
               onChange={(event) => setCandidateName(event.target.value)}
               placeholder="新候选版本名称"
             />
-            <Button type="submit">创建候选</Button>
+            <Button type="submit" disabled={pendingAdd || !candidateName.trim()}>
+              创建候选
+            </Button>
           </form>
           <ul>
             {rows.map((version) => (
@@ -478,12 +520,13 @@ function VersionControls({
                   v{version.version_number} · {version.name} ·{" "}
                   {VERSION_STATUS_LABEL[version.status] ?? version.status}
                 </span>
+                {version.base_publication_id && <Badge>公共素材的项目变体</Badge>}
                 {version.status === "candidate" && (
                   <>
                     <Button
                       type="button"
                       data-testid="asset-version-promote"
-                      onClick={() => onPromote(version.id)}
+                      onClick={() => onPromote(version.id, decisionKey("promote:" + version.id))}
                     >
                       提升为正式
                     </Button>

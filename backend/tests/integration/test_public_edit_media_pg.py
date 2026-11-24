@@ -137,9 +137,22 @@ async def test_edit_public_material_rechecks_at_each_entry(http_agent, monkeypat
         patch = agent.client.patch
         post = agent.client.post
         ver = basis.result_version
+        denied_preview = await post(path + "/preview-plan", headers=agent.headers, json=save)
+        assert denied_preview.status_code == 422 and not reads
         denied = await patch(path + "/timeline", headers=agent.headers, json=save)
         assert denied.status_code == 422 and "EDIT_SOURCE_NOT_ADOPTED" in denied.text
         ver = await permit(["library_reference", "creation"], ver)
+        preview = await post(path + "/preview-plan", headers=agent.headers, json=save)
+        assert preview.status_code == 200, preview.text
+        playback = preview.json()["clips"][0]
+        key = "video" if kind == "video" else "audio"
+        assert playback[f"{key}_public_ref"] == {
+            "public_asset_link_id": str(link.id),
+            "publication_item_id": str(publication.items[0].id),
+        }
+        assert playback[f"{key}_artifact_id"] is None and str(media.id) not in preview.text
+        assert playback["duration_ms"] == 1000 and reads == []
+        assert (await agent.client.get(path)).json()["version"] == 1
         saved = await patch(path + "/timeline", headers=agent.headers, json=save)
         assert saved.status_code == 200, saved.text
         denied = await post(path + "/exports", headers=agent.headers, json=receipt)
