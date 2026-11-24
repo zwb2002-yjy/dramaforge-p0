@@ -36,6 +36,10 @@ RUN set -eux; \
     test -s /opt/whisper/ggml-base.bin; \
     echo "$WHISPER_MODEL_SHA256  /opt/whisper/ggml-base.bin" | sha256sum -c -
 
+FROM python:3.14-slim-bookworm AS restic
+COPY backend/image-tools/ /opt/restic-release/
+RUN python /opt/restic-release/install_restic.py /usr/local/bin/restic
+
 FROM python:3.14-slim-bookworm
 
 WORKDIR /workspace
@@ -54,7 +58,7 @@ RUN set -eux; \
     apt_options="-o Acquire::Retries=10 -o Acquire::Queue-Mode=access -o Acquire::http::Pipeline-Depth=0 -o Acquire::http::Timeout=60"; \
     apt-get ${apt_options} update; \
     attempt=1; \
-    while ! apt-get ${apt_options} install -y --no-install-recommends ffmpeg espeak-ng fonts-noto-cjk git iptables libgomp1 poppler-utils tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-chi-tra tesseract-ocr-eng; do \
+    while ! apt-get ${apt_options} install -y --no-install-recommends ffmpeg espeak-ng fonts-noto-cjk git postgresql-client iptables libgomp1 poppler-utils tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-chi-tra tesseract-ocr-eng; do \
         if [ "${attempt}" -ge 3 ]; then exit 1; fi; \
         attempt=$((attempt + 1)); \
         apt-get ${apt_options} update; \
@@ -62,6 +66,7 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     pip install --no-cache-dir "uv==0.13.3"
 
+COPY --from=restic /usr/local/bin/restic /usr/local/bin/restic
 COPY --from=whisper /usr/local/bin/whisper-cli /usr/local/bin/whisper-cli
 COPY --from=whisper /opt/whisper/ggml-base.bin /opt/whisper/ggml-base.bin
 

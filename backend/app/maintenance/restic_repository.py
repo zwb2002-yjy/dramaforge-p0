@@ -132,6 +132,11 @@ class ResticRepository:
         ):
             raise _fail("repository, password and staging must be separate")
 
+    def initialize_empty(self) -> None:
+        if any(self.path.iterdir()):
+            raise _fail("initialization requires an empty local repository")
+        self._run("init")
+
     def snapshot(self, staging: Path) -> dict[str, str]:
         self._separate(staging)
         path = staging / "bundle.json"
@@ -168,10 +173,8 @@ class ResticRepository:
             "manifest_hash": saved["manifest_hash"],
         }
 
-    def restore_bundle(self, receipt: dict[str, str], target: Path) -> dict[str, Any]:
-        self._separate(target)
-        if not target.is_dir() or target.is_symlink() or any(target.iterdir()):
-            raise _fail("restore staging must be an empty directory")
+    def read_snapshot_manifest(self, receipt: dict[str, str]) -> dict[str, Any]:
+        """Identify the exact snapshot before allocating space or touching restore targets."""
         snapshot_id = receipt["snapshot_id"]
         if (
             not re.fullmatch(r"[0-9a-f]{64}", snapshot_id)
@@ -184,6 +187,14 @@ class ResticRepository:
             or saved.get("manifest_hash") != receipt["manifest_hash"]
         ):
             raise _fail("restore manifest mismatch")
+        return saved
+
+    def restore_bundle(self, receipt: dict[str, str], target: Path) -> dict[str, Any]:
+        self._separate(target)
+        if not target.is_dir() or target.is_symlink() or any(target.iterdir()):
+            raise _fail("restore staging must be an empty directory")
+        saved = self.read_snapshot_manifest(receipt)
+        snapshot_id = receipt["snapshot_id"]
         self._run("restore", snapshot_id, "--target", str(target), "--verify")
         _check_members(target, saved)
         if json.loads((target / "bundle.json").read_bytes()) != saved:

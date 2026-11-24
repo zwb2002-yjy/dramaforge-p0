@@ -71,8 +71,12 @@ def plan_capacity(
     if not members:
         raise BackupManifestError("BACKUP_CAPACITY_INVALID", "manifest has no database member")
     total_database_bytes = 0
+    measured = set()
     for member in members:
         identity = f"{member['server_identity']}/{member['database']}"
+        if identity in measured:
+            continue
+        measured.add(identity)
         if identity not in database_bytes:
             # Guessing a size would turn a capacity check into a hopeful guess.
             raise BackupManifestError("BACKUP_DB_SIZE_UNKNOWN", f"no measured size for {identity}")

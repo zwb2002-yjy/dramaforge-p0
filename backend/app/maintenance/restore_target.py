@@ -64,6 +64,7 @@ class RestoreTargetConfig:
     buckets: list[BucketTarget] = field(default_factory=list)
     allow_clean: bool = False
     confirm_overwrite: bool = False
+    runtime_credential_ref: str | None = None
 
 
 def _check_credential_ref(value: str | None, *, field_name: str) -> None:
@@ -103,6 +104,7 @@ def validate_target_config(
         _check_credential_ref(item.credential_ref, field_name="databases.credential_ref")
     for bucket in config.buckets:
         _check_credential_ref(bucket.credential_ref, field_name="buckets.credential_ref")
+    _check_credential_ref(config.runtime_credential_ref, field_name="runtime_credential_ref")
 
     expected_databases, expected_buckets = _source_members(manifest)
 
@@ -138,22 +140,40 @@ def validate_target_config(
             + ",".join(sorted("/".join(key) for key in missing_buckets)),
         )
 
-    # A target that equals its source is not isolation, it is an overwrite.
+    if set(seen_databases) != expected_databases or set(seen_buckets) != expected_buckets:
+        raise _fail("RESTORE_TARGET_UNDECLARED", "target config contains an undeclared member")
+    roles = {
+        (row["server_identity"], row["database"], row.get("schema")): row["role"]
+        for row in manifest["databases"]
+    }
+    source_databases = {(server, db) for server, db, _ in expected_databases}
+    mapped_clusters: dict[tuple[str, str], tuple[str, str]] = {}
+    mapped_schemas: set[tuple[str, str, str | None]] = set()
     for item in config.databases:
-        source = (item.source_server_identity, item.source_database)
-        if item.target_key == source and (item.target_schema or None) == (
-            item.source_schema or None
-        ):
+        if item.target_key in source_databases:
             raise _fail(
                 "RESTORE_TARGET_IS_SOURCE",
                 f"{item.source_database} would be restored onto itself",
             )
+        if item.source_role != roles[item.source_key]:
+            raise _fail("RESTORE_TARGET_ROLE_MISMATCH", "database role differs from the manifest")
+        source = (item.source_server_identity, item.source_database)
+        prior = mapped_clusters.setdefault(item.target_key, source)
+        target_schema = (*item.target_key, item.target_schema)
+        if prior != source or target_schema in mapped_schemas:
+            raise _fail("RESTORE_TARGET_COLLISION", "independent database members share a target")
+        mapped_schemas.add(target_schema)
+    mapped_bucket_targets = set()
     for bucket in config.buckets:
-        if (bucket.target_endpoint_identity, bucket.target_bucket) == bucket.source_key:
+        target = (bucket.target_endpoint_identity, bucket.target_bucket)
+        if target in expected_buckets:
             raise _fail(
                 "RESTORE_TARGET_IS_SOURCE",
                 f"{bucket.source_bucket} would be restored onto itself",
             )
+        if target in mapped_bucket_targets:
+            raise _fail("RESTORE_TARGET_COLLISION", "different buckets share a target")
+        mapped_bucket_targets.add(target)
 
     return {
         "owner_task": config.owner_task,

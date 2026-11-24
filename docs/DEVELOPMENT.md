@@ -343,9 +343,11 @@ FFmpeg 解码成功不证明叙事成立，人工喜欢画面不放行重复扣�
 ## 备份与恢复
 
 ```text
-docker compose --profile maintenance run --rm maintenance backup --out /workspace/tmp/<name>.tar
+python scripts/maintenance_cold_backup.py --project <project> --compose-file <compose-file> \
+  --repository <local-dir> --staging-parent <local-staging-dir> --password-file <local-secret> --report <new-receipt>
 docker compose --profile maintenance run --rm maintenance restore-verify \
-  --archive /workspace/tmp/<name>.tar --restore-database-url <dsn> --restore-bucket <bucket>
+  --repository <mounted-repository> --snapshot <full-id> --password-file <mounted-secret> \
+  --receipt <mounted-receipt> --target-config <mounted-config> --staging <new-directory>
 ```
 
 ### 生产路由与 API 契约复现

@@ -220,6 +220,8 @@ def build_manifest(
     deployment: DeploymentMember,
     objects: list[ObjectEntry],
     pending_operations: dict[str, int] | None = None,
+    pending_identity_hash: str | None = None,
+    primary_authority_hash: str | None = None,
     created_at: datetime | None = None,
 ) -> dict[str, Any]:
     """Assemble the manifest for one consistent recovery point."""
@@ -234,6 +236,23 @@ def build_manifest(
         "objects": _object_dicts(objects),
         "pending_operations": dict(sorted((pending_operations or {}).items())),
     }
+    if pending_identity_hash is not None:
+        if not _SHA256.fullmatch(pending_identity_hash):
+            raise BackupManifestError(
+                "BACKUP_PENDING_IDENTITY_INVALID", "expected a SHA-256 digest"
+            )
+        manifest["pending_identity_hash"] = pending_identity_hash
+    if primary_authority_hash is not None:
+        if not _SHA256.fullmatch(primary_authority_hash):
+            raise BackupManifestError("BACKUP_AUTHORITY_INVALID", "expected a SHA-256 digest")
+        manifest["primary_authority_hash"] = primary_authority_hash
+    # Distinct logical roles can occupy one physical database. Keep their coverage
+    # even when the full dump has been deduplicated.
+    if len(manifest["databases"]) < len(databases):
+        manifest["database_roles"] = {
+            member.role: [member.server_identity, member.database, member.schema]
+            for member in sorted(databases, key=lambda member: member.role)
+        }
     _reject_secret_keys(payload=manifest)
     manifest["manifest_hash"] = manifest_hash(manifest)
     return manifest

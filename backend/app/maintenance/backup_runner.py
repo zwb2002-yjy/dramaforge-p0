@@ -74,12 +74,11 @@ def _schema_pattern(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
-def dump_database(command: BackupCommand, *, source_dsn: str) -> int:
-    """The coordinator resolves this DSN for the command's verified cluster and database."""
-    if not source_dsn.startswith(("postgresql://", "postgres://")):
+def pg_client_environment(dsn: str, database: str) -> dict[str, str]:
+    if not dsn.startswith(("postgresql://", "postgres://")):
         raise BackupAborted("BACKUP_DB_IDENTITY_CONFLICT", "a full PostgreSQL DSN is required")
-    options = conninfo_to_dict(source_dsn)
-    if not options.get("host") or options.get("dbname") != command.database or "service" in options:
+    options = conninfo_to_dict(dsn)
+    if not options.get("host") or options.get("dbname") != database or "service" in options:
         raise BackupAborted("BACKUP_DB_IDENTITY_CONFLICT", "DSN differs from the database member")
     # Use libpq's own option-to-environment mapping to preserve connection settings
     # without exposing secrets in process arguments or falling back to host defaults.
@@ -89,6 +88,16 @@ def dump_database(command: BackupCommand, *, source_dsn: str) -> int:
         if key not in names:
             raise BackupAborted("BACKUP_DB_IDENTITY_CONFLICT", "unsupported connection setting")
         environment[names[key]] = str(value)
+    return environment
+
+
+def dump_database(
+    command: BackupCommand, *, source_dsn: str, hostaddr: str | None = None, port: str | None = None
+) -> int:
+    """The coordinator resolves this DSN for the command's verified cluster and database."""
+    environment = pg_client_environment(source_dsn, command.database)
+    if hostaddr is not None and port is not None:
+        environment.update(PGHOSTADDR=hostaddr, PGPORT=port)
     identity = subprocess.run(
         [
             "psql",

@@ -350,8 +350,8 @@ mock/contract gates do not authorize a live create or a remote service restart.
 Named volumes `postgres_data`, `minio_data`, and `litellm_db_data` contain
 persistent state. `docker compose down` preserves them; do not use `--volumes`
 unless permanent data deletion is intended and backups have been verified.
-Backup and restore-verify run through the profiled maintenance service, whose
-entrypoint is `scripts/p0_backup_restore.py` (see
+The host cold-backup command uses the profiled maintenance service for capture;
+its restore entrypoint is `scripts/p0_backup_restore.py` (see
 [DEVELOPMENT.md](DEVELOPMENT.md)).
 
 ## Director runtime engine
@@ -387,7 +387,7 @@ Parser以非root运行，仅任务私有spool可写；原件只读，不挂载�
 每进程时间/内存/输出/并发限制及清理只作用本任务资源；超限保留原件/已完成块和明确覆盖缺口。
 默认本地重处理并发1，设备吞吐通过I0/I4实测后公布；不将此值当GPU/CPU性能保证。
 
-worker-director在O5路径只通过统一Invocation/外发准入访问内部受管LiteLLM，不开放媒体Provider直连。
+worker-director 在 O5 路径通过统一 Invocation 与外发准入访问内部受管 LiteLLM。API 和导演 Worker 使用相同的网关地址、受限数据密钥、BYOK 密钥版本及 keyring；管理密钥不进入导演 Worker。
 已有Proxy network guard继续为真实下游、代理与重定向实施默认拒绝；可信本地位置依据部署/网络合同核验，
 不是看到localhost或Docker服务名就认作本地推理。媒体仍由原Production worker经冻结Binding和网络守卫发送。
 本地资料处理器没有隐式网络路径；Vision/云端语义研究沿单独显式模型与许可，不能借Parser下载绕过。
@@ -424,11 +424,9 @@ Redis只承担唤醒/通知，持久进度来自PG/Outbox/RuntimeControl；恢�
 
 ### 备份现状与必须补强的合同
 
-已实际读取scripts/p0_backup_restore.py：当前备份一个settings.database_url的pg_dump和一个MinIO桶，
-清单校验对象hash并用Fernet加密；restore-verify目前以URL字符串/桶名不同判断隔离，使用pg_restore --clean，
-容器分支只从目标DSN取database名；恢复结果主要是public表数量和对象数量。
-因此当前脚本不证明Proxy独立库已备份，也不证明任意目标URL不会被容器分支解析到错误实例，
-更不证明恢复后业务角色/检查点/外部副作用身份正确。本任务不运行restore，不把现状称为完整机构恢复能力。
+历史 v1 归档包括一个 PostgreSQL dump 和一个 MinIO 桶，使用 Fernet 加密。
+维护 CLI 的 `inspect-archive --archive <legacy-file>` 可以只读核对旧成员清单、大小及 hash。
+旧归档缺少 Proxy 独立库、完整多资源身份和运行角色证据，不能作为机构版完整恢复点。
 
 继续扩展同一maintenance服务/脚本，目标bundle_schema_version=2，采用下文restic快照承载，不设计自制密码算法：
 - manifest列出主库、检查点实际数据库/私有schema、Proxy数据库（按真实同库身份去重）、全部需要的对象桶、
@@ -444,7 +442,7 @@ Redis只承担唤醒/通知，持久进度来自PG/Outbox/RuntimeControl；恢�
   包装脚本流式读对象并落受限staging，不再read_bytes整个tar。目标机仍测实际峰值内存/磁盘及完整保护集，
   空间不足或处理失败拒绝本次备份，不截断、跳过或宣称固定低内存SLA。
 
-恢复目标使用明确的多资源target-config（计划新增--target-config参数，现有CLI尚不支持），
+v2 恢复目标使用显式多资源 target-config，参数及资源核对方式见下文；
 将app/checkpoint/Proxy和对象存储分别映射到隔离目标及凭据引用。旧双参数示例只描述当前单库工具，
 未来替换所有调用方与测试，不以旧接口静默忽略v2多库成员。v1历史归档可校验/读取但缺项必须明示，不能自动称完整恢复。
 恢复前核验实际数据库服务器/cluster身份、database身份与名称、容器映射和桶endpoint+bucket，
@@ -458,12 +456,13 @@ Run/Turn/Flow/Invocation/Operation/Artifact身份，Timeline/Export版本和所�
 以合成任务演练恢复队列、失去通知、Worker重启与未知提交；断言外部Create计数不增加。
 真实库恢复/切换仍单独批准，隔离恢复成功不授权覆盖现有实例，也不授权抹掉备份后发生的已计费事实。
 
-### 备份容量方案冻结：maintenance内restic（D7工程选择，未安装）
+### 备份容量方案冻结与 maintenance 的 restic 工具
 
 采用restic 0.19.1官方Linux amd64二进制，压缩发布件`restic_0.19.1_linux_amd64.bz2`的官方SHA-256为
 `f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c`。
-这是已读取的[官方发布资产元数据](https://github.com/restic/restic/releases/expanded_assets/v0.19.1)，
-不是已下载验证；构建时还须对实际字节和签名校验并绑定镜像。目标架构不匹配时拒绝使用，不临时self-update。
+backend 与 quality 镜像在独立构建阶段下载冻结发布件、发行清单和签名，校验 restic 发布签名指纹
+`CF8F18F2844575973F79D4E191A6868BD3F7A907`、清单内记录和实际归档 SHA-256 后才安装二进制。
+离线构建输入同样逐项校验，目标架构不匹配时拒绝使用。[官方发布资产元数据](https://github.com/restic/restic/releases/expanded_assets/v0.19.1)
 工具只打入现有maintenance所用镜像/quality镜像，不全局安装、不加常驻服务、不改变业务数据库事实。
 已有Fernet仅保留历史v1读取，正常新写只有一个restic路径，归档业务格式与restic repository版本分别标明。
 
@@ -491,9 +490,42 @@ v2只在maintenance容器内用PG客户端按完整目标DSN连接，不启用�
 原备份默认恢复会覆盖现有文件的行为不向用户裸露，由包装脚本强制新空目标且校验所有权。
 restic仓库损坏、缺对象、密码错误、一个数据库dump失败、暂停窗口不成立、恢复目录非空、目标复用源等都必须失败关闭。
 
-未来maintenance CLI目标为`backup --repository <local-dir> --password-file <secret-file> --report <owned-path>`及
-`restore-verify --repository <local-dir> --snapshot <full-id> --password-file <secret-file> --target-config <file> --report <owned-path>`。
-这是待实施合同，现有脚本尚不接受这些参数；实际调用仍须满足当时授权，本文不要求现在运行。
+现有 maintenance CLI 的 v2 资源还原入口如下。所有路径均在 maintenance 容器内解析，staging 必须为可写介质上的全新绝对路径。
+restic 读取时也会维护仓库锁文件，仓库挂载需允许该锁操作，密码文件使用只读挂载。
+
+```text
+restore-stage --repository <local-dir> --snapshot <full-id> --receipt <backup-receipt.json> --password-file <secret-file> --target-config <file> --staging <new-dir>
+restore-verify --repository <local-dir> --snapshot <full-id> --receipt <backup-receipt.json> --password-file <secret-file> --target-config <file> --staging <different-new-dir> --report <new-report>
+```
+
+第一条核对完整快照、清单、目标映射和全部成员，再将数据还原到私有 staging。第二条另外执行实际 PostgreSQL / MinIO 目标验证、导入和对象回读。
+`target-config` 使用 `owner_task`、`databases`、`buckets`。数据库成员填写 `source_role`、`source_server_identity`、
+`source_database`、`source_schema`、`target_server_identity`、`target_database`、`target_schema`、`credential_ref`。
+数据库身份取实际 PostgreSQL system identifier；当前支持原 schema 名还原。每个目标库应独立预置为空库，其数据库注释为
+`dramaforge-restore:<owner_task>`；凭据引用为容器环境变量名，对应包括 host 和目标 database 的完整 PostgreSQL DSN。
+桶成员填写 `source_endpoint_identity`、`source_bucket`、`target_endpoint_identity`、`target_bucket`、`credential_ref`。
+目标 endpoint 身份取 MinIO 实际 deploymentID。空目标桶标签 `dramaforge-restore-task` 取本次 owner_task；
+凭据环境变量保存由 `endpoint`、`access_key`、`secret_key` 组成的 JSON。目标凭据须能读取这些身份、枚举版本和执行受限恢复。
+所有目标须先通过检查。数据库使用事务还原和维护锁，桶使用条件写声明，已有内容、复用任何源库/桶和独立资源目标碰撞均会拒绝。
+中断可能留下已写入的隔离资源；重试需要全新目标，原资源留待检查。成功回执 `resources_restored` 证明数据库资源恢复与对象内容回读。
+若 target-config 同时给出 `runtime_credential_ref`（该环境变量保存恢复实例 API 低权限账户的目标库 DSN），
+则使用实际登录会话验证角色、缺省工作区的项目 RLS、schema head、未决任务数量、队列幂等键、运行租约和未知提交身份，
+结果记录在 `runtime_database_checks`。回读 PostgreSQL 状态不触发恢复任务或模型调用。
+会话轮换、密钥解密、重启后的工作链等验收独立进行。历史归档检查使用 `P0_BACKUP_FERNET_KEY`，只读取旧格式。
+
+单机离线备份通过宿主运行 `python scripts/maintenance_cold_backup.py --project <Compose项目名> --compose-file <部署文件> --repository <本地仓库目录> --password-file <密钥文件> --staging-parent <暂存目录> --report <新的回执路径>`。
+每份 compose 覆盖文件使用另一个 `--compose-file`；这些参数指定的 repository、staging 与密码文件需已存在、彼此隔离，空仓库会初始化。
+此操作会在维护窗口停止该项目原先运行的写入服务，并按原容器身份恢复。真实实例停写须获得当次授权。
+宿主检查 Compose 标签、存储端口、网络成员、卷写者和原进程集合；整个捕获期间观察 Docker 事件，证据中断或出现额外写者时拒发回执。
+维护容器验证实际 PG 集群和数据库、核对已部署 API、checkpoint、Proxy 的端点，并在没有其他数据库客户端的情况下锁定源表。
+捕获专用 MinIO 服务的全部桶、列出的对象、当前 schema、未决操作数量与身份摘要；无法完整表示的多版本对象历史会明确拒绝。
+同一物理数据库按实际 schema 拆分或去重。恢复时核对 Proxy 表结构与未决操作身份摘要。
+独立 checkpoint 存储可通过 `--checkpoint-db` 指定 Compose 数据服务，并配置对应的 `MAINTENANCE_CHECKPOINT_DATABASE_URL` 管理 DSN。
+正式部署仅支持确认归属于单一 Compose 项目的本地存储服务，此路径不向容器授予 Docker socket 权限。
+捕获失败按原运行集合重新启动。宿主意外掉电或恢复就绪失败时检查 `<项目>-cold-backup-lock` 的
+`org.dramaforge.maintenance.original-writers` 标签、实际进程状态及未决操作，确认捕获进程已停止后由维护负责人处理。
+只有 `completed=true`、`verified_window=compose_offline` 且通过快照与清单复核的宿主回执才证明这个离线窗口的捕获完成。
+在线 `maintenance/recovery_only` 全进程准入仍须另外验收。
 多库和完整对象staging仍需要磁盘容量，restic并不消除该要求；I0/I10以实际保护集验证空间与时长。
 容量的架构选择已收敛，设备容量/真实恢复证据仍待实施，不把设计选择标成运维已通过。
 

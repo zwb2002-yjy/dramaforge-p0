@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from app.maintenance.backup_manifest import (
     BackupManifestError,
@@ -193,3 +195,34 @@ def test_overwrite_needs_explicit_confirmation() -> None:
         _config(allow_clean=True, confirm_overwrite=True), manifest=_manifest()
     )
     assert resolved["allow_clean"] is True
+
+
+@pytest.mark.parametrize(
+    ("member", "changes", "code"),
+    [
+        (
+            "db",
+            {"target_server_identity": "proxy.internal:5432", "target_database": "litellm"},
+            "RESTORE_TARGET_IS_SOURCE",
+        ),
+        (
+            "db",
+            {"target_server_identity": "restore-proxy:5432", "target_database": "litellm_restore"},
+            "RESTORE_TARGET_COLLISION",
+        ),
+        ("db", {"source_role": "checkpoint"}, "RESTORE_TARGET_ROLE_MISMATCH"),
+        (
+            "bucket",
+            {"target_endpoint_identity": "minio:9000", "target_bucket": "media"},
+            "RESTORE_TARGET_IS_SOURCE",
+        ),
+        ("bucket", {"target_bucket": "media-restore"}, "RESTORE_TARGET_COLLISION"),
+    ],
+)
+def test_source_set_and_independent_target_isolation(member, changes, code):
+    config = _config()
+    rows = config.databases if member == "db" else config.buckets
+    rows[0] = replace(rows[0], **changes)
+    with pytest.raises(BackupManifestError) as error:
+        validate_target_config(config, manifest=_manifest())
+    assert error.value.code == code

@@ -41,6 +41,10 @@ RUN set -eux; \
 # matching the PostgreSQL 15 service used by the release Compose topology.
 # An unqualified ``python:3.14-slim`` may advance to a newer Debian release
 # and create a pg_dump/pg_restore format mismatch during backup recovery.
+FROM python:3.14-slim-bookworm AS restic
+COPY image-tools/ /opt/restic-release/
+RUN python /opt/restic-release/install_restic.py /usr/local/bin/restic
+
 FROM python:3.14-slim-bookworm
 
 WORKDIR /app
@@ -85,6 +89,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         apt-get ${apt_options} update; \
     done
 
+COPY --from=restic /usr/local/bin/restic /usr/local/bin/restic
 COPY --from=whisper /usr/local/bin/whisper-cli /usr/local/bin/whisper-cli
 COPY --from=whisper /opt/whisper/ggml-base.bin /opt/whisper/ggml-base.bin
 
