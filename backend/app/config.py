@@ -26,6 +26,7 @@ class Settings(BaseSettings):
 
     app_name: str = "DramaForge"
     app_env: Literal["development", "test", "production"] = "development"
+    runtime_admission_mode: Literal["normal", "maintenance", "recovery_only"] = "normal"
     api_prefix: str = "/api/v1"
     source_commit: str = Field(
         default="",

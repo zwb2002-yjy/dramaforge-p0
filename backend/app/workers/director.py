@@ -9,7 +9,7 @@ import socket
 from typing import Any
 from uuid import UUID
 
-from arq import cron
+from arq import cron, func
 from arq.connections import RedisSettings
 from sqlalchemy import text
 
@@ -19,6 +19,7 @@ from app.director.wakeup import process_director_wakeup
 from app.runtime.resources import shutdown_runtime_resources
 from app.shared.db import get_session_factory
 from app.shared.model_registry import load_all_models
+from app.shared.runtime_admission import record_ready
 from app.workers.jobs import reconcile_waiting_director_turns, recover_interrupted_director_turns
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,11 @@ QUEUE_NAME = os.environ.get("DIRECTOR_QUEUE_NAME", "arq:director")
 async def startup(ctx: dict[str, Any]) -> None:
     load_all_models()
     settings = get_settings()
+    if settings.runtime_admission_mode != "normal":
+        if settings.runtime_admission_mode == "recovery_only":
+            await recover_interrupted_director_turns(ctx)
+        record_ready("worker-director")
+        return
     from app.director.runtime.checkpoint import verify_checkpoint_store
 
     await verify_checkpoint_store(settings)
@@ -37,6 +43,7 @@ async def startup(ctx: dict[str, Any]) -> None:
         consumer_name=f"{socket.gethostname()}:{os.getpid()}",
     )
     await recover_interrupted_director_turns(ctx)
+    record_ready("worker-director")
 
 
 async def execute_director_wakeup(ctx: dict[str, Any], inbox_id: str) -> bool:
@@ -224,10 +231,14 @@ async def dispatch_research_analyses(ctx: dict[str, Any]) -> int:
         )
     return len(candidates)
 
+async def hold_director_job(ctx: dict[str, Any], *args: object) -> dict[str, str]:
+    return {"status": get_settings().runtime_admission_mode}
+
+
 class WorkerSettings:
     on_shutdown = shutdown_runtime_resources
 
-    functions = [
+    _normal_jobs = [
         execute_director_wakeup,
         execute_director_runtime_wakeup,
         execute_agent_turn,
@@ -253,6 +264,13 @@ class WorkerSettings:
         cron(reconcile_waiting_director_turns, second={7, 37}, run_at_startup=True, unique=True),
     ]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+    functions = (
+        _normal_jobs if get_settings().runtime_admission_mode == "normal"
+        else [func(hold_director_job, name=job.__name__) for job in _normal_jobs]
+    )
+    if get_settings().runtime_admission_mode != "normal":
+        # Already-enqueued work remains discoverable from durable rows after normal startup.
+        cron_jobs = []
     queue_name = QUEUE_NAME
     max_jobs = 4
     job_timeout = 60

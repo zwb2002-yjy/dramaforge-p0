@@ -1,6 +1,6 @@
 """Version 1 API router."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app.api.v1 import (
     assets,
@@ -82,6 +82,10 @@ api_router.include_router(creative_capabilities.router)
 
 
 @api_router.get("/status", tags=["system"])
-async def api_status() -> dict[str, str]:
+async def api_status(request: Request) -> dict[str, str]:
     """Lightweight API surface probe."""
-    return {"status": "ok", "api": "v1"}
+    return {
+        "status": "ok",
+        "api": "v1",
+        "runtime_admission_mode": request.app.state.settings.runtime_admission_mode,
+    }

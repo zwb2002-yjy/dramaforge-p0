@@ -17,7 +17,7 @@ from uuid import UUID
 from sqlalchemy import func, or_, select, text, true
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.elements import TextClause
+from sqlalchemy.sql.elements import ColumnElement, TextClause
 
 
 @dataclass(frozen=True)
@@ -249,6 +249,7 @@ async def list_resumable_provider_node_run_rls_scopes(
     source_commit: str | None = None,
     after_node_run_id: UUID | None = None,
     stale_before: datetime | None = None,
+    include_due: bool = False,
 ) -> list[tuple[UUID, NodeRunRlsScope]]:
     """Keyset-scan stale latest operations, exposing only persisted owner scopes."""
     cutoff = stale_before or datetime.now(UTC) - PROVIDER_RECOVERY_LEASE
@@ -256,15 +257,16 @@ async def list_resumable_provider_node_run_rls_scopes(
     bind = session.get_bind()
     dialect = bind.dialect.name if bind is not None else ""
     if dialect == "postgresql":
+        query = """SELECT node_run_id, owner_user_id, workspace_id, project_id
+                   FROM app.resumable_provider_node_run_contexts(:limit, :source_commit,
+                       :after_node_run_id, :stale_before)"""
+        if include_due:
+            query = f"""SELECT * FROM ({query} UNION SELECT * FROM
+                app.recovery_only_provider_contexts(:limit,:source_commit,:after_node_run_id)
+            ) candidates ORDER BY node_run_id LIMIT :limit"""
         return await _list_postgresql_scopes(
             session,
-            text(
-                """
-                SELECT node_run_id, owner_user_id, workspace_id, project_id
-                FROM app.resumable_provider_node_run_contexts(:limit, :source_commit,
-                    :after_node_run_id, :stale_before)
-                """
-            ),
+            text(query),
             {
                 "limit": limit,
                 "source_commit": source_commit,
@@ -288,25 +290,44 @@ async def list_resumable_provider_node_run_rls_scopes(
         .correlate(NodeRun)
         .scalar_subquery()
     )
-    stmt = (
-        select(NodeRun.id)
-        .join(ProviderOperation, ProviderOperation.id == latest_operation)
-        .where(
-            NodeRun.status.in_({"running", "cancel_requested"}),
-            func.coalesce(NodeRun.started_at, NodeRun.created_at) < cutoff,
+    old = (
+        NodeRun.status.in_({"running", "cancel_requested"})
+        & (func.coalesce(NodeRun.started_at, NodeRun.created_at) < cutoff)
+        & (
             func.coalesce(
                 ProviderOperation.last_polled_at,
                 ProviderOperation.submitted_at,
                 ProviderOperation.created_at,
-            ) < cutoff,
+            )
+            < cutoff
+        )
+    )
+    admitted: ColumnElement[bool] = old
+    if include_due:
+        admitted = or_(
+            old,
+            NodeRun.status.in_({"queued", "cancel_requested"})
+            & NodeRun.started_at.is_(None)
+            & or_(NodeRun.next_attempt_at.is_(None), NodeRun.next_attempt_at <= datetime.now(UTC))
+            & ProviderOperation.status.in_(
+                {"submitted", "running", "timed_out", "cancel_requested"}
+            ),
+        )
+    stmt = (
+        select(NodeRun.id)
+        .join(ProviderOperation, ProviderOperation.id == latest_operation)
+        .where(
+            admitted,
             or_(
                 ProviderOperation.status.in_(
                     {"submitted", "running", "timed_out", "cancel_requested"}
                 )
                 & or_(
                     ProviderOperation.provider_operation_id.is_not(None),
-                    ProviderOperation.response_summary["synchronous_result"]["schema_version"]
-                    .as_integer() == 1,
+                    ProviderOperation.response_summary["synchronous_result"][
+                        "schema_version"
+                    ].as_integer()
+                    == 1,
                 ),
                 (ProviderOperation.status == "submission_started")
                 & ProviderOperation.provider_operation_id.is_(None)

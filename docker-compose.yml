@@ -91,6 +91,9 @@ services:
       LITELLM_EGRESS_ALLOWED_ORIGINS: ${LITELLM_EGRESS_ALLOWED_ORIGINS:-[]}
       LITELLM_EGRESS_TRUSTED_NETWORKS: ${LITELLM_EGRESS_TRUSTED_NETWORKS:-[]}
       LITELLM_DB_HOST: litellm-db
+      LITELLM_PINNED_HOSTS_FILE: /run/litellm-pins/hosts
+    volumes:
+      - litellm_pinned_hosts:/run/litellm-pins
     cap_drop: [ALL]
     cap_add: [NET_ADMIN]
     security_opt: ["no-new-privileges:true"]
@@ -132,6 +135,12 @@ services:
       LITELLM_SCRIPT_FAST_API_KEY: ${LITELLM_SCRIPT_FAST_API_KEY:-}
       LITELLM_SCRIPT_FAST_MOCK_RESPONSE: ${LITELLM_SCRIPT_FAST_MOCK_RESPONSE:-}
     volumes:
+      - type: volume
+        source: litellm_pinned_hosts
+        target: /etc/hosts
+        read_only: true
+        volume:
+          subpath: hosts
       - ./infra/litellm/config.yaml:/app/config.yaml:ro
       - ./infra/litellm:/etc/dramaforge-litellm:ro
     command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "1"]
@@ -191,6 +200,7 @@ services:
     image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
+      RUNTIME_ADMISSION_MODE: ${RUNTIME_ADMISSION_MODE:-normal}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
@@ -333,6 +343,8 @@ services:
       WORKER_TOKEN: ${WORKER_TOKEN:?Run python scripts/init_env.py first}
       BYOK_FERNET_KEY: ${BYOK_FERNET_KEY:?Run python scripts/init_env.py first}
       P0_BACKUP_FERNET_KEY: ${P0_BACKUP_FERNET_KEY:-}
+      MAINTENANCE_CHECKPOINT_DATABASE_URL: ${MAINTENANCE_CHECKPOINT_DATABASE_URL:-postgresql://${POSTGRES_USER:-dramaforge}:${POSTGRES_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}}
+      MAINTENANCE_PROXY_DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:?Run python scripts/init_env.py first}@litellm-db:5432/litellm
     depends_on:
       postgres:
         condition: service_healthy
@@ -349,6 +361,7 @@ services:
     image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
+      RUNTIME_ADMISSION_MODE: ${RUNTIME_ADMISSION_MODE:-normal}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
@@ -379,7 +392,7 @@ services:
     cap_drop:
       - ALL
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket;s=socket.create_connection(('redis',6379),3);s.sendall(b'*1\\r\\n$4\\r\\nPING\\r\\n');assert b'PONG' in s.recv(64)"]
+      test: ["CMD", "python", "-c", "from app.shared.runtime_admission import read_ready;read_ready('dispatcher');import socket;s=socket.create_connection(('redis',6379),3);s.sendall(b'*1\\r\\n$4\\r\\nPING\\r\\n');assert b'PONG' in s.recv(64)"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -391,6 +404,7 @@ services:
     image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
+      RUNTIME_ADMISSION_MODE: ${RUNTIME_ADMISSION_MODE:-normal}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
@@ -444,7 +458,7 @@ services:
     cap_drop:
       - ALL
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket;s=socket.create_connection(('redis',6379),3);s.sendall(b'*1\\r\\n$4\\r\\nPING\\r\\n');assert b'PONG' in s.recv(64)"]
+      test: ["CMD", "python", "-c", "from app.shared.runtime_admission import read_ready;read_ready('worker-default');import socket;s=socket.create_connection(('redis',6379),3);s.sendall(b'*1\\r\\n$4\\r\\nPING\\r\\n');assert b'PONG' in s.recv(64)"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -461,6 +475,8 @@ services:
     image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
+      RUNTIME_ADMISSION_MODE: ${RUNTIME_ADMISSION_MODE:-normal}
+      DRAMAFORGE_READY_ROLE: worker-director
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
@@ -505,6 +521,7 @@ services:
     image: ${DRAMAFORGE_BACKEND_IMAGE:-dramaforge-backend:dev}
     environment:
       APP_ENV: ${APP_ENV:-development}
+      RUNTIME_ADMISSION_MODE: ${RUNTIME_ADMISSION_MODE:-normal}
       DRAMAFORGE_SOURCE_COMMIT: ${DRAMAFORGE_SOURCE_COMMIT:?Set the exact source commit}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_APP_USER:-dramaforge_app}:${POSTGRES_APP_PASSWORD:?Run python scripts/init_env.py first}@postgres:5432/${POSTGRES_DB:-dramaforge}
       DATABASE_SSL: ${DATABASE_SSL:-false}
@@ -559,7 +576,7 @@ services:
     cap_drop:
       - ALL
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket;s=socket.create_connection(('redis',6379),3);s.sendall(b'*1\\r\\n$4\\r\\nPING\\r\\n');assert b'PONG' in s.recv(64)"]
+      test: ["CMD", "python", "-c", "from app.shared.runtime_admission import read_ready;read_ready('worker-heavy');import socket;s=socket.create_connection(('redis',6379),3);s.sendall(b'*1\\r\\n$4\\r\\nPING\\r\\n');assert b'PONG' in s.recv(64)"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -575,3 +592,4 @@ volumes:
   postgres_data:
   minio_data:
   litellm_db_data:
+  litellm_pinned_hosts:

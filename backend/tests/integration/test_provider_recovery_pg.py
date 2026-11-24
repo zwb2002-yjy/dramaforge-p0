@@ -146,6 +146,65 @@ async def test_short_poll_due_scope_and_overlapping_workers_share_one_remote(mon
         await _drop_database(dbname)
 
 
+async def test_restored_due_scan_exposes_only_recorded_remote_work_and_preserves_other_rows(
+    monkeypatch,
+):
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "runtime_admission_mode", "recovery_only")
+    name = f"df_admission_{uuid4().hex[:12]}"
+    await _create_database(name)
+    admin = create_async_engine(_async_url(name))
+    app = create_async_engine(
+        _async_url(name), connect_args={"server_settings": {"role": "dramaforge_app"}}
+    )
+    try:
+        _alembic(name)
+        factory = async_sessionmaker(app, expire_on_commit=False)
+        monkeypatch.setattr(jobs, "get_session_factory", lambda: factory)
+        async with async_sessionmaker(admin, expire_on_commit=False)() as db:
+            _, _, ids = await _seed(db, first_id=1, count=3)
+            for index, ident in enumerate(ids):
+                row = await db.get(NodeRun, ident)
+                op = await db.scalar(
+                    select(ProviderOperation).where(ProviderOperation.node_run_id == ident)
+                )
+                row.status, row.started_at = "queued", None
+                if index == 0:
+                    op.resume_token = {"remote_task_id": op.provider_operation_id}
+                elif index == 1:
+                    op.status = "unknown_submission"
+                    op.provider_operation_id = None
+                else:
+                    await db.delete(op)
+            await db.commit()
+        async with factory() as db:
+            acl = (
+                await db.execute(
+                    text("""SELECT p.proowner::regrole::text,p.prosecdef,
+                EXISTS(SELECT FROM aclexplode(p.proacl) a WHERE a.grantee=0 AND a.privilege_type='EXECUTE')
+                FROM pg_proc p WHERE p.oid='app.recovery_only_provider_contexts(integer,text,uuid)'::regprocedure""")
+                )
+            ).one()
+            assert tuple(acl) == ("dramaforge_worker_resolver", True, False)
+            queue = await list_resumable_provider_node_run_rls_scopes(
+                db, limit=50, include_due=True
+            )
+            assert [r[0] for r in queue] == [ids[0]]
+        for ident in ids:
+            assert (await jobs.execute_node_run({}, str(ident)))["status"] == "recovery_only"
+        async with async_sessionmaker(admin)() as db:
+            assert set(await db.scalars(select(NodeRun.status))) == {"queued"}
+            assert sorted(await db.scalars(select(ProviderOperation.status))) == [
+                "submitted",
+                "unknown_submission",
+            ]
+    finally:
+        await app.dispose()
+        await admin.dispose()
+        await _drop_database(name)
+
+
 async def _seed(session, *, first_id, count, age=timedelta(hours=2), remote=True):
     user = User(
         email=f"provider-recovery-{uuid4()}@example.com", display_name="Owner", password_hash="x"

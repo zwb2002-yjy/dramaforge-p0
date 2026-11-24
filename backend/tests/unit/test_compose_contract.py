@@ -358,6 +358,16 @@ def test_proxy_owns_a_restricted_network_namespace_and_persistent_salt() -> None
     assert proxy["cap_drop"] == ["ALL"]
     assert guard["cap_add"] == ["NET_ADMIN"]
     assert guard["read_only"] is True
+    assert guard["environment"]["LITELLM_PINNED_HOSTS_FILE"] == "/run/litellm-pins/hosts"
+    assert "litellm_pinned_hosts:/run/litellm-pins" in guard["volumes"]
+    assert {
+        "type": "volume",
+        "source": "litellm_pinned_hosts",
+        "target": "/etc/hosts",
+        "read_only": True,
+        "volume": {"subpath": "hosts"},
+    } in proxy["volumes"]
+    assert proxy["depends_on"]["litellm-network"]["condition"] == "service_healthy"
     assert proxy["environment"]["LITELLM_SALT_KEY"].startswith("${LITELLM_SALT_KEY:?")
     assert proxy["environment"]["STORE_MODEL_IN_DB"] == "True"
     assert "@sha256:" in proxy["image"]

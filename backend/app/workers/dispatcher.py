@@ -7,10 +7,12 @@ import logging
 import os
 import socket
 
+from app.config import get_settings
 from app.runtime.provider_recovery import recover_interrupted_provider_jobs
 from app.runtime.scheduler import NodeRunScheduler, RedisStreamPublisher
 from app.shared.db import get_session_factory
 from app.shared.model_registry import load_all_models
+from app.shared.runtime_admission import record_ready
 
 logger = logging.getLogger(__name__)
 POLL_SECONDS = float(os.getenv("OUTBOX_DISPATCH_INTERVAL_SECONDS", "1"))
@@ -24,8 +26,8 @@ load_all_models()
 
 async def dispatch_once(*, worker_id: str) -> int:
     """Publish pending Outbox events and enqueue durable NodeRuns once."""
-    from app.config import get_settings
-
+    if get_settings().runtime_admission_mode != "normal":
+        return 0
     factory = get_session_factory()
     async with factory() as session:
         publisher = RedisStreamPublisher(get_settings().redis_url)
@@ -61,8 +63,9 @@ async def _recover_providers_forever() -> None:
             counts = await recover_interrupted_provider_jobs(state)
             from app.production.final_film_uploads import sweep_final_film_uploads
 
-            async with asyncio.timeout(FINAL_FILM_CLEANUP_TIMEOUT_SECONDS):
-                await sweep_final_film_uploads()
+            if get_settings().runtime_admission_mode == "normal":
+                async with asyncio.timeout(FINAL_FILM_CLEANUP_TIMEOUT_SECONDS):
+                    await sweep_final_film_uploads()
             if any(counts.values()):
                 logger.info("provider_recovery %s", counts)
         except asyncio.CancelledError:
@@ -78,10 +81,16 @@ async def run_forever() -> None:
     from app.runtime.resources import close_runtime_resources
 
     try:
+        mode = get_settings().runtime_admission_mode
+        record_ready("dispatcher")
+        if mode == "maintenance":
+            await asyncio.Event().wait()
+            return
         async with asyncio.TaskGroup() as tasks:
-            tasks.create_task(_dispatch_forever(worker_id=worker_id), name="outbox-dispatch")
             tasks.create_task(_recover_providers_forever(), name="provider-recovery")
-            tasks.create_task(_process_sources_forever(), name="project-source-processing")
+            if mode == "normal":
+                tasks.create_task(_dispatch_forever(worker_id=worker_id), name="outbox-dispatch")
+                tasks.create_task(_process_sources_forever(), name="project-source-processing")
     finally:
         await close_runtime_resources()
 

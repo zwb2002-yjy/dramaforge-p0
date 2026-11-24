@@ -11,6 +11,7 @@ from uuid import UUID
 from arq import Retry
 from sqlalchemy.exc import DBAPIError
 
+from app.config import get_settings
 from app.runtime.provider_recovery import provider_attempt_is_active
 from app.runtime.provider_recovery import (
     recover_interrupted_provider_jobs as _recover_provider_jobs,
@@ -24,6 +25,7 @@ from app.shared.errors import (
     ProviderTaskPendingError,
 )
 from app.shared.model_registry import load_all_models
+from app.shared.runtime_admission import record_ready
 from app.storage.scratch import sweep_owned_media
 
 # Ensure full MetaData / FK graph is registered in worker process (SQLAlchemy
@@ -58,8 +60,13 @@ def _worker_failure_code(exc: Exception) -> str:
 
 async def recover_interrupted_provider_jobs(ctx: dict[str, Any]) -> dict[str, int]:
     """Compatibility startup entry; the resident dispatcher owns periodic scans."""
-    await asyncio.to_thread(sweep_owned_media)
-    return await _recover_provider_jobs(ctx, session_factory=get_session_factory())
+    if get_settings().runtime_admission_mode == "maintenance":
+        result = {"scanned": 0, "resumed": 0, "unknown": 0, "failed": 0, "timed_out": 0}
+    else:
+        await asyncio.to_thread(sweep_owned_media)
+        result = await _recover_provider_jobs(ctx, session_factory=get_session_factory())
+    record_ready("worker-heavy")
+    return result
 
 
 async def recover_interrupted_director_turns(ctx: dict[str, Any]) -> dict[str, int]:
@@ -225,6 +232,9 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
     claimed_started_at: datetime | None = None
     async with factory() as session:
         try:
+            mode = get_settings().runtime_admission_mode
+            if mode == "maintenance":
+                return {"status": "maintenance", "node_run_id": node_run_id}
             scope = await set_node_run_rls_context(session, node_run_id=run_uuid)
             if scope is None:
                 return {"status": "failed", "error": "node_run not found"}
@@ -240,6 +250,36 @@ async def execute_node_run(ctx: dict[str, Any], node_run_id: str) -> dict[str, A
             )
             if run is None:
                 raise NodeRunAlreadyClaimedError()
+            if mode == "recovery_only":
+                from app.execution.models import GraphNode
+                from app.execution.provider_recovery_audit import verified_observation
+
+                if run.status in {"completed", "cached", "completed_after_cancel"}:
+                    prior = await execute_media_node_run(
+                        session, node_run_id=run_uuid, already_claimed=True
+                    )
+                    return {
+                        "status": run.status,
+                        "node_run_id": node_run_id,
+                        "artifact_id": str(prior.artifact_id),
+                    }
+                node = await session.get(GraphNode, run.graph_node_id)
+                operation = await session.scalar(
+                    select(ProviderOperation)
+                    .where(ProviderOperation.node_run_id == run.id)
+                    .order_by(
+                        ProviderOperation.attempt_no.desc(), ProviderOperation.created_at.desc()
+                    )
+                    .limit(1)
+                )
+                if (
+                    run.status not in {"queued", "running", "cancel_requested"}
+                    or node is None
+                    or node.node_type not in {"keyframe", "video"}
+                    or operation is None
+                    or not verified_observation(run, operation)
+                ):
+                    return {"status": "recovery_only", "node_run_id": node_run_id}
             if not node_run_is_due(run, now=datetime.now(UTC)):
                 await session.rollback()
                 return {"status": "not_due", "node_run_id": node_run_id}

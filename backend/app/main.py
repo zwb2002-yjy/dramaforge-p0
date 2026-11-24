@@ -14,12 +14,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import __version__
-from app.api.errors import register_exception_handlers
+from app.api.errors import problem_response, register_exception_handlers
 from app.api.v1.router import api_router
 from app.config import Settings, get_settings
 from app.events.sse import RedisSseBridge
 from app.shared.db import get_session
 from app.shared.observability import REQUESTS_TOTAL, metrics_payload
+from app.shared.runtime_admission import process_facts, unavailable
 
 
 @asynccontextmanager
@@ -84,6 +85,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def count_http_requests(request: Request, call_next: Any) -> Response:
         """Count every handled request under its bounded route template."""
+        if cfg.runtime_admission_mode != "normal" and request.method not in {
+            "GET",
+            "HEAD",
+            "OPTIONS",
+        }:
+            auth_paths = {cfg.api_prefix + "/auth/login", cfg.api_prefix + "/auth/logout"}
+            if request.method != "POST" or request.url.path not in auth_paths:
+                denied = unavailable(cfg)
+                return problem_response(
+                    status_code=denied.status_code,
+                    code=denied.code,
+                    message=denied.message,
+                    details={"request_accepted": False},
+                )
         try:
             response: Response = await call_next(request)
         except Exception:
@@ -130,6 +145,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "db": "up" if db_ok else "down",
             "migration_head": migration_head,
             "source_commit": cfg.source_commit,
+            **process_facts(cfg, "api"),
             "dependencies": {
                 "litellm": await _litellm_dependency_status(cfg),
             },

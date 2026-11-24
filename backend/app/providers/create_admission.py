@@ -22,6 +22,7 @@ from app.providers.models import (
     ProviderModelBinding,
 )
 from app.shared.errors import ValidationAppError
+from app.shared.runtime_admission import require_new_work
 
 
 async def require_frozen_create_admission(
@@ -29,6 +30,7 @@ async def require_frozen_create_admission(
     identity: ExecutionIdentitySnapshot,
 ) -> None:
     """This is a Create gate only. Historical resume must not call it."""
+    require_new_work()
     await lock_catalog_publication(session, shared=True)
     # The compiler may already have loaded these rows. Reload and hold their
     # current permission through the durable submission marker commit.

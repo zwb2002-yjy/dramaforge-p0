@@ -14,6 +14,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.config import get_settings
 from app.shared.db import get_session_factory
 from app.shared.rls_scopes import PROVIDER_RECOVERY_LEASE
 
@@ -57,7 +58,8 @@ async def recover_interrupted_provider_jobs(
     # also retain it. Advance past *attempted* rows, including errors/locks.
     state = ctx.setdefault("provider_recovery_scan_state", {"cursor": None, "busy": False})
     counts = {"scanned": 0, "resumed": 0, "unknown": 0, "failed": 0, "timed_out": 0}
-    if state["busy"]:
+    mode = get_settings().runtime_admission_mode
+    if state["busy"] or mode == "maintenance":
         return counts
     state["busy"] = True
     cutoff = datetime.now(UTC) - PROVIDER_RECOVERY_LEASE
@@ -72,6 +74,7 @@ async def recover_interrupted_provider_jobs(
                     source_commit=None,
                     after_node_run_id=UUID(cursor) if cursor else None,
                     stale_before=cutoff,
+                    include_due=mode == "recovery_only",
                 )
                 for node_run_id, scope in candidates:
                     state["cursor"] = str(node_run_id)
@@ -89,10 +92,25 @@ async def recover_interrupted_provider_jobs(
                             .with_for_update(skip_locked=True)
                             .execution_options(populate_existing=True)
                         )
-                        if (
-                            run is None
-                            or run.status not in {"running", "cancel_requested"}
-                            or not _older_than(run.started_at or run.created_at, cutoff)
+                        due = bool(
+                            run is not None
+                            and mode == "recovery_only"
+                            and run.status in {"queued", "cancel_requested"}
+                            and run.started_at is None
+                            and (
+                                run.next_attempt_at is None
+                                or run.next_attempt_at.replace(
+                                    tzinfo=run.next_attempt_at.tzinfo or UTC
+                                )
+                                <= datetime.now(UTC)
+                            )
+                        )
+                        if run is None or (
+                            not due
+                            and (
+                                run.status not in {"running", "cancel_requested"}
+                                or not _older_than(run.started_at or run.created_at, cutoff)
+                            )
                         ):
                             await session.rollback()
                             continue
@@ -115,10 +133,15 @@ async def recover_interrupted_provider_jobs(
                             .with_for_update(skip_locked=True)
                             .execution_options(populate_existing=True)
                         )
-                        if operation is None or not _older_than(
-                            operation.last_polled_at or operation.submitted_at
-                            or operation.created_at,
-                            cutoff,
+                        if (
+                            operation is None
+                            or not due
+                            and not _older_than(
+                                operation.last_polled_at
+                                or operation.submitted_at
+                                or operation.created_at,
+                                cutoff,
+                            )
                         ):
                             await session.rollback()
                             continue
@@ -147,6 +170,12 @@ async def recover_interrupted_provider_jobs(
                         }:
                             await session.rollback()
                             continue
+                        if mode == "recovery_only":
+                            from app.execution.provider_recovery_audit import verified_observation
+
+                            if not verified_observation(run, operation):
+                                await session.rollback()
+                                continue
                         # Hold the NodeRun lock through the scheduler's Outbox
                         # commit. Overlapping sweeps share one durable event and
                         # one queue-scoped job ID, even if enqueue later fails.

@@ -56,6 +56,10 @@ def main() -> int:
     previous_handler = signal.signal(signal.SIGALRM, _deadline_expired)
     signal.setitimer(signal.ITIMER_REAL, PROBE_TIMEOUT_SECONDS)
     try:
+        if role := os.getenv("DRAMAFORGE_READY_ROLE"):
+            from app.shared.runtime_admission import read_ready
+
+            read_ready(role)
         healthy = heartbeat_is_healthy(redis_url, queue_name)
     except Exception as exc:
         # Do not print exception messages: Redis URLs may contain credentials.

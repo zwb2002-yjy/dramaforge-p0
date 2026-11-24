@@ -335,16 +335,22 @@ async def test_time_bound_advances_only_past_attempted_row_and_retries_after_wra
         assert len((await session.scalars(select(OutboxEvent))).all()) == 2
 
 
-async def test_remote_identity_resumes_interrupted_download_with_zero_create(recovery, monkeypatch):
+@pytest.mark.parametrize("mode", ["normal", "recovery_only"])
+async def test_remote_identity_resumes_interrupted_download_with_zero_create(
+    recovery, monkeypatch, mode
+):
     import asyncio
     import hashlib
     from io import BytesIO
     from unittest.mock import AsyncMock
 
+    from app.config import get_settings
     from app.execution.models import Artifact
     from app.providers.execution_identity import ExecutionIdentitySnapshot
     from app.providers.runtime import PollResult, ProviderResumeToken, ProviderRuntimeResolver
     from PIL import Image
+
+    monkeypatch.setattr(get_settings(), "runtime_admission_mode", mode)
 
     (run_id,) = await seed(recovery)
     identity = ExecutionIdentitySnapshot(

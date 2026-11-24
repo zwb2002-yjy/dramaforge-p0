@@ -44,6 +44,38 @@ RECOVERY_STATES = frozenset(
 )
 
 
+def verified_observation(run: NodeRun, operation: ProviderOperation) -> bool:
+    """Before claiming a restored job, require its recorded input, sender and remote identity."""
+    if (
+        operation.node_run_id != run.id
+        or operation.execution_path_version != "unified-v1"
+        or operation.status not in {"submitted", "running", "timed_out", "cancel_requested"}
+    ):
+        return False
+    copies = [
+        (d or {}).get("execution_identity")
+        for d in (run.input_snapshot, operation.selection_plan, operation.request_summary)
+    ]
+    if not isinstance(copies[0], dict) or any(c != copies[0] for c in copies[1:]):
+        return False
+    try:
+        identity = ExecutionIdentitySnapshot.model_validate(copies[0])
+        require_operation_identity(identity, operation)
+        if synchronous_image_receipt(run=run, operation=operation) is not None:
+            return identity.capability == "image.generate"
+        token = ProviderResumeToken.model_validate(operation.resume_token)
+        require_resume_token_identity(
+            token,
+            remote_task_id=operation.provider_operation_id,
+            provider_type=operation.actual_provider,
+            protocol_profile=operation.protocol_profile,
+            remote_secondary_id=operation.remote_secondary_id,
+        )
+    except (ValueError, ValidationAppError):
+        return False
+    return True
+
+
 @dataclass(frozen=True)
 class ProviderRecoveryAuditRow:
     operation_id: UUID
